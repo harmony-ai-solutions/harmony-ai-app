@@ -294,7 +294,7 @@ If you encounter this error:
    ```
 
 **References**:
-- [React Native 0.83 Gradle Compatibility Guide](https://medium.com/@bebongnchuy/fixing-jvmvendorspec-ibm-semeru-and-java-25-errors-in-react-native-0-83-on-ubuntu-238b273cdb89)
+- [React Native 0.83 Gradle Compatibility Issue fixing tutorial](https://medium.com/@bebongnchuy/fixing-jvmvendorspec-ibm-semeru-and-java-25-errors-in-react-native-0-83-on-ubuntu-238b273cdb89)
 - Gradle 8.13 is currently the recommended version for RN 0.83.1
 
 #### Android SDK Environment Variables
@@ -435,6 +435,18 @@ npm run android
 - Check `adb devices` shows your device
 - Try uninstalling the app first: `adb uninstall com.harmonyaiapp`
 
+**Issue**: "Long Path errors under Windows"
+- by default, windows has a maximum path limit of 250 Chars. This can be fixed inside the Windows Registry with this command:
+  ```pwsh
+  New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+  ```
+- However, the gradle build wrapper might still encounter issues, because the ninja compiler shipping with the cmake version of the Android SDK cannot handle the extended path limit.
+
+- References:
+  - https://github.com/expo/expo/issues/36274#issuecomment-3051732073 => simplest solution
+  - https://github.com/ninja-build/ninja/releases
+  - https://github.com/AppAndFlow/react-native-safe-area-context/issues/424#issuecomment-2454869033
+  
 ### Device Not Detected
 
 **Issue**: `adb devices` shows no devices
