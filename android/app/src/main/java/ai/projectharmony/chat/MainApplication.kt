@@ -1,4 +1,4 @@
-package com.harmonyaiapp
+package ai.projectharmony.chat
 
 import android.app.Application
 import com.facebook.react.PackageList

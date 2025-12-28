@@ -433,7 +433,7 @@ npm run android
 **Issue**: "Execution failed for task ':app:installDebug'"
 - Make sure an emulator is running or device is connected
 - Check `adb devices` shows your device
-- Try uninstalling the app first: `adb uninstall com.harmonyaiapp`
+- Try uninstalling the app first: `adb uninstall ai.projectharmony.chat`
 
 **Issue**: "Long Path errors under Windows"
 - by default, windows has a maximum path limit of 250 Chars. This can be fixed inside the Windows Registry with this command:
