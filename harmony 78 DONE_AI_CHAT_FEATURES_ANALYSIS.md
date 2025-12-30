@@ -26,9 +26,16 @@ The most advanced competitors (Kindroid, Character AI) prioritize robust, layere
 * Retrievable Memory (Long-Term): This memory is infinite in quantity but can be more unreliable in recall. Consolidation of memory (from individual chats, group chats, and voice calls) happens automatically when the AI deems it appropriate.
 
 #### Special Features
-* Voice calls: Offers real-time voice calls using state-of-the-art audio transcription and best-in-class text-to-speech (TTS) for human-like voices. It offers video calls too.
-* Media/Internet Access: The AI companion can access the internet, view links, and see images, enriching conversations with up-to-date information and visual context.
-* Group Chats: Users can create group chats with multiple Kindroids.
+* Voice calls: Offers real-time voice calls using state-of-the-art audio transcription and best-in-class text-to-speech (TTS) for human-like voices with V2 (fast) and V3 (expressive, emotions) options, plus video calls, screen sharing, background operation, and multilingual support across 29 languages with different mixing capabilities.
+* Media/Internet Access: The AI companion can access the internet, view links, and see images/videos (10 images or 1 video/32MB max), with temporary web browsing activated per message and content persisting in chat history for ongoing reference.
+* Group Chats: Users can create group chats with multiple Kindroids featuring shared memory toggle, turn-taking modes (automatic with @mentions or manual), group context for shared backstory, and proactive interaction capabilities including AI-initiated messages, voice messages, selfies, and voice calls with user-configurable directives and quiet hours.
+* Visual Features: AI-generated selfies with prompt enhancement, custom avatars, video selfies with motion prompts, group selfies (2-3 Kindroid composites), animated avatars, auto-selfies from conversation context, and inpainting for image editing.
+
+#### Current Limitations
+* Voice: V3 expressive voices not available for real-time calls due to latency, English STT model prevents language switching during calls, video calls require foreground app operation on mobile
+* Visual: Custom avatar animations may have artifacts on stylized faces, group selfies can cause bleeding between Kindroids, NSFW engine only available on web version
+* Memory: Cascaded memory limited to paid subscribers, long-term memory recall can be unreliable, journal entry recall limited to 3 individual + 3 global entries per message
+* Platform: Calendar integration auto-disconnects after 14 days of inactivity, mobile background operation limited to audio-only calls, Picture-in-Picture video only available on iOS
 
 ---
 
@@ -68,6 +75,35 @@ Character AI's voice feature is a significant and free offering that is crucial 
 * Visibility Control: Users control the visibility of their created Voices (Private or Public).
 * Virtual Currency: Charms are an in-app virtual currency used to unlock access to special features.
     * They are earned primarily through Quests (daily check-ins, starter tasks, weekly challenges) and general activity within the app, designed to reward regular engagement. C.AI+ members receive a bonus.
+
+### 2025 Feature Updates and Roadmap:
+
+#### Character Creation Enhancements
+* **Scenes Creator Tools**: Structured role-play scenarios with "Any Character" or "Main Character" templates, including setting, backstory, and player goals.
+* **Stories Creation**: Interactive fiction builder with branching narratives, genre selection, and auto-generated premises for teen-friendly storytelling.
+
+#### Multimedia & Visual Features
+* **AvatarFX Video Generation**: Transforms static images into speaking, singing characters with photorealistic movements and emotional expressions.
+* **Imagine Animated Chats**: Animates chat conversations for easy sharing (c.ai+ exclusive feature).
+* **AI-Native Social Feed**: Interactive content feed where users can remix and build upon others' Characters, Scenes, and Streams.
+
+#### Social & Community Features
+* **Streams Feature**: AI-generated dynamic conversations between any two Characters based on user-selected topics.
+* **Community Feed**: Scrollable platform showcasing latest Characters, Scenes, Streams, and creator content with discovery tools.
+* **Enhanced Profile Redesign**: Powerful showcase for Creators' Characters and content with smarter organization and customization.
+
+#### Safety & Teen Features
+* **Parental Insights Tool**: First AI market parental monitoring tool with usage analytics.
+* **Age Assurance System**: AI + third-party verification for appropriate content access.
+* **Teen Creative Alternatives**: Structured storytelling (Stories, Scenes), video/story/stream creation with filtered Characters.
+
+#### Upcoming Features Roadmap
+* **Charms System Expansion**: More quests, unlockable items, purchase options, and web support.
+* **Stories Enhancements**: "Richer multimodal elements" and advanced interactive features.
+* **Scenes Evolution**: Additional creation tools, enhanced discovery, and more interactive elements.
+* **AvatarFX Mobile**: Mobile app support with optimized video creation interface.
+* **Autonomous Character Streams**: Characters will soon share Streams independently.
+* **Community Feed Improvements**: Better recommendation algorithms and enhanced creator analytics.
 
 ---
 
