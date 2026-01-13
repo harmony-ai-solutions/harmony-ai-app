@@ -15,13 +15,14 @@
 - Type-safe routing with RootStackParamList
 - Header configuration support
 
-✅ **Design System**
-- Theme matching Harmony Link aesthetic
-- Dark mode by default (#282828 background)
-- Orange accent color (#ea580c)
-- React Native Paper Material Design 3 integration
-- Centralized color palette
-- Type-safe theme configuration
+✅ **Design System & Advanced Theming**
+- **Robust Theme Engine**: Implemented `ThemeContext` with 6 built-in themes and support for unlimited custom themes.
+- **Dynamic Switching**: Instant theme application across the entire app without restart.
+- **Advanced Editor**: Full-featured theme editor with RGB sliders for every color category (Accents, Backgrounds, Status, Text).
+- **Themed Components**: Library of reusable components (`ThemedView`, `ThemedText`, `ThemedButton`, `ThemedCard`, `ThemedGradient`) for effortless UI consistency.
+- **Persistence**: Theme preferences and custom themes persisted via `AsyncStorage`.
+- **Import/Export**: JSON-based theme sharing using modern `@react-native-documents/picker`.
+- **Material Design 3**: Seamless integration with React Native Paper.
 
 ✅ **Project Structure**
 - Organized src/ folder hierarchy
@@ -125,6 +126,13 @@
 - [ ] Language settings
 
 ### Phase 3: Advanced Features
+✅ **Advanced Theming System**
+- ✅ Custom theme creation and editing
+- ✅ RGB color picker overlay
+- ✅ Theme deletion
+- ✅ JSON Import/Export
+- ✅ Modern build compatibility fixes
+
 🔄 **Character System**
 - [ ] Custom character creation
 - [ ] Character profile editing
@@ -213,6 +221,17 @@
 - Messenger API limitations and restrictions
 
 ## Evolution of Decisions
+
+### January 2026
+**Decision**: Advanced Theming System with Custom Editor
+- **Reason**: Enable high levels of user personalization and brand alignment.
+- **Trade-off**: Increases state management complexity and requires detailed component-level styling.
+- **Outcome**: Successfully implemented a robust context-based system with full color editing capabilities.
+
+**Decision**: Migration to `@react-native-documents/picker`
+- **Reason**: `react-native-document-picker` was outdated and caused build failures with React Native 0.83.1.
+- **Trade-off**: Required refactoring existing file picking logic to the new API.
+- **Outcome**: Fixed build issues and provided a more stable, modern file selection experience.
 
 ### December 2025
 **Decision**: Use React Native CLI instead of Expo

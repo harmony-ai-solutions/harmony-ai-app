@@ -1,12 +1,19 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { HomeScreen } from '../screens/HomeScreen';
-import { ChatScreen } from '../screens/ChatScreen';
+import { BottomNavigator } from './BottomNavigator';
+import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
+import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
+import { SettingsHomeScreen } from '../screens/settings/SettingsHomeScreen';
+import { ProfileSettingsScreen, ConnectionSettingsScreen } from '../screens/settings/OtherSettingsScreens';
 
 export type RootStackParamList = {
-  Home: undefined;
-  Chat: undefined;
+  Main: undefined;
+  SettingsHome: undefined;
+  ThemeSettings: undefined;
+  ThemeEditor: { themeId?: string } | undefined;
+  ProfileSettings: undefined;
+  ConnectionSettings: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -15,13 +22,17 @@ export const AppNavigator: React.FC = () => {
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName="Home"
+        initialRouteName="Main"
         screenOptions={{
           headerShown: false,
         }}
       >
-        <Stack.Screen name="Home" component={HomeScreen} />
-        <Stack.Screen name="Chat" component={ChatScreen} />
+        <Stack.Screen name="Main" component={BottomNavigator} />
+        <Stack.Screen name="SettingsHome" component={SettingsHomeScreen} />
+        <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
+        <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />
+        <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
+        <Stack.Screen name="ConnectionSettings" component={ConnectionSettingsScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

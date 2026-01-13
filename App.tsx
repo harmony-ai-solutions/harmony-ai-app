@@ -10,15 +10,35 @@ import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PaperProvider } from 'react-native-paper';
 import { AppNavigator } from './src/navigation/AppNavigator';
-import { theme } from './src/theme/theme';
+import { ThemeProvider, usePaperTheme, useAppTheme } from './src/contexts/ThemeContext';
 
+/**
+ * App content with theme
+ */
+function AppContent() {
+  const paperTheme = usePaperTheme();
+  const { theme } = useAppTheme();
+
+  return (
+    <PaperProvider theme={paperTheme}>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={theme?.colors.background.base || '#000000'}
+      />
+      <AppNavigator />
+    </PaperProvider>
+  );
+}
+
+/**
+ * Root App component
+ */
 function App() {
   return (
     <SafeAreaProvider>
-      <PaperProvider theme={theme}>
-        <StatusBar barStyle="light-content" backgroundColor={theme.colors.background} />
-        <AppNavigator />
-      </PaperProvider>
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }
