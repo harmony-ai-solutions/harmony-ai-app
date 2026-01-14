@@ -7,6 +7,7 @@ import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
 import { SettingsHomeScreen } from '../screens/settings/SettingsHomeScreen';
 import { ProfileSettingsScreen, ConnectionSettingsScreen } from '../screens/settings/OtherSettingsScreens';
 import { DatabaseTestScreen } from '../screens/development/DatabaseTestScreen';
+import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
 
 export type RootStackParamList = {
   Main: undefined;
@@ -16,6 +17,7 @@ export type RootStackParamList = {
   ProfileSettings: undefined;
   ConnectionSettings: undefined;
   DatabaseTests?: undefined; // DEV only
+  DatabaseTableViewer?: undefined; // DEV only
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -36,11 +38,18 @@ export const AppNavigator: React.FC = () => {
         <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
         <Stack.Screen name="ConnectionSettings" component={ConnectionSettingsScreen} />
         {__DEV__ && (
-          <Stack.Screen 
-            name="DatabaseTests" 
-            component={DatabaseTestScreen}
-            options={{ headerShown: false }}
-          />
+          <>
+            <Stack.Screen 
+              name="DatabaseTests" 
+              component={DatabaseTestScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen 
+              name="DatabaseTableViewer" 
+              component={DatabaseTableViewerScreen}
+              options={{ headerShown: false }}
+            />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

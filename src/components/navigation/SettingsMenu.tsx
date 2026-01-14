@@ -56,6 +56,7 @@ const menuSections: MenuSection[] = [
         title: 'Development',
         items: [
             { icon: 'test-tube', label: 'Database Tests', screen: 'DatabaseTests', badge: 'DEV' },
+            { icon: 'database-eye', label: 'Database Table Viewer', screen: 'DatabaseTableViewer', badge: 'DEV' },
         ],
     }] : []),
 ];
