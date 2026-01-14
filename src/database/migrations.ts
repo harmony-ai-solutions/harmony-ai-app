@@ -45,7 +45,10 @@ const MIGRATIONS: Migration[] = [
 /**
  * Create the schema_migrations table if it doesn't exist
  */
-async function createMigrationsTable(db: SQLiteDatabase): Promise<void> {
+async function createMigrationsTable(
+  db: SQLiteDatabase,
+  silent: boolean = false
+): Promise<void> {
   const sql = `
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
@@ -53,9 +56,11 @@ async function createMigrationsTable(db: SQLiteDatabase): Promise<void> {
       description TEXT
     );
   `;
-  
+
   await db.executeSql(sql);
-  console.log('[Migrations] Created schema_migrations table');
+  if (!silent) {
+    console.log('[Migrations] Created schema_migrations table');
+  }
 }
 
 /**
@@ -78,12 +83,15 @@ async function getAppliedMigrations(db: SQLiteDatabase): Promise<Set<number>> {
  */
 async function applyMigration(
   db: SQLiteDatabase,
-  migration: Migration
+  migration: Migration,
+  silent: boolean = false
 ): Promise<void> {
-  console.log(
-    `[Migrations] Applying migration ${migration.version}: ${migration.description}`
-  );
-  
+  if (!silent) {
+    console.log(
+      `[Migrations] Applying migration ${migration.version}: ${migration.description}`
+    );
+  }
+
   try {
     // Execute the migration SQL
     // Note: SQLite doesn't support multiple statements in executeSql,
@@ -102,10 +110,12 @@ async function applyMigration(
       'INSERT INTO schema_migrations (version, description) VALUES (?, ?)',
       [migration.version, migration.description]
     );
-    
-    console.log(
-      `[Migrations] Successfully applied migration ${migration.version}`
-    );
+
+    if (!silent) {
+      console.log(
+        `[Migrations] Successfully applied migration ${migration.version}`
+      );
+    }
   } catch (error) {
     console.error(
       `[Migrations] Failed to apply migration ${migration.version}:`,
@@ -119,39 +129,52 @@ async function applyMigration(
  * Run all pending migrations
  * This is the main entry point called during database initialization
  */
-export async function runMigrations(db: SQLiteDatabase): Promise<void> {
-  console.log('[Migrations] Starting migration process...');
-  
+export async function runMigrations(
+  db: SQLiteDatabase,
+  silent: boolean = false
+): Promise<void> {
+  if (!silent) {
+    console.log('[Migrations] Starting migration process...');
+  }
+
   try {
     // Ensure migrations table exists
-    await createMigrationsTable(db);
-    
+    await createMigrationsTable(db, silent);
+
     // Get already applied migrations
     const appliedVersions = await getAppliedMigrations(db);
-    console.log(
-      `[Migrations] Found ${appliedVersions.size} previously applied migrations`
-    );
-    
+    if (!silent) {
+      console.log(
+        `[Migrations] Found ${appliedVersions.size} previously applied migrations`
+      );
+    }
+
     // Find pending migrations
     const pendingMigrations = MIGRATIONS.filter(
       m => !appliedVersions.has(m.version)
     );
-    
+
     if (pendingMigrations.length === 0) {
-      console.log('[Migrations] Database is up to date');
+      if (!silent) {
+        console.log('[Migrations] Database is up to date');
+      }
       return;
     }
-    
-    console.log(
-      `[Migrations] Applying ${pendingMigrations.length} pending migrations`
-    );
-    
+
+    if (!silent) {
+      console.log(
+        `[Migrations] Applying ${pendingMigrations.length} pending migrations`
+      );
+    }
+
     // Apply each pending migration in order
     for (const migration of pendingMigrations) {
-      await applyMigration(db, migration);
+      await applyMigration(db, migration, silent);
     }
-    
-    console.log('[Migrations] All migrations completed successfully');
+
+    if (!silent) {
+      console.log('[Migrations] All migrations completed successfully');
+    }
   } catch (error) {
     console.error('[Migrations] Migration process failed:', error);
     throw error;

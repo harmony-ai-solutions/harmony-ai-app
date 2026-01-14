@@ -1,9 +1,19 @@
 # Active Context
 
 ## Current Focus
-**Database Implementation Complete** - SQLite with SQLCipher encryption, complete repository layer, app integration, and comprehensive testing. Ready for Harmony Link synchronization.
+**Database Implementation Complete** - SQLite with SQLCipher encryption, complete repository layer, app integration, comprehensive testing, and in-app test runner. Ready for Harmony Link synchronization.
 
 ## Recent Work (January 2026)
+
+### Database Test Runner Implementation ✅ COMPLETE (January 14, 2026)
+- ✅ Created DatabaseTestScreen with real-time console output
+- ✅ Integrated into Settings menu (hamburger menu)
+- ✅ DEV-only visibility using __DEV__ checks
+- ✅ Color-coded test results (success/error/warning)
+- ✅ Live test execution in React Native environment
+- ✅ Themed UI matching app design
+- ✅ Updated database README with test instructions
+- ✅ Auto-hidden in production builds
 
 ### Database Layer Implementation ✅ COMPLETE
 - ✅ SQLite database with SQLCipher encryption for secure data storage
@@ -152,6 +162,25 @@ harmony-ai-app/
 - React Native Paper provides good dark theme support
 - Navigation setup is straightforward with typed routes
 - Android development workflow is smooth
+- **Metro Bundler Limitation**: Cannot resolve imports from `__tests__` directories by default
+  - Solution: Create wrapper files outside `__tests__` to re-export test modules
+  - Example: `src/database/test-runner.ts` wraps `src/database/__tests__/run-all-tests.ts`
+
+### Navigation Modification Checklist
+When adding a new screen to Settings navigation, **ALL 3 files must be updated**:
+1. **`src/navigation/AppNavigator.tsx`** - Register the route in the Stack.Navigator
+   - Add route name to RootStackParamList type
+   - Add Stack.Screen with component reference
+2. **`src/screens/settings/SettingsHomeScreen.tsx`** - Add button in main settings list
+   - Add TouchableOpacity with icon and label
+   - Configure navigation.navigate() call
+   - Use `__DEV__` conditional for development-only features
+3. **`src/components/navigation/SettingsMenu.tsx`** - Add item to hamburger menu
+   - Add MenuItem to appropriate menuSections array
+   - Use spread operator for conditional sections: `...(__DEV__ ? [section] : [])`
+   - Ensure icon, label, and screen match other locations
+
+**Common Pitfall**: Forgetting to update SettingsMenu.tsx causes the item to be missing from the hamburger menu even though it works from the main settings screen.
 
 ### Project-Specific Notes
 - Keep harmony-link design consistency (colors, spacing)

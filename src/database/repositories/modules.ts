@@ -27,14 +27,24 @@ export async function createBackendConfig(
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      `INSERT INTO backend_configs (name, provider, provider_config_id)
-       VALUES (?, ?, ?)`,
-      [config.name, config.provider, config.provider_config_id]
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO backend_configs (name, provider, provider_config_id)
+           VALUES (?, ?, ?)`,
+          [config.name, config.provider, config.provider_config_id],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -142,20 +152,30 @@ export async function createCognitionConfig(
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      `INSERT INTO cognition_configs (name, provider, provider_config_id, max_cognition_events, generate_expressions)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
-        config.name,
-        config.provider,
-        config.provider_config_id,
-        config.max_cognition_events,
-        config.generate_expressions,
-      ]
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO cognition_configs (name, provider, provider_config_id, max_cognition_events, generate_expressions)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            config.name,
+            config.provider,
+            config.provider_config_id,
+            config.max_cognition_events,
+            config.generate_expressions,
+          ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -279,20 +299,30 @@ export async function createMovementConfig(
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      `INSERT INTO movement_configs (name, provider, provider_config_id, startup_sync_timeout, execution_threshold)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
-        config.name,
-        config.provider,
-        config.provider_config_id,
-        config.startup_sync_timeout,
-        config.execution_threshold,
-      ]
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO movement_configs (name, provider, provider_config_id, startup_sync_timeout, execution_threshold)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            config.name,
+            config.provider,
+            config.provider_config_id,
+            config.startup_sync_timeout,
+            config.execution_threshold,
+          ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -416,19 +446,29 @@ export async function createRAGConfig(
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      `INSERT INTO rag_configs (name, provider, provider_config_id, embedding_concurrency)
-       VALUES (?, ?, ?, ?)`,
-      [
-        config.name,
-        config.provider,
-        config.provider_config_id,
-        config.embedding_concurrency,
-      ]
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO rag_configs (name, provider, provider_config_id, embedding_concurrency)
+           VALUES (?, ?, ?, ?)`,
+          [
+            config.name,
+            config.provider,
+            config.provider_config_id,
+            config.embedding_concurrency,
+          ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -548,26 +588,36 @@ export async function createSTTConfig(
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      `INSERT INTO stt_configs (
-        name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
-        transcription_provider, transcription_provider_config_id,
-        vad_provider, vad_provider_config_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        config.name,
-        config.main_stream_time_millis,
-        config.transition_stream_time_millis,
-        config.max_buffer_count,
-        config.transcription_provider,
-        config.transcription_provider_config_id,
-        config.vad_provider,
-        config.vad_provider_config_id,
-      ]
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO stt_configs (
+            name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
+            transcription_provider, transcription_provider_config_id,
+            vad_provider, vad_provider_config_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            config.name,
+            config.main_stream_time_millis,
+            config.transition_stream_time_millis,
+            config.max_buffer_count,
+            config.transcription_provider,
+            config.transcription_provider_config_id,
+            config.vad_provider,
+            config.vad_provider_config_id,
+          ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -711,21 +761,31 @@ export async function createTTSConfig(
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      `INSERT INTO tts_configs (name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        config.name,
-        config.provider,
-        config.provider_config_id,
-        config.output_type,
-        config.words_to_replace,
-        config.vocalize_nonverbal,
-      ]
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO tts_configs (name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            config.name,
+            config.provider,
+            config.provider_config_id,
+            config.output_type,
+            config.words_to_replace,
+            config.vocalize_nonverbal,
+          ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 

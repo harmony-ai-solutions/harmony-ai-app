@@ -44,7 +44,7 @@ const menuSections: MenuSection[] = [
             { icon: 'shield-lock', label: 'Data & Privacy', screen: 'PrivacySettings' },
             { icon: 'bell', label: 'Notifications', screen: 'NotificationSettings' },
         ],
-    },
+    },    
     {
         title: 'Info',
         items: [
@@ -52,6 +52,12 @@ const menuSections: MenuSection[] = [
             { icon: 'help-circle', label: 'Help & Support', screen: 'Help' },
         ],
     },
+    ...(__DEV__ ? [{
+        title: 'Development',
+        items: [
+            { icon: 'test-tube', label: 'Database Tests', screen: 'DatabaseTests', badge: 'DEV' },
+        ],
+    }] : []),
 ];
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({

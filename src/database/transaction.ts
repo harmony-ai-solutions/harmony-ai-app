@@ -20,20 +20,27 @@ export async function withTransaction<T>(
   db: SQLiteDatabase,
   fn: (tx: Transaction) => Promise<T>
 ): Promise<T> {
-  return new Promise((resolve, reject) => {
+  // Using the Promise-based transaction API from react-native-sqlite-storage
+  // Must capture result and wait for success callback
+  return new Promise<T>((resolve, reject) => {
+    let result: T;
+    
     db.transaction(
       async (tx) => {
         try {
-          const result = await fn(tx);
-          resolve(result);
+          result = await fn(tx);
         } catch (error) {
-          console.error('[Transaction] Error during transaction:', error);
           reject(error);
+          throw error; // Re-throw to trigger transaction rollback
         }
       },
       (error) => {
-        console.error('[Transaction] Transaction failed:', error);
+        // Transaction error/rollback callback
         reject(error);
+      },
+      () => {
+        // Transaction success/commit callback
+        resolve(result);
       }
     );
   });

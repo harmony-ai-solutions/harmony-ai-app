@@ -37,6 +37,23 @@ export const SettingsHomeScreen: React.FC<any> = ({ navigation }) => {
                     <Icon name="chevron-right" size={24} color={theme.colors.text.muted} />
                 </TouchableOpacity>
 
+                {/* DEV ONLY: Database Tests */}
+                {__DEV__ && (
+                    <TouchableOpacity
+                        style={[styles.item, { borderBottomColor: theme.colors.border.default }]}
+                        onPress={() => navigation.navigate('DatabaseTests')}
+                    >
+                        <Icon name="test-tube" size={24} color={theme.colors.status.warning} />
+                        <Text style={[styles.itemLabel, { color: theme.colors.text.primary }]}>
+                            Database Tests
+                        </Text>
+                        <View style={[styles.devBadge, { backgroundColor: theme.colors.status.warning }]}>
+                            <Text style={styles.devBadgeText}>DEV</Text>
+                        </View>
+                        <Icon name="chevron-right" size={24} color={theme.colors.text.muted} />
+                    </TouchableOpacity>
+                )}
+
                 {/* Add more items here as needed */}
             </ScrollView>
 
@@ -79,5 +96,17 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 16,
         marginLeft: 16,
+    },
+    devBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 4,
+        marginRight: 8,
+    },
+    devBadgeText: {
+        color: '#ffffff',
+        fontSize: 10,
+        fontWeight: 'bold',
+        letterSpacing: 0.5,
     },
 });

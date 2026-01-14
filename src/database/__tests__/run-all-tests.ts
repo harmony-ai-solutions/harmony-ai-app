@@ -1,14 +1,17 @@
 /**
  * Comprehensive Database Test Runner
- * 
- * Runs all database repository tests in sequence
  */
 
-import {closeDatabase} from '../connection';
+import {
+  closeDatabase,
+  initializeDatabase,
+  clearDatabaseData,
+} from '../connection';
 import {runEntityTests} from './entities.test';
 import {runCharacterTests} from './characters.test';
 import {runModuleTests} from './modules.test';
 import {runProviderTests} from './providers.test';
+import {TestResult} from './test-utils';
 
 /**
  * Main test runner
@@ -19,34 +22,39 @@ async function runAllTests() {
   console.log('     HARMONY AI APP - DATABASE COMPREHENSIVE TEST SUITE');
   console.log('═══════════════════════════════════════════════════════════');
   console.log('\n');
+
+  try {
+    await initializeDatabase(true);
+    await clearDatabaseData(true);
+    console.log('[Test Setup] Initialized and cleaned database');
+  } catch (error) {
+    console.error('[Test Setup] Failed to initialize database:', error);
+    return false;
+  }
   
-  const results = {
-    entities: false,
-    characters: false,
-    modules: false,
-    providers: false,
+  const results: Record<string, TestResult[]> = {
+    entities: [],
+    characters: [],
+    modules: [],
+    providers: [],
   };
   
   try {
-    // Run Entity Tests
     console.log('┌─────────────────────────────────────────────────────────┐');
     console.log('│ Phase 1: Entity Repository Tests                       │');
     console.log('└─────────────────────────────────────────────────────────┘');
     results.entities = await runEntityTests();
     
-    // Run Character Tests
     console.log('\n┌─────────────────────────────────────────────────────────┐');
     console.log('│ Phase 2: Character Repository Tests                    │');
     console.log('└─────────────────────────────────────────────────────────┘');
     results.characters = await runCharacterTests();
     
-    // Run Module Tests
     console.log('\n┌─────────────────────────────────────────────────────────┐');
     console.log('│ Phase 3: Module Repository Tests                       │');
     console.log('└─────────────────────────────────────────────────────────┘');
     results.modules = await runModuleTests();
     
-    // Run Provider Tests
     console.log('\n┌─────────────────────────────────────────────────────────┐');
     console.log('│ Phase 4: Provider Repository Tests                     │');
     console.log('└─────────────────────────────────────────────────────────┘');
@@ -55,7 +63,6 @@ async function runAllTests() {
   } catch (error) {
     console.error('\n❌ Test suite failed with critical error:', error);
   } finally {
-    // Close database connection
     try {
       await closeDatabase();
       console.log('\n[Cleanup] Database connection closed');
@@ -64,27 +71,48 @@ async function runAllTests() {
     }
   }
   
-  // Print Summary
+  // Print Detailed Summary
   console.log('\n');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('                     TEST SUMMARY');
-  console.log('═══════════════════════════════════════════════════════════');
-  console.log(`  Entity Tests:     ${results.entities ? '✅ PASSED' : '❌ FAILED'}`);
-  console.log(`  Character Tests:  ${results.characters ? '✅ PASSED' : '❌ FAILED'}`);
-  console.log(`  Module Tests:     ${results.modules ? '✅ PASSED' : '❌ FAILED'}`);
-  console.log(`  Provider Tests:   ${results.providers ? '✅ PASSED' : '❌ FAILED'}`);
+  console.log('                     DETAILED TEST SUMMARY');
   console.log('═══════════════════════════════════════════════════════════');
   
-  const allPassed = Object.values(results).every(result => result === true);
+  let totalTests = 0;
+  let totalPassed = 0;
+  let totalFailed = 0;
+
+  for (const [phase, phaseResults] of Object.entries(results)) {
+    const phasePassed = phaseResults.filter(r => r.passed).length;
+    const phaseFailed = phaseResults.filter(r => !r.passed).length;
+    const phaseTotal = phaseResults.length;
+    
+    totalTests += phaseTotal;
+    totalPassed += phasePassed;
+    totalFailed += phaseFailed;
+
+    console.log(`\n[${phase.toUpperCase()}] (${phasePassed}/${phaseTotal} Passed)`);
+    
+    phaseResults.forEach(res => {
+      const icon = res.passed ? '✅' : '❌';
+      const duration = res.duration ? ` (${res.duration}ms)` : '';
+      console.log(`  ${icon} ${res.name}${duration}`);
+      if (!res.passed && res.error) {
+        console.log(`     └─ Error: ${res.error}`);
+      }
+    });
+  }
+
+  console.log('\n═══════════════════════════════════════════════════════════');
+  console.log(` TOTAL: ${totalTests} tests | ${totalPassed} passed | ${totalFailed} failed`);
+  console.log('═══════════════════════════════════════════════════════════');
   
-  if (allPassed) {
+  if (totalFailed === 0 && totalTests > 0) {
     console.log('\n🎉 All tests PASSED! Database implementation complete.\n');
+    return true;
   } else {
     console.log('\n⚠️  Some tests FAILED. Please review the output above.\n');
+    return false;
   }
-  
-  return allPassed;
 }
 
-// Export for use
 export default runAllTests;

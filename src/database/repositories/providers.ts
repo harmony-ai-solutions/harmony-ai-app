@@ -35,29 +35,39 @@ export async function createOpenAIProviderConfig(
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      `INSERT INTO provider_config_openai (
-        name, api_key, model, max_tokens, temperature, top_p, n,
-        stop_tokens, embedding_model, voice, speed, format
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        config.name,
-        config.api_key,
-        config.model,
-        config.max_tokens,
-        config.temperature,
-        config.top_p,
-        config.n,
-        config.stop_tokens,
-        config.embedding_model,
-        config.voice,
-        config.speed,
-        config.format,
-      ]
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO provider_config_openai (
+            name, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, voice, speed, format
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            config.name,
+            config.api_key,
+            config.model,
+            config.max_tokens,
+            config.temperature,
+            config.top_p,
+            config.n,
+            config.stop_tokens,
+            config.embedding_model,
+            config.voice,
+            config.speed,
+            config.format,
+          ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -210,12 +220,14 @@ export async function deleteOpenAIProviderConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createOpenRouterProviderConfig(
-  config: Omit<OpenRouterProviderConfig, 'id'>
+  config: Omit<any, 'id'>
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
       `INSERT INTO provider_config_openrouter (
         name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -228,10 +240,18 @@ export async function createOpenRouterProviderConfig(
         config.top_p,
         config.n,
         config.stop_tokens,
-      ]
+      ],
+      (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -364,12 +384,14 @@ export async function deleteOpenRouterProviderConfig(id: number): Promise<void> 
 // ============================================================================
 
 export async function createOpenAICompatibleProviderConfig(
-  config: Omit<OpenAICompatibleProviderConfig, 'id'>
+  config: Omit<any, 'id'>
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
       `INSERT INTO provider_config_openaicompatible (
         name, base_url, api_key, model, max_tokens, temperature, top_p, n,
         stop_tokens, embedding_model
@@ -385,10 +407,18 @@ export async function createOpenAICompatibleProviderConfig(
         config.n,
         config.stop_tokens,
         config.embedding_model,
-      ]
+      ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -532,12 +562,14 @@ export async function deleteOpenAICompatibleProviderConfig(id: number): Promise<
 // ============================================================================
 
 export async function createHarmonySpeechProviderConfig(
-  config: Omit<HarmonySpeechProviderConfig, 'id'>
+  config: Omit<any, 'id'>
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
       `INSERT INTO provider_config_harmonyspeech (
         name, endpoint, model, voice_config_file, format, sample_rate, stream
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -549,10 +581,18 @@ export async function createHarmonySpeechProviderConfig(
         config.format,
         config.sample_rate,
         config.stream,
-      ]
+      ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -681,12 +721,14 @@ export async function deleteHarmonySpeechProviderConfig(id: number): Promise<voi
 // ============================================================================
 
 export async function createElevenLabsProviderConfig(
-  config: Omit<ElevenLabsProviderConfig, 'id'>
+  config: Omit<any, 'id'>
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
       `INSERT INTO provider_config_elevenlabs (
         name, api_key, voice_id, model_id, stability, similarity_boost, style, speaker_boost
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -699,10 +741,18 @@ export async function createElevenLabsProviderConfig(
         config.similarity_boost,
         config.style,
         config.speaker_boost,
-      ]
+      ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -835,18 +885,28 @@ export async function deleteElevenLabsProviderConfig(id: number): Promise<void> 
 // ============================================================================
 
 export async function createKindroidProviderConfig(
-  config: Omit<KindroidProviderConfig, 'id'>
+  config: Omit<any, 'id'>
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
       `INSERT INTO provider_config_kindroid (name, api_key, kindroid_id)
        VALUES (?, ?, ?)`,
-      [config.name, config.api_key, config.kindroid_id]
+      [config.name, config.api_key, config.kindroid_id],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -948,18 +1008,28 @@ export async function deleteKindroidProviderConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createKajiwotoProviderConfig(
-  config: Omit<KajiwotoProviderConfig, 'id'>
+  config: Omit<any, 'id'>
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
       `INSERT INTO provider_config_kajiwoto (name, username, password, room_url)
        VALUES (?, ?, ?, ?)`,
-      [config.name, config.username, config.password, config.room_url]
+      [config.name, config.username, config.password, config.room_url],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -1066,18 +1136,28 @@ export async function deleteKajiwotoProviderConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createCharacterAIProviderConfig(
-  config: Omit<CharacterAIProviderConfig, 'id'>
+  config: Omit<any, 'id'>
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
       `INSERT INTO provider_config_characterai (name, api_token, chatroom_url)
        VALUES (?, ?, ?)`,
-      [config.name, config.api_token, config.chatroom_url]
+      [config.name, config.api_token, config.chatroom_url],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -1181,17 +1261,27 @@ export async function deleteCharacterAIProviderConfig(id: number): Promise<void>
 // ============================================================================
 
 export async function createLocalAIProviderConfig(
-  config: Omit<LocalAIProviderConfig, 'id'>
+  config: Omit<any, 'id'>
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
       'INSERT INTO provider_config_localai (name, embedding_model) VALUES (?, ?)',
-      [config.name, config.embedding_model]
+      [config.name, config.embedding_model],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -1290,17 +1380,27 @@ export async function deleteLocalAIProviderConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createMistralProviderConfig(
-  config: Omit<MistralProviderConfig, 'id'>
+  config: Omit<any, 'id'>
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
       'INSERT INTO provider_config_mistral (name, api_key) VALUES (?, ?)',
-      [config.name, config.api_key]
+      [config.name, config.api_key],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -1399,17 +1499,27 @@ export async function deleteMistralProviderConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createOllamaProviderConfig(
-  config: Omit<OllamaProviderConfig, 'id'>
+  config: Omit<any, 'id'>
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
       'INSERT INTO provider_config_ollama (name, base_url, embedding_model) VALUES (?, ?, ?)',
-      [config.name, config.base_url, config.embedding_model]
+      [config.name, config.base_url, config.embedding_model],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 

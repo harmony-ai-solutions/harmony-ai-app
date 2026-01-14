@@ -1,0 +1,18 @@
+# Harmony AI App Brief
+@Overview: Open-source Android mobile app for AI character chat. Mobile frontend for Harmony Link ecosystem.
+@Purpose:
+- Mobile access to Harmony Link AI characters
+- Chat with AI on Android devices
+- Connected mode (Harmony Link/Cloud) + on-device AI
+- Privacy-first with user-controlled backends
+- Testing field for messenger integration
+@Goals:
+- Mobile AI Chat: Seamless conversations on Android
+- Dual Backend: Self-hosted Link or Harmony Cloud
+- On-Device AI: Limited offline with Executorch (up to 7B models)
+- Privacy Control: Full data control with self-hosted
+- Messenger Integration: WhatsApp/Telegram (future premium)
+- Open Source: Community-driven, transparent
+@Innovation: Mobile-first AI chat + flexible backends (privacy or convenience). On-device AI for offline. Messenger integration vision for everyday platforms.
+@Users: Privacy-conscious users, Harmony Link users, power users, content creators, AI app developers.
+@Reqs: Android primary (iOS community), React Native, Harmony Link APIs (WS/REST), SQLite persistence with sync, Executorch integration, Material Design 3, text/voice/image support, character memory.

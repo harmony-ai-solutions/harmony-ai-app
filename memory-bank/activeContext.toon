@@ -1,0 +1,31 @@
+# Harmony AI App Active Context
+@Focus:
+- Database Implementation Complete: SQLCipher encryption, full repository layer (84 tests), in-app DEV-only test runner.
+- Test Runner Integration: DatabaseTestScreen in Settings menu, real-time console, color-coded results, themed UI.
+- Advanced Theming: RGB editor, custom theme creation/deletion, JSON import/export, 6 built-in themes.
+- Bootstrap Complete: RN 0.83.1, TypeScript, navigation, Paper UI, organized structure.
+@Next:
+- Chat Interface: Message list (FlatList), bubbles (user/AI), text input, timestamps.
+- Harmony Link Integration: REST API client, WebSocket, authentication, message send/receive.
+- Message Persistence: SQLite message storage, offline queue, sync tracking.
+- Character Management: Selection UI, profile display, avatar loading, character switching.
+@Decisions:
+- React Native CLI (not Expo) for full native module control (Executorch, messenger APIs).
+- React Native Paper for Material Design 3 consistency.
+- React Navigation for type-safe routing.
+- TypeScript strict mode for type safety.
+- Hooks → Redux/Zustand as complexity grows.
+- Dark theme default (matches Harmony Link, OLED-friendly).
+- Database schema 100% compatible with Harmony Link for bidirectional sync.
+- DEV-only test runner using __DEV__ checks for production safety.
+@Learnings:
+- Metro bundler hot reload excellent with TypeScript.
+- React Native Paper dark theme integration smooth.
+- Migration from react-native-document-picker to @react-native-documents/picker fixed RN 0.83.1 compatibility.
+- Gradle 8.13 required (NOT 9.0+) for RN 0.83.1.
+- Database encryption with SQLCipher + React Native Keychain provides secure storage.
+- In-app test runner provides better developer experience than Node-based tests.
+- BLOB handling in SQLite requires Uint8Array → Base64 conversion for UI.
+- __DEV__ checks ensure development tools invisible in production builds.
+- ADB PATH setup critical for newcomers.
+- Good foundation prevents technical debt.

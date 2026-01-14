@@ -72,21 +72,126 @@ useEffect(() => {
 
 ### Using Transactions
 
+#### ⚠️ CRITICAL: Transaction Helper Limitations
+
+The `withTransaction()` helper has a **major limitation** in React Native SQLite:
+
+**❌ DO NOT USE for INSERT operations that need to return `insertId`**
+
+The helper uses async/await with Promises, which causes transactions to finalize before values can be returned. This breaks INSERT operations that need to return the auto-generated ID.
+
+#### ✅ Correct Pattern for INSERT with insertId
+
+Use **direct transaction callbacks** with Promise wrappers:
+
 ```typescript
 import {getDatabase} from './database/connection';
-import {withTransaction} from './database/transaction';
 
 const db = getDatabase();
 
+// ✅ CORRECT: Direct transaction callback pattern
+export async function createEntity(entity: Entity): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          'INSERT INTO entities (id, name) VALUES (?, ?)',
+          [entity.id, entity.name],
+          (_, result) => {
+            resolve(result.insertId!);  // ✅ Works correctly
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
+    );
+  });
+}
+```
+
+#### ✅ Correct Pattern for Multiple Sequential Statements
+
+For operations with multiple statements (like updating multiple rows):
+
+```typescript
+// ✅ CORRECT: Nested callbacks for sequential operations
+export async function setPrimaryImage(profileId: string, imageId: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        // First operation
+        tx.executeSql(
+          'UPDATE images SET is_primary = 0 WHERE profile_id = ?',
+          [profileId],
+          () => {
+            // Second operation in success callback
+            tx.executeSql(
+              'UPDATE images SET is_primary = 1 WHERE id = ?',
+              [imageId],
+              () => resolve(),
+              (_, error) => {
+                reject(error);
+                return false;
+              }
+            );
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
+    );
+  });
+}
+```
+
+#### ✅ When withTransaction() IS Safe to Use
+
+The `withTransaction()` helper can be used for:
+- UPDATE operations that don't need return values (other than rowsAffected check)
+- DELETE operations that don't need return values (other than rowsAffected check)
+- Operations where you construct the return value from input data
+
+```typescript
+// ✅ SAFE: UPDATE that returns input object
 await withTransaction(db, async (tx) => {
-  // All operations here are atomic
-  await tx.executeSql('INSERT INTO entities (id) VALUES (?)', ['entity-1']);
-  await tx.executeSql('INSERT INTO character_profiles (id, name) VALUES (?, ?)', 
-    ['profile-1', 'Alice']
+  const now = new Date().toISOString();
+  await tx.executeSql(
+    'UPDATE entities SET name = ?, updated_at = ? WHERE id = ?',
+    [entity.name, now, entity.id]
   );
-  // Auto-commit on success, auto-rollback on error
+  return {...entity, updated_at: new Date(now)};  // ✅ Constructed from input
+});
+
+// ✅ SAFE: DELETE with rowsAffected check
+await withTransaction(db, async (tx) => {
+  const [result] = await tx.executeSql(
+    'DELETE FROM entities WHERE id = ?',
+    [id]
+  );
+  if (result.rowsAffected === 0) {
+    throw new Error('Entity not found');
+  }
 });
 ```
+
+#### Summary Table
+
+| Operation Type | Use withTransaction? | Pattern |
+|----------------|---------------------|---------|
+| INSERT returning insertId | ❌ NO | Direct callback with Promise wrapper |
+| INSERT not returning insertId | ✅ YES | withTransaction is fine |
+| UPDATE with checks | ✅ YES | withTransaction is fine |
+| DELETE with checks | ✅ YES | withTransaction is fine |
+| Multiple sequential statements | ❌ NO | Nested callbacks in single transaction |
+| SELECT queries | ✅ YES | Can use either pattern |
+
+**Root Cause:** React Native SQLite transactions follow run-to-completion semantics. When using Promises with A+ standard, resolution occurs on a subsequent tick, which happens after the transaction has already committed. This causes the "transaction already finalized" error.
 
 ## 📋 Schema Overview
 
@@ -199,24 +304,54 @@ export async function getCharacterProfile(id: string): Promise<CharacterProfile 
 - Implement CRUD for all 11 provider config types
 - Consider generic repository pattern to reduce boilerplate
 
-## 🧪 Testing Checklist
+## 🧪 Running Database Tests
 
-### Manual Testing
-- [ ] Database initializes on first launch
-- [ ] Encryption key generated and stored
-- [ ] Encryption key retrieved on subsequent launches
-- [ ] All 4 migrations execute successfully
-- [ ] `schema_migrations` table has 4 entries
-- [ ] Foreign key constraints enforced
-- [ ] Transactions commit on success
-- [ ] Transactions rollback on error
+### In-App Test Runner (Development Only)
 
-### Integration Testing
-- [ ] Entity CRUD operations
-- [ ] Character profile CRUD operations
-- [ ] Module mapping updates
-- [ ] CASCADE deletes work correctly
-- [ ] BLOB data (images) store/retrieve correctly
+The easiest way to run database tests is using the built-in test runner screen:
+
+1. **Launch the app in development mode:**
+   ```bash
+   npm run android
+   # or
+   npm run ios
+   ```
+
+2. **Navigate to Settings:**
+   - Tap the hamburger menu (settings icon)
+   - Look for **"Database Tests"** with a yellow "DEV" badge
+   - This option only appears in development builds
+
+3. **Run Tests:**
+   - Tap "Run All Tests" button
+   - Watch real-time console output
+   - See color-coded results (✅/❌)
+   - View summary of passed/failed tests
+
+4. **Features:**
+   - Real-time test execution in React Native environment
+   - Uses actual SQLite database with encryption
+   - Tests all repository functions (entities, characters, modules, providers)
+   - Clear console output between runs
+   - Progress indicators
+
+**Note:** The test runner screen is automatically hidden in production builds thanks to `__DEV__` checks.
+
+### Testing Checklist
+
+- [x] Database initializes on first launch
+- [x] Encryption key generated and stored
+- [x] Encryption key retrieved on subsequent launches
+- [x] All 4 migrations execute successfully
+- [x] `schema_migrations` table has 4 entries
+- [x] Foreign key constraints enforced
+- [x] Transactions commit on success
+- [x] Transactions rollback on error
+- [x] Entity CRUD operations
+- [x] Character profile CRUD operations
+- [x] Module mapping updates
+- [x] CASCADE deletes work correctly
+- [x] BLOB data (images) store/retrieve correctly
 
 ## 📚 Additional Resources
 

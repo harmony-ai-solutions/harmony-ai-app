@@ -132,25 +132,33 @@ async function configureDatabase(database: SQLiteDatabase): Promise<void> {
  * Initialize database: open connection and run migrations
  * This should be called once at app startup
  */
-export async function initializeDatabase(): Promise<void> {
+export async function initializeDatabase(
+  silent: boolean = false
+): Promise<void> {
   if (db) {
-    console.warn('[Database] Database already initialized');
+    if (!silent) {
+      console.warn('[Database] Database already initialized');
+    }
     return;
   }
-  
+
   try {
-    console.log('[Database] Initializing database...');
-    
+    if (!silent) {
+      console.log('[Database] Initializing database...');
+    }
+
     // Get or create encryption key
     const encryptionKey = await getOrCreateEncryptionKey();
-    
+
     // Open database with encryption
     db = await openDatabase(encryptionKey);
-    
+
     // Run pending migrations
-    await runMigrations(db);
-    
-    console.log('[Database] Database initialization complete');
+    await runMigrations(db, silent);
+
+    if (!silent) {
+      console.log('[Database] Database initialization complete');
+    }
   } catch (error) {
     console.error('[Database] Database initialization failed:', error);
     db = null;
@@ -191,6 +199,50 @@ export async function closeDatabase(): Promise<void> {
  */
 export function isDatabaseReady(): boolean {
   return db !== null;
+}
+
+/**
+ * Clear all data and schema from the database and re-initialize (USE ONLY FOR TESTING)
+ */
+export async function clearDatabaseData(
+  silent: boolean = false
+): Promise<void> {
+  const database = getDatabase();
+  if (!silent) {
+    console.log('[Database] Dropping all tables for a clean test state...');
+  }
+
+  try {
+    // Disable foreign keys to allow dropping tables in any order
+    await database.executeSql('PRAGMA foreign_keys = OFF;');
+
+    // Get all table names
+    const [results] = await database.executeSql(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+    );
+
+    for (let i = 0; i < results.rows.length; i++) {
+      const tableName = results.rows.item(i).name;
+      await database.executeSql(`DROP TABLE IF EXISTS ${tableName};`);
+    }
+
+    // Re-enable foreign keys
+    await database.executeSql('PRAGMA foreign_keys = ON;');
+
+    if (!silent) {
+      console.log('[Database] Schema dropped. Re-applying migrations...');
+    }
+
+    // Re-run migrations to create tables fresh
+    await runMigrations(database, silent);
+
+    if (!silent) {
+      console.log('✅ Database reset complete');
+    }
+  } catch (error) {
+    console.error('[Database] Failed to reset database:', error);
+    throw error;
+  }
 }
 
 /**

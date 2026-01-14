@@ -63,6 +63,7 @@
   - Provider repository for all 11 types (32 tests)
 - **App integration**: DatabaseContext, loading screen, error recovery
 - **84 comprehensive tests** covering all CRUD operations
+- **In-app test runner**: DEV-only screen in Settings for running tests
 - **Production-ready**: Type-safe, documented, tested
 - **Sync-ready**: Schema compatible with Harmony Link for bidirectional sync
 

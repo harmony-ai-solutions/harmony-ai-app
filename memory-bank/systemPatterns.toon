@@ -1,0 +1,39 @@
+# Harmony AI App System Patterns
+@Arch: Three-Tier Mobile (Presentation → Business Logic → Data)
+- Screen Components: Full-page views, navigation, screen state
+- Presentational Components: Pure display, props-driven, reusable
+- Container Components: Data fetching, side effects, service connection
+- State: Local (useState) → Context (theme/auth) → Redux/Zustand (future complex state)
+- Navigation: Stack (primary), Modal (future)
+@Components:
+- Screens: HomeScreen, ChatScreen, CharacterListScreen
+- Services: HarmonyLinkService (REST), WebSocketService (real-time)
+- Storage: SQLite (messages/characters), AsyncStorage (settings)
+- Theme: Centralized via React Native Paper, Harmony Link palette
+- Sync: Optimistic updates, background sync, conflict resolution (last-write-wins)
+@Database:
+- SQLite with SQLCipher encryption, schema matches Harmony Link
+- Transaction Pattern CRITICAL: withTransaction() helper CANNOT be used for INSERT operations returning insertId
+  - Problem: React Native SQLite uses run-to-completion semantics; Promise resolution occurs AFTER transaction commits
+  - Solution: Use direct transaction callbacks with Promise wrappers for INSERT operations
+  - Pattern: db.transaction((tx) => { tx.executeSql(..., (_, result) => resolve(result.insertId)) })
+- Safe withTransaction() uses: UPDATE/DELETE with rowsAffected checks, SELECT queries
+- Unsafe withTransaction() uses: INSERT returning insertId, multiple sequential statements
+- All repositories follow this pattern: providers.ts, modules.ts, characters.ts, entities.ts
+@Decisions:
+- React Native CLI (not Expo): Full native control for Executorch/messengers
+- React Native Paper: Material Design 3 consistency
+- React Navigation: Type-safe stack navigation
+- TypeScript strict: Type safety, better DX
+- Hooks → Redux/Zustand: Monitor complexity, add when needed
+- SQLite: Local data persistence, Harmony Link schema compatible
+- Offline queue: Queue operations when offline, process when online
+@Patterns:
+- Service Layer: All API calls centralized
+- Queue-based Offline: Detect connection → queue ops → process when online
+- Optimistic UI: Update UI immediately, sync async, handle conflicts
+- Virtualized Lists: FlatList for performance
+- Secure Storage: EncryptedStorage for sensitive data
+- Error Boundaries: Graceful error handling
+@Performance: FlatList virtualization, image lazy loading/caching, memoization, clean listener management.
+@Security: HTTPS only, token auth, encrypted storage, no credentials in code.

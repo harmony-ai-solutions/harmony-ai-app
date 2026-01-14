@@ -93,19 +93,21 @@ export async function getAllEntities(): Promise<Entity[]> {
 export async function updateEntity(entity: Entity): Promise<Entity> {
   const db = getDatabase();
   
+  // First check if entity exists
+  const existing = await getEntity(entity.id);
+  if (!existing) {
+    throw new Error(`Entity not found: ${entity.id}`);
+  }
+  
   return withTransaction(db, async (tx) => {
     const now = new Date().toISOString();
     
-    const [result] = await tx.executeSql(
+    await tx.executeSql(
       `UPDATE entities 
        SET character_profile_id = ?, updated_at = ? 
        WHERE id = ?`,
       [entity.character_profile_id, now, entity.id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Entity not found: ${entity.id}`);
-    }
     
     return {
       ...entity,
@@ -122,15 +124,17 @@ export async function updateEntity(entity: Entity): Promise<Entity> {
 export async function deleteEntity(id: string): Promise<void> {
   const db = getDatabase();
   
+  // First check if entity exists
+  const existing = await getEntity(id);
+  if (!existing) {
+    throw new Error(`Entity not found: ${id}`);
+  }
+  
   return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
+    await tx.executeSql(
       'DELETE FROM entities WHERE id = ?',
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Entity not found: ${id}`);
-    }
   });
 }
 

@@ -219,26 +219,36 @@ export async function createCharacterImage(
 ): Promise<number> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      `INSERT INTO character_image (
-        character_profile_id, image_data, mime_type, description,
-        is_primary, display_order, vl_model_interpretation, vl_model, vl_model_embedding
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        image.character_profile_id,
-        image.image_data,
-        image.mime_type,
-        image.description,
-        image.is_primary ? 1 : 0,
-        image.display_order,
-        image.vl_model_interpretation,
-        image.vl_model,
-        image.vl_model_embedding,
-      ]
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO character_image (
+            character_profile_id, image_data, mime_type, description,
+            is_primary, display_order, vl_model_interpretation, vl_model, vl_model_embedding
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            image.character_profile_id,
+            image.image_data,
+            image.mime_type,
+            image.description,
+            image.is_primary ? 1 : 0,
+            image.display_order,
+            image.vl_model_interpretation,
+            image.vl_model,
+            image.vl_model_embedding,
+          ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    return result.insertId!;
   });
 }
 
@@ -365,26 +375,43 @@ export async function deleteCharacterImage(id: number): Promise<void> {
 export async function setPrimaryImage(profileId: string, imageId: number): Promise<void> {
   const db = getDatabase();
   
-  return withTransaction(db, async (tx) => {
-    // Unset current primary
-    await tx.executeSql(
-      `UPDATE character_image
-       SET is_primary = 0
-       WHERE character_profile_id = ? AND is_primary = 1`,
-      [profileId]
+  return new Promise<void>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        // Unset current primary first
+        tx.executeSql(
+          `UPDATE character_image
+           SET is_primary = 0
+           WHERE character_profile_id = ? AND is_primary = 1`,
+          [profileId],
+          () => {
+            // Success callback for first update, now set new primary
+            tx.executeSql(
+              `UPDATE character_image
+               SET is_primary = 1
+               WHERE id = ? AND character_profile_id = ?`,
+              [imageId, profileId],
+              (_, result) => {
+                if (result.rowsAffected === 0) {
+                  reject(new Error('Image not found or does not belong to character profile'));
+                } else {
+                  resolve();
+                }
+              },
+              (_, error) => {
+                reject(error);
+                return false;
+              }
+            );
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
     );
-    
-    // Set new primary
-    const [result] = await tx.executeSql(
-      `UPDATE character_image
-       SET is_primary = 1
-       WHERE id = ? AND character_profile_id = ?`,
-      [imageId, profileId]
-    );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error('Image not found or does not belong to character profile');
-    }
   });
 }
 

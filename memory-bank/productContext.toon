@@ -1,0 +1,25 @@
+# Harmony AI App Product Context
+@Problems:
+- Harmony Link users: AI characters only on desktop/game engines, no mobile access
+- Privacy users: Cloud AI collects all data, no private alternative
+- Power users: Commercial apps limited customization, closed source
+- Offline scenarios: Cloud AI needs constant connection
+@Solution:
+- Mobile app syncs with Harmony Link backend (self-hosted privacy)
+- Open-source codebase (full customization)
+- On-device AI via Executorch (offline functionality)
+- Flexible backend: Harmony Link (privacy) or Harmony Cloud (convenience)
+@Benefits: Complete privacy (self-hosted), anywhere access (mobile), offline capability (local models), full control (open-source), character persistence (cross-device sync).
+@UX Goals:
+- Simplicity: One-tap cloud setup, clear self-hosted tutorials
+- Privacy: Transparent data handling, clear backend mode indication
+- Reliability: Stable connections, robust offline, no message loss
+- Natural: Realistic timing, character personality, context-aware
+@Flow: Setup (choose backend) → Character Selection → Chat (natural conv) → Sync (cross-device) → Offline (graceful fallback).
+@Roadmap:
+- P1 Foundation: Basic chat, Harmony Link connection, local storage, character selection
+- P2 Enhanced: On-device AI, voice (STT/TTS), images, rich profiles
+- P3 Integration: Messengers (WhatsApp/Telegram), group chat, multi-character
+- P4 Advanced: Custom character creation, memory viz, relationship graphs
+@Differentiators: Privacy-first (self-hosted option unique), character persistence (deep memory), open-source (full transparency), ecosystem integration (Harmony Link/games), realistic behavior (advanced timing/personality).
+@Metrics: Adoption (MAU, retention), engagement (messages/day, session length), performance (latency, sync reliability), privacy (self-hosted vs cloud split).
