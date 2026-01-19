@@ -16,7 +16,7 @@ import {Entity, EntityModuleMapping} from '../models';
 /**
  * Create a new entity
  */
-export async function createEntity(entity: Omit<Entity, 'created_at' | 'updated_at'>): Promise<Entity> {
+export async function createEntity(entity: Omit<Entity, 'created_at' | 'updated_at' | 'deleted_at'>): Promise<Entity> {
   const db = getDatabase();
   
   return withTransaction(db, async (tx) => {
@@ -32,21 +32,23 @@ export async function createEntity(entity: Omit<Entity, 'created_at' | 'updated_
       ...entity,
       created_at: new Date(now),
       updated_at: new Date(now),
+      deleted_at: null,
     };
   });
 }
 
 /**
  * Get entity by ID
- * Returns null if not found
+ * Returns null if not found or if soft deleted (unless includeDeleted is true)
  */
-export async function getEntity(id: string): Promise<Entity | null> {
+export async function getEntity(id: string, includeDeleted = false): Promise<Entity | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT * FROM entities WHERE id = ?',
-    [id]
-  );
+  const query = includeDeleted 
+    ? 'SELECT * FROM entities WHERE id = ?'
+    : 'SELECT * FROM entities WHERE id = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -58,19 +60,22 @@ export async function getEntity(id: string): Promise<Entity | null> {
     character_profile_id: row.character_profile_id,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
 /**
  * Get all entities
- * Returns empty array if none found
+ * Returns empty array if none found. Filters out soft deleted by default.
  */
-export async function getAllEntities(): Promise<Entity[]> {
+export async function getAllEntities(includeDeleted = false): Promise<Entity[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT * FROM entities ORDER BY id'
-  );
+  const query = includeDeleted
+    ? 'SELECT * FROM entities ORDER BY id'
+    : 'SELECT * FROM entities WHERE deleted_at IS NULL ORDER BY id';
+
+  const [results] = await db.executeSql(query);
   
   const entities: Entity[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -80,6 +85,7 @@ export async function getAllEntities(): Promise<Entity[]> {
       character_profile_id: row.character_profile_id,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -117,24 +123,28 @@ export async function updateEntity(entity: Entity): Promise<Entity> {
 }
 
 /**
- * Delete entity by ID
- * CASCADE will automatically delete entity_module_mappings
+ * Soft delete entity by ID
  * Throws error if entity not found
  */
-export async function deleteEntity(id: string): Promise<void> {
+export async function deleteEntity(id: string, permanent = false): Promise<void> {
   const db = getDatabase();
   
   // First check if entity exists
-  const existing = await getEntity(id);
+  const existing = await getEntity(id, true);
   if (!existing) {
     throw new Error(`Entity not found: ${id}`);
   }
   
   return withTransaction(db, async (tx) => {
-    await tx.executeSql(
-      'DELETE FROM entities WHERE id = ?',
-      [id]
-    );
+    if (permanent) {
+      await tx.executeSql('DELETE FROM entities WHERE id = ?', [id]);
+    } else {
+      const now = new Date().toISOString();
+      await tx.executeSql(
+        'UPDATE entities SET deleted_at = ?, updated_at = ? WHERE id = ?',
+        [now, now, id]
+      );
+    }
   });
 }
 
@@ -174,14 +184,16 @@ export async function createEntityModuleMapping(
  * Returns null if not found
  */
 export async function getEntityModuleMapping(
-  entityId: string
+  entityId: string,
+  includeDeleted = false
 ): Promise<EntityModuleMapping | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT * FROM entity_module_mappings WHERE entity_id = ?',
-    [entityId]
-  );
+  const query = includeDeleted
+    ? 'SELECT * FROM entity_module_mappings WHERE entity_id = ?'
+    : 'SELECT * FROM entity_module_mappings WHERE entity_id = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [entityId]);
   
   if (results.rows.length === 0) {
     return null;
@@ -196,6 +208,7 @@ export async function getEntityModuleMapping(
     rag_config_id: row.rag_config_id,
     stt_config_id: row.stt_config_id,
     tts_config_id: row.tts_config_id,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
@@ -233,16 +246,22 @@ export async function updateEntityModuleMapping(
 }
 
 /**
- * Delete entity module mapping
- * Note: This is normally handled by CASCADE delete when entity is deleted
+ * Soft delete entity module mapping
+ * Note: This is normally handled by CASCADE delete when entity is deleted,
+ * but with soft delete we should manually mark it if needed.
  */
-export async function deleteEntityModuleMapping(entityId: string): Promise<void> {
+export async function deleteEntityModuleMapping(entityId: string, permanent = false): Promise<void> {
   const db = getDatabase();
   
   return withTransaction(db, async (tx) => {
-    await tx.executeSql(
-      'DELETE FROM entity_module_mappings WHERE entity_id = ?',
-      [entityId]
-    );
+    if (permanent) {
+      await tx.executeSql('DELETE FROM entity_module_mappings WHERE entity_id = ?', [entityId]);
+    } else {
+      const now = new Date().toISOString();
+      await tx.executeSql(
+        'UPDATE entity_module_mappings SET deleted_at = ? WHERE entity_id = ?',
+        [now, entityId]
+      );
+    }
   });
 }

@@ -23,6 +23,7 @@ CREATE TABLE character_image (
     vl_model TEXT DEFAULT '',
     vl_model_embedding BLOB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE
 );
 

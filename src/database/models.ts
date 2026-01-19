@@ -21,6 +21,7 @@ export interface CharacterProfile {
   example_dialogues: string | null;
   created_at: Date;
   updated_at: Date;
+  deleted_at: Date | null;
 }
 
 export interface Entity {
@@ -28,6 +29,7 @@ export interface Entity {
   character_profile_id: string | null;
   created_at: Date;
   updated_at: Date;
+  deleted_at: Date | null;
 }
 
 export interface EntityModuleMapping {
@@ -38,6 +40,7 @@ export interface EntityModuleMapping {
   rag_config_id: number | null;
   stt_config_id: number | null;
   tts_config_id: number | null;
+  deleted_at: Date | null;
 }
 
 // ============================================================================
@@ -58,6 +61,7 @@ export interface OpenAIProviderConfig {
   voice: string | null;
   speed: number | null;
   format: string | null;
+  deleted_at: Date | null;
 }
 
 export interface OpenRouterProviderConfig {
@@ -70,6 +74,7 @@ export interface OpenRouterProviderConfig {
   top_p: number | null;
   n: number | null;
   stop_tokens: string | null; // JSON array
+  deleted_at: Date | null;
 }
 
 export interface OpenAICompatibleProviderConfig {
@@ -84,6 +89,7 @@ export interface OpenAICompatibleProviderConfig {
   n: number | null;
   stop_tokens: string | null; // JSON array
   embedding_model: string | null;
+  deleted_at: Date | null;
 }
 
 export interface HarmonySpeechProviderConfig {
@@ -95,6 +101,7 @@ export interface HarmonySpeechProviderConfig {
   format: string | null;
   sample_rate: number | null;
   stream: number | null;
+  deleted_at: Date | null;
 }
 
 export interface ElevenLabsProviderConfig {
@@ -107,6 +114,7 @@ export interface ElevenLabsProviderConfig {
   similarity_boost: number | null;
   style: number | null;
   speaker_boost: number | null;
+  deleted_at: Date | null;
 }
 
 export interface KindroidProviderConfig {
@@ -114,6 +122,7 @@ export interface KindroidProviderConfig {
   name: string;
   api_key: string;
   kindroid_id: string;
+  deleted_at: Date | null;
 }
 
 export interface KajiwotoProviderConfig {
@@ -122,6 +131,7 @@ export interface KajiwotoProviderConfig {
   username: string;
   password: string;
   room_url: string;
+  deleted_at: Date | null;
 }
 
 export interface CharacterAIProviderConfig {
@@ -129,18 +139,21 @@ export interface CharacterAIProviderConfig {
   name: string;
   api_token: string;
   chatroom_url: string;
+  deleted_at: Date | null;
 }
 
 export interface LocalAIProviderConfig {
   id: number;
   name: string;
   embedding_model: string;
+  deleted_at: Date | null;
 }
 
 export interface MistralProviderConfig {
   id: number;
   name: string;
   api_key: string;
+  deleted_at: Date | null;
 }
 
 export interface OllamaProviderConfig {
@@ -148,6 +161,7 @@ export interface OllamaProviderConfig {
   name: string;
   base_url: string;
   embedding_model: string | null;
+  deleted_at: Date | null;
 }
 
 // ============================================================================
@@ -159,6 +173,7 @@ export interface BackendConfig {
   name: string;
   provider: string;
   provider_config_id: number;
+  deleted_at: Date | null;
 }
 
 export interface MovementConfig {
@@ -168,6 +183,7 @@ export interface MovementConfig {
   provider_config_id: number;
   startup_sync_timeout: number | null;
   execution_threshold: number | null;
+  deleted_at: Date | null;
 }
 
 export interface STTConfig {
@@ -180,6 +196,7 @@ export interface STTConfig {
   transcription_provider_config_id: number;
   vad_provider: string;
   vad_provider_config_id: number;
+  deleted_at: Date | null;
 }
 
 export interface CognitionConfig {
@@ -189,6 +206,7 @@ export interface CognitionConfig {
   provider_config_id: number;
   max_cognition_events: number | null;
   generate_expressions: number | null;
+  deleted_at: Date | null;
 }
 
 export interface RAGConfig {
@@ -197,6 +215,7 @@ export interface RAGConfig {
   provider: string;
   provider_config_id: number;
   embedding_concurrency: number | null;
+  deleted_at: Date | null;
 }
 
 export interface TTSConfig {
@@ -207,6 +226,7 @@ export interface TTSConfig {
   output_type: string | null;
   words_to_replace: string | null;
   vocalize_nonverbal: number | null;
+  deleted_at: Date | null;
 }
 
 // ============================================================================
@@ -225,6 +245,55 @@ export interface CharacterImage {
   vl_model: string;
   vl_model_embedding: Uint8Array | null; // BLOB data
   created_at: Date;
+  deleted_at: Date | null;
+}
+
+// ============================================================================
+// Sync & Chat Models
+// ============================================================================
+
+export interface SyncDevice {
+  device_id: string;
+  device_name: string;
+  device_type: string;
+  device_platform: string | null;
+  is_approved: number;
+  approval_requested_at: Date | null;
+  approved_by_user_at: Date | null;
+  last_sync_timestamp: number;
+  last_sync_initiated_by: string;
+  jwt_token: string | null;
+  jwt_expires_at: number | null;
+  created_at: Date;
+  updated_at: Date;
+  deleted_at: Date | null;
+}
+
+export interface SyncHistory {
+  id: number;
+  device_id: string;
+  sync_started_at: Date;
+  sync_completed_at: Date | null;
+  records_sent: number;
+  records_received: number;
+  sync_status: string;
+  error_message: string | null;
+  created_at: Date;
+  deleted_at: Date | null;
+}
+
+export interface ChatMessage {
+  id: string;
+  entity_id: string;
+  sender_entity_id: string;
+  session_id: string | null;
+  content: string;
+  audio_file: string | null;
+  audio_duration: number | null;
+  message_type: 'text' | 'audio' | 'combined';
+  created_at: Date;
+  updated_at: Date;
+  deleted_at: Date | null;
 }
 
 export interface CharacterImageInfo {

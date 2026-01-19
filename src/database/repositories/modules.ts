@@ -23,7 +23,7 @@ import {
 // ============================================================================
 
 export async function createBackendConfig(
-  config: Omit<BackendConfig, 'id'>
+  config: Omit<BackendConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -48,13 +48,14 @@ export async function createBackendConfig(
   });
 }
 
-export async function getBackendConfig(id: number): Promise<BackendConfig | null> {
+export async function getBackendConfig(id: number, includeDeleted = false): Promise<BackendConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, provider, provider_config_id FROM backend_configs WHERE id = ?',
-    [id]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, provider, provider_config_id, deleted_at FROM backend_configs WHERE id = ?'
+    : 'SELECT id, name, provider, provider_config_id, deleted_at FROM backend_configs WHERE id = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -66,16 +67,18 @@ export async function getBackendConfig(id: number): Promise<BackendConfig | null
     name: row.name,
     provider: row.provider,
     provider_config_id: row.provider_config_id,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getBackendConfigByName(name: string): Promise<BackendConfig | null> {
+export async function getBackendConfigByName(name: string, includeDeleted = false): Promise<BackendConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, provider, provider_config_id FROM backend_configs WHERE name = ?',
-    [name]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, provider, provider_config_id, deleted_at FROM backend_configs WHERE name = ?'
+    : 'SELECT id, name, provider, provider_config_id, deleted_at FROM backend_configs WHERE name = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -87,15 +90,18 @@ export async function getBackendConfigByName(name: string): Promise<BackendConfi
     name: row.name,
     provider: row.provider,
     provider_config_id: row.provider_config_id,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllBackendConfigs(): Promise<BackendConfig[]> {
+export async function getAllBackendConfigs(includeDeleted = false): Promise<BackendConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, provider, provider_config_id FROM backend_configs ORDER BY name'
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, provider, provider_config_id, deleted_at FROM backend_configs ORDER BY name'
+    : 'SELECT id, name, provider, provider_config_id, deleted_at FROM backend_configs WHERE deleted_at IS NULL ORDER BY name';
+
+  const [results] = await db.executeSql(query);
   
   const configs: BackendConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -105,6 +111,7 @@ export async function getAllBackendConfigs(): Promise<BackendConfig[]> {
       name: row.name,
       provider: row.provider,
       provider_config_id: row.provider_config_id,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -128,17 +135,40 @@ export async function updateBackendConfig(config: BackendConfig): Promise<void> 
   });
 }
 
-export async function deleteBackendConfig(id: number): Promise<void> {
+/**
+ * Check if a backend config is in use by any entities
+ */
+export async function isBackendConfigInUse(id: number): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT COUNT(*) as count FROM entity_module_mappings WHERE backend_config_id = ? AND deleted_at IS NULL',
+    [id]
+  );
+  return results.rows.item(0).count > 0;
+}
+
+export async function deleteBackendConfig(id: number, permanent = false): Promise<void> {
   const db = getDatabase();
   
+  if (!permanent && await isBackendConfigInUse(id)) {
+    throw new Error(`Backend config ${id} is in use and cannot be soft deleted`);
+  }
+
   return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM backend_configs WHERE id = ?',
-      [id]
-    );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Backend config not found: ${id}`);
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM backend_configs WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`Backend config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE backend_configs SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`Backend config not found: ${id}`);
+      }
     }
   });
 }
@@ -148,7 +178,7 @@ export async function deleteBackendConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createCognitionConfig(
-  config: Omit<CognitionConfig, 'id'>
+  config: Omit<CognitionConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -179,14 +209,16 @@ export async function createCognitionConfig(
   });
 }
 
-export async function getCognitionConfig(id: number): Promise<CognitionConfig | null> {
+export async function getCognitionConfig(id: number, includeDeleted = false): Promise<CognitionConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, max_cognition_events, generate_expressions
-     FROM cognition_configs WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, max_cognition_events, generate_expressions, deleted_at
+     FROM cognition_configs WHERE id = ?`
+    : `SELECT id, name, provider, provider_config_id, max_cognition_events, generate_expressions, deleted_at
+     FROM cognition_configs WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -200,17 +232,20 @@ export async function getCognitionConfig(id: number): Promise<CognitionConfig | 
     provider_config_id: row.provider_config_id,
     max_cognition_events: row.max_cognition_events,
     generate_expressions: row.generate_expressions,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getCognitionConfigByName(name: string): Promise<CognitionConfig | null> {
+export async function getCognitionConfigByName(name: string, includeDeleted = false): Promise<CognitionConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, max_cognition_events, generate_expressions
-     FROM cognition_configs WHERE name = ?`,
-    [name]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, max_cognition_events, generate_expressions, deleted_at
+     FROM cognition_configs WHERE name = ?`
+    : `SELECT id, name, provider, provider_config_id, max_cognition_events, generate_expressions, deleted_at
+     FROM cognition_configs WHERE name = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -224,16 +259,20 @@ export async function getCognitionConfigByName(name: string): Promise<CognitionC
     provider_config_id: row.provider_config_id,
     max_cognition_events: row.max_cognition_events,
     generate_expressions: row.generate_expressions,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllCognitionConfigs(): Promise<CognitionConfig[]> {
+export async function getAllCognitionConfigs(includeDeleted = false): Promise<CognitionConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, max_cognition_events, generate_expressions
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, max_cognition_events, generate_expressions, deleted_at
      FROM cognition_configs ORDER BY name`
-  );
+    : `SELECT id, name, provider, provider_config_id, max_cognition_events, generate_expressions, deleted_at
+     FROM cognition_configs WHERE deleted_at IS NULL ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const configs: CognitionConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -245,6 +284,7 @@ export async function getAllCognitionConfigs(): Promise<CognitionConfig[]> {
       provider_config_id: row.provider_config_id,
       max_cognition_events: row.max_cognition_events,
       generate_expressions: row.generate_expressions,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -275,17 +315,40 @@ export async function updateCognitionConfig(config: CognitionConfig): Promise<vo
   });
 }
 
-export async function deleteCognitionConfig(id: number): Promise<void> {
+/**
+ * Check if a cognition config is in use by any entities
+ */
+export async function isCognitionConfigInUse(id: number): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT COUNT(*) as count FROM entity_module_mappings WHERE cognition_config_id = ? AND deleted_at IS NULL',
+    [id]
+  );
+  return results.rows.item(0).count > 0;
+}
+
+export async function deleteCognitionConfig(id: number, permanent = false): Promise<void> {
   const db = getDatabase();
   
+  if (!permanent && await isCognitionConfigInUse(id)) {
+    throw new Error(`Cognition config ${id} is in use and cannot be soft deleted`);
+  }
+
   return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM cognition_configs WHERE id = ?',
-      [id]
-    );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Cognition config not found: ${id}`);
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM cognition_configs WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`Cognition config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE cognition_configs SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`Cognition config not found: ${id}`);
+      }
     }
   });
 }
@@ -295,7 +358,7 @@ export async function deleteCognitionConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createMovementConfig(
-  config: Omit<MovementConfig, 'id'>
+  config: Omit<MovementConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -326,14 +389,16 @@ export async function createMovementConfig(
   });
 }
 
-export async function getMovementConfig(id: number): Promise<MovementConfig | null> {
+export async function getMovementConfig(id: number, includeDeleted = false): Promise<MovementConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, startup_sync_timeout, execution_threshold
-     FROM movement_configs WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, startup_sync_timeout, execution_threshold, deleted_at
+     FROM movement_configs WHERE id = ?`
+    : `SELECT id, name, provider, provider_config_id, startup_sync_timeout, execution_threshold, deleted_at
+     FROM movement_configs WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -347,17 +412,20 @@ export async function getMovementConfig(id: number): Promise<MovementConfig | nu
     provider_config_id: row.provider_config_id,
     startup_sync_timeout: row.startup_sync_timeout,
     execution_threshold: row.execution_threshold,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getMovementConfigByName(name: string): Promise<MovementConfig | null> {
+export async function getMovementConfigByName(name: string, includeDeleted = false): Promise<MovementConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, startup_sync_timeout, execution_threshold
-     FROM movement_configs WHERE name = ?`,
-    [name]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, startup_sync_timeout, execution_threshold, deleted_at
+     FROM movement_configs WHERE name = ?`
+    : `SELECT id, name, provider, provider_config_id, startup_sync_timeout, execution_threshold, deleted_at
+     FROM movement_configs WHERE name = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -371,16 +439,20 @@ export async function getMovementConfigByName(name: string): Promise<MovementCon
     provider_config_id: row.provider_config_id,
     startup_sync_timeout: row.startup_sync_timeout,
     execution_threshold: row.execution_threshold,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllMovementConfigs(): Promise<MovementConfig[]> {
+export async function getAllMovementConfigs(includeDeleted = false): Promise<MovementConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, startup_sync_timeout, execution_threshold
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, startup_sync_timeout, execution_threshold, deleted_at
      FROM movement_configs ORDER BY name`
-  );
+    : `SELECT id, name, provider, provider_config_id, startup_sync_timeout, execution_threshold, deleted_at
+     FROM movement_configs WHERE deleted_at IS NULL ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const configs: MovementConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -392,6 +464,7 @@ export async function getAllMovementConfigs(): Promise<MovementConfig[]> {
       provider_config_id: row.provider_config_id,
       startup_sync_timeout: row.startup_sync_timeout,
       execution_threshold: row.execution_threshold,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -422,17 +495,40 @@ export async function updateMovementConfig(config: MovementConfig): Promise<void
   });
 }
 
-export async function deleteMovementConfig(id: number): Promise<void> {
+/**
+ * Check if a movement config is in use by any entities
+ */
+export async function isMovementConfigInUse(id: number): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT COUNT(*) as count FROM entity_module_mappings WHERE movement_config_id = ? AND deleted_at IS NULL',
+    [id]
+  );
+  return results.rows.item(0).count > 0;
+}
+
+export async function deleteMovementConfig(id: number, permanent = false): Promise<void> {
   const db = getDatabase();
   
+  if (!permanent && await isMovementConfigInUse(id)) {
+    throw new Error(`Movement config ${id} is in use and cannot be soft deleted`);
+  }
+
   return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM movement_configs WHERE id = ?',
-      [id]
-    );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Movement config not found: ${id}`);
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM movement_configs WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`Movement config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE movement_configs SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`Movement config not found: ${id}`);
+      }
     }
   });
 }
@@ -442,7 +538,7 @@ export async function deleteMovementConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createRAGConfig(
-  config: Omit<RAGConfig, 'id'>
+  config: Omit<RAGConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -472,14 +568,16 @@ export async function createRAGConfig(
   });
 }
 
-export async function getRAGConfig(id: number): Promise<RAGConfig | null> {
+export async function getRAGConfig(id: number, includeDeleted = false): Promise<RAGConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, embedding_concurrency
-     FROM rag_configs WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, embedding_concurrency, deleted_at
+     FROM rag_configs WHERE id = ?`
+    : `SELECT id, name, provider, provider_config_id, embedding_concurrency, deleted_at
+     FROM rag_configs WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -492,17 +590,20 @@ export async function getRAGConfig(id: number): Promise<RAGConfig | null> {
     provider: row.provider,
     provider_config_id: row.provider_config_id,
     embedding_concurrency: row.embedding_concurrency,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getRAGConfigByName(name: string): Promise<RAGConfig | null> {
+export async function getRAGConfigByName(name: string, includeDeleted = false): Promise<RAGConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, embedding_concurrency
-     FROM rag_configs WHERE name = ?`,
-    [name]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, embedding_concurrency, deleted_at
+     FROM rag_configs WHERE name = ?`
+    : `SELECT id, name, provider, provider_config_id, embedding_concurrency, deleted_at
+     FROM rag_configs WHERE name = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -515,16 +616,20 @@ export async function getRAGConfigByName(name: string): Promise<RAGConfig | null
     provider: row.provider,
     provider_config_id: row.provider_config_id,
     embedding_concurrency: row.embedding_concurrency,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllRAGConfigs(): Promise<RAGConfig[]> {
+export async function getAllRAGConfigs(includeDeleted = false): Promise<RAGConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, embedding_concurrency
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, embedding_concurrency, deleted_at
      FROM rag_configs ORDER BY name`
-  );
+    : `SELECT id, name, provider, provider_config_id, embedding_concurrency, deleted_at
+     FROM rag_configs WHERE deleted_at IS NULL ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const configs: RAGConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -535,6 +640,7 @@ export async function getAllRAGConfigs(): Promise<RAGConfig[]> {
       provider: row.provider,
       provider_config_id: row.provider_config_id,
       embedding_concurrency: row.embedding_concurrency,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -564,17 +670,40 @@ export async function updateRAGConfig(config: RAGConfig): Promise<void> {
   });
 }
 
-export async function deleteRAGConfig(id: number): Promise<void> {
+/**
+ * Check if a RAG config is in use by any entities
+ */
+export async function isRAGConfigInUse(id: number): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT COUNT(*) as count FROM entity_module_mappings WHERE rag_config_id = ? AND deleted_at IS NULL',
+    [id]
+  );
+  return results.rows.item(0).count > 0;
+}
+
+export async function deleteRAGConfig(id: number, permanent = false): Promise<void> {
   const db = getDatabase();
   
+  if (!permanent && await isRAGConfigInUse(id)) {
+    throw new Error(`RAG config ${id} is in use and cannot be soft deleted`);
+  }
+
   return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM rag_configs WHERE id = ?',
-      [id]
-    );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`RAG config not found: ${id}`);
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM rag_configs WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`RAG config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE rag_configs SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`RAG config not found: ${id}`);
+      }
     }
   });
 }
@@ -584,7 +713,7 @@ export async function deleteRAGConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createSTTConfig(
-  config: Omit<STTConfig, 'id'>
+  config: Omit<STTConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -621,16 +750,20 @@ export async function createSTTConfig(
   });
 }
 
-export async function getSTTConfig(id: number): Promise<STTConfig | null> {
+export async function getSTTConfig(id: number, includeDeleted = false): Promise<STTConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
+  const query = includeDeleted
+    ? `SELECT id, name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
             transcription_provider, transcription_provider_config_id,
-            vad_provider, vad_provider_config_id
-     FROM stt_configs WHERE id = ?`,
-    [id]
-  );
+            vad_provider, vad_provider_config_id, deleted_at
+     FROM stt_configs WHERE id = ?`
+    : `SELECT id, name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
+            transcription_provider, transcription_provider_config_id,
+            vad_provider, vad_provider_config_id, deleted_at
+     FROM stt_configs WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -647,19 +780,24 @@ export async function getSTTConfig(id: number): Promise<STTConfig | null> {
     transcription_provider_config_id: row.transcription_provider_config_id,
     vad_provider: row.vad_provider,
     vad_provider_config_id: row.vad_provider_config_id,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getSTTConfigByName(name: string): Promise<STTConfig | null> {
+export async function getSTTConfigByName(name: string, includeDeleted = false): Promise<STTConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
+  const query = includeDeleted
+    ? `SELECT id, name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
             transcription_provider, transcription_provider_config_id,
-            vad_provider, vad_provider_config_id
-     FROM stt_configs WHERE name = ?`,
-    [name]
-  );
+            vad_provider, vad_provider_config_id, deleted_at
+     FROM stt_configs WHERE name = ?`
+    : `SELECT id, name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
+            transcription_provider, transcription_provider_config_id,
+            vad_provider, vad_provider_config_id, deleted_at
+     FROM stt_configs WHERE name = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -676,18 +814,24 @@ export async function getSTTConfigByName(name: string): Promise<STTConfig | null
     transcription_provider_config_id: row.transcription_provider_config_id,
     vad_provider: row.vad_provider,
     vad_provider_config_id: row.vad_provider_config_id,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllSTTConfigs(): Promise<STTConfig[]> {
+export async function getAllSTTConfigs(includeDeleted = false): Promise<STTConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
+  const query = includeDeleted
+    ? `SELECT id, name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
             transcription_provider, transcription_provider_config_id,
-            vad_provider, vad_provider_config_id
+            vad_provider, vad_provider_config_id, deleted_at
      FROM stt_configs ORDER BY name`
-  );
+    : `SELECT id, name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
+            transcription_provider, transcription_provider_config_id,
+            vad_provider, vad_provider_config_id, deleted_at
+     FROM stt_configs WHERE deleted_at IS NULL ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const configs: STTConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -702,6 +846,7 @@ export async function getAllSTTConfigs(): Promise<STTConfig[]> {
       transcription_provider_config_id: row.transcription_provider_config_id,
       vad_provider: row.vad_provider,
       vad_provider_config_id: row.vad_provider_config_id,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -737,17 +882,40 @@ export async function updateSTTConfig(config: STTConfig): Promise<void> {
   });
 }
 
-export async function deleteSTTConfig(id: number): Promise<void> {
+/**
+ * Check if an STT config is in use by any entities
+ */
+export async function isSTTConfigInUse(id: number): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT COUNT(*) as count FROM entity_module_mappings WHERE stt_config_id = ? AND deleted_at IS NULL',
+    [id]
+  );
+  return results.rows.item(0).count > 0;
+}
+
+export async function deleteSTTConfig(id: number, permanent = false): Promise<void> {
   const db = getDatabase();
   
+  if (!permanent && await isSTTConfigInUse(id)) {
+    throw new Error(`STT config ${id} is in use and cannot be soft deleted`);
+  }
+
   return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM stt_configs WHERE id = ?',
-      [id]
-    );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`STT config not found: ${id}`);
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM stt_configs WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`STT config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE stt_configs SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`STT config not found: ${id}`);
+      }
     }
   });
 }
@@ -757,7 +925,7 @@ export async function deleteSTTConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createTTSConfig(
-  config: Omit<TTSConfig, 'id'>
+  config: Omit<TTSConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -789,14 +957,16 @@ export async function createTTSConfig(
   });
 }
 
-export async function getTTSConfig(id: number): Promise<TTSConfig | null> {
+export async function getTTSConfig(id: number, includeDeleted = false): Promise<TTSConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal
-     FROM tts_configs WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal, deleted_at
+     FROM tts_configs WHERE id = ?`
+    : `SELECT id, name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal, deleted_at
+     FROM tts_configs WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -811,17 +981,20 @@ export async function getTTSConfig(id: number): Promise<TTSConfig | null> {
     output_type: row.output_type,
     words_to_replace: row.words_to_replace,
     vocalize_nonverbal: row.vocalize_nonverbal,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getTTSConfigByName(name: string): Promise<TTSConfig | null> {
+export async function getTTSConfigByName(name: string, includeDeleted = false): Promise<TTSConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal
-     FROM tts_configs WHERE name = ?`,
-    [name]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal, deleted_at
+     FROM tts_configs WHERE name = ?`
+    : `SELECT id, name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal, deleted_at
+     FROM tts_configs WHERE name = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -836,16 +1009,20 @@ export async function getTTSConfigByName(name: string): Promise<TTSConfig | null
     output_type: row.output_type,
     words_to_replace: row.words_to_replace,
     vocalize_nonverbal: row.vocalize_nonverbal,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllTTSConfigs(): Promise<TTSConfig[]> {
+export async function getAllTTSConfigs(includeDeleted = false): Promise<TTSConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal
+  const query = includeDeleted
+    ? `SELECT id, name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal, deleted_at
      FROM tts_configs ORDER BY name`
-  );
+    : `SELECT id, name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal, deleted_at
+     FROM tts_configs WHERE deleted_at IS NULL ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const configs: TTSConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -858,6 +1035,7 @@ export async function getAllTTSConfigs(): Promise<TTSConfig[]> {
       output_type: row.output_type,
       words_to_replace: row.words_to_replace,
       vocalize_nonverbal: row.vocalize_nonverbal,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -889,17 +1067,40 @@ export async function updateTTSConfig(config: TTSConfig): Promise<void> {
   });
 }
 
-export async function deleteTTSConfig(id: number): Promise<void> {
+/**
+ * Check if a TTS config is in use by any entities
+ */
+export async function isTTSConfigInUse(id: number): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT COUNT(*) as count FROM entity_module_mappings WHERE tts_config_id = ? AND deleted_at IS NULL',
+    [id]
+  );
+  return results.rows.item(0).count > 0;
+}
+
+export async function deleteTTSConfig(id: number, permanent = false): Promise<void> {
   const db = getDatabase();
   
+  if (!permanent && await isTTSConfigInUse(id)) {
+    throw new Error(`TTS config ${id} is in use and cannot be soft deleted`);
+  }
+
   return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM tts_configs WHERE id = ?',
-      [id]
-    );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`TTS config not found: ${id}`);
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM tts_configs WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`TTS config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE tts_configs SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`TTS config not found: ${id}`);
+      }
     }
   });
 }

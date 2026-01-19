@@ -44,7 +44,14 @@ const menuSections: MenuSection[] = [
             { icon: 'shield-lock', label: 'Data & Privacy', screen: 'PrivacySettings' },
             { icon: 'bell', label: 'Notifications', screen: 'NotificationSettings' },
         ],
-    },    
+    },
+    {
+        title: 'Sync & Connection',
+        items: [
+            { icon: 'sync', label: 'Sync Settings', screen: 'SyncSettings' },
+            { icon: 'link-variant', label: 'Pair with Harmony Link', screen: 'ConnectionSetup' },
+        ],
+    },
     {
         title: 'Info',
         items: [

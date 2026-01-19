@@ -31,7 +31,7 @@ import {
 // ============================================================================
 
 export async function createOpenAIProviderConfig(
-  config: Omit<OpenAIProviderConfig, 'id'>
+  config: Omit<OpenAIProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -71,15 +71,18 @@ export async function createOpenAIProviderConfig(
   });
 }
 
-export async function getOpenAIProviderConfig(id: number): Promise<OpenAIProviderConfig | null> {
+export async function getOpenAIProviderConfig(id: number, includeDeleted = false): Promise<OpenAIProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, voice, speed, format
-     FROM provider_config_openai WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, voice, speed, format, deleted_at
+     FROM provider_config_openai WHERE id = ?`
+    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, voice, speed, format, deleted_at
+     FROM provider_config_openai WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -100,18 +103,22 @@ export async function getOpenAIProviderConfig(id: number): Promise<OpenAIProvide
     voice: row.voice,
     speed: row.speed,
     format: row.format,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getOpenAIProviderConfigByName(name: string): Promise<OpenAIProviderConfig | null> {
+export async function getOpenAIProviderConfigByName(name: string, includeDeleted = false): Promise<OpenAIProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, voice, speed, format
-     FROM provider_config_openai WHERE name = ?`,
-    [name]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, voice, speed, format, deleted_at
+     FROM provider_config_openai WHERE name = ?`
+    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, voice, speed, format, deleted_at
+     FROM provider_config_openai WHERE name = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -132,17 +139,22 @@ export async function getOpenAIProviderConfigByName(name: string): Promise<OpenA
     voice: row.voice,
     speed: row.speed,
     format: row.format,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllOpenAIProviderConfigs(): Promise<OpenAIProviderConfig[]> {
+export async function getAllOpenAIProviderConfigs(includeDeleted = false): Promise<OpenAIProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, voice, speed, format
+  const query = includeDeleted
+    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, voice, speed, format, deleted_at
      FROM provider_config_openai ORDER BY name`
-  );
+    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, voice, speed, format, deleted_at
+     FROM provider_config_openai WHERE deleted_at IS NULL ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const configs: OpenAIProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -161,6 +173,7 @@ export async function getAllOpenAIProviderConfigs(): Promise<OpenAIProviderConfi
       voice: row.voice,
       speed: row.speed,
       format: row.format,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -200,17 +213,44 @@ export async function updateOpenAIProviderConfig(config: OpenAIProviderConfig): 
   });
 }
 
-export async function deleteOpenAIProviderConfig(id: number): Promise<void> {
+/**
+ * Check if an OpenAI provider config is in use by any modules
+ */
+export async function isOpenAIProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_openai WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'openai' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`OpenAI provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteOpenAIProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isOpenAIProviderConfigInUse(id)) {
+    throw new Error(`OpenAI provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_openai WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`OpenAI provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_openai SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`OpenAI provider config not found: ${id}`);
+      }
     }
   });
 }
@@ -220,7 +260,7 @@ export async function deleteOpenAIProviderConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createOpenRouterProviderConfig(
-  config: Omit<any, 'id'>
+  config: Omit<OpenRouterProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -255,14 +295,16 @@ export async function createOpenRouterProviderConfig(
   });
 }
 
-export async function getOpenRouterProviderConfig(id: number): Promise<OpenRouterProviderConfig | null> {
+export async function getOpenRouterProviderConfig(id: number, includeDeleted = false): Promise<OpenRouterProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens
-     FROM provider_config_openrouter WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+     FROM provider_config_openrouter WHERE id = ?`
+    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+     FROM provider_config_openrouter WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -279,17 +321,20 @@ export async function getOpenRouterProviderConfig(id: number): Promise<OpenRoute
     top_p: row.top_p,
     n: row.n,
     stop_tokens: row.stop_tokens,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getOpenRouterProviderConfigByName(name: string): Promise<OpenRouterProviderConfig | null> {
+export async function getOpenRouterProviderConfigByName(name: string, includeDeleted = false): Promise<OpenRouterProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens
-     FROM provider_config_openrouter WHERE name = ?`,
-    [name]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+     FROM provider_config_openrouter WHERE name = ?`
+    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+     FROM provider_config_openrouter WHERE name = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -306,16 +351,20 @@ export async function getOpenRouterProviderConfigByName(name: string): Promise<O
     top_p: row.top_p,
     n: row.n,
     stop_tokens: row.stop_tokens,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllOpenRouterProviderConfigs(): Promise<OpenRouterProviderConfig[]> {
+export async function getAllOpenRouterProviderConfigs(includeDeleted = false): Promise<OpenRouterProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens
+  const query = includeDeleted
+    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
      FROM provider_config_openrouter ORDER BY name`
-  );
+    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+     FROM provider_config_openrouter WHERE deleted_at IS NULL ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const configs: OpenRouterProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -330,6 +379,7 @@ export async function getAllOpenRouterProviderConfigs(): Promise<OpenRouterProvi
       top_p: row.top_p,
       n: row.n,
       stop_tokens: row.stop_tokens,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -364,17 +414,44 @@ export async function updateOpenRouterProviderConfig(config: OpenRouterProviderC
   });
 }
 
-export async function deleteOpenRouterProviderConfig(id: number): Promise<void> {
+/**
+ * Check if an OpenRouter provider config is in use by any modules
+ */
+export async function isOpenRouterProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_openrouter WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'openrouter' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`OpenRouter provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteOpenRouterProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isOpenRouterProviderConfigInUse(id)) {
+    throw new Error(`OpenRouter provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_openrouter WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`OpenRouter provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_openrouter SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`OpenRouter provider config not found: ${id}`);
+      }
     }
   });
 }
@@ -384,7 +461,7 @@ export async function deleteOpenRouterProviderConfig(id: number): Promise<void> 
 // ============================================================================
 
 export async function createOpenAICompatibleProviderConfig(
-  config: Omit<any, 'id'>
+  config: Omit<OpenAICompatibleProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -422,15 +499,18 @@ export async function createOpenAICompatibleProviderConfig(
   });
 }
 
-export async function getOpenAICompatibleProviderConfig(id: number): Promise<OpenAICompatibleProviderConfig | null> {
+export async function getOpenAICompatibleProviderConfig(id: number, includeDeleted = false): Promise<OpenAICompatibleProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model
-     FROM provider_config_openaicompatible WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, deleted_at
+     FROM provider_config_openaicompatible WHERE id = ?`
+    : `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, deleted_at
+     FROM provider_config_openaicompatible WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -449,18 +529,22 @@ export async function getOpenAICompatibleProviderConfig(id: number): Promise<Ope
     n: row.n,
     stop_tokens: row.stop_tokens,
     embedding_model: row.embedding_model,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getOpenAICompatibleProviderConfigByName(name: string): Promise<OpenAICompatibleProviderConfig | null> {
+export async function getOpenAICompatibleProviderConfigByName(name: string, includeDeleted = false): Promise<OpenAICompatibleProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model
-     FROM provider_config_openaicompatible WHERE name = ?`,
-    [name]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, deleted_at
+     FROM provider_config_openaicompatible WHERE name = ?`
+    : `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, deleted_at
+     FROM provider_config_openaicompatible WHERE name = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -479,17 +563,22 @@ export async function getOpenAICompatibleProviderConfigByName(name: string): Pro
     n: row.n,
     stop_tokens: row.stop_tokens,
     embedding_model: row.embedding_model,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllOpenAICompatibleProviderConfigs(): Promise<OpenAICompatibleProviderConfig[]> {
+export async function getAllOpenAICompatibleProviderConfigs(includeDeleted = false): Promise<OpenAICompatibleProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model
+  const query = includeDeleted
+    ? `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, deleted_at
      FROM provider_config_openaicompatible ORDER BY name`
-  );
+    : `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
+            stop_tokens, embedding_model, deleted_at
+     FROM provider_config_openaicompatible WHERE deleted_at IS NULL ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const configs: OpenAICompatibleProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -506,6 +595,7 @@ export async function getAllOpenAICompatibleProviderConfigs(): Promise<OpenAICom
       n: row.n,
       stop_tokens: row.stop_tokens,
       embedding_model: row.embedding_model,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -542,17 +632,44 @@ export async function updateOpenAICompatibleProviderConfig(config: OpenAICompati
   });
 }
 
-export async function deleteOpenAICompatibleProviderConfig(id: number): Promise<void> {
+/**
+ * Check if an OpenAI Compatible provider config is in use by any modules
+ */
+export async function isOpenAICompatibleProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_openaicompatible WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'openaicompatible' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`OpenAI Compatible provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteOpenAICompatibleProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isOpenAICompatibleProviderConfigInUse(id)) {
+    throw new Error(`OpenAI Compatible provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_openaicompatible WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`OpenAI Compatible provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_openaicompatible SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`OpenAI Compatible provider config not found: ${id}`);
+      }
     }
   });
 }
@@ -562,7 +679,7 @@ export async function deleteOpenAICompatibleProviderConfig(id: number): Promise<
 // ============================================================================
 
 export async function createHarmonySpeechProviderConfig(
-  config: Omit<any, 'id'>
+  config: Omit<HarmonySpeechProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -596,14 +713,16 @@ export async function createHarmonySpeechProviderConfig(
   });
 }
 
-export async function getHarmonySpeechProviderConfig(id: number): Promise<HarmonySpeechProviderConfig | null> {
+export async function getHarmonySpeechProviderConfig(id: number, includeDeleted = false): Promise<HarmonySpeechProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, endpoint, model, voice_config_file, format, sample_rate, stream
-     FROM provider_config_harmonyspeech WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, endpoint, model, voice_config_file, format, sample_rate, stream, deleted_at
+     FROM provider_config_harmonyspeech WHERE id = ?`
+    : `SELECT id, name, endpoint, model, voice_config_file, format, sample_rate, stream, deleted_at
+     FROM provider_config_harmonyspeech WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -619,17 +738,20 @@ export async function getHarmonySpeechProviderConfig(id: number): Promise<Harmon
     format: row.format,
     sample_rate: row.sample_rate,
     stream: row.stream,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getHarmonySpeechProviderConfigByName(name: string): Promise<HarmonySpeechProviderConfig | null> {
+export async function getHarmonySpeechProviderConfigByName(name: string, includeDeleted = false): Promise<HarmonySpeechProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, endpoint, model, voice_config_file, format, sample_rate, stream
-     FROM provider_config_harmonyspeech WHERE name = ?`,
-    [name]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, endpoint, model, voice_config_file, format, sample_rate, stream, deleted_at
+     FROM provider_config_harmonyspeech WHERE name = ?`
+    : `SELECT id, name, endpoint, model, voice_config_file, format, sample_rate, stream, deleted_at
+     FROM provider_config_harmonyspeech WHERE name = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -645,16 +767,20 @@ export async function getHarmonySpeechProviderConfigByName(name: string): Promis
     format: row.format,
     sample_rate: row.sample_rate,
     stream: row.stream,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllHarmonySpeechProviderConfigs(): Promise<HarmonySpeechProviderConfig[]> {
+export async function getAllHarmonySpeechProviderConfigs(includeDeleted = false): Promise<HarmonySpeechProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, endpoint, model, voice_config_file, format, sample_rate, stream
+  const query = includeDeleted
+    ? `SELECT id, name, endpoint, model, voice_config_file, format, sample_rate, stream, deleted_at
      FROM provider_config_harmonyspeech ORDER BY name`
-  );
+    : `SELECT id, name, endpoint, model, voice_config_file, format, sample_rate, stream, deleted_at
+     FROM provider_config_harmonyspeech WHERE deleted_at IS NULL ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const configs: HarmonySpeechProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -668,6 +794,7 @@ export async function getAllHarmonySpeechProviderConfigs(): Promise<HarmonySpeec
       format: row.format,
       sample_rate: row.sample_rate,
       stream: row.stream,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -701,17 +828,44 @@ export async function updateHarmonySpeechProviderConfig(config: HarmonySpeechPro
   });
 }
 
-export async function deleteHarmonySpeechProviderConfig(id: number): Promise<void> {
+/**
+ * Check if a HarmonySpeech provider config is in use by any modules
+ */
+export async function isHarmonySpeechProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_harmonyspeech WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'harmonyspeech' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`HarmonySpeech provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteHarmonySpeechProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isHarmonySpeechProviderConfigInUse(id)) {
+    throw new Error(`HarmonySpeech provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_harmonyspeech WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`HarmonySpeech provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_harmonyspeech SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`HarmonySpeech provider config not found: ${id}`);
+      }
     }
   });
 }
@@ -721,7 +875,7 @@ export async function deleteHarmonySpeechProviderConfig(id: number): Promise<voi
 // ============================================================================
 
 export async function createElevenLabsProviderConfig(
-  config: Omit<any, 'id'>
+  config: Omit<ElevenLabsProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -756,14 +910,16 @@ export async function createElevenLabsProviderConfig(
   });
 }
 
-export async function getElevenLabsProviderConfig(id: number): Promise<ElevenLabsProviderConfig | null> {
+export async function getElevenLabsProviderConfig(id: number, includeDeleted = false): Promise<ElevenLabsProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, api_key, voice_id, model_id, stability, similarity_boost, style, speaker_boost
-     FROM provider_config_elevenlabs WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, api_key, voice_id, model_id, stability, similarity_boost, style, speaker_boost, deleted_at
+     FROM provider_config_elevenlabs WHERE id = ?`
+    : `SELECT id, name, api_key, voice_id, model_id, stability, similarity_boost, style, speaker_boost, deleted_at
+     FROM provider_config_elevenlabs WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -780,17 +936,20 @@ export async function getElevenLabsProviderConfig(id: number): Promise<ElevenLab
     similarity_boost: row.similarity_boost,
     style: row.style,
     speaker_boost: row.speaker_boost,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getElevenLabsProviderConfigByName(name: string): Promise<ElevenLabsProviderConfig | null> {
+export async function getElevenLabsProviderConfigByName(name: string, includeDeleted = false): Promise<ElevenLabsProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, api_key, voice_id, model_id, stability, similarity_boost, style, speaker_boost
-     FROM provider_config_elevenlabs WHERE name = ?`,
-    [name]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, api_key, voice_id, model_id, stability, similarity_boost, style, speaker_boost, deleted_at
+     FROM provider_config_elevenlabs WHERE name = ?`
+    : `SELECT id, name, api_key, voice_id, model_id, stability, similarity_boost, style, speaker_boost, deleted_at
+     FROM provider_config_elevenlabs WHERE name = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -807,16 +966,20 @@ export async function getElevenLabsProviderConfigByName(name: string): Promise<E
     similarity_boost: row.similarity_boost,
     style: row.style,
     speaker_boost: row.speaker_boost,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllElevenLabsProviderConfigs(): Promise<ElevenLabsProviderConfig[]> {
+export async function getAllElevenLabsProviderConfigs(includeDeleted = false): Promise<ElevenLabsProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, api_key, voice_id, model_id, stability, similarity_boost, style, speaker_boost
+  const query = includeDeleted
+    ? `SELECT id, name, api_key, voice_id, model_id, stability, similarity_boost, style, speaker_boost, deleted_at
      FROM provider_config_elevenlabs ORDER BY name`
-  );
+    : `SELECT id, name, api_key, voice_id, model_id, stability, similarity_boost, style, speaker_boost, deleted_at
+     FROM provider_config_elevenlabs WHERE deleted_at IS NULL ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const configs: ElevenLabsProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -831,6 +994,7 @@ export async function getAllElevenLabsProviderConfigs(): Promise<ElevenLabsProvi
       similarity_boost: row.similarity_boost,
       style: row.style,
       speaker_boost: row.speaker_boost,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -865,17 +1029,44 @@ export async function updateElevenLabsProviderConfig(config: ElevenLabsProviderC
   });
 }
 
-export async function deleteElevenLabsProviderConfig(id: number): Promise<void> {
+/**
+ * Check if an ElevenLabs provider config is in use by any modules
+ */
+export async function isElevenLabsProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_elevenlabs WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'elevenlabs' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`ElevenLabs provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteElevenLabsProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isElevenLabsProviderConfigInUse(id)) {
+    throw new Error(`ElevenLabs provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_elevenlabs WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`ElevenLabs provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_elevenlabs SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`ElevenLabs provider config not found: ${id}`);
+      }
     }
   });
 }
@@ -885,7 +1076,7 @@ export async function deleteElevenLabsProviderConfig(id: number): Promise<void> 
 // ============================================================================
 
 export async function createKindroidProviderConfig(
-  config: Omit<any, 'id'>
+  config: Omit<KindroidProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -910,13 +1101,14 @@ export async function createKindroidProviderConfig(
   });
 }
 
-export async function getKindroidProviderConfig(id: number): Promise<KindroidProviderConfig | null> {
+export async function getKindroidProviderConfig(id: number, includeDeleted = false): Promise<KindroidProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, api_key, kindroid_id FROM provider_config_kindroid WHERE id = ?',
-    [id]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, api_key, kindroid_id, deleted_at FROM provider_config_kindroid WHERE id = ?'
+    : 'SELECT id, name, api_key, kindroid_id, deleted_at FROM provider_config_kindroid WHERE id = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -928,16 +1120,18 @@ export async function getKindroidProviderConfig(id: number): Promise<KindroidPro
     name: row.name,
     api_key: row.api_key,
     kindroid_id: row.kindroid_id,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getKindroidProviderConfigByName(name: string): Promise<KindroidProviderConfig | null> {
+export async function getKindroidProviderConfigByName(name: string, includeDeleted = false): Promise<KindroidProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, api_key, kindroid_id FROM provider_config_kindroid WHERE name = ?',
-    [name]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, api_key, kindroid_id, deleted_at FROM provider_config_kindroid WHERE name = ?'
+    : 'SELECT id, name, api_key, kindroid_id, deleted_at FROM provider_config_kindroid WHERE name = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -949,15 +1143,18 @@ export async function getKindroidProviderConfigByName(name: string): Promise<Kin
     name: row.name,
     api_key: row.api_key,
     kindroid_id: row.kindroid_id,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllKindroidProviderConfigs(): Promise<KindroidProviderConfig[]> {
+export async function getAllKindroidProviderConfigs(includeDeleted = false): Promise<KindroidProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, api_key, kindroid_id FROM provider_config_kindroid ORDER BY name'
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, api_key, kindroid_id, deleted_at FROM provider_config_kindroid ORDER BY name'
+    : 'SELECT id, name, api_key, kindroid_id, deleted_at FROM provider_config_kindroid WHERE deleted_at IS NULL ORDER BY name';
+
+  const [results] = await db.executeSql(query);
   
   const configs: KindroidProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -967,6 +1164,7 @@ export async function getAllKindroidProviderConfigs(): Promise<KindroidProviderC
       name: row.name,
       api_key: row.api_key,
       kindroid_id: row.kindroid_id,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -988,17 +1186,44 @@ export async function updateKindroidProviderConfig(config: KindroidProviderConfi
   });
 }
 
-export async function deleteKindroidProviderConfig(id: number): Promise<void> {
+/**
+ * Check if a Kindroid provider config is in use by any modules
+ */
+export async function isKindroidProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_kindroid WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'kindroid' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Kindroid provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteKindroidProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isKindroidProviderConfigInUse(id)) {
+    throw new Error(`Kindroid provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_kindroid WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`Kindroid provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_kindroid SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`Kindroid provider config not found: ${id}`);
+      }
     }
   });
 }
@@ -1008,7 +1233,7 @@ export async function deleteKindroidProviderConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createKajiwotoProviderConfig(
-  config: Omit<any, 'id'>
+  config: Omit<KajiwotoProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -1033,13 +1258,14 @@ export async function createKajiwotoProviderConfig(
   });
 }
 
-export async function getKajiwotoProviderConfig(id: number): Promise<KajiwotoProviderConfig | null> {
+export async function getKajiwotoProviderConfig(id: number, includeDeleted = false): Promise<KajiwotoProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, username, password, room_url FROM provider_config_kajiwoto WHERE id = ?',
-    [id]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, username, password, room_url, deleted_at FROM provider_config_kajiwoto WHERE id = ?'
+    : 'SELECT id, name, username, password, room_url, deleted_at FROM provider_config_kajiwoto WHERE id = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -1052,16 +1278,18 @@ export async function getKajiwotoProviderConfig(id: number): Promise<KajiwotoPro
     username: row.username,
     password: row.password,
     room_url: row.room_url,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getKajiwotoProviderConfigByName(name: string): Promise<KajiwotoProviderConfig | null> {
+export async function getKajiwotoProviderConfigByName(name: string, includeDeleted = false): Promise<KajiwotoProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, username, password, room_url FROM provider_config_kajiwoto WHERE name = ?',
-    [name]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, username, password, room_url, deleted_at FROM provider_config_kajiwoto WHERE name = ?'
+    : 'SELECT id, name, username, password, room_url, deleted_at FROM provider_config_kajiwoto WHERE name = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -1074,15 +1302,18 @@ export async function getKajiwotoProviderConfigByName(name: string): Promise<Kaj
     username: row.username,
     password: row.password,
     room_url: row.room_url,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllKajiwotoProviderConfigs(): Promise<KajiwotoProviderConfig[]> {
+export async function getAllKajiwotoProviderConfigs(includeDeleted = false): Promise<KajiwotoProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, username, password, room_url FROM provider_config_kajiwoto ORDER BY name'
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, username, password, room_url, deleted_at FROM provider_config_kajiwoto ORDER BY name'
+    : 'SELECT id, name, username, password, room_url, deleted_at FROM provider_config_kajiwoto WHERE deleted_at IS NULL ORDER BY name';
+
+  const [results] = await db.executeSql(query);
   
   const configs: KajiwotoProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -1093,6 +1324,7 @@ export async function getAllKajiwotoProviderConfigs(): Promise<KajiwotoProviderC
       username: row.username,
       password: row.password,
       room_url: row.room_url,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -1116,17 +1348,44 @@ export async function updateKajiwotoProviderConfig(config: KajiwotoProviderConfi
   });
 }
 
-export async function deleteKajiwotoProviderConfig(id: number): Promise<void> {
+/**
+ * Check if a Kajiwoto provider config is in use by any modules
+ */
+export async function isKajiwotoProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_kajiwoto WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'kajiwoto' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Kajiwoto provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteKajiwotoProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isKajiwotoProviderConfigInUse(id)) {
+    throw new Error(`Kajiwoto provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_kajiwoto WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`Kajiwoto provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_kajiwoto SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`Kajiwoto provider config not found: ${id}`);
+      }
     }
   });
 }
@@ -1136,7 +1395,7 @@ export async function deleteKajiwotoProviderConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createCharacterAIProviderConfig(
-  config: Omit<any, 'id'>
+  config: Omit<CharacterAIProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -1161,13 +1420,14 @@ export async function createCharacterAIProviderConfig(
   });
 }
 
-export async function getCharacterAIProviderConfig(id: number): Promise<CharacterAIProviderConfig | null> {
+export async function getCharacterAIProviderConfig(id: number, includeDeleted = false): Promise<CharacterAIProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, api_token, chatroom_url FROM provider_config_characterai WHERE id = ?',
-    [id]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, api_token, chatroom_url, deleted_at FROM provider_config_characterai WHERE id = ?'
+    : 'SELECT id, name, api_token, chatroom_url, deleted_at FROM provider_config_characterai WHERE id = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -1179,16 +1439,18 @@ export async function getCharacterAIProviderConfig(id: number): Promise<Characte
     name: row.name,
     api_token: row.api_token,
     chatroom_url: row.chatroom_url,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getCharacterAIProviderConfigByName(name: string): Promise<CharacterAIProviderConfig | null> {
+export async function getCharacterAIProviderConfigByName(name: string, includeDeleted = false): Promise<CharacterAIProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, api_token, chatroom_url FROM provider_config_characterai WHERE name = ?',
-    [name]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, api_token, chatroom_url, deleted_at FROM provider_config_characterai WHERE name = ?'
+    : 'SELECT id, name, api_token, chatroom_url, deleted_at FROM provider_config_characterai WHERE name = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -1200,15 +1462,18 @@ export async function getCharacterAIProviderConfigByName(name: string): Promise<
     name: row.name,
     api_token: row.api_token,
     chatroom_url: row.chatroom_url,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllCharacterAIProviderConfigs(): Promise<CharacterAIProviderConfig[]> {
+export async function getAllCharacterAIProviderConfigs(includeDeleted = false): Promise<CharacterAIProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, api_token, chatroom_url FROM provider_config_characterai ORDER BY name'
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, api_token, chatroom_url, deleted_at FROM provider_config_characterai ORDER BY name'
+    : 'SELECT id, name, api_token, chatroom_url, deleted_at FROM provider_config_characterai WHERE deleted_at IS NULL ORDER BY name';
+
+  const [results] = await db.executeSql(query);
   
   const configs: CharacterAIProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -1218,6 +1483,7 @@ export async function getAllCharacterAIProviderConfigs(): Promise<CharacterAIPro
       name: row.name,
       api_token: row.api_token,
       chatroom_url: row.chatroom_url,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -1241,17 +1507,44 @@ export async function updateCharacterAIProviderConfig(config: CharacterAIProvide
   });
 }
 
-export async function deleteCharacterAIProviderConfig(id: number): Promise<void> {
+/**
+ * Check if a CharacterAI provider config is in use by any modules
+ */
+export async function isCharacterAIProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_characterai WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'characterai' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`CharacterAI provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteCharacterAIProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isCharacterAIProviderConfigInUse(id)) {
+    throw new Error(`CharacterAI provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_characterai WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`CharacterAI provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_characterai SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`CharacterAI provider config not found: ${id}`);
+      }
     }
   });
 }
@@ -1261,7 +1554,7 @@ export async function deleteCharacterAIProviderConfig(id: number): Promise<void>
 // ============================================================================
 
 export async function createLocalAIProviderConfig(
-  config: Omit<any, 'id'>
+  config: Omit<LocalAIProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -1285,13 +1578,14 @@ export async function createLocalAIProviderConfig(
   });
 }
 
-export async function getLocalAIProviderConfig(id: number): Promise<LocalAIProviderConfig | null> {
+export async function getLocalAIProviderConfig(id: number, includeDeleted = false): Promise<LocalAIProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, embedding_model FROM provider_config_localai WHERE id = ?',
-    [id]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, embedding_model, deleted_at FROM provider_config_localai WHERE id = ?'
+    : 'SELECT id, name, embedding_model, deleted_at FROM provider_config_localai WHERE id = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -1302,16 +1596,18 @@ export async function getLocalAIProviderConfig(id: number): Promise<LocalAIProvi
     id: row.id,
     name: row.name,
     embedding_model: row.embedding_model,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getLocalAIProviderConfigByName(name: string): Promise<LocalAIProviderConfig | null> {
+export async function getLocalAIProviderConfigByName(name: string, includeDeleted = false): Promise<LocalAIProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, embedding_model FROM provider_config_localai WHERE name = ?',
-    [name]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, embedding_model, deleted_at FROM provider_config_localai WHERE name = ?'
+    : 'SELECT id, name, embedding_model, deleted_at FROM provider_config_localai WHERE name = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -1322,15 +1618,18 @@ export async function getLocalAIProviderConfigByName(name: string): Promise<Loca
     id: row.id,
     name: row.name,
     embedding_model: row.embedding_model,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllLocalAIProviderConfigs(): Promise<LocalAIProviderConfig[]> {
+export async function getAllLocalAIProviderConfigs(includeDeleted = false): Promise<LocalAIProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, embedding_model FROM provider_config_localai ORDER BY name'
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, embedding_model, deleted_at FROM provider_config_localai ORDER BY name'
+    : 'SELECT id, name, embedding_model, deleted_at FROM provider_config_localai WHERE deleted_at IS NULL ORDER BY name';
+
+  const [results] = await db.executeSql(query);
   
   const configs: LocalAIProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -1339,6 +1638,7 @@ export async function getAllLocalAIProviderConfigs(): Promise<LocalAIProviderCon
       id: row.id,
       name: row.name,
       embedding_model: row.embedding_model,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -1360,17 +1660,44 @@ export async function updateLocalAIProviderConfig(config: LocalAIProviderConfig)
   });
 }
 
-export async function deleteLocalAIProviderConfig(id: number): Promise<void> {
+/**
+ * Check if a LocalAI provider config is in use by any modules
+ */
+export async function isLocalAIProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_localai WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'localai' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`LocalAI provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteLocalAIProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isLocalAIProviderConfigInUse(id)) {
+    throw new Error(`LocalAI provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_localai WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`LocalAI provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_localai SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`LocalAI provider config not found: ${id}`);
+      }
     }
   });
 }
@@ -1380,7 +1707,7 @@ export async function deleteLocalAIProviderConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createMistralProviderConfig(
-  config: Omit<any, 'id'>
+  config: Omit<MistralProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -1404,13 +1731,14 @@ export async function createMistralProviderConfig(
   });
 }
 
-export async function getMistralProviderConfig(id: number): Promise<MistralProviderConfig | null> {
+export async function getMistralProviderConfig(id: number, includeDeleted = false): Promise<MistralProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, api_key FROM provider_config_mistral WHERE id = ?',
-    [id]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, api_key, deleted_at FROM provider_config_mistral WHERE id = ?'
+    : 'SELECT id, name, api_key, deleted_at FROM provider_config_mistral WHERE id = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -1421,16 +1749,18 @@ export async function getMistralProviderConfig(id: number): Promise<MistralProvi
     id: row.id,
     name: row.name,
     api_key: row.api_key,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getMistralProviderConfigByName(name: string): Promise<MistralProviderConfig | null> {
+export async function getMistralProviderConfigByName(name: string, includeDeleted = false): Promise<MistralProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, api_key FROM provider_config_mistral WHERE name = ?',
-    [name]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, api_key, deleted_at FROM provider_config_mistral WHERE name = ?'
+    : 'SELECT id, name, api_key, deleted_at FROM provider_config_mistral WHERE name = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -1441,15 +1771,18 @@ export async function getMistralProviderConfigByName(name: string): Promise<Mist
     id: row.id,
     name: row.name,
     api_key: row.api_key,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllMistralProviderConfigs(): Promise<MistralProviderConfig[]> {
+export async function getAllMistralProviderConfigs(includeDeleted = false): Promise<MistralProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, api_key FROM provider_config_mistral ORDER BY name'
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, api_key, deleted_at FROM provider_config_mistral ORDER BY name'
+    : 'SELECT id, name, api_key, deleted_at FROM provider_config_mistral WHERE deleted_at IS NULL ORDER BY name';
+
+  const [results] = await db.executeSql(query);
   
   const configs: MistralProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -1458,6 +1791,7 @@ export async function getAllMistralProviderConfigs(): Promise<MistralProviderCon
       id: row.id,
       name: row.name,
       api_key: row.api_key,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -1479,17 +1813,44 @@ export async function updateMistralProviderConfig(config: MistralProviderConfig)
   });
 }
 
-export async function deleteMistralProviderConfig(id: number): Promise<void> {
+/**
+ * Check if a Mistral provider config is in use by any modules
+ */
+export async function isMistralProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_mistral WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'mistral' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Mistral provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteMistralProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isMistralProviderConfigInUse(id)) {
+    throw new Error(`Mistral provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_mistral WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`Mistral provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_mistral SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`Mistral provider config not found: ${id}`);
+      }
     }
   });
 }
@@ -1499,7 +1860,7 @@ export async function deleteMistralProviderConfig(id: number): Promise<void> {
 // ============================================================================
 
 export async function createOllamaProviderConfig(
-  config: Omit<any, 'id'>
+  config: Omit<OllamaProviderConfig, 'id' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -1523,13 +1884,14 @@ export async function createOllamaProviderConfig(
   });
 }
 
-export async function getOllamaProviderConfig(id: number): Promise<OllamaProviderConfig | null> {
+export async function getOllamaProviderConfig(id: number, includeDeleted = false): Promise<OllamaProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, base_url, embedding_model FROM provider_config_ollama WHERE id = ?',
-    [id]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, base_url, embedding_model, deleted_at FROM provider_config_ollama WHERE id = ?'
+    : 'SELECT id, name, base_url, embedding_model, deleted_at FROM provider_config_ollama WHERE id = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -1541,16 +1903,18 @@ export async function getOllamaProviderConfig(id: number): Promise<OllamaProvide
     name: row.name,
     base_url: row.base_url,
     embedding_model: row.embedding_model,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getOllamaProviderConfigByName(name: string): Promise<OllamaProviderConfig | null> {
+export async function getOllamaProviderConfigByName(name: string, includeDeleted = false): Promise<OllamaProviderConfig | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, base_url, embedding_model FROM provider_config_ollama WHERE name = ?',
-    [name]
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, base_url, embedding_model, deleted_at FROM provider_config_ollama WHERE name = ?'
+    : 'SELECT id, name, base_url, embedding_model, deleted_at FROM provider_config_ollama WHERE name = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [name]);
   
   if (results.rows.length === 0) {
     return null;
@@ -1562,15 +1926,18 @@ export async function getOllamaProviderConfigByName(name: string): Promise<Ollam
     name: row.name,
     base_url: row.base_url,
     embedding_model: row.embedding_model,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
-export async function getAllOllamaProviderConfigs(): Promise<OllamaProviderConfig[]> {
+export async function getAllOllamaProviderConfigs(includeDeleted = false): Promise<OllamaProviderConfig[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    'SELECT id, name, base_url, embedding_model FROM provider_config_ollama ORDER BY name'
-  );
+  const query = includeDeleted
+    ? 'SELECT id, name, base_url, embedding_model, deleted_at FROM provider_config_ollama ORDER BY name'
+    : 'SELECT id, name, base_url, embedding_model, deleted_at FROM provider_config_ollama WHERE deleted_at IS NULL ORDER BY name';
+
+  const [results] = await db.executeSql(query);
   
   const configs: OllamaProviderConfig[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -1580,6 +1947,7 @@ export async function getAllOllamaProviderConfigs(): Promise<OllamaProviderConfi
       name: row.name,
       base_url: row.base_url,
       embedding_model: row.embedding_model,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -1601,17 +1969,44 @@ export async function updateOllamaProviderConfig(config: OllamaProviderConfig): 
   });
 }
 
-export async function deleteOllamaProviderConfig(id: number): Promise<void> {
+/**
+ * Check if an Ollama provider config is in use by any modules
+ */
+export async function isOllamaProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM provider_config_ollama WHERE id = ?',
+  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  for (const table of tables) {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'ollama' AND provider_config_id = ? AND deleted_at IS NULL`,
       [id]
     );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Ollama provider config not found: ${id}`);
+    if (results.rows.item(0).count > 0) return true;
+  }
+  return false;
+}
+
+export async function deleteOllamaProviderConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isOllamaProviderConfigInUse(id)) {
+    throw new Error(`Ollama provider config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM provider_config_ollama WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`Ollama provider config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE provider_config_ollama SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`Ollama provider config not found: ${id}`);
+      }
     }
   });
 }

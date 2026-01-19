@@ -37,6 +37,17 @@ export const SettingsHomeScreen: React.FC<any> = ({ navigation }) => {
                     <Icon name="chevron-right" size={24} color={theme.colors.text.muted} />
                 </TouchableOpacity>
 
+                <TouchableOpacity
+                    style={[styles.item, { borderBottomColor: theme.colors.border.default }]}
+                    onPress={() => navigation.navigate('SyncSettings')}
+                >
+                    <Icon name="sync" size={24} color={theme.colors.accent.primary} />
+                    <Text style={[styles.itemLabel, { color: theme.colors.text.primary }]}>
+                        Data Synchronization
+                    </Text>
+                    <Icon name="chevron-right" size={24} color={theme.colors.text.muted} />
+                </TouchableOpacity>
+
                 {/* DEV ONLY: Database Tests */}
                 {__DEV__ && (
                     <TouchableOpacity

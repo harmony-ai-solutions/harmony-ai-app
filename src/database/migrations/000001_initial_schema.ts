@@ -34,6 +34,8 @@ CREATE TABLE entity_module_mappings (
     rag_config_id INTEGER,
     stt_config_id INTEGER,
     tts_config_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE,
     FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL,
     FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL,
@@ -57,7 +59,9 @@ CREATE TABLE provider_config_openai (
     embedding_model TEXT,
     voice TEXT,
     speed REAL,
-    format TEXT
+    format TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE provider_config_openrouter (
@@ -69,7 +73,9 @@ CREATE TABLE provider_config_openrouter (
     temperature REAL,
     top_p REAL,
     n INTEGER,
-    stop_tokens TEXT
+    stop_tokens TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE provider_config_openaicompatible (
@@ -83,7 +89,9 @@ CREATE TABLE provider_config_openaicompatible (
     top_p REAL,
     n INTEGER,
     stop_tokens TEXT,
-    embedding_model TEXT
+    embedding_model TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE provider_config_harmonyspeech (
@@ -94,7 +102,9 @@ CREATE TABLE provider_config_harmonyspeech (
     voice_config_file TEXT,
     format TEXT,
     sample_rate INTEGER,
-    stream INTEGER
+    stream INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE provider_config_elevenlabs (
@@ -106,14 +116,18 @@ CREATE TABLE provider_config_elevenlabs (
     stability REAL,
     similarity_boost REAL,
     style REAL,
-    speaker_boost INTEGER
+    speaker_boost INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE provider_config_kindroid (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     api_key TEXT NOT NULL,
-    kindroid_id TEXT NOT NULL
+    kindroid_id TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE provider_config_kajiwoto (
@@ -121,33 +135,43 @@ CREATE TABLE provider_config_kajiwoto (
     name TEXT NOT NULL UNIQUE,
     username TEXT NOT NULL,
     password TEXT NOT NULL,
-    room_url TEXT NOT NULL
+    room_url TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE provider_config_characterai (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     api_token TEXT NOT NULL,
-    chatroom_url TEXT NOT NULL
+    chatroom_url TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE provider_config_localai (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    embedding_model TEXT NOT NULL
+    embedding_model TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE provider_config_mistral (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    api_key TEXT NOT NULL
+    api_key TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE provider_config_ollama (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     base_url TEXT NOT NULL,
-    embedding_model TEXT
+    embedding_model TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Module Configuration Tables
@@ -155,7 +179,9 @@ CREATE TABLE backend_configs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     provider TEXT NOT NULL,
-    provider_config_id INTEGER NOT NULL
+    provider_config_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE movement_configs (
@@ -164,7 +190,9 @@ CREATE TABLE movement_configs (
     provider TEXT NOT NULL,
     provider_config_id INTEGER NOT NULL,
     startup_sync_timeout INTEGER,
-    execution_threshold REAL
+    execution_threshold REAL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE stt_configs (
@@ -176,14 +204,18 @@ CREATE TABLE stt_configs (
     transcription_provider TEXT NOT NULL,
     transcription_provider_config_id INTEGER NOT NULL,
     vad_provider TEXT NOT NULL,
-    vad_provider_config_id INTEGER NOT NULL
+    vad_provider_config_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE cognition_configs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     provider TEXT NOT NULL,
-    provider_config_id INTEGER NOT NULL
+    provider_config_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE rag_configs (
@@ -191,7 +223,9 @@ CREATE TABLE rag_configs (
     name TEXT NOT NULL UNIQUE,
     provider TEXT NOT NULL,
     provider_config_id INTEGER NOT NULL,
-    embedding_concurrency INTEGER
+    embedding_concurrency INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE tts_configs (
@@ -201,6 +235,8 @@ CREATE TABLE tts_configs (
     provider_config_id INTEGER NOT NULL,
     output_type TEXT,
     words_to_replace TEXT,
-    vocalize_nonverbal INTEGER
+    vocalize_nonverbal INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 `;

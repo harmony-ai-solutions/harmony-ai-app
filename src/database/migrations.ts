@@ -10,6 +10,7 @@ import {migration001} from './migrations/000001_initial_schema';
 import {migration002} from './migrations/000002_make_character_profile_optional';
 import {migration003} from './migrations/000003_add_character_card_fields';
 import {migration004} from './migrations/000004_add_cognition_generate_expressions';
+import {migration005} from './migrations/000005_add_sync_tables';
 
 // Migration definition
 interface Migration {
@@ -39,6 +40,11 @@ const MIGRATIONS: Migration[] = [
     version: 4,
     description: 'add_cognition_generate_expressions',
     sql: migration004,
+  },
+  {
+    version: 5,
+    description: 'add_sync_tables',
+    sql: migration005,
   },
 ];
 

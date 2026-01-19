@@ -18,7 +18,7 @@ import {CharacterProfile, CharacterImage, CharacterImageInfo} from '../models';
  * Create a new character profile
  */
 export async function createCharacterProfile(
-  profile: Omit<CharacterProfile, 'created_at' | 'updated_at'>
+  profile: Omit<CharacterProfile, 'created_at' | 'updated_at' | 'deleted_at'>
 ): Promise<CharacterProfile> {
   const db = getDatabase();
   
@@ -51,25 +51,31 @@ export async function createCharacterProfile(
       ...profile,
       created_at: new Date(now),
       updated_at: new Date(now),
+      deleted_at: null,
     };
   });
 }
 
 /**
  * Get character profile by ID
- * Returns null if not found
+ * Returns null if not found or soft deleted (unless includeDeleted is true)
  */
-export async function getCharacterProfile(id: string): Promise<CharacterProfile | null> {
+export async function getCharacterProfile(id: string, includeDeleted = false): Promise<CharacterProfile | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, description, personality, appearance, backstory,
-            voice_characteristics, base_prompt, scenario, example_dialogues,
-            created_at, updated_at
-     FROM character_profiles
-     WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, description, personality, appearance, backstory,
+              voice_characteristics, base_prompt, scenario, example_dialogues,
+              created_at, updated_at, deleted_at
+       FROM character_profiles
+       WHERE id = ?`
+    : `SELECT id, name, description, personality, appearance, backstory,
+              voice_characteristics, base_prompt, scenario, example_dialogues,
+              created_at, updated_at, deleted_at
+       FROM character_profiles
+       WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -89,23 +95,31 @@ export async function getCharacterProfile(id: string): Promise<CharacterProfile 
     example_dialogues: row.example_dialogues,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
 /**
  * Get all character profiles
- * Returns empty array if none found
+ * Returns empty array if none found. Filters out soft deleted by default.
  */
-export async function getAllCharacterProfiles(): Promise<CharacterProfile[]> {
+export async function getAllCharacterProfiles(includeDeleted = false): Promise<CharacterProfile[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, name, description, personality, appearance, backstory,
-            voice_characteristics, base_prompt, scenario, example_dialogues,
-            created_at, updated_at
-     FROM character_profiles
-     ORDER BY name`
-  );
+  const query = includeDeleted
+    ? `SELECT id, name, description, personality, appearance, backstory,
+              voice_characteristics, base_prompt, scenario, example_dialogues,
+              created_at, updated_at, deleted_at
+       FROM character_profiles
+       ORDER BY name`
+    : `SELECT id, name, description, personality, appearance, backstory,
+              voice_characteristics, base_prompt, scenario, example_dialogues,
+              created_at, updated_at, deleted_at
+       FROM character_profiles
+       WHERE deleted_at IS NULL
+       ORDER BY name`;
+
+  const [results] = await db.executeSql(query);
   
   const profiles: CharacterProfile[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -123,6 +137,7 @@ export async function getAllCharacterProfiles(): Promise<CharacterProfile[]> {
       example_dialogues: row.example_dialogues,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -172,38 +187,48 @@ export async function updateCharacterProfile(profile: CharacterProfile): Promise
 }
 
 /**
- * Delete character profile
- * Will fail if profile is referenced by any entities (FOREIGN KEY RESTRICT)
- * Throws error if profile not found or if it's in use
- */
-export async function deleteCharacterProfile(id: string): Promise<void> {
-  const db = getDatabase();
-  
-  return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM character_profiles WHERE id = ?',
-      [id]
-    );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Character profile not found: ${id}`);
-    }
-  });
-}
-
-/**
  * Check if a character profile is in use by any entities
  */
 export async function isCharacterProfileInUse(id: string): Promise<boolean> {
   const db = getDatabase();
   
   const [results] = await db.executeSql(
-    'SELECT COUNT(*) as count FROM entities WHERE character_profile_id = ?',
+    'SELECT COUNT(*) as count FROM entities WHERE character_profile_id = ? AND deleted_at IS NULL',
     [id]
   );
   
   const count = results.rows.item(0).count;
   return count > 0;
+}
+
+/**
+ * Soft delete character profile
+ * Throws error if profile not found
+ */
+export async function deleteCharacterProfile(id: string, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isCharacterProfileInUse(id)) {
+    throw new Error(`Character profile ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM character_profiles WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`Character profile not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE character_profiles SET deleted_at = ?, updated_at = ? WHERE id = ?',
+        [now, now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`Character profile not found: ${id}`);
+      }
+    }
+  });
 }
 
 // ============================================================================
@@ -215,7 +240,7 @@ export async function isCharacterProfileInUse(id: string): Promise<boolean> {
  * Returns the ID of the created image
  */
 export async function createCharacterImage(
-  image: Omit<CharacterImage, 'id' | 'created_at'>
+  image: Omit<CharacterImage, 'id' | 'created_at' | 'deleted_at'>
 ): Promise<number> {
   const db = getDatabase();
   
@@ -254,19 +279,24 @@ export async function createCharacterImage(
 
 /**
  * Get character image by ID
- * Returns null if not found
+ * Returns null if not found or soft deleted (unless includeDeleted is true)
  */
-export async function getCharacterImage(id: number): Promise<CharacterImage | null> {
+export async function getCharacterImage(id: number, includeDeleted = false): Promise<CharacterImage | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, character_profile_id, image_data, mime_type, description,
-            is_primary, display_order, vl_model_interpretation, vl_model,
-            vl_model_embedding, created_at
-     FROM character_image
-     WHERE id = ?`,
-    [id]
-  );
+  const query = includeDeleted
+    ? `SELECT id, character_profile_id, image_data, mime_type, description,
+              is_primary, display_order, vl_model_interpretation, vl_model,
+              vl_model_embedding, created_at, deleted_at
+       FROM character_image
+       WHERE id = ?`
+    : `SELECT id, character_profile_id, image_data, mime_type, description,
+              is_primary, display_order, vl_model_interpretation, vl_model,
+              vl_model_embedding, created_at, deleted_at
+       FROM character_image
+       WHERE id = ? AND deleted_at IS NULL`;
+
+  const [results] = await db.executeSql(query, [id]);
   
   if (results.rows.length === 0) {
     return null;
@@ -285,25 +315,32 @@ export async function getCharacterImage(id: number): Promise<CharacterImage | nu
     vl_model: row.vl_model,
     vl_model_embedding: row.vl_model_embedding ? new Uint8Array(row.vl_model_embedding) : null,
     created_at: new Date(row.created_at),
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
 /**
- * Get all images for a specific character profile
+ * Get all images for a specific character profile. Filters out soft deleted by default.
  * Ordered by display_order ASC, then created_at DESC
  */
-export async function getCharacterImages(profileId: string): Promise<CharacterImage[]> {
+export async function getCharacterImages(profileId: string, includeDeleted = false): Promise<CharacterImage[]> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, character_profile_id, image_data, mime_type, description,
-            is_primary, display_order, vl_model_interpretation, vl_model,
-            vl_model_embedding, created_at
-     FROM character_image
-     WHERE character_profile_id = ?
-     ORDER BY display_order ASC, created_at DESC`,
-    [profileId]
-  );
+  const query = includeDeleted
+    ? `SELECT id, character_profile_id, image_data, mime_type, description,
+              is_primary, display_order, vl_model_interpretation, vl_model,
+              vl_model_embedding, created_at, deleted_at
+       FROM character_image
+       WHERE character_profile_id = ?
+       ORDER BY display_order ASC, created_at DESC`
+    : `SELECT id, character_profile_id, image_data, mime_type, description,
+              is_primary, display_order, vl_model_interpretation, vl_model,
+              vl_model_embedding, created_at, deleted_at
+       FROM character_image
+       WHERE character_profile_id = ? AND deleted_at IS NULL
+       ORDER BY display_order ASC, created_at DESC`;
+
+  const [results] = await db.executeSql(query, [profileId]);
   
   const images: CharacterImage[] = [];
   for (let i = 0; i < results.rows.length; i++) {
@@ -320,6 +357,7 @@ export async function getCharacterImages(profileId: string): Promise<CharacterIm
       vl_model: row.vl_model,
       vl_model_embedding: row.vl_model_embedding ? new Uint8Array(row.vl_model_embedding) : null,
       created_at: new Date(row.created_at),
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   
@@ -350,20 +388,27 @@ export async function updateCharacterImage(
 }
 
 /**
- * Delete character image
+ * Soft delete character image
  * Throws error if image not found
  */
-export async function deleteCharacterImage(id: number): Promise<void> {
+export async function deleteCharacterImage(id: number, permanent = false): Promise<void> {
   const db = getDatabase();
   
   return withTransaction(db, async (tx) => {
-    const [result] = await tx.executeSql(
-      'DELETE FROM character_image WHERE id = ?',
-      [id]
-    );
-    
-    if (result.rowsAffected === 0) {
-      throw new Error(`Character image not found: ${id}`);
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM character_image WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`Character image not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE character_image SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`Character image not found: ${id}`);
+      }
     }
   });
 }
@@ -417,7 +462,7 @@ export async function setPrimaryImage(profileId: string, imageId: number): Promi
 
 /**
  * Get the primary image for a character profile
- * Returns null if no primary image is set
+ * Returns null if no primary image is set or if primary is soft deleted
  */
 export async function getPrimaryImage(profileId: string): Promise<CharacterImage | null> {
   const db = getDatabase();
@@ -425,9 +470,9 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
   const [results] = await db.executeSql(
     `SELECT id, character_profile_id, image_data, mime_type, description,
             is_primary, display_order, vl_model_interpretation, vl_model,
-            vl_model_embedding, created_at
+            vl_model_embedding, created_at, deleted_at
      FROM character_image
-     WHERE character_profile_id = ? AND is_primary = 1
+     WHERE character_profile_id = ? AND is_primary = 1 AND deleted_at IS NULL
      LIMIT 1`,
     [profileId]
   );
@@ -449,6 +494,7 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
     vl_model: row.vl_model,
     vl_model_embedding: row.vl_model_embedding ? new Uint8Array(row.vl_model_embedding) : null,
     created_at: new Date(row.created_at),
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 
@@ -494,12 +540,13 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
 }
 
 /**
- * Get character images with data URLs for UI convenience
+ * Get character images with data URLs for UI convenience. Filters out soft deleted by default.
  */
 export async function getCharacterImagesWithDataURLs(
-  profileId: string
+  profileId: string,
+  includeDeleted = false
 ): Promise<CharacterImageInfo[]> {
-  const images = await getCharacterImages(profileId);
+  const images = await getCharacterImages(profileId, includeDeleted);
   
   return images.map(image => ({
     id: image.id,

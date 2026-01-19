@@ -1,13 +1,15 @@
 # Harmony AI App Active Context
 @Focus:
-- Database Implementation Complete: SQLCipher encryption, full repository layer (84 tests), in-app DEV-only test runner.
+- Sync Services Implementation Complete: EventEmitter3-based event system, WebSocket/WSS support, handshake protocol.
+- Database Implementation Complete: SQLCipher encryption, full repository layer (84 tests), in-app DEV-only test runner, sync tables added.
 - Test Runner Integration: DatabaseTestScreen in Settings menu, real-time console, color-coded results, themed UI.
 - Advanced Theming: RGB editor, custom theme creation/deletion, JSON import/export, 6 built-in themes.
 - Bootstrap Complete: RN 0.83.1, TypeScript, navigation, Paper UI, organized structure.
 @Next:
+- Sync Testing: Test handshake flow with Harmony Link, verify HANDSHAKE_PENDING → ACCEPT → WSS upgrade.
+- Sync Protocol: Test SYNC_REQUEST → SYNC_DATA exchange → SYNC_COMPLETE flow.
 - Chat Interface: Message list (FlatList), bubbles (user/AI), text input, timestamps.
-- Harmony Link Integration: REST API client, WebSocket, authentication, message send/receive.
-- Message Persistence: SQLite message storage, offline queue, sync tracking.
+- Message Persistence: SQLite message storage with sync, offline queue, sync tracking.
 - Character Management: Selection UI, profile display, avatar loading, character switching.
 @Decisions:
 - React Native CLI (not Expo) for full native module control (Executorch, messenger APIs).
@@ -29,3 +31,16 @@
 - __DEV__ checks ensure development tools invisible in production builds.
 - ADB PATH setup critical for newcomers.
 - Good foundation prevents technical debt.
+- EventEmitter3 (~2KB) provides type-safe, reliable event handling for React Native (Node.js EventEmitter unreliable).
+- TypeScript generics for EventEmitter interfaces enable compile-time event validation.
+- Comprehensive logging with [ServiceName] prefix critical for debugging async WebSocket flows.
+- Android emulator uses 10.0.2.2 to access host's localhost (not 127.0.0.1).
+- Harmony Link must bind to 0.0.0.0 (not localhost) for emulator connectivity.
+- HANDSHAKE_PENDING event handler essential for user feedback during device approval.
+@Implementation[Sync]:
+- Services[3]: ConnectionStateManager (JWT lifecycle), SyncService (protocol logic), WebSocketService (transport).
+- EventEmitter3: Type-safe pub/sub pattern, 14 event types, proper cleanup in useEffect.
+- Protocol: HANDSHAKE_REQUEST → PENDING → ACCEPT → WSS upgrade → SYNC_REQUEST → DATA exchange → COMPLETE → FINALIZE.
+- Screens[2]: ConnectionSetupScreen (IP/port input, handshake), SyncSettingsScreen (status, manual sync).
+- Database: sync_devices, sync_history, chat_messages tables (migration 000005).
+- Error Handling: Connection validation, timeout handling (30s), confirmation tracking, comprehensive logging.
