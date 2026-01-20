@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, TextInput, Alert } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../../components/themed/ThemedText';
@@ -18,18 +18,77 @@ import type { RootStackParamList } from '../../navigation/AppNavigator';
 export const ConnectionSetupScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { showToast, isPaired, isConnected } = useConnection();
+  const { showToast, isPaired, isConnected, isConnecting, reconnect } = useConnection();
   
   const [url, setUrl] = useState('192.168.1.');
   const [port, setPort] = useState('8080');
   const [status, setStatus] = useState('Idle');
-  const [isConnecting, setIsConnecting] = useState(false);
+  const [isManuallyConnecting, setIsManuallyConnecting] = useState(false);
   const [showCertModal, setShowCertModal] = useState(false);
   const [showCertDetailsModal, setShowCertDetailsModal] = useState(false);
   const [serverCertificate, setServerCertificate] = useState<string>('');
   const [pendingCredentials, setPendingCredentials] = useState<any>(null);
   const [securityMode, setSecurityMode] = useState<string>('');
+  const [hasSelectedSecurityMode, setHasSelectedSecurityMode] = useState(false);
 
+  /**
+   * Load connection data from storage
+   */
+  const loadConnectionData = useCallback(async () => {
+    console.log('[ConnectionSetupScreen] Loading connection data, isPaired:', isPaired);
+    
+    if (isPaired) {
+      const mode = await ConnectionStateManager.getSecurityMode();
+      setSecurityMode(mode || 'secure');
+      
+      // Load URL and port based on security mode
+      if (mode === 'unencrypted') {
+        // For unencrypted, use WS URL
+        const wsUrl = await ConnectionStateManager.getWSUrl();
+        if (wsUrl) {
+          const match = wsUrl.match(/ws:\/\/([^:]+):(\d+)/);
+          if (match) {
+            setUrl(match[1]);
+            setPort(match[2]);
+          }
+        }
+      } else {
+        // For secure/insecure_ssl, use WSS URL
+        const wssUrl = await ConnectionStateManager.getWSSUrl();
+        if (wssUrl) {
+          const match = wssUrl.match(/wss:\/\/([^:]+):(\d+)/);
+          if (match) {
+            setUrl(match[1]);
+            setPort(match[2]);
+          }
+        }
+      }
+      
+      const cert = await ConnectionStateManager.getServerCert();
+      if (cert) {
+        setServerCertificate(cert);
+      }
+      
+      setStatus(isConnected ? 'Connected' : 'Disconnected');
+    } else {
+      // Not paired - reset to defaults
+      setUrl('192.168.1.');
+      setPort('8080');
+      setSecurityMode('');
+      setServerCertificate('');
+      setStatus('Idle');
+    }
+  }, [isPaired, isConnected]);
+
+  /**
+   * Reload connection data when screen comes into focus
+   */
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[ConnectionSetupScreen] Screen focused, reloading connection data');
+      loadConnectionData();
+    }, [loadConnectionData])
+  );
 
   const attemptSecureConnection = async () => {
     try {
@@ -48,12 +107,12 @@ export const ConnectionSetupScreen: React.FC = () => {
       }
       
       setStatus('Connected successfully!');
-      setIsConnecting(false);
+      setIsManuallyConnecting(false);
       showToast('Successfully connected to Harmony Link!');
       
       // Navigate back after a short delay
       setTimeout(() => {
-        navigation.navigate('SettingsHome');
+        navigation.navigate('SyncSettings');
       }, 1000);
     } catch (err: any) {
       console.error('[ConnectionSetupScreen] Secure connection failed:', err);
@@ -76,6 +135,7 @@ export const ConnectionSetupScreen: React.FC = () => {
         // Don't re-throw - we're handling it with the modal
       } else {
         // For non-cert errors, re-throw to be handled by outer catch
+        setIsManuallyConnecting(false);
         throw err;
       }
     }
@@ -83,11 +143,13 @@ export const ConnectionSetupScreen: React.FC = () => {
 
 
   const handleCertModalChoice = async (mode: 'insecure_ssl' | 'unencrypted' | 'abort') => {
+    // Mark that user has made a security choice to prevent modal from reopening
+    setHasSelectedSecurityMode(true);
     setShowCertModal(false);
     
     if (mode === 'abort') {
       setStatus('Connection aborted by user');
-      setIsConnecting(false);
+      setIsManuallyConnecting(false);
       showToast('Connection cancelled');
       return;
     }
@@ -104,52 +166,33 @@ export const ConnectionSetupScreen: React.FC = () => {
         setStatus('Switching to unencrypted connection...');
         // Disconnect secure and reconnect unencrypted
         await WebSocketService.disconnect();
-        const wsUrl = `ws://${url}:${port}/events`;
+        // Use the original WS URL (different port than WSS)
+        const wsUrl = await ConnectionStateManager.getWSUrl();
+        if (!wsUrl) {
+          throw new Error('No WS URL available for unencrypted connection');
+        }
         await WebSocketService.connect(wsUrl);
         setStatus('Connected unencrypted!');
       }
       
-      setIsConnecting(false);
+      setIsManuallyConnecting(false);
       showToast('Successfully connected to Harmony Link!');
       
       // Navigate back after a short delay
       setTimeout(() => {
-        navigation.navigate('SettingsHome');
+        navigation.navigate('SyncSettings');
       }, 1000);
     } catch (err: any) {
       console.error('[ConnectionSetupScreen] Connection with selected mode failed:', err);
       setStatus('Connection failed');
-      setIsConnecting(false);
+      setIsManuallyConnecting(false);
       showToast('Failed to connect with selected security mode');
       Alert.alert('Connection Failed', 'Failed to connect: ' + (err.message || 'Unknown error'));
     }
   };
 
   useEffect(() => {
-    // Load existing connection data if paired
-    const loadConnectionData = async () => {
-      if (isPaired) {
-        const wssUrl = await ConnectionStateManager.getWSSUrl();
-        if (wssUrl) {
-          // Extract host and port from wss URL (format: wss://host:port/events)
-          const match = wssUrl.match(/wss:\/\/([^:]+):(\d+)/);
-          if (match) {
-            setUrl(match[1]);
-            setPort(match[2]);
-          }
-        }
-        
-        const mode = await ConnectionStateManager.getSecurityMode();
-        setSecurityMode(mode || 'secure');
-        
-        const cert = await ConnectionStateManager.getServerCert();
-        if (cert) {
-          setServerCertificate(cert);
-        }
-        
-        setStatus(isConnected ? 'Connected' : 'Disconnected');
-      }
-    };
+    // Load connection data on mount and when isPaired/isConnected changes
     loadConnectionData();
 
     const handleHandshakeRequested = (event: any) => {
@@ -186,7 +229,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       } catch (err: any) {
         console.error('[ConnectionSetupScreen] Connection setup failed:', err);
         setStatus('Connection failed');
-        setIsConnecting(false);
+        setIsManuallyConnecting(false);
         showToast('Failed to establish connection');
       }
     };
@@ -194,7 +237,7 @@ export const ConnectionSetupScreen: React.FC = () => {
     const handleHandshakeRejected = (payload: any) => {
       console.log('[ConnectionSetupScreen] Handshake rejected');
       setStatus('Connection rejected');
-      setIsConnecting(false);
+      setIsManuallyConnecting(false);
       showToast('Harmony Link rejected the connection request');
       Alert.alert('Connection Rejected', 'Harmony Link rejected the connection request. Please try again or check device approval settings on Harmony Link.');
     };
@@ -202,14 +245,29 @@ export const ConnectionSetupScreen: React.FC = () => {
     const handleConnectionError = (error: any) => {
       console.error('[ConnectionSetupScreen] Connection error:', error);
       setStatus('Connection error');
-      setIsConnecting(false);
+      setIsManuallyConnecting(false);
       showToast('Connection error occurred');
     };
 
     const handleCertVerificationFailed = (error: any) => {
       console.log('[ConnectionSetupScreen] Certificate verification failed:', error);
-      setStatus('Certificate verification failed');
-      setShowCertModal(true);
+      // Only show modal if user hasn't already made a security choice
+      if (!hasSelectedSecurityMode) {
+        setStatus('Certificate verification failed');
+        setShowCertModal(true);
+      } else {
+        console.log('[ConnectionSetupScreen] Ignoring cert error - user already selected security mode');
+      }
+    };
+
+    const handleCredentialsCleared = () => {
+      console.log('[ConnectionSetupScreen] Credentials cleared, resetting state');
+      // Reset local state immediately
+      setUrl('192.168.1.');
+      setPort('8080');
+      setSecurityMode('');
+      setServerCertificate('');
+      setStatus('Idle');
     };
 
     // Subscribe to events
@@ -219,6 +277,7 @@ export const ConnectionSetupScreen: React.FC = () => {
     SyncService.on('handshake:rejected', handleHandshakeRejected);
     WebSocketService.on('error', handleConnectionError);
     WebSocketService.on('cert:verification_failed', handleCertVerificationFailed);
+    ConnectionStateManager.on('credentials:cleared', handleCredentialsCleared);
 
     return () => {
       // Cleanup
@@ -228,8 +287,9 @@ export const ConnectionSetupScreen: React.FC = () => {
       SyncService.off('handshake:rejected', handleHandshakeRejected);
       WebSocketService.off('error', handleConnectionError);
       WebSocketService.off('cert:verification_failed', handleCertVerificationFailed);
+      ConnectionStateManager.off('credentials:cleared', handleCredentialsCleared);
     };
-  }, [isPaired, isConnected]);
+  }, [isPaired, isConnected, loadConnectionData, hasSelectedSecurityMode]);
 
 
   const handleConnect = async () => {
@@ -239,7 +299,7 @@ export const ConnectionSetupScreen: React.FC = () => {
     }
 
     const wsUrl = `ws://${url}:${port}/events`;
-    setIsConnecting(true);
+    setIsManuallyConnecting(true);
     setStatus('Connecting to Harmony Link...');
 
     try {
@@ -251,7 +311,7 @@ export const ConnectionSetupScreen: React.FC = () => {
     } catch (err: any) {
       console.error('[ConnectionSetupScreen] Connection failed:', err);
       setStatus('Connection failed');
-      setIsConnecting(false);
+      setIsManuallyConnecting(false);
       showToast('Failed to connect to Harmony Link');
       Alert.alert('Connection Failed', 'Failed to connect to Harmony Link. Please check the IP address and port, and ensure Harmony Link is running.');
     }
@@ -316,14 +376,34 @@ export const ConnectionSetupScreen: React.FC = () => {
 
           {!isPaired ? (
             <ThemedButton
-              label={isConnecting ? "Connecting..." : "Connect & Pair"}
+              label={isManuallyConnecting ? "Connecting..." : "Connect & Pair"}
               onPress={handleConnect}
-              disabled={isConnecting}
+              disabled={isManuallyConnecting || isConnecting}
             />
           ) : (
-            <ThemedButton
-              label="Unpair Device"
-              onPress={async () => {
+            <View style={styles.pairedActions}>
+              {!isConnected && (
+                <ThemedButton
+                  label={isConnecting ? "Reconnecting..." : "Reconnect"}
+                  onPress={async () => {
+                    try {
+                      setStatus('Reconnecting...');
+                      await reconnect();
+                      setStatus('Connected!');
+                      showToast('Reconnected successfully');
+                    } catch (error: any) {
+                      console.error('[ConnectionSetupScreen] Manual reconnect failed:', error);
+                      setStatus('Reconnection failed');
+                      showToast('Failed to reconnect');
+                    }
+                  }}
+                  disabled={isConnecting}
+                  style={styles.reconnectButton}
+                />
+              )}
+              <ThemedButton
+                label="Unpair Device"
+                onPress={async () => {
                 Alert.alert(
                   'Unpair Device',
                   'This will remove all pairing data. You will need to pair again to sync with Harmony Link.',
@@ -346,9 +426,10 @@ export const ConnectionSetupScreen: React.FC = () => {
                     }
                   ]
                 );
-              }}
-              variant="secondary"
-            />
+                }}
+                variant="secondary"
+              />
+            </View>
           )}
 
         </View>
@@ -411,5 +492,11 @@ const styles = StyleSheet.create({
   },
   statusText: {
     // Color applied dynamically via theme
+  },
+  pairedActions: {
+    gap: 10,
+  },
+  reconnectButton: {
+    marginBottom: 10,
   },
 });

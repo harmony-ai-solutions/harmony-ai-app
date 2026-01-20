@@ -37,6 +37,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   private static instance: SyncService;
   private currentSession: SyncSession | null = null;
   private pendingConfirmations: Map<string, (success: boolean) => void> = new Map();
+  // Track completion states to ensure SYNC_FINALIZE is sent only once
+  private localChangesSent: boolean = false;
+  private remoteCompleteReceived: boolean = false;
+  private finalizeSent: boolean = false;
 
   static getInstance(): SyncService {
     if (!SyncService.instance) {
@@ -92,6 +96,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     const lastSync = await this.getLastSyncTimestamp();
     const deviceId = await DeviceInfo.getUniqueId();
     const deviceName = await DeviceInfo.getDeviceName();
+    
+    // Reset completion flags for new sync session
+    this.localChangesSent = false;
+    this.remoteCompleteReceived = false;
+    this.finalizeSent = false;
     
     this.currentSession = {
       sessionId: this.generateEventId(),
@@ -188,6 +197,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     }
     
     await this.sendSyncComplete();
+    
+    // Mark that we've finished sending our local changes
+    this.localChangesSent = true;
+    console.log('[SyncService] Local changes sent, waiting for remote confirmation');
+    this.attemptFinalize();
   }
 
   private async sendSyncData(table: string, operation: string, record: any): Promise<void> {
@@ -232,7 +246,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       const confirmEvent = {
         event_id: this.generateEventId(),
         event_type: 'SYNC_DATA_CONFIRM',
-        status: 'SUCCESS',
+        status: 'NEW',
         payload: {
           event_id: payload.event_id,
           status: 'SUCCESS'
@@ -251,7 +265,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       const errorEvent = {
         event_id: this.generateEventId(),
         event_type: 'SYNC_DATA_CONFIRM',
-        status: 'ERROR',
+        status: 'NEW',
         payload: {
           event_id: payload.event_id,
           status: 'ERROR',
@@ -270,24 +284,48 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     }
   }
 
-  async handleSyncComplete(): Promise<void> {
+  async handleSyncComplete(event: any): Promise<void> {
     if (!this.currentSession) {
       console.warn('[SyncService] Received SYNC_COMPLETE but no current session');
       return;
     }
     
-    console.log('[SyncService] Sync complete, sending finalize');
-    
-    const finalizeEvent = {
-      event_id: this.generateEventId(),
-      event_type: 'SYNC_FINALIZE',
-      status: 'SUCCESS',
-      payload: {
-        sync_session_id: this.currentSession.sessionId
-      }
-    };
-    
-    this.emit('sync:finalize_out', finalizeEvent);
+    // Only process SUCCESS status - ignore PENDING acknowledgements
+    if (event.status === 'SUCCESS' || event.status === 'DONE') {
+      console.log('[SyncService] Remote sync complete confirmed (status: ' + event.status + ')');
+      this.remoteCompleteReceived = true;
+      this.attemptFinalize();
+    } else {
+      console.log(`[SyncService] SYNC_COMPLETE ${event.status} - waiting for SUCCESS`);
+    }
+  }
+
+  private attemptFinalize(): void {
+    // Only finalize when BOTH conditions are met AND we haven't already sent it
+    if (!this.currentSession) {
+      return;
+    }
+
+    if (this.localChangesSent && 
+        this.remoteCompleteReceived && 
+        !this.finalizeSent) {
+      
+      console.log('[SyncService] Both sides complete, sending SYNC_FINALIZE');
+      this.finalizeSent = true;
+      
+      const finalizeEvent = {
+        event_id: this.generateEventId(),
+        event_type: 'SYNC_FINALIZE',
+        status: 'NEW',
+        payload: {
+          sync_session_id: this.currentSession.sessionId
+        }
+      };
+      
+      this.emit('sync:finalize_out', finalizeEvent);
+    } else {
+      console.log(`[SyncService] Not ready to finalize: local=${this.localChangesSent}, remote=${this.remoteCompleteReceived}, sent=${this.finalizeSent}`);
+    }
   }
 
   async handleSyncFinalize(): Promise<void> {
@@ -336,7 +374,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     const event = {
       event_id: this.generateEventId(),
       event_type: 'SYNC_COMPLETE',
-      status: 'SUCCESS',
+      status: 'NEW',
       payload: {
         sync_session_id: this.currentSession.sessionId
       }

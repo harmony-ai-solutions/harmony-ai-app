@@ -164,10 +164,11 @@ export class WebSocketService extends EventEmitter<WebSocketServiceEvents> {
           reject(error);
         };
         
-        ws.onclose = () => {
-          console.log('[WebSocketService] Disconnected');
+        ws.onclose = (event) => {
+          console.log('[WebSocketService] Disconnected, code:', event.code, 'reason:', event.reason);
           // Only emit disconnected if this is still our current connection
           if (this.ws === ws) {
+            this.ws = null;
             this.emit('disconnected');
           }
         };
@@ -286,7 +287,7 @@ export class WebSocketService extends EventEmitter<WebSocketServiceEvents> {
         
         wss.onclose = (event) => {
           clearTimeout(connectionTimeout);
-          console.log('[WebSocketService] Secure connection closed, code:', event.code);
+          console.log('[WebSocketService] Secure connection closed, code:', event.code, 'reason:', event.reason);
           
           // Only emit disconnected if this is still our current connection
           if (this.wss === wss) {
@@ -485,6 +486,19 @@ export class WebSocketService extends EventEmitter<WebSocketServiceEvents> {
         syncService.emit('handshake:rejected', event.payload);
         break;
         
+      case 'SYNC_REQUEST':
+        console.log('[WebSocketService] Sync request status update:', event.status);
+        // Backend sends SYNC_REQUEST back with status SUCCESS/DONE containing SyncAcceptPayload
+        if (event.status === 'SUCCESS' || event.status === 'DONE') {
+          console.log('[WebSocketService] Sync request accepted, handling as SYNC_ACCEPT');
+          syncService.handleSyncAccept(event.payload);
+        } else if (event.status === 'ERROR') {
+          console.log('[WebSocketService] Sync request failed');
+          syncService.emit('sync:rejected', event.payload);
+        }
+        // PENDING status is just an acknowledgement - no action needed
+        break;
+        
       case 'SYNC_ACCEPT':
         console.log('[WebSocketService] Sync accepted');
         syncService.handleSyncAccept(event.payload);
@@ -507,7 +521,7 @@ export class WebSocketService extends EventEmitter<WebSocketServiceEvents> {
         
       case 'SYNC_COMPLETE':
         console.log('[WebSocketService] Sync complete');
-        syncService.handleSyncComplete();
+        syncService.handleSyncComplete(event);
         break;
         
       case 'SYNC_FINALIZE':

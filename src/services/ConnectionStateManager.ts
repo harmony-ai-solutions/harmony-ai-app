@@ -33,7 +33,8 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
   // Storage keys
   private static readonly STORAGE_KEYS = {
     JWT_TOKEN: 'harmony_jwt',
-    WSS_URL: 'harmony_wss_url',
+    WS_URL: 'harmony_ws_url', // Original unencrypted URL (e.g., ws://server:8080/events)
+    WSS_URL: 'harmony_wss_url', // Secure URL (e.g., wss://server:8081/events)
     SERVER_CERT: 'harmony_server_cert',
     TOKEN_EXPIRES_AT: 'harmony_token_expires_at',
     DEVICE_ID: 'harmony_device_id',
@@ -83,6 +84,13 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
       // Determine if device was previously paired
       this.isPaired = pairedStr === 'true' && jwtToken !== null;
 
+      // IMPORTANT: isConnected is runtime-only state, always starts as false
+      // It will be set to true only after successful WebSocket connection
+      this.isConnected = false;
+      
+      // Clean up any stale connected state from previous sessions
+      await AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.CONNECTED);
+
       // Check JWT token validity
       if (jwtToken && tokenExpiresAtStr) {
         this.tokenExpiresAt = parseInt(tokenExpiresAtStr);
@@ -91,10 +99,9 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
         if (now < this.tokenExpiresAt) {
           // Token is still valid
           this.jwtToken = jwtToken;
-          this.isConnected = false; // Connected is only true after handshake succeeds
           this.emit('state:changed', {
             isPaired: this.isPaired,
-            isConnected: this.isConnected,
+            isConnected: false, // Always false on init, will be set by WebSocket events
             jwtValid: true,
           });
         } else {
@@ -106,6 +113,12 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
             requiresRepair: true,
           });
         }
+      } else {
+        // Not paired
+        this.emit('state:changed', {
+          isPaired: false,
+          isConnected: false,
+        });
       }
     } catch (error) {
       console.error('Error initializing connection state:', error);
@@ -127,13 +140,23 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
       this.tokenExpiresAt = expiresAt;
       this.isPaired = true;
 
-      await Promise.all([
+      // Also get and save the original WS URL for unencrypted mode
+      const wsUrl = await AsyncStorage.getItem('harmony_server_url');
+
+      const storageOps = [
         AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.JWT_TOKEN, jwtToken),
         AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.WSS_URL, wssUrl),
         AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.SERVER_CERT, serverCert),
         AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.TOKEN_EXPIRES_AT, expiresAt.toString()),
         AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.PAIRED, 'true'),
-      ]);
+      ];
+
+      // Save WS URL if available (for unencrypted fallback)
+      if (wsUrl) {
+        storageOps.push(AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.WS_URL, wsUrl));
+      }
+
+      await Promise.all(storageOps);
 
       this.emit('credentials:saved', { isPaired: this.isPaired });
     } catch (error) {
@@ -144,19 +167,21 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
 
   /**
    * Mark device as connected (after WSS connection succeeds)
+   * Note: Connection state is runtime-only and not persisted
    */
   async markConnected(): Promise<void> {
+    console.log('[ConnectionStateManager] Marking as connected');
     this.isConnected = true;
-    await AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.CONNECTED, 'true');
     this.emit('state:changed', { isConnected: true, isPaired: this.isPaired });
   }
 
   /**
    * Mark device as disconnected
+   * Note: Connection state is runtime-only and not persisted
    */
   async markDisconnected(): Promise<void> {
+    console.log('[ConnectionStateManager] Marking as disconnected');
     this.isConnected = false;
-    await AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.CONNECTED, 'false');
     this.emit('state:changed', { isConnected: false, isPaired: this.isPaired });
   }
 
@@ -165,6 +190,7 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
    */
   async clearAllCredentials(): Promise<void> {
     try {
+      console.log('[ConnectionStateManager] Clearing all credentials');
       this.jwtToken = null;
       this.isConnected = false;
       this.isPaired = false;
@@ -172,14 +198,21 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
 
       await Promise.all([
         AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.JWT_TOKEN),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.WS_URL),
         AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.WSS_URL),
         AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.SERVER_CERT),
         AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.TOKEN_EXPIRES_AT),
         AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.PAIRED),
-        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.CONNECTED),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.SECURITY_MODE),
       ]);
 
+      // Emit both events to ensure all listeners are notified
       this.emit('credentials:cleared', { isPaired: false });
+      this.emit('state:changed', { 
+        isPaired: false, 
+        isConnected: false,
+        jwtValid: false,
+      });
     } catch (error) {
       console.error('Error clearing connection credentials:', error);
       this.emit('error', error);
@@ -244,7 +277,14 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
   }
 
   /**
-   * Get stored WSS URL
+   * Get stored WS URL (for unencrypted connections)
+   */
+  async getWSUrl(): Promise<string | null> {
+    return AsyncStorage.getItem(ConnectionStateManager.STORAGE_KEYS.WS_URL);
+  }
+
+  /**
+   * Get stored WSS URL (for secure connections)
    */
   async getWSSUrl(): Promise<string | null> {
     return AsyncStorage.getItem(ConnectionStateManager.STORAGE_KEYS.WSS_URL);

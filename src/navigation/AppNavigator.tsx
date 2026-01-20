@@ -4,8 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { BottomNavigator } from './BottomNavigator';
 import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
-import { SettingsHomeScreen } from '../screens/settings/SettingsHomeScreen';
-import { ProfileSettingsScreen, ConnectionSettingsScreen } from '../screens/settings/OtherSettingsScreens';
+import { ProfileSettingsScreen } from '../screens/settings/ProfileSettingsScreen';
 import { DatabaseTestScreen } from '../screens/development/DatabaseTestScreen';
 import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
 import { ConnectionSetupScreen } from '../screens/setup/ConnectionSetupScreen';
@@ -13,11 +12,9 @@ import { SyncSettingsScreen } from '../screens/settings/SyncSettingsScreen';
 
 export type RootStackParamList = {
   Main: undefined;
-  SettingsHome: undefined;
   ThemeSettings: undefined;
   ThemeEditor: { themeId?: string } | undefined;
   ProfileSettings: undefined;
-  ConnectionSettings: undefined;
   ConnectionSetup: undefined;
   SyncSettings: undefined;
   DatabaseTests?: undefined; // DEV only
@@ -40,11 +37,9 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({ navigationRef }) => 
         }}
       >
         <Stack.Screen name="Main" component={BottomNavigator} />
-        <Stack.Screen name="SettingsHome" component={SettingsHomeScreen} />
         <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
         <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />
         <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
-        <Stack.Screen name="ConnectionSettings" component={ConnectionSettingsScreen} />
         <Stack.Screen name="ConnectionSetup" component={ConnectionSetupScreen} />
         <Stack.Screen name="SyncSettings" component={SyncSettingsScreen} />
         {__DEV__ && (

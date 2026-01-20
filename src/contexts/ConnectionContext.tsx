@@ -10,6 +10,7 @@ interface ConnectionContextType {
   isConnecting: boolean;
   autoConnect: () => Promise<void>;
   disconnect: () => void;
+  reconnect: () => Promise<void>;
   showToast: (message: string) => void;
 }
 
@@ -23,6 +24,13 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
   const [isPaired, setIsPaired] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [reconnectTimeoutId, setReconnectTimeoutId] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [lastConnectionError, setLastConnectionError] = useState<string>('');
+  
+  // Auto-reconnect configuration
+  const MAX_RECONNECT_ATTEMPTS = 5;
+  const RECONNECT_INTERVALS = [2000, 5000, 10000, 20000, 30000]; // Progressive backoff
 
   useEffect(() => {
     // Listen to connection state changes
@@ -32,29 +40,76 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
       setIsConnected(state.isConnected || false);
     };
 
+    const handleConnected = () => {
+      console.log('[ConnectionContext] Connected (insecure)');
+      ConnectionStateManager.markConnected();
+      setIsConnected(true);
+      setIsConnecting(false);
+      setReconnectAttempts(0); // Reset on successful connection
+      setLastConnectionError(''); // Clear error
+      showToast('Connected to Harmony Link');
+      
+      // Auto-trigger sync after successful connection
+      // setTimeout(async () => {
+      //   try {
+      //     console.log('[ConnectionContext] Auto-triggering sync...');
+      //     await SyncService.initiateSync();
+      //   } catch (error) {
+      //     console.error('[ConnectionContext] Auto-sync failed:', error);
+      //   }
+      // }, 1000);
+    };
+
     const handleConnectedSecure = () => {
       console.log('[ConnectionContext] Connected securely');
       ConnectionStateManager.markConnected();
       setIsConnected(true);
       setIsConnecting(false);
+      setReconnectAttempts(0); // Reset on successful connection
+      setLastConnectionError(''); // Clear error
       showToast('Connected to Harmony Link');
       
       // Auto-trigger sync after successful connection
-      setTimeout(async () => {
-        try {
-          console.log('[ConnectionContext] Auto-triggering sync...');
-          await SyncService.initiateSync();
-        } catch (error) {
-          console.error('[ConnectionContext] Auto-sync failed:', error);
-        }
-      }, 1000);
+      // setTimeout(async () => {
+      //   try {
+      //     console.log('[ConnectionContext] Auto-triggering sync...');
+      //     await SyncService.initiateSync();
+      //   } catch (error) {
+      //     console.error('[ConnectionContext] Auto-sync failed:', error);
+      //   }
+      // }, 1000);
     };
 
-    const handleDisconnectedSecure = () => {
-      console.log('[ConnectionContext] Disconnected');
+    const handleDisconnected = () => {
+      console.log('[ConnectionContext] Disconnected (insecure)');
       ConnectionStateManager.markDisconnected();
       setIsConnected(false);
       setIsConnecting(false);
+      
+      // Only trigger auto-reconnect if no fatal error and paired
+      if (isPaired && !isFatalConnectionError(lastConnectionError)) {
+        console.log('[ConnectionContext] Connection lost. Attempting auto-reconnect...');
+        scheduleReconnect();
+      } else if (isFatalConnectionError(lastConnectionError)) {
+        console.log('[ConnectionContext] Fatal connection error detected, disabling auto-reconnect');
+        showToast('Connection failed. Please check settings and reconnect manually.');
+      }
+    };
+
+    const handleDisconnectedSecure = () => {
+      console.log('[ConnectionContext] Disconnected (secure)');
+      ConnectionStateManager.markDisconnected();
+      setIsConnected(false);
+      setIsConnecting(false);
+      
+      // Only trigger auto-reconnect if no fatal error and paired
+      if (isPaired && !isFatalConnectionError(lastConnectionError)) {
+        console.log('[ConnectionContext] Connection lost. Attempting auto-reconnect...');
+        scheduleReconnect();
+      } else if (isFatalConnectionError(lastConnectionError)) {
+        console.log('[ConnectionContext] Fatal connection error detected, disabling auto-reconnect');
+        showToast('Connection failed. Please check settings and reconnect manually.');
+      }
     };
 
     const handleSyncCompleted = (session: any) => {
@@ -69,12 +124,19 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
 
     const handleWebSocketError = (error: any) => {
       console.error('[ConnectionContext] WebSocket error:', error);
-      const errorMessage = error?.message || 'Connection error occurred';
-      showToast(`Connection error: ${errorMessage}`);
+      const errorMessage = error?.message || error?.toString?.() || 'Connection error occurred';
+      setLastConnectionError(errorMessage);
+      
+      // Don't show toast for every error if we're in a reconnect loop
+      if (reconnectAttempts === 0) {
+        showToast(`Connection error: ${errorMessage}`);
+      }
     };
 
     ConnectionStateManager.on('state:changed', handleStateChange);
+    WebSocketService.on('connected', handleConnected);
     WebSocketService.on('connected:secure', handleConnectedSecure);
+    WebSocketService.on('disconnected', handleDisconnected);
     WebSocketService.on('disconnected:secure', handleDisconnectedSecure);
     WebSocketService.on('error', handleWebSocketError);
     SyncService.on('sync:completed', handleSyncCompleted);
@@ -85,13 +147,95 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
 
     return () => {
       ConnectionStateManager.off('state:changed', handleStateChange);
+      WebSocketService.off('connected', handleConnected);
       WebSocketService.off('connected:secure', handleConnectedSecure);
+      WebSocketService.off('disconnected', handleDisconnected);
       WebSocketService.off('disconnected:secure', handleDisconnectedSecure);
       WebSocketService.off('error', handleWebSocketError);
       SyncService.off('sync:completed', handleSyncCompleted);
       SyncService.off('sync:error', handleSyncError);
+      
+      // Clear any pending reconnect timeout on cleanup
+      if (reconnectTimeoutId) {
+        clearTimeout(reconnectTimeoutId);
+      }
     };
-  }, []);
+  }, [isPaired, reconnectTimeoutId, lastConnectionError, reconnectAttempts]);
+
+  /**
+   * Check if an error is fatal and should prevent auto-reconnect
+   */
+  const isFatalConnectionError = (errorMessage: string): boolean => {
+    const fatalErrorPatterns = [
+      'client sent an HTTP request to an HTTPS server',
+      'protocol',
+      'ECONNREFUSED',
+      'network unreachable',
+    ];
+    
+    return fatalErrorPatterns.some(pattern => 
+      errorMessage.toLowerCase().includes(pattern.toLowerCase())
+    );
+  };
+
+  /**
+   * Schedule an auto-reconnect attempt with exponential backoff
+   */
+  const scheduleReconnect = () => {
+    // Clear any existing timeout
+    if (reconnectTimeoutId) {
+      clearTimeout(reconnectTimeoutId);
+      setReconnectTimeoutId(null);
+    }
+    
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.log('[ConnectionContext] Max reconnect attempts reached. Manual reconnection required.');
+      showToast('Connection lost. Please reconnect manually.');
+      setReconnectAttempts(0);
+      return;
+    }
+    
+    const delay = RECONNECT_INTERVALS[Math.min(reconnectAttempts, RECONNECT_INTERVALS.length - 1)];
+    console.log(`[ConnectionContext] Scheduling reconnect attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
+    
+    const timeoutId = setTimeout(async () => {
+      setReconnectAttempts(prev => prev + 1);
+      try {
+        await autoConnect();
+        // Reset attempts on successful connection
+        setReconnectAttempts(0);
+      } catch (error) {
+        console.error('[ConnectionContext] Auto-reconnect failed:', error);
+        // Will schedule another attempt via the disconnected handler
+      }
+    }, delay);
+    
+    setReconnectTimeoutId(timeoutId);
+  };
+
+  /**
+   * Manual reconnect - resets attempt counter and immediately tries to connect
+   */
+  const reconnect = async (): Promise<void> => {
+    console.log('[ConnectionContext] Manual reconnect triggered');
+    
+    // Clear any pending auto-reconnect
+    if (reconnectTimeoutId) {
+      clearTimeout(reconnectTimeoutId);
+      setReconnectTimeoutId(null);
+    }
+    
+    // Reset reconnect attempts
+    setReconnectAttempts(0);
+    
+    // Disconnect existing connections
+    WebSocketService.disconnect();
+    await ConnectionStateManager.markDisconnected();
+    setIsConnected(false);
+    
+    // Attempt to reconnect
+    await autoConnect();
+  };
 
   const initializeConnection = async () => {
     try {
@@ -135,9 +279,10 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
       if (savedMode === 'insecure_ssl') {
         await WebSocketService.connectSecureInsecure();
       } else if (savedMode === 'unencrypted') {
-        const serverUrl = await ConnectionStateManager.getServerUrl();
-        if (serverUrl) {
-          await WebSocketService.connect(serverUrl);
+        // For unencrypted, use the original WS URL (different port than WSS)
+        const wsUrl = await ConnectionStateManager.getWSUrl();
+        if (wsUrl) {
+          await WebSocketService.connect(wsUrl);
         } else {
           throw new Error('No server URL saved for unencrypted connection');
         }
@@ -149,9 +294,18 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
       console.log('[ConnectionContext] Auto-connect successful');
     } catch (error: any) {
       console.error('[ConnectionContext] Auto-connect failed:', error);
+      const errorMessage = error?.message || error?.toString?.() || 'Unknown error';
+      setLastConnectionError(errorMessage);
       setIsConnecting(false);
       setIsConnected(false);
-      showToast('Failed to connect to Harmony Link');
+      
+      // Only show toast on first attempt, not during auto-reconnect
+      if (reconnectAttempts === 0) {
+        showToast('Failed to connect to Harmony Link');
+      }
+      
+      // Rethrow to let caller handle
+      throw error;
     }
   };
 
@@ -191,7 +345,17 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
   };
 
   const disconnect = () => {
-    console.log('[ConnectionContext] Disconnecting...');
+    console.log('[ConnectionContext] Manual disconnect');
+    
+    // Clear any pending reconnect timeout
+    if (reconnectTimeoutId) {
+      clearTimeout(reconnectTimeoutId);
+      setReconnectTimeoutId(null);
+    }
+    
+    // Reset reconnect attempts to prevent auto-reconnect after manual disconnect
+    setReconnectAttempts(MAX_RECONNECT_ATTEMPTS);
+    
     WebSocketService.disconnect();
     ConnectionStateManager.markDisconnected();
     setIsConnected(false);
@@ -213,6 +377,7 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
     isConnecting,
     autoConnect,
     disconnect,
+    reconnect,
     showToast,
   };
 
