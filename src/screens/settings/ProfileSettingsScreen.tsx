@@ -11,15 +11,6 @@ export const ProfileSettingsScreen: React.FC = () => {
     );
 };
 
-export const ConnectionSettingsScreen: React.FC = () => {
-    const { theme } = useAppTheme();
-    return (
-        <View style={[styles.container, { backgroundColor: theme?.colors.background.base }]}>
-            <Text style={{ color: theme?.colors.text.primary }}>Connection Settings (Coming Soon)</Text>
-        </View>
-    );
-};
-
 const styles = StyleSheet.create({
     container: {
         flex: 1,

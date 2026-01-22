@@ -1,0 +1,18 @@
+# Harmony AI App Tech Context
+@Core: React Native 0.83.1, TypeScript, React Navigation (Native Stack), React Native Paper (MD3).
+@State: React Hooks (current), Context API (theme/auth), Redux/Zustand (future complex state).
+@Data: SQLite (messages/characters, future), AsyncStorage (settings, current), SQLCipher encryption, React Native Keychain (secure storage).
+@Network: Axios (REST), WebSocket (real-time), reconnection logic, retry with backoff.
+@Build: Metro Bundler, Gradle 8.13 (NOT 9.0+), Android SDK API 24-33, JDK 17.
+@Dev Tools: TypeScript compiler, ESLint, Prettier, Jest, React Native Debugger, hot reload.
+@Future Integrations:
+- On-Device AI: React Native Executorch (PyTorch models, quantized up to 7B)
+- Audio: React Native Voice (STT), React Native TTS
+- Media: Image Picker, Camera, FFmpeg
+- Services: FCM (push), biometric auth, cloud backup
+@APIs: Harmony Link REST (characters, config, messages, sync) + WebSocket (real-time messages, status, typing).
+@Performance: Lazy loading, image optimization, FlatList virtualization, memoization, code splitting.
+@Security: EncryptedStorage, HTTPS, token auth, SSL pinning (consideration), no plaintext credentials.
+@Platforms: Android 7.0+ (API 24), target API 33.
+@Workflow: Local dev with Metro → emulator/ADB testing → release builds → Play Store (future).
+@Key Deps: react 19.2.0, react-native 0.83.1, @react-navigation/*  ^7.x, react-native-paper ^5.x, @react-native-async-storage/async-storage ^2.x, react-native-sqlite-storage ^6.x.

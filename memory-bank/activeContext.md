@@ -1,9 +1,34 @@
 # Active Context
 
 ## Current Focus
-**Advanced Theming System Complete** - Users can now fully customize, manage, and share themes. The foundation is robust and ready for feature development.
+**Database Implementation Complete** - SQLite with SQLCipher encryption, complete repository layer, app integration, comprehensive testing, and in-app test runner. Ready for Harmony Link synchronization.
 
 ## Recent Work (January 2026)
+
+### Database Test Runner Implementation ✅ COMPLETE (January 14, 2026)
+- ✅ Created DatabaseTestScreen with real-time console output
+- ✅ Integrated into Settings menu (hamburger menu)
+- ✅ DEV-only visibility using __DEV__ checks
+- ✅ Color-coded test results (success/error/warning)
+- ✅ Live test execution in React Native environment
+- ✅ Themed UI matching app design
+- ✅ Updated database README with test instructions
+- ✅ Auto-hidden in production builds
+
+### Database Layer Implementation ✅ COMPLETE
+- ✅ SQLite database with SQLCipher encryption for secure data storage
+- ✅ Secure encryption key management via React Native Keychain
+- ✅ Forward-only migration system (4 migrations, 100% Harmony Link compatible)
+- ✅ Complete repository layer for all entity types:
+  - Entity repository (11 tests)
+  - Character repository with BLOB handling (18 tests)
+  - Module repository for all 6 types (23 tests)
+  - Provider repository for all 11 types (32 tests)
+- ✅ Database context with automatic initialization
+- ✅ Database loading screen with theme integration
+- ✅ App.tsx integration with error recovery
+- ✅ Comprehensive test suite (84 total tests)
+- ✅ Complete documentation (README, IMPLEMENTATION_SUMMARY, NEXT_STEPS)
 
 ### Advanced Theming System Implementation
 - ✅ Implemented `ThemeContext` with `AsyncStorage` persistence for built-in and custom themes.
@@ -137,6 +162,25 @@ harmony-ai-app/
 - React Native Paper provides good dark theme support
 - Navigation setup is straightforward with typed routes
 - Android development workflow is smooth
+- **Metro Bundler Limitation**: Cannot resolve imports from `__tests__` directories by default
+  - Solution: Create wrapper files outside `__tests__` to re-export test modules
+  - Example: `src/database/test-runner.ts` wraps `src/database/__tests__/run-all-tests.ts`
+
+### Navigation Modification Checklist
+When adding a new screen to Settings navigation, **ALL 3 files must be updated**:
+1. **`src/navigation/AppNavigator.tsx`** - Register the route in the Stack.Navigator
+   - Add route name to RootStackParamList type
+   - Add Stack.Screen with component reference
+2. **`src/screens/settings/SettingsHomeScreen.tsx`** - Add button in main settings list
+   - Add TouchableOpacity with icon and label
+   - Configure navigation.navigate() call
+   - Use `__DEV__` conditional for development-only features
+3. **`src/components/navigation/SettingsMenu.tsx`** - Add item to hamburger menu
+   - Add MenuItem to appropriate menuSections array
+   - Use spread operator for conditional sections: `...(__DEV__ ? [section] : [])`
+   - Ensure icon, label, and screen match other locations
+
+**Common Pitfall**: Forgetting to update SettingsMenu.tsx causes the item to be missing from the hamburger menu even though it works from the main settings screen.
 
 ### Project-Specific Notes
 - Keep harmony-link design consistency (colors, spacing)

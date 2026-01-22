@@ -40,9 +40,14 @@ const menuSections: MenuSection[] = [
         title: 'App Settings',
         items: [
             { icon: 'palette', label: 'Appearance & Theme', screen: 'ThemeSettings', badge: '⭐' },
-            { icon: 'connection', label: 'Connection Settings', screen: 'ConnectionSettings' },
             { icon: 'shield-lock', label: 'Data & Privacy', screen: 'PrivacySettings' },
             { icon: 'bell', label: 'Notifications', screen: 'NotificationSettings' },
+        ],
+    },
+    {
+        title: 'Sync & Connection',
+        items: [
+            { icon: 'sync', label: 'Sync Settings', screen: 'SyncSettings' },
         ],
     },
     {
@@ -52,6 +57,13 @@ const menuSections: MenuSection[] = [
             { icon: 'help-circle', label: 'Help & Support', screen: 'Help' },
         ],
     },
+    ...(__DEV__ ? [{
+        title: 'Development',
+        items: [
+            { icon: 'test-tube', label: 'Database Tests', screen: 'DatabaseTests', badge: 'DEV' },
+            { icon: 'database-eye', label: 'Database Table Viewer', screen: 'DatabaseTableViewer', badge: 'DEV' },
+        ],
+    }] : []),
 ];
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({
