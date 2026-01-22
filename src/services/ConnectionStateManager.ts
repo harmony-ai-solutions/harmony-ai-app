@@ -47,7 +47,7 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
   // Security mode types
   public static readonly SECURITY_MODES = {
     SECURE: 'secure',
-    INSECURE_SSL: 'insecure_ssl',
+    INSECURE_SSL: 'insecure-ssl',
     UNENCRYPTED: 'unencrypted',
   } as const;
 

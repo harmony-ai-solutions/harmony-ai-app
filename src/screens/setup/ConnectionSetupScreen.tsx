@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, ScrollView, TextInput, Alert } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -29,13 +29,15 @@ export const ConnectionSetupScreen: React.FC = () => {
   const [serverCertificate, setServerCertificate] = useState<string>('');
   const [pendingCredentials, setPendingCredentials] = useState<any>(null);
   const [securityMode, setSecurityMode] = useState<string>('');
-  const [hasSelectedSecurityMode, setHasSelectedSecurityMode] = useState(false);
+  
+  // Use ref to track security mode selection without causing re-renders
+  const hasSelectedSecurityModeRef = useRef(false);
 
   /**
    * Load connection data from storage
    */
   const loadConnectionData = useCallback(async () => {
-    console.log('[ConnectionSetupScreen] Loading connection data, isPaired:', isPaired);
+    console.log('[ConnectionSetupScreen] Loading connection data, isPaired:', isPaired, 'isManuallyConnecting:', isManuallyConnecting);
     
     if (isPaired) {
       const mode = await ConnectionStateManager.getSecurityMode();
@@ -53,7 +55,7 @@ export const ConnectionSetupScreen: React.FC = () => {
           }
         }
       } else {
-        // For secure/insecure_ssl, use WSS URL
+        // For secure/insecure-ssl, use WSS URL
         const wssUrl = await ConnectionStateManager.getWSSUrl();
         if (wssUrl) {
           const match = wssUrl.match(/wss:\/\/([^:]+):(\d+)/);
@@ -71,14 +73,17 @@ export const ConnectionSetupScreen: React.FC = () => {
       
       setStatus(isConnected ? 'Connected' : 'Disconnected');
     } else {
-      // Not paired - reset to defaults
-      setUrl('192.168.1.');
-      setPort('8080');
-      setSecurityMode('');
-      setServerCertificate('');
-      setStatus('Idle');
+      // Not paired - only reset to defaults if we're not in the middle of connecting
+      if (!isManuallyConnecting) {
+        setUrl('192.168.1.');
+        setPort('8080');
+        setSecurityMode('');
+        setServerCertificate('');
+        setStatus('Idle');
+      }
+      // If we're connecting, keep the current status (e.g., "Waiting for approval...")
     }
-  }, [isPaired, isConnected]);
+  }, [isPaired, isConnected, isManuallyConnecting]);
 
   /**
    * Reload connection data when screen comes into focus
@@ -94,16 +99,17 @@ export const ConnectionSetupScreen: React.FC = () => {
     try {
       const savedMode = await ConnectionStateManager.getSecurityMode();
       
-      if (savedMode === 'insecure_ssl') {
+      if (savedMode === 'insecure-ssl' || savedMode === 'secure') {
         setStatus('Connecting with trusted certificate...');
-        await WebSocketService.connectSecureInsecure();
-      } else if (savedMode === 'unencrypted') {
+        const wssUrl = await ConnectionStateManager.getWSSUrl();
+        if (wssUrl) {
+          await WebSocketService.connect(wssUrl, savedMode);
+        } else {
+          throw new Error('No server URL saved for encrypted connection');
+        }
+      } else {
         setStatus('Connecting unencrypted...');
         // Already connected via ws:// during handshake, just verify
-      } else {
-        // Default: Try secure connection
-        setStatus('Connecting securely...');
-        await WebSocketService.connectSecure();
       }
       
       setStatus('Connected successfully!');
@@ -142,9 +148,9 @@ export const ConnectionSetupScreen: React.FC = () => {
   };
 
 
-  const handleCertModalChoice = async (mode: 'insecure_ssl' | 'unencrypted' | 'abort') => {
+  const handleCertModalChoice = async (mode: 'insecure-ssl' | 'unencrypted' | 'abort') => {
     // Mark that user has made a security choice to prevent modal from reopening
-    setHasSelectedSecurityMode(true);
+    hasSelectedSecurityModeRef.current = true;
     setShowCertModal(false);
     
     if (mode === 'abort') {
@@ -158,9 +164,14 @@ export const ConnectionSetupScreen: React.FC = () => {
       // Save the security mode preference
       await ConnectionStateManager.saveSecurityMode(mode);
       
-      if (mode === 'insecure_ssl') {
+      if (mode === 'insecure-ssl') {
         setStatus('Connecting with trusted certificate...');
-        await WebSocketService.connectSecureInsecure();
+        const wssUrl = await ConnectionStateManager.getWSSUrl();
+        if (wssUrl) {
+          await WebSocketService.connect(wssUrl, 'insecure-ssl');
+        } else {
+          throw new Error('No server URL saved for encrypted connection');
+        }
         setStatus('Connected with trusted certificate!');
       } else if (mode === 'unencrypted') {
         setStatus('Switching to unencrypted connection...');
@@ -171,7 +182,7 @@ export const ConnectionSetupScreen: React.FC = () => {
         if (!wsUrl) {
           throw new Error('No WS URL available for unencrypted connection');
         }
-        await WebSocketService.connect(wsUrl);
+        await WebSocketService.connect(wsUrl, 'unencrypted');
         setStatus('Connected unencrypted!');
       }
       
@@ -252,7 +263,7 @@ export const ConnectionSetupScreen: React.FC = () => {
     const handleCertVerificationFailed = (error: any) => {
       console.log('[ConnectionSetupScreen] Certificate verification failed:', error);
       // Only show modal if user hasn't already made a security choice
-      if (!hasSelectedSecurityMode) {
+      if (!hasSelectedSecurityModeRef.current) {
         setStatus('Certificate verification failed');
         setShowCertModal(true);
       } else {
@@ -289,7 +300,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       WebSocketService.off('cert:verification_failed', handleCertVerificationFailed);
       ConnectionStateManager.off('credentials:cleared', handleCredentialsCleared);
     };
-  }, [isPaired, isConnected, loadConnectionData, hasSelectedSecurityMode]);
+  }, [isPaired, isConnected, loadConnectionData]);
 
 
   const handleConnect = async () => {
@@ -304,7 +315,7 @@ export const ConnectionSetupScreen: React.FC = () => {
 
     try {
       console.log('[ConnectionSetupScreen] Connecting to:', wsUrl);
-      await WebSocketService.connect(wsUrl);
+      await WebSocketService.connect(wsUrl, 'unencrypted');
       await AsyncStorage.setItem('harmony_server_url', wsUrl);
       setStatus('Connected! Sending handshake request...');
       await SyncService.requestHandshake();
@@ -358,7 +369,7 @@ export const ConnectionSetupScreen: React.FC = () => {
               <View style={[styles.input, { justifyContent: 'center' }]}>
                 <ThemedText>
                   {securityMode === 'secure' && '🔒 Secure (Verified SSL)'}
-                  {securityMode === 'insecure_ssl' && '🔓 Trusted Certificate (Self-Signed)'}
+                  {securityMode === 'insecure-ssl' && '🔓 Trusted Certificate (Self-Signed)'}
                   {securityMode === 'unencrypted' && '⚠️ Unencrypted (No SSL)'}
                 </ThemedText>
               </View>

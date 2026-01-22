@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import ConnectionStateManager from '../services/ConnectionStateManager';
 import WebSocketService from '../services/WebSocketService';
 import SyncService from '../services/SyncService';
@@ -27,6 +27,9 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [reconnectTimeoutId, setReconnectTimeoutId] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [lastConnectionError, setLastConnectionError] = useState<string>('');
+  
+  // Track if we've already initialized to prevent re-initialization on state changes
+  const hasInitialized = useRef(false);
   
   // Auto-reconnect configuration
   const MAX_RECONNECT_ATTEMPTS = 5;
@@ -133,17 +136,32 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
       }
     };
 
+    const handleCertVerificationFailed = (error: any) => {
+      console.log('[ConnectionContext] Certificate verification failed - stopping auto-reconnect loop');
+      // Clear any pending reconnect timeout to prevent spamming
+      if (reconnectTimeoutId) {
+        clearTimeout(reconnectTimeoutId);
+        setReconnectTimeoutId(null);
+      }
+      // Reset reconnect attempts to prevent auto-reconnect while modal is open
+      setReconnectAttempts(MAX_RECONNECT_ATTEMPTS + 1); // Set to a value that prevents reconnecting
+    };
+
     ConnectionStateManager.on('state:changed', handleStateChange);
     WebSocketService.on('connected', handleConnected);
     WebSocketService.on('connected:secure', handleConnectedSecure);
     WebSocketService.on('disconnected', handleDisconnected);
     WebSocketService.on('disconnected:secure', handleDisconnectedSecure);
     WebSocketService.on('error', handleWebSocketError);
+    WebSocketService.on('cert:verification_failed', handleCertVerificationFailed);
     SyncService.on('sync:completed', handleSyncCompleted);
     SyncService.on('sync:error', handleSyncError);
 
-    // Initialize connection state on mount
-    initializeConnection();
+    // Initialize connection state on mount only once
+    if (!hasInitialized.current) {
+      hasInitialized.current = true;
+      initializeConnection();
+    }
 
     return () => {
       ConnectionStateManager.off('state:changed', handleStateChange);
@@ -171,6 +189,15 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
       'protocol',
       'ECONNREFUSED',
       'network unreachable',
+      'certificate',
+      'ssl',
+      'tls',
+      'cert_',
+      'trust anchor',
+      'self signed',
+      'unable to verify',
+      'verification failed',
+      'handshake',
     ];
     
     return fatalErrorPatterns.some(pattern => 
@@ -186,6 +213,12 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
     if (reconnectTimeoutId) {
       clearTimeout(reconnectTimeoutId);
       setReconnectTimeoutId(null);
+    }
+    
+    // If we're waiting for certificate verification, don't reconnect
+    if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+      console.log('[ConnectionContext] Certificate verification in progress - skipping auto-reconnect');
+      return;
     }
     
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
@@ -276,19 +309,21 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
       const savedMode = await ConnectionStateManager.getSecurityMode();
       console.log('[ConnectionContext] Using security mode:', savedMode || 'secure (default)');
       
-      if (savedMode === 'insecure_ssl') {
-        await WebSocketService.connectSecureInsecure();
-      } else if (savedMode === 'unencrypted') {
-        // For unencrypted, use the original WS URL (different port than WSS)
+      if (savedMode === 'insecure-ssl' || savedMode === 'secure') {
+        const wssUrl = await ConnectionStateManager.getWSSUrl();
+        if (wssUrl) {
+          await WebSocketService.connect(wssUrl, savedMode);
+        } else {
+          throw new Error('No server URL saved for encrypted connection');
+        }        
+      } else  {
+        // Default: unencrypted connection
         const wsUrl = await ConnectionStateManager.getWSUrl();
         if (wsUrl) {
-          await WebSocketService.connect(wsUrl);
+          await WebSocketService.connect(wsUrl, 'unencrypted');
         } else {
           throw new Error('No server URL saved for unencrypted connection');
         }
-      } else {
-        // Default: secure connection
-        await WebSocketService.connectSecure();
       }
       
       console.log('[ConnectionContext] Auto-connect successful');
@@ -330,7 +365,7 @@ export const ConnectionProvider: React.FC<ConnectionProviderProps> = ({ children
       const wsUrl = wssUrl.replace('wss://', 'ws://').replace('/events', '/events');
       
       // Connect with WS first
-      await WebSocketService.connect(wsUrl);
+      await WebSocketService.connect(wsUrl, 'unencrypted');
       
       // Request new handshake
       await SyncService.requestHandshake();

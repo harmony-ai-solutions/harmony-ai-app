@@ -3,6 +3,7 @@ import DeviceInfo from 'react-native-device-info';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SyncHelpers from '../database/sync';
+import ConnectionStateManager from './ConnectionStateManager';
 
 // Define event types for type safety
 interface SyncServiceEvents {
@@ -89,8 +90,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     await AsyncStorage.setItem('harmony_server_cert', payload.server_cert);
     await AsyncStorage.setItem('harmony_token_expires_at', payload.token_expires_at.toString());
     
+    // Save security mode preference after handshake
+    await ConnectionStateManager.saveSecurityMode('secure');
+    
     this.emit('handshake:accepted', payload);
-  }
+  };
 
   async initiateSync(): Promise<void> {
     const lastSync = await this.getLastSyncTimestamp();

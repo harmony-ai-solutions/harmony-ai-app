@@ -10,15 +10,29 @@ export const toUnixTimestamp = (isoDate: string): number => {
 export const getChangedRecords = async (table: string, lastSyncTimestamp: number) => {
   const db = getDatabase();
   
-  // Use CAST(strftime('%s', column) AS INTEGER) for numeric comparisons
-  const query = `
-    SELECT * FROM ${table}
-    WHERE CAST(strftime('%s', created_at) AS INTEGER) > ?
-       OR CAST(strftime('%s', updated_at) AS INTEGER) > ?
-       OR (deleted_at IS NOT NULL AND CAST(strftime('%s', deleted_at) AS INTEGER) > ?)
-  `;
+  // For first sync (lastSyncTimestamp = 0), we want to include ALL records regardless of timestamp
+  let query: string;
+  let params: any[];
   
-  const [result] = await db.executeSql(query, [lastSyncTimestamp, lastSyncTimestamp, lastSyncTimestamp]);
+  if (lastSyncTimestamp === 0) {
+    // On first sync, include all non-deleted records (including those with old timestamps)
+    query = `
+      SELECT * FROM ${table}
+      WHERE deleted_at IS NULL OR CAST(strftime('%s', deleted_at) AS INTEGER) > ?
+    `;
+    params = [lastSyncTimestamp];
+  } else {
+    // For subsequent syncs, use normal timestamp comparison
+    query = `
+      SELECT * FROM ${table}
+      WHERE CAST(strftime('%s', created_at) AS INTEGER) > ?
+         OR CAST(strftime('%s', updated_at) AS INTEGER) > ?
+         OR (deleted_at IS NOT NULL AND CAST(strftime('%s', deleted_at) AS INTEGER) > ?)
+    `;
+    params = [lastSyncTimestamp, lastSyncTimestamp, lastSyncTimestamp];
+  }
+  
+  const [result] = await db.executeSql(query, params);
   
   const records: any[] = [];
   for (let i = 0; i < result.rows.length; i++) {

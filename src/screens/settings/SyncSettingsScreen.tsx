@@ -108,7 +108,7 @@ export const SyncSettingsScreen: React.FC = () => {
     switch (securityMode) {
       case 'secure':
         return '🔒 Secure (Verified SSL)';
-      case 'insecure_ssl':
+      case 'insecure-ssl':
         return '🔓 Trusted Certificate (Self-Signed)';
       case 'unencrypted':
         return '⚠️ Unencrypted (No SSL)';
