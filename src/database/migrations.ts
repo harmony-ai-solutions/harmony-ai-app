@@ -6,6 +6,8 @@
  */
 
 import {SQLiteDatabase} from 'react-native-sqlite-storage';
+import {createLogger} from '../utils/logger';
+
 import {migration001} from './migrations/000001_initial_schema';
 import {migration002} from './migrations/000002_make_character_profile_optional';
 import {migration003} from './migrations/000003_add_character_card_fields';
@@ -18,6 +20,8 @@ interface Migration {
   description: string;
   sql: string;
 }
+
+const log = createLogger('[Migrations]');
 
 // All migrations in order
 const MIGRATIONS: Migration[] = [
@@ -65,7 +69,7 @@ async function createMigrationsTable(
 
   await db.executeSql(sql);
   if (!silent) {
-    console.log('[Migrations] Created schema_migrations table');
+    log.info('Created schema_migrations table');
   }
 }
 
@@ -93,8 +97,8 @@ async function applyMigration(
   silent: boolean = false
 ): Promise<void> {
   if (!silent) {
-    console.log(
-      `[Migrations] Applying migration ${migration.version}: ${migration.description}`
+    log.info(
+      `Applying migration ${migration.version}: ${migration.description}`
     );
   }
 
@@ -118,15 +122,10 @@ async function applyMigration(
     );
 
     if (!silent) {
-      console.log(
-        `[Migrations] Successfully applied migration ${migration.version}`
-      );
+      log.info(`Successfully applied migration ${migration.version}`);
     }
   } catch (error) {
-    console.error(
-      `[Migrations] Failed to apply migration ${migration.version}:`,
-      error
-    );
+    log.error(`Failed to apply migration ${migration.version}:`, error);
     throw error;
   }
 }
@@ -140,7 +139,7 @@ export async function runMigrations(
   silent: boolean = false
 ): Promise<void> {
   if (!silent) {
-    console.log('[Migrations] Starting migration process...');
+    log.info('Starting migration process...');
   }
 
   try {
@@ -150,9 +149,7 @@ export async function runMigrations(
     // Get already applied migrations
     const appliedVersions = await getAppliedMigrations(db);
     if (!silent) {
-      console.log(
-        `[Migrations] Found ${appliedVersions.size} previously applied migrations`
-      );
+      log.info(`Found ${appliedVersions.size} previously applied migrations`);
     }
 
     // Find pending migrations
@@ -162,15 +159,13 @@ export async function runMigrations(
 
     if (pendingMigrations.length === 0) {
       if (!silent) {
-        console.log('[Migrations] Database is up to date');
+        log.info('Database is up to date');
       }
       return;
     }
 
     if (!silent) {
-      console.log(
-        `[Migrations] Applying ${pendingMigrations.length} pending migrations`
-      );
+      log.info(`Applying ${pendingMigrations.length} pending migrations`);
     }
 
     // Apply each pending migration in order
@@ -179,10 +174,10 @@ export async function runMigrations(
     }
 
     if (!silent) {
-      console.log('[Migrations] All migrations completed successfully');
+      log.info('All migrations completed successfully');
     }
   } catch (error) {
-    console.error('[Migrations] Migration process failed:', error);
+    log.error('Migration process failed:', error);
     throw error;
   }
 }

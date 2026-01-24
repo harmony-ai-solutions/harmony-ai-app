@@ -1,6 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WebSocketConnection } from './WebSocketConnection';
 import { BaseWebSocketConnection } from './BaseWebSocketConnection';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('[SecureWebSocketConnection]');
 
 export class SecureWebSocketConnection extends BaseWebSocketConnection implements WebSocketConnection {
   private wss: WebSocket | null = null;
@@ -12,7 +15,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
   async connect(url: string): Promise<void> {
     // Clean up existing secure connection properly
     if (this.wss) {
-      console.log('[SecureWebSocketConnection] Closing existing WSS connection');
+      log.info('Closing existing WSS connection');
       const oldWss = this.wss;
       oldWss.onopen = null;
       oldWss.onmessage = null;
@@ -22,7 +25,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
       this.wss = null;
     }
 
-    console.log('[SecureWebSocketConnection] Connecting securely to:', url);
+    log.info(`Connecting securely to: ${url}`);
     
     return new Promise((resolve, reject) => {
       try {
@@ -30,7 +33,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
         AsyncStorage.getItem('harmony_jwt').then(async (jwt) => {
           if (!jwt) {
             const error = new Error('No JWT credentials available');
-            console.error('[SecureWebSocketConnection]', error.message);
+            log.error(error.message);
             reject(error);
             return;
           }
@@ -42,7 +45,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
           
           // Set a timeout for the connection attempt
           const connectionTimeout = setTimeout(() => {
-            console.error('[SecureWebSocketConnection] WSS connection timeout');
+            log.error('WSS connection timeout');
             wss.close();
             this.wss = null;
             reject(new Error('Secure connection timeout'));
@@ -55,7 +58,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
           
           wss.onopen = () => {
             clearTimeout(connectionTimeout);
-            console.log('[SecureWebSocketConnection] Connected securely (WSS)');
+            log.info('Connected securely (WSS)');
             
             this.emit('connected');
             resolve();
@@ -63,9 +66,9 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
           
           wss.onerror = (error: any) => {
             clearTimeout(connectionTimeout);
-            console.error('[SecureWebSocketConnection] Secure connection error:', error);
-            console.error('[SecureWebSocketConnection] Error type:', typeof error);
-            console.error('[SecureWebSocketConnection] Error keys:', error ? Object.keys(error) : 'null');
+            log.error('Secure connection error:', error);
+            log.error(`Error type: ${typeof error}`);
+            log.error(`Error keys: ${error ? Object.keys(error) : 'null'}`);
             
             // Detect certificate verification errors - check multiple error formats
             // Handle the case where error.toString() returns '[object Object]' which is useless
@@ -80,7 +83,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
               errorString = (error?.message || errorToString || JSON.stringify(error) || '').toLowerCase();
             }
             
-            console.log('[SecureWebSocketConnection] Error string for detection:', errorString);
+            log.info(`Error string for detection: ${errorString}`);
             
             const isCertError = 
               errorString.includes('certificate') ||
@@ -106,7 +109,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
             this.wss = null;
             
             if (isCertError || hasGenericErrorStructure) {
-              console.log('[SecureWebSocketConnection] Certificate verification failed - emitting event');
+              log.info('Certificate verification failed - emitting event');
               this.emit('cert:verification_failed', error);
             } else {
               this.emit('error', error);
@@ -116,7 +119,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
 
           wss.onclose = (event) => {
             clearTimeout(connectionTimeout);
-            console.log('[SecureWebSocketConnection] Secure connection closed, code:', event.code, 'reason:', event.reason);
+            log.info(`Secure connection closed, code: ${event.code} reason: ${event.reason}`);
             
             // Only emit disconnected if this is still our current connection
             if (this.wss === wss) {
@@ -128,11 +131,11 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
           // Only assign to this.wss after all handlers are set up
           this.wss = wss;
         }).catch((error) => {
-          console.error('[SecureWebSocketConnection] Failed to get JWT token:', error);
+          log.error('Failed to get JWT token:', error);
           reject(error);
         });
       } catch (error) {
-        console.error('[SecureWebSocketConnection] Failed to create WSS connection:', error);
+        log.error('Failed to create WSS connection:', error);
         this.wss = null;
         reject(error);
       }
@@ -140,13 +143,13 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
   }
 
   disconnect(): void {
-    console.log('[SecureWebSocketConnection] Disconnecting');
+    log.info('Disconnecting');
     
     if (this.wss) {
       try {
         this.wss.close();
       } catch (err) {
-        console.warn('[SecureWebSocketConnection] Error closing connection:', err);
+        log.warn('Error closing connection:', err);
       }
       this.wss = null;
     }
@@ -155,24 +158,24 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
   async sendEvent(event: any): Promise<void> {
     if (!this.wss) {
       const error = new Error('No WebSocket connection available');
-      console.error('[SecureWebSocketConnection]', error.message);
+      log.error(error.message);
       this.emit('error', error);
       throw error;
     }
 
     if (this.wss.readyState !== WebSocket.OPEN) {
       const error = new Error(`WebSocket not ready (state: ${this.wss.readyState})`);
-      console.error('[SecureWebSocketConnection]', error.message);
+      log.error(error.message);
       this.emit('error', error);
       throw error;
     }
 
     try {
       const message = JSON.stringify(event);
-      console.log('[SecureWebSocketConnection] Sending event:', event.event_type);
+      log.info(`Sending event: ${event.event_type}`);
       this.wss.send(message);
     } catch (error) {
-      console.error('[SecureWebSocketConnection] Error sending event:', error);
+      log.error('Error sending event:', error);
       this.emit('error', error);
       throw error;
     }

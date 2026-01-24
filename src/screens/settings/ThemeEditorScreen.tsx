@@ -7,8 +7,11 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { Theme, ThemeColors } from '../../theme/types';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
+import { createLogger } from '../../utils/logger';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/AppNavigator';
+
+const log = createLogger('[ThemeEditorScreen]');
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ThemeEditor'>;
 
@@ -97,7 +100,7 @@ export const ThemeEditorScreen: React.FC<Props> = ({ navigation, route }) => {
             }
             navigation.goBack();
         } catch (e) {
-            console.error("Failed to save theme", e);
+            log.error('Failed to save theme', e);
         }
     };
 

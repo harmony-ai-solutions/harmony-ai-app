@@ -2,6 +2,9 @@ import React from 'react';
 import { ViewProps, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('[ThemedGradient]');
 
 interface ThemedGradientProps extends ViewProps {
     /** Which gradient from theme to use */
@@ -100,7 +103,7 @@ function parseGradient(gradientString: string): {
             end: coords.end,
         };
     } catch (err) {
-        console.error('Failed to parse gradient:', err);
+        log.error('Failed to parse gradient:', err);
         return null;
     }
 }

@@ -19,6 +19,9 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { executeRawQuery } from '../../database/connection';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('[DatabaseTableViewer]');
 
 interface TableInfo {
     name: string;
@@ -94,7 +97,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Failed to load tables';
             setError(errorMessage);
-            console.error('[DatabaseTableViewer] Error loading tables:', err);
+            log.error('Error loading tables:', err);
         } finally {
             setIsLoading(false);
         }
@@ -129,7 +132,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Failed to load table data';
             setError(errorMessage);
-            console.error('[DatabaseTableViewer] Error loading table data:', err);
+            log.error('Error loading table data:', err);
         } finally {
             setIsLoading(false);
         }

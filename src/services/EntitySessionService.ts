@@ -3,6 +3,9 @@ import DeviceInfo from 'react-native-device-info';
 import { Platform } from 'react-native';
 import ConnectionManager from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[EntitySessionService]');
 
 export interface EntitySession {
   sessionId: string;              // From backend after ENTITY_SESSION_ACCEPT
@@ -60,11 +63,11 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     
     // Check if session already exists
     if (this.sessions.has(entityId)) {
-      console.warn(`[EntitySessionService] Session for ${entityId} already exists`);
+      log.warn(`Session for ${entityId} already exists`);
       return this.sessions.get(entityId)!;
     }
     
-    console.log(`[EntitySessionService] Starting session for entity ${entityId}`);
+    log.info(`Starting session for entity ${entityId}`);
     
     const deviceId = await DeviceInfo.getUniqueId();
     const connectionId = `entity-${entityId}`;
@@ -110,7 +113,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       
       return session;
     } catch (error) {
-      console.error(`[EntitySessionService] Failed to start session for ${entityId}:`, error);
+      log.error(`Failed to start session for ${entityId}:`, error);
       this.sessions.delete(entityId);
       throw error;
     }
@@ -138,11 +141,11 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     const session = this.sessions.get(entityId);
     
     if (!session) {
-      console.warn(`[EntitySessionService] No session found for ${entityId}`);
+      log.warn(`No session found for ${entityId}`);
       return;
     }
     
-    console.log(`[EntitySessionService] Stopping session for entity ${entityId}`);
+    log.info(`Stopping session for entity ${entityId}`);
     
     try {
       // Send session end event if connected
@@ -150,7 +153,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         await this.sendSessionEnd(session);
       }
     } catch (error) {
-      console.error(`[EntitySessionService] Error sending session end:`, error);
+      log.error('Error sending session end:', error);
     } finally {
       // Disconnect and cleanup
       this.connectionManager.disconnectConnection(session.connectionId);
@@ -206,12 +209,12 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
   
   private handleEntityConnected(entityId: string): void {
-    console.log(`[EntitySessionService] Entity ${entityId} connected`);
+    log.info(`Entity ${entityId} connected`);
     // Connection is established, waiting for SESSION_ACCEPT
   }
   
   private handleEntityDisconnected(entityId: string): void {
-    console.log(`[EntitySessionService] Entity ${entityId} disconnected`);
+    log.info(`Entity ${entityId} disconnected`);
     const session = this.sessions.get(entityId);
     if (session) {
       session.status = 'disconnected';
@@ -220,7 +223,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
   
   private handleEntityError(entityId: string, error: any): void {
-    console.error(`[EntitySessionService] Entity ${entityId} error:`, error);
+    log.error(`Entity ${entityId} error:`, error);
     this.emit('session:error', entityId, error.message || 'Connection error');
   }
   
@@ -230,7 +233,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     
     session.lastActivity = Date.now();
     
-    console.log(`[EntitySessionService] Entity ${entityId} event: ${event.event_type}`);
+    log.info(`Entity ${entityId} event: ${event.event_type}`);
     
     switch (event.event_type) {
       case 'ENTITY_SESSION_ACCEPT':
@@ -252,7 +255,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         break;
         
       default:
-        console.warn(`[EntitySessionService] Unhandled event: ${event.event_type}`);
+        log.warn(`Unhandled event: ${event.event_type}`);
     }
   }
   

@@ -2,6 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import WebSocketWithSelfSignedCert from 'react-native-websocket-self-signed';
 import { WebSocketConnection } from './WebSocketConnection'
 import { BaseWebSocketConnection } from './BaseWebSocketConnection';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('[InsecureSSLWebSocketConnection]');
 
 export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection implements WebSocketConnection {
   private wssSelfSigned: WebSocketWithSelfSignedCert | null = null;
@@ -15,13 +18,13 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
     
     if (!jwt) {
       const error = new Error('No JWT credentials available');
-      console.error('[InsecureSSLWebSocketConnection]', error.message);
+      log.error(error.message);
       throw error;
     }
 
     // Close existing connections properly
     if (this.wssSelfSigned) {
-      console.log('[InsecureSSLWebSocketConnection] Closing existing self-signed WSS connection');
+      log.info('Closing existing self-signed WSS connection');
       const oldWs = this.wssSelfSigned;
       
       // Clear event handlers to prevent spurious events
@@ -32,23 +35,23 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
         oldWs.onClose(() => {});
         oldWs.close();
       } catch (err) {
-        console.warn('[InsecureSSLWebSocketConnection] Error closing self-signed connection:', err);
+        log.warn('Error closing self-signed connection:', err);
       }
       
       this.wssSelfSigned = null;
     }
 
-    console.log('[InsecureSSLWebSocketConnection] Connecting with self-signed cert library to:', url);
+    log.info(`Connecting with self-signed cert library to: ${url}`);
     
     return new Promise((resolve, reject) => {
       // Set a timeout for the connection attempt
       const connectionTimeout = setTimeout(() => {
-        console.error('[InsecureSSLWebSocketConnection] Self-signed WSS connection timeout');
+        log.error('Self-signed WSS connection timeout');
         if (this.wssSelfSigned) {
           try {
             this.wssSelfSigned.close();
           } catch (err) {
-            console.warn('[InsecureSSLWebSocketConnection] Error closing timed-out connection:', err);
+            log.warn('Error closing timed-out connection:', err);
           }
           this.wssSelfSigned = null;
         }
@@ -60,7 +63,7 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
         
         ws.onOpen(() => {
           clearTimeout(connectionTimeout);
-          console.log('[InsecureSSLWebSocketConnection] Connected securely (self-signed)');
+          log.info('Connected securely (self-signed)');
           
           this.emit('connected');
           resolve();
@@ -74,22 +77,22 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
         
         ws.onClose(() => {
           clearTimeout(connectionTimeout);
-          console.log('[InsecureSSLWebSocketConnection] Self-signed connection closed');
+          log.info('Self-signed connection closed');
           
-          // Only emit disconnected if this is our current connection
+          // Only emit disconnected if this is still our current connection
           if (this.wssSelfSigned === ws) {
-            console.log('[InsecureSSLWebSocketConnection] Current connection closed, cleaning up');
+            log.info('Current connection closed, cleaning up');
             this.wssSelfSigned = null;
             
             this.emit('disconnected');
           } else {
-            console.log('[InsecureSSLWebSocketConnection] Old connection closed, ignoring');
+            log.info('Old connection closed, ignoring');
           }
         });
         
         ws.onError((err: string) => {
           clearTimeout(connectionTimeout);
-          console.error('[InsecureSSLWebSocketConnection] Self-signed connection error:', err);
+          log.error(`Self-signed connection error: ${err}`);
           
           // Clean up failed connection
           if (this.wssSelfSigned === ws) {
@@ -104,12 +107,12 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
         // Connect with JWT authorization header
         ws.connect({ Authorization: `Bearer ${jwt}` })
           .then(() => {
-            console.log('[InsecureSSLWebSocketConnection] Self-signed connection established');
+            log.info('Self-signed connection established');
             this.wssSelfSigned = ws;
           })
           .catch((err: any) => {
             clearTimeout(connectionTimeout);
-            console.error('[InsecureSSLWebSocketConnection] Failed to connect with self-signed library:', err);
+            log.error('Failed to connect with self-signed library:', err);
             
             // Clean up
             if (this.wssSelfSigned === ws) {
@@ -122,7 +125,7 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
           
       } catch (error) {
         clearTimeout(connectionTimeout);
-        console.error('[InsecureSSLWebSocketConnection] Failed to initialize self-signed connection:', error);
+        log.error('Failed to initialize self-signed connection:', error);
         this.wssSelfSigned = null;
         reject(error);
       }
@@ -130,7 +133,7 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
   }
 
   disconnect(): void {
-    console.log('[InsecureSSLWebSocketConnection] Disconnecting');
+    log.info('Disconnecting');
     
     if (this.wssSelfSigned) {
       try {
@@ -141,7 +144,7 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
         // Now close the connection
         ws.close();
       } catch (err) {
-        console.warn('[InsecureSSLWebSocketConnection] Error closing connection:', err);
+        log.warn('Error closing connection:', err);
       }
     }
   }
@@ -154,17 +157,17 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
   async sendEvent(event: any): Promise<void> {
     if (!this.wssSelfSigned) {
       const error = new Error('No WebSocket connection available');
-      console.error('[InsecureSSLWebSocketConnection]', error.message);
+      log.error(error.message);
       this.emit('error', error);
       throw error;
     }
 
     try {
       const message = JSON.stringify(event);
-      console.log('[InsecureSSLWebSocketConnection] Sending event:', event.event_type);
+      log.info(`Sending event: ${event.event_type}`);
       this.wssSelfSigned.send(message);
     } catch (error) {
-      console.error('[InsecureSSLWebSocketConnection] Error sending event:', error);
+      log.error('Error sending event:', error);
       this.emit('error', error);
       throw error;
     }

@@ -1,6 +1,9 @@
 import EventEmitter from 'eventemitter3';
 import { WebSocketConnection } from '../websocket/WebSocketConnection';
 import { WebSocketConnectionFactory } from '../websocket/WebSocketConnectionFactory';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('[ConnectionManager]');
 
 export type ConnectionType = 'sync' | 'entity';
 export type ConnectionMode = 'unencrypted' | 'secure' | 'insecure-ssl';
@@ -44,7 +47,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
   
   private constructor() {
     super();
-    console.log('[ConnectionManager] Initialized');
+    log.info('Initialized');
   }
   
   static getInstance(): ConnectionManager {
@@ -76,11 +79,11 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
     
     // Check if connection already exists
     if (this.connections.has(id)) {
-      console.warn(`[ConnectionManager] Connection ${id} already exists, disconnecting first`);
+      log.warn(`Connection ${id} already exists, disconnecting first`);
       this.disconnectConnection(id);
     }
     
-    console.log(`[ConnectionManager] Creating ${type} connection: ${id}`);
+    log.info(`Creating ${type} connection: ${id}`);
     
     // Create WebSocket connection using factory
     const connection = WebSocketConnectionFactory.createConnection(mode);
@@ -115,9 +118,9 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
       connectionInfo.status = 'connected';
       connectionInfo.lastActivity = Date.now();
       
-      console.log(`[ConnectionManager] Connection ${id} established`);
+      log.info(`Connection ${id} established`);
     } catch (error) {
-      console.error(`[ConnectionManager] Failed to connect ${id}:`, error);
+      log.error(`Failed to connect ${id}:`, error);
       connectionInfo.status = 'error';
       this.emit('connection:error', id, error);
       throw error;
@@ -132,7 +135,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
       const info = this.connections.get(connectionId);
       if (!info) return;
 
-      console.log(`[ConnectionManager] ${connectionId} connected`);
+      log.info(`${connectionId} connected`);
       info.status = 'connected';
       info.lastActivity = Date.now();
       
@@ -151,7 +154,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
       const info = this.connections.get(connectionId);
       if (!info) return;
 
-      console.log(`[ConnectionManager] ${connectionId} disconnected`);
+      log.info(`${connectionId} disconnected`);
       info.status = 'disconnected';
       
       this.emit('connection:disconnected', connectionId);
@@ -169,7 +172,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
       const info = this.connections.get(connectionId);
       if (!info) return;
 
-      console.error(`[ConnectionManager] ${connectionId} error:`, error);
+      log.error(`${connectionId} error:`, error);
       info.status = 'error';
       
       this.emit('connection:error', connectionId, error);
@@ -184,7 +187,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
 
     // Cert verification failed event
     connection.on('cert:verification_failed', (error: any) => {
-      console.log(`[ConnectionManager] ${connectionId} cert verification failed`);
+      log.info(`${connectionId} cert verification failed`);
       this.emit('cert:verification_failed', error);
     });
     
@@ -195,7 +198,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
 
       info.lastActivity = Date.now();
       
-      console.log(`[ConnectionManager] ${connectionId} received event: ${data.event_type}`);
+      log.info(`${connectionId} received event: ${data.event_type}`);
       
       // Route to appropriate handler
       if (info.type === 'sync') {
@@ -238,7 +241,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
       throw new Error(`Connection ${connectionId} is not connected`);
     }
     
-    console.log(`[ConnectionManager] Sending event via ${connectionId}: ${event.event_type}`);
+    log.info(`Sending event via ${connectionId}: ${event.event_type}`);
     conn.lastActivity = Date.now();
     
     await conn.connection.sendEvent(event);
@@ -248,11 +251,11 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
     const conn = this.connections.get(id);
     
     if (!conn) {
-      console.warn(`[ConnectionManager] Connection ${id} not found`);
+      log.warn(`Connection ${id} not found`);
       return;
     }
     
-    console.log(`[ConnectionManager] Disconnecting ${id}`);
+    log.info(`Disconnecting ${id}`);
     
     // Remove all event listeners to prevent memory leaks and duplicate events
     conn.connection.removeAllListeners();
@@ -265,7 +268,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
   }
   
   disconnectByType(type: ConnectionType): void {
-    console.log(`[ConnectionManager] Disconnecting all ${type} connections`);
+    log.info(`Disconnecting all ${type} connections`);
     const toDisconnect = Array.from(this.connections.entries())
       .filter(([_, conn]) => conn.type === type)
       .map(([id, _]) => id);
@@ -274,7 +277,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
   }
   
   disconnectAll(): void {
-    console.log('[ConnectionManager] Disconnecting all connections');
+    log.info('Disconnecting all connections');
     const ids = Array.from(this.connections.keys());
     ids.forEach(id => this.disconnectConnection(id));
   }

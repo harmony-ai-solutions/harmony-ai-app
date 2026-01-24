@@ -5,6 +5,7 @@
 - Database Implementation Complete: SQLCipher encryption, full repository layer (84 tests), in-app DEV-only test runner, sync tables added.
 - Test Runner Integration: DatabaseTestScreen in Settings menu, real-time console, color-coded results, themed UI.
 - Advanced Theming: RGB editor, custom theme creation/deletion, JSON import/export, 6 built-in themes.
+- Logging Infrastructure: Migrated from console.log to react-native-logs, production-ready levels, colored dev output, unified [Namespace] prefixes.
 - Bootstrap Complete: RN 0.83.1, TypeScript, navigation, Paper UI, organized structure.
 @Next:
 - Sync Testing: Test handshake flow with Harmony Link, verify HANDSHAKE_PENDING → ACCEPT → WSS upgrade.
@@ -17,10 +18,11 @@
 - React Native Paper for Material Design 3 consistency.
 - React Navigation for type-safe routing.
 - TypeScript strict mode for type safety.
-- Hooks → Redux/Zustand as complexity grows.
+- Hooks -> Redux/Zustand as complexity grows.
 - Dark theme default (matches Harmony Link, OLED-friendly).
 - Database schema 100% compatible with Harmony Link for bidirectional sync.
 - DEV-only test runner using __DEV__ checks for production safety.
+- Logging: Use react-native-logs for all non-test code; preserve console for test runners.
 @Learnings:
 - Metro bundler hot reload excellent with TypeScript.
 - React Native Paper dark theme integration smooth.
@@ -45,6 +47,7 @@
 - Reconnect race condition fix: Only schedule reconnect from disconnected event if NOT in isConnecting state (prevents double-scheduling when connection attempt fails).
 - Event listener accumulation: Always call removeAllListeners() before disconnecting to prevent duplicate error messages from old listeners.
 - Auto-reconnect strategy: Always retry regardless of error type, exponential backoff [1s, 2s, 4s, 8s, 16s, 30s].
+- Logging transport enhancement: Custom transport to stringify Error objects (including stacks) prevents useless '[object Object]' logs.
 @Implementation[Sync]:
 - Multi-Connection Architecture: ConnectionManager manages multiple WebSocket connections (sync + entity sessions).
 - Services[4]: ConnectionManager (transport pool), SyncService (protocol logic), EntitySessionService (session management), ConnectionStateManager (JWT lifecycle).

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, ScrollView, TextInput, Alert } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { createLogger } from '../../utils/logger';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
@@ -14,6 +15,8 @@ import SyncService from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
+
+const log = createLogger('ConnectionSetupScreen');
 
 export const ConnectionSetupScreen: React.FC = () => {
   const { theme } = useAppTheme();
@@ -39,7 +42,7 @@ export const ConnectionSetupScreen: React.FC = () => {
    * Load connection data from storage
    */
   const loadConnectionData = useCallback(async () => {
-    console.log('[ConnectionSetupScreen] Loading connection data, isPaired:', isPaired, 'isManuallyConnecting:', isManuallyConnecting);
+    log.info('Loading connection data, isPaired:', isPaired, 'isManuallyConnecting:', isManuallyConnecting);
     
     if (isPaired) {
       const mode = await ConnectionStateManager.getSecurityMode();
@@ -92,7 +95,7 @@ export const ConnectionSetupScreen: React.FC = () => {
    */
   useFocusEffect(
     useCallback(() => {
-      console.log('[ConnectionSetupScreen] Screen focused, reloading connection data');
+      log.info('Screen focused, reloading connection data');
       loadConnectionData();
     }, [loadConnectionData])
   );
@@ -123,7 +126,7 @@ export const ConnectionSetupScreen: React.FC = () => {
         navigation.navigate('SyncSettings');
       }, 1000);
     } catch (err: any) {
-      console.error('[ConnectionSetupScreen] Secure connection failed:', err);
+      log.error('Secure connection failed:', err);
       
       // Check if this is a certificate error
       const errorString = (err?.message || err?.toString?.() || JSON.stringify(err) || '').toLowerCase();
@@ -137,7 +140,7 @@ export const ConnectionSetupScreen: React.FC = () => {
         errorString.includes('unable to verify');
       
       if (isCertError) {
-        console.log('[ConnectionSetupScreen] Detected cert error in catch block - showing modal');
+        log.info('Detected cert error in catch block - showing modal');
         setStatus('Certificate verification failed');
         setShowCertModal(true);
         // Don't re-throw - we're handling it with the modal
@@ -196,7 +199,7 @@ export const ConnectionSetupScreen: React.FC = () => {
         navigation.navigate('SyncSettings');
       }, 1000);
     } catch (err: any) {
-      console.error('[ConnectionSetupScreen] Connection with selected mode failed:', err);
+      log.error('Connection with selected mode failed:', err);
       setStatus('Connection failed');
       setIsManuallyConnecting(false);
       showToast('Failed to connect with selected security mode');
@@ -209,12 +212,12 @@ export const ConnectionSetupScreen: React.FC = () => {
     loadConnectionData();
 
     const handleHandshakePending = (payload: any) => {
-      console.log('[ConnectionSetupScreen] Handshake pending approval');
+      log.info('Handshake pending approval');
       setStatus('Waiting for approval on Harmony Link...');
     };
 
     const handleHandshakeAccepted = async (payload: any) => {
-      console.log('[ConnectionSetupScreen] Handshake accepted');
+      log.info('Handshake accepted');
       setStatus('Handshake accepted! Saving credentials...');
       
       try {
@@ -234,7 +237,7 @@ export const ConnectionSetupScreen: React.FC = () => {
         // Try to connect with saved security mode, or default to secure
         await attemptSecureConnection();
       } catch (err: any) {
-        console.error('[ConnectionSetupScreen] Connection setup failed:', err);
+        log.error('Connection setup failed:', err);
         setStatus('Connection failed');
         setIsManuallyConnecting(false);
         showToast('Failed to establish connection');
@@ -242,7 +245,7 @@ export const ConnectionSetupScreen: React.FC = () => {
     };
 
     const handleHandshakeRejected = (payload: any) => {
-      console.log('[ConnectionSetupScreen] Handshake rejected');
+      log.info('Handshake rejected');
       setStatus('Connection rejected');
       setIsManuallyConnecting(false);
       showToast('Harmony Link rejected the connection request');
@@ -251,25 +254,25 @@ export const ConnectionSetupScreen: React.FC = () => {
 
     const handleConnectionError = (id: string, error: any) => {
       if (id !== 'sync') return;
-      console.error('[ConnectionSetupScreen] Sync connection error:', error);
+      log.error('Sync connection error:', error);
       setStatus('Connection error');
       setIsManuallyConnecting(false);
       showToast('Connection error occurred');
     };
 
     const handleCertVerificationFailed = (error: any) => {
-      console.log('[ConnectionSetupScreen] Certificate verification failed:', error);
+      log.info('Certificate verification failed:', error);
       // Only show modal if user hasn't already made a security choice
       if (!hasSelectedSecurityModeRef.current) {
         setStatus('Certificate verification failed');
         setShowCertModal(true);
       } else {
-        console.log('[ConnectionSetupScreen] Ignoring cert error - user already selected security mode');
+        log.info('Ignoring cert error - user already selected security mode');
       }
     };
 
     const handleCredentialsCleared = () => {
-      console.log('[ConnectionSetupScreen] Credentials cleared, resetting state');
+      log.info('Credentials cleared, resetting state');
       // Reset local state immediately
       setUrl('192.168.1.');
       setPort('8080');
@@ -309,13 +312,13 @@ export const ConnectionSetupScreen: React.FC = () => {
     setStatus('Connecting to Harmony Link...');
 
     try {
-      console.log('[ConnectionSetupScreen] Connecting to:', wsUrl);
+      log.info('Connecting to:', wsUrl);
       await connectionManager.createConnection('sync', 'sync', wsUrl, 'unencrypted');
       await AsyncStorage.setItem('harmony_server_url', wsUrl);
       setStatus('Connected! Sending handshake request...');
       await SyncService.requestHandshake();
     } catch (err: any) {
-      console.error('[ConnectionSetupScreen] Connection failed:', err);
+      log.error('Connection failed:', err);
       setStatus('Connection failed');
       setIsManuallyConnecting(false);
       showToast('Failed to connect to Harmony Link');
@@ -398,7 +401,7 @@ export const ConnectionSetupScreen: React.FC = () => {
                       setStatus('Connected!');
                       showToast('Reconnected successfully');
                     } catch (error: any) {
-                      console.error('[ConnectionSetupScreen] Manual reconnect failed:', error);
+                      log.error('Manual reconnect failed:', error);
                       setStatus('Reconnection failed');
                       showToast('Failed to reconnect');
                     }

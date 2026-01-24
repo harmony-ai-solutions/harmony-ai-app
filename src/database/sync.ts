@@ -1,4 +1,7 @@
 import { getDatabase } from './connection';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[DatabaseSync]');
 
 /**
  * Critical: Use CAST(strftime('%s', ...) AS INTEGER) for all timestamp comparisons

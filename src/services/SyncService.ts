@@ -6,6 +6,9 @@ import * as SyncHelpers from '../database/sync';
 import ConnectionStateManager from './ConnectionStateManager';
 import connectionManagerInstance from './connection/ConnectionManager';
 import type { ConnectionManager } from './connection/ConnectionManager';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[SyncService]');
 
 // Define event types for type safety
 interface SyncServiceEvents {
@@ -59,7 +62,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   }
 
   private routeSyncEvent(data: any) {
-    console.log('[SyncService] Received sync event:', data.event_type, 'status:', data.status);
+    log.info(`Received sync event: ${data.event_type} status: ${data.status}`);
     
     switch (data.event_type) {
       case 'HANDSHAKE_PENDING':
@@ -108,7 +111,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         break;
         
       default:
-        console.warn(`[SyncService] Unhandled sync event type: ${data.event_type}`);
+        log.warn(`Unhandled sync event type: ${data.event_type}`);
     }
   }
 
@@ -132,12 +135,12 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       }
     };
     
-    console.log('[SyncService] Requesting handshake:', event);
+    log.info('Requesting handshake:', event);
     await this.connectionManager.sendEvent('sync', event);
   }
 
   private async handleHandshakeAccept(payload: any): Promise<void> {
-    console.log('[SyncService] Handshake accepted:', payload);
+    log.info('Handshake accepted:', payload);
     await AsyncStorage.setItem('harmony_jwt', payload.jwt_token);    
 
     // Get the server URL from the current WebSocket connection
@@ -146,7 +149,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       // Replace ws:// with wss:// and update port
       const wssUrl = currentWsUrl.replace(/^ws:\/\//, 'wss://').replace(/:\d+/, `:${payload.wss_port}`);
       await AsyncStorage.setItem('harmony_wss_url', wssUrl);
-      console.log('[SyncService] Constructed WSS URL:', wssUrl);
+      log.info(`Constructed WSS URL: ${wssUrl}`);
     }
     
     await AsyncStorage.setItem('harmony_server_cert', payload.server_cert);
@@ -192,17 +195,17 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       }
     };
     
-    console.log('[SyncService] Initiating sync:', event);
+    log.info('Initiating sync:', event);
     await this.connectionManager.sendEvent('sync', event);
   }
 
   private async handleSyncAccept(payload: any): Promise<void> {
     if (!this.currentSession) {
-      console.warn('[SyncService] Received SYNC_ACCEPT but no current session');
+      log.warn('Received SYNC_ACCEPT but no current session');
       return;
     }
     
-    console.log('[SyncService] Sync accepted:', payload);
+    log.info('Sync accepted:', payload);
     this.currentSession.status = 'in_progress';
     this.currentSession.sessionId = payload.sync_session_id;
     
@@ -212,13 +215,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     try {
       await this.sendLocalChanges(payload.last_sync_timestamp);
     } catch (error: any) {
-      console.error('[SyncService] Error sending local changes:', error);
+      log.error('Error sending local changes:', error);
       this.emit('sync:error', error.message);
     }
   }
 
   private async sendLocalChanges(lastSync: number): Promise<void> {
-    console.log('[SyncService] Sending local changes since:', lastSync);
+    log.info(`Sending local changes since: ${lastSync}`);
     
     const tables = [
       'character_profiles',
@@ -248,7 +251,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     for (const table of tables) {
       try {
         const changes = await SyncHelpers.getChangedRecords(table, lastSync);
-        console.log(`[SyncService] Found ${changes.length} changes in ${table}`);
+        log.info(`Found ${changes.length} changes in ${table}`);
         
         for (const record of changes) {
           const operation = record.deleted_at ? 'delete' : 
@@ -257,7 +260,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
           await this.sendSyncData(table, operation, record);
         }
       } catch (error: any) {
-        console.error(`[SyncService] Error syncing table ${table}:`, error);
+        log.error(`Error syncing table ${table}:`, error);
         // Continue with other tables
       }
     }
@@ -266,7 +269,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     
     // Mark that we've finished sending our local changes
     this.localChangesSent = true;
-    console.log('[SyncService] Local changes sent, waiting for remote confirmation');
+    log.info('Local changes sent, waiting for remote confirmation');
     this.attemptFinalize();
   }
 
@@ -287,7 +290,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       }
     };
     
-    console.log(`[SyncService] Sending sync data for ${table}:${record.id}`);
+    log.info(`Sending sync data for ${table}:${record.id}`);
     await this.connectionManager.sendEvent('sync', event);
     
     const confirmed = await this.waitForConfirmation(eventId);
@@ -295,13 +298,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       this.currentSession.recordsSent++;
       this.emit('sync:progress', this.currentSession);
     } else {
-      console.warn(`[SyncService] Failed to confirm ${table}:${record.id}`);
+      log.warn(`Failed to confirm ${table}:${record.id}`);
     }
   }
 
   private async handleIncomingSyncData(payload: any): Promise<void> {
     try {
-      console.log(`[SyncService] Receiving sync data for ${payload.table}:${payload.record?.id}`);
+      log.info(`Receiving sync data for ${payload.table}:${payload.record?.id}`);
       
       await SyncHelpers.applySyncRecord(
         payload.table,
@@ -326,7 +329,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         this.emit('sync:progress', this.currentSession);
       }
     } catch (error: any) {
-      console.error('[SyncService] Error applying sync record:', error);
+      log.error('Error applying sync record:', error);
       
       const errorEvent = {
         event_id: this.generateEventId(),
@@ -352,17 +355,17 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
   private async handleSyncComplete(event: any): Promise<void> {
     if (!this.currentSession) {
-      console.warn('[SyncService] Received SYNC_COMPLETE but no current session');
+      log.warn('Received SYNC_COMPLETE but no current session');
       return;
     }
     
     // Only process SUCCESS status - ignore PENDING acknowledgements
     if (event.status === 'SUCCESS' || event.status === 'DONE') {
-      console.log('[SyncService] Remote sync complete confirmed (status: ' + event.status + ')');
+      log.info(`Remote sync complete confirmed (status: ${event.status})`);
       this.remoteCompleteReceived = true;
       this.attemptFinalize();
     } else {
-      console.log(`[SyncService] SYNC_COMPLETE ${event.status} - waiting for SUCCESS`);
+      log.info(`SYNC_COMPLETE ${event.status} - waiting for SUCCESS`);
     }
   }
 
@@ -376,7 +379,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         this.remoteCompleteReceived && 
         !this.finalizeSent) {
       
-      console.log('[SyncService] Both sides complete, sending SYNC_FINALIZE');
+      log.info('Both sides complete, sending SYNC_FINALIZE');
       this.finalizeSent = true;
       
       const finalizeEvent = {
@@ -390,17 +393,17 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       
       this.connectionManager.sendEvent('sync', finalizeEvent);
     } else {
-      console.log(`[SyncService] Not ready to finalize: local=${this.localChangesSent}, remote=${this.remoteCompleteReceived}, sent=${this.finalizeSent}`);
+      log.info(`Not ready to finalize: local=${this.localChangesSent}, remote=${this.remoteCompleteReceived}, sent=${this.finalizeSent}`);
     }
   }
 
   private async handleSyncFinalize(): Promise<void> {
     if (!this.currentSession) {
-      console.warn('[SyncService] Received SYNC_FINALIZE but no current session');
+      log.warn('Received SYNC_FINALIZE but no current session');
       return;
     }
     
-    console.log('[SyncService] Finalizing sync session');
+    log.info('Finalizing sync session');
     
     await this.updateLastSyncTimestamp(this.currentSession.startTime);
     
@@ -413,7 +416,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
         this.pendingConfirmations.delete(eventId);
-        console.warn(`[SyncService] Timeout waiting for confirmation: ${eventId}`);
+        log.warn(`Timeout waiting for confirmation: ${eventId}`);
         resolve(false);
       }, 30000); // 30 second timeout
       
@@ -431,7 +434,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
   private async updateLastSyncTimestamp(timestamp: number): Promise<void> {
     await AsyncStorage.setItem('last_sync_timestamp', timestamp.toString());
-    console.log('[SyncService] Updated last sync timestamp:', timestamp);
+    log.info(`Updated last sync timestamp: ${timestamp}`);
   }
 
   private async sendSyncComplete(): Promise<void> {
@@ -446,7 +449,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       }
     };
     
-    console.log('[SyncService] Sending SYNC_COMPLETE');
+    log.info('Sending SYNC_COMPLETE');
     await this.connectionManager.sendEvent('sync', event);
   }
 }

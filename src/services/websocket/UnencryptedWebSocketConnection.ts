@@ -1,5 +1,8 @@
 import { WebSocketConnection } from './WebSocketConnection';
 import { BaseWebSocketConnection } from './BaseWebSocketConnection';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('[UnencryptedWebSocketConnection]');
 
 export class UnencryptedWebSocketConnection extends BaseWebSocketConnection implements WebSocketConnection {
   protected ws: WebSocket | null = null;
@@ -11,7 +14,7 @@ export class UnencryptedWebSocketConnection extends BaseWebSocketConnection impl
   async connect(url: string): Promise<void> {
     // Clean up existing connection properly
     if (this.ws) {
-      console.log('[UnencryptedWebSocketConnection] Closing existing WS connection');
+      log.info('Closing existing WS connection');
       // Remove event handlers to prevent them from firing during cleanup
       const oldWs = this.ws;
       oldWs.onopen = null;
@@ -23,7 +26,7 @@ export class UnencryptedWebSocketConnection extends BaseWebSocketConnection impl
     }
 
     return new Promise((resolve, reject) => {
-      console.log('[UnencryptedWebSocketConnection] Connecting to:', url);
+      log.info(`Connecting to: ${url}`);
       
       try {
         const ws = new WebSocket(url);
@@ -33,20 +36,20 @@ export class UnencryptedWebSocketConnection extends BaseWebSocketConnection impl
         };
         
         ws.onopen = () => {
-          console.log('[UnencryptedWebSocketConnection] Connected (insecure)');
+          log.info('Connected (insecure)');
           
           this.emit('connected');
           resolve();
         };
         
         ws.onerror = (error) => {
-          console.error('[UnencryptedWebSocketConnection] Connection error:', error);
+          log.error('Connection error:', error);
           this.emit('error', error);
           reject(error);
         };
         
         ws.onclose = (event) => {
-          console.log('[UnencryptedWebSocketConnection] Disconnected, code:', event.code, 'reason:', event.reason);
+          log.info(`Disconnected, code: ${event.code} reason: ${event.reason}`);
           // Only emit disconnected if this is still our current connection
           if (this.ws === ws) {
             this.ws = null;
@@ -57,20 +60,20 @@ export class UnencryptedWebSocketConnection extends BaseWebSocketConnection impl
         // Only assign to this.ws after all handlers are set up
         this.ws = ws;
       } catch (error) {
-        console.error('[UnencryptedWebSocketConnection] Failed to create WS connection:', error);
+        log.error('Failed to create WS connection:', error);
         reject(error);
       }
     });
   }
 
   disconnect(): void {
-    console.log('[UnencryptedWebSocketConnection] Disconnecting');
+    log.info('Disconnecting');
     
     if (this.ws) {
       try {
         this.ws.close();
       } catch (err) {
-        console.warn('[UnencryptedWebSocketConnection] Error closing connection:', err);
+        log.warn('Error closing connection:', err);
       }
       this.ws = null;
     }
@@ -79,17 +82,17 @@ export class UnencryptedWebSocketConnection extends BaseWebSocketConnection impl
   async sendEvent(event: any): Promise<void> {
     if (!this.ws) {
       const error = new Error('No WebSocket connection available');
-      console.error('[UnencryptedWebSocketConnection]', error.message);
+      log.error(error.message);
       this.emit('error', error);
       throw error;
     }
 
     try {
       const message = JSON.stringify(event);
-      console.log('[UnencryptedWebSocketConnection] Sending event:', event.event_type);
+      log.info(`Sending event: ${event.event_type}`);
       this.ws.send(message);
     } catch (error) {
-      console.error('[UnencryptedWebSocketConnection] Error sending event:', error);
+      log.error('Error sending event:', error);
       this.emit('error', error);
       throw error;
     }

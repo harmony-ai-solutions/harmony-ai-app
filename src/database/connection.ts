@@ -12,6 +12,9 @@ import SQLite, {SQLiteDatabase} from 'react-native-sqlite-storage';
 import RNFS from 'react-native-fs';
 import * as Keychain from 'react-native-keychain';
 import {runMigrations} from './migrations';
+import {createLogger} from '../utils/logger';
+
+const log = createLogger('[Database]');
 
 // Enable promise API and debugging
 SQLite.enablePromise(true);
@@ -54,7 +57,7 @@ async function getOrCreateEncryptionKey(): Promise<string> {
     });
     
     if (credentials && credentials.password) {
-      console.log('[Database] Retrieved existing encryption key');
+      log.info('Retrieved existing encryption key');
       return credentials.password;
     }
     
@@ -71,10 +74,10 @@ async function getOrCreateEncryptionKey(): Promise<string> {
       }
     );
     
-    console.log('[Database] Generated and stored new encryption key');
+    log.info('Generated and stored new encryption key');
     return newKey;
   } catch (error) {
-    console.error('[Database] Failed to manage encryption key:', error);
+    log.error('Failed to manage encryption key:', error);
     throw new Error('Failed to initialize database encryption');
   }
 }
@@ -85,7 +88,7 @@ async function getOrCreateEncryptionKey(): Promise<string> {
 async function openDatabase(encryptionKey: string): Promise<SQLiteDatabase> {
   const dbPath = `${RNFS.DocumentDirectoryPath}/${DATABASE_NAME}`;
   
-  console.log(`[Database] Opening encrypted database at: ${dbPath}`);
+  log.info(`Opening encrypted database at: ${dbPath}`);
   
   try {
     // Open database with encryption
@@ -99,10 +102,10 @@ async function openDatabase(encryptionKey: string): Promise<SQLiteDatabase> {
     // Configure database settings
     await configureDatabase(database);
     
-    console.log('[Database] Successfully opened encrypted database');
+    log.info('Successfully opened encrypted database');
     return database;
   } catch (error) {
-    console.error('[Database] Failed to open database:', error);
+    log.error('Failed to open database:', error);
     throw error;
   }
 }
@@ -121,9 +124,9 @@ async function configureDatabase(database: SQLiteDatabase): Promise<void> {
     // Set synchronous mode for better performance while maintaining safety
     await database.executeSql('PRAGMA synchronous = NORMAL;');
     
-    console.log('[Database] Database configured successfully');
+    log.info('Database configured successfully');
   } catch (error) {
-    console.error('[Database] Failed to configure database:', error);
+    log.error('Failed to configure database:', error);
     throw error;
   }
 }
@@ -137,14 +140,14 @@ export async function initializeDatabase(
 ): Promise<void> {
   if (db) {
     if (!silent) {
-      console.warn('[Database] Database already initialized');
+      log.warn('Database already initialized');
     }
     return;
   }
 
   try {
     if (!silent) {
-      console.log('[Database] Initializing database...');
+      log.info('Initializing database...');
     }
 
     // Get or create encryption key
@@ -157,10 +160,10 @@ export async function initializeDatabase(
     await runMigrations(db, silent);
 
     if (!silent) {
-      console.log('[Database] Database initialization complete');
+      log.info('Database initialization complete');
     }
   } catch (error) {
-    console.error('[Database] Database initialization failed:', error);
+    log.error('Database initialization failed:', error);
     db = null;
     throw error;
   }
@@ -185,10 +188,10 @@ export async function closeDatabase(): Promise<void> {
   if (db) {
     try {
       await db.close();
-      console.log('[Database] Database closed successfully');
+      log.info('Database closed successfully');
       db = null;
     } catch (error) {
-      console.error('[Database] Failed to close database:', error);
+      log.error('Failed to close database:', error);
       throw error;
     }
   }
@@ -209,7 +212,7 @@ export async function clearDatabaseData(
 ): Promise<void> {
   const database = getDatabase();
   if (!silent) {
-    console.log('[Database] Dropping all tables for a clean test state...');
+    log.info('Dropping all tables for a clean test state...');
   }
 
   try {
@@ -230,17 +233,17 @@ export async function clearDatabaseData(
     await database.executeSql('PRAGMA foreign_keys = ON;');
 
     if (!silent) {
-      console.log('[Database] Schema dropped. Re-applying migrations...');
+      log.info('Schema dropped. Re-applying migrations...');
     }
 
     // Re-run migrations to create tables fresh
     await runMigrations(database, silent);
 
     if (!silent) {
-      console.log('✅ Database reset complete');
+      log.info('Database reset complete');
     }
   } catch (error) {
-    console.error('[Database] Failed to reset database:', error);
+    log.error('Failed to reset database:', error);
     throw error;
   }
 }

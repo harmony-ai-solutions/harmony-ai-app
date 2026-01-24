@@ -3,6 +3,9 @@ import ConnectionStateManager from '../services/ConnectionStateManager';
 import ConnectionManager from '../services/connection/ConnectionManager';
 import SyncService from '../services/SyncService';
 import { ToastAndroid, Platform, Alert } from 'react-native';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[SyncConnectionContext]');
 
 interface SyncConnectionContextType {
   // Pairing state
@@ -49,7 +52,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   useEffect(() => {
     // Listen to sync connection events from ConnectionManager
     const handleSyncConnected = () => {
-      console.log('[SyncConnectionContext] Sync connected');
+      log.info('Sync connected');
       ConnectionStateManager.markConnected();
       setIsConnected(true);
       setIsConnecting(false);
@@ -62,7 +65,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     };
 
     const handleSyncDisconnected = () => {
-      console.log('[SyncConnectionContext] Sync disconnected');
+      log.info('Sync disconnected');
       ConnectionStateManager.markDisconnected();
       setIsConnected(false);
       
@@ -71,17 +74,17 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       // If isConnecting is true, it means we're in the middle of a connection attempt
       // that failed, and the catch block will handle scheduling the reconnect
       if (isPaired && !isReconnecting && !isConnecting) {
-        console.log('[SyncConnectionContext] Connection lost. Scheduling auto-reconnect...');
+        log.info('Connection lost. Scheduling auto-reconnect...');
         scheduleReconnect();
       } else if (isConnecting) {
-        console.log('[SyncConnectionContext] Disconnect during connection attempt - catch block will handle reconnect');
+        log.info('Disconnect during connection attempt - catch block will handle reconnect');
       }
       
       setIsConnecting(false);
     };
 
     const handleSyncError = (error: any) => {
-      console.error('[SyncConnectionContext] Sync connection error:', error);
+      log.error('Sync connection error:', error);
       const errorMessage = error?.message || error?.toString?.() || 'Connection error';
       setLastConnectionError(errorMessage);
       
@@ -93,7 +96,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       // Connection errors usually mean the connection is broken, schedule reconnect
       // This handles cases where the connection drops after being established
       if (isConnected && isPaired && !isReconnecting && !isConnecting) {
-        console.log('[SyncConnectionContext] Connection error detected while connected, scheduling reconnect...');
+        log.info('Connection error detected while connected, scheduling reconnect...');
         ConnectionStateManager.markDisconnected();
         setIsConnected(false);
         scheduleReconnect();
@@ -101,7 +104,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     };
 
     const handleCertVerificationFailed = (error: any) => {
-      console.log('[SyncConnectionContext] Certificate verification failed');
+      log.info('Certificate verification failed');
       if (reconnectTimeoutId) {
         clearTimeout(reconnectTimeoutId);
         setReconnectTimeoutId(null);
@@ -111,18 +114,18 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     };
 
     const handleStateChange = (state: any) => {
-      console.log('[SyncConnectionContext] State changed:', state);
+      log.info('State changed:', state);
       setIsPaired(state.isPaired || false);
       setIsConnected(state.isConnected || false);
     };
 
     const handleSyncCompleted = (session: any) => {
-      console.log('[SyncConnectionContext] Sync completed:', session);
+      log.info('Sync completed:', session);
       showToast(`Sync complete! Sent: ${session.recordsSent}, Received: ${session.recordsReceived}`);
     };
 
     const handleSyncErrorEvent = (error: string) => {
-      console.error('[SyncConnectionContext] Sync service error:', error);
+      log.error('Sync service error:', error);
       showToast(`Sync failed: ${error}`);
     };
 
@@ -162,7 +165,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
 
   const scheduleReconnect = () => {
     if (reconnectTimeoutId !== null) {
-      console.log('[SyncConnectionContext] Reconnect already scheduled');
+      log.info('Reconnect already scheduled');
       return;
     }
     
@@ -171,13 +174,13 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     const delay = RECONNECT_INTERVALS[Math.min(currentAttempt, RECONNECT_INTERVALS.length - 1)];
     const attemptNumber = currentAttempt + 1;
     
-    console.log(`[SyncConnectionContext] Scheduling reconnect attempt ${attemptNumber} in ${delay}ms`);
+    log.info(`Scheduling reconnect attempt ${attemptNumber} in ${delay}ms`);
     
     setIsReconnecting(true);
     setNextReconnectIn(delay);
     
     const timeoutId = setTimeout(async () => {
-      console.log(`[SyncConnectionContext] Executing reconnect attempt ${attemptNumber}`);
+      log.info(`Executing reconnect attempt ${attemptNumber}`);
       
       // Update both ref and state
       reconnectAttemptsRef.current = attemptNumber;
@@ -190,16 +193,16 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
         const isTokenExpired = ConnectionStateManager.getIsTokenExpired();
         
         if (isTokenExpired) {
-          console.log('[SyncConnectionContext] Token expired, performing handshake to refresh...');
+          log.info('Token expired, performing handshake to refresh...');
           await connectWithRefresh();
         } else {
-          console.log('[SyncConnectionContext] Token valid, connecting normally...');
+          log.info('Token valid, connecting normally...');
           await connect();
         }
       } catch (error) {
-        console.error('[SyncConnectionContext] Auto-reconnect failed:', error);
+        log.error('Auto-reconnect failed:', error);
         // Schedule next reconnect attempt - ref already incremented
-        console.log('[SyncConnectionContext] Scheduling next reconnect after failed attempt');
+        log.info('Scheduling next reconnect after failed attempt');
         scheduleReconnect();
       }
     }, delay);
@@ -208,7 +211,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   };
 
   const reconnect = async (): Promise<void> => {
-    console.log('[SyncConnectionContext] Manual reconnect triggered');
+    log.info('Manual reconnect triggered');
     
     if (reconnectTimeoutId) {
       clearTimeout(reconnectTimeoutId);
@@ -236,34 +239,34 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setIsPaired(summary.isPaired);
       setIsConnected(summary.isConnected);
       
-      console.log('[SyncConnectionContext] Initialized:', summary);
+      log.info('Initialized:', summary);
       
       if (summary.isPaired && !summary.isTokenExpired) {
-        console.log('[SyncConnectionContext] Auto-connecting...');
+        log.info('Auto-connecting...');
         try {
           await connect();
         } catch (connectError: any) {
-          console.log('[SyncConnectionContext] Scheduling reconnect after initialization failure');
+          log.info('Scheduling reconnect after initialization failure');
           scheduleReconnect();
         }
       } else if (summary.isPaired && summary.requiresRepair) {
-        console.log('[SyncConnectionContext] Token expired, attempting re-handshake...');
+        log.info('Token expired, attempting re-handshake...');
         await connectWithRefresh();
       }
     } catch (error) {
-      console.error('[SyncConnectionContext] Initialization error:', error);
+      log.error('Initialization error:', error);
     }
   };
 
   const connect = async (): Promise<void> => {
     if (isConnecting) {
-      console.log('[SyncConnectionContext] Already connecting');
+      log.info('Already connecting');
       return;
     }
 
     try {
       setIsConnecting(true);
-      console.log('[SyncConnectionContext] Connecting to sync...');
+      log.info('Connecting to sync...');
       
       const savedMode = await ConnectionStateManager.getSecurityMode();
       const url = savedMode === 'unencrypted'
@@ -279,9 +282,9 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       // Create sync connection via ConnectionManager
       await connectionManager.createConnection('sync', 'sync', url, mode as any);
       
-      console.log('[SyncConnectionContext] Sync connection established');
+      log.info('Sync connection established');
     } catch (error: any) {
-      console.error('[SyncConnectionContext] Connect failed:', error);
+      log.error('Connect failed:', error);
       const errorMessage = error?.message || 'Unknown error';
       setLastConnectionError(errorMessage);
       setIsConnecting(false);
@@ -300,7 +303,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
 
     try {
       setIsConnecting(true);
-      console.log('[SyncConnectionContext] Attempting to refresh token...');
+      log.info('Attempting to refresh token...');
       
       const wsUrl = await ConnectionStateManager.getWSUrl();
       if (!wsUrl) throw new Error('No WS URL available');
@@ -314,7 +317,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       await Promise.race([connectionPromise, timeoutPromise]);
       await SyncService.requestHandshake();
       
-      console.log('[SyncConnectionContext] Token refresh successful, switching to encrypted connection...');
+      log.info('Token refresh successful, switching to encrypted connection...');
       
       // Disconnect from unencrypted connection
       connectionManager.disconnectConnection('sync');
@@ -325,7 +328,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       // Now connect with the fresh token using encrypted mode
       await connect();
     } catch (error: any) {
-      console.error('[SyncConnectionContext] Token refresh failed:', error);
+      log.error('Token refresh failed:', error);
       
       // Clean up failed connection
       connectionManager.disconnectConnection('sync');
@@ -337,18 +340,18 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       
       // Get current paired state
       const currentSummary = ConnectionStateManager.getConnectionSummary();
-      console.log('[SyncConnectionContext] Handshake failed, isPaired:', currentSummary.isPaired);
+      log.info('Handshake failed, isPaired:', currentSummary.isPaired);
       
       // Schedule reconnect for handshake failures too
       if (currentSummary.isPaired) {
-        console.log('[SyncConnectionContext] Scheduling reconnect after handshake failure');
+        log.info('Scheduling reconnect after handshake failure');
         scheduleReconnect();
       }
     }
   };
 
   const disconnect = () => {
-    console.log('[SyncConnectionContext] Manual disconnect');
+    log.info('Manual disconnect');
     
     if (reconnectTimeoutId) {
       clearTimeout(reconnectTimeoutId);
@@ -365,7 +368,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   };
 
   const showToast = (message: string) => {
-    console.log('[SyncConnectionContext] Toast:', message);
+    log.info('Toast:', message);
     if (Platform.OS === 'android') {
       ToastAndroid.show(message, ToastAndroid.SHORT);
     } else {

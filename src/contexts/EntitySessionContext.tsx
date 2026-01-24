@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import EntitySessionService, { EntitySession } from '../services/EntitySessionService';
 import { useSyncConnection } from './SyncConnectionContext';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[EntitySessionContext]');
 
 interface EntitySessionContextType {
   activeSession: EntitySession | null;
@@ -26,17 +29,17 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
 
   useEffect(() => {
     const handleSessionStarted = (session: EntitySession) => {
-      console.log('[EntitySessionContext] Session started:', session.entityId);
+      log.info('Session started:', session.entityId);
       setActiveSession(session);
     };
 
     const handleSessionStopped = (entityId: string) => {
-      console.log('[EntitySessionContext] Session stopped:', entityId);
+      log.info('Session stopped:', entityId);
       setActiveSession(prev => prev?.entityId === entityId ? null : prev);
     };
 
     const handleSessionError = (entityId: string, error: string) => {
-      console.error('[EntitySessionContext] Session error:', entityId, error);
+      log.error('Session error:', entityId, error);
     };
 
     entitySessionService.on('session:started', handleSessionStarted);
@@ -55,13 +58,13 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
       throw new Error('Sync connection required for entity sessions');
     }
 
-    console.log(`[EntitySessionContext] Starting session for entity ${entityId}`);
+    log.info(`Starting session for entity ${entityId}`);
     const session = await entitySessionService.startEntitySession(entityId, characterId);
     setActiveSession(session);
   };
 
   const stopSession = async (entityId: string): Promise<void> => {
-    console.log(`[EntitySessionContext] Stopping session for entity ${entityId}`);
+    log.info(`Stopping session for entity ${entityId}`);
     await entitySessionService.stopEntitySession(entityId);
   };
 

@@ -19,6 +19,9 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import runAllTests from '../../database/test-runner';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('[DatabaseTestScreen]');
 
 interface ConsoleMessage {
     text: string;
@@ -71,7 +74,7 @@ export const DatabaseTestScreen: React.FC = () => {
             }
             
             addConsoleMessage(message, type);
-            originalLog(...args);
+            log.info(message);
         };
 
         console.error = (...args: any[]) => {
@@ -79,7 +82,7 @@ export const DatabaseTestScreen: React.FC = () => {
                 typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
             ).join(' ');
             addConsoleMessage(message, 'error');
-            originalError(...args);
+            log.error(message);
         };
 
         console.warn = (...args: any[]) => {
@@ -87,7 +90,7 @@ export const DatabaseTestScreen: React.FC = () => {
                 typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
             ).join(' ');
             addConsoleMessage(message, 'warning');
-            originalWarn(...args);
+            log.warn(message);
         };
 
         try {

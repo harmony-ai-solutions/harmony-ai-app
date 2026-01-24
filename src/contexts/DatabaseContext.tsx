@@ -6,6 +6,9 @@
 
 import React, {createContext, useContext, useEffect, useState, ReactNode} from 'react';
 import {initializeDatabase, isDatabaseReady, closeDatabase} from '../database';
+import {createLogger} from '../utils/logger';
+
+const log = createLogger('[DatabaseContext]');
 
 interface DatabaseContextType {
   isReady: boolean;
@@ -40,7 +43,7 @@ export function DatabaseProvider({children}: DatabaseProviderProps) {
       setIsLoading(true);
       setError(null);
       
-      console.log('[DatabaseContext] Initializing database...');
+      log.info('Initializing database...');
       await initializeDatabase();
       
       // Verify database is ready
@@ -48,13 +51,13 @@ export function DatabaseProvider({children}: DatabaseProviderProps) {
       setIsReady(ready);
       
       if (ready) {
-        console.log('[DatabaseContext] Database initialized successfully');
+        log.info('Database initialized successfully');
       } else {
         throw new Error('Database initialization completed but database is not ready');
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
-      console.error('[DatabaseContext] Database initialization failed:', errorMessage);
+      log.error('Database initialization failed:', errorMessage);
       setError(errorMessage);
       setIsReady(false);
     } finally {
@@ -63,7 +66,7 @@ export function DatabaseProvider({children}: DatabaseProviderProps) {
   };
 
   const retryInitialization = async () => {
-    console.log('[DatabaseContext] Retrying database initialization...');
+    log.info('Retrying database initialization...');
     await initializeDb();
   };
 
@@ -73,9 +76,9 @@ export function DatabaseProvider({children}: DatabaseProviderProps) {
 
     // Cleanup on unmount
     return () => {
-      console.log('[DatabaseContext] Cleaning up database connection...');
+      log.info('Cleaning up database connection...');
       closeDatabase().catch(err => {
-        console.error('[DatabaseContext] Failed to close database:', err);
+        log.error('Failed to close database:', err);
       });
     };
   }, []);

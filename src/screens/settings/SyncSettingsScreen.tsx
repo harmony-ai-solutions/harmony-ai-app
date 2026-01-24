@@ -10,7 +10,10 @@ import { ThemedButton } from '../../components/themed/ThemedButton';
 import SyncService, { SyncSession } from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createLogger } from '../../utils/logger';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
+
+const log = createLogger('[SyncSettingsScreen]');
 
 export const SyncSettingsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
