@@ -57,9 +57,6 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
             clearTimeout(connectionTimeout);
             console.log('[SecureWebSocketConnection] Connected securely (WSS)');
             
-            // Setup sync listeners after connection is established
-            this.setupSyncListeners();
-            
             this.emit('connected');
             resolve();
           };
@@ -144,9 +141,6 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
 
   disconnect(): void {
     console.log('[SecureWebSocketConnection] Disconnecting');
-    
-    // Cleanup sync listeners when disconnecting
-    this.cleanupSyncListeners();
     
     if (this.wss) {
       try {

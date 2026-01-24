@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-nat
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import { useConnection } from '../../contexts/ConnectionContext';
+import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedButton } from '../../components/themed/ThemedButton';
@@ -16,11 +16,12 @@ export const SyncSettingsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const { theme } = useAppTheme();
-  const { isConnected, isPaired, showToast } = useConnection();
+  const { isConnected, isPaired, isReconnecting, reconnectAttempt, nextReconnectIn, showToast } = useSyncConnection();
   const [currentSession, setCurrentSession] = useState<SyncSession | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>('Never');
   const [securityMode, setSecurityMode] = useState<string>('');
+  const [countdown, setCountdown] = useState<number>(0);
 
   useEffect(() => {
     // Load last sync time and security mode on mount
@@ -49,12 +50,12 @@ export const SyncSettingsScreen: React.FC = () => {
       setCurrentSession(null);
       setIsSyncing(false);
       setLastSyncTime(new Date().toLocaleString());
-      // Toast is handled by ConnectionContext
+      // Toast is handled by SyncConnectionContext
     };
 
     const errorListener = (error: string) => {
       setIsSyncing(false);
-      // Error toast is handled by ConnectionContext
+      // Error toast is handled by SyncConnectionContext
     };
 
     SyncService.on('sync:progress', progressListener);
@@ -67,6 +68,27 @@ export const SyncSettingsScreen: React.FC = () => {
       SyncService.removeListener('sync:error', errorListener);
     };
   }, []);
+
+  // Dynamic countdown timer for reconnection
+  useEffect(() => {
+    if (!isReconnecting || nextReconnectIn <= 0) {
+      setCountdown(0);
+      return;
+    }
+
+    // Initialize countdown
+    setCountdown(Math.ceil(nextReconnectIn / 1000));
+
+    // Update countdown every second
+    const interval = setInterval(() => {
+      setCountdown((prev) => {
+        const next = prev - 1;
+        return next > 0 ? next : 0;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isReconnecting, nextReconnectIn]);
 
   const handleSyncNow = async () => {
     if (!isConnected) {
@@ -91,6 +113,14 @@ export const SyncSettingsScreen: React.FC = () => {
     if (isConnected) {
       return 'Connected to Harmony Link';
     }
+    if (isReconnecting) {
+      if (reconnectAttempt === 0) {
+        return 'Connection lost - Reconnecting...';
+      } else {
+        const retryText = countdown > 0 ? ` in ${countdown}s` : '...';
+        return `Reconnecting (${reconnectAttempt} failed retries)${retryText}`;
+      }
+    }
     return 'Disconnected';
   };
 
@@ -100,6 +130,9 @@ export const SyncSettingsScreen: React.FC = () => {
     }
     if (isConnected) {
       return '#4CAF50'; // Green
+    }
+    if (isReconnecting) {
+      return '#FFC107'; // Amber - attempting to reconnect
     }
     return '#F44336'; // Red
   };
@@ -213,9 +246,15 @@ export const SyncSettingsScreen: React.FC = () => {
           </ThemedText>
         )}
 
-        {isPaired && !isConnected && (
+        {isPaired && !isConnected && !isReconnecting && (
           <ThemedText variant="secondary" style={styles.warningText}>
-            ⚠️ Not connected. The app will attempt to reconnect automatically.
+            ⚠️ Not connected. Attempting to reconnect...
+          </ThemedText>
+        )}
+        
+        {isPaired && isReconnecting && (
+          <ThemedText variant="secondary" style={styles.infoText}>
+            🔄 Auto-reconnect in progress. The connection will be restored automatically.
           </ThemedText>
         )}
 

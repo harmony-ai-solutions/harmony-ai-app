@@ -4,20 +4,16 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SyncHelpers from '../database/sync';
 import ConnectionStateManager from './ConnectionStateManager';
+import connectionManagerInstance from './connection/ConnectionManager';
+import type { ConnectionManager } from './connection/ConnectionManager';
 
 // Define event types for type safety
 interface SyncServiceEvents {
-  'handshake:requested': (event: any) => void;
   'handshake:pending': (payload: any) => void;
   'handshake:accepted': (payload: any) => void;
   'handshake:rejected': (payload: any) => void;
-  'sync:requested': (event: any) => void;
   'sync:started': (session: SyncSession) => void;
   'sync:progress': (session: SyncSession) => void;
-  'sync:data_out': (event: any) => void;
-  'sync:confirm_out': (event: any) => void;
-  'sync:complete_out': (event: any) => void;
-  'sync:finalize_out': (event: any) => void;
   'sync:completed': (session: SyncSession) => void;
   'sync:rejected': (payload: any) => void;
   'sync:error': (error: string) => void;
@@ -36,6 +32,7 @@ export interface SyncSession {
 
 export class SyncService extends EventEmitter<SyncServiceEvents> {
   private static instance: SyncService;
+  private connectionManager: ConnectionManager;
   private currentSession: SyncSession | null = null;
   private pendingConfirmations: Map<string, (success: boolean) => void> = new Map();
   // Track completion states to ensure SYNC_FINALIZE is sent only once
@@ -43,11 +40,76 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   private remoteCompleteReceived: boolean = false;
   private finalizeSent: boolean = false;
 
+  private constructor() {
+    super();
+    this.connectionManager = connectionManagerInstance;
+    this.setupConnectionListeners();
+  }
+
   static getInstance(): SyncService {
     if (!SyncService.instance) {
       SyncService.instance = new SyncService();
     }
     return SyncService.instance;
+  }
+
+  private setupConnectionListeners() {
+    // Listen ONLY to sync connection events from ConnectionManager
+    this.connectionManager.on('event:sync', this.routeSyncEvent.bind(this));
+  }
+
+  private routeSyncEvent(data: any) {
+    console.log('[SyncService] Received sync event:', data.event_type, 'status:', data.status);
+    
+    switch (data.event_type) {
+      case 'HANDSHAKE_PENDING':
+        this.emit('handshake:pending', data.payload);
+        break;
+        
+      case 'HANDSHAKE_ACCEPT':
+        this.handleHandshakeAccept(data.payload);
+        break;
+        
+      case 'HANDSHAKE_REJECT':
+        this.emit('handshake:rejected', data.payload);
+        break;
+        
+      case 'SYNC_REQUEST':
+        // Backend sends SYNC_REQUEST back with status SUCCESS/DONE containing SyncAcceptPayload
+        if (data.status === 'SUCCESS' || data.status === 'DONE') {
+          this.handleSyncAccept(data.payload);
+        } else if (data.status === 'ERROR') {
+          this.emit('sync:rejected', data.payload);
+        }
+        break;
+        
+      case 'SYNC_ACCEPT':
+        this.handleSyncAccept(data.payload);
+        break;
+        
+      case 'SYNC_REJECT':
+        this.emit('sync:rejected', data.payload);
+        break;
+        
+      case 'SYNC_DATA':
+        this.handleIncomingSyncData(data.payload);
+        break;
+        
+      case 'SYNC_DATA_CONFIRM':
+        this.handleSyncDataConfirm(data.payload);
+        break;
+        
+      case 'SYNC_COMPLETE':
+        this.handleSyncComplete(data);
+        break;
+        
+      case 'SYNC_FINALIZE':
+        this.handleSyncFinalize();
+        break;
+        
+      default:
+        console.warn(`[SyncService] Unhandled sync event type: ${data.event_type}`);
+    }
   }
 
   private generateEventId(): string {
@@ -71,10 +133,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     };
     
     console.log('[SyncService] Requesting handshake:', event);
-    this.emit('handshake:requested', event);
+    await this.connectionManager.sendEvent('sync', event);
   }
 
-  async handleHandshakeAccept(payload: any): Promise<void> {
+  private async handleHandshakeAccept(payload: any): Promise<void> {
     console.log('[SyncService] Handshake accepted:', payload);
     await AsyncStorage.setItem('harmony_jwt', payload.jwt_token);    
 
@@ -131,10 +193,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     };
     
     console.log('[SyncService] Initiating sync:', event);
-    this.emit('sync:requested', event);
+    await this.connectionManager.sendEvent('sync', event);
   }
 
-  async handleSyncAccept(payload: any): Promise<void> {
+  private async handleSyncAccept(payload: any): Promise<void> {
     if (!this.currentSession) {
       console.warn('[SyncService] Received SYNC_ACCEPT but no current session');
       return;
@@ -226,7 +288,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     };
     
     console.log(`[SyncService] Sending sync data for ${table}:${record.id}`);
-    this.emit('sync:data_out', event);
+    await this.connectionManager.sendEvent('sync', event);
     
     const confirmed = await this.waitForConfirmation(eventId);
     if (confirmed) {
@@ -237,7 +299,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     }
   }
 
-  async handleIncomingSyncData(payload: any): Promise<void> {
+  private async handleIncomingSyncData(payload: any): Promise<void> {
     try {
       console.log(`[SyncService] Receiving sync data for ${payload.table}:${payload.record?.id}`);
       
@@ -257,7 +319,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         }
       };
       
-      this.emit('sync:confirm_out', confirmEvent);
+      await this.connectionManager.sendEvent('sync', confirmEvent);
       
       if (this.currentSession) {
         this.currentSession.recordsReceived++;
@@ -276,11 +338,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
           error_message: error.message
         }
       };
-      this.emit('sync:confirm_out', errorEvent);
+      await this.connectionManager.sendEvent('sync', errorEvent);
     }
   }
 
-  handleSyncDataConfirm(payload: any): void {
+  private handleSyncDataConfirm(payload: any): void {
     const callback = this.pendingConfirmations.get(payload.event_id);
     if (callback) {
       callback(payload.status === 'SUCCESS');
@@ -288,7 +350,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     }
   }
 
-  async handleSyncComplete(event: any): Promise<void> {
+  private async handleSyncComplete(event: any): Promise<void> {
     if (!this.currentSession) {
       console.warn('[SyncService] Received SYNC_COMPLETE but no current session');
       return;
@@ -326,13 +388,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         }
       };
       
-      this.emit('sync:finalize_out', finalizeEvent);
+      this.connectionManager.sendEvent('sync', finalizeEvent);
     } else {
       console.log(`[SyncService] Not ready to finalize: local=${this.localChangesSent}, remote=${this.remoteCompleteReceived}, sent=${this.finalizeSent}`);
     }
   }
 
-  async handleSyncFinalize(): Promise<void> {
+  private async handleSyncFinalize(): Promise<void> {
     if (!this.currentSession) {
       console.warn('[SyncService] Received SYNC_FINALIZE but no current session');
       return;
@@ -385,7 +447,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     };
     
     console.log('[SyncService] Sending SYNC_COMPLETE');
-    this.emit('sync:complete_out', event);
+    await this.connectionManager.sendEvent('sync', event);
   }
 }
 

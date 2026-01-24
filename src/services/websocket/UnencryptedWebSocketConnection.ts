@@ -35,9 +35,6 @@ export class UnencryptedWebSocketConnection extends BaseWebSocketConnection impl
         ws.onopen = () => {
           console.log('[UnencryptedWebSocketConnection] Connected (insecure)');
           
-          // Setup sync listeners after connection is established
-          this.setupSyncListeners();
-          
           this.emit('connected');
           resolve();
         };
@@ -68,9 +65,6 @@ export class UnencryptedWebSocketConnection extends BaseWebSocketConnection impl
 
   disconnect(): void {
     console.log('[UnencryptedWebSocketConnection] Disconnecting');
-    
-    // Cleanup sync listeners when disconnecting
-    this.cleanupSyncListeners();
     
     if (this.ws) {
       try {

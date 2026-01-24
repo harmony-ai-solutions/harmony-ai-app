@@ -9,16 +9,16 @@ import { ThemedButton } from '../../components/themed/ThemedButton';
 import { CertificateVerificationModal } from '../../components/modals/CertificateVerificationModal';
 import { CertificateDetailsModal } from '../../components/modals/CertificateDetailsModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import WebSocketService from '../../services/WebSocketService';
+import ConnectionManager from '../../services/connection/ConnectionManager';
 import SyncService from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
-import { useConnection } from '../../contexts/ConnectionContext';
+import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 export const ConnectionSetupScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { showToast, isPaired, isConnected, isConnecting, reconnect } = useConnection();
+  const { showToast, isPaired, isConnected, isConnecting, reconnect } = useSyncConnection();
   
   const [url, setUrl] = useState('192.168.1.');
   const [port, setPort] = useState('8080');
@@ -29,6 +29,8 @@ export const ConnectionSetupScreen: React.FC = () => {
   const [serverCertificate, setServerCertificate] = useState<string>('');
   const [pendingCredentials, setPendingCredentials] = useState<any>(null);
   const [securityMode, setSecurityMode] = useState<string>('');
+  
+  const connectionManager = ConnectionManager;
   
   // Use ref to track security mode selection without causing re-renders
   const hasSelectedSecurityModeRef = useRef(false);
@@ -103,7 +105,7 @@ export const ConnectionSetupScreen: React.FC = () => {
         setStatus('Connecting with trusted certificate...');
         const wssUrl = await ConnectionStateManager.getWSSUrl();
         if (wssUrl) {
-          await WebSocketService.connect(wssUrl, savedMode);
+          await connectionManager.createConnection('sync', 'sync', wssUrl, savedMode);
         } else {
           throw new Error('No server URL saved for encrypted connection');
         }
@@ -168,7 +170,7 @@ export const ConnectionSetupScreen: React.FC = () => {
         setStatus('Connecting with trusted certificate...');
         const wssUrl = await ConnectionStateManager.getWSSUrl();
         if (wssUrl) {
-          await WebSocketService.connect(wssUrl, 'insecure-ssl');
+          await connectionManager.createConnection('sync', 'sync', wssUrl, 'insecure-ssl');
         } else {
           throw new Error('No server URL saved for encrypted connection');
         }
@@ -176,13 +178,13 @@ export const ConnectionSetupScreen: React.FC = () => {
       } else if (mode === 'unencrypted') {
         setStatus('Switching to unencrypted connection...');
         // Disconnect secure and reconnect unencrypted
-        await WebSocketService.disconnect();
+        connectionManager.disconnectConnection('sync');
         // Use the original WS URL (different port than WSS)
         const wsUrl = await ConnectionStateManager.getWSUrl();
         if (!wsUrl) {
           throw new Error('No WS URL available for unencrypted connection');
         }
-        await WebSocketService.connect(wsUrl, 'unencrypted');
+        await connectionManager.createConnection('sync', 'sync', wsUrl, 'unencrypted');
         setStatus('Connected unencrypted!');
       }
       
@@ -205,12 +207,6 @@ export const ConnectionSetupScreen: React.FC = () => {
   useEffect(() => {
     // Load connection data on mount and when isPaired/isConnected changes
     loadConnectionData();
-
-    const handleHandshakeRequested = (event: any) => {
-
-      console.log('[ConnectionSetupScreen] Handshake requested');
-      setStatus('Sending handshake request...');
-    };
 
     const handleHandshakePending = (payload: any) => {
       console.log('[ConnectionSetupScreen] Handshake pending approval');
@@ -253,8 +249,9 @@ export const ConnectionSetupScreen: React.FC = () => {
       Alert.alert('Connection Rejected', 'Harmony Link rejected the connection request. Please try again or check device approval settings on Harmony Link.');
     };
 
-    const handleConnectionError = (error: any) => {
-      console.error('[ConnectionSetupScreen] Connection error:', error);
+    const handleConnectionError = (id: string, error: any) => {
+      if (id !== 'sync') return;
+      console.error('[ConnectionSetupScreen] Sync connection error:', error);
       setStatus('Connection error');
       setIsManuallyConnecting(false);
       showToast('Connection error occurred');
@@ -282,22 +279,20 @@ export const ConnectionSetupScreen: React.FC = () => {
     };
 
     // Subscribe to events
-    SyncService.on('handshake:requested', handleHandshakeRequested);
     SyncService.on('handshake:pending', handleHandshakePending);
     SyncService.on('handshake:accepted', handleHandshakeAccepted);
     SyncService.on('handshake:rejected', handleHandshakeRejected);
-    WebSocketService.on('error', handleConnectionError);
-    WebSocketService.on('cert:verification_failed', handleCertVerificationFailed);
+    connectionManager.on('connection:error', handleConnectionError);
+    connectionManager.on('cert:verification_failed', handleCertVerificationFailed);
     ConnectionStateManager.on('credentials:cleared', handleCredentialsCleared);
 
     return () => {
       // Cleanup
-      SyncService.off('handshake:requested', handleHandshakeRequested);
       SyncService.off('handshake:pending', handleHandshakePending);
       SyncService.off('handshake:accepted', handleHandshakeAccepted);
       SyncService.off('handshake:rejected', handleHandshakeRejected);
-      WebSocketService.off('error', handleConnectionError);
-      WebSocketService.off('cert:verification_failed', handleCertVerificationFailed);
+      connectionManager.off('connection:error', handleConnectionError);
+      connectionManager.off('cert:verification_failed', handleCertVerificationFailed);
       ConnectionStateManager.off('credentials:cleared', handleCredentialsCleared);
     };
   }, [isPaired, isConnected, loadConnectionData]);
@@ -315,7 +310,7 @@ export const ConnectionSetupScreen: React.FC = () => {
 
     try {
       console.log('[ConnectionSetupScreen] Connecting to:', wsUrl);
-      await WebSocketService.connect(wsUrl, 'unencrypted');
+      await connectionManager.createConnection('sync', 'sync', wsUrl, 'unencrypted');
       await AsyncStorage.setItem('harmony_server_url', wsUrl);
       setStatus('Connected! Sending handshake request...');
       await SyncService.requestHandshake();
@@ -426,7 +421,7 @@ export const ConnectionSetupScreen: React.FC = () => {
                       onPress: async () => {
                         await ConnectionStateManager.clearAllCredentials();
                         await ConnectionStateManager.clearSecurityMode();
-                        WebSocketService.disconnect();
+                        connectionManager.disconnectConnection('sync');
                         setUrl('192.168.1.');
                         setPort('8080');
                         setStatus('Idle');

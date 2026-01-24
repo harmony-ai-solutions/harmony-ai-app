@@ -1,5 +1,6 @@
 # Harmony AI App Active Context
 @Focus:
+- Multi-Connection WebSocket Architecture: Refactored to support multiple concurrent connections (sync + entity sessions).
 - Sync Services Implementation Complete: EventEmitter3-based event system, WebSocket/WSS support, handshake protocol.
 - Database Implementation Complete: SQLCipher encryption, full repository layer (84 tests), in-app DEV-only test runner, sync tables added.
 - Test Runner Integration: DatabaseTestScreen in Settings menu, real-time console, color-coded results, themed UI.
@@ -37,10 +38,20 @@
 - Android emulator uses 10.0.2.2 to access host's localhost (not 127.0.0.1).
 - Harmony Link must bind to 0.0.0.0 (not localhost) for emulator connectivity.
 - HANDSHAKE_PENDING event handler essential for user feedback during device approval.
+- ConnectionManager pattern enables multiple concurrent connections with independent lifecycles and event routing.
+- Decoupling transport layer from service logic improves testability and scalability.
+- Context separation (SyncConnectionContext vs EntitySessionContext) provides clear responsibility boundaries.
+- React useRef critical for avoiding stale closures in setTimeout/async callbacks (reconnect counter).
+- Reconnect race condition fix: Only schedule reconnect from disconnected event if NOT in isConnecting state (prevents double-scheduling when connection attempt fails).
+- Event listener accumulation: Always call removeAllListeners() before disconnecting to prevent duplicate error messages from old listeners.
+- Auto-reconnect strategy: Always retry regardless of error type, exponential backoff [1s, 2s, 4s, 8s, 16s, 30s].
 @Implementation[Sync]:
-- Services[3]: ConnectionStateManager (JWT lifecycle), SyncService (protocol logic), WebSocketService (transport).
-- EventEmitter3: Type-safe pub/sub pattern, 14 event types, proper cleanup in useEffect.
+- Multi-Connection Architecture: ConnectionManager manages multiple WebSocket connections (sync + entity sessions).
+- Services[4]: ConnectionManager (transport pool), SyncService (protocol logic), EntitySessionService (session management), ConnectionStateManager (JWT lifecycle).
+- Contexts[2]: SyncConnectionContext (sync connection state/actions), EntitySessionContext (entity session management).
+- EventEmitter3: Type-safe pub/sub pattern, connection-specific event routing (event:sync, event:entity).
 - Protocol: HANDSHAKE_REQUEST → PENDING → ACCEPT → WSS upgrade → SYNC_REQUEST → DATA exchange → COMPLETE → FINALIZE.
+- Entity Sessions: Mirror Harmony Link's EntitySessionManager pattern, on-demand connections per chat.
 - Screens[2]: ConnectionSetupScreen (IP/port input, handshake), SyncSettingsScreen (status, manual sync).
 - Database: sync_devices, sync_history, chat_messages tables (migration 000005).
 - Error Handling: Connection validation, timeout handling (30s), confirmation tracking, comprehensive logging.

@@ -62,9 +62,6 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
           clearTimeout(connectionTimeout);
           console.log('[InsecureSSLWebSocketConnection] Connected securely (self-signed)');
           
-          // Setup sync listeners after connection is established
-          this.setupSyncListeners();
-          
           this.emit('connected');
           resolve();
         });
@@ -79,13 +76,10 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
           clearTimeout(connectionTimeout);
           console.log('[InsecureSSLWebSocketConnection] Self-signed connection closed');
           
-          // Only emit disconnected and cleanup if this is our current connection
+          // Only emit disconnected if this is our current connection
           if (this.wssSelfSigned === ws) {
             console.log('[InsecureSSLWebSocketConnection] Current connection closed, cleaning up');
             this.wssSelfSigned = null;
-            
-            // Cleanup sync listeners when connection closes
-            this.cleanupSyncListeners();
             
             this.emit('disconnected');
           } else {
@@ -144,17 +138,11 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
         const ws = this.wssSelfSigned;
         this.wssSelfSigned = null;
         
-        // Cleanup sync listeners before closing
-        this.cleanupSyncListeners();
-        
         // Now close the connection
         ws.close();
       } catch (err) {
         console.warn('[InsecureSSLWebSocketConnection] Error closing connection:', err);
       }
-    } else {
-      // No active connection, but still cleanup listeners if any
-      this.cleanupSyncListeners();
     }
   }
 
