@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import { executeRawQuery } from '../../database/connection';
+import { executeRawQuery, clearDatabaseData } from '../../database/connection';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[DatabaseTableViewer]');
@@ -43,6 +43,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [isPortrait, setIsPortrait] = useState(true);
     const [dropdownVisible, setDropdownVisible] = useState(false);
+    const [wipeConfirmVisible, setWipeConfirmVisible] = useState(false);
     const scrollViewRef = useRef<ScrollView>(null);
 
     // Check orientation on mount and window changes
@@ -133,6 +134,33 @@ export const DatabaseTableViewerScreen: React.FC = () => {
             const errorMessage = err instanceof Error ? err.message : 'Failed to load table data';
             setError(errorMessage);
             log.error('Error loading table data:', err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleWipeDatabase = async () => {
+        setWipeConfirmVisible(false);
+        setIsLoading(true);
+        setError(null);
+        
+        try {
+            log.info('Wiping database...');
+            await clearDatabaseData();
+            
+            // Reset state
+            setSelectedTable(null);
+            setColumns([]);
+            setRows([]);
+            
+            // Reload tables
+            await loadTables();
+            
+            log.info('Database wiped successfully');
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : 'Failed to wipe database';
+            setError(errorMessage);
+            log.error('Error wiping database:', err);
         } finally {
             setIsLoading(false);
         }
@@ -432,17 +460,30 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                     </View>
                 </View>
                 
-                <TouchableOpacity
-                    style={[
-                        styles.refreshButton,
-                        { backgroundColor: theme.colors.accent.primary },
-                        isLoading && styles.buttonDisabled
-                    ]}
-                    onPress={() => selectedTable ? loadTableData(selectedTable) : loadTables()}
-                    disabled={isLoading}
-                >
-                    <Icon name="refresh" size={20} color="#ffffff" />
-                </TouchableOpacity>
+                <View style={styles.headerButtons}>
+                    <TouchableOpacity
+                        style={[
+                            styles.wipeButton,
+                            { backgroundColor: theme.colors.status.error },
+                            isLoading && styles.buttonDisabled
+                        ]}
+                        onPress={() => setWipeConfirmVisible(true)}
+                        disabled={isLoading}
+                    >
+                        <Icon name="database-remove" size={20} color="#ffffff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[
+                            styles.refreshButton,
+                            { backgroundColor: theme.colors.accent.primary },
+                            isLoading && styles.buttonDisabled
+                        ]}
+                        onPress={() => selectedTable ? loadTableData(selectedTable) : loadTables()}
+                        disabled={isLoading}
+                    >
+                        <Icon name="refresh" size={20} color="#ffffff" />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Error Display */}
@@ -483,6 +524,51 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                     This screen is only visible in development builds
                 </Text>
             </View>
+
+            {/* Wipe Database Confirmation Modal */}
+            <Modal
+                visible={wipeConfirmVisible}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => setWipeConfirmVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.confirmModal, { backgroundColor: theme.colors.background.elevated }]}>
+                        <View style={styles.confirmHeader}>
+                            <Icon name="alert" size={48} color={theme.colors.status.error} />
+                        </View>
+                        
+                        <Text style={[styles.confirmTitle, { color: theme.colors.text.primary }]}>
+                            Wipe Database?
+                        </Text>
+                        
+                        <Text style={[styles.confirmMessage, { color: theme.colors.text.secondary }]}>
+                            This will permanently delete all data from the database and reset the schema. This action cannot be undone.
+                        </Text>
+                        
+                        <View style={styles.confirmButtons}>
+                            <TouchableOpacity
+                                style={[styles.confirmButton, styles.cancelButton, { backgroundColor: theme.colors.background.surface }]}
+                                onPress={() => setWipeConfirmVisible(false)}
+                            >
+                                <Text style={[styles.buttonText, { color: theme.colors.text.primary }]}>
+                                    Cancel
+                                </Text>
+                            </TouchableOpacity>
+                            
+                            <TouchableOpacity
+                                style={[styles.confirmButton, styles.wipeConfirmButton, { backgroundColor: theme.colors.status.error }]}
+                                onPress={handleWipeDatabase}
+                            >
+                                <Icon name="delete-forever" size={20} color="#ffffff" />
+                                <Text style={[styles.buttonText, { color: '#ffffff' }]}>
+                                    Wipe Database
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 };
@@ -516,6 +602,14 @@ const styles = StyleSheet.create({
     subtitle: {
         fontSize: 7,
         marginTop: 2,
+    },
+    headerButtons: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    wipeButton: {
+        padding: 5,
+        borderRadius: 4,
     },
     refreshButton: {
         padding: 5,
@@ -747,5 +841,51 @@ const styles = StyleSheet.create({
     },
     infoText: {
         fontSize: 6,
+    },
+    confirmModal: {
+        width: '85%',
+        maxWidth: 400,
+        borderRadius: 12,
+        padding: 24,
+        gap: 16,
+    },
+    confirmHeader: {
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    confirmTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        textAlign: 'center',
+    },
+    confirmMessage: {
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    confirmButtons: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 8,
+    },
+    confirmButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 12,
+        borderRadius: 8,
+        gap: 8,
+    },
+    cancelButton: {
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+    },
+    wipeConfirmButton: {
+        // No additional styles needed
+    },
+    buttonText: {
+        fontSize: 14,
+        fontWeight: '600',
     },
 });

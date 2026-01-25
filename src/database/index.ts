@@ -11,6 +11,8 @@ export {
   closeDatabase,
   isDatabaseReady,
   executeRawQuery,
+  clearDatabaseData,
+  wipeDatabaseCompletely,
 } from './connection';
 
 // Migration utilities

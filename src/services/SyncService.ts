@@ -2,10 +2,12 @@ import EventEmitter from 'eventemitter3';
 import DeviceInfo from 'react-native-device-info';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Transaction } from 'react-native-sqlite-storage';
 import * as SyncHelpers from '../database/sync';
 import ConnectionStateManager from './ConnectionStateManager';
 import connectionManagerInstance from './connection/ConnectionManager';
 import type { ConnectionManager } from './connection/ConnectionManager';
+import { getDatabase } from '../database/connection';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[SyncService]');
@@ -42,6 +44,20 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   private localChangesSent: boolean = false;
   private remoteCompleteReceived: boolean = false;
   private finalizeSent: boolean = false;
+
+  private syncPhase: 'IDLE' | 'SERVER_SENDING' | 'CLIENT_SENDING' | 'FINALIZING' = 'IDLE';
+  private pendingSyncConfirmation: {
+    eventId: string;
+    resolve: (value: any) => void;
+    reject: (reason: any) => void;
+  } | null = null;
+  
+  // Buffer for incoming server data (applied atomically when SYNC_COMPLETE received)
+  private incomingDataBuffer: Array<{
+    table: string;
+    operation: 'insert' | 'update' | 'delete';
+    record: any;
+  }> = [];
 
   private constructor() {
     super();
@@ -209,114 +225,326 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     this.currentSession.status = 'in_progress';
     this.currentSession.sessionId = payload.sync_session_id;
     
+    // Set phase to SERVER_SENDING and clear buffer
+    this.syncPhase = 'SERVER_SENDING';
+    this.incomingDataBuffer = [];
+
     this.emit('sync:started', this.currentSession);
     
-    // Trigger sending local changes
-    try {
-      await this.sendLocalChanges(payload.last_sync_timestamp);
-    } catch (error: any) {
-      log.error('Error sending local changes:', error);
-      this.emit('sync:error', error.message);
-    }
-  }
-
-  private async sendLocalChanges(lastSync: number): Promise<void> {
-    log.info(`Sending local changes since: ${lastSync}`);
-    
-    const tables = [
-      'character_profiles',
-      'character_image',
-      'entities',
-      'entity_module_mappings',
-      'chat_messages',
-      'provider_config_openai',
-      'provider_config_openrouter',
-      'provider_config_openaicompatible',
-      'provider_config_harmonyspeech',
-      'provider_config_elevenlabs',
-      'provider_config_kindroid',
-      'provider_config_kajiwoto',
-      'provider_config_characterai',
-      'provider_config_localai',
-      'provider_config_mistral',
-      'provider_config_ollama',
-      'backend_configs',
-      'cognition_configs',
-      'movement_configs',
-      'rag_configs',
-      'stt_configs',
-      'tts_configs'
-    ];
-    
-    for (const table of tables) {
-      try {
-        const changes = await SyncHelpers.getChangedRecords(table, lastSync);
-        log.info(`Found ${changes.length} changes in ${table}`);
-        
-        for (const record of changes) {
-          const operation = record.deleted_at ? 'delete' : 
-                           (SyncHelpers.toUnixTimestamp(record.created_at) > lastSync ? 'insert' : 'update');
-          
-          await this.sendSyncData(table, operation, record);
-        }
-      } catch (error: any) {
-        log.error(`Error syncing table ${table}:`, error);
-        // Continue with other tables
-      }
-    }
-    
-    await this.sendSyncComplete();
-    
-    // Mark that we've finished sending our local changes
-    this.localChangesSent = true;
-    log.info('Local changes sent, waiting for remote confirmation');
-    this.attemptFinalize();
-  }
-
-  private async sendSyncData(table: string, operation: string, record: any): Promise<void> {
-    if (!this.currentSession) return;
-
-    const eventId = this.generateEventId();
-    const event = {
-      event_id: eventId,
-      event_type: 'SYNC_DATA',
+    // Send SYNC_START to trigger server to send its changes
+    const startEvent = {
+      event_id: this.generateEventId(),
+      event_type: 'SYNC_START',
       status: 'NEW',
       payload: {
-        sync_session_id: this.currentSession.sessionId,
-        event_id: eventId,  // Include in payload for confirmation
-        table: table,
-        operation: operation,
-        record: record
+        sync_session_id: this.currentSession.sessionId
       }
     };
     
-    log.info(`Sending sync data for ${table}:${record.id}`);
-    await this.connectionManager.sendEvent('sync', event);
+    log.info('Sending SYNC_START to trigger server data transmission');
+    await this.connectionManager.sendEvent('sync', startEvent);
     
-    const confirmed = await this.waitForConfirmation(eventId);
-    if (confirmed) {
-      this.currentSession.recordsSent++;
-      this.emit('sync:progress', this.currentSession);
-    } else {
-      log.warn(`Failed to confirm ${table}:${record.id}`);
+    // DO NOT send local changes yet - wait for server SYNC_COMPLETE
+  }
+  
+  /**
+   * Apply buffered sync records in a single atomic transaction
+   */
+  private async applyBufferedSyncData(): Promise<void> {
+    if (this.incomingDataBuffer.length === 0) {
+      log.info('No buffered data to apply');
+      return;
     }
+    
+    const db = getDatabase();
+    const recordCount = this.incomingDataBuffer.length;
+    
+    // Debug: Log the buffer contents
+    log.info(`Applying ${recordCount} buffered sync records in transaction`);
+    log.info('Buffer contents:');
+    this.incomingDataBuffer.forEach((item, index) => {
+      const pkField = item.table === 'entity_module_mappings' ? 'entity_id' : 'id';
+      const pkValue = item.record[pkField];
+      log.info(`  [${index + 1}/${recordCount}] ${item.table}.${item.operation} (${pkField}=${pkValue})`);
+    });
+    
+    return new Promise<void>((resolve, reject) => {
+      db.transaction(
+        (tx) => {
+          // Apply all buffered records synchronously within transaction
+          for (const item of this.incomingDataBuffer) {
+            const pkField = item.table === 'entity_module_mappings' ? 'entity_id' : 'id';
+            const pkValue = item.record[pkField];
+
+            if (item.operation === 'delete') {
+              // Soft delete
+              log.debug(`  Executing DELETE for ${item.table}:${pkValue}`);
+              tx.executeSql(
+                `UPDATE ${item.table} SET deleted_at = ?, updated_at = ? WHERE ${pkField} = ?`,
+                [item.record.deleted_at, item.record.updated_at, pkValue],
+                () => {
+                  log.debug(`  ✓ DELETE successful for ${item.table}:${pkValue}`);
+                },
+                (_, error) => {
+                  log.error(`  ❌ DELETE FAILED for ${item.table}:${pkValue}`);
+                  log.error(`  Error: ${error.message} (code: ${(error as any).code || 'unknown'})`);
+                  log.error(`  Record:`, JSON.stringify(item.record, null, 2));
+                  return false; // Rollback
+                }
+              );
+            } else {
+              // Check if record exists, then insert or update
+              tx.executeSql(
+                `SELECT updated_at FROM ${item.table} WHERE ${pkField} = ?`,
+                [pkValue],
+                (_, result) => {
+                  if (result.rows.length === 0) {
+                    // Insert new record
+                    log.debug(`  Executing INSERT for ${item.table}:${pkValue}`);
+                    log.debug(`  Record data:`, JSON.stringify(item.record, null, 2));
+                    const columns = Object.keys(item.record).join(', ');
+                    const placeholders = Object.keys(item.record).map(() => '?').join(', ');
+                    const values = Object.values(item.record);
+                    
+                    tx.executeSql(
+                      `INSERT INTO ${item.table} (${columns}) VALUES (${placeholders})`,
+                      values,
+                      () => {
+                        log.debug(`  ✓ INSERT successful for ${item.table}:${pkValue}`);
+                      },
+                      (_, error) => {
+                        log.error(`  ❌ INSERT FAILED for ${item.table}:${pkValue}`);
+                        log.error(`  Error: ${error.message} (code: ${(error as any).code || 'unknown'})`);
+                        log.error(`  SQL: INSERT INTO ${item.table} (${columns}) VALUES (...)`);
+                        
+                        // Log FK field values to identify constraint violations
+                        const fkFields = this.getForeignKeyFields(item.table);
+                        if (fkFields.length > 0) {
+                          log.error(`  Foreign Key Fields:`);
+                          fkFields.forEach(fk => {
+                            const value = item.record[fk];
+                            log.error(`    - ${fk}: ${value === null ? 'NULL' : value === undefined ? 'UNDEFINED' : `"${value}"`}`);
+                          });
+                        }
+                        
+                        log.error(`  Full Record:`, JSON.stringify(item.record, null, 2));
+                        return false; // Rollback
+                      }
+                    );
+                  } else {
+                    // Last-Write-Wins: Compare timestamps
+                    const existingUpdated = SyncHelpers.toUnixTimestamp(result.rows.item(0).updated_at);
+                    const incomingUpdated = SyncHelpers.toUnixTimestamp(item.record.updated_at);
+                    
+                    if (incomingUpdated >= existingUpdated) {
+                      // Incoming wins - update
+                      log.debug(`  Executing UPDATE for ${item.table}:${pkValue}`);
+                      log.debug(`  Record data:`, JSON.stringify(item.record, null, 2));
+                      const updates = Object.keys(item.record)
+                        .filter(k => k !== pkField)
+                        .map(k => `${k} = ?`)
+                        .join(', ');
+                      const values = Object.keys(item.record)
+                        .filter(k => k !== pkField)
+                        .map(k => item.record[k]);
+                      values.push(pkValue);
+                      
+                      tx.executeSql(
+                        `UPDATE ${item.table} SET ${updates} WHERE ${pkField} = ?`,
+                        values,
+                        () => {
+                          log.debug(`  ✓ UPDATE successful for ${item.table}:${pkValue}`);
+                        },
+                        (_, error) => {
+                          log.error(`  ❌ UPDATE FAILED for ${item.table}:${pkValue}`);
+                          log.error(`  Error: ${error.message} (code: ${(error as any).code || 'unknown'})`);
+                          log.error(`  Record:`, JSON.stringify(item.record, null, 2));
+                          return false; // Rollback
+                        }
+                      );
+                    } else {
+                      log.debug(`  Skipping UPDATE for ${item.table}:${pkValue} (local is newer)`);
+                    }
+                  }
+                },
+                (_, error) => {
+                  log.error(`Error checking existing record: ${error.message}`);
+                  return false; // Rollback
+                }
+              );
+            }
+          }
+        },
+        (error) => {
+          log.error('❌ Transaction failed/rolled back:', error);
+          log.error(`  Error message: ${error.message}`);
+          log.error(`  Error code: ${(error as any).code || 'unknown'}`);
+          
+          // Critical cleanup on failure
+          log.warn('Cleaning up after transaction failure');
+          this.incomingDataBuffer = []; // Clear buffer
+          this.syncPhase = 'IDLE'; // Reset sync phase
+          
+          // Clear current session
+          if (this.currentSession) {
+            log.warn(`Clearing failed sync session: ${this.currentSession.sessionId}`);
+            this.currentSession.status = 'failed';
+            this.currentSession = null;
+          }
+          
+          // Reset completion flags
+          this.localChangesSent = false;
+          this.remoteCompleteReceived = false;
+          this.finalizeSent = false;
+          
+          reject(error);
+        },
+        () => {
+          log.info(`✅ Transaction committed successfully - applied ${recordCount} records`);
+          this.incomingDataBuffer = []; // Clear buffer after successful commit
+          resolve();
+        }
+      );
+    });
+  }
+
+  private async sendLocalChangesSequentially(lastSync: number): Promise<void> {
+    if (!this.currentSession) {
+      log.error('No active sync session');
+      return;
+    }
+
+    log.info(`Sending local changes since: ${lastSync}`);
+
+    try {
+      // Define table order respecting FK dependencies
+      const tables = [
+        'character_profiles',
+        'character_image',
+        'provider_config_openai',
+        'provider_config_ollama',
+        'provider_config_openaicompatible',
+        'provider_config_openrouter',
+        'provider_config_harmonyspeech',
+        'provider_config_elevenlabs',
+        'provider_config_kindroid',
+        'provider_config_kajiwoto',
+        'provider_config_characterai',
+        'provider_config_localai',
+        'provider_config_mistral',
+        'backend_configs',
+        'cognition_configs',
+        'movement_configs',
+        'rag_configs',
+        'stt_configs',
+        'tts_configs',
+        'entities',
+        'entity_module_mappings',
+        'chat_messages',
+      ];
+
+      // Send each table's records sequentially
+      for (const table of tables) {
+        const records = await SyncHelpers.getChangedRecords(table, lastSync);
+        log.info(`Found ${records.length} changes in ${table}`);
+
+        for (const record of records) {
+          const operation = record.deleted_at ? 'delete' : 
+                           (SyncHelpers.toUnixTimestamp(record.created_at) > lastSync ? 'insert' : 'update');
+          
+          // Send record and wait for confirmation
+          await this.sendSyncDataWithConfirmation(table, operation, record);
+        }
+      }
+
+      // All local changes sent and confirmed
+      log.info('Local changes sent, sending SYNC_COMPLETE');
+      
+      const event = {
+        event_id: this.generateEventId(),
+        event_type: 'SYNC_COMPLETE',
+        status: 'NEW',
+        payload: {
+          sync_session_id: this.currentSession.sessionId
+        }
+      };
+      
+      await this.connectionManager.sendEvent('sync', event);
+
+    } catch (error) {
+      log.error('Error sending local changes:', error);
+      this.emit('sync:error', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async sendSyncDataWithConfirmation(
+    table: string,
+    operation: 'insert' | 'update' | 'delete',
+    record: any
+  ): Promise<void> {
+    if (!this.currentSession) {
+      throw new Error('No active sync session');
+    }
+
+    const eventId = `data_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    return new Promise((resolve, reject) => {
+      // Store confirmation callback
+      this.pendingSyncConfirmation = { eventId, resolve, reject };
+
+      // Send the data
+      const event = {
+        event_id: eventId,
+        event_type: 'SYNC_DATA',
+        status: 'NEW',
+        payload: {
+          sync_session_id: this.currentSession!.sessionId,
+          event_id: eventId,
+          table,
+          operation,
+          record,
+        },
+      };
+
+      log.info(`Sending sync data for ${table}:${record.id || 'undefined'}, eventId: ${eventId}`);
+      this.connectionManager.sendEvent('sync', event).catch(reject);
+
+      // Set timeout
+      setTimeout(() => {
+        if (this.pendingSyncConfirmation?.eventId === eventId) {
+          this.pendingSyncConfirmation = null;
+          reject(new Error(`Timeout waiting for confirmation of ${eventId}`));
+        }
+      }, 30000); // 30 second timeout
+    });
   }
 
   private async handleIncomingSyncData(payload: any): Promise<void> {
     try {
-      log.info(`Receiving sync data for ${payload.table}:${payload.record?.id}`);
+      log.info(`Buffering sync data for ${payload.table}:${payload.record?.id || 'undefined'}`);
       
-      await SyncHelpers.applySyncRecord(
-        payload.table,
-        payload.operation,
-        payload.record
-      );
+      if (!this.currentSession) {
+        log.error('No active sync session');
+        return;
+      }
       
+      // Buffer the incoming data for atomic application later
+      this.incomingDataBuffer.push({
+        table: payload.table,
+        operation: payload.operation,
+        record: payload.record
+      });
+      
+      this.currentSession.recordsReceived++;
+      this.emit('sync:progress', this.currentSession);
+
+      // Send confirmation
       const confirmEvent = {
         event_id: this.generateEventId(),
         event_type: 'SYNC_DATA_CONFIRM',
         status: 'NEW',
         payload: {
+          sync_session_id: payload.sync_session_id,
           event_id: payload.event_id,
           status: 'SUCCESS'
         }
@@ -324,32 +552,45 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       
       await this.connectionManager.sendEvent('sync', confirmEvent);
       
-      if (this.currentSession) {
-        this.currentSession.recordsReceived++;
-        this.emit('sync:progress', this.currentSession);
-      }
     } catch (error: any) {
-      log.error('Error applying sync record:', error);
+      log.error('Error buffering sync record:', error);
       
       const errorEvent = {
         event_id: this.generateEventId(),
         event_type: 'SYNC_DATA_CONFIRM',
         status: 'NEW',
         payload: {
+          sync_session_id: payload.sync_session_id,
           event_id: payload.event_id,
           status: 'ERROR',
-          error_message: error.message
+          error_message: error.message || 'Unknown error'
         }
       };
       await this.connectionManager.sendEvent('sync', errorEvent);
+      
+      // Emit sync error to notify UI
+      this.emit('sync:error', error.message || 'Unknown error');
     }
   }
 
   private handleSyncDataConfirm(payload: any): void {
-    const callback = this.pendingConfirmations.get(payload.event_id);
-    if (callback) {
-      callback(payload.status === 'SUCCESS');
-      this.pendingConfirmations.delete(payload.event_id);
+    if (!payload) {
+      log.error('SYNC_DATA_CONFIRM received with null payload');
+      return;
+    }
+
+    log.debug(`Received confirmation for ${payload.event_id}: ${payload.status}`);
+
+    // Check if we're waiting for this confirmation
+    if (this.pendingSyncConfirmation?.eventId === payload.event_id) {
+      if (payload.status === 'SUCCESS') {
+        this.pendingSyncConfirmation?.resolve(true);
+      } else {
+        this.pendingSyncConfirmation?.reject(
+          new Error(payload.error_message || 'Sync failed')
+        );
+      }
+      this.pendingSyncConfirmation = null;
     }
   }
 
@@ -359,13 +600,49 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       return;
     }
     
-    // Only process SUCCESS status - ignore PENDING acknowledgements
-    if (event.status === 'SUCCESS' || event.status === 'DONE') {
-      log.info(`Remote sync complete confirmed (status: ${event.status})`);
+    const status = event.status;
+    log.info(`Received sync event: SYNC_COMPLETE status: ${status} phase: ${this.syncPhase}`);
+
+    // Handle SYNC_COMPLETE from server (can be NEW, SUCCESS, or DONE status)
+    if (this.syncPhase === 'SERVER_SENDING') {
+      // Server finished sending - apply buffered data atomically and move to next phase
+      try {
+        await this.applyBufferedSyncData();
+        log.info('Server data applied successfully');
+      } catch (error) {
+        log.error('Failed to apply server data:', error);
+        this.incomingDataBuffer = []; // Clear buffer on error
+        this.emit('sync:error', 'Failed to apply server data');
+        return;
+      }
+      
+      log.info('Starting client data transmission');
+      this.syncPhase = 'CLIENT_SENDING';
+      
+      // Trigger local changes sequentially
+      const lastSync = await this.getLastSyncTimestamp();
+      this.sendLocalChangesSequentially(lastSync);
+      
+    } else if (this.syncPhase === 'CLIENT_SENDING' && (status === 'SUCCESS' || status === 'DONE')) {
+      // Server acknowledged our SYNC_COMPLETE
+      log.info('Server acknowledged our data transmission complete');
+      this.localChangesSent = true;
       this.remoteCompleteReceived = true;
-      this.attemptFinalize();
-    } else {
-      log.info(`SYNC_COMPLETE ${event.status} - waiting for SUCCESS`);
+      
+      // Both sides complete - send SYNC_FINALIZE
+      log.info('Both sides complete, sending SYNC_FINALIZE');
+      this.syncPhase = 'FINALIZING';
+      
+      const finalizeEvent = {
+        event_id: this.generateEventId(),
+        event_type: 'SYNC_FINALIZE',
+        status: 'NEW',
+        payload: {
+          sync_session_id: this.currentSession!.sessionId
+        }
+      };
+      
+      this.connectionManager.sendEvent('sync', finalizeEvent);
     }
   }
 
@@ -451,6 +728,32 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     
     log.info('Sending SYNC_COMPLETE');
     await this.connectionManager.sendEvent('sync', event);
+  }
+
+  /**
+   * Returns the list of foreign key field names for a given table
+   */
+  private getForeignKeyFields(table: string): string[] {
+    const fkMap: Record<string, string[]> = {
+      'entities': ['character_profile_id'],
+      'entity_module_mappings': [
+        'entity_id',
+        'backend_config_id',
+        'cognition_config_id',
+        'movement_config_id',
+        'rag_config_id',
+        'stt_config_id',
+        'tts_config_id'
+      ],
+      'backend_configs': ['provider_config_id'],
+      'cognition_configs': ['provider_config_id'],
+      'movement_configs': ['provider_config_id'],
+      'rag_configs': ['provider_config_id'],
+      'stt_configs': ['transcription_provider_config_id', 'vad_provider_config_id'],
+      'tts_configs': ['provider_config_id'],
+    };
+    
+    return fkMap[table] || [];
   }
 }
 

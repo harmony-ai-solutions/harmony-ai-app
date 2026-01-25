@@ -249,6 +249,101 @@ export async function clearDatabaseData(
 }
 
 /**
+ * Completely wipe the database file and encryption key
+ * This works even if the database is not initialized or corrupted
+ * USE WITH EXTREME CAUTION - ALL DATA WILL BE PERMANENTLY LOST
+ */
+export async function wipeDatabaseCompletely(
+  silent: boolean = false
+): Promise<void> {
+  if (!silent) {
+    log.info('Wiping database completely...');
+  }
+
+  try {
+    // Step 1: Close existing connection if any
+    if (db) {
+      try {
+        await db.close();
+        db = null;
+        if (!silent) {
+          log.info('Closed existing database connection');
+        }
+      } catch (error) {
+        log.warn('Failed to close database connection (may already be closed):', error);
+        db = null;
+      }
+    }
+
+    // Step 2: Clear the encryption key from keychain FIRST
+    // This ensures we don't try to open the old database with the old key
+    try {
+      await Keychain.resetGenericPassword({
+        service: ENCRYPTION_KEY_SERVICE,
+      });
+      if (!silent) {
+        log.info('Cleared encryption key from keychain');
+      }
+    } catch (error) {
+      log.warn('Failed to clear encryption key (may not exist):', error);
+    }
+
+    // Step 3: Force a small delay to ensure SQLite releases all file handles
+    await new Promise(resolve => setTimeout(() => resolve(undefined), 200));
+
+    // Step 4: Use SQLite's own deleteDatabase API to properly remove the database
+    // This handles SQLite's internal caching and ensures a clean deletion
+    try {
+      await SQLite.deleteDatabase(DATABASE_NAME);
+      if (!silent) {
+        log.info('Deleted database using SQLite API');
+      }
+    } catch (error) {
+      log.warn('SQLite deleteDatabase failed, trying manual file deletion:', error);
+      
+      // Fallback to manual deletion if SQLite API fails
+      const dbPath = `${RNFS.DocumentDirectoryPath}/${DATABASE_NAME}`;
+      const filesToDelete = [
+        dbPath,
+        `${dbPath}-wal`,
+        `${dbPath}-shm`,
+        `${dbPath}-journal`,
+      ];
+
+      for (const filePath of filesToDelete) {
+        try {
+          if (await RNFS.exists(filePath)) {
+            await RNFS.unlink(filePath);
+            if (!silent) {
+              log.info(`Manually deleted ${filePath.split('/').pop()}`);
+            }
+          }
+        } catch (fileError) {
+          log.warn(`Failed to delete ${filePath}:`, fileError);
+        }
+      }
+    }
+
+    // Step 5: Another small delay to ensure file system operations complete
+    await new Promise(resolve => setTimeout(() => resolve(undefined), 100));
+
+    if (!silent) {
+      log.info('Database files wiped. Re-initializing with fresh database...');
+    }
+
+    // Step 6: Reinitialize the database (this will create new encryption key and fresh DB)
+    await initializeDatabase(silent);
+
+    if (!silent) {
+      log.info('Database reinitialized successfully with fresh schema');
+    }
+  } catch (error) {
+    log.error('Failed to wipe database:', error);
+    throw error;
+  }
+}
+
+/**
  * Execute a raw SQL query (for debugging/testing)
  * Use repositories for production code
  */

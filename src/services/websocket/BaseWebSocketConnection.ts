@@ -16,17 +16,39 @@ export abstract class BaseWebSocketConnection extends EventEmitter<WebSocketConn
 
   protected handleMessage(event: any): void {
     try {
-      const data = JSON.parse(event.data);
-      log.info(`Received event: ${data.event_type} status: ${data.status}`);
+      const message = JSON.parse(event.data);
       
+      // Validate message structure before accessing properties
+      if (!message || typeof message !== 'object') {
+        log.error('Invalid message format received');
+        return;
+      }
+
+      log.info(`Received event: ${message.event_type} status: ${message.status}`);
+
+      if (!message.payload) {
+        log.warn('Message received with null/undefined payload', {
+          event_type: message.event_type,
+          status: message.status,
+        });
+        // Still process the message, just be careful with payload access
+      }
+
+      const harmonyEvent = {
+        event_id: message.event_id || `unknown_${Date.now()}`,
+        event_type: message.event_type,
+        status: message.status,
+        payload: message.payload || {},
+      };
+
       // Emit the event for ConnectionManager to route
-      this.emit('event', data);
+      this.emit('event', harmonyEvent);
       
       // Check if event has ERROR status and emit as error
-      if (data.status === 'ERROR') {
-        log.error('Received ERROR event:', data);
-        const errorMsg = data.payload?.message || data.payload?.error || 'An error occurred';
-        this.emit('error', { message: errorMsg, event: data });
+      if (harmonyEvent.status === 'ERROR') {
+        log.error('Received ERROR event:', harmonyEvent);
+        const errorMsg = harmonyEvent.payload?.message || harmonyEvent.payload?.error || harmonyEvent.payload?.error_message || 'An error occurred';
+        this.emit('error', { message: errorMsg, event: harmonyEvent });
       }
     } catch (error) {
       log.error('Error parsing message:', error);

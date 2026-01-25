@@ -51,6 +51,7 @@ declare module 'react-native-sqlite-storage' {
     DEBUG(debug: boolean): void;
     enablePromise(enable: boolean): void;
     openDatabase(params: DatabaseParams): Promise<SQLiteDatabase>;
+    deleteDatabase(databaseName: string): Promise<void>;
   }
 
   const SQLiteStorage: SQLite;

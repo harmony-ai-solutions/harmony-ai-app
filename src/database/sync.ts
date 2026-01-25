@@ -1,5 +1,6 @@
 import { getDatabase } from './connection';
 import { createLogger } from '../utils/logger';
+import { Transaction } from 'react-native-sqlite-storage';
 
 const log = createLogger('[DatabaseSync]');
 
@@ -45,28 +46,47 @@ export const getChangedRecords = async (table: string, lastSyncTimestamp: number
 };
 
 /**
+ * Get the primary key field name for a table
+ */
+const getPrimaryKeyField = (table: string): string => {
+  // entity_module_mappings uses entity_id as primary key
+  if (table === 'entity_module_mappings') {
+    return 'entity_id';
+  }
+  // All other tables use id
+  return 'id';
+};
+
+/**
  * Apply sync record using Last-Write-Wins (LWW) conflict resolution
+ * 
+ * @param table - The table to apply the record to
+ * @param operation - The operation type (insert, update, delete)
+ * @param record - The record data
+ * @param tx - Transaction to execute within (required for atomic sync)
  */
 export const applySyncRecord = async (
   table: string,
   operation: 'insert' | 'update' | 'delete',
-  record: any
+  record: any,
+  tx: Transaction
 ) => {
-  const db = getDatabase();
+  const pkField = getPrimaryKeyField(table);
+  const pkValue = record[pkField];
 
   if (operation === 'delete') {
     // Soft delete
-    await db.executeSql(
-      `UPDATE ${table} SET deleted_at = ?, updated_at = ? WHERE id = ?`,
-      [record.deleted_at, record.updated_at, record.id]
+    await tx.executeSql(
+      `UPDATE ${table} SET deleted_at = ?, updated_at = ? WHERE ${pkField} = ?`,
+      [record.deleted_at, record.updated_at, pkValue]
     );
     return;
   }
   
   // Check if record exists
-  const [existing] = await db.executeSql(
-    `SELECT updated_at FROM ${table} WHERE id = ?`,
-    [record.id]
+  const [existing] = await tx.executeSql(
+    `SELECT updated_at FROM ${table} WHERE ${pkField} = ?`,
+    [pkValue]
   );
   
   if (existing.rows.length === 0) {
@@ -75,7 +95,7 @@ export const applySyncRecord = async (
     const placeholders = Object.keys(record).map(() => '?').join(', ');
     const values = Object.values(record);
     
-    await db.executeSql(`INSERT INTO ${table} (${columns}) VALUES (${placeholders})`, values);
+    await tx.executeSql(`INSERT INTO ${table} (${columns}) VALUES (${placeholders})`, values);
   } else {
     // Last-Write-Wins: Compare timestamps
     // SQLites updated_at is stored as ISO string in the app
@@ -85,15 +105,15 @@ export const applySyncRecord = async (
     if (incomingUpdated >= existingUpdated) {
       // Incoming wins - update
       const updates = Object.keys(record)
-        .filter(k => k !== 'id')
+        .filter(k => k !== pkField)
         .map(k => `${k} = ?`)
         .join(', ');
       const values = Object.keys(record)
-        .filter(k => k !== 'id')
+        .filter(k => k !== pkField)
         .map(k => record[k]);
-      values.push(record.id);
+      values.push(pkValue);
       
-      await db.executeSql(`UPDATE ${table} SET ${updates} WHERE id = ?`, values);
+      await tx.executeSql(`UPDATE ${table} SET ${updates} WHERE ${pkField} = ?`, values);
     }
     // Else: Existing wins - do nothing
   }
