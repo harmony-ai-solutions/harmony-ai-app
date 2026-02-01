@@ -3,7 +3,7 @@ import { Text, TextProps, StyleSheet } from 'react-native';
 import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface ThemedTextProps extends TextProps {
-    variant?: 'primary' | 'secondary' | 'muted' | 'disabled' | 'accent';
+    variant?: 'primary' | 'secondary' | 'muted' | 'disabled' | 'accent' | 'success';
     weight?: 'normal' | 'medium' | 'bold';
     size?: number;
 }
@@ -23,6 +23,8 @@ export const ThemedText: React.FC<ThemedTextProps> = ({
 
     if (variant === 'accent') {
         color = theme.colors.accent.primary;
+    } else if (variant === 'success') {
+        color = theme.colors.status.success;
     }
 
     const fontWeight =

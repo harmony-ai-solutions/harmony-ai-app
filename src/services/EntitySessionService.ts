@@ -46,6 +46,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   private static instance: EntitySessionService;
   private connectionManager: typeof ConnectionManager;
   private sessions: Map<string, DualEntitySession> = new Map();
+  private pendingSessions: Map<string, EntitySession> = new Map(); // Track individual sessions during initialization
   private appStateSubscription: any;
   
   private constructor() {
@@ -135,8 +136,15 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         impersonatedEntityId
       };
       
+      // Store the dual session
       this.sessions.set(partnerEntityId, dualSession);
-      this.emit('session:started', partnerEntityId, dualSession);
+
+      log.info(`Dual session created for partner ${partnerEntityId}, sessions are 'connecting'...`);
+      log.info(`User session (${impersonatedEntityId}): ${userSession.status}`);
+      log.info(`Partner session (${partnerEntityId}): ${partnerSession.status}`);
+
+      // Note: 'session:started' event will be emitted from handleEntityEvent 
+      // when both sessions transition to 'active' status
       
       return dualSession;
     } catch (error) {
@@ -153,7 +161,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     mode: ConnectionMode
   ): Promise<EntitySession> {
     const session: EntitySession = {
-      sessionId: '',
+      sessionId: '', // Will be set when INIT_ENTITY response arrives
       connectionId,
       entityId,
       deviceType: 'harmony_app',
@@ -161,22 +169,45 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       capabilities: ['chat', 'voice', 'images'],
       connectedAt: Date.now(),
       lastActivity: Date.now(),
-      status: 'connecting'
+      status: 'connecting' // Starts as 'connecting', will become 'active' via event
     };
     
-    // Create WebSocket connection
-    await this.connectionManager.createConnection(
-      connectionId,
-      'entity',
-      url,
-      mode,
-      entityId
-    );
-    
-    // Send INIT_ENTITY event
-    await this.sendInitEntity(session);
-    
-    return session;
+    try {
+      // Store in pendingSessions immediately so handleEntityEvent can find it
+      this.pendingSessions.set(entityId, session);
+      log.info(`Stored pending session for ${entityId}`);
+      
+      // Create WebSocket connection
+      await this.connectionManager.createConnection(
+        connectionId,
+        'entity',
+        url,
+        mode,
+        entityId
+      );
+
+      log.info(`WebSocket connection established for ${entityId}, sending INIT_ENTITY...`);
+
+      // Send INIT_ENTITY (fire and forget)
+      await this.sendInitEntity(session);
+
+      log.info(`INIT_ENTITY sent for ${entityId}, waiting for backend response via events...`);
+
+      // Return session in 'connecting' state
+      // It will transition to 'active' when handleEntityEvent processes the response
+      return session;
+    } catch (error) {
+      log.error(`Failed to initialize entity session for ${entityId}:`, error);
+      session.status = 'disconnected';
+
+      // Clean up pending session and connection on failure
+      this.pendingSessions.delete(entityId);
+      if (this.connectionManager.isConnected(connectionId)) {
+        this.connectionManager.disconnectConnection(connectionId);
+      }
+
+      throw error;
+    }
   }
   
   private async sendInitEntity(session: EntitySession): Promise<void> {
@@ -236,6 +267,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         );
         this.connectionManager.disconnectConnection(dualSession.partnerSession.connectionId);
       }
+      
+      // Clean up pending sessions if they exist
+      this.pendingSessions.delete(dualSession.userSession.entityId);
+      this.pendingSessions.delete(dualSession.partnerSession.entityId);
     } catch (error) {
       log.error('Error stopping session:', error);
     } finally {
@@ -345,68 +380,134 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
   
   private async handleEntityEvent(entityId: string, event: any): Promise<void> {
-    // Find which dual session this belongs to
+    log.debug(`handleEntityEvent called for entity ${entityId}, event type: ${event.event_type}, status: ${event.status}`);
+
+    // First, try to find in pending sessions (for sessions still initializing)
+    let targetSession = this.pendingSessions.get(entityId);
     let dualSession: DualEntitySession | null = null;
-    let sessionType: 'user' | 'partner' | null = null;
-    
-    for (const [, session] of this.sessions) {
-      if (session.userSession.entityId === entityId) {
-        dualSession = session;
-        sessionType = 'user';
-        break;
-      }
-      if (session.partnerSession.entityId === entityId) {
-        dualSession = session;
-        sessionType = 'partner';
-        break;
+
+    if (!targetSession) {
+      // Not in pending, search in active dual sessions
+      for (const session of this.sessions.values()) {
+        if (session.userSession.entityId === entityId) {
+          dualSession = session;
+          targetSession = session.userSession;
+          break;
+        } else if (session.partnerSession.entityId === entityId) {
+          dualSession = session;
+          targetSession = session.partnerSession;
+          break;
+        }
       }
     }
-    
-    if (!dualSession) {
-      log.warn(`Received event for unknown entity: ${entityId}`);
+
+    if (!targetSession) {
+      log.warn(`Received event for unknown entity ${entityId}`);
       return;
     }
-    
+
     // Update last activity
-    if (sessionType === 'user') {
-      dualSession.userSession.lastActivity = Date.now();
-    } else {
-      dualSession.partnerSession.lastActivity = Date.now();
-    }
-    
-    log.info(`Entity ${entityId} event: ${event.event_type}`);
-    
-    switch (event.event_type) {
-      case 'ENTITY_INFO': // Response to INIT_ENTITY
-        if (sessionType === 'user') {
-          dualSession.userSession.sessionId = event.payload.session_id;
-          dualSession.userSession.status = 'active';
-        } else {
-          dualSession.partnerSession.sessionId = event.payload.session_id;
-          dualSession.partnerSession.status = 'active';
+    targetSession.lastActivity = Date.now();
+
+    // Handle INIT_ENTITY responses (SUCCESS or ERROR)
+    if (event.event_type === 'INIT_ENTITY') {
+      if (event.status === 'SUCCESS') {
+        log.info(`INIT_ENTITY SUCCESS for ${entityId}`);
+
+        // Update session with backend response
+        targetSession.sessionId = event.payload.session_id;
+        targetSession.status = 'active';
+
+        log.info(`Session activated: ${entityId} -> session_id=${event.payload.session_id}`);
+
+        // Find the dual session this belongs to (may not exist yet if this is the first to complete)
+        if (!dualSession) {
+          // Search for dual session containing this entity
+          for (const session of this.sessions.values()) {
+            if (session.userSession.entityId === entityId || session.partnerSession.entityId === entityId) {
+              dualSession = session;
+              break;
+            }
+          }
         }
-        // Only emit when both sessions are active
-        if (dualSession.userSession.status === 'active' && 
+
+        // Check if we have a dual session and if BOTH sessions are now active
+        if (dualSession) {
+          if (dualSession.userSession.status === 'active' &&
             dualSession.partnerSession.status === 'active') {
-          this.emit('session:started', dualSession.partnerEntityId, dualSession);
+            log.info(`Dual session fully active for partner ${dualSession.partnerEntityId}`);
+            
+            // Remove from pending sessions now that they're fully active
+            this.pendingSessions.delete(dualSession.userSession.entityId);
+            this.pendingSessions.delete(dualSession.partnerSession.entityId);
+            
+            this.emit('session:started', dualSession.partnerEntityId, dualSession);
+          } else {
+            log.info(`Dual session partially active: user=${dualSession.userSession.status}, partner=${dualSession.partnerSession.status}`);
+          }
+        } else {
+          log.info(`Session ${entityId} activated, waiting for dual session to be created`);
         }
-        break;
+
+        return; // INIT_ENTITY response handled, don't process further
+      } else if (event.status === 'ERROR') {
+        log.error(`INIT_ENTITY ERROR for ${entityId}:`, event.payload);
+
+        // Mark session as failed
+        targetSession.status = 'disconnected';
         
+        // Remove from pending sessions
+        this.pendingSessions.delete(entityId);
+
+        // Find the dual session if it exists
+        if (!dualSession) {
+          for (const session of this.sessions.values()) {
+            if (session.userSession.entityId === entityId || session.partnerSession.entityId === entityId) {
+              dualSession = session;
+              break;
+            }
+          }
+        }
+
+        if (dualSession) {
+          // Emit error
+          this.emit('session:error', dualSession.partnerEntityId,
+            event.payload?.error || 'Session initialization failed');
+
+          // Clean up the dual session
+          this.sessions.delete(dualSession.partnerEntityId);
+
+          // Clean up pending sessions
+          this.pendingSessions.delete(dualSession.userSession.entityId);
+          this.pendingSessions.delete(dualSession.partnerSession.entityId);
+
+          // Disconnect both connections
+          this.connectionManager.disconnectConnection(dualSession.userSession.connectionId);
+          this.connectionManager.disconnectConnection(dualSession.partnerSession.connectionId);
+        }
+
+        return; // Error handled
+      }
+    }
+
+    // Handle other event types (only if we have a dual session)
+    if (!dualSession) {
+      log.debug(`Event ${event.event_type} for ${entityId} - no dual session yet, ignoring`);
+      return;
+    }
+
+    switch (event.event_type) {
       case 'ENTITY_UTTERANCE':
-        // Convert utterance to chat message and save
-        await this.handleIncomingUtterance(dualSession, event.payload);
-        this.emit('message:received', dualSession.partnerEntityId, event.payload);
+        // Handle incoming messages
+        await this.handleIncomingMessage(dualSession, event);
         break;
-        
+
       case 'TYPING_INDICATOR':
-        this.emit(
-          'typing:indicator',
-          dualSession.partnerEntityId,
-          event.payload.entity_id,
-          event.payload.is_typing
-        );
+        // Handle typing indicator
+        const isTyping = event.payload?.is_typing || false;
+        this.emit('typing:indicator', dualSession.partnerEntityId, entityId, isTyping);
         break;
-        
+
       case 'RECORDING_INDICATOR':
         this.emit(
           'recording:indicator',
@@ -415,12 +516,29 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
           event.payload.is_recording
         );
         break;
-        
+
       default:
-        log.warn(`Unhandled event: ${event.event_type}`);
+        log.debug(`Unhandled entity event type: ${event.event_type}`);
     }
   }
   
+  private async handleIncomingMessage(dualSession: DualEntitySession, event: any): Promise<void> {
+    try {
+      const message = event.payload;
+
+      log.info(`Incoming message from ${message.sender_entity_id} in session ${dualSession.partnerEntityId}`);
+
+      // Save to database
+      await this.handleIncomingUtterance(dualSession, message);
+
+      // Just emit event so UI can reload if this chat is open
+      this.emit('message:received', dualSession.partnerEntityId, event.payload);
+
+    } catch (error) {
+      log.error('Failed to handle incoming message:', error);
+    }
+  }
+
   private async handleIncomingUtterance(
     dualSession: DualEntitySession,
     utterance: any

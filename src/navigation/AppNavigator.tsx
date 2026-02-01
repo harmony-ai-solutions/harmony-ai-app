@@ -18,7 +18,7 @@ export type RootStackParamList = {
   ProfileSettings: undefined;
   ConnectionSetup: undefined;
   SyncSettings: undefined;
-  ChatDetail: { partnerEntityId: string; partnerCharacterId?: string };
+  ChatDetail: { partnerEntityId: string; partnerCharacterId?: string; impersonatedEntityId: string };
   DatabaseTests?: undefined; // DEV only
   DatabaseTableViewer?: undefined; // DEV only
 };

@@ -81,6 +81,12 @@ harmony-ai-app/
 ## Next Steps
 
 ### Immediate Priorities (Phase 1)
+- **Entity Selection System for Chat**: COMPLETED the implementation of a user entity selection system for chat conversations.
+    - **ChatPreferencesService**: Implemented a new service using `AsyncStorage` to persist per-partner entity selection preferences.
+    - **EntitySelectionModal**: Created a Material Design 3 modal for selecting the impersonated entity with smart defaults (favoring "user").
+    - **ChatList Integration**: Integrated the selection flow into `ChatListScreen`. The list now filters for entities with character profiles and uses preferences to show accurate last message previews.
+    - **ChatDetail Update**: Updated `ChatDetailScreen` to use the `impersonatedEntityId` from navigation parameters, enabling dynamic roleplay identities.
+    - **Type Safety**: Updated navigation types to require `impersonatedEntityId` for the `ChatDetail` route.
 - **Theming System Refinement**: COMPLETED the enhancement of the theming system, adding custom theme deletion and a full-featured color editor with an RGB slider-based overlay. Migrated to `@react-native-documents/picker` for modern build compatibility.
 1. **Chat Interface**
    - Message list with FlatList virtualization

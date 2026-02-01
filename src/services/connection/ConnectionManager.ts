@@ -86,6 +86,10 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
     
     log.info(`Creating ${type} connection: ${id}`);
     
+    // Make URL unique by appending connection ID as query parameter
+    // This allows multiple connections to the same base URL (required for dual entity sessions)
+    const uniqueUrl = this.makeUrlUnique(url, id);
+    
     // Create WebSocket connection using factory
     const connection = WebSocketConnectionFactory.createConnection(mode);
     
@@ -112,8 +116,8 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
     this.emit('connection:created', id, type);
     
     try {
-      // Attempt connection
-      await connection.connect(url);
+      // Attempt connection with unique URL
+      await connection.connect(uniqueUrl);
       
       // Update status
       connectionInfo.status = 'connected';
@@ -335,6 +339,18 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
     log.info('Disconnecting all connections');
     const ids = Array.from(this.connections.keys());
     ids.forEach(id => this.disconnectConnection(id));
+  }
+  
+  /**
+   * Make URL unique by appending connection ID as query parameter
+   * This allows multiple WebSocket connections to the same base URL
+   * (required for dual entity sessions with libraries using singleton pattern)
+   */
+  private makeUrlUnique(url: string, connectionId: string): string {
+    const separator = url.includes('?') ? '&' : '?';
+    const uniqueUrl = `${url}${separator}connection_id=${encodeURIComponent(connectionId)}`;
+    log.info(`Made URL unique: ${url} -> ${uniqueUrl}`);
+    return uniqueUrl;
   }
 }
 

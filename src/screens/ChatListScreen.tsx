@@ -19,6 +19,11 @@ import { getLastChatMessage } from '../database/repositories/chat_messages';
 import { getPrimaryImage, getCharacterProfile, imageToDataURL } from '../database/repositories/characters';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import ChatPreferencesService from '../services/ChatPreferencesService';
+import { EntitySelectionModal } from '../components/modals/EntitySelectionModal';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[ChatListScreen]');
 
 interface ChatListItem {
   entityId: string;
@@ -39,22 +44,27 @@ export const ChatListScreen: React.FC = () => {
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  
-  // Default impersonated entity is "user"
-  const impersonatedEntityId = 'user';
+  const [entityModalVisible, setEntityModalVisible] = useState(false);
+  const [selectedPartner, setSelectedPartner] = useState<ChatListItem | null>(null);
+
+  // Default impersonated entity is "user" (fallback)
+  const defaultImpersonatedEntityId = 'user';
   
   const loadChatList = useCallback(async () => {
     try {
       const entities = await getAllEntities();
       const listItems: ChatListItem[] = [];
-      
+
       for (const entity of entities) {
-        // Skip the impersonated entity itself
-        if (entity.id === impersonatedEntityId) continue;
-        
-        // Get last message for preview
-        const lastMsg = await getLastChatMessage(impersonatedEntityId, entity.id);
-        
+        // Skip entities without a character profile linked
+        if (!entity.character_profile_id) continue;
+
+        // Get preferred impersonated entity for this partner
+        const preferredEntityId = await ChatPreferencesService.getPreferredEntity(entity.id) || defaultImpersonatedEntityId;
+
+        // Get last message for preview using the preferred impersonated entity
+        const lastMsg = await getLastChatMessage(preferredEntityId, entity.id);
+
         // Get avatar
         let avatarUri: string | null = null;
         let characterName = entity.id;
@@ -105,14 +115,70 @@ export const ChatListScreen: React.FC = () => {
     setRefreshing(true);
     loadChatList();
   };
-  
+
+  const handleChatPress = async (item: ChatListItem) => {
+    try {
+      // Check for existing preference
+      const preferredEntity = await ChatPreferencesService.getPreferredEntity(item.entityId);
+
+      if (preferredEntity) {
+        // Navigate directly with saved preference
+        log.info(`Using saved entity preference: ${preferredEntity} for ${item.entityId}`);
+        navigation.navigate('ChatDetail', {
+          partnerEntityId: item.entityId,
+          partnerCharacterId: item.characterId || undefined,
+          impersonatedEntityId: preferredEntity,
+        });
+      } else {
+        // Show entity selection modal
+        log.info(`No entity preference found for ${item.entityId}, showing modal`);
+        setSelectedPartner(item);
+        setEntityModalVisible(true);
+      }
+    } catch (error) {
+      log.error('Failed to handle chat press:', error);
+    }
+  };
+
+  const handleEntitySelected = async (entityId: string) => {
+    if (!selectedPartner) return;
+
+    try {
+      // Save preference
+      await ChatPreferencesService.setPreferredEntity(selectedPartner.entityId, entityId);
+      log.info(`Saved entity preference: ${entityId} for ${selectedPartner.entityId}`);
+
+      // Navigate to chat
+      navigation.navigate('ChatDetail', {
+        partnerEntityId: selectedPartner.entityId,
+        partnerCharacterId: selectedPartner.characterId || undefined,
+        impersonatedEntityId: entityId,
+      });
+
+      // Cleanup
+      setEntityModalVisible(false);
+      setSelectedPartner(null);
+    } catch (error) {
+      log.error('Failed to save entity preference:', error);
+      // Still navigate even if save failed
+      navigation.navigate('ChatDetail', {
+        partnerEntityId: selectedPartner.entityId,
+        partnerCharacterId: selectedPartner.characterId || undefined,
+        impersonatedEntityId: entityId,
+      });
+      setEntityModalVisible(false);
+      setSelectedPartner(null);
+    }
+  };
+
+  const handleEntitySelectionCancel = () => {
+    log.info('Entity selection cancelled');
+    setEntityModalVisible(false);
+    setSelectedPartner(null);
+  };
+
   const renderItem = ({ item }: { item: ChatListItem }) => (
-    <TouchableOpacity
-      onPress={() => navigation.navigate('ChatDetail', {
-        partnerEntityId: item.entityId,
-        partnerCharacterId: item.characterId || undefined
-      })}
-    >
+    <TouchableOpacity onPress={() => handleChatPress(item)}>
       <List.Item
         title={item.characterName}
         description={item.lastMessage}
@@ -199,6 +265,13 @@ export const ChatListScreen: React.FC = () => {
         visible={menuVisible}
         onClose={() => setMenuVisible(false)}
         onNavigate={(screen) => navigation.navigate(screen as any)}
+      />
+
+      <EntitySelectionModal
+        visible={entityModalVisible}
+        partnerEntityId={selectedPartner?.entityId || ''}
+        onSelect={handleEntitySelected}
+        onCancel={handleEntitySelectionCancel}
       />
     </ThemedView>
   );

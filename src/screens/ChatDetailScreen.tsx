@@ -6,6 +6,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  ToastAndroid,
+  Alert,
 } from 'react-native';
 import { Appbar, Avatar } from 'react-native-paper';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -16,7 +18,8 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ChatBubble } from '../components/chat/ChatBubble';
 import { ChatInput } from '../components/chat/ChatInput';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
-import EntitySessionService from '../services/EntitySessionService';
+import { useEntitySession } from '../contexts/EntitySessionContext';
+import EntitySessionService from '../services/EntitySessionService'; // Still needed for event listeners
 import { getRecentChatMessages } from '../database/repositories/chat_messages';
 import { getPrimaryImage, getCharacterProfile, imageToDataURL } from '../database/repositories/characters';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
@@ -28,19 +31,18 @@ const log = createLogger('[ChatDetailScreen]');
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
 export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { partnerEntityId, partnerCharacterId } = route.params;
+  const { partnerEntityId, partnerCharacterId, impersonatedEntityId } = route.params;
   const { theme } = useAppTheme();
-  const { isPaired } = useSyncConnection();
+  const { isConnected } = useSyncConnection();
+  const { isDualSessionActive, startDualSession, stopDualSession } = useEntitySession();
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
   const [partnerName, setPartnerName] = useState<string>('Chat');
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
-  const [sessionActive, setSessionActive] = useState(false);
   
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
-  const impersonatedEntityId = 'user';
 
   // Load partner info (avatar, name)
   useEffect(() => {
@@ -59,41 +61,84 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     loadPartnerInfo();
   }, [partnerCharacterId]);
 
-  // Load messages and initialize session
+  // Load messages
   useEffect(() => {
-    const initialize = async () => {
+    const loadMessages = async () => {
       try {
         setLoading(true);
         
-        // Load existing messages
         const existingMessages = await getRecentChatMessages(
           impersonatedEntityId,
           partnerEntityId,
           50
         );
         setMessages(existingMessages);
-        
-        // Start entity session
-        if (isPaired) {
-          await EntitySessionService.startDualSession(partnerEntityId, impersonatedEntityId);
-          setSessionActive(true);
-        }
       } catch (error) {
-        log.error('Failed to initialize chat:', error);
+        log.error('Failed to load messages:', error);
       } finally {
         setLoading(false);
       }
     };
     
-    initialize();
+    loadMessages();
+  }, [partnerEntityId, impersonatedEntityId]);
+
+  // Initialize entity session
+  useEffect(() => {
+    let mounted = true;
+    
+    const initializeSession = async () => {
+      // Only start if we have an active sync connection
+      if (!isConnected) {
+        log.warn('Cannot start entity session: sync not connected');
+        return;
+      }
+      
+      // Check if session already exists (e.g., navigating back to chat)
+      if (isDualSessionActive(partnerEntityId)) {
+        log.info(`Session already active for ${partnerEntityId}`);
+        return;
+      }
+      
+      try {
+        log.info(`Initializing dual session for ${partnerEntityId}...`);
+        await startDualSession(partnerEntityId, impersonatedEntityId);
+        // Session will be in 'connecting' state, UI will show "Connecting..."
+        // When INIT_ENTITY responses arrive, UI will update to "Connected"
+      } catch (error: any) {
+        if (!mounted) return;
+        
+        log.error('Failed to initialize entity session:', error);
+        
+        const errorMessage = error?.message || 'Unknown error';
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(
+            `Failed to start chat session: ${errorMessage}`,
+            ToastAndroid.LONG
+          );
+        } else {
+          Alert.alert(
+            'Connection Error',
+            `Could not establish chat session: ${errorMessage}`,
+            [{ text: 'OK' }]
+          );
+        }
+      }
+    };
+    
+    initializeSession();
     
     // Cleanup on unmount
     return () => {
-      EntitySessionService.stopSession(partnerEntityId);
+      mounted = false;
+      if (isDualSessionActive(partnerEntityId)) {
+        log.info(`Stopping session for ${partnerEntityId} on unmount`);
+        stopDualSession(partnerEntityId);
+      }
     };
-  }, [partnerEntityId, isPaired]);
+  }, [partnerEntityId, impersonatedEntityId, isConnected]);
 
-  // Listen for new messages
+  // Listen for new messages and typing indicator
   useEffect(() => {
     const handleNewMessage = (entityId: string) => {
       if (entityId === partnerEntityId) {
@@ -118,8 +163,39 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [partnerEntityId]);
 
+  // Listen for session errors
+  useEffect(() => {
+    const handleSessionError = (errorPartnerId: string, error: string) => {
+      if (errorPartnerId === partnerEntityId) {
+        log.error(`Session error for ${partnerEntityId}:`, error);
+        
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(
+            `Chat session error: ${error}`,
+            ToastAndroid.LONG
+          );
+        } else {
+          Alert.alert(
+            'Session Error',
+            error,
+            [{ text: 'OK' }]
+          );
+        }
+      }
+    };
+    
+    EntitySessionService.on('session:error', handleSessionError);
+    
+    return () => {
+      EntitySessionService.off('session:error', handleSessionError);
+    };
+  }, [partnerEntityId]);
+
   const handleSendText = useCallback(async (text: string) => {
-    if (!text.trim() || !sessionActive) return;
+    if (!text.trim() || !isDualSessionActive(partnerEntityId)) {
+      log.warn('Cannot send message: session not active');
+      return;
+    }
     
     try {
       await EntitySessionService.sendTextMessage(partnerEntityId, text.trim());
@@ -133,10 +209,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     } catch (error) {
       log.error('Failed to send message:', error);
     }
-  }, [partnerEntityId, sessionActive]);
+  }, [partnerEntityId, impersonatedEntityId, isDualSessionActive]);
 
   const handleSendAudio = useCallback(async (audioData: Uint8Array, duration: number) => {
-    if (!sessionActive) return;
+    if (!isDualSessionActive(partnerEntityId)) return;
     
     try {
       await EntitySessionService.sendAudioMessage(
@@ -154,10 +230,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     } catch (error) {
       log.error('Failed to send audio:', error);
     }
-  }, [partnerEntityId, sessionActive]);
+  }, [partnerEntityId, isDualSessionActive]);
 
   const handleSendImage = useCallback(async (imageBase64: string, mimeType: string, caption?: string) => {
-    if (!sessionActive) return;
+    if (!isDualSessionActive(partnerEntityId)) return;
     
     try {
       await EntitySessionService.sendImageMessage(partnerEntityId, imageBase64, mimeType, caption);
@@ -170,11 +246,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     } catch (error) {
       log.error('Failed to send image:', error);
     }
-  }, [partnerEntityId, sessionActive]);
+  }, [partnerEntityId, isDualSessionActive]);
 
   const handleTypingStart = useCallback(() => {
     // Send typing indicator if session active
-  }, [sessionActive]);
+  }, [partnerEntityId, isDualSessionActive]);
 
   const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
     const isOwn = item.sender_entity_id === impersonatedEntityId;
@@ -190,7 +266,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         theme={theme!}
       />
     );
-  }, [partnerAvatar, theme]);
+  }, [partnerAvatar, theme, impersonatedEntityId]);
 
   if (loading) {
     return (
@@ -220,8 +296,18 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           title={partnerName}
           titleStyle={{ color: theme?.colors.text.primary }}
         />
-        {!sessionActive && (
-          <ThemedText variant="muted" size={12} style={styles.offlineIndicator}>
+        {isConnected ? (
+          isDualSessionActive(partnerEntityId) ? (
+            <ThemedText variant="success" size={12} style={styles.statusIndicator}>
+              Connected
+            </ThemedText>
+          ) : (
+            <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
+              Connecting...
+            </ThemedText>
+          )
+        ) : (
+          <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
             Offline
           </ThemedText>
         )}
@@ -249,7 +335,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           onSendAudio={handleSendAudio}
           onSendImage={handleSendImage}
           onTypingStart={handleTypingStart}
-          disabled={!sessionActive}
+          disabled={!isDualSessionActive(partnerEntityId)}
           theme={theme!}
         />
       </KeyboardAvoidingView>
@@ -274,7 +360,7 @@ const styles = StyleSheet.create({
   headerAvatar: {
     marginRight: 8,
   },
-  offlineIndicator: {
+  statusIndicator: {
     marginRight: 16,
   },
 });

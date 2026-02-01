@@ -71,6 +71,7 @@
 
 ### Phase 1: Core Chat Functionality (Next Priority)
 🔄 **Chat Interface**
+- [x] Entity Selection System (Smart Defaults, AsyncStorage Persistence)
 - [ ] Message list component with FlatList
 - [ ] Message bubble components (user/AI styling)
 - [ ] Text input field with send button
