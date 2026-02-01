@@ -87,19 +87,39 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       log.error('Sync connection error:', error);
       const errorMessage = error?.message || error?.toString?.() || 'Connection error';
       setLastConnectionError(errorMessage);
-      
-      // Only show toast for the first connection attempt, not during reconnects
-      if (reconnectAttempts === 0 && !isReconnecting) {
-        showToast(`Connection error: ${errorMessage}`);
-      }
-      
-      // Connection errors usually mean the connection is broken, schedule reconnect
-      // This handles cases where the connection drops after being established
-      if (isConnected && isPaired && !isReconnecting && !isConnecting) {
-        log.info('Connection error detected while connected, scheduling reconnect...');
+
+      // Check if this is a heartbeat timeout
+      const isHeartbeatTimeout = error?.code === 'HEARTBEAT_TIMEOUT' || 
+                                 errorMessage?.includes('heartbeat timeout');
+
+      if (isHeartbeatTimeout) {
+        log.warn('Heartbeat timeout detected - connection is dead');
+        
+        // Mark as disconnected immediately
         ConnectionStateManager.markDisconnected();
         setIsConnected(false);
-        scheduleReconnect();
+        setIsConnecting(false);
+        
+        // Schedule reconnection (will be handled by disconnected event)
+        // Don't show error toast for heartbeat timeouts (just log)
+        if (isPaired && !isReconnecting) {
+          log.info('Scheduling reconnect after heartbeat timeout');
+          scheduleReconnect();
+        }
+      } else {
+        // Only show toast for non-heartbeat errors
+        if (reconnectAttempts === 0 && !isReconnecting) {
+          showToast(`Connection error: ${errorMessage}`);
+        }
+        
+        // Connection errors usually mean the connection is broken, schedule reconnect
+        // This handles cases where the connection drops after being established
+        if (isConnected && isPaired && !isReconnecting && !isConnecting) {
+          log.info('Connection error detected while connected, scheduling reconnect...');
+          ConnectionStateManager.markDisconnected();
+          setIsConnected(false);
+          scheduleReconnect();
+        }
       }
     };
 
@@ -315,11 +335,14 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       );
       
       await Promise.race([connectionPromise, timeoutPromise]);
-      await SyncService.requestHandshake();
+      
+      // Wait for handshake response with timeout
+      log.info('Connection established, waiting for handshake response...');
+      await SyncService.requestHandshakeWithWait(15000);
       
       log.info('Token refresh successful, switching to encrypted connection...');
       
-      // Disconnect from unencrypted connection
+      // we can disconnect the unencrypted connection after receiving the handshake response
       connectionManager.disconnectConnection('sync');
       
       // Reset isConnecting so connect() can proceed

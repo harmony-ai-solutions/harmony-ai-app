@@ -288,9 +288,20 @@ export interface ChatMessage {
   sender_entity_id: string;
   session_id: string | null;
   content: string;
-  audio_file: string | null;
   audio_duration: number | null;
-  message_type: 'text' | 'audio' | 'combined';
+  message_type: 'text' | 'audio' | 'combined' | 'image';
+
+  // Audio blob storage (replaces audio_file)
+  audio_data?: Uint8Array | null;
+  audio_mime_type?: string | null;
+
+  // Image fields
+  image_data?: Uint8Array | null;
+  image_mime_type?: string | null;
+  vl_model?: string | null;
+  vl_model_interpretation?: string | null;
+  vl_model_embedding?: Uint8Array | null;
+
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;

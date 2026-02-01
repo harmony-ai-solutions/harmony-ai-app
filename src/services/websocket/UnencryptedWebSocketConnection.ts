@@ -50,6 +50,7 @@ export class UnencryptedWebSocketConnection extends BaseWebSocketConnection impl
         
         ws.onclose = (event) => {
           log.info(`Disconnected, code: ${event.code} reason: ${event.reason}`);
+          this.stopHeartbeat();
           // Only emit disconnected if this is still our current connection
           if (this.ws === ws) {
             this.ws = null;
@@ -68,6 +69,7 @@ export class UnencryptedWebSocketConnection extends BaseWebSocketConnection impl
 
   disconnect(): void {
     log.info('Disconnecting');
+    this.stopHeartbeat();
     
     if (this.ws) {
       try {
@@ -87,13 +89,32 @@ export class UnencryptedWebSocketConnection extends BaseWebSocketConnection impl
       throw error;
     }
 
+    if (this.ws.readyState !== WebSocket.OPEN) {
+      const error = new Error(`WebSocket not ready (state: ${this.ws.readyState})`);
+      log.error(error.message);
+
+      // Emit error to trigger reconnection
+      this.emit('error', {
+        message: error.message,
+        code: 'SEND_FAILED',
+        readyState: this.ws.readyState
+      });
+      throw error;
+    }
+
     try {
       const message = JSON.stringify(event);
       log.info(`Sending event: ${event.event_type}`);
       this.ws.send(message);
     } catch (error) {
       log.error('Error sending event:', error);
-      this.emit('error', error);
+
+      // Emit error to trigger potential reconnection
+      this.emit('error', {
+        message: 'Failed to send event',
+        code: 'SEND_FAILED',
+        originalError: error
+      });
       throw error;
     }
   }

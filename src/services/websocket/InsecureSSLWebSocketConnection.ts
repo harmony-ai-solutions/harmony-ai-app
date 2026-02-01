@@ -78,6 +78,7 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
         ws.onClose(() => {
           clearTimeout(connectionTimeout);
           log.info('Self-signed connection closed');
+          this.stopHeartbeat();
           
           // Only emit disconnected if this is still our current connection
           if (this.wssSelfSigned === ws) {
@@ -134,6 +135,7 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
 
   disconnect(): void {
     log.info('Disconnecting');
+    this.stopHeartbeat();
     
     if (this.wssSelfSigned) {
       try {
@@ -162,13 +164,28 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
       throw error;
     }
 
+    // the library doesn't expose readyState, but we check if it is still connected
+    if (!this.isConnected()) {
+      const error = new Error('WebSocket not connected');
+      log.error(error.message);
+      this.emit('error', {
+        message: error.message,
+        code: 'SEND_FAILED'
+      });
+      throw error;
+    }
+
     try {
       const message = JSON.stringify(event);
       log.info(`Sending event: ${event.event_type}`);
       this.wssSelfSigned.send(message);
     } catch (error) {
       log.error('Error sending event:', error);
-      this.emit('error', error);
+      this.emit('error', {
+        message: 'Failed to send event',
+        code: 'SEND_FAILED',
+        originalError: error
+      });
       throw error;
     }
   }

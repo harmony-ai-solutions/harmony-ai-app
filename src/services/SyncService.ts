@@ -51,6 +51,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
   } | null = null;
+
+  // Handshake promise tracking
+  private pendingHandshake: {
+    resolve: (value: any) => void;
+    reject: (reason: any) => void;
+    timeoutId: ReturnType<typeof setTimeout>;
+  } | null = null;
   
   // Buffer for incoming server data (applied atomically when SYNC_COMPLETE received)
   private incomingDataBuffer: Array<{
@@ -90,7 +97,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         break;
         
       case 'HANDSHAKE_REJECT':
-        this.emit('handshake:rejected', data.payload);
+        this.handleHandshakeReject(data.payload);
         break;
         
       case 'SYNC_REQUEST':
@@ -155,8 +162,54 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     await this.connectionManager.sendEvent('sync', event);
   }
 
+  /**
+   * Request handshake and wait for the response.
+   * Returns a Promise that resolves when HANDSHAKE_ACCEPT is received.
+   * Rejects on timeout or if HANDSHAKE_REJECT is received.
+   */
+  async requestHandshakeWithWait(timeoutMs: number = 30000): Promise<any> {
+    // Check if there's already a pending handshake
+    if (this.pendingHandshake) {
+      log.warn('Handshake already in progress, rejecting previous one');
+      this.pendingHandshake.reject(new Error('New handshake requested'));
+      clearTimeout(this.pendingHandshake.timeoutId);
+      this.pendingHandshake = null;
+    }
+
+    return new Promise(async (resolve, reject) => {
+      // Set up timeout
+      const timeoutId = setTimeout(() => {
+        log.error(`Handshake timed out after ${timeoutMs}ms`);
+        this.pendingHandshake = null;
+        reject(new Error('Handshake timeout'));
+      }, timeoutMs);
+
+      // Store pending handshake
+      this.pendingHandshake = { resolve, reject, timeoutId };
+
+      try {
+        // Send the handshake request
+        await this.requestHandshake();
+        log.info('Handshake request sent, waiting for response...');
+      } catch (error) {
+        // If sending fails, clear timeout and reject immediately
+        clearTimeout(timeoutId);
+        this.pendingHandshake = null;
+        reject(error);
+      }
+    });
+  }
+
   private async handleHandshakeAccept(payload: any): Promise<void> {
     log.info('Handshake accepted:', payload);
+    
+    // Resolve pending handshake if exists
+    if (this.pendingHandshake) {
+      clearTimeout(this.pendingHandshake.timeoutId);
+      this.pendingHandshake.resolve(payload);
+      this.pendingHandshake = null;
+    }
+    
     await AsyncStorage.setItem('harmony_jwt', payload.jwt_token);    
 
     // Get the server URL from the current WebSocket connection
@@ -176,6 +229,19 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     
     this.emit('handshake:accepted', payload);
   };
+
+  private handleHandshakeReject(payload: any): void {
+    log.warn('Handshake rejected:', payload);
+    
+    // Reject pending handshake if exists
+    if (this.pendingHandshake) {
+      clearTimeout(this.pendingHandshake.timeoutId);
+      this.pendingHandshake.reject(new Error(payload.message || 'Device rejected'));
+      this.pendingHandshake = null;
+    }
+    
+    this.emit('handshake:rejected', payload);
+  }
 
   async initiateSync(): Promise<void> {
     const lastSync = await this.getLastSyncTimestamp();
@@ -211,8 +277,21 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       }
     };
     
-    log.info('Initiating sync:', event);
-    await this.connectionManager.sendEvent('sync', event);
+    try {
+      log.info('Initiating sync:', event);
+      await this.connectionManager.sendEvent('sync', event);
+    } catch (sendError) {
+      log.error('Failed to send SYNC_REQUEST:', sendError);
+
+      // Clear session since sync failed to initiate
+      this.currentSession = null;
+
+      // Emit error event so UI can show appropriate message
+      this.emit('sync:error', 'Failed to initiate sync - connection may be lost');
+
+      // Re-throw so caller knows it failed
+      throw sendError;
+    }
   }
 
   private async handleSyncAccept(payload: any): Promise<void> {

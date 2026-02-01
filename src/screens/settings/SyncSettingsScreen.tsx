@@ -104,8 +104,23 @@ export const SyncSettingsScreen: React.FC = () => {
       await SyncService.initiateSync();
     } catch (err: any) {
       setIsSyncing(false);
-      showToast('Failed to start sync: ' + err.message);
-      Alert.alert('Error', 'Failed to start sync: ' + err.message);
+
+      const errorMsg = err?.message || 'Unknown error';
+      log.error('Sync initiation failed:', errorMsg);
+
+      // Check if error is due to lost connection
+      const isConnectionError = errorMsg.includes('not connected') || 
+                                errorMsg.includes('connection') ||
+                                err?.code === 'SEND_FAILED' ||
+                                err?.code === 'NOT_CONNECTED';
+
+      if (isConnectionError) {
+        showToast('Connection lost - reconnecting...');
+        // Reconnection will be handled automatically by SyncConnectionContext
+      } else {
+        showToast('Failed to start sync: ' + errorMsg);
+        Alert.alert('Sync Error', 'Failed to start sync: ' + errorMsg);
+      }
     }
   };
 

@@ -9,6 +9,7 @@
 import {getDatabase} from '../connection';
 import {withTransaction} from '../transaction';
 import {CharacterProfile, CharacterImage, CharacterImageInfo} from '../models';
+import {blobToUint8Array, uint8ArrayToBase64} from '../blob';
 
 // ============================================================================
 // Character Profile CRUD Operations
@@ -303,17 +304,20 @@ export async function getCharacterImage(id: number, includeDeleted = false): Pro
   }
   
   const row = results.rows.item(0);
+  const imageData = blobToUint8Array(row.image_data);
+  const embeddingData = row.vl_model_embedding ? blobToUint8Array(row.vl_model_embedding) : null;
+  
   return {
     id: row.id,
     character_profile_id: row.character_profile_id,
-    image_data: new Uint8Array(row.image_data),
+    image_data: imageData || new Uint8Array(),
     mime_type: row.mime_type,
     description: row.description,
     is_primary: row.is_primary === 1,
     display_order: row.display_order,
     vl_model_interpretation: row.vl_model_interpretation,
     vl_model: row.vl_model,
-    vl_model_embedding: row.vl_model_embedding ? new Uint8Array(row.vl_model_embedding) : null,
+    vl_model_embedding: embeddingData,
     created_at: new Date(row.created_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
@@ -345,17 +349,20 @@ export async function getCharacterImages(profileId: string, includeDeleted = fal
   const images: CharacterImage[] = [];
   for (let i = 0; i < results.rows.length; i++) {
     const row = results.rows.item(i);
+    const imageData = blobToUint8Array(row.image_data);
+    const embeddingData = row.vl_model_embedding ? blobToUint8Array(row.vl_model_embedding) : null;
+    
     images.push({
       id: row.id,
       character_profile_id: row.character_profile_id,
-      image_data: new Uint8Array(row.image_data),
+      image_data: imageData || new Uint8Array(),
       mime_type: row.mime_type,
       description: row.description,
       is_primary: row.is_primary === 1,
       display_order: row.display_order,
       vl_model_interpretation: row.vl_model_interpretation,
       vl_model: row.vl_model,
-      vl_model_embedding: row.vl_model_embedding ? new Uint8Array(row.vl_model_embedding) : null,
+      vl_model_embedding: embeddingData,
       created_at: new Date(row.created_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
@@ -482,17 +489,20 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
   }
   
   const row = results.rows.item(0);
+  const imageData = blobToUint8Array(row.image_data);
+  const embeddingData = row.vl_model_embedding ? blobToUint8Array(row.vl_model_embedding) : null;
+  
   return {
     id: row.id,
     character_profile_id: row.character_profile_id,
-    image_data: new Uint8Array(row.image_data),
+    image_data: imageData || new Uint8Array(),
     mime_type: row.mime_type,
     description: row.description,
     is_primary: row.is_primary === 1,
     display_order: row.display_order,
     vl_model_interpretation: row.vl_model_interpretation,
     vl_model: row.vl_model,
-    vl_model_embedding: row.vl_model_embedding ? new Uint8Array(row.vl_model_embedding) : null,
+    vl_model_embedding: embeddingData,
     created_at: new Date(row.created_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
@@ -510,33 +520,6 @@ export function imageToDataURL(image: CharacterImage): string {
   // Convert Uint8Array to base64
   const base64 = uint8ArrayToBase64(image.image_data);
   return `data:${image.mime_type};base64,${base64}`;
-}
-
-/**
- * Convert Uint8Array to Base64 string
- * React Native compatible implementation
- */
-function uint8ArrayToBase64(bytes: Uint8Array): string {
-  const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let result = '';
-  let i;
-  
-  for (i = 0; i < bytes.length; i += 3) {
-    const byte1 = bytes[i];
-    const byte2 = i + 1 < bytes.length ? bytes[i + 1] : 0;
-    const byte3 = i + 2 < bytes.length ? bytes[i + 2] : 0;
-    
-    const encoded1 = byte1 >> 2;
-    const encoded2 = ((byte1 & 3) << 4) | (byte2 >> 4);
-    const encoded3 = ((byte2 & 15) << 2) | (byte3 >> 6);
-    const encoded4 = byte3 & 63;
-    
-    result += base64Chars[encoded1] + base64Chars[encoded2];
-    result += i + 1 < bytes.length ? base64Chars[encoded3] : '=';
-    result += i + 2 < bytes.length ? base64Chars[encoded4] : '=';
-  }
-  
-  return result;
 }
 
 /**

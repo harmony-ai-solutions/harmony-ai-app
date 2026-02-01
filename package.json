@@ -31,7 +31,10 @@
     "react-native-screens": "^4.19.0",
     "react-native-sqlite-storage": "^6.0.1",
     "react-native-vector-icons": "^10.3.0",
-    "react-native-websocket-self-signed": "^0.4.0"
+    "react-native-websocket-self-signed": "^0.4.0",
+    "react-native-audio-record": "^0.2.2",
+    "react-native-track-player": "^5.0.0-alpha0",
+    "react-native-image-picker": "^7.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

@@ -14,4 +14,5 @@ export interface WebSocketConnection extends EventEmitter<WebSocketConnectionEve
   disconnect(): void;
   isConnected(): boolean;
   sendEvent(event: any): Promise<void>;
+  startHeartbeat(): void;
 }

@@ -1,5 +1,15 @@
 # Harmony AI App Active Context
 @Focus:
+- Chat Feature Implementation (Complete): Full chat interface with image/audio support, persistent storage, and real-time event handling.
+- Database Layer: Migration 000007 adds chat image/audio blob support, updated ChatMessage model with VL fields.
+- Repository Layer: chat_messages.ts repository with CRUD operations, bidirectional conversation queries, pagination support.
+- Audio Services: AudioRecorder (react-native-audio-record) and AudioPlayer (react-native-track-player) implementations.
+- Native Dependencies: Added react-native-audio-record, react-native-track-player, react-native-fs, react-native-image-picker.
+- iOS/Android Setup: Microphone permissions, storage permissions, Podfile configuration.
+- Event System: Updated EntitySessionService with dual session management (user + partner), typing/recording indicators.
+- UI Screens: ChatListScreen (conversation overview), ChatDetailScreen (messaging interface).
+- UI Components: ChatBubble (text/audio/image), ChatInput (text/voice/image), TypingIndicator (animated dots).
+- Navigation: Updated AppNavigator with ChatDetail route.
 - Multi-Connection WebSocket Architecture: Refactored to support multiple concurrent connections (sync + entity sessions).
 - Sync Services Implementation Complete: EventEmitter3-based event system, WebSocket/WSS support, handshake protocol.
 - Database Implementation Complete: SQLCipher encryption, full repository layer (84 tests), in-app DEV-only test runner, sync tables added.
@@ -8,12 +18,14 @@
 - Logging Infrastructure: Migrated from console.log to react-native-logs, production-ready levels, colored dev output, unified [Namespace] prefixes.
 - Bootstrap Complete: RN 0.83.1, TypeScript, navigation, Paper UI, organized structure.
 @Next:
-- Sync Testing: Test handshake flow with Harmony Link, verify HANDSHAKE_PENDING → ACCEPT → WSS upgrade.
+- Chat Testing: Test message sending/receiving, audio playback, image display, sync integration.
 - Sync Protocol: Test SYNC_REQUEST → SYNC_DATA exchange → SYNC_COMPLETE flow.
-- Chat Interface: Message list (FlatList), bubbles (user/AI), text input, timestamps.
-- Message Persistence: SQLite message storage with sync, offline queue, sync tracking.
 - Character Management: Selection UI, profile display, avatar loading, character switching.
 @Decisions:
+- Chat Message Types: Support 'text', 'audio', 'combined', 'image' message types with blob storage for audio/image data.
+- Audio Storage: Uint8Array for binary data, base64 encoding for event transmission.
+- Dual Session Pattern: Mobile app uses dual entity sessions (user + partner) for bidirectional chat with Harmony Link.
+- Real-time Indicators: Typing and recording indicators provide better UX for chat interactions.
 - React Native CLI (not Expo) for full native module control (Executorch, messenger APIs).
 - React Native Paper for Material Design 3 consistency.
 - React Navigation for type-safe routing.
@@ -24,6 +36,19 @@
 - DEV-only test runner using __DEV__ checks for production safety.
 - Logging: Use react-native-logs for all non-test code; preserve console for test runners.
 @Learnings:
+- Native Module Integration: react-native-audio-record and react-native-track-player require careful iOS/Android configuration.
+- Audio Recording Flow: Initialize → Start → Stop → Read file → Convert to Uint8Array → Cleanup temp file.
+- Base64 Encoding: Required for transmitting binary data over WebSocket events; use `Buffer.from(data, 'binary').toString('base64')` instead of btoa for React Native compatibility.
+- React Native Track Player v5 Migration:
+  - Android build fixed by upgrading to v5.0.0-alpha0 (Kotlin type safety fixes for React Native 0.83.1)
+  - API changes: `getPlaybackState()` returns `PlaybackState` object (contains `state` property), use `getProgress()` instead of separate `getPosition()`/`getDuration()` calls
+  - Update options: `notificationCapabilities` replaces `compactCapabilities`
+  - State enum values are now strings (e.g., State.Playing = "playing")
+- Blob Handling in RN: Uint8Array for in-memory, Base64 for transmission, BLOB for SQLite storage.
+- Chat UI Patterns: KeyboardAvoidingView essential for iOS, FlatList with inverted prop for message lists.
+- Image Picker: react-native-image-picker provides good UX with caption support.
+- Pulse Animation: Animated.loop with scale transform creates effective recording indicator.
+- Typing Indicator: Three-dot staggered animation (150ms delay between dots) provides familiar UX.
 - Metro bundler hot reload excellent with TypeScript.
 - React Native Paper dark theme integration smooth.
 - Migration from react-native-document-picker to @react-native-documents/picker fixed RN 0.83.1 compatibility.
@@ -58,3 +83,14 @@
 - Screens[2]: ConnectionSetupScreen (IP/port input, handshake), SyncSettingsScreen (status, manual sync).
 - Database: sync_devices, sync_history, chat_messages tables (migration 000005).
 - Error Handling: Connection validation, timeout handling (30s), confirmation tracking, comprehensive logging.
+@Implementation[Chat]:
+- Database: Migration 000007 adds image/audio support to chat_messages table.
+- Repository: chat_messages.ts with createChatMessage, getChatMessagesBetween, getRecentChatMessages, getLastChatMessage, messageExists, deleteChatMessage.
+- Audio Services: AudioRecorder.ts (initialize, startRecording, stopRecording), AudioPlayer.ts (initialize, playAudioBlob, playAudioBase64, control methods).
+- Native Modules: react-native-audio-record, react-native-track-player, react-native-fs, react-native-image-picker.
+- Platform Setup: iOS (NSMicrophoneUsageDescription, RNTrackPlayer Pod), Android (RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE permissions).
+- Event Constants: TYPING_INDICATOR, RECORDING_INDICATOR added to events system.
+- EntitySessionService: Dual session management (userSession + partnerSession), message sending (text/audio/image), event handling for incoming messages and indicators.
+- UI Screens: ChatListScreen (conversation list with avatars), ChatDetailScreen (messaging with keyboard handling).
+- UI Components: ChatBubble (text/audio/image with themed styling), ChatInput (text/voice/image with pulse animation), TypingIndicator (animated dots).
+- Navigation: ChatDetail route with partnerEntityId and partnerCharacterId params.

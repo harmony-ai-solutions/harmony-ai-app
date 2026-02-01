@@ -19,6 +19,7 @@ export interface ConnectionInfo {
   status: ConnectionStatus;
   createdAt: number;
   lastActivity: number;
+  lastHeartbeat?: number;
 }
 
 interface ConnectionManagerEvents {
@@ -129,6 +130,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
   
   private setupConnectionListeners(connectionId: string, connection: WebSocketConnection): void {
     // We use a closure here to capture the info at the time of the event
+    let heartbeatStarted = false;
     
     // Connected event
     connection.on('connected', () => {
@@ -176,12 +178,35 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
       info.status = 'error';
       
       this.emit('connection:error', connectionId, error);
-      
-      // Emit type-specific error
-      if (info.type === 'sync') {
-        this.emit('error:sync', error);
-      } else if (info.type === 'entity' && info.entityId) {
-        this.emit('error:entity', info.entityId, error);
+
+      // Check if this is a heartbeat timeout
+      const isHeartbeatTimeout = error?.code === 'HEARTBEAT_TIMEOUT' || 
+                                 error?.message?.includes('heartbeat timeout');
+
+      if (isHeartbeatTimeout) {
+        log.warn(`${connectionId} heartbeat timeout detected, marking as disconnected`);
+        info.lastHeartbeat = Date.now();
+        
+        // Treat heartbeat timeout as a disconnection
+        // This will trigger reconnection logic in SyncConnectionContext
+        info.status = 'disconnected';
+        
+        // Emit disconnected event to trigger reconnect
+        this.emit('connection:disconnected', connectionId);
+        
+        // Emit type-specific disconnect event
+        if (info.type === 'sync') {
+          this.emit('disconnected:sync');
+        } else if (info.type === 'entity' && info.entityId) {
+          this.emit('disconnected:entity', info.entityId);
+        }
+      } else {
+        // Emit type-specific error for non-heartbeat errors
+        if (info.type === 'sync') {
+          this.emit('error:sync', error);
+        } else if (info.type === 'entity' && info.entityId) {
+          this.emit('error:entity', info.entityId, error);
+        }
       }
     });
 
@@ -200,6 +225,13 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
       
       log.info(`${connectionId} received event: ${data.event_type}`);
       
+      // Start heartbeat after first successful event (application protocol is ready)
+      if (!heartbeatStarted) {
+        log.info(`${connectionId} starting heartbeat after first event`);
+        connection.startHeartbeat();
+        heartbeatStarted = true;
+      }
+      
       // Route to appropriate handler
       if (info.type === 'sync') {
         this.emit('event:sync', data);
@@ -207,6 +239,7 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
         this.emit('event:entity', info.entityId, data);
       }
     });
+
   }
   
   getConnection(id: string): ConnectionInfo | null {
@@ -238,13 +271,35 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
     }
     
     if (!conn.connection.isConnected()) {
-      throw new Error(`Connection ${connectionId} is not connected`);
+      const error = new Error(`Connection ${connectionId} is not connected`);
+      log.error(error.message);
+      
+      // Emit error which will trigger reconnection logic
+      this.emit('connection:error', connectionId, { 
+        message: error.message,
+        code: 'NOT_CONNECTED' 
+      });
+      throw error;
     }
     
     log.info(`Sending event via ${connectionId}: ${event.event_type}`);
     conn.lastActivity = Date.now();
     
-    await conn.connection.sendEvent(event);
+    try {
+      await conn.connection.sendEvent(event);
+    } catch (sendError) {
+      log.error(`Failed to send event via ${connectionId}:`, sendError);
+      
+      // Emit error to trigger reconnection
+      this.emit('connection:error', connectionId, {
+        message: 'Failed to send event',
+        code: 'SEND_FAILED',
+        originalError: sendError
+      });
+      
+      // Re-throw so caller knows it failed
+      throw sendError;
+    }
   }
   
   disconnectConnection(id: string): void {

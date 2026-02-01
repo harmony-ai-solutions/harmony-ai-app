@@ -120,6 +120,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
           wss.onclose = (event) => {
             clearTimeout(connectionTimeout);
             log.info(`Secure connection closed, code: ${event.code} reason: ${event.reason}`);
+            this.stopHeartbeat();
             
             // Only emit disconnected if this is still our current connection
             if (this.wss === wss) {
@@ -144,6 +145,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
 
   disconnect(): void {
     log.info('Disconnecting');
+    this.stopHeartbeat();
     
     if (this.wss) {
       try {
@@ -166,7 +168,11 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
     if (this.wss.readyState !== WebSocket.OPEN) {
       const error = new Error(`WebSocket not ready (state: ${this.wss.readyState})`);
       log.error(error.message);
-      this.emit('error', error);
+      this.emit('error', {
+        message: error.message,
+        code: 'SEND_FAILED',
+        readyState: this.wss.readyState
+      });
       throw error;
     }
 
@@ -176,7 +182,11 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
       this.wss.send(message);
     } catch (error) {
       log.error('Error sending event:', error);
-      this.emit('error', error);
+      this.emit('error', {
+        message: 'Failed to send event',
+        code: 'SEND_FAILED',
+        originalError: error
+      });
       throw error;
     }
   }

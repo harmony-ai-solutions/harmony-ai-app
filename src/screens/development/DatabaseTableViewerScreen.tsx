@@ -20,6 +20,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { executeRawQuery, clearDatabaseData } from '../../database/connection';
 import { createLogger } from '../../utils/logger';
+import { blobToUint8Array } from '../../database/blob';
 
 const log = createLogger('[DatabaseTableViewer]');
 
@@ -125,8 +126,19 @@ export const DatabaseTableViewerScreen: React.FC = () => {
             const rowList: any[] = [];
             
             for (let i = 0; i < dataResult.rows.length; i++) {
-                const row = dataResult.rows.item(i);
-                rowList.push(row);
+                try {
+                    const row = dataResult.rows.item(i);
+                    // Create a safe copy of the row data
+                    const safeRow: any = {};
+                    for (const col of columnList) {
+                        safeRow[col.name] = row[col.name];
+                    }
+                    rowList.push(safeRow);
+                } catch (rowErr) {
+                    log.warn(`Error processing row ${i}:`, rowErr);
+                    // Still add the row but mark it as problematic
+                    rowList.push({ _error: `Row ${i} could not be loaded` });
+                }
             }
             
             setRows(rowList);
@@ -174,10 +186,15 @@ export const DatabaseTableViewerScreen: React.FC = () => {
             return 'undefined';
         }
         if (columnType === 'BLOB') {
-            if (value instanceof Uint8Array) {
-                return `[BLOB: ${value.length} bytes]`;
+            try {
+                const bytes = blobToUint8Array(value);
+                if (bytes) {
+                    return `[BLOB: ${bytes.length} bytes]`;
+                }
+                return '[BLOB: invalid]';
+            } catch (err) {
+                return '[BLOB: error]';
             }
-            return '[BLOB]';
         }
         if (typeof value === 'object') {
             try {
