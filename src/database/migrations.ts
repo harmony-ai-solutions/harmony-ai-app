@@ -13,6 +13,8 @@ import {migration002} from './migrations/000002_make_character_profile_optional'
 import {migration003} from './migrations/000003_add_character_card_fields';
 import {migration004} from './migrations/000004_add_cognition_generate_expressions';
 import {migration005} from './migrations/000005_add_sync_tables';
+import {migration006} from './migrations/000006_fix_sync_devices_primary_key';
+import {migration007} from './migrations/000007_add_chat_images';
 
 // Migration definition
 interface Migration {
@@ -49,6 +51,16 @@ const MIGRATIONS: Migration[] = [
     version: 5,
     description: 'add_sync_tables',
     sql: migration005,
+  },
+  {
+    version: 6,
+    description: 'fix_sync_devices_primary_key',
+    sql: migration006,
+  },
+  {
+    version: 7,
+    description: 'add_chat_images',
+    sql: migration007,
   },
 ];
 

@@ -38,7 +38,7 @@ WHERE EXISTS (SELECT 1 FROM sync_devices LIMIT 1);
 DROP TABLE sync_devices;
 
 -- Rename new table
-ALTER TABLE sync_devices_new TO sync_devices;
+ALTER TABLE sync_devices_new RENAME TO sync_devices;
 
 -- Recreate sync_history table (no changes, but recreate for consistency)
 CREATE TABLE IF NOT EXISTS sync_history_new (
@@ -68,5 +68,5 @@ WHERE EXISTS (SELECT 1 FROM sync_history LIMIT 1);
 DROP TABLE sync_history;
 
 -- Rename new table
-ALTER TABLE sync_history_new TO sync_history;
+ALTER TABLE sync_history_new RENAME TO sync_history;
 `;

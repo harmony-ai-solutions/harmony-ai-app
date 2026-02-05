@@ -88,6 +88,11 @@ harmony-ai-app/
     - **ChatDetail Update**: Updated `ChatDetailScreen` to use the `impersonatedEntityId` from navigation parameters, enabling dynamic roleplay identities.
     - **Type Safety**: Updated navigation types to require `impersonatedEntityId` for the `ChatDetail` route.
 - **Theming System Refinement**: COMPLETED the enhancement of the theming system, adding custom theme deletion and a full-featured color editor with an RGB slider-based overlay. Migrated to `@react-native-documents/picker` for modern build compatibility.
+- **Audio Transcription Flow**: COMPLETED implementation of an asynchronous audio transcription flow where recordings are first sent to the user's own entity for processing before being forwarded to the partner.
+    - **Architecture**: Asynchronous flow using `STT_INPUT_AUDIO` with `result_mode: "return"`.
+    - **Key Methods**: Added `EntitySessionService.newAudioMessage()` for initiated messages and handled `STT_OUTPUT_TEXT` responses.
+    - **Database**: Extended `chat_messages` repository with `updateChatMessage()` for atomic async updates.
+    - **UI**: Updated `ChatBubble` and `ChatDetailScreen` to support a "confirm-before-send" workflow with transcription status and editing.
 1. **Chat Interface**
    - Message list with FlatList virtualization
    - Message bubble components (user/AI differentiation)

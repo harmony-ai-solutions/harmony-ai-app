@@ -10,6 +10,7 @@ import {getDatabase} from '../connection';
 import {withTransaction} from '../transaction';
 import {CharacterProfile, CharacterImage, CharacterImageInfo} from '../models';
 import {blobToUint8Array, uint8ArrayToBase64} from '../blob';
+import {loadBlobColumn} from '../sync';
 
 // ============================================================================
 // Character Profile CRUD Operations
@@ -326,45 +327,52 @@ export async function getCharacterImage(id: number, includeDeleted = false): Pro
 /**
  * Get all images for a specific character profile. Filters out soft deleted by default.
  * Ordered by display_order ASC, then created_at DESC
+ * 
+ * Uses two-phase query to avoid CursorWindow overflow.
  */
 export async function getCharacterImages(profileId: string, includeDeleted = false): Promise<CharacterImage[]> {
   const db = getDatabase();
   
-  const query = includeDeleted
-    ? `SELECT id, character_profile_id, image_data, mime_type, description,
+  // Phase 1: Get metadata without BLOBs
+  const metadataQuery = includeDeleted
+    ? `SELECT id, character_profile_id, mime_type, description,
               is_primary, display_order, vl_model_interpretation, vl_model,
-              vl_model_embedding, created_at, deleted_at
+              created_at, deleted_at
        FROM character_image
        WHERE character_profile_id = ?
        ORDER BY display_order ASC, created_at DESC`
-    : `SELECT id, character_profile_id, image_data, mime_type, description,
+    : `SELECT id, character_profile_id, mime_type, description,
               is_primary, display_order, vl_model_interpretation, vl_model,
-              vl_model_embedding, created_at, deleted_at
+              created_at, deleted_at
        FROM character_image
        WHERE character_profile_id = ? AND deleted_at IS NULL
        ORDER BY display_order ASC, created_at DESC`;
 
-  const [results] = await db.executeSql(query, [profileId]);
+  const [metadataResults] = await db.executeSql(metadataQuery, [profileId]);
   
+  // Phase 2: Load each image's BLOBs individually with chunking
   const images: CharacterImage[] = [];
-  for (let i = 0; i < results.rows.length; i++) {
-    const row = results.rows.item(i);
-    const imageData = blobToUint8Array(row.image_data);
-    const embeddingData = row.vl_model_embedding ? blobToUint8Array(row.vl_model_embedding) : null;
+  
+  for (let i = 0; i < metadataResults.rows.length; i++) {
+    const metadata = metadataResults.rows.item(i);
+    
+    // Load BLOBs individually with chunking
+    const imageData = await loadBlobColumn('character_image', metadata.id, 'image_data');
+    const embeddingData = await loadBlobColumn('character_image', metadata.id, 'vl_model_embedding');
     
     images.push({
-      id: row.id,
-      character_profile_id: row.character_profile_id,
+      id: metadata.id,
+      character_profile_id: metadata.character_profile_id,
       image_data: imageData || new Uint8Array(),
-      mime_type: row.mime_type,
-      description: row.description,
-      is_primary: row.is_primary === 1,
-      display_order: row.display_order,
-      vl_model_interpretation: row.vl_model_interpretation,
-      vl_model: row.vl_model,
+      mime_type: metadata.mime_type,
+      description: metadata.description,
+      is_primary: metadata.is_primary === 1,
+      display_order: metadata.display_order,
+      vl_model_interpretation: metadata.vl_model_interpretation,
+      vl_model: metadata.vl_model,
       vl_model_embedding: embeddingData,
-      created_at: new Date(row.created_at),
-      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+      created_at: new Date(metadata.created_at),
+      deleted_at: metadata.deleted_at ? new Date(metadata.deleted_at) : null,
     });
   }
   

@@ -5,7 +5,7 @@ import { Buffer } from 'buffer';
 import ConnectionManager, { ConnectionMode } from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
 import { createLogger } from '../utils/logger';
-import { messageExists, createChatMessage } from '../database/repositories/chat_messages';
+import { messageExists, createChatMessage, updateChatMessage } from '../database/repositories/chat_messages';
 import { SyncService } from './SyncService';
 import AudioPlayer from './AudioPlayer';
 
@@ -47,6 +47,12 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   private connectionManager: typeof ConnectionManager;
   private sessions: Map<string, DualEntitySession> = new Map();
   private pendingSessions: Map<string, EntitySession> = new Map(); // Track individual sessions during initialization
+  private pendingTranscriptions: Map<string, {
+    messageId: string;
+    partnerEntityId: string;
+    eventId: string;
+    timeout: any;
+  }> = new Map();
   private appStateSubscription: any;
   
   private constructor() {
@@ -298,6 +304,29 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for entity ${partnerEntityId}`);
     }
     
+    // Store message locally first (optimistic UI pattern)
+    const messageId = this.generateEventId();
+    const message = {
+      id: messageId,
+      entity_id: dualSession.impersonatedEntityId,
+      sender_entity_id: dualSession.impersonatedEntityId,
+      session_id: dualSession.partnerSession.sessionId,
+      content: text,
+      audio_duration: null,
+      message_type: 'text' as 'text',
+      audio_data: null,
+      audio_mime_type: null,
+      image_data: null,
+      image_mime_type: null,
+      vl_model: null,
+      vl_model_interpretation: null,
+      vl_model_embedding: null
+    };
+    
+    await createChatMessage(message);
+    log.info(`Stored text message ${messageId} locally`);
+    
+    // Send to partner entity
     const utterance = {
       entity_id: dualSession.impersonatedEntityId,
       content: text,
@@ -307,35 +336,99 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     await this.sendUtterance(dualSession.partnerSession.connectionId, utterance);
     dualSession.partnerSession.lastActivity = Date.now();
   }
-  
+
   /**
-   * Send audio message to partner entity
+   * Create a new audio message (stores locally, requests transcription)
+   * Does NOT send to partner - that happens via sendUtterance() after confirmation
    */
-  async sendAudioMessage(
+  async newAudioMessage(
     partnerEntityId: string,
     audioData: Uint8Array,
     mimeType: string,
     duration: number
-  ): Promise<void> {
+  ): Promise<string> {
     const dualSession = this.sessions.get(partnerEntityId);
     if (!dualSession || dualSession.partnerSession.status !== 'active') {
       throw new Error(`No active session for entity ${partnerEntityId}`);
     }
     
-    // Convert to base64 for event payload
-    const base64Audio = btoa(String.fromCharCode(...audioData));
+    log.info(`Starting audio message flow for ${partnerEntityId}`);
     
-    const utterance = {
+    const messageId = this.generateEventId();
+    const message = {
+      id: messageId,
       entity_id: dualSession.impersonatedEntityId,
+      sender_entity_id: dualSession.impersonatedEntityId,
+      session_id: dualSession.partnerSession.sessionId,
       content: '',
-      type: 'UTTERANCE_COMBINED',
-      audio: base64Audio,
-      audio_type: mimeType,
-      audio_duration: duration
+      audio_duration: duration,
+      message_type: 'audio' as 'audio',
+      audio_data: audioData,
+      audio_mime_type: mimeType,
+      image_data: null,
+      image_mime_type: null,
+      vl_model: null,
+      vl_model_interpretation: null,
+      vl_model_embedding: null
     };
     
-    await this.sendUtterance(dualSession.partnerSession.connectionId, utterance);
-    dualSession.partnerSession.lastActivity = Date.now();
+    await createChatMessage(message);
+    log.info(`Stored message ${messageId} in database (awaiting transcription)`);
+    
+    try {
+      await this.requestTranscription(messageId, partnerEntityId, audioData);
+    } catch (error) {
+      log.error(`Failed to request transcription for ${messageId}:`, error);
+    }
+    
+    return messageId;
+  }
+
+  private async requestTranscription(
+    messageId: string,
+    partnerEntityId: string,
+    audioData: Uint8Array
+  ): Promise<void> {
+    const dualSession = this.sessions.get(partnerEntityId);
+    if (!dualSession) {
+      throw new Error(`No session for ${partnerEntityId}`);
+    }
+    
+    const eventId = this.generateEventId();
+    const base64Audio = btoa(String.fromCharCode(...audioData));
+    
+    const timeout = setTimeout(() => {
+      log.warn(`Transcription timeout for message ${messageId}`);
+      this.pendingTranscriptions.delete(eventId);
+      this.emit('transcription:error' as any, partnerEntityId, messageId, 'Transcription timeout');
+    }, 30000);
+    
+    this.pendingTranscriptions.set(eventId, {
+      messageId,
+      partnerEntityId,
+      eventId,
+      timeout
+    });
+    
+    const event = {
+      event_id: eventId,
+      event_type: 'STT_INPUT_AUDIO',
+      status: 'NEW',
+      payload: {
+        audio_bytes: base64Audio,
+        channels: 1,
+        bit_depth: 16,
+        sample_rate: 16000,
+        result_mode: 'return'
+      }
+    };
+    
+    await this.connectionManager.sendEvent(
+      dualSession.userSession.connectionId,
+      event
+    );
+    
+    log.info(`Sent STT_INPUT_AUDIO for message ${messageId}, event ${eventId}`);
   }
   
   /**
@@ -364,7 +457,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     dualSession.partnerSession.lastActivity = Date.now();
   }
   
-  private async sendUtterance(connectionId: string, utterance: any): Promise<void> {
+  public async sendUtterance(connectionId: string, utterance: any): Promise<void> {
     const event = {
       event_id: this.generateEventId(),
       event_type: 'ENTITY_UTTERANCE',
@@ -497,6 +590,29 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
 
     switch (event.event_type) {
+      case 'STT_OUTPUT_TEXT':
+        if (event.status === 'SUCCESS' || event.status === 'DONE') {
+          const transcriptionRequest = this.pendingTranscriptions.get(event.event_id);
+          if (transcriptionRequest) {
+            clearTimeout(transcriptionRequest.timeout);
+            this.pendingTranscriptions.delete(event.event_id);
+            
+            const text = event.payload?.content || '';
+            log.info(`Received STT transcription for message ${transcriptionRequest.messageId}: "${text}"`);
+            
+            await updateChatMessage(transcriptionRequest.messageId, {
+              content: text
+            });
+            
+            this.emit('transcription:completed' as any, 
+              transcriptionRequest.partnerEntityId,
+              transcriptionRequest.messageId,
+              text
+            );
+          }
+        }
+        break;
+
       case 'ENTITY_UTTERANCE':
         // Handle incoming messages
         await this.handleIncomingMessage(dualSession, event);

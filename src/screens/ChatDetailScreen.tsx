@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { Appbar, Avatar } from 'react-native-paper';
+import { Buffer } from 'buffer';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -20,7 +21,7 @@ import { ChatInput } from '../components/chat/ChatInput';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { useEntitySession } from '../contexts/EntitySessionContext';
 import EntitySessionService from '../services/EntitySessionService'; // Still needed for event listeners
-import { getRecentChatMessages } from '../database/repositories/chat_messages';
+import { getRecentChatMessages, updateChatMessage, getChatMessage } from '../database/repositories/chat_messages';
 import { getPrimaryImage, getCharacterProfile, imageToDataURL } from '../database/repositories/characters';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import { createLogger } from '../utils/logger';
@@ -153,15 +154,26 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         setIsTyping(isTypingActive);
       }
     };
+
+    const handleTranscriptionCompleted = (entityId: string, messageId: string, text: string) => {
+      if (entityId === partnerEntityId) {
+        log.info(`Transcription completed for message ${messageId}: "${text}"`);
+        // Reload messages to show updated transcription
+        getRecentChatMessages(impersonatedEntityId, partnerEntityId, 50)
+          .then(setMessages);
+      }
+    };
     
     EntitySessionService.on('message:received', handleNewMessage);
     EntitySessionService.on('typing:indicator', handleTyping);
+    EntitySessionService.on('transcription:completed' as any, handleTranscriptionCompleted);
     
     return () => {
       EntitySessionService.off('message:received', handleNewMessage);
       EntitySessionService.off('typing:indicator', handleTyping);
+      EntitySessionService.off('transcription:completed' as any, handleTranscriptionCompleted);
     };
-  }, [partnerEntityId]);
+  }, [partnerEntityId, impersonatedEntityId]);
 
   // Listen for session errors
   useEffect(() => {
@@ -215,12 +227,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     if (!isDualSessionActive(partnerEntityId)) return;
     
     try {
-      await EntitySessionService.sendAudioMessage(
+      await EntitySessionService.newAudioMessage(
         partnerEntityId,
         audioData,
         'audio/wav',
         duration
       );
+      
+      log.info('Audio message saved, awaiting transcription...');
+      
       const updatedMessages = await getRecentChatMessages(
         impersonatedEntityId,
         partnerEntityId,
@@ -228,9 +243,67 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       );
       setMessages(updatedMessages);
     } catch (error) {
-      log.error('Failed to send audio:', error);
+      log.error('Failed to save audio message:', error);
     }
-  }, [partnerEntityId, isDualSessionActive]);
+  }, [partnerEntityId, impersonatedEntityId, isDualSessionActive]);
+
+  const handleConfirmAndSendMessage = useCallback(async (messageId: string, finalText: string) => {
+    if (!isDualSessionActive(partnerEntityId)) {
+      log.warn('Cannot send message: session not active');
+      return;
+    }
+    
+    try {
+      const message = await getChatMessage(messageId);
+      if (!message || !message.audio_data) {
+        throw new Error('Message not found or has no audio');
+      }
+
+      const base64Audio = Buffer.from(message.audio_data).toString('base64');
+
+      if (finalText !== message.content) {
+        await updateChatMessage(messageId, { content: finalText });
+      }
+
+      const dualSession = EntitySessionService.getSession(partnerEntityId);
+      if (dualSession) {
+        const utterance = {
+          entity_id: dualSession.impersonatedEntityId,
+          content: finalText,
+          type: 'UTTERANCE_COMBINED',
+          audio: base64Audio,
+          audio_type: message.audio_mime_type || 'audio/wav',
+          audio_duration: message.audio_duration || 0,
+          message_id: messageId
+        };
+
+        await EntitySessionService.sendUtterance(
+          dualSession.partnerSession.connectionId,
+          utterance
+        );
+
+        log.info(`Message ${messageId} sent to partner entity`);
+
+        if (Platform.OS === 'android') {
+          ToastAndroid.show('Message sent', ToastAndroid.SHORT);
+        }
+
+        const updatedMessages = await getRecentChatMessages(
+          impersonatedEntityId,
+          partnerEntityId,
+          50
+        );
+        setMessages(updatedMessages);
+      }
+    } catch (error: any) {
+      log.error('Failed to send message:', error);
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(`Failed to send: ${error.message}`, ToastAndroid.LONG);
+      } else {
+        Alert.alert('Error', `Failed to send message: ${error.message}`);
+      }
+    }
+  }, [partnerEntityId, impersonatedEntityId, isDualSessionActive]);
 
   const handleSendImage = useCallback(async (imageBase64: string, mimeType: string, caption?: string) => {
     if (!isDualSessionActive(partnerEntityId)) return;
@@ -263,10 +336,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         onImagePress={() => {
           // Navigate to full-screen image viewer
         }}
+        onSendMessage={handleConfirmAndSendMessage}
         theme={theme!}
       />
     );
-  }, [partnerAvatar, theme, impersonatedEntityId]);
+  }, [partnerAvatar, theme, impersonatedEntityId, handleConfirmAndSendMessage]);
 
   if (loading) {
     return (

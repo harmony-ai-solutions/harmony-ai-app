@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, TouchableOpacity, Image, Dimensions } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator } from 'react-native';
 import { Avatar, IconButton } from 'react-native-paper';
 import { Buffer } from 'buffer';
 import { ThemedText } from '../themed/ThemedText';
@@ -14,6 +14,7 @@ interface ChatBubbleProps {
   isOwn: boolean;
   partnerAvatar?: string | null;
   onImagePress?: (imageData: Uint8Array, mimeType: string) => void;
+  onSendMessage?: (messageId: string, editedText: string) => void;
   theme: Theme;
 }
 
@@ -22,9 +23,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isOwn,
   partnerAvatar,
   onImagePress,
+  onSendMessage,
   theme,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedText, setEditedText] = useState(message.content || '');
+
+  useEffect(() => {
+    setEditedText(message.content || '');
+  }, [message.content]);
 
   const handlePlayAudio = async () => {
     if (!message.audio_data) return;
@@ -49,6 +57,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const hasText = message.content && message.content.trim().length > 0;
     const hasAudio = message.audio_data && message.audio_data.length > 0;
     const hasImage = message.image_data && message.image_data.length > 0;
+
+    const isAudioMessage = message.message_type === 'audio' && hasAudio;
+    const isTranscribing = isAudioMessage && !hasText;
+    const isPendingSend = isAudioMessage && hasText && isOwn;
 
     return (
       <>
@@ -84,11 +96,73 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             )}
           </TouchableOpacity>
         )}
+
+        {isTranscribing && (
+          <View style={styles.transcriptionStatus}>
+            <ActivityIndicator size="small" color={theme.colors.accent.primary} />
+            <ThemedText variant="muted" size={12} style={styles.statusText}>
+              Transcribing...
+            </ThemedText>
+          </View>
+        )}
         
         {hasText && (
-          <ThemedText variant={isOwn ? 'primary' : 'secondary'} style={styles.textContent}>
-            {message.content}
-          </ThemedText>
+          <View>
+            {isEditing ? (
+              <TextInput
+                value={editedText}
+                onChangeText={setEditedText}
+                multiline
+                style={[styles.textInput, { color: theme.colors.text.primary, borderColor: theme.colors.border.default }]}
+                placeholderTextColor={theme.colors.text.muted}
+              />
+            ) : (
+              <ThemedText variant={isOwn ? 'primary' : 'secondary'} style={styles.textContent}>
+                {message.content}
+              </ThemedText>
+            )}
+          </View>
+        )}
+
+        {isPendingSend && (
+          <View style={styles.actionButtons}>
+            {isEditing ? (
+              <>
+                <TouchableOpacity
+                  onPress={() => {
+                    setEditedText(message.content || '');
+                    setIsEditing(false);
+                  }}
+                  style={styles.actionButton}
+                >
+                  <ThemedText variant="muted" size={12}>Cancel</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setIsEditing(false)}
+                  style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
+                >
+                  <ThemedText style={{ color: '#fff' }} size={12}>Save</ThemedText>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  onPress={() => setIsEditing(true)}
+                  style={styles.actionButton}
+                >
+                  <IconButton icon="pencil" size={16} iconColor={theme.colors.text.muted} />
+                  <ThemedText variant="muted" size={12}>Edit</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => onSendMessage && onSendMessage(message.id, editedText)}
+                  style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
+                >
+                  <IconButton icon="send" size={16} iconColor="#fff" />
+                  <ThemedText style={{ color: '#fff' }} size={12}>Send</ThemedText>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         )}
         
         <ThemedText variant="muted" size={10} style={styles.timestamp}>
@@ -191,5 +265,37 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     width: '60%',
+  },
+  transcriptionStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  statusText: {
+    marginLeft: 8,
+  },
+  textInput: {
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    minHeight: 60,
+    textAlignVertical: 'top',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 8,
+    gap: 8,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  primaryActionButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
   },
 });

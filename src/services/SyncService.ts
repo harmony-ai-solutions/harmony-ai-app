@@ -87,6 +87,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   private routeSyncEvent(data: any) {
     log.info(`Received sync event: ${data.event_type} status: ${data.status}`);
     
+    // IGNORE acknowledgment statuses - these are transport/processing confirmations, not actionable events
+    // Only process NEW and ERROR status events which contain actionable data
+    if (data.status === 'PENDING' || data.status === 'SUCCESS') {
+      log.debug(`Ignoring ${data.status} status event: ${data.event_type}`);
+      return;
+    }
+    
     switch (data.event_type) {
       case 'HANDSHAKE_PENDING':
         this.emit('handshake:pending', data.payload);
@@ -101,10 +108,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         break;
         
       case 'SYNC_REQUEST':
-        // Backend sends SYNC_REQUEST back with status SUCCESS/DONE containing SyncAcceptPayload
-        if (data.status === 'SUCCESS' || data.status === 'DONE') {
-          this.handleSyncAccept(data.payload);
-        } else if (data.status === 'ERROR') {
+        if (data.status === 'ERROR') {
           this.emit('sync:rejected', data.payload);
         }
         break;
@@ -600,7 +604,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
   private async handleIncomingSyncData(payload: any): Promise<void> {
     try {
-      log.info(`Buffering sync data for ${payload.table}:${payload.record?.id || 'undefined'}`);
+      // Better logging for primary key (handle both 'id' and 'entity_id')
+      const pkField = payload.table === 'entity_module_mappings' ? 'entity_id' : 'id';
+      const pkValue = payload.record?.[pkField] || 'undefined';
+      log.info(`Buffering sync data for ${payload.table}:${pkValue}`);
       
       if (!this.currentSession) {
         log.error('No active sync session');
@@ -618,16 +625,28 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       this.emit('sync:progress', this.currentSession);
 
       // Send confirmation
+      const confirmPayload = {
+        sync_session_id: payload.sync_session_id,
+        event_id: payload.event_id,
+        status: 'SUCCESS'
+      };
+      
+      // DIAGNOSTIC: Validate payload before sending
+      if (!confirmPayload.sync_session_id || !confirmPayload.event_id) {
+        log.error('⚠️ DIAGNOSTIC: Attempting to send SYNC_DATA_CONFIRM with empty fields!');
+        log.error(`  sync_session_id: ${confirmPayload.sync_session_id || 'EMPTY'}`);
+        log.error(`  event_id: ${confirmPayload.event_id || 'EMPTY'}`);
+        log.error(`  Original payload received:`, JSON.stringify(payload, null, 2));
+      }
+      
       const confirmEvent = {
         event_id: this.generateEventId(),
         event_type: 'SYNC_DATA_CONFIRM',
         status: 'NEW',
-        payload: {
-          sync_session_id: payload.sync_session_id,
-          event_id: payload.event_id,
-          status: 'SUCCESS'
-        }
+        payload: confirmPayload
       };
+      
+      log.debug(`Sending SYNC_DATA_CONFIRM for event ${confirmPayload.event_id} in session ${confirmPayload.sync_session_id}`);
       
       await this.connectionManager.sendEvent('sync', confirmEvent);
       
@@ -682,7 +701,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     const status = event.status;
     log.info(`Received sync event: SYNC_COMPLETE status: ${status} phase: ${this.syncPhase}`);
 
-    // Handle SYNC_COMPLETE from server (can be NEW, SUCCESS, or DONE status)
+    // Handle SYNC_COMPLETE from server (can be NEW or SUCCESS status)
     if (this.syncPhase === 'SERVER_SENDING') {
       // Server finished sending - apply buffered data atomically and move to next phase
       try {
@@ -702,7 +721,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       const lastSync = await this.getLastSyncTimestamp();
       this.sendLocalChangesSequentially(lastSync);
       
-    } else if (this.syncPhase === 'CLIENT_SENDING' && (status === 'SUCCESS' || status === 'DONE')) {
+    } else if (this.syncPhase === 'CLIENT_SENDING' && status === 'SUCCESS' ) {
       // Server acknowledged our SYNC_COMPLETE
       log.info('Server acknowledged our data transmission complete');
       this.localChangesSent = true;
