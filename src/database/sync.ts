@@ -4,17 +4,17 @@ import { Transaction } from 'react-native-sqlite-storage';
 
 const log = createLogger('[DatabaseSync]');
 
-// BLOB table configuration
-const BLOB_TABLES = ['character_image', 'chat_messages'];
+// TEXT table configuration (for large base64 fields)
+const TEXT_TABLES = ['character_image', 'chat_messages'];
 
-const BLOB_COLUMNS: Record<string, string[]> = {
+const TEXT_COLUMNS: Record<string, string[]> = {
   'character_image': ['image_data', 'vl_model_embedding'],
   'chat_messages': ['image_data', 'audio_data', 'vl_model_embedding']
 };
 
 // Chunking configuration
-const CHUNK_SIZE = 1_000_000; // 1MB chunks for reading large BLOBs
-const BLOB_SIZE_THRESHOLD = 2_000_000; // 2MB threshold - chunk if larger
+const CHUNK_SIZE = 1_000_000; // 1MB chunks for reading large TEXT fields
+const TEXT_SIZE_THRESHOLD = 2_000_000; // 2MB threshold - chunk if larger
 
 /**
  * Critical: Use CAST(strftime('%s', ...) AS INTEGER) for all timestamp comparisons
@@ -24,45 +24,45 @@ export const toUnixTimestamp = (isoDate: string): number => {
 };
 
 /**
- * Get all column names for a table excluding BLOB columns
+ * Get all column names for a table excluding TEXT columns
  * Uses PRAGMA table_info to introspect table structure
  */
-async function getNonBlobColumns(table: string): Promise<string[]> {
+async function getNonTextColumns(table: string): Promise<string[]> {
   const db = getDatabase();
   const [result] = await db.executeSql(`PRAGMA table_info(${table})`);
   
-  const blobCols = BLOB_COLUMNS[table] || [];
+  const textCols = TEXT_COLUMNS[table] || [];
   const columns: string[]= [];
   
   for (let i = 0; i < result.rows.length; i++) {
     const col = result.rows.item(i).name;
-    if (!blobCols.includes(col)) {
+    if (!textCols.includes(col)) {
       columns.push(col);
     }
   }
   
-  log.debug(`Non-BLOB columns for ${table}:`, columns);
+  log.debug(`Non-TEXT columns for ${table}:`, columns);
   return columns;
 }
 
 /**
- * Load a BLOB column with optional chunking for large BLOBs
- * Uses SQL substr() to read BLOBs in chunks if they exceed threshold
+ * Load a TEXT column with optional chunking for large fields
+ * Uses SQL substr() to read strings in chunks if they exceed threshold
  * 
  * @param table - Table name
  * @param id - Primary key value
- * @param columnName - BLOB column name
- * @returns BLOB data as Uint8Array or null if column is NULL/empty
+ * @param columnName - Column name
+ * @returns TEXT data as string or null if column is NULL/empty
  */
-export async function loadBlobColumn(
+export async function loadTextColumn(
   table: string,
   id: string | number,
   columnName: string
-): Promise<Uint8Array | null> {
+): Promise<string | null> {
   const db = getDatabase();
   const pkField = table === 'entity_module_mappings' ? 'entity_id' : 'id';
   
-  // Step 1: Check BLOB size using length()
+  // Step 1: Check TEXT size using length()
   const [sizeResult] = await db.executeSql(
     `SELECT length(${columnName}) as size FROM ${table} WHERE ${pkField} = ?`,
     [id]
@@ -79,7 +79,7 @@ export async function loadBlobColumn(
   }
   
   // Step 2: Load directly if small enough
-  if (size <= BLOB_SIZE_THRESHOLD) {
+  if (size <= TEXT_SIZE_THRESHOLD) {
     const [result] = await db.executeSql(
       `SELECT ${columnName} FROM ${table} WHERE ${pkField} = ?`,
       [id]
@@ -87,9 +87,9 @@ export async function loadBlobColumn(
     return result.rows.item(0)[columnName];
   }
   
-  // Step 3: Chunk large BLOBs
-  log.info(`Chunking large BLOB: ${table}.${columnName} (${size} bytes, ${Math.ceil(size / CHUNK_SIZE)} chunks)`);
-  const chunks: Uint8Array[] = [];
+  // Step 3: Chunk large TEXT fields
+  log.info(`Chunking large TEXT: ${table}.${columnName} (${size} chars, ${Math.ceil(size / CHUNK_SIZE)} chunks)`);
+  const chunks: string[] = [];
   
   for (let offset = 0; offset < size; offset += CHUNK_SIZE) {
     const [chunkResult] = await db.executeSql(
@@ -103,41 +103,61 @@ export async function loadBlobColumn(
     }
   }
   
-  // Step 4: Concatenate chunks
-  const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-  const result = new Uint8Array(totalLength);
-  let writeOffset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, writeOffset);
-    writeOffset += chunk.length;
-  }
+  // Step 4: Simple string concatenation
+  const result = chunks.join('');
   
-  log.debug(`Successfully loaded ${size} bytes from ${table}.${columnName}`);
+  log.debug(`Successfully loaded ${size} chars from ${table}.${columnName}`);
   return result;
 }
 
 /**
- * Get changed records for BLOB tables using two-phase query
- * Phase 1: Fetch metadata without BLOBs
- * Phase 2: Load each record's BLOBs individually with chunking
+ * Normalize boolean fields that SQLite stores as integers (0/1)
+ * Convert to proper JSON booleans (true/false) for Go unmarshalling
  */
-async function getChangedRecordsWithBlobs(
+function normalizeBooleanFields(table: string, record: any): any {
+  // Define tables and their boolean fields
+  const booleanFields: Record<string, string[]> = {
+    'character_image': ['is_primary'],
+    // Add other tables with boolean fields as needed
+  };
+
+  const fields = booleanFields[table];
+  if (!fields) {
+    return record; // No boolean fields to normalize
+  }
+
+  const normalized = { ...record };
+  for (const field of fields) {
+    if (field in normalized && typeof normalized[field] === 'number') {
+      normalized[field] = normalized[field] === 1;
+    }
+  }
+  
+  return normalized;
+}
+
+/**
+ * Get changed records for TEXT tables using two-phase query
+ * Phase 1: Fetch metadata without TEXT columns
+ * Phase 2: Load each record's TEXT columns individually with chunking
+ */
+async function getChangedRecordsWithText(
   table: string,
   lastSyncTimestamp: number
 ): Promise<any[]> {
   const db = getDatabase();
-  const blobColumns = BLOB_COLUMNS[table] || [];
-  const nonBlobColumns = await getNonBlobColumns(table);
+  const textColumns = TEXT_COLUMNS[table] || [];
+  const nonTextColumns = await getNonTextColumns(table);
   const pkField = table === 'entity_module_mappings' ? 'entity_id' : 'id';
   
-  // Phase 1: Get IDs and metadata without BLOBs
+  // Phase 1: Get IDs and metadata without TEXT columns
   let metadataQuery: string;
   let params: any[];
   
   if (lastSyncTimestamp === 0) {
     // First sync - include all records
     metadataQuery = `
-      SELECT ${nonBlobColumns.join(', ')}
+      SELECT ${nonTextColumns.join(', ')}
       FROM ${table}
       WHERE deleted_at IS NULL OR CAST(strftime('%s', deleted_at) AS INTEGER) > ?
     `;
@@ -145,7 +165,7 @@ async function getChangedRecordsWithBlobs(
   } else {
     // Subsequent syncs - only changed records
     metadataQuery = `
-      SELECT ${nonBlobColumns.join(', ')}
+      SELECT ${nonTextColumns.join(', ')}
       FROM ${table}
       WHERE CAST(strftime('%s', created_at) AS INTEGER) > ?
          OR CAST(strftime('%s', updated_at) AS INTEGER) > ?
@@ -154,7 +174,7 @@ async function getChangedRecordsWithBlobs(
     params = [lastSyncTimestamp, lastSyncTimestamp, lastSyncTimestamp];
   }
   
-  log.info(`Phase 1: Fetching metadata for ${table} (excluding BLOBs)`);
+  log.info(`Phase 1: Fetching metadata for ${table} (excluding TEXT columns)`);
   const [metadataResult] = await db.executeSql(metadataQuery, params);
   
   if (metadataResult.rows.length === 0) {
@@ -164,50 +184,53 @@ async function getChangedRecordsWithBlobs(
   
   log.info(`Phase 1 complete: Found ${metadataResult.rows.length} record(s) in ${table}`);
   
-  // Phase 2: Load each record with BLOBs individually
-  log.info(`Phase 2: Loading BLOBs for ${metadataResult.rows.length} record(s)`);
+  // Phase 2: Load each record with TEXT columns individually
+  log.info(`Phase 2: Loading TEXT columns for ${metadataResult.rows.length} record(s)`);
   const records: any[] = [];
   
   for (let i = 0; i < metadataResult.rows.length; i++) {
     const metadata = metadataResult.rows.item(i);
     const id = metadata[pkField];
     
-    log.debug(`Loading BLOB record ${table}:${id} (${i + 1}/${metadataResult.rows.length})`);
+    log.debug(`Loading TEXT record ${table}:${id} (${i + 1}/${metadataResult.rows.length})`);
     
     // Start with metadata
-    const record: any = { ...metadata };
+    let record: any = { ...metadata };
     
-    // Load each BLOB column with chunking if needed
-    for (const blobCol of blobColumns) {
+    // Load each TEXT column with chunking if needed
+    for (const textCol of textColumns) {
       try {
-        const blobData = await loadBlobColumn(table, id, blobCol);
-        record[blobCol] = blobData;
+        const textData = await loadTextColumn(table, id, textCol);
+        record[textCol] = textData;
       } catch (error) {
-        log.error(`Failed to load ${table}.${blobCol} for id ${id}:`, error);
+        log.error(`Failed to load ${table}.${textCol} for id ${id}:`, error);
         // Set to null on error to allow sync to continue
-        record[blobCol] = null;
+        record[textCol] = null;
       }
     }
+    
+    // Normalize boolean fields (SQLite stores as 0/1, JSON needs true/false)
+    record = normalizeBooleanFields(table, record);
     
     records.push(record);
   }
   
-  log.info(`Phase 2 complete: Loaded ${records.length} BLOB record(s) from ${table}`);
+  log.info(`Phase 2 complete: Loaded ${records.length} TEXT record(s) from ${table}`);
   return records;
 }
 
 /**
  * Get changed records for sync
- * Automatically routes BLOB tables to two-phase query
+ * Automatically routes TEXT tables to two-phase query
  */
 export const getChangedRecords = async (
   table: string,
   lastSyncTimestamp: number
 ) => {
-  // Route BLOB tables to two-phase query
-  if (BLOB_TABLES.includes(table)) {
-    log.info(`Using BLOB-safe query for table: ${table}`);
-    return await getChangedRecordsWithBlobs(table, lastSyncTimestamp);
+  // Route TEXT tables to two-phase query
+  if (TEXT_TABLES.includes(table)) {
+    log.info(`Using TEXT-safe two-phase query for table: ${table}`);
+    return await getChangedRecordsWithText(table, lastSyncTimestamp);
   }
   
   // Original logic for non-BLOB tables

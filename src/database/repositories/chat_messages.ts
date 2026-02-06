@@ -1,6 +1,6 @@
 import { getDatabase } from '../connection';
 import { ChatMessage } from '../models';
-import { loadBlobColumn } from '../sync';
+import { loadTextColumn } from '../sync';
 
 /**
  * Create a new chat message
@@ -78,34 +78,34 @@ export async function getChatMessagesBetween(
   
   const [results] = await db.executeSql(query, params);
   
-  // Phase 2: Load each message's BLOBs individually with chunking
+  // Phase 2: Load each message's TEXT columns individually with chunking
   const messages: ChatMessage[] = [];
   for (let i = 0; i < results.rows.length; i++) {
-    const metadata = results.rows.item(i);
+    const row = results.rows.item(i);
     
-    // Load BLOBs individually with chunking
-    const audioData = await loadBlobColumn('chat_messages', metadata.id, 'audio_data');
-    const imageData = await loadBlobColumn('chat_messages', metadata.id, 'image_data');
-    const embeddingData = await loadBlobColumn('chat_messages', metadata.id, 'vl_model_embedding');
+    // Load TEXT columns individually with chunking
+    const audioData = await loadTextColumn('chat_messages', row.id, 'audio_data');
+    const imageData = await loadTextColumn('chat_messages', row.id, 'image_data');
+    const embeddingData = await loadTextColumn('chat_messages', row.id, 'vl_model_embedding');
 
     messages.push({
-      id: metadata.id,
-      entity_id: metadata.entity_id,
-      sender_entity_id: metadata.sender_entity_id,
-      session_id: metadata.session_id,
-      content: metadata.content,
-      audio_duration: metadata.audio_duration,
-      message_type: metadata.message_type,
+      id: row.id,
+      entity_id: row.entity_id,
+      sender_entity_id: row.sender_entity_id,
+      session_id: row.session_id,
+      content: row.content,
+      audio_duration: row.audio_duration,
+      message_type: row.message_type,
       audio_data: audioData,
-      audio_mime_type: metadata.audio_mime_type,
+      audio_mime_type: row.audio_mime_type,
       image_data: imageData,
-      image_mime_type: metadata.image_mime_type,
-      vl_model: metadata.vl_model,
-      vl_model_interpretation: metadata.vl_model_interpretation,
+      image_mime_type: row.image_mime_type,
+      vl_model: row.vl_model,
+      vl_model_interpretation: row.vl_model_interpretation,
       vl_model_embedding: embeddingData,
-      created_at: new Date(metadata.created_at),
-      updated_at: new Date(metadata.updated_at),
-      deleted_at: metadata.deleted_at ? new Date(metadata.deleted_at) : null,
+      created_at: new Date(row.created_at),
+      updated_at: new Date(row.updated_at),
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   return messages;
@@ -158,34 +158,34 @@ export async function getRecentChatMessages(
     ids
   );
   
-  // Phase 2: Load each message's BLOBs individually with chunking
+  // Phase 2: Load each message's TEXT columns individually with chunking
   const messages: ChatMessage[] = [];
   for (let i = 0; i < results.rows.length; i++) {
-    const metadata = results.rows.item(i);
+    const row = results.rows.item(i);
     
-    // Load BLOBs individually with chunking
-    const audioData = await loadBlobColumn('chat_messages', metadata.id, 'audio_data');
-    const imageData = await loadBlobColumn('chat_messages', metadata.id, 'image_data');
-    const embeddingData = await loadBlobColumn('chat_messages', metadata.id, 'vl_model_embedding');
+    // Load TEXT columns individually with chunking
+    const audioData = await loadTextColumn('chat_messages', row.id, 'audio_data');
+    const imageData = await loadTextColumn('chat_messages', row.id, 'image_data');
+    const embeddingData = await loadTextColumn('chat_messages', row.id, 'vl_model_embedding');
 
     messages.push({
-      id: metadata.id,
-      entity_id: metadata.entity_id,
-      sender_entity_id: metadata.sender_entity_id,
-      session_id: metadata.session_id,
-      content: metadata.content,
-      audio_duration: metadata.audio_duration,
-      message_type: metadata.message_type,
+      id: row.id,
+      entity_id: row.entity_id,
+      sender_entity_id: row.sender_entity_id,
+      session_id: row.session_id,
+      content: row.content,
+      audio_duration: row.audio_duration,
+      message_type: row.message_type,
       audio_data: audioData,
-      audio_mime_type: metadata.audio_mime_type,
+      audio_mime_type: row.audio_mime_type,
       image_data: imageData,
-      image_mime_type: metadata.image_mime_type,
-      vl_model: metadata.vl_model,
-      vl_model_interpretation: metadata.vl_model_interpretation,
+      image_mime_type: row.image_mime_type,
+      vl_model: row.vl_model,
+      vl_model_interpretation: row.vl_model_interpretation,
       vl_model_embedding: embeddingData,
-      created_at: new Date(metadata.created_at),
-      updated_at: new Date(metadata.updated_at),
-      deleted_at: metadata.deleted_at ? new Date(metadata.deleted_at) : null,
+      created_at: new Date(row.created_at),
+      updated_at: new Date(row.updated_at),
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
   return messages;
@@ -220,31 +220,31 @@ export async function getLastChatMessage(
   );
   
   if (results.rows.length === 0) return null;
-  const metadata = results.rows.item(0);
+  const row = results.rows.item(0);
 
-  // Phase 2: Load BLOBs with chunking
-  const audioData = await loadBlobColumn('chat_messages', metadata.id, 'audio_data');
-  const imageData = await loadBlobColumn('chat_messages', metadata.id, 'image_data');
-  const embeddingData = await loadBlobColumn('chat_messages', metadata.id, 'vl_model_embedding');
+  // Phase 2: Load TEXT columns with chunking
+  const audioData = await loadTextColumn('chat_messages', row.id, 'audio_data');
+  const imageData = await loadTextColumn('chat_messages', row.id, 'image_data');
+  const embeddingData = await loadTextColumn('chat_messages', row.id, 'vl_model_embedding');
 
   return {
-    id: metadata.id,
-    entity_id: metadata.entity_id,
-    sender_entity_id: metadata.sender_entity_id,
-    session_id: metadata.session_id,
-    content: metadata.content,
-    audio_duration: metadata.audio_duration,
-    message_type: metadata.message_type,
+    id: row.id,
+    entity_id: row.entity_id,
+    sender_entity_id: row.sender_entity_id,
+    session_id: row.session_id,
+    content: row.content,
+    audio_duration: row.audio_duration,
+    message_type: row.message_type,
     audio_data: audioData,
-    audio_mime_type: metadata.audio_mime_type,
+    audio_mime_type: row.audio_mime_type,
     image_data: imageData,
-    image_mime_type: metadata.image_mime_type,
-    vl_model: metadata.vl_model,
-    vl_model_interpretation: metadata.vl_model_interpretation,
+    image_mime_type: row.image_mime_type,
+    vl_model: row.vl_model,
+    vl_model_interpretation: row.vl_model_interpretation,
     vl_model_embedding: embeddingData,
-    created_at: new Date(metadata.created_at),
-    updated_at: new Date(metadata.updated_at),
-    deleted_at: metadata.deleted_at ? new Date(metadata.deleted_at) : null,
+    created_at: new Date(row.created_at),
+    updated_at: new Date(row.updated_at),
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
 

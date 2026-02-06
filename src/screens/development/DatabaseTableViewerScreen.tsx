@@ -20,7 +20,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { executeRawQuery, clearDatabaseData } from '../../database/connection';
 import { createLogger } from '../../utils/logger';
-import { blobToUint8Array } from '../../database/blob';
+import { createDataURL } from '../../database/base64';
 
 const log = createLogger('[DatabaseTableViewer]');
 
@@ -185,15 +185,10 @@ export const DatabaseTableViewerScreen: React.FC = () => {
         if (value === undefined) {
             return 'undefined';
         }
-        if (columnType === 'BLOB') {
-            try {
-                const bytes = blobToUint8Array(value);
-                if (bytes) {
-                    return `[BLOB: ${bytes.length} bytes]`;
-                }
-                return '[BLOB: invalid]';
-            } catch (err) {
-                return '[BLOB: error]';
+        if (columnType === 'TEXT') {
+            // value is already base64 string from TEXT column
+            if (typeof value === 'string' && value.length > 100 && /^[A-Za-z0-9+/]+=*$/.test(value.substring(0, 100))) {
+                return `[Base64: ${value.length} chars]`;
             }
         }
         if (typeof value === 'object') {

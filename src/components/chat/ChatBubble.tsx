@@ -13,7 +13,7 @@ interface ChatBubbleProps {
   message: ChatMessage;
   isOwn: boolean;
   partnerAvatar?: string | null;
-  onImagePress?: (imageData: Uint8Array, mimeType: string) => void;
+  onImagePress?: (imageBase64: string, mimeType: string) => void;
   onSendMessage?: (messageId: string, editedText: string) => void;
   theme: Theme;
 }
@@ -42,7 +42,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       setIsPlaying(false);
     } else {
       setIsPlaying(true);
-      await AudioPlayer.playAudioBlob(message.audio_data, message.audio_mime_type || 'audio/wav');
+      await AudioPlayer.playAudio(message.audio_data, message.audio_mime_type || 'audio/wav');
       setIsPlaying(false);
     }
   };
@@ -67,9 +67,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         {hasImage && (
           <TouchableOpacity onPress={handleImagePress} style={styles.imageContainer}>
             <Image
-              source={{ uri: `data:${message.image_mime_type || 'image/jpeg'};base64,${
-                Buffer.from(message.image_data!).toString('base64')
-              }` }}
+              source={{ uri: `data:${message.image_mime_type || 'image/jpeg'};base64,${message.image_data}` }}
               style={styles.image}
               resizeMode="cover"
             />

@@ -14,14 +14,14 @@ ALTER TABLE character_profiles ADD COLUMN example_dialogues TEXT DEFAULT '';
 CREATE TABLE character_image (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     character_profile_id TEXT NOT NULL,
-    image_data BLOB NOT NULL,
+    image_data TEXT NOT NULL,
     mime_type TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     is_primary BOOLEAN NOT NULL DEFAULT 0,
     display_order INTEGER NOT NULL DEFAULT 0,
     vl_model_interpretation TEXT NOT NULL DEFAULT '',
     vl_model TEXT NOT NULL DEFAULT '',
-    vl_model_embedding BLOB,
+    vl_model_embedding TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE

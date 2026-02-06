@@ -259,7 +259,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         throw new Error('Message not found or has no audio');
       }
 
-      const base64Audio = Buffer.from(message.audio_data).toString('base64');
+      const base64Audio = message.audio_data; // Already base64 string
 
       if (finalText !== message.content) {
         await updateChatMessage(messageId, { content: finalText });

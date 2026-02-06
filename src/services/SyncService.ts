@@ -89,7 +89,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     
     // IGNORE acknowledgment statuses - these are transport/processing confirmations, not actionable events
     // Only process NEW and ERROR status events which contain actionable data
-    if (data.status === 'PENDING' || data.status === 'SUCCESS') {
+    // EXCEPTION: Allow SYNC_COMPLETE with SUCCESS status through (it's a protocol signal, not just a transport ack)
+    if (data.status === 'PENDING' || (data.status === 'SUCCESS' && data.event_type !== 'SYNC_COMPLETE')) {
       log.debug(`Ignoring ${data.status} status event: ${data.event_type}`);
       return;
     }
@@ -589,6 +590,12 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         },
       };
 
+      // Measure payload size for diagnostics (like server-side logging)
+      const payloadJSON = JSON.stringify(event.payload);
+      const byteSize = new Blob([payloadJSON]).size;
+      const mbSize = byteSize / (1024 * 1024);
+      log.debug(`📊 SYNC_DATA payload size: ${table} ${operation} - ${mbSize.toFixed(2)} MB (${byteSize} bytes)`);
+
       log.info(`Sending sync data for ${table}:${record.id || 'undefined'}, eventId: ${eventId}`);
       this.connectionManager.sendEvent('sync', event).catch(reject);
 
@@ -682,6 +689,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     // Check if we're waiting for this confirmation
     if (this.pendingSyncConfirmation?.eventId === payload.event_id) {
       if (payload.status === 'SUCCESS') {
+        // Increment records sent counter and emit progress when confirmed
+        if (this.currentSession) {
+          this.currentSession.recordsSent++;
+          this.emit('sync:progress', this.currentSession);
+        }
         this.pendingSyncConfirmation?.resolve(true);
       } else {
         this.pendingSyncConfirmation?.reject(

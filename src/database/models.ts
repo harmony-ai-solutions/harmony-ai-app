@@ -236,14 +236,14 @@ export interface TTSConfig {
 export interface CharacterImage {
   id: number;
   character_profile_id: string;
-  image_data: Uint8Array; // BLOB data
+  image_data: string; // Base64 encoded image
   mime_type: string;
   description: string;
   is_primary: boolean;
   display_order: number;
   vl_model_interpretation: string;
   vl_model: string;
-  vl_model_embedding: Uint8Array | null; // BLOB data
+  vl_model_embedding: string | null; // Base64 encoded embedding
   created_at: Date;
   deleted_at: Date | null;
 }
@@ -291,16 +291,16 @@ export interface ChatMessage {
   audio_duration: number | null;
   message_type: 'text' | 'audio' | 'combined' | 'image';
 
-  // Audio blob storage (replaces audio_file)
-  audio_data?: Uint8Array | null;
+  // Audio storage (base64 encoded)
+  audio_data?: string | null;
   audio_mime_type?: string | null;
 
-  // Image fields
-  image_data?: Uint8Array | null;
+  // Image fields (base64 encoded)
+  image_data?: string | null;
   image_mime_type?: string | null;
   vl_model?: string | null;
   vl_model_interpretation?: string | null;
-  vl_model_embedding?: Uint8Array | null;
+  vl_model_embedding?: string | null;
 
   created_at: Date;
   updated_at: Date;

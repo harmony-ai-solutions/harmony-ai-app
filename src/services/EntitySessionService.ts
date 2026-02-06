@@ -8,11 +8,9 @@ import { createLogger } from '../utils/logger';
 import { messageExists, createChatMessage, updateChatMessage } from '../database/repositories/chat_messages';
 import { SyncService } from './SyncService';
 import AudioPlayer from './AudioPlayer';
+import { uint8ArrayToBase64 } from '../database/base64';
 
 const log = createLogger('[EntitySessionService]');
-
-// polyfill for btoa in React Native
-const btoa = (data: string) => Buffer.from(data, 'binary').toString('base64');
 
 export interface DualEntitySession {
   userSession: EntitySession;      // The entity user impersonates
@@ -354,6 +352,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     
     log.info(`Starting audio message flow for ${partnerEntityId}`);
     
+    // Convert to base64 immediately for storage
+    const base64Audio = uint8ArrayToBase64(audioData);
+    
     const messageId = this.generateEventId();
     const message = {
       id: messageId,
@@ -363,7 +364,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       content: '',
       audio_duration: duration,
       message_type: 'audio' as 'audio',
-      audio_data: audioData,
+      audio_data: base64Audio,
       audio_mime_type: mimeType,
       image_data: null,
       image_mime_type: null,
@@ -376,7 +377,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     log.info(`Stored message ${messageId} in database (awaiting transcription)`);
     
     try {
-      await this.requestTranscription(messageId, partnerEntityId, audioData);
+      await this.requestTranscription(messageId, partnerEntityId, base64Audio);
     } catch (error) {
       log.error(`Failed to request transcription for ${messageId}:`, error);
     }
@@ -387,7 +388,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   private async requestTranscription(
     messageId: string,
     partnerEntityId: string,
-    audioData: Uint8Array
+    base64Audio: string
   ): Promise<void> {
     const dualSession = this.sessions.get(partnerEntityId);
     if (!dualSession) {
@@ -395,7 +396,6 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
     
     const eventId = this.generateEventId();
-    const base64Audio = btoa(String.fromCharCode(...audioData));
     
     const timeout = setTimeout(() => {
       log.warn(`Transcription timeout for message ${messageId}`);
@@ -676,17 +676,6 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       messageType = 'audio';
     }
     
-    // Convert base64 data to Uint8Array if present
-    let imageData: Uint8Array | null = null;
-    if (utterance.image_data) {
-      imageData = new Uint8Array(Buffer.from(utterance.image_data, 'base64'));
-    }
-    
-    let audioData: Uint8Array | null = null;
-    if (utterance.audio) {
-      audioData = new Uint8Array(Buffer.from(utterance.audio, 'base64'));
-    }
-    
     const message = {
       id: messageId,
       entity_id: dualSession.impersonatedEntityId,  // From user's perspective
@@ -695,9 +684,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       content: utterance.content || '',
       audio_duration: utterance.audio_duration || null,
       message_type: messageType,
-      audio_data: audioData,
+      audio_data: utterance.audio || null,          // Already base64 from backend
       audio_mime_type: utterance.audio_type || null,
-      image_data: imageData,
+      image_data: utterance.image_data || null,     // Already base64 from backend
       image_mime_type: utterance.image_mime_type || null,
       vl_model: null, // Will be populated by Harmony Link
       vl_model_interpretation: null,

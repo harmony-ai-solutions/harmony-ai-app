@@ -9,8 +9,8 @@
 import {getDatabase} from '../connection';
 import {withTransaction} from '../transaction';
 import {CharacterProfile, CharacterImage, CharacterImageInfo} from '../models';
-import {blobToUint8Array, uint8ArrayToBase64} from '../blob';
-import {loadBlobColumn} from '../sync';
+import {uint8ArrayToBase64, createDataURL} from '../base64';
+import {loadTextColumn} from '../sync';
 
 // ============================================================================
 // Character Profile CRUD Operations
@@ -305,20 +305,22 @@ export async function getCharacterImage(id: number, includeDeleted = false): Pro
   }
   
   const row = results.rows.item(0);
-  const imageData = blobToUint8Array(row.image_data);
-  const embeddingData = row.vl_model_embedding ? blobToUint8Array(row.vl_model_embedding) : null;
+  
+  // Load TEXT fields with chunking if needed
+  const imageData = await loadTextColumn('character_image', id, 'image_data');
+  const embeddingData = await loadTextColumn('character_image', id, 'vl_model_embedding');
   
   return {
     id: row.id,
     character_profile_id: row.character_profile_id,
-    image_data: imageData || new Uint8Array(),
+    image_data: imageData || '', // Base64 string
     mime_type: row.mime_type,
     description: row.description,
     is_primary: row.is_primary === 1,
     display_order: row.display_order,
     vl_model_interpretation: row.vl_model_interpretation,
     vl_model: row.vl_model,
-    vl_model_embedding: embeddingData,
+    vl_model_embedding: embeddingData, // Base64 string or null
     created_at: new Date(row.created_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
@@ -333,7 +335,7 @@ export async function getCharacterImage(id: number, includeDeleted = false): Pro
 export async function getCharacterImages(profileId: string, includeDeleted = false): Promise<CharacterImage[]> {
   const db = getDatabase();
   
-  // Phase 1: Get metadata without BLOBs
+  // Phase 1: Get metadata without large TEXT columns
   const metadataQuery = includeDeleted
     ? `SELECT id, character_profile_id, mime_type, description,
               is_primary, display_order, vl_model_interpretation, vl_model,
@@ -350,27 +352,27 @@ export async function getCharacterImages(profileId: string, includeDeleted = fal
 
   const [metadataResults] = await db.executeSql(metadataQuery, [profileId]);
   
-  // Phase 2: Load each image's BLOBs individually with chunking
+  // Phase 2: Load each image's TEXT columns individually with chunking
   const images: CharacterImage[] = [];
   
   for (let i = 0; i < metadataResults.rows.length; i++) {
     const metadata = metadataResults.rows.item(i);
     
-    // Load BLOBs individually with chunking
-    const imageData = await loadBlobColumn('character_image', metadata.id, 'image_data');
-    const embeddingData = await loadBlobColumn('character_image', metadata.id, 'vl_model_embedding');
+    // Load TEXT columns individually with chunking
+    const imageData = await loadTextColumn('character_image', metadata.id, 'image_data');
+    const embeddingData = await loadTextColumn('character_image', metadata.id, 'vl_model_embedding');
     
     images.push({
       id: metadata.id,
       character_profile_id: metadata.character_profile_id,
-      image_data: imageData || new Uint8Array(),
+      image_data: imageData || '', // Base64 string
       mime_type: metadata.mime_type,
       description: metadata.description,
       is_primary: metadata.is_primary === 1,
       display_order: metadata.display_order,
       vl_model_interpretation: metadata.vl_model_interpretation,
       vl_model: metadata.vl_model,
-      vl_model_embedding: embeddingData,
+      vl_model_embedding: embeddingData, // Base64 string or null
       created_at: new Date(metadata.created_at),
       deleted_at: metadata.deleted_at ? new Date(metadata.deleted_at) : null,
     });
@@ -497,20 +499,22 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
   }
   
   const row = results.rows.item(0);
-  const imageData = blobToUint8Array(row.image_data);
-  const embeddingData = row.vl_model_embedding ? blobToUint8Array(row.vl_model_embedding) : null;
+  
+  // Load TEXT fields with chunking if needed
+  const imageData = await loadTextColumn('character_image', row.id, 'image_data');
+  const embeddingData = await loadTextColumn('character_image', row.id, 'vl_model_embedding');
   
   return {
     id: row.id,
     character_profile_id: row.character_profile_id,
-    image_data: imageData || new Uint8Array(),
+    image_data: imageData || '', // Base64 string
     mime_type: row.mime_type,
     description: row.description,
     is_primary: row.is_primary === 1,
     display_order: row.display_order,
     vl_model_interpretation: row.vl_model_interpretation,
     vl_model: row.vl_model,
-    vl_model_embedding: embeddingData,
+    vl_model_embedding: embeddingData, // Base64 string or null
     created_at: new Date(row.created_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
@@ -525,9 +529,7 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
  * Example: "data:image/png;base64,iVBORw0KGgo..."
  */
 export function imageToDataURL(image: CharacterImage): string {
-  // Convert Uint8Array to base64
-  const base64 = uint8ArrayToBase64(image.image_data);
-  return `data:${image.mime_type};base64,${base64}`;
+  return createDataURL(image.image_data, image.mime_type);
 }
 
 /**

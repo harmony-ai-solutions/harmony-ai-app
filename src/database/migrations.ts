@@ -15,6 +15,7 @@ import {migration004} from './migrations/000004_add_cognition_generate_expressio
 import {migration005} from './migrations/000005_add_sync_tables';
 import {migration006} from './migrations/000006_fix_sync_devices_primary_key';
 import {migration007} from './migrations/000007_add_chat_images';
+import {migration008} from './migrations/000008_remove_provider_name_unique_constraint';
 
 // Migration definition
 interface Migration {
@@ -61,6 +62,11 @@ const MIGRATIONS: Migration[] = [
     version: 7,
     description: 'add_chat_images',
     sql: migration007,
+  },
+  {
+    version: 8,
+    description: 'remove_provider_name_unique_constraint',
+    sql: migration008,
   },
 ];
 

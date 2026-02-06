@@ -59,7 +59,7 @@ async function runAllTests() {
     console.log('│ Phase 4: Provider Repository Tests                     │');
     console.log('└─────────────────────────────────────────────────────────┘');
     results.providers = await runProviderTests();
-    
+
   } catch (error) {
     console.error('\n❌ Test suite failed with critical error:', error);
   } finally {

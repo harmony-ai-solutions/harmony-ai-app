@@ -9,8 +9,6 @@ import { createLogger } from '../utils/logger';
 
 const log = createLogger('[AudioPlayer]');
 
-const btoa = (data: string) => Buffer.from(data, 'binary').toString('base64');
-
 // Use react-native-track-player (https://github.com/doublesymmetry/react-native-track-player)
 // Installation: npm install react-native-track-player
 //               npx pod-install (iOS)
@@ -44,35 +42,9 @@ export class AudioPlayer {
   }
 
   /**
-   * Play audio from blob data
+   * Play audio from base64 string
    */
-  async playAudioBlob(audioData: Uint8Array, mimeType: string): Promise<void> {
-    if (!this.isInitialized) {
-      await this.initialize();
-    }
-
-    // Convert blob to base64 data URL
-    const base64 = btoa(String.fromCharCode(...audioData));
-    const uri = `data:${mimeType};base64,${base64}`;
-
-    const track: Track = {
-      id: `audio_${Date.now()}`,
-      url: uri,
-      title: 'Voice Message',
-      artist: 'Harmony AI',
-    };
-
-    await TrackPlayer.reset();
-    await TrackPlayer.add(track);
-    await TrackPlayer.play();
-    
-    log.info('Playing audio blob');
-  }
-
-  /**
-   * Play audio from base64 string (for events)
-   */
-  async playAudioBase64(base64Audio: string, mimeType: string = 'audio/wav'): Promise<void> {
+  async playAudio(base64Audio: string, mimeType: string = 'audio/wav'): Promise<void> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -90,7 +62,7 @@ export class AudioPlayer {
     await TrackPlayer.add(track);
     await TrackPlayer.play();
     
-    log.info('Playing audio base64');
+    log.info('Playing audio');
   }
 
   /**
