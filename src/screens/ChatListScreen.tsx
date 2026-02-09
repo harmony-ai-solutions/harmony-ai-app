@@ -47,7 +47,7 @@ export const ChatListScreen: React.FC = () => {
   const [entityModalVisible, setEntityModalVisible] = useState(false);
   const [selectedPartner, setSelectedPartner] = useState<ChatListItem | null>(null);
 
-  // Default impersonated entity is "user" (fallback)
+  // Default impersonated entity is "user" (fallback) - FIXME
   const defaultImpersonatedEntityId = 'user';
   
   const loadChatList = useCallback(async () => {
@@ -60,7 +60,7 @@ export const ChatListScreen: React.FC = () => {
         if (!entity.character_profile_id) continue;
 
         // Get preferred impersonated entity for this partner
-        const preferredEntityId = await ChatPreferencesService.getPreferredEntity(entity.id) || defaultImpersonatedEntityId;
+        const preferredEntityId = await ChatPreferencesService.getPreferredEntity(entity.id) || defaultImpersonatedEntityId; // FIXME
 
         // Get last message for preview using the preferred impersonated entity
         const lastMsg = await getLastChatMessage(preferredEntityId, entity.id);

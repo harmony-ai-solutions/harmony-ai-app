@@ -229,8 +229,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     await AsyncStorage.setItem('harmony_server_cert', payload.server_cert);
     await AsyncStorage.setItem('harmony_token_expires_at', payload.token_expires_at.toString());
     
-    // Save security mode preference after handshake
-    await ConnectionStateManager.saveSecurityMode('secure');
+    // Only set default security mode if user hasn't chosen one yet
+    // Default mode is required to "upgrade" the handler on first handshake,
+    // but on Token refresh, we already have one set, so we can keep it as it is.
+    const currentMode = await ConnectionStateManager.getSecurityMode();
+    if (!currentMode) {
+      await ConnectionStateManager.saveSecurityMode('secure');
+    }
     
     this.emit('handshake:accepted', payload);
   };

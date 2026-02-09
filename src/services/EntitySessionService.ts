@@ -306,7 +306,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     const messageId = this.generateEventId();
     const message = {
       id: messageId,
-      entity_id: dualSession.impersonatedEntityId,
+      entity_id: dualSession.partnerEntityId,
       sender_entity_id: dualSession.impersonatedEntityId,
       session_id: dualSession.partnerSession.sessionId,
       content: text,
@@ -358,7 +358,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     const messageId = this.generateEventId();
     const message = {
       id: messageId,
-      entity_id: dualSession.impersonatedEntityId,
+      entity_id: dualSession.partnerEntityId,
       sender_entity_id: dualSession.impersonatedEntityId,
       session_id: dualSession.partnerSession.sessionId,
       content: '',

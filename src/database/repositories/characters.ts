@@ -31,8 +31,9 @@ export async function createCharacterProfile(
       `INSERT INTO character_profiles (
         id, name, description, personality, appearance, backstory,
         voice_characteristics, base_prompt, scenario, example_dialogues,
+        typing_speed_wpm, audio_response_chance_percent,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         profile.id,
         profile.name,
@@ -44,6 +45,8 @@ export async function createCharacterProfile(
         profile.base_prompt,
         profile.scenario,
         profile.example_dialogues,
+        profile.typing_speed_wpm,
+        profile.audio_response_chance_percent,
         now,
         now,
       ]
@@ -68,11 +71,13 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
   const query = includeDeleted
     ? `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
+              typing_speed_wpm, audio_response_chance_percent,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE id = ?`
     : `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
+              typing_speed_wpm, audio_response_chance_percent,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE id = ? AND deleted_at IS NULL`;
@@ -95,6 +100,8 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
     base_prompt: row.base_prompt,
     scenario: row.scenario,
     example_dialogues: row.example_dialogues,
+    typing_speed_wpm: row.typing_speed_wpm,
+    audio_response_chance_percent: row.audio_response_chance_percent,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -111,11 +118,13 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
   const query = includeDeleted
     ? `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
+              typing_speed_wpm, audio_response_chance_percent,
               created_at, updated_at, deleted_at
        FROM character_profiles
        ORDER BY name`
     : `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
+              typing_speed_wpm, audio_response_chance_percent,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE deleted_at IS NULL
@@ -137,6 +146,8 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
       base_prompt: row.base_prompt,
       scenario: row.scenario,
       example_dialogues: row.example_dialogues,
+      typing_speed_wpm: row.typing_speed_wpm,
+      audio_response_chance_percent: row.audio_response_chance_percent,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -160,7 +171,9 @@ export async function updateCharacterProfile(profile: CharacterProfile): Promise
       `UPDATE character_profiles
        SET name = ?, description = ?, personality = ?, appearance = ?,
            backstory = ?, voice_characteristics = ?, base_prompt = ?,
-           scenario = ?, example_dialogues = ?, updated_at = ?
+           scenario = ?, example_dialogues = ?,
+           typing_speed_wpm = ?, audio_response_chance_percent = ?,
+           updated_at = ?
        WHERE id = ?`,
       [
         profile.name,
@@ -172,6 +185,8 @@ export async function updateCharacterProfile(profile: CharacterProfile): Promise
         profile.base_prompt,
         profile.scenario,
         profile.example_dialogues,
+        profile.typing_speed_wpm,
+        profile.audio_response_chance_percent,
         now,
         profile.id,
       ]

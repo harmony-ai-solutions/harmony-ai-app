@@ -16,6 +16,7 @@ import {migration005} from './migrations/000005_add_sync_tables';
 import {migration006} from './migrations/000006_fix_sync_devices_primary_key';
 import {migration007} from './migrations/000007_add_chat_images';
 import {migration008} from './migrations/000008_remove_provider_name_unique_constraint';
+import {migration009} from './migrations/000009_add_character_chat_behavior';
 
 // Migration definition
 interface Migration {
@@ -67,6 +68,11 @@ const MIGRATIONS: Migration[] = [
     version: 8,
     description: 'remove_provider_name_unique_constraint',
     sql: migration008,
+  },
+  {
+    version: 9,
+    description: 'add_character_chat_behavior',
+    sql: migration009,
   },
 ];
 

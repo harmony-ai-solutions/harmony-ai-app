@@ -5,9 +5,10 @@ import { Theme } from '../../theme/types';
 
 interface TypingIndicatorProps {
   theme: Theme | null;
+  mode?: 'text' | 'audio';
 }
 
-export const TypingIndicator: React.FC<TypingIndicatorProps> = ({ theme }) => {
+export const TypingIndicator: React.FC<TypingIndicatorProps> = ({ theme, mode = 'text' }) => {
   const dot1 = useRef(new Animated.Value(0)).current;
   const dot2 = useRef(new Animated.Value(0)).current;
   const dot3 = useRef(new Animated.Value(0)).current;
@@ -58,7 +59,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({ theme }) => {
   return (
     <View style={styles.container}>
       <ThemedText variant="muted" size={12} style={styles.text}>
-        Typing
+        {mode === 'audio' ? 'Recording audio...' : 'Typing...'}
       </ThemedText>
       <View style={styles.dots}>
         {[dot1, dot2, dot3].map((dot, index) => (

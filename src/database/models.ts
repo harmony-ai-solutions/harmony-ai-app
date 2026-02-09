@@ -19,6 +19,8 @@ export interface CharacterProfile {
   base_prompt: string | null;
   scenario: string | null;
   example_dialogues: string | null;
+  typing_speed_wpm: number;
+  audio_response_chance_percent: number;
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;

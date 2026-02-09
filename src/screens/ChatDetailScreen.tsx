@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   FlatList,
-  View,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
@@ -10,7 +9,6 @@ import {
   Alert,
 } from 'react-native';
 import { Appbar, Avatar } from 'react-native-paper';
-import { Buffer } from 'buffer';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -40,6 +38,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [partnerName, setPartnerName] = useState<string>('Chat');
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
   
@@ -150,10 +149,24 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     };
     
     const handleTyping = (entityId: string, senderId: string, isTypingActive: boolean) => {
-      if (entityId === partnerEntityId && senderId === partnerEntityId) {
+      if (entityId === partnerEntityId && (senderId === partnerEntityId || senderId === '')) {
         setIsTyping(isTypingActive);
+        if (isTypingActive) setIsRecording(false);
       }
     };
+
+    const handleRecording = (entityId: string, senderId: string, isRecordingActive: boolean) => {
+      if (entityId === partnerEntityId && (senderId === partnerEntityId || senderId === '')) {
+        setIsRecording(isRecordingActive);
+        if (isRecordingActive) setIsTyping(false);
+      }
+    };
+
+    // Cleanup indicators when session becomes inactive
+    if (!isDualSessionActive(partnerEntityId)) {
+      setIsTyping(false);
+      setIsRecording(false);
+    }
 
     const handleTranscriptionCompleted = (entityId: string, messageId: string, text: string) => {
       if (entityId === partnerEntityId) {
@@ -166,11 +179,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     
     EntitySessionService.on('message:received', handleNewMessage);
     EntitySessionService.on('typing:indicator', handleTyping);
+    EntitySessionService.on('recording:indicator', handleRecording);
     EntitySessionService.on('transcription:completed' as any, handleTranscriptionCompleted);
-    
+
     return () => {
       EntitySessionService.off('message:received', handleNewMessage);
       EntitySessionService.off('typing:indicator', handleTyping);
+      EntitySessionService.off('recording:indicator', handleRecording);
       EntitySessionService.off('transcription:completed' as any, handleTranscriptionCompleted);
     };
   }, [partnerEntityId, impersonatedEntityId]);
@@ -283,10 +298,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         );
 
         log.info(`Message ${messageId} sent to partner entity`);
-
-        if (Platform.OS === 'android') {
-          ToastAndroid.show('Message sent', ToastAndroid.SHORT);
-        }
 
         const updatedMessages = await getRecentChatMessages(
           impersonatedEntityId,
@@ -402,8 +413,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
         />
         
-        {isTyping && <TypingIndicator theme={theme} />}
-        
+        {isTyping && (
+          <TypingIndicator theme={theme} mode="text" />
+        )}
+        {isRecording && (
+          <TypingIndicator theme={theme} mode="audio" />
+        )}
+
         <ChatInput
           onSendText={handleSendText}
           onSendAudio={handleSendAudio}
