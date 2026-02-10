@@ -5,7 +5,27 @@
 
 ## Recent Work (January 2026)
 
-### Database Test Runner Implementation ✅ COMPLETE (January 14, 2026)
+### Chat Quality of Life Improvements ✅ COMPLETE
+- ✅ **Last Message Actions**: Context menu for the last message in chat with Delete, Edit, and Regenerate options
+  - Delete: Available for both user and partner messages (with confirmation dialog)
+  - Edit: Available for user's last message - edits content and triggers resend for new AI response
+  - Regenerate: Available for partner's last message - deletes response and resends user's previous message
+- ✅ **New Messages Indicator**: Visual divider showing "X new message(s)" since last visit
+  - Automatic last-read timestamp tracking via `ChatPreferencesService`
+  - Persistent across app restarts using `AsyncStorage`
+  - Smart auto-scroll on mount: scrolls to divider or bottom depending on new message count
+- ✅ **Mark as Read**: Automatic marking when user scrolls past 75% of chat content
+- ✅ **Components Created**:
+  - `NewMessagesDivider`: Themed horizontal bar component
+  - Enhanced `ChatBubble` with `Menu` from React Native Paper for contextual actions
+  - Extended `ChatPreferencesService` with last-read timestamp methods
+- ✅ **ChatDetailScreen Enhancements**:
+  - Message list with divider insertion via `useMemo`
+  - Scroll handler with throttling for performance
+  - Confirmation dialogs for all destructive actions
+  - Text-only resending for simplicity (audio already transcribed)
+
+### Database Test Runner Implementation ✅ 
 - ✅ Created DatabaseTestScreen with real-time console output
 - ✅ Integrated into Settings menu (hamburger menu)
 - ✅ DEV-only visibility using __DEV__ checks

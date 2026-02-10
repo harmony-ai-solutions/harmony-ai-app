@@ -224,7 +224,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         device_type: session.deviceType,
         device_id: session.deviceId,
         device_platform: Platform.OS,
-        capabilities: session.capabilities
+        capabilities: session.capabilities,
+        tts_output_type: 'binary' // Request binary audio output for mobile app
       }
     };
     
@@ -640,12 +641,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   
   private async handleIncomingMessage(dualSession: DualEntitySession, event: any): Promise<void> {
     try {
-      const message = event.payload;
-
-      log.info(`Incoming message from ${message.sender_entity_id} in session ${dualSession.partnerEntityId}`);
+      log.info(`Incoming message from ${event.entity_id} in session ${dualSession.partnerEntityId}`);
 
       // Save to database
-      await this.handleIncomingUtterance(dualSession, message);
+      await this.handleIncomingUtterance(dualSession, event.payload);
 
       // Just emit event so UI can reload if this chat is open
       this.emit('message:received', dualSession.partnerEntityId, event.payload);
@@ -660,7 +659,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     utterance: any
   ): Promise<void> {
     // Check for duplicate
-    const messageId = utterance.message_id || this.generateEventId();
+    const messageId = utterance.event_id || this.generateEventId();
     if (await messageExists(messageId)) {
       log.debug(`Message ${messageId} already exists, skipping`);
       return;

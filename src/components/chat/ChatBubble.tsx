@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator } from 'react-native';
-import { Avatar, IconButton } from 'react-native-paper';
+import { Avatar, IconButton, Menu } from 'react-native-paper';
 import { Buffer } from 'buffer';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
@@ -12,23 +12,32 @@ const { width: screenWidth } = Dimensions.get('window');
 interface ChatBubbleProps {
   message: ChatMessage;
   isOwn: boolean;
+  isLastMessage?: boolean;
   partnerAvatar?: string | null;
   onImagePress?: (imageBase64: string, mimeType: string) => void;
   onSendMessage?: (messageId: string, editedText: string) => void;
+  onDelete?: (messageId: string) => void;
+  onRegenerate?: (messageId: string) => void;
+  onEdit?: (messageId: string, newText: string) => void;
   theme: Theme;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
   message,
   isOwn,
+  isLastMessage = false,
   partnerAvatar,
   onImagePress,
   onSendMessage,
+  onDelete,
+  onRegenerate,
+  onEdit,
   theme,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(message.content || '');
+  const [menuVisible, setMenuVisible] = useState(false);
 
   useEffect(() => {
     setEditedText(message.content || '');
@@ -51,6 +60,37 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     if (message.image_data && onImagePress) {
       onImagePress(message.image_data, message.image_mime_type || 'image/jpeg');
     }
+  };
+
+  const handleDelete = () => {
+    setMenuVisible(false);
+    if (onDelete) {
+      onDelete(message.id);
+    }
+  };
+
+  const handleRegenerate = () => {
+    setMenuVisible(false);
+    if (onRegenerate) {
+      onRegenerate(message.id);
+    }
+  };
+
+  const handleEditStart = () => {
+    setMenuVisible(false);
+    setIsEditing(true);
+  };
+
+  const handleEditSave = () => {
+    setIsEditing(false);
+    if (onEdit && editedText !== message.content) {
+      onEdit(message.id, editedText);
+    }
+  };
+
+  const handleEditCancel = () => {
+    setEditedText(message.content || '');
+    setIsEditing(false);
   };
 
   const renderContent = () => {
@@ -163,9 +203,38 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           </View>
         )}
         
-        <ThemedText variant="muted" size={10} style={styles.timestamp}>
-          {formatTime(message.created_at)}
-        </ThemedText>
+        <View style={styles.timestampRow}>
+          <ThemedText variant="muted" size={10} style={styles.timestamp}>
+            {formatTime(message.created_at)}
+          </ThemedText>
+          {isLastMessage && !isPendingSend && !isEditing && (
+            <Menu
+              visible={menuVisible}
+              onDismiss={() => setMenuVisible(false)}
+              anchor={
+                <IconButton
+                  icon="dots-vertical"
+                  size={16}
+                  iconColor={theme.colors.text.muted}
+                  onPress={() => setMenuVisible(true)}
+                  style={styles.menuButton}
+                />
+              }
+            >
+              {isOwn ? (
+                <>
+                  <Menu.Item onPress={handleEditStart} title="Edit" leadingIcon="pencil" />
+                  <Menu.Item onPress={handleDelete} title="Delete" leadingIcon="delete" />
+                </>
+              ) : (
+                <>
+                  <Menu.Item onPress={handleRegenerate} title="Regenerate" leadingIcon="refresh" />
+                  <Menu.Item onPress={handleDelete} title="Delete" leadingIcon="delete" />
+                </>
+              )}
+            </Menu>
+          )}
+        </View>
       </>
     );
   };
@@ -232,9 +301,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
   },
-  timestamp: {
+  timestampRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     marginTop: 4,
+  },
+  timestamp: {
     alignSelf: 'flex-end',
+  },
+  menuButton: {
+    margin: 0,
+    marginLeft: 4,
   },
   imageContainer: {
     marginBottom: 8,

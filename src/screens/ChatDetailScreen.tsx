@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   StyleSheet,
   FlatList,
@@ -7,6 +7,8 @@ import {
   ActivityIndicator,
   ToastAndroid,
   Alert,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
 } from 'react-native';
 import { Appbar, Avatar } from 'react-native-paper';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -17,11 +19,13 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ChatBubble } from '../components/chat/ChatBubble';
 import { ChatInput } from '../components/chat/ChatInput';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
+import { NewMessagesDivider } from '../components/chat/NewMessagesDivider';
 import { useEntitySession } from '../contexts/EntitySessionContext';
 import EntitySessionService from '../services/EntitySessionService'; // Still needed for event listeners
-import { getRecentChatMessages, updateChatMessage, getChatMessage } from '../database/repositories/chat_messages';
+import { getRecentChatMessages, updateChatMessage, getChatMessage, deleteChatMessage } from '../database/repositories/chat_messages';
 import { getPrimaryImage, getCharacterProfile, imageToDataURL } from '../database/repositories/characters';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
+import ChatPreferencesService from '../services/ChatPreferencesService';
 import { createLogger } from '../utils/logger';
 import { ChatMessage } from '../database/models';
 
@@ -41,8 +45,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [partnerName, setPartnerName] = useState<string>('Chat');
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
+  const [lastReadTimestamp, setLastReadTimestamp] = useState<number>(0);
   
-  const flatListRef = useRef<FlatList<ChatMessage>>(null);
+  const flatListRef = useRef<FlatList<any>>(null);
+  const hasScrolledToNewMessages = useRef(false);
 
   // Load partner info (avatar, name)
   useEffect(() => {
@@ -61,9 +67,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     loadPartnerInfo();
   }, [partnerCharacterId]);
 
-  // Load messages
+  // Load messages and last-read timestamp
   useEffect(() => {
-    const loadMessages = async () => {
+    const loadMessagesAndTimestamp = async () => {
       try {
         setLoading(true);
         
@@ -73,6 +79,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           50
         );
         setMessages(existingMessages);
+        
+        const timestamp = await ChatPreferencesService.getLastReadTimestamp(partnerEntityId);
+        setLastReadTimestamp(timestamp);
       } catch (error) {
         log.error('Failed to load messages:', error);
       } finally {
@@ -80,7 +89,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     };
     
-    loadMessages();
+    loadMessagesAndTimestamp();
   }, [partnerEntityId, impersonatedEntityId]);
 
   // Initialize entity session
@@ -336,22 +345,242 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // Send typing indicator if session active
   }, [partnerEntityId, isDualSessionActive]);
 
-  const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
+  // Delete message handler
+  const handleDeleteMessage = useCallback(async (messageId: string) => {
+    Alert.alert(
+      'Delete Message',
+      'Are you sure you want to delete this message?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteChatMessage(messageId);
+              const updatedMessages = await getRecentChatMessages(
+                impersonatedEntityId,
+                partnerEntityId,
+                50
+              );
+              setMessages(updatedMessages);
+              
+              if (Platform.OS === 'android') {
+                ToastAndroid.show('Message deleted', ToastAndroid.SHORT);
+              }
+            } catch (error) {
+              log.error('Failed to delete message:', error);
+            }
+          },
+        },
+      ]
+    );
+  }, [impersonatedEntityId, partnerEntityId]);
+
+  // Regenerate message handler (for partner's last message)
+  const handleRegenerateMessage = useCallback(async (messageId: string) => {
+    Alert.alert(
+      'Regenerate Response',
+      'Delete this response and regenerate a new one?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Regenerate',
+          onPress: async () => {
+            try {
+              // Delete the partner's message
+              await deleteChatMessage(messageId);
+              
+              // Find the last user message
+              const userMessages = messages.filter(m => m.sender_entity_id === impersonatedEntityId);
+              if (userMessages.length === 0) {
+                throw new Error('No previous message to regenerate from');
+              }
+              
+              const lastUserMessage = userMessages[userMessages.length - 1];
+              
+              // Resend the user's last message
+              await EntitySessionService.sendTextMessage(partnerEntityId, lastUserMessage.content);
+              
+              // Reload messages
+              const updatedMessages = await getRecentChatMessages(
+                impersonatedEntityId,
+                partnerEntityId,
+                50
+              );
+              setMessages(updatedMessages);
+              
+              if (Platform.OS === 'android') {
+                ToastAndroid.show('Regenerating response...', ToastAndroid.SHORT);
+              }
+            } catch (error: any) {
+              log.error('Failed to regenerate:', error);
+              if (Platform.OS === 'android') {
+                ToastAndroid.show(`Failed: ${error.message}`, ToastAndroid.LONG);
+              } else {
+                Alert.alert('Error', error.message);
+              }
+            }
+          },
+        },
+      ]
+    );
+  }, [messages, impersonatedEntityId, partnerEntityId]);
+
+  // Edit message handler (for user's last message)
+  const handleEditMessage = useCallback(async (messageId: string, newText: string) => {
+    Alert.alert(
+      'Edit and Resend',
+      'Edit and resend this message? This will trigger a new AI response.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Edit & Resend',
+          onPress: async () => {
+            try {
+              // Update the message content
+              await updateChatMessage(messageId, { content: newText });
+              
+              // Get the message to check if it has audio
+              const message = await getChatMessage(messageId);
+              if (!message) {
+                throw new Error('Message not found');
+              }
+              
+              // Resend with new text
+              await EntitySessionService.sendTextMessage(partnerEntityId, newText);
+              
+              // Reload messages
+              const updatedMessages = await getRecentChatMessages(
+                impersonatedEntityId,
+                partnerEntityId,
+                50
+              );
+              setMessages(updatedMessages);
+              
+              if (Platform.OS === 'android') {
+                ToastAndroid.show('Message updated and sent', ToastAndroid.SHORT);
+              }
+            } catch (error: any) {
+              log.error('Failed to edit message:', error);
+              if (Platform.OS === 'android') {
+                ToastAndroid.show(`Failed: ${error.message}`, ToastAndroid.LONG);
+              } else {
+                Alert.alert('Error', error.message);
+              }
+            }
+          },
+        },
+      ]
+    );
+  }, [impersonatedEntityId, partnerEntityId]);
+
+  // Calculate messages with divider
+  const messagesWithDivider = useMemo(() => {
+    if (messages.length === 0 || lastReadTimestamp === 0) {
+      return messages;
+    }
+    
+    // Find the first new message
+    const firstNewIndex = messages.findIndex(m => 
+      m.created_at.getTime() > lastReadTimestamp
+    );
+    
+    // If no new messages or all messages are new, don't add divider
+    if (firstNewIndex === -1 || firstNewIndex === 0) {
+      return messages;
+    }
+    
+    // Insert divider before first new message
+    const newMessageCount = messages.length - firstNewIndex;
+    const result: any[] = [...messages];
+    result.splice(firstNewIndex, 0, {
+      id: 'new-messages-divider',
+      type: 'divider',
+      count: newMessageCount,
+    });
+    
+    return result;
+  }, [messages, lastReadTimestamp]);
+
+  // Scroll to new messages on mount
+  useEffect(() => {
+    if (messagesWithDivider.length > 0 && !hasScrolledToNewMessages.current) {
+      const dividerIndex = messagesWithDivider.findIndex((m: any) => m.type === 'divider');
+      
+      if (dividerIndex !== -1) {
+        const messagesAfterDivider = messagesWithDivider.length - dividerIndex - 1;
+        
+        // Small delay to ensure FlatList is rendered
+        setTimeout(() => {
+          if (messagesAfterDivider < 3) {
+            // Close to bottom, scroll to end
+            flatListRef.current?.scrollToEnd({ animated: true });
+          } else {
+            // Scroll to show divider at top
+            try {
+              flatListRef.current?.scrollToIndex({
+                index: dividerIndex,
+                animated: true,
+                viewPosition: 0,
+              });
+            } catch (error) {
+              // Fallback to scroll to end if scrollToIndex fails
+              flatListRef.current?.scrollToEnd({ animated: true });
+            }
+          }
+          hasScrolledToNewMessages.current = true;
+        }, 100);
+      }
+    }
+  }, [messagesWithDivider]);
+
+  // Handle scroll for mark-as-read
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const scrollPosition = contentOffset.y;
+    const totalHeight = contentSize.height;
+    const viewportHeight = layoutMeasurement.height;
+    
+    // If scrolled past 75% of content, mark all as read
+    if (scrollPosition + viewportHeight > totalHeight * 0.75) {
+      if (messages.length > 0) {
+        const latestTimestamp = messages[messages.length - 1]?.created_at.getTime() || 0;
+        if (latestTimestamp > lastReadTimestamp) {
+          setLastReadTimestamp(latestTimestamp);
+          ChatPreferencesService.setLastReadTimestamp(partnerEntityId, latestTimestamp);
+        }
+      }
+    }
+  }, [messages, lastReadTimestamp, partnerEntityId]);
+
+  const renderMessage = useCallback(({ item }: { item: any }) => {
+    // Render divider
+    if (item.type === 'divider') {
+      return <NewMessagesDivider count={item.count} theme={theme!} />;
+    }
+    
+    // Render message
     const isOwn = item.sender_entity_id === impersonatedEntityId;
+    const isLastMessage = messages.length > 0 && item.id === messages[messages.length - 1].id;
     
     return (
       <ChatBubble
         message={item}
         isOwn={isOwn}
+        isLastMessage={isLastMessage}
         partnerAvatar={!isOwn ? partnerAvatar : null}
         onImagePress={() => {
           // Navigate to full-screen image viewer
         }}
         onSendMessage={handleConfirmAndSendMessage}
+        onDelete={handleDeleteMessage}
+        onRegenerate={handleRegenerateMessage}
+        onEdit={handleEditMessage}
         theme={theme!}
       />
     );
-  }, [partnerAvatar, theme, impersonatedEntityId, handleConfirmAndSendMessage]);
+  }, [messages, partnerAvatar, theme, impersonatedEntityId, handleConfirmAndSendMessage, handleDeleteMessage, handleRegenerateMessage, handleEditMessage]);
 
   if (loading) {
     return (
@@ -405,12 +634,22 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       >
         <FlatList
           ref={flatListRef}
-          data={messages}
+          data={messagesWithDivider}
           renderItem={renderMessage}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.messageList}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-          onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          onScroll={handleScroll}
+          scrollEventThrottle={400}
+          onContentSizeChange={() => {
+            if (!hasScrolledToNewMessages.current) {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }
+          }}
+          onLayout={() => {
+            if (!hasScrolledToNewMessages.current) {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }
+          }}
         />
         
         {isTyping && (
