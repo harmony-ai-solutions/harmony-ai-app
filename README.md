@@ -25,7 +25,6 @@ Harmony AI App is a React Native Android application that serves as a mobile fro
 
 ### Phase 2: Advanced Features
 - [ ] On-device AI model integration / Full Offline Mode
-- [ ] Full Offline mode
 - [ ] AI Lifecycle system - Define daily & weekly routines for characters + dynamic events based on lore
 - [ ] Proactive AI behaviour - Initiates new conversations, Time Awareness, App Notifications
 - [ ] Configure Settings and configuration in App directly (Harmony Link not needed)
