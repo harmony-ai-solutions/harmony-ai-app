@@ -89,7 +89,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     
     // IGNORE acknowledgment statuses - these are transport/processing confirmations, not actionable events
     // Only process NEW and ERROR status events which contain actionable data
-    // EXCEPTION: Allow SYNC_COMPLETE with SUCCESS status through (it's a protocol signal, not just a transport ack)
+    // EXCEPTION: Allow SYNC_COMPLETE and SYNC_FINALIZE with SUCCESS status through (it's a protocol signal when finishing the sync process)
     if (data.status === 'PENDING' || (data.status === 'SUCCESS' && (data.event_type !== 'SYNC_COMPLETE') && data.event_type !== 'SYNC_FINALIZE')) {
       log.debug(`Ignoring ${data.status} status event: ${data.event_type}`);
       return;
