@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator } from 'react-native';
 import { Avatar, IconButton, Menu } from 'react-native-paper';
-import { Buffer } from 'buffer';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
 import { Theme } from '../../theme/types';
@@ -38,20 +37,132 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(message.content || '');
   const [menuVisible, setMenuVisible] = useState(false);
+  const [audioDuration, setAudioDuration] = useState<number | null>(null);
+  const [currentPosition, setCurrentPosition] = useState<number>(0);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [showTranscription, setShowTranscription] = useState(false);
+  const progressIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     setEditedText(message.content || '');
   }, [message.content]);
 
+  // Preload audio to get duration
+  useEffect(() => {
+    const preloadAudio = async () => {
+      if (message.audio_data && !audioDuration) {
+        try {
+          // Initialize and load the track without playing
+          await AudioPlayer.initialize();
+          await AudioPlayer.stop(); // Reset any previous track
+          
+          // Add the track
+          const uri = `data:${message.audio_mime_type || 'audio/wav'};base64,${message.audio_data}`;
+          await AudioPlayer.playAudio(message.audio_data, message.audio_mime_type || 'audio/wav');
+          
+          // Immediately pause it (so it doesn't play)
+          await AudioPlayer.pause();
+          
+          // Get the duration after a brief delay to ensure track is loaded
+          setTimeout(async () => {
+            try {
+              const duration = await AudioPlayer.getDuration();
+              console.log('Preloaded audio duration:', duration);
+              if (duration && duration > 0) {
+                setAudioDuration(duration);
+              } else if (message.audio_duration) {
+                // Fallback to stored duration
+                setAudioDuration(message.audio_duration);
+              }
+            } catch (error) {
+              console.warn('Could not get duration during preload:', error);
+              if (message.audio_duration) {
+                setAudioDuration(message.audio_duration);
+              }
+            }
+          }, 300);
+        } catch (error) {
+          console.warn('Could not preload audio:', error);
+          // Use stored duration as fallback
+          if (message.audio_duration) {
+            setAudioDuration(message.audio_duration);
+          }
+        }
+      }
+    };
+    
+    preloadAudio();
+  }, [message.audio_data, message.audio_mime_type, message.audio_duration]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Track playback progress
+  useEffect(() => {
+    if (isPlaying) {
+      // Start polling for progress updates
+      progressIntervalRef.current = setInterval(async () => {
+        try {
+          const progress = await AudioPlayer.getProgress();
+          setCurrentPosition(progress.position);
+          
+          // Auto-stop when playback finishes
+          const state = await AudioPlayer.getState();
+          if (state !== 'playing' && state !== 'buffering') {
+            setIsPlaying(false);
+            setCurrentPosition(0);
+          }
+        } catch (error) {
+          // Playback might have stopped or encountered an error
+          setIsPlaying(false);
+          setCurrentPosition(0);
+        }
+      }, 250);
+    } else {
+      // Clear interval when not playing
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    };
+  }, [isPlaying]);
+
   const handlePlayAudio = async () => {
     if (!message.audio_data) return;
     
-    if (isPlaying) {
-      await AudioPlayer.pause();
-      setIsPlaying(false);
-    } else {
-      setIsPlaying(true);
-      await AudioPlayer.playAudio(message.audio_data, message.audio_mime_type || 'audio/wav');
+    try {
+      if (isPlaying) {
+        // Pause playback
+        await AudioPlayer.pause();
+        setIsPlaying(false);
+      } else {
+        // Check if playback has finished (position at or near end)
+        const progress = await AudioPlayer.getProgress();
+        if (audioDuration && progress.position >= audioDuration - 0.5) {
+          // Seek back to beginning if playback has finished
+          await AudioPlayer.seekTo(0);
+          setCurrentPosition(0);
+        }
+        
+        // Resume playback (track is already loaded from preload)
+        await AudioPlayer.resume();
+        setIsPlaying(true);
+      }
+    } catch (error) {
+      console.error('Failed to toggle playback:', error);
       setIsPlaying(false);
     }
   };
@@ -98,9 +209,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const hasAudio = message.audio_data && message.audio_data.length > 0;
     const hasImage = message.image_data && message.image_data.length > 0;
 
-    const isAudioMessage = message.message_type === 'audio' && hasAudio;
-    const isTranscribing = isAudioMessage && !hasText;
-    const isPendingSend = isAudioMessage && hasText && isOwn;
+    // Audio message with transcription (message_type: 'combined' or 'audio' with text)
+    const hasAudioWithTranscription = hasAudio && hasText;
+    // Still transcribing (message_type: 'audio' without text yet)
+    const isTranscribing = hasAudio && !hasText;
+    // Pending send (user's own audio message before sending)
+    const isPendingSend = message.message_type === 'audio' && hasText && isOwn;
 
     return (
       <>
@@ -118,20 +232,45 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           <TouchableOpacity 
             onPress={handlePlayAudio} 
             style={[styles.audioContainer, { backgroundColor: theme.colors.background.elevated + '40' }]}
+            disabled={isLoadingAudio}
+            activeOpacity={1}
           >
-            <IconButton
-              icon={isPlaying ? 'pause' : 'play'}
-              size={24}
-              iconColor={theme.colors.accent.primary}
-            />
-            <View style={styles.audioWaveform}>
-              <View style={[styles.waveformBar, { backgroundColor: theme.colors.accent.primary }]} />
-            </View>
-            {message.audio_duration && (
-              <ThemedText variant="muted" size={12}>
-                {formatDuration(message.audio_duration)}
-              </ThemedText>
+            {isLoadingAudio ? (
+              <ActivityIndicator size="small" color={theme.colors.accent.primary} />
+            ) : (
+              <IconButton
+                icon={isPlaying ? 'pause' : 'play'}
+                size={24}
+                iconColor={theme.colors.accent.primary}
+                animated={false}
+                style={styles.playButton}
+                />
             )}
+            <View style={styles.audioWaveform}>
+              <View style={[styles.progressBarBackground, { backgroundColor: theme.colors.text.muted + '30' }]}>
+                <View 
+                  style={[
+                    styles.progressBar, 
+                    { 
+                      backgroundColor: theme.colors.accent.primary,
+                      width: audioDuration && audioDuration > 0 
+                        ? `${(currentPosition / audioDuration) * 100}%`
+                        : '0%'
+                    }
+                  ]} 
+                />
+              </View>
+            </View>
+            <ThemedText variant="muted" size={12} style={styles.durationText}>
+              {audioDuration && currentPosition > 0
+                ? `${formatDuration(currentPosition)} / ${formatDuration(audioDuration)}`
+                : audioDuration
+                ? `${formatDuration(currentPosition)} / ${formatDuration(audioDuration)}`
+                : message.audio_duration
+                ? formatDuration(message.audio_duration)
+                : '--:--'
+              }
+            </ThemedText>
           </TouchableOpacity>
         )}
 
@@ -142,6 +281,23 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               Transcribing...
             </ThemedText>
           </View>
+        )}
+        
+        {hasAudioWithTranscription && !isPendingSend && !isEditing && (
+          <TouchableOpacity 
+            onPress={() => setShowTranscription(!showTranscription)}
+            style={styles.transcriptionToggle}
+          >
+            <ThemedText variant="muted" size={12}>
+              Transcription
+            </ThemedText>
+            <IconButton
+              icon={showTranscription ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              iconColor={theme.colors.text.muted}
+              style={styles.transcriptionToggleIcon}
+            />
+          </TouchableOpacity>
         )}
         
         {hasText && (
@@ -155,9 +311,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 placeholderTextColor={theme.colors.text.muted}
               />
             ) : (
-              <ThemedText variant={isOwn ? 'primary' : 'secondary'} style={styles.textContent}>
-                {message.content}
-              </ThemedText>
+              <>
+                {(!hasAudioWithTranscription || isPendingSend || showTranscription) && (
+                  <ThemedText variant={isOwn ? 'primary' : 'secondary'} style={styles.textContent}>
+                    {message.content}
+                  </ThemedText>
+                )}
+              </>
             )}
           </View>
         )}
@@ -287,7 +447,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   bubble: {
-    maxWidth: screenWidth * 0.75,
+    width: screenWidth * 0.75,
     borderRadius: 16,
     padding: 12,
   },
@@ -332,10 +492,28 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginBottom: 8,
   },
+  playButton: {
+    margin: 0,
+  },
   audioWaveform: {
     flex: 1,
     height: 24,
     justifyContent: 'center',
+    marginHorizontal: 8,
+  },
+  progressBarBackground: {
+    width: '100%',
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  durationText: {
+    minWidth: 60,
+    textAlign: 'right',
   },
   waveformBar: {
     height: 4,
@@ -349,6 +527,17 @@ const styles = StyleSheet.create({
   },
   statusText: {
     marginLeft: 8,
+  },
+  transcriptionToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  transcriptionToggleIcon: {
+    margin: 0,
+    marginLeft: -8,
   },
   textInput: {
     padding: 8,
