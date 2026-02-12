@@ -1,6 +1,6 @@
 # Harmony AI Chat
 
-Open Source Android AI Chat Application - Your AI companion powered by your own backend or Harmony Cloud.
+Open Source Android AI Chat Application - Your AI companions powered by your own backend or Harmony Cloud.
 
 ## 🎯 Project Overview
 
@@ -11,9 +11,63 @@ Harmony AI App is a React Native Android application that serves as a mobile fro
 - **Privacy-First**: Full control over your data when using self-hosted backends
 - **Open Source**: Completely transparent and customizable
 
-This is the bootstrap version with core functionality - a foundation ready for feature development.
+## Implementation Progress
 
-## 📋 Prerequisites
+### Phase 1: Core Features
+- [X] Chat interface with message list
+- [X] Text input and message sending
+- [X] Local data persistence (SQLite)
+- [X] Backend integration (Harmony Link API)
+- [X] Data Sync with Backend
+- [X] Character selection
+- [X] AI Audio message support (STT/TTS)
+- [ ] AI Image viewing and generation
+
+### Phase 2: Advanced Features
+- [ ] On-device AI model integration / Full Offline Mode
+- [ ] Full Offline mode
+- [ ] AI Lifecycle system - Define daily & weekly routines for characters + dynamic events based on lore
+- [ ] Proactive AI behaviour - Initiates new conversations, Time Awareness, App Notifications
+- [ ] Configure Settings and configuration in App directly (Harmony Link not needed)
+- [ ] Custom character creation
+- [ ] Voice Calls with AIs
+
+### Phase 3: Premium Features
+- [ ] Full Support for iOS Native App
+- [ ] 3rd Party Messenger integrations (WhatsApp, Telegram, Discord etc)
+- [ ] Group chats (Multi-Humans + AIs; Across Messengers)
+- [ ] Video Share with AIs
+- [ ] Cloud backup (GDrive, iCloud Drive)
+
+## 📖 Documentation
+
+- **Design Document**: See `design/00 Design Document.md`
+- **Harmony Link**: https://github.com/harmony-ai-solutions/harmony-link-private
+- **React Native**: https://reactnative.dev/
+- **React Native Paper**: https://callstack.github.io/react-native-paper/
+
+## 🤝 Contributing
+
+Contributions are welcome! This is an open-source project.
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## 📄 License
+
+Apache 2.0 License
+
+See LICENSE file for details.
+
+## 🔗 Links
+
+- **GitHub**: https://github.com/harmony-ai-solutions/harmony-ai-app
+- **Harmony AI Solutions**: https://github.com/harmony-ai-solutions
+- **Project Harmony.AI**: https://project-harmony.ai
+
+## 📋 Prerequisites for Developing on the Codebase
 
 Before you begin, ensure you have the following installed:
 
@@ -46,12 +100,9 @@ Before you begin, ensure you have the following installed:
      - `%ANDROID_HOME%\platform-tools` (Windows)
      - `$ANDROID_HOME/platform-tools` (macOS/Linux)
 
-### Optional Tools
-
-- **Git**: For version control
+5. **Git**: For version control
   - Windows (with Chocolatey): `choco install git`
   - Or download from: https://git-scm.com/
-- **Watchman**: For better file watching (macOS/Linux)
 
 ## 🚀 Installation
 
@@ -171,7 +222,7 @@ Before you begin, ensure you have the following installed:
 - **Three-finger tap** (some devices) also opens developer menu
 - **Enable "Stay Awake"** in Developer Options to prevent screen timeout during development
 
-## 🏗️ Project Structure
+## 🏗️ Project Structure (Outdated)
 
 ```
 harmony-ai-app/
@@ -535,56 +586,6 @@ cd android
 ./gradlew assembleDebug
 # APK location: android/app/build/outputs/apk/debug/app-debug.apk
 ```
-
-## 🎯 Next Steps
-
-This bootstrap provides the foundation. Next features to implement:
-
-### Phase 1: Core Features
-- [ ] Chat interface with message list
-- [ ] Text input and message sending
-- [ ] Backend integration (Harmony Link API)
-- [ ] Local data persistence (SQLite)
-- [ ] Character selection/management
-
-### Phase 2: Advanced Features  
-- [ ] On-device AI model integration (React Native Executorch)
-- [ ] Audio message support (STT/TTS)
-- [ ] Image viewing and generation
-- [ ] Offline mode with sync
-- [ ] Settings and configuration
-
-### Phase 3: Premium Features
-- [ ] Messenger integration
-- [ ] Group chats
-- [ ] Video analysis
-- [ ] Cloud backup
-- [ ] Custom character creation
-
-## 📖 Documentation
-
-- **Design Document**: See `design/00 Design Document.md`
-- **Harmony Link**: https://github.com/harmony-ai-solutions/harmony-link-private
-- **React Native**: https://reactnative.dev/
-- **React Native Paper**: https://callstack.github.io/react-native-paper/
-
-## 🤝 Contributing
-
-Contributions are welcome! This is an open-source project.
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## 📄 License
-
-See LICENSE file for details.
-
-## 🔗 Links
-
-- **GitHub**: https://github.com/harmony-ai-solutions/harmony-ai-app
-- **Harmony AI Solutions**: https://github.com/harmony-ai-solutions
 
 ---
 
