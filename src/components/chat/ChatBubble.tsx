@@ -5,12 +5,12 @@ import { Buffer } from 'buffer';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
 import { Theme } from '../../theme/types';
-import { ChatMessage } from '../../database/models';
+import { ConversationMessage } from '../../database/models';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 interface ChatBubbleProps {
-  message: ChatMessage;
+  message: ConversationMessage;
   isOwn: boolean;
   isLastMessage?: boolean;
   partnerAvatar?: string | null;

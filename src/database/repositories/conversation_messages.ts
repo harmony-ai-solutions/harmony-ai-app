@@ -1,18 +1,18 @@
 import { getDatabase } from '../connection';
-import { ChatMessage } from '../models';
+import { ConversationMessage } from '../models';
 import { loadTextColumn } from '../sync';
 
 /**
  * Create a new chat message
  */
-export async function createChatMessage(
-  message: Omit<ChatMessage, 'created_at' | 'updated_at' | 'deleted_at'>
+export async function createConversationMessage(
+  message: Omit<ConversationMessage, 'created_at' | 'updated_at' | 'deleted_at'>
 ): Promise<void> {
   const db = getDatabase();
   const now = new Date().toISOString();
   
   await db.executeSql(
-    `INSERT INTO chat_messages (
+    `INSERT INTO conversation_messages (
       id, entity_id, sender_entity_id, session_id, content,
       audio_duration, message_type, audio_data, audio_mime_type,
       image_data, image_mime_type, vl_model, vl_model_interpretation, 
@@ -45,12 +45,12 @@ export async function createChatMessage(
  * 
  * Uses two-phase query and chunking to avoid CursorWindow overflow.
  */
-export async function getChatMessagesBetween(
+export async function getConversationMessagesBetween(
   entityA: string,
   entityB: string,
   limit: number = 20,
   beforeTimestamp?: number
-): Promise<ChatMessage[]> {
+): Promise<ConversationMessage[]> {
   const db = getDatabase();
   
   // Phase 1: Get metadata without BLOBs
@@ -59,7 +59,7 @@ export async function getChatMessagesBetween(
            audio_duration, message_type, audio_mime_type,
            image_mime_type, vl_model, vl_model_interpretation,
            created_at, updated_at, deleted_at
-    FROM chat_messages 
+    FROM conversation_messages 
     WHERE deleted_at IS NULL 
     AND (
       (entity_id = ? AND sender_entity_id = ?) OR
@@ -79,14 +79,14 @@ export async function getChatMessagesBetween(
   const [results] = await db.executeSql(query, params);
   
   // Phase 2: Load each message's TEXT columns individually with chunking
-  const messages: ChatMessage[] = [];
+  const messages: ConversationMessage[] = [];
   for (let i = 0; i < results.rows.length; i++) {
     const row = results.rows.item(i);
     
     // Load TEXT columns individually with chunking
-    const audioData = await loadTextColumn('chat_messages', row.id, 'audio_data');
-    const imageData = await loadTextColumn('chat_messages', row.id, 'image_data');
-    const embeddingData = await loadTextColumn('chat_messages', row.id, 'vl_model_embedding');
+    const audioData = await loadTextColumn('conversation_messages', row.id, 'audio_data');
+    const imageData = await loadTextColumn('conversation_messages', row.id, 'image_data');
+    const embeddingData = await loadTextColumn('conversation_messages', row.id, 'vl_model_embedding');
 
     messages.push({
       id: row.id,
@@ -117,16 +117,16 @@ export async function getChatMessagesBetween(
  * 
  * Uses two-phase query and chunking to avoid CursorWindow overflow.
  */
-export async function getRecentChatMessages(
+export async function getRecentConversationMessages(
   entityA: string,
   entityB: string,
   limit: number = 20
-): Promise<ChatMessage[]> {
+): Promise<ConversationMessage[]> {
   const db = getDatabase();
   
   // First get the IDs ordered by newest first
   const [idResults] = await db.executeSql(
-    `SELECT id FROM chat_messages 
+    `SELECT id FROM conversation_messages 
      WHERE deleted_at IS NULL 
      AND (
        (entity_id = ? AND sender_entity_id = ?) OR
@@ -152,21 +152,21 @@ export async function getRecentChatMessages(
             audio_duration, message_type, audio_mime_type,
             image_mime_type, vl_model, vl_model_interpretation,
             created_at, updated_at, deleted_at
-     FROM chat_messages 
+     FROM conversation_messages 
      WHERE id IN (${placeholders})
      ORDER BY created_at ASC`,
     ids
   );
   
   // Phase 2: Load each message's TEXT columns individually with chunking
-  const messages: ChatMessage[] = [];
+  const messages: ConversationMessage[] = [];
   for (let i = 0; i < results.rows.length; i++) {
     const row = results.rows.item(i);
     
     // Load TEXT columns individually with chunking
-    const audioData = await loadTextColumn('chat_messages', row.id, 'audio_data');
-    const imageData = await loadTextColumn('chat_messages', row.id, 'image_data');
-    const embeddingData = await loadTextColumn('chat_messages', row.id, 'vl_model_embedding');
+    const audioData = await loadTextColumn('conversation_messages', row.id, 'audio_data');
+    const imageData = await loadTextColumn('conversation_messages', row.id, 'image_data');
+    const embeddingData = await loadTextColumn('conversation_messages', row.id, 'vl_model_embedding');
 
     messages.push({
       id: row.id,
@@ -196,10 +196,10 @@ export async function getRecentChatMessages(
  * 
  * Uses two-phase query and chunking to avoid CursorWindow overflow.
  */
-export async function getLastChatMessage(
+export async function getLastConversationMessage(
   entityA: string,
   entityB: string
-): Promise<ChatMessage | null> {
+): Promise<ConversationMessage | null> {
   const db = getDatabase();
   
   // Phase 1: Get metadata for the last message
@@ -208,7 +208,7 @@ export async function getLastChatMessage(
             audio_duration, message_type, audio_mime_type,
             image_mime_type, vl_model, vl_model_interpretation,
             created_at, updated_at, deleted_at
-     FROM chat_messages 
+     FROM conversation_messages 
      WHERE deleted_at IS NULL 
      AND (
        (entity_id = ? AND sender_entity_id = ?) OR
@@ -223,9 +223,9 @@ export async function getLastChatMessage(
   const row = results.rows.item(0);
 
   // Phase 2: Load TEXT columns with chunking
-  const audioData = await loadTextColumn('chat_messages', row.id, 'audio_data');
-  const imageData = await loadTextColumn('chat_messages', row.id, 'image_data');
-  const embeddingData = await loadTextColumn('chat_messages', row.id, 'vl_model_embedding');
+  const audioData = await loadTextColumn('conversation_messages', row.id, 'audio_data');
+  const imageData = await loadTextColumn('conversation_messages', row.id, 'image_data');
+  const embeddingData = await loadTextColumn('conversation_messages', row.id, 'vl_model_embedding');
 
   return {
     id: row.id,
@@ -254,7 +254,7 @@ export async function getLastChatMessage(
 export async function messageExists(id: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
-    'SELECT 1 FROM chat_messages WHERE id = ?',
+    'SELECT 1 FROM conversation_messages WHERE id = ?',
     [id]
   );
   return results.rows.length > 0;
@@ -264,9 +264,9 @@ export async function messageExists(id: string): Promise<boolean> {
  * Update an existing chat message
  * Used primarily for adding transcription to audio messages
  */
-export async function updateChatMessage(
+export async function updateConversationMessage(
   messageId: string,
-  updates: Partial<ChatMessage>
+  updates: Partial<ConversationMessage>
 ): Promise<void> {
   const db = getDatabase();
   const now = new Date().toISOString();
@@ -321,7 +321,7 @@ export async function updateChatMessage(
   values.push(messageId);
 
   const sql = `
-    UPDATE chat_messages 
+    UPDATE conversation_messages 
     SET ${updateFields.join(', ')}
     WHERE id = ?
   `;
@@ -332,13 +332,13 @@ export async function updateChatMessage(
 /**
  * Get a single chat message by ID
  */
-export async function getChatMessage(
+export async function getConversationMessage(
   messageId: string
-): Promise<ChatMessage | null> {
+): Promise<ConversationMessage | null> {
   const db = getDatabase();
 
   const [result] = await db.executeSql(
-    'SELECT * FROM chat_messages WHERE id = ? AND deleted_at IS NULL',
+    'SELECT * FROM conversation_messages WHERE id = ? AND deleted_at IS NULL',
     [messageId]
   );
 
@@ -347,23 +347,23 @@ export async function getChatMessage(
   }
 
   const row = result.rows.item(0);
-  return mapRowToChatMessage(row);
+  return mapRowToConversationMessage(row);
 }
 
 /**
  * Delete chat message (soft delete)
  */
-export async function deleteChatMessage(id: string): Promise<void> {
+export async function deleteConversationMessage(id: string): Promise<void> {
   const db = getDatabase();
   const now = new Date().toISOString();
   await db.executeSql(
-    'UPDATE chat_messages SET deleted_at = ?, updated_at = ? WHERE id = ?',
+    'UPDATE conversation_messages SET deleted_at = ?, updated_at = ? WHERE id = ?',
     [now, now, id]
   );
 }
 
-// Helper function to map DB row to ChatMessage
-function mapRowToChatMessage(row: any): ChatMessage {
+// Helper function to map DB row to ConversationMessage
+function mapRowToConversationMessage(row: any): ConversationMessage {
   return {
     id: row.id,
     entity_id: row.entity_id,

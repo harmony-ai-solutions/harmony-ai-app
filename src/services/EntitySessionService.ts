@@ -5,7 +5,7 @@ import { Buffer } from 'buffer';
 import ConnectionManager, { ConnectionMode } from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
 import { createLogger } from '../utils/logger';
-import { messageExists, createChatMessage, updateChatMessage } from '../database/repositories/chat_messages';
+import { messageExists, createConversationMessage, updateConversationMessage } from '../database/repositories/conversation_messages';
 import { SyncService } from './SyncService';
 import AudioPlayer from './AudioPlayer';
 import { uint8ArrayToBase64 } from '../database/base64';
@@ -322,7 +322,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       vl_model_embedding: null
     };
     
-    await createChatMessage(message);
+    await createConversationMessage(message);
     log.info(`Stored text message ${messageId} locally`);
     
     // Send to partner entity
@@ -374,7 +374,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       vl_model_embedding: null
     };
     
-    await createChatMessage(message);
+    await createConversationMessage(message);
     log.info(`Stored message ${messageId} in database (awaiting transcription)`);
     
     try {
@@ -601,7 +601,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
             const text = event.payload?.content || '';
             log.info(`Received STT transcription for message ${transcriptionRequest.messageId}: "${text}"`);
             
-            await updateChatMessage(transcriptionRequest.messageId, {
+            await updateConversationMessage(transcriptionRequest.messageId, {
               content: text
             });
             
@@ -692,7 +692,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       vl_model_embedding: null
     };
     
-    await createChatMessage(message);
+    await createConversationMessage(message);
 
     // Trigger sync
     SyncService.getInstance().initiateSync();

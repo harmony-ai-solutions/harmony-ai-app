@@ -284,7 +284,7 @@ export interface SyncHistory {
   deleted_at: Date | null;
 }
 
-export interface ChatMessage {
+export interface ConversationMessage {
   id: string;
   entity_id: string;
   sender_entity_id: string;

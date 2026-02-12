@@ -15,7 +15,7 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
 import { getAllEntities } from '../database/repositories/entities';
-import { getLastChatMessage } from '../database/repositories/chat_messages';
+import { getLastConversationMessage } from '../database/repositories/conversation_messages';
 import { getPrimaryImage, getCharacterProfile, imageToDataURL } from '../database/repositories/characters';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -63,7 +63,7 @@ export const ChatListScreen: React.FC = () => {
         const preferredEntityId = await ChatPreferencesService.getPreferredEntity(entity.id) || defaultImpersonatedEntityId; // FIXME
 
         // Get last message for preview using the preferred impersonated entity
-        const lastMsg = await getLastChatMessage(preferredEntityId, entity.id);
+        const lastMsg = await getLastConversationMessage(preferredEntityId, entity.id);
 
         // Get avatar
         let avatarUri: string | null = null;

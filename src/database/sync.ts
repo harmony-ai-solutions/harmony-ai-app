@@ -5,11 +5,11 @@ import { Transaction } from 'react-native-sqlite-storage';
 const log = createLogger('[DatabaseSync]');
 
 // TEXT table configuration (for large base64 fields)
-const TEXT_TABLES = ['character_image', 'chat_messages'];
+const TEXT_TABLES = ['character_image', 'conversation_messages'];
 
 const TEXT_COLUMNS: Record<string, string[]> = {
   'character_image': ['image_data', 'vl_model_embedding'],
-  'chat_messages': ['image_data', 'audio_data', 'vl_model_embedding']
+  'conversation_messages': ['image_data', 'audio_data', 'vl_model_embedding']
 };
 
 // Chunking configuration

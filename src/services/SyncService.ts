@@ -529,7 +529,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'tts_configs',
         'entities',
         'entity_module_mappings',
-        'chat_messages',
+        'conversation_messages',
       ];
 
       // Send each table's records sequentially

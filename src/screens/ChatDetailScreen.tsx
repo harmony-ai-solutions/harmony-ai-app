@@ -22,12 +22,12 @@ import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewMessagesDivider } from '../components/chat/NewMessagesDivider';
 import { useEntitySession } from '../contexts/EntitySessionContext';
 import EntitySessionService from '../services/EntitySessionService'; // Still needed for event listeners
-import { getRecentChatMessages, updateChatMessage, getChatMessage, deleteChatMessage } from '../database/repositories/chat_messages';
+import { getRecentConversationMessages, updateConversationMessage, getConversationMessage, deleteConversationMessage } from '../database/repositories/conversation_messages';
 import { getPrimaryImage, getCharacterProfile, imageToDataURL } from '../database/repositories/characters';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { createLogger } from '../utils/logger';
-import { ChatMessage } from '../database/models';
+import { ConversationMessage } from '../database/models';
 
 const log = createLogger('[ChatDetailScreen]');
 
@@ -39,7 +39,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { isConnected } = useSyncConnection();
   const { isDualSessionActive, startDualSession, stopDualSession } = useEntitySession();
   
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -73,7 +73,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       try {
         setLoading(true);
         
-        const existingMessages = await getRecentChatMessages(
+        const existingMessages = await getRecentConversationMessages(
           impersonatedEntityId,
           partnerEntityId,
           50
@@ -152,7 +152,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const handleNewMessage = (entityId: string) => {
       if (entityId === partnerEntityId) {
         // Reload messages from database
-        getRecentChatMessages(impersonatedEntityId, partnerEntityId, 50)
+        getRecentConversationMessages(impersonatedEntityId, partnerEntityId, 50)
           .then(setMessages);
       }
     };
@@ -181,7 +181,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       if (entityId === partnerEntityId) {
         log.info(`Transcription completed for message ${messageId}: "${text}"`);
         // Reload messages to show updated transcription
-        getRecentChatMessages(impersonatedEntityId, partnerEntityId, 50)
+        getRecentConversationMessages(impersonatedEntityId, partnerEntityId, 50)
           .then(setMessages);
       }
     };
@@ -236,7 +236,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     try {
       await EntitySessionService.sendTextMessage(partnerEntityId, text.trim());
       // Optimistically reload from database
-      const updatedMessages = await getRecentChatMessages(
+      const updatedMessages = await getRecentConversationMessages(
         impersonatedEntityId,
         partnerEntityId,
         50
@@ -260,7 +260,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       
       log.info('Audio message saved, awaiting transcription...');
       
-      const updatedMessages = await getRecentChatMessages(
+      const updatedMessages = await getRecentConversationMessages(
         impersonatedEntityId,
         partnerEntityId,
         50
@@ -278,7 +278,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
     
     try {
-      const message = await getChatMessage(messageId);
+      const message = await getConversationMessage(messageId);
       if (!message || !message.audio_data) {
         throw new Error('Message not found or has no audio');
       }
@@ -286,7 +286,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       const base64Audio = message.audio_data; // Already base64 string
 
       if (finalText !== message.content) {
-        await updateChatMessage(messageId, { content: finalText });
+        await updateConversationMessage(messageId, { content: finalText });
       }
 
       const dualSession = EntitySessionService.getSession(partnerEntityId);
@@ -308,7 +308,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         log.info(`Message ${messageId} sent to partner entity`);
 
-        const updatedMessages = await getRecentChatMessages(
+        const updatedMessages = await getRecentConversationMessages(
           impersonatedEntityId,
           partnerEntityId,
           50
@@ -330,7 +330,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     
     try {
       await EntitySessionService.sendImageMessage(partnerEntityId, imageBase64, mimeType, caption);
-      const updatedMessages = await getRecentChatMessages(
+      const updatedMessages = await getRecentConversationMessages(
         impersonatedEntityId,
         partnerEntityId,
         50
@@ -357,8 +357,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteChatMessage(messageId);
-              const updatedMessages = await getRecentChatMessages(
+              await deleteConversationMessage(messageId);
+              const updatedMessages = await getRecentConversationMessages(
                 impersonatedEntityId,
                 partnerEntityId,
                 50
@@ -389,7 +389,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           onPress: async () => {
             try {
               // Delete the partner's message
-              await deleteChatMessage(messageId);
+              await deleteConversationMessage(messageId);
               
               // Find the last user message
               const userMessages = messages.filter(m => m.sender_entity_id === impersonatedEntityId);
@@ -403,7 +403,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               await EntitySessionService.sendTextMessage(partnerEntityId, lastUserMessage.content);
               
               // Reload messages
-              const updatedMessages = await getRecentChatMessages(
+              const updatedMessages = await getRecentConversationMessages(
                 impersonatedEntityId,
                 partnerEntityId,
                 50
@@ -439,10 +439,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           onPress: async () => {
             try {
               // Update the message content
-              await updateChatMessage(messageId, { content: newText });
+              await updateConversationMessage(messageId, { content: newText });
               
               // Get the message to check if it has audio
-              const message = await getChatMessage(messageId);
+              const message = await getConversationMessage(messageId);
               if (!message) {
                 throw new Error('Message not found');
               }
@@ -451,7 +451,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               await EntitySessionService.sendTextMessage(partnerEntityId, newText);
               
               // Reload messages
-              const updatedMessages = await getRecentChatMessages(
+              const updatedMessages = await getRecentConversationMessages(
                 impersonatedEntityId,
                 partnerEntityId,
                 50
