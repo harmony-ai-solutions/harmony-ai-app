@@ -2,7 +2,6 @@ import EventEmitter from 'eventemitter3';
 import DeviceInfo from 'react-native-device-info';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Transaction } from 'react-native-sqlite-storage';
 import * as SyncHelpers from '../database/sync';
 import ConnectionStateManager from './ConnectionStateManager';
 import connectionManagerInstance from './connection/ConnectionManager';
@@ -39,11 +38,6 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   private static instance: SyncService;
   private connectionManager: ConnectionManager;
   private currentSession: SyncSession | null = null;
-  private pendingConfirmations: Map<string, (success: boolean) => void> = new Map();
-  // Track completion states to ensure SYNC_FINALIZE is sent only once
-  private localChangesSent: boolean = false;
-  private remoteCompleteReceived: boolean = false;
-  private finalizeSent: boolean = false;
 
   private syncPhase: 'IDLE' | 'SERVER_SENDING' | 'CLIENT_SENDING' | 'FINALIZING' = 'IDLE';
   private pendingSyncConfirmation: {
@@ -258,11 +252,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     const deviceId = await DeviceInfo.getUniqueId();
     const deviceName = await DeviceInfo.getDeviceName();
     
-    // Reset completion flags for new sync session
-    this.localChangesSent = false;
-    this.remoteCompleteReceived = false;
-    this.finalizeSent = false;
-    
+    // new sync session    
     this.currentSession = {
       sessionId: this.generateEventId(),
       deviceId: deviceId,
@@ -480,11 +470,6 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
             this.currentSession.status = 'failed';
             this.currentSession = null;
           }
-          
-          // Reset completion flags
-          this.localChangesSent = false;
-          this.remoteCompleteReceived = false;
-          this.finalizeSent = false;
           
           reject(error);
         },
@@ -740,10 +725,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       
     } else if (this.syncPhase === 'CLIENT_SENDING' && status === 'SUCCESS' ) {
       // Server acknowledged our SYNC_COMPLETE
-      log.info('Server acknowledged our data transmission complete');
-      this.localChangesSent = true;
-      this.remoteCompleteReceived = true;
-      
+      log.info('Server acknowledged our data transmission complete');      
       // Both sides complete - send SYNC_FINALIZE
       log.info('Both sides complete, sending SYNC_FINALIZE');
       this.syncPhase = 'FINALIZING';
