@@ -90,7 +90,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     // IGNORE acknowledgment statuses - these are transport/processing confirmations, not actionable events
     // Only process NEW and ERROR status events which contain actionable data
     // EXCEPTION: Allow SYNC_COMPLETE with SUCCESS status through (it's a protocol signal, not just a transport ack)
-    if (data.status === 'PENDING' || (data.status === 'SUCCESS' && data.event_type !== 'SYNC_COMPLETE')) {
+    if (data.status === 'PENDING' || (data.status === 'SUCCESS' && (data.event_type !== 'SYNC_COMPLETE') && data.event_type !== 'SYNC_FINALIZE')) {
       log.debug(`Ignoring ${data.status} status event: ${data.event_type}`);
       return;
     }
@@ -761,34 +761,6 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     }
   }
 
-  private attemptFinalize(): void {
-    // Only finalize when BOTH conditions are met AND we haven't already sent it
-    if (!this.currentSession) {
-      return;
-    }
-
-    if (this.localChangesSent && 
-        this.remoteCompleteReceived && 
-        !this.finalizeSent) {
-      
-      log.info('Both sides complete, sending SYNC_FINALIZE');
-      this.finalizeSent = true;
-      
-      const finalizeEvent = {
-        event_id: this.generateEventId(),
-        event_type: 'SYNC_FINALIZE',
-        status: 'NEW',
-        payload: {
-          sync_session_id: this.currentSession.sessionId
-        }
-      };
-      
-      this.connectionManager.sendEvent('sync', finalizeEvent);
-    } else {
-      log.info(`Not ready to finalize: local=${this.localChangesSent}, remote=${this.remoteCompleteReceived}, sent=${this.finalizeSent}`);
-    }
-  }
-
   private async handleSyncFinalize(): Promise<void> {
     if (!this.currentSession) {
       log.warn('Received SYNC_FINALIZE but no current session');
@@ -804,21 +776,6 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     this.currentSession = null;
   }
 
-  private waitForConfirmation(eventId: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        this.pendingConfirmations.delete(eventId);
-        log.warn(`Timeout waiting for confirmation: ${eventId}`);
-        resolve(false);
-      }, 30000); // 30 second timeout
-      
-      this.pendingConfirmations.set(eventId, (success) => {
-        clearTimeout(timeout);
-        resolve(success);
-      });
-    });
-  }
-
   private async getLastSyncTimestamp(): Promise<number> {
     const stored = await AsyncStorage.getItem('last_sync_timestamp');
     return stored ? parseInt(stored) : 0;
@@ -827,22 +784,6 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   private async updateLastSyncTimestamp(timestamp: number): Promise<void> {
     await AsyncStorage.setItem('last_sync_timestamp', timestamp.toString());
     log.info(`Updated last sync timestamp: ${timestamp}`);
-  }
-
-  private async sendSyncComplete(): Promise<void> {
-    if (!this.currentSession) return;
-    
-    const event = {
-      event_id: this.generateEventId(),
-      event_type: 'SYNC_COMPLETE',
-      status: 'NEW',
-      payload: {
-        sync_session_id: this.currentSession.sessionId
-      }
-    };
-    
-    log.info('Sending SYNC_COMPLETE');
-    await this.connectionManager.sendEvent('sync', event);
   }
 
   /**
