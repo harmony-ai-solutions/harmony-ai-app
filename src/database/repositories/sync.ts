@@ -1,6 +1,6 @@
 import {getDatabase} from '../connection';
 import {withTransaction} from '../transaction';
-import { SyncDevice, SyncHistory, ChatMessage } from '../models';
+import { SyncDevice, SyncHistory } from '../models';
 
 // ============================================================================
 // Sync Device Operations

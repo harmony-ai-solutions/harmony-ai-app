@@ -7,7 +7,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 
 interface CertificateVerificationModalProps {
   visible: boolean;
-  onSelectMode: (mode: 'insecure_ssl' | 'unencrypted' | 'abort') => void;
+  onSelectMode: (mode: 'insecure-ssl' | 'unencrypted' | 'abort') => void;
   onViewCertificate?: () => void;
 }
 
@@ -17,7 +17,7 @@ export const CertificateVerificationModal: React.FC<CertificateVerificationModal
   onViewCertificate,
 }) => {
   const { theme } = useAppTheme();
-  const [selectedMode, setSelectedMode] = useState<'insecure_ssl' | 'unencrypted' | null>(null);
+  const [selectedMode, setSelectedMode] = useState<'insecure-ssl' | 'unencrypted' | null>(null);
 
   if (!theme) return null;
 
@@ -37,7 +37,7 @@ export const CertificateVerificationModal: React.FC<CertificateVerificationModal
     label, 
     description 
   }: { 
-    value: 'insecure_ssl' | 'unencrypted'; 
+    value: 'insecure-ssl' | 'unencrypted';
     label: string; 
     description: string; 
   }) => (
@@ -81,7 +81,7 @@ export const CertificateVerificationModal: React.FC<CertificateVerificationModal
 
           <View style={styles.optionsContainer}>
             <RadioOption
-              value="insecure_ssl"
+              value="insecure-ssl"
               label="Trust This Certificate"
               description="Use encrypted connection but skip certificate validation. Recommended for self-signed certificates on trusted networks."
             />

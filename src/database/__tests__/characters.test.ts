@@ -4,6 +4,7 @@
 
 import {initializeDatabase, clearDatabaseData} from '../connection';
 import * as characters from '../repositories/characters';
+import {uint8ArrayToBase64} from '../base64';
 import {runTestWithCleanup, TestResult} from './test-utils';
 
 /**
@@ -128,7 +129,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           scenario: null,
           example_dialogues: null,
         });
-        const mockImageData = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+        const mockImageData = uint8ArrayToBase64(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
         await characters.createCharacterImage({
           character_profile_id: testProfileId,
           image_data: mockImageData,
@@ -159,7 +160,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           scenario: null,
           example_dialogues: null,
         });
-        const mockImageData = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+        const mockImageData = uint8ArrayToBase64(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
         const imageId = await characters.createCharacterImage({
           character_profile_id: testProfileId,
           image_data: mockImageData,
@@ -214,7 +215,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           scenario: null,
           example_dialogues: null,
         });
-        const mockImageData = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+        const mockImageData = uint8ArrayToBase64(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
         await characters.createCharacterImage({
           character_profile_id: testProfileId,
           image_data: mockImageData,
@@ -239,7 +240,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
         const mockImage = {
           id: 1,
           character_profile_id: 'test',
-          image_data: new Uint8Array([1, 2, 3]),
+          image_data: uint8ArrayToBase64(new Uint8Array([1, 2, 3])),
           mime_type: 'image/png',
           is_primary: true,
           display_order: 0,
@@ -293,7 +294,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           scenario: null,
           example_dialogues: null,
         });
-        const mockImageData = new Uint8Array([1, 2, 3]);
+        const mockImageData = uint8ArrayToBase64(new Uint8Array([1, 2, 3]));
         const baseParams = {
           character_profile_id: testProfileId,
           image_data: mockImageData,
@@ -339,7 +340,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
         });
         const id = await characters.createCharacterImage({
           character_profile_id: testProfileId,
-          image_data: new Uint8Array([1]),
+          image_data: uint8ArrayToBase64(new Uint8Array([1])),
           mime_type: 'image/png',
           is_primary: true,
           display_order: 0,
@@ -374,7 +375,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
         });
         const id = await characters.createCharacterImage({
           character_profile_id: testProfileId,
-          image_data: new Uint8Array([1]),
+          image_data: uint8ArrayToBase64(new Uint8Array([1])),
           mime_type: 'image/png',
           is_primary: true,
           display_order: 0,

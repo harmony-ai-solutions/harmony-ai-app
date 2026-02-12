@@ -4,6 +4,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MD3DarkTheme } from 'react-native-paper';
 import { Theme, ThemeContextType, ThemeMode, ThemeSyncStatus, PaperThemeColors } from '../theme/types';
 import { defaultThemes, DEFAULT_THEME_ID, getThemeById, getDefaultTheme } from '../theme/themes';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[ThemeContext]');
 
 // Storage keys
 const STORAGE_KEY_CURRENT_THEME = '@harmony_current_theme';
@@ -38,7 +41,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 return customThemes.map(t => ({ ...t, isCustom: true }));
             }
         } catch (err) {
-            console.error('Failed to load custom themes:', err);
+            log.error('Failed to load custom themes:', err);
         }
         return [];
     }, []);
@@ -51,7 +54,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const customThemes = themes.filter(t => t.isCustom);
             await AsyncStorage.setItem(STORAGE_KEY_CUSTOM_THEMES, JSON.stringify(customThemes));
         } catch (err) {
-            console.error('Failed to save custom themes:', err);
+            log.error('Failed to save custom themes:', err);
             throw err;
         }
     }, []);
@@ -100,7 +103,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             await AsyncStorage.setItem(STORAGE_KEY_CURRENT_THEME, JSON.stringify(selectedTheme));
 
         } catch (err) {
-            console.error('Failed to load theme:', err);
+            log.error('Failed to load theme:', err);
             setError(err as Error);
 
             // Fallback to default theme
@@ -127,7 +130,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             await AsyncStorage.setItem(STORAGE_KEY_CURRENT_THEME, JSON.stringify(selectedTheme));
 
         } catch (err) {
-            console.error('Failed to switch theme:', err);
+            log.error('Failed to switch theme:', err);
             setError(err as Error);
             throw err;
         }
@@ -144,7 +147,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // Reload theme with new mode
             await loadTheme();
         } catch (err) {
-            console.error('Failed to set theme mode:', err);
+            log.error('Failed to set theme mode:', err);
             setError(err as Error);
             throw err;
         }
@@ -168,7 +171,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
             setSyncStatus(prev => ({ ...prev, pendingChanges: true }));
         } catch (err) {
-            console.error('Failed to create custom theme:', err);
+            log.error('Failed to create custom theme:', err);
             setError(err as Error);
             throw err;
         }
@@ -208,7 +211,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
             setSyncStatus(prev => ({ ...prev, pendingChanges: true }));
         } catch (err) {
-            console.error('Failed to update custom theme:', err);
+            log.error('Failed to update custom theme:', err);
             setError(err as Error);
             throw err;
         }
@@ -237,7 +240,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 await switchTheme(DEFAULT_THEME_ID);
             }
         } catch (err) {
-            console.error('Failed to delete custom theme:', err);
+            log.error('Failed to delete custom theme:', err);
             setError(err as Error);
             throw err;
         }
@@ -265,7 +268,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
             await createCustomTheme(importedTheme);
         } catch (err) {
-            console.error('Failed to import theme:', err);
+            log.error('Failed to import theme:', err);
             setError(err as Error);
             throw err;
         }
@@ -283,7 +286,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
             return JSON.stringify(themeToExport, null, 2);
         } catch (err) {
-            console.error('Failed to export theme:', err);
+            log.error('Failed to export theme:', err);
             setError(err as Error);
             throw err;
         }
@@ -296,7 +299,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const syncWithHarmonyLink = useCallback(async () => {
         try {
             // This will be implemented in Phase 3
-            console.log('Theme sync with Harmony Link - not yet implemented');
+            log.info('Theme sync with Harmony Link - not yet implemented');
 
             setSyncStatus(prev => ({
                 ...prev,
@@ -304,7 +307,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 pendingChanges: false,
             }));
         } catch (err) {
-            console.error('Failed to sync with Harmony Link:', err);
+            log.error('Failed to sync with Harmony Link:', err);
             setError(err as Error);
             throw err;
         }

@@ -72,6 +72,23 @@ jest.mock('react-native-paper', () => ({
 // Mock react-native-vector-icons
 jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => 'Icon');
 
+// Mock react-native-websocket-self-signed
+jest.mock('react-native-websocket-self-signed', () => ({
+  __esModule: true,
+  default: jest.fn(() => ({
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+    send: jest.fn(),
+    close: jest.fn(),
+  })),
+}));
+
+// Mock react-native Platform.select
+jest.mock('react-native/Libraries/Utilities/Platform', () => ({
+  OS: 'ios',
+  select: jest.fn((obj) => obj.ios || obj.default),
+}));
+
 // Suppress console warnings in tests
 global.console = {
   ...console,

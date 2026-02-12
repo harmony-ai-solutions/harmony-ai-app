@@ -1,6 +1,9 @@
 import EventEmitter from 'eventemitter3';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DeviceInfo from 'react-native-device-info';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[ConnectionStateManager]');
 
 interface ConnectionStateEvents {
   'state:changed': (state: ConnectionState) => void;
@@ -47,7 +50,7 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
   // Security mode types
   public static readonly SECURITY_MODES = {
     SECURE: 'secure',
-    INSECURE_SSL: 'insecure_ssl',
+    INSECURE_SSL: 'insecure-ssl',
     UNENCRYPTED: 'unencrypted',
   } as const;
 
@@ -121,7 +124,7 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
         });
       }
     } catch (error) {
-      console.error('Error initializing connection state:', error);
+      log.error('Error initializing connection state:', error);
       this.emit('error', error);
     }
   }
@@ -160,7 +163,7 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
 
       this.emit('credentials:saved', { isPaired: this.isPaired });
     } catch (error) {
-      console.error('Error saving connection credentials:', error);
+      log.error('Error saving connection credentials:', error);
       this.emit('error', error);
     }
   }
@@ -170,7 +173,7 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
    * Note: Connection state is runtime-only and not persisted
    */
   async markConnected(): Promise<void> {
-    console.log('[ConnectionStateManager] Marking as connected');
+    log.info('Marking as connected');
     this.isConnected = true;
     this.emit('state:changed', { isConnected: true, isPaired: this.isPaired });
   }
@@ -180,7 +183,7 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
    * Note: Connection state is runtime-only and not persisted
    */
   async markDisconnected(): Promise<void> {
-    console.log('[ConnectionStateManager] Marking as disconnected');
+    log.info('Marking as disconnected');
     this.isConnected = false;
     this.emit('state:changed', { isConnected: false, isPaired: this.isPaired });
   }
@@ -190,7 +193,7 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
    */
   async clearAllCredentials(): Promise<void> {
     try {
-      console.log('[ConnectionStateManager] Clearing all credentials');
+      log.info('Clearing all credentials');
       this.jwtToken = null;
       this.isConnected = false;
       this.isPaired = false;
@@ -214,7 +217,7 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
         jwtValid: false,
       });
     } catch (error) {
-      console.error('Error clearing connection credentials:', error);
+      log.error('Error clearing connection credentials:', error);
       this.emit('error', error);
     }
   }
@@ -310,9 +313,9 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
   async saveSecurityMode(mode: string): Promise<void> {
     try {
       await AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.SECURITY_MODE, mode);
-      console.log(`[ConnectionStateManager] Security mode saved: ${mode}`);
+      log.info(`Security mode saved: ${mode}`);
     } catch (error) {
-      console.error('[ConnectionStateManager] Failed to save security mode:', error);
+      log.error('Failed to save security mode:', error);
       throw error;
     }
   }
@@ -323,9 +326,9 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
   async clearSecurityMode(): Promise<void> {
     try {
       await AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.SECURITY_MODE);
-      console.log('[ConnectionStateManager] Security mode cleared');
+      log.info('Security mode cleared');
     } catch (error) {
-      console.error('[ConnectionStateManager] Failed to clear security mode:', error);
+      log.error('Failed to clear security mode:', error);
       throw error;
     }
   }

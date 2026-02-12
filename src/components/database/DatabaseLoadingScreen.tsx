@@ -4,11 +4,12 @@
  * Displays during database initialization with error handling
  */
 
-import React from 'react';
-import {View, StyleSheet, ActivityIndicator} from 'react-native';
+import React, {useState} from 'react';
+import {View, StyleSheet, ActivityIndicator, Alert} from 'react-native';
 import {Text, Button} from 'react-native-paper';
 import {useDatabase} from '../../contexts/DatabaseContext';
 import {useAppTheme} from '../../contexts/ThemeContext';
+import {wipeDatabaseCompletely} from '../../database';
 
 /**
  * Database Loading Screen Component
@@ -16,6 +17,55 @@ import {useAppTheme} from '../../contexts/ThemeContext';
 export function DatabaseLoadingScreen() {
   const {isLoading, error, retryInitialization} = useDatabase();
   const {theme} = useAppTheme();
+  const [isWiping, setIsWiping] = useState(false);
+
+  const handleWipeDatabase = () => {
+    Alert.alert(
+      '⚠️ Wipe Database',
+      'This will permanently delete all data and reinitialize the database with a fresh schema. This action cannot be undone.\n\nAre you sure you want to continue?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Wipe & Reinitialize',
+          style: 'destructive',
+          onPress: async () => {
+            setIsWiping(true);
+            try {
+              await wipeDatabaseCompletely();
+              Alert.alert(
+                'Success',
+                'Database has been wiped and reinitialized successfully!',
+                [
+                  {
+                    text: 'OK',
+                    onPress: () => {
+                      setIsWiping(false);
+                      retryInitialization();
+                    },
+                  },
+                ]
+              );
+            } catch (err) {
+              const errorMessage = err instanceof Error ? err.message : String(err);
+              Alert.alert(
+                'Error',
+                `Failed to wipe database: ${errorMessage}`,
+                [
+                  {
+                    text: 'OK',
+                    onPress: () => setIsWiping(false),
+                  },
+                ]
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
 
   // Error state
   if (error) {
@@ -42,13 +92,28 @@ export function DatabaseLoadingScreen() {
           <Text style={[styles.errorDetails, {color: theme?.colors.text.secondary || '#ccc'}]}>
             Error: {error}
           </Text>
-          <Button
-            mode="contained"
-            onPress={retryInitialization}
-            style={styles.retryButton}
-            buttonColor={theme?.colors.accent.primary || '#8e24aa'}>
-            Retry Initialization
-          </Button>
+          
+          <View style={styles.buttonContainer}>
+            <Button
+              mode="contained"
+              onPress={retryInitialization}
+              style={styles.retryButton}
+              disabled={isWiping}
+              buttonColor={theme?.colors.accent.primary || '#8e24aa'}>
+              Retry Initialization
+            </Button>
+            
+            <Button
+              mode="outlined"
+              onPress={handleWipeDatabase}
+              style={styles.wipeButton}
+              disabled={isWiping}
+              loading={isWiping}
+              textColor={theme?.colors.status.warning || '#ff9800'}
+              buttonColor="transparent">
+              {isWiping ? 'Wiping Database...' : 'Wipe & Reinitialize'}
+            </Button>
+          </View>
         </View>
       </View>
     );
@@ -116,8 +181,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     alignSelf: 'stretch',
   },
+  buttonContainer: {
+    width: '100%',
+    alignItems: 'stretch',
+  },
   retryButton: {
     marginTop: 20,
     minWidth: 200,
+  },
+  wipeButton: {
+    marginTop: 12,
+    minWidth: 200,
+    borderColor: 'rgba(255, 152, 0, 0.5)',
   },
 });

@@ -171,6 +171,7 @@ export async function runEntityTests(): Promise<TestResult[]> {
             character_profile_id: null,
             created_at: new Date(),
             updated_at: new Date(),
+            deleted_at: null,
           });
           throw new Error('Should have thrown error');
         } catch (error) {

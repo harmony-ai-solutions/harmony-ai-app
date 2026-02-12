@@ -9,6 +9,7 @@ import { DatabaseTestScreen } from '../screens/development/DatabaseTestScreen';
 import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
 import { ConnectionSetupScreen } from '../screens/setup/ConnectionSetupScreen';
 import { SyncSettingsScreen } from '../screens/settings/SyncSettingsScreen';
+import { ChatDetailScreen } from '../screens/ChatDetailScreen';
 
 export type RootStackParamList = {
   Main: undefined;
@@ -17,6 +18,7 @@ export type RootStackParamList = {
   ProfileSettings: undefined;
   ConnectionSetup: undefined;
   SyncSettings: undefined;
+  ChatDetail: { partnerEntityId: string; partnerCharacterId?: string; impersonatedEntityId: string };
   DatabaseTests?: undefined; // DEV only
   DatabaseTableViewer?: undefined; // DEV only
 };
@@ -42,6 +44,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({ navigationRef }) => 
         <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
         <Stack.Screen name="ConnectionSetup" component={ConnectionSetupScreen} />
         <Stack.Screen name="SyncSettings" component={SyncSettingsScreen} />
+        <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
         {__DEV__ && (
           <>
             <Stack.Screen 

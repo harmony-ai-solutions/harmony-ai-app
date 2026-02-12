@@ -5,7 +5,27 @@
 
 ## Recent Work (January 2026)
 
-### Database Test Runner Implementation ✅ COMPLETE (January 14, 2026)
+### Chat Quality of Life Improvements ✅ COMPLETE
+- ✅ **Last Message Actions**: Context menu for the last message in chat with Delete, Edit, and Regenerate options
+  - Delete: Available for both user and partner messages (with confirmation dialog)
+  - Edit: Available for user's last message - edits content and triggers resend for new AI response
+  - Regenerate: Available for partner's last message - deletes response and resends user's previous message
+- ✅ **New Messages Indicator**: Visual divider showing "X new message(s)" since last visit
+  - Automatic last-read timestamp tracking via `ChatPreferencesService`
+  - Persistent across app restarts using `AsyncStorage`
+  - Smart auto-scroll on mount: scrolls to divider or bottom depending on new message count
+- ✅ **Mark as Read**: Automatic marking when user scrolls past 75% of chat content
+- ✅ **Components Created**:
+  - `NewMessagesDivider`: Themed horizontal bar component
+  - Enhanced `ChatBubble` with `Menu` from React Native Paper for contextual actions
+  - Extended `ChatPreferencesService` with last-read timestamp methods
+- ✅ **ChatDetailScreen Enhancements**:
+  - Message list with divider insertion via `useMemo`
+  - Scroll handler with throttling for performance
+  - Confirmation dialogs for all destructive actions
+  - Text-only resending for simplicity (audio already transcribed)
+
+### Database Test Runner Implementation ✅ 
 - ✅ Created DatabaseTestScreen with real-time console output
 - ✅ Integrated into Settings menu (hamburger menu)
 - ✅ DEV-only visibility using __DEV__ checks
@@ -81,7 +101,18 @@ harmony-ai-app/
 ## Next Steps
 
 ### Immediate Priorities (Phase 1)
+- **Entity Selection System for Chat**: COMPLETED the implementation of a user entity selection system for chat conversations.
+    - **ChatPreferencesService**: Implemented a new service using `AsyncStorage` to persist per-partner entity selection preferences.
+    - **EntitySelectionModal**: Created a Material Design 3 modal for selecting the impersonated entity with smart defaults (favoring "user").
+    - **ChatList Integration**: Integrated the selection flow into `ChatListScreen`. The list now filters for entities with character profiles and uses preferences to show accurate last message previews.
+    - **ChatDetail Update**: Updated `ChatDetailScreen` to use the `impersonatedEntityId` from navigation parameters, enabling dynamic roleplay identities.
+    - **Type Safety**: Updated navigation types to require `impersonatedEntityId` for the `ChatDetail` route.
 - **Theming System Refinement**: COMPLETED the enhancement of the theming system, adding custom theme deletion and a full-featured color editor with an RGB slider-based overlay. Migrated to `@react-native-documents/picker` for modern build compatibility.
+- **Audio Transcription Flow**: COMPLETED implementation of an asynchronous audio transcription flow where recordings are first sent to the user's own entity for processing before being forwarded to the partner.
+    - **Architecture**: Asynchronous flow using `STT_INPUT_AUDIO` with `result_mode: "return"`.
+    - **Key Methods**: Added `EntitySessionService.newAudioMessage()` for initiated messages and handled `STT_OUTPUT_TEXT` responses.
+    - **Database**: Extended `chat_messages` repository with `updateChatMessage()` for atomic async updates.
+    - **UI**: Updated `ChatBubble` and `ChatDetailScreen` to support a "confirm-before-send" workflow with transcription status and editing.
 1. **Chat Interface**
    - Message list with FlatList virtualization
    - Message bubble components (user/AI differentiation)

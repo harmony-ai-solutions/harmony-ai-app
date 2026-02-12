@@ -13,7 +13,8 @@ import { NavigationContainerRef } from '@react-navigation/native';
 import { AppNavigator, RootStackParamList } from './src/navigation/AppNavigator';
 import { ThemeProvider, usePaperTheme, useAppTheme } from './src/contexts/ThemeContext';
 import { DatabaseProvider, useDatabase } from './src/contexts/DatabaseContext';
-import { ConnectionProvider, useConnection } from './src/contexts/ConnectionContext';
+import { SyncConnectionProvider, useSyncConnection } from './src/contexts/SyncConnectionContext';
+import { EntitySessionProvider } from './src/contexts/EntitySessionContext';
 import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoadingScreen';
 import { InitialPairingModal } from './src/components/modals/InitialPairingModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -25,7 +26,7 @@ function AppContent() {
   const paperTheme = usePaperTheme();
   const { theme } = useAppTheme();
   const { isReady, isLoading } = useDatabase();
-  const { isPaired } = useConnection();
+  const { isPaired } = useSyncConnection();
   const [showPairingModal, setShowPairingModal] = useState(false);
   const [pairingModalChecked, setPairingModalChecked] = useState(false);
   
@@ -102,9 +103,11 @@ function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <DatabaseProvider>
-          <ConnectionProvider>
-            <AppContent />
-          </ConnectionProvider>
+          <SyncConnectionProvider>
+            <EntitySessionProvider>
+              <AppContent />
+            </EntitySessionProvider>
+          </SyncConnectionProvider>
         </DatabaseProvider>
       </ThemeProvider>
     </SafeAreaProvider>

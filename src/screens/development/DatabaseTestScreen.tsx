@@ -19,6 +19,10 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import runAllTests from '../../database/test-runner';
+import { clearDatabaseData } from '../../database';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('[DatabaseTestScreen]');
 
 interface ConsoleMessage {
     text: string;
@@ -55,39 +59,80 @@ export const DatabaseTestScreen: React.FC = () => {
         const originalError = console.error;
         const originalWarn = console.warn;
 
+        // Helper to determine if a message should be shown in UI
+        const shouldShowInUI = (message: string): boolean => {
+            // Always show: test results, errors, warnings, and summary messages
+            const importantPatterns = [
+                /✅|❌|⚠️/,                           // Emoji indicators
+                /PASSED|FAILED/i,                     // Test results
+                /^Running|^Starting|^Testing/i,       // Test actions
+                /^\d+\/\d+/,                          // Progress counters (e.g., "1/5")
+                /test.*(?:passed|failed|completed)/i, // Test status
+                /^🎉|^All tests/i,                    // Summary messages
+                /repository tests?/i,                 // Repository test headers
+            ];
+            
+            // Filter out verbose debug messages
+            const verbosePatterns = [
+                /Executing SQL/i,
+                /Query result/i,
+                /Database operation/i,
+                /Inserting|Updating|Deleting.*record/i,
+                /Transaction (started|committed)/i,
+                /^DEBUG:/i,
+            ];
+            
+            // Check if message should be filtered out
+            if (verbosePatterns.some(pattern => pattern.test(message))) {
+                return false;
+            }
+            
+            // Show if it matches important patterns
+            return importantPatterns.some(pattern => pattern.test(message));
+        };
+
         console.log = (...args: any[]) => {
             const message = args.map(arg => 
                 typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
             ).join(' ');
             
-            // Determine message type based on content
-            let type: ConsoleMessage['type'] = 'log';
-            if (message.includes('✅') || message.includes('PASSED')) {
-                type = 'success';
-            } else if (message.includes('❌') || message.includes('FAILED')) {
-                type = 'error';
-            } else if (message.includes('⚠️')) {
-                type = 'warning';
-            }
+            // Always log to file/console for debugging
+            log.info(message);
             
-            addConsoleMessage(message, type);
-            originalLog(...args);
+            // Only show important messages in UI
+            if (shouldShowInUI(message)) {
+                // Determine message type based on content
+                let type: ConsoleMessage['type'] = 'log';
+                if (message.includes('✅') || message.includes('PASSED')) {
+                    type = 'success';
+                } else if (message.includes('❌') || message.includes('FAILED')) {
+                    type = 'error';
+                } else if (message.includes('⚠️')) {
+                    type = 'warning';
+                }
+                
+                addConsoleMessage(message, type);
+            }
         };
 
         console.error = (...args: any[]) => {
             const message = args.map(arg => 
                 typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
             ).join(' ');
+            
+            // Always show errors in UI and log
             addConsoleMessage(message, 'error');
-            originalError(...args);
+            log.error(message);
         };
 
         console.warn = (...args: any[]) => {
             const message = args.map(arg => 
                 typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
             ).join(' ');
+            
+            // Always show warnings in UI and log
             addConsoleMessage(message, 'warning');
-            originalWarn(...args);
+            log.warn(message);
         };
 
         try {
@@ -126,6 +171,51 @@ export const DatabaseTestScreen: React.FC = () => {
         const fullOutput = consoleOutput.map(m => m.text).join('\n');
         Clipboard.setString(fullOutput);
         Alert.alert('Copied', 'Test output has been copied to clipboard.');
+    };
+
+    const wipeAndReinitializeDatabase = () => {
+        Alert.alert(
+            '⚠️ Wipe Database',
+            'This will permanently delete all data and reinitialize the database with a fresh schema. This action cannot be undone.\n\nAre you sure you want to continue?',
+            [
+                {
+                    text: 'Cancel',
+                    style: 'cancel',
+                },
+                {
+                    text: 'Wipe & Reinitialize',
+                    style: 'destructive',
+                    onPress: async () => {
+                        setIsRunning(true);
+                        setConsoleOutput([]);
+                        setTestsPassed(null);
+                        
+                        try {
+                            addConsoleMessage('🗑️  Wiping database...', 'warning');
+                            await clearDatabaseData();
+                            addConsoleMessage('✅ Database wiped and reinitialized successfully!', 'success');
+                            
+                            Alert.alert(
+                                'Success',
+                                'Database has been wiped and reinitialized. You may need to restart the app for all changes to take effect.',
+                                [{ text: 'OK' }]
+                            );
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            addConsoleMessage(`❌ Failed to wipe database: ${errorMessage}`, 'error');
+                            
+                            Alert.alert(
+                                'Error',
+                                `Failed to wipe database: ${errorMessage}`,
+                                [{ text: 'OK' }]
+                            );
+                        } finally {
+                            setIsRunning(false);
+                        }
+                    },
+                },
+            ]
+        );
     };
 
     const getMessageColor = (type: ConsoleMessage['type']) => {
@@ -268,6 +358,28 @@ export const DatabaseTestScreen: React.FC = () => {
                 </TouchableOpacity>
             </View>
 
+            {/* Wipe Database Button */}
+            <View style={styles.dangerZone}>
+                <TouchableOpacity
+                    style={[
+                        styles.wipeButton,
+                        { 
+                            backgroundColor: 'transparent',
+                            borderColor: theme.colors.status.warning,
+                            borderWidth: 1,
+                        },
+                        isRunning && styles.buttonDisabled
+                    ]}
+                    onPress={wipeAndReinitializeDatabase}
+                    disabled={isRunning}
+                >
+                    <Icon name="database-remove" size={20} color={theme.colors.status.warning} />
+                    <Text style={[styles.buttonText, { color: theme.colors.status.warning }]}>
+                        Wipe & Reinitialize Database
+                    </Text>
+                </TouchableOpacity>
+            </View>
+
             {/* Info Banner */}
             <View style={[styles.infoBanner, { backgroundColor: theme.colors.background.surface }]}>
                 <Icon name="information" size={16} color={theme.colors.accent.primary} />
@@ -387,6 +499,19 @@ const styles = StyleSheet.create({
         color: '#ffffff',
         fontSize: 16,
         fontWeight: '600',
+    },
+    dangerZone: {
+        paddingHorizontal: 16,
+        paddingBottom: 8,
+    },
+    wipeButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 20,
+        borderRadius: 12,
+        gap: 8,
     },
     infoBanner: {
         flexDirection: 'row',

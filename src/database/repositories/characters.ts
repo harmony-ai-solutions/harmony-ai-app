@@ -9,6 +9,8 @@
 import {getDatabase} from '../connection';
 import {withTransaction} from '../transaction';
 import {CharacterProfile, CharacterImage, CharacterImageInfo} from '../models';
+import {uint8ArrayToBase64, createDataURL} from '../base64';
+import {loadTextColumn} from '../sync';
 
 // ============================================================================
 // Character Profile CRUD Operations
@@ -29,8 +31,9 @@ export async function createCharacterProfile(
       `INSERT INTO character_profiles (
         id, name, description, personality, appearance, backstory,
         voice_characteristics, base_prompt, scenario, example_dialogues,
+        typing_speed_wpm, audio_response_chance_percent,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         profile.id,
         profile.name,
@@ -42,6 +45,8 @@ export async function createCharacterProfile(
         profile.base_prompt,
         profile.scenario,
         profile.example_dialogues,
+        profile.typing_speed_wpm,
+        profile.audio_response_chance_percent,
         now,
         now,
       ]
@@ -66,11 +71,13 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
   const query = includeDeleted
     ? `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
+              typing_speed_wpm, audio_response_chance_percent,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE id = ?`
     : `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
+              typing_speed_wpm, audio_response_chance_percent,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE id = ? AND deleted_at IS NULL`;
@@ -93,6 +100,8 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
     base_prompt: row.base_prompt,
     scenario: row.scenario,
     example_dialogues: row.example_dialogues,
+    typing_speed_wpm: row.typing_speed_wpm,
+    audio_response_chance_percent: row.audio_response_chance_percent,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -109,11 +118,13 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
   const query = includeDeleted
     ? `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
+              typing_speed_wpm, audio_response_chance_percent,
               created_at, updated_at, deleted_at
        FROM character_profiles
        ORDER BY name`
     : `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
+              typing_speed_wpm, audio_response_chance_percent,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE deleted_at IS NULL
@@ -135,6 +146,8 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
       base_prompt: row.base_prompt,
       scenario: row.scenario,
       example_dialogues: row.example_dialogues,
+      typing_speed_wpm: row.typing_speed_wpm,
+      audio_response_chance_percent: row.audio_response_chance_percent,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -158,7 +171,9 @@ export async function updateCharacterProfile(profile: CharacterProfile): Promise
       `UPDATE character_profiles
        SET name = ?, description = ?, personality = ?, appearance = ?,
            backstory = ?, voice_characteristics = ?, base_prompt = ?,
-           scenario = ?, example_dialogues = ?, updated_at = ?
+           scenario = ?, example_dialogues = ?,
+           typing_speed_wpm = ?, audio_response_chance_percent = ?,
+           updated_at = ?
        WHERE id = ?`,
       [
         profile.name,
@@ -170,6 +185,8 @@ export async function updateCharacterProfile(profile: CharacterProfile): Promise
         profile.base_prompt,
         profile.scenario,
         profile.example_dialogues,
+        profile.typing_speed_wpm,
+        profile.audio_response_chance_percent,
         now,
         profile.id,
       ]
@@ -303,17 +320,22 @@ export async function getCharacterImage(id: number, includeDeleted = false): Pro
   }
   
   const row = results.rows.item(0);
+  
+  // Load TEXT fields with chunking if needed
+  const imageData = await loadTextColumn('character_image', id, 'image_data');
+  const embeddingData = await loadTextColumn('character_image', id, 'vl_model_embedding');
+  
   return {
     id: row.id,
     character_profile_id: row.character_profile_id,
-    image_data: new Uint8Array(row.image_data),
+    image_data: imageData || '', // Base64 string
     mime_type: row.mime_type,
     description: row.description,
     is_primary: row.is_primary === 1,
     display_order: row.display_order,
     vl_model_interpretation: row.vl_model_interpretation,
     vl_model: row.vl_model,
-    vl_model_embedding: row.vl_model_embedding ? new Uint8Array(row.vl_model_embedding) : null,
+    vl_model_embedding: embeddingData, // Base64 string or null
     created_at: new Date(row.created_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
@@ -322,42 +344,52 @@ export async function getCharacterImage(id: number, includeDeleted = false): Pro
 /**
  * Get all images for a specific character profile. Filters out soft deleted by default.
  * Ordered by display_order ASC, then created_at DESC
+ * 
+ * Uses two-phase query to avoid CursorWindow overflow.
  */
 export async function getCharacterImages(profileId: string, includeDeleted = false): Promise<CharacterImage[]> {
   const db = getDatabase();
   
-  const query = includeDeleted
-    ? `SELECT id, character_profile_id, image_data, mime_type, description,
+  // Phase 1: Get metadata without large TEXT columns
+  const metadataQuery = includeDeleted
+    ? `SELECT id, character_profile_id, mime_type, description,
               is_primary, display_order, vl_model_interpretation, vl_model,
-              vl_model_embedding, created_at, deleted_at
+              created_at, deleted_at
        FROM character_image
        WHERE character_profile_id = ?
        ORDER BY display_order ASC, created_at DESC`
-    : `SELECT id, character_profile_id, image_data, mime_type, description,
+    : `SELECT id, character_profile_id, mime_type, description,
               is_primary, display_order, vl_model_interpretation, vl_model,
-              vl_model_embedding, created_at, deleted_at
+              created_at, deleted_at
        FROM character_image
        WHERE character_profile_id = ? AND deleted_at IS NULL
        ORDER BY display_order ASC, created_at DESC`;
 
-  const [results] = await db.executeSql(query, [profileId]);
+  const [metadataResults] = await db.executeSql(metadataQuery, [profileId]);
   
+  // Phase 2: Load each image's TEXT columns individually with chunking
   const images: CharacterImage[] = [];
-  for (let i = 0; i < results.rows.length; i++) {
-    const row = results.rows.item(i);
+  
+  for (let i = 0; i < metadataResults.rows.length; i++) {
+    const metadata = metadataResults.rows.item(i);
+    
+    // Load TEXT columns individually with chunking
+    const imageData = await loadTextColumn('character_image', metadata.id, 'image_data');
+    const embeddingData = await loadTextColumn('character_image', metadata.id, 'vl_model_embedding');
+    
     images.push({
-      id: row.id,
-      character_profile_id: row.character_profile_id,
-      image_data: new Uint8Array(row.image_data),
-      mime_type: row.mime_type,
-      description: row.description,
-      is_primary: row.is_primary === 1,
-      display_order: row.display_order,
-      vl_model_interpretation: row.vl_model_interpretation,
-      vl_model: row.vl_model,
-      vl_model_embedding: row.vl_model_embedding ? new Uint8Array(row.vl_model_embedding) : null,
-      created_at: new Date(row.created_at),
-      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+      id: metadata.id,
+      character_profile_id: metadata.character_profile_id,
+      image_data: imageData || '', // Base64 string
+      mime_type: metadata.mime_type,
+      description: metadata.description,
+      is_primary: metadata.is_primary === 1,
+      display_order: metadata.display_order,
+      vl_model_interpretation: metadata.vl_model_interpretation,
+      vl_model: metadata.vl_model,
+      vl_model_embedding: embeddingData, // Base64 string or null
+      created_at: new Date(metadata.created_at),
+      deleted_at: metadata.deleted_at ? new Date(metadata.deleted_at) : null,
     });
   }
   
@@ -482,17 +514,22 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
   }
   
   const row = results.rows.item(0);
+  
+  // Load TEXT fields with chunking if needed
+  const imageData = await loadTextColumn('character_image', row.id, 'image_data');
+  const embeddingData = await loadTextColumn('character_image', row.id, 'vl_model_embedding');
+  
   return {
     id: row.id,
     character_profile_id: row.character_profile_id,
-    image_data: new Uint8Array(row.image_data),
+    image_data: imageData || '', // Base64 string
     mime_type: row.mime_type,
     description: row.description,
     is_primary: row.is_primary === 1,
     display_order: row.display_order,
     vl_model_interpretation: row.vl_model_interpretation,
     vl_model: row.vl_model,
-    vl_model_embedding: row.vl_model_embedding ? new Uint8Array(row.vl_model_embedding) : null,
+    vl_model_embedding: embeddingData, // Base64 string or null
     created_at: new Date(row.created_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
@@ -507,36 +544,7 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
  * Example: "data:image/png;base64,iVBORw0KGgo..."
  */
 export function imageToDataURL(image: CharacterImage): string {
-  // Convert Uint8Array to base64
-  const base64 = uint8ArrayToBase64(image.image_data);
-  return `data:${image.mime_type};base64,${base64}`;
-}
-
-/**
- * Convert Uint8Array to Base64 string
- * React Native compatible implementation
- */
-function uint8ArrayToBase64(bytes: Uint8Array): string {
-  const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let result = '';
-  let i;
-  
-  for (i = 0; i < bytes.length; i += 3) {
-    const byte1 = bytes[i];
-    const byte2 = i + 1 < bytes.length ? bytes[i + 1] : 0;
-    const byte3 = i + 2 < bytes.length ? bytes[i + 2] : 0;
-    
-    const encoded1 = byte1 >> 2;
-    const encoded2 = ((byte1 & 3) << 4) | (byte2 >> 4);
-    const encoded3 = ((byte2 & 15) << 2) | (byte3 >> 6);
-    const encoded4 = byte3 & 63;
-    
-    result += base64Chars[encoded1] + base64Chars[encoded2];
-    result += i + 1 < bytes.length ? base64Chars[encoded3] : '=';
-    result += i + 2 < bytes.length ? base64Chars[encoded4] : '=';
-  }
-  
-  return result;
+  return createDataURL(image.image_data, image.mime_type);
 }
 
 /**

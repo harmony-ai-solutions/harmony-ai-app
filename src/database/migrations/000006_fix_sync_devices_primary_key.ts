@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS sync_devices_new (
   device_name TEXT NOT NULL,
   device_type TEXT NOT NULL,        -- 'harmony_link' | 'harmony_app'
   device_platform TEXT,              -- 'windows' | 'android' | 'linux' | 'macos'
-  is_approved INTEGER DEFAULT 0,     -- 0 = pending, 1 = approved, 2 = rejected
+  is_approved INTEGER NOT NULL DEFAULT 0,     -- 0 = pending, 1 = approved, 2 = rejected
   approval_requested_at DATETIME,    -- When device first requested access
   approved_by_user_at DATETIME,      -- When user approved in UI
   last_sync_timestamp INTEGER NOT NULL DEFAULT 0, -- Unix timestamp (UTC)
@@ -27,7 +27,7 @@ INSERT INTO sync_devices_new (device_id, device_name, device_type, device_platfo
                                approval_requested_at, approved_by_user_at, last_sync_timestamp,
                                last_sync_initiated_by, jwt_token, jwt_expires_at, created_at,
                                updated_at, deleted_at)
-SELECT device_id, device_name, device_type, device_platform, is_approved,
+SELECT device_id, device_name, device_type, device_platform, COALESCE(is_approved, 0),
        approval_requested_at, approved_by_user_at, last_sync_timestamp,
        last_sync_initiated_by, jwt_token, jwt_expires_at, created_at,
        updated_at, deleted_at
@@ -38,7 +38,7 @@ WHERE EXISTS (SELECT 1 FROM sync_devices LIMIT 1);
 DROP TABLE sync_devices;
 
 -- Rename new table
-ALTER TABLE sync_devices_new TO sync_devices;
+ALTER TABLE sync_devices_new RENAME TO sync_devices;
 
 -- Recreate sync_history table (no changes, but recreate for consistency)
 CREATE TABLE IF NOT EXISTS sync_history_new (
@@ -46,8 +46,8 @@ CREATE TABLE IF NOT EXISTS sync_history_new (
   device_id TEXT NOT NULL,
   sync_started_at DATETIME NOT NULL,
   sync_completed_at DATETIME,
-  records_sent INTEGER DEFAULT 0,
-  records_received INTEGER DEFAULT 0,
+  records_sent INTEGER NOT NULL DEFAULT 0,
+  records_received INTEGER NOT NULL DEFAULT 0,
   sync_status TEXT NOT NULL,         -- 'in_progress' | 'completed' | 'failed'
   error_message TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -68,5 +68,5 @@ WHERE EXISTS (SELECT 1 FROM sync_history LIMIT 1);
 DROP TABLE sync_history;
 
 -- Rename new table
-ALTER TABLE sync_history_new TO sync_history;
+ALTER TABLE sync_history_new RENAME TO sync_history;
 `;

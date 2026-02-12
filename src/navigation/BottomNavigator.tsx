@@ -2,7 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../contexts/ThemeContext';
-import { ChatScreen } from '../screens/ChatScreen';
+import { ChatListScreen } from '../screens/ChatListScreen';
 import { CharactersScreen } from '../screens/CharactersScreen';
 import { AIConfigScreen } from '../screens/AIConfigScreen';
 
@@ -43,7 +43,7 @@ export const BottomNavigator: React.FC = () => {
         >
             <Tab.Screen
                 name="Chat"
-                component={ChatScreen}
+                component={ChatListScreen}
                 options={{
                     tabBarIcon: ({ color, size }) => (
                         <Icon name="message-text" size={size} color={color} />
