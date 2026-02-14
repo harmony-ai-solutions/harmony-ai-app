@@ -5,37 +5,37 @@ This diagram shows the service layer architecture and how WebSocket connections 
 ## Service Layer Architecture
 
 ```mermaid
-graph TB
-    subgraph "UI Layer"
+graph LR
+    subgraph UI["📱 UI Layer"]
         Setup[ConnectionSetupScreen]
         Chat[ChatDetailScreen]
         Sync[SyncSettingsScreen]
     end
     
-    subgraph "Context Layer"
+    subgraph Context["🔄 Context Layer"]
         SyncCtx[SyncConnectionContext]
         EntityCtx[EntitySessionContext]
     end
     
-    subgraph "Service Layer"
-        CSM[ConnectionStateManager]
-        CM[ConnectionManager]
-        SS[SyncService]
-        ESS[EntitySessionService]
+    subgraph Services["⚙️ Service Layer"]
+        CSM[ConnectionStateManager<br/>JWT & Pairing]
+        CM[ConnectionManager<br/>Multi-Connection Pool]
+        SS[SyncService<br/>Data Sync]
+        ESS[EntitySessionService<br/>Chat Sessions]
         AR[AudioRecorder]
         AP[AudioPlayer]
     end
     
-    subgraph "WebSocket Layer"
+    subgraph WS["🌐 WebSocket Layer"]
         Factory[WebSocketConnectionFactory]
-        Secure[SecureWebSocketConnection]
-        Insecure[InsecureSSLWebSocketConnection]
-        Unencrypted[UnencryptedWebSocketConnection]
+        Secure[Secure TLS]
+        Insecure[Insecure TLS]
+        Unencrypted[Unencrypted]
     end
     
-    subgraph "Storage"
-        AS[AsyncStorage]
-        DB[(SQLite DB)]
+    subgraph Storage["💾 Storage"]
+        AS[AsyncStorage<br/>Credentials]
+        DB[(SQLite DB<br/>Messages & Config)]
     end
     
     Setup --> SyncCtx
@@ -60,9 +60,15 @@ graph TB
     Factory --> Insecure
     Factory --> Unencrypted
     
-    Secure --> |WebSocket|HL[Harmony Link]
-    Insecure --> |WebSocket|HL
-    Unencrypted --> |WebSocket|HL
+    Secure -.->|wss://| HL[🖥️ Harmony Link]
+    Insecure -.->|wss://| HL
+    Unencrypted -.->|ws://| HL
+    
+    style UI fill:#e1f5ff
+    style Context fill:#fff4e1
+    style Services fill:#e8f5e9
+    style WS fill:#f3e5f5
+    style Storage fill:#fce4ec
 ```
 
 ## Connection Manager - Multi-Connection Architecture
