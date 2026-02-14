@@ -224,27 +224,6 @@ Deleted records use `deleted_at` timestamp (soft delete):
 
 The receiving side updates: `UPDATE table SET deleted_at=?, updated_at=? WHERE id=?`
 
-## Sync Phases State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE
-    
-    IDLE --> SERVER_SENDING: SYNC_ACCEPT received
-    
-    SERVER_SENDING --> CLIENT_SENDING: SYNC_COMPLETE from server
-    
-    Note right of CLIENT_SENDING: Apply buffered data<br/>then send local changes
-    
-    CLIENT_SENDING --> FINALIZING: SYNC_COMPLETE from client
-    
-    FINALIZING --> IDLE: SYNC_FINALIZE complete
-    
-    SERVER_SENDING --> IDLE: Error
-    CLIENT_SENDING --> IDLE: Error
-    FINALIZING --> IDLE: Error
-```
-
 ## Error Handling
 
 ```mermaid

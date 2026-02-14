@@ -93,13 +93,13 @@ sequenceDiagram
     participant DB as SQLite DB
     participant HL as Harmony Link
     
-    User->>UI: Hold mic button
+    User->>UI: Tap record button
     UI->>AR: startRecording()
     AR->>AR: Check microphone permission
     AR->>AR: Start recording (16kHz, 16-bit, mono)
-    UI->>User: Show recording UI
+    UI->>User: Show recording indicator
     
-    User->>UI: Release mic button
+    User->>UI: Tap stop button
     UI->>AR: stopRecording()
     AR-->>UI: { uri, duration, base64 }
     
@@ -124,10 +124,11 @@ sequenceDiagram
         ESS->>UI: transcription:completed event
         UI->>UI: Replace "Transcribing..." with text
         
-        Note over UI: User reviews & confirms
+        Note over UI: User reviews & can edit
         User->>UI: Tap send button
         
-        UI->>ESS: sendUtterance (with transcript)
+        UI->>DB: UPDATE message SET content=edited_text
+        UI->>ESS: sendUtterance (with final transcript)
         ESS->>HL: ENTITY_UTTERANCE
         Note over ESS,HL: Audio + transcript to AI
         
@@ -180,42 +181,6 @@ sequenceDiagram
     "content": "Hello, how are you?"
   }
 }
-```
-
-## Receiving AI Voice Response
-
-```mermaid
-sequenceDiagram
-    participant HL as Harmony Link
-    participant ESS as EntitySessionService
-    participant DB as SQLite DB
-    participant AP as AudioPlayer
-    participant UI as ChatDetailScreen
-    participant User
-    
-    HL->>ESS: ENTITY_UTTERANCE
-    Note over HL,ESS: audio + content + audio_type
-    
-    ESS->>DB: INSERT AI message
-    Note over DB: Store base64 audio + transcript
-    
-    ESS->>UI: message:received event
-    UI->>UI: Reload messages
-    UI->>User: Show message with play button
-    
-    opt User plays audio
-        User->>UI: Tap play button
-        UI->>AP: playAudio(base64, mimeType, messageId)
-        AP->>AP: Decode base64 to audio
-        AP->>AP: Initialize TrackPlayer
-        AP->>User: 🔊 Audio plays
-        
-        AP->>UI: Progress updates
-        UI->>UI: Update playback progress bar
-        
-        AP->>UI: Playback complete
-        UI->>UI: Reset play button
-    end
 ```
 
 ## Image Message Flow (In Progress)
