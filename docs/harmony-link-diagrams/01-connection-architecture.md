@@ -63,12 +63,6 @@ graph LR
     Secure -.->|wss://| HL[🖥️ Harmony Link]
     Insecure -.->|wss://| HL
     Unencrypted -.->|ws://| HL
-    
-    style UI fill:#e1f5ff
-    style Context fill:#fff4e1
-    style Services fill:#e8f5e9
-    style WS fill:#f3e5f5
-    style Storage fill:#fce4ec
 ```
 
 ## Connection Manager - Multi-Connection Architecture
