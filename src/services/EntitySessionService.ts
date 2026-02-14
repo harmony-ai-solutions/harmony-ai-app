@@ -9,6 +9,7 @@ import { messageExists, createConversationMessage, updateConversationMessage } f
 import { SyncService } from './SyncService';
 import AudioPlayer from './AudioPlayer';
 import { uint8ArrayToBase64 } from '../database/base64';
+import { v7 as uuidv7 } from 'uuid';
 
 const log = createLogger('[EntitySessionService]');
 
@@ -303,8 +304,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for entity ${partnerEntityId}`);
     }
     
+    // Generate UUID v7 for message ID (domain layer)
+    const messageId = uuidv7();
+    
     // Store message locally first (optimistic UI pattern)
-    const messageId = this.generateEventId();
     const message = {
       id: messageId,
       entity_id: dualSession.partnerEntityId,
@@ -325,8 +328,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     await createConversationMessage(message);
     log.info(`Stored text message ${messageId} locally`);
     
-    // Send to partner entity
+    // Send to partner entity with message_id
     const utterance = {
+      message_id: messageId,
       entity_id: dualSession.impersonatedEntityId,
       content: text,
       type: 'UTTERANCE_COMBINED'
@@ -356,7 +360,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     // Convert to base64 immediately for storage
     const base64Audio = uint8ArrayToBase64(audioData);
     
-    const messageId = this.generateEventId();
+    // Generate UUID v7 for message ID (domain layer)
+    const messageId = uuidv7();
+    
     const message = {
       id: messageId,
       entity_id: dualSession.partnerEntityId,
@@ -446,7 +452,11 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for entity ${partnerEntityId}`);
     }
     
+    // Generate UUID v7 for message ID
+    const messageId = uuidv7();
+    
     const utterance = {
+      message_id: messageId,
       entity_id: dualSession.impersonatedEntityId,
       content: caption || '',
       type: 'UTTERANCE_COMBINED',
@@ -644,7 +654,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       log.info(`Incoming message from ${event.entity_id} in session ${dualSession.partnerEntityId}`);
 
       // Save to database
-      await this.handleIncomingUtterance(dualSession, event.payload);
+      await this.handleIncomingUtterance(dualSession, event.payload, event.event_id);
 
       // Just emit event so UI can reload if this chat is open
       this.emit('message:received', dualSession.partnerEntityId, event.payload);
@@ -656,10 +666,17 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
   private async handleIncomingUtterance(
     dualSession: DualEntitySession,
-    utterance: any
+    utterance: any,
+    eventId: string
   ): Promise<void> {
+    // Get message_id from utterance (protocol field)
+    const messageId = utterance.message_id;
+    if (!messageId) {
+      log.warn(`Received utterance without message_id (event_id: ${eventId}), skipping`);
+      return;
+    }
+    
     // Check for duplicate
-    const messageId = utterance.event_id || this.generateEventId();
     if (await messageExists(messageId)) {
       log.debug(`Message ${messageId} already exists, skipping`);
       return;
