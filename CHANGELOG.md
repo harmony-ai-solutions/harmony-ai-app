@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Preferences saved automatically for each chat partner
   - Smart defaults favoring "user" entity
 
+#### Fixed
+- Fixed crash when attempting to record audio messages without microphone permission
+- Added proper runtime permission handling for audio recording on Android
+- Improved user feedback when microphone permission is denied
+- Added visual indication of microphone permission state
+- Fixed audio message transcription showing infinite loading animation after timeout or disconnection
+- Added transcription timeout detection (30-second timeout) with visual feedback
+- Added retry button for failed audio transcriptions
+- Automatic cleanup of pending transcriptions when session disconnects
+
 ### Harmony Link Integration
 
 #### Added

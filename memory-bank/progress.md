@@ -123,7 +123,7 @@
 - [ ] Text-to-Speech for AI responses
 - [ ] Audio playback controls
 - [ ] Audio message UI
-- [ ] Microphone permissions
+- [x] Microphone permissions
 
 🔄 **Media Support**
 - [ ] Image viewing
@@ -237,6 +237,12 @@
 - Messenger API limitations and restrictions
 
 ## Evolution of Decisions
+
+### February 2026
+**Decision**: Proper Android Runtime Permission Handling
+- **Reason**: Fix crashes occurring when attempting to record audio without granted permissions.
+- **Trade-off**: Slightly more complex UI flow and service initialization logic.
+- **Outcome**: Created reusable permission utility, updated `AudioRecorder` service to check/request permissions, and enhanced `ChatInput` with visual feedback and recovery options.
 
 ### January 2026
 **Decision**: Advanced Theming System with Custom Editor

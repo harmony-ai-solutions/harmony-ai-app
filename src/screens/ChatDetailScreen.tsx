@@ -46,6 +46,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [partnerName, setPartnerName] = useState<string>('Chat');
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
   const [lastReadTimestamp, setLastReadTimestamp] = useState<number>(0);
+  const [failedTranscriptions, setFailedTranscriptions] = useState<Set<string>>(new Set());
   
   const flatListRef = useRef<FlatList<any>>(null);
   const hasScrolledToNewMessages = useRef(false);
@@ -79,6 +80,21 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           50
         );
         setMessages(existingMessages);
+        
+        // Detect stuck transcriptions (messages with audio but no text that aren't actively transcribing)
+        const stuckTranscriptions = existingMessages
+          .filter(msg => 
+            msg.audio_data && 
+            msg.audio_data.length > 0 && 
+            (!msg.content || msg.content.trim().length === 0) &&
+            msg.sender_entity_id === impersonatedEntityId // Only user's own messages
+          )
+          .map(msg => msg.id);
+        
+        if (stuckTranscriptions.length > 0) {
+          log.info(`Found ${stuckTranscriptions.length} stuck transcriptions on load`);
+          setFailedTranscriptions(new Set(stuckTranscriptions));
+        }
         
         const timestamp = await ChatPreferencesService.getLastReadTimestamp(partnerEntityId);
         setLastReadTimestamp(timestamp);
@@ -180,7 +196,24 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const handleTranscriptionCompleted = (entityId: string, messageId: string, text: string) => {
       if (entityId === partnerEntityId) {
         log.info(`Transcription completed for message ${messageId}: "${text}"`);
+        // Remove from failed set if it was there
+        setFailedTranscriptions(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(messageId);
+          return newSet;
+        });
         // Reload messages to show updated transcription
+        getRecentConversationMessages(impersonatedEntityId, partnerEntityId, 50)
+          .then(setMessages);
+      }
+    };
+
+    const handleTranscriptionFailed = (entityId: string, messageId: string) => {
+      if (entityId === partnerEntityId) {
+        log.warn(`Transcription failed for message ${messageId}`);
+        // Add to failed set
+        setFailedTranscriptions(prev => new Set(prev).add(messageId));
+        // Reload messages to trigger re-render
         getRecentConversationMessages(impersonatedEntityId, partnerEntityId, 50)
           .then(setMessages);
       }
@@ -189,13 +222,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     EntitySessionService.on('message:received', handleNewMessage);
     EntitySessionService.on('typing:indicator', handleTyping);
     EntitySessionService.on('recording:indicator', handleRecording);
-    EntitySessionService.on('transcription:completed' as any, handleTranscriptionCompleted);
+    EntitySessionService.on('transcription:completed', handleTranscriptionCompleted);
+    EntitySessionService.on('transcription:failed', handleTranscriptionFailed);
 
     return () => {
       EntitySessionService.off('message:received', handleNewMessage);
       EntitySessionService.off('typing:indicator', handleTyping);
       EntitySessionService.off('recording:indicator', handleRecording);
-      EntitySessionService.off('transcription:completed' as any, handleTranscriptionCompleted);
+      EntitySessionService.off('transcription:completed', handleTranscriptionCompleted);
+      EntitySessionService.off('transcription:failed', handleTranscriptionFailed);
     };
   }, [partnerEntityId, impersonatedEntityId]);
 
@@ -247,7 +282,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [partnerEntityId, impersonatedEntityId, isDualSessionActive]);
 
-  const handleSendAudio = useCallback(async (audioData: Uint8Array, duration: number) => {
+  const handleSendAudio = useCallback(async (audioData: string, duration: number) => {
     if (!isDualSessionActive(partnerEntityId)) return;
     
     try {
@@ -285,9 +320,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
       const base64Audio = message.audio_data; // Already base64 string
 
+      // Update message with final text and change type to 'combined'
+      const updates: any = { message_type: 'combined' };
       if (finalText !== message.content) {
-        await updateConversationMessage(messageId, { content: finalText });
+        updates.content = finalText;
       }
+      await updateConversationMessage(messageId, updates);
 
       const dualSession = EntitySessionService.getSession(partnerEntityId);
       if (dualSession) {
@@ -475,6 +513,34 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }, [impersonatedEntityId, partnerEntityId]);
 
+  const handleRetryTranscription = useCallback(async (messageId: string) => {
+    try {
+      // Remove from failed set optimistically
+      setFailedTranscriptions(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(messageId);
+        return newSet;
+      });
+      
+      await EntitySessionService.retryTranscription(messageId, partnerEntityId);
+      
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Retrying transcription...', ToastAndroid.SHORT);
+      }
+    } catch (error: any) {
+      log.error('Failed to retry transcription:', error);
+      
+      // Add back to failed set
+      setFailedTranscriptions(prev => new Set(prev).add(messageId));
+      
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(`Retry failed: ${error.message}`, ToastAndroid.LONG);
+      } else {
+        Alert.alert('Retry Failed', error.message);
+      }
+    }
+  }, [partnerEntityId]);
+
   // Calculate messages with divider
   const messagesWithDivider = useMemo(() => {
     if (messages.length === 0 || lastReadTimestamp === 0) {
@@ -563,13 +629,16 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // Render message
     const isOwn = item.sender_entity_id === impersonatedEntityId;
     const isLastMessage = messages.length > 0 && item.id === messages[messages.length - 1].id;
+    const isTranscriptionFailed = failedTranscriptions.has(item.id);
     
     return (
       <ChatBubble
         message={item}
         isOwn={isOwn}
         isLastMessage={isLastMessage}
+        isTranscriptionFailed={isTranscriptionFailed}
         partnerAvatar={!isOwn ? partnerAvatar : null}
+        partnerName={partnerName}
         onImagePress={() => {
           // Navigate to full-screen image viewer
         }}
@@ -577,10 +646,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         onDelete={handleDeleteMessage}
         onRegenerate={handleRegenerateMessage}
         onEdit={handleEditMessage}
+        onRetryTranscription={handleRetryTranscription}
         theme={theme!}
       />
     );
-  }, [messages, partnerAvatar, theme, impersonatedEntityId, handleConfirmAndSendMessage, handleDeleteMessage, handleRegenerateMessage, handleEditMessage]);
+  }, [messages, partnerAvatar, theme, impersonatedEntityId, failedTranscriptions, handleConfirmAndSendMessage, handleDeleteMessage, handleRegenerateMessage, handleEditMessage, handleRetryTranscription]);
 
   if (loading) {
     return (

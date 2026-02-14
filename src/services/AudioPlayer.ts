@@ -15,6 +15,7 @@ const log = createLogger('[AudioPlayer]');
 
 export class AudioPlayer {
   private isInitialized: boolean = false;
+  private currentMessageId: string | null = null;
 
   /**
    * Initialize the audio player
@@ -24,27 +25,66 @@ export class AudioPlayer {
       return;
     }
 
-    await TrackPlayer.setupPlayer({
-      autoHandleInterruptions: true,
-    });
+    try {
+      await TrackPlayer.setupPlayer({
+        autoHandleInterruptions: true,
+      });
 
-    await TrackPlayer.updateOptions({
-      capabilities: [
-        Capability.Play,
-        Capability.Pause,
-        Capability.Stop,
-      ],
-      notificationCapabilities: [Capability.Play, Capability.Pause],
-    });
+      await TrackPlayer.updateOptions({
+        capabilities: [
+          Capability.Play,
+          Capability.Pause,
+          Capability.Stop,
+        ],
+        notificationCapabilities: [Capability.Play, Capability.Pause],
+      });
 
-    this.isInitialized = true;
-    log.info('Audio player initialized');
+      this.isInitialized = true;
+      log.info('Audio player initialized successfully');
+    } catch (error) {
+      log.error('Failed to initialize audio player:', error);
+      throw error;
+    }
   }
 
   /**
    * Play audio from base64 string
    */
-  async playAudio(base64Audio: string, mimeType: string = 'audio/wav'): Promise<void> {
+  async playAudio(base64Audio: string, mimeType: string = 'audio/wav', messageId?: string): Promise<void> {
+    try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      const uri = `data:${mimeType};base64,${base64Audio}`;
+
+      const track: Track = {
+        id: `audio_${Date.now()}`,
+        url: uri,
+        title: 'Voice Message',
+        artist: 'Harmony AI',
+      };
+
+      await TrackPlayer.reset();
+      await TrackPlayer.add(track);
+      await TrackPlayer.play();
+      
+      // Track which message is currently loaded
+      if (messageId) {
+        this.currentMessageId = messageId;
+      }
+      
+      log.info(`Playing audio${messageId ? ` for message ${messageId}` : ''}`);
+    } catch (error) {
+      log.error('Failed to play audio:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Load audio for a specific message (without playing)
+   */
+  async loadAudioForMessage(messageId: string, base64Audio: string, mimeType: string = 'audio/wav'): Promise<void> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -60,9 +100,25 @@ export class AudioPlayer {
 
     await TrackPlayer.reset();
     await TrackPlayer.add(track);
-    await TrackPlayer.play();
     
-    log.info('Playing audio');
+    // Store the message ID but don't play yet
+    this.currentMessageId = messageId;
+    
+    log.info(`Loaded audio for message ${messageId}`);
+  }
+
+  /**
+   * Check if a specific message's audio is currently loaded
+   */
+  isMessageLoaded(messageId: string): boolean {
+    return this.currentMessageId === messageId;
+  }
+
+  /**
+   * Get the currently loaded message ID
+   */
+  getCurrentMessageId(): string | null {
+    return this.currentMessageId;
   }
 
   /**
@@ -85,6 +141,8 @@ export class AudioPlayer {
   async stop(): Promise<void> {
     await TrackPlayer.stop();
     await TrackPlayer.reset();
+    // Clear the current message ID when stopping
+    this.currentMessageId = null;
   }
 
   /**

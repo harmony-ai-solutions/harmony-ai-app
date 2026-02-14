@@ -5,7 +5,7 @@ import { Buffer } from 'buffer';
 import ConnectionManager, { ConnectionMode } from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
 import { createLogger } from '../utils/logger';
-import { messageExists, createConversationMessage, updateConversationMessage } from '../database/repositories/conversation_messages';
+import { messageExists, createConversationMessage, updateConversationMessage, getConversationMessage } from '../database/repositories/conversation_messages';
 import { SyncService } from './SyncService';
 import AudioPlayer from './AudioPlayer';
 import { uint8ArrayToBase64 } from '../database/base64';
@@ -39,6 +39,8 @@ interface EntitySessionEvents {
   'message:received': (partnerEntityId: string, message: any) => void;
   'typing:indicator': (partnerEntityId: string, entityId: string, isTyping: boolean) => void;
   'recording:indicator': (partnerEntityId: string, entityId: string, isRecording: boolean) => void;
+  'transcription:completed': (partnerEntityId: string, messageId: string, text: string) => void;
+  'transcription:failed': (partnerEntityId: string, messageId: string) => void;
 }
 
 export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
@@ -49,9 +51,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   private pendingTranscriptions: Map<string, {
     messageId: string;
     partnerEntityId: string;
-    eventId: string;
     timeout: any;
   }> = new Map();
+  private transcriptionStates: Map<string, 'pending' | 'failed'> = new Map(); // Track transcription state
   private appStateSubscription: any;
   
   private constructor() {
@@ -246,6 +248,23 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       // Stop any playing audio
       await AudioPlayer.stop();
       
+      // Clean up all pending transcriptions for this partner
+      const transcriptionsToCleanup: string[] = [];
+      for (const [messageId, request] of this.pendingTranscriptions.entries()) {
+        if (request.partnerEntityId === partnerEntityId) {
+          clearTimeout(request.timeout);
+          transcriptionsToCleanup.push(messageId);
+          this.transcriptionStates.set(messageId, 'failed');
+        }
+      }
+      transcriptionsToCleanup.forEach(messageId => {
+        this.pendingTranscriptions.delete(messageId);
+      });
+      
+      if (transcriptionsToCleanup.length > 0) {
+        log.info(`Marked ${transcriptionsToCleanup.length} pending transcriptions as failed for ${partnerEntityId}`);
+      }
+      
       // Disconnect user session
       if (this.connectionManager.isConnected(dualSession.userSession.connectionId)) {
         await this.connectionManager.sendEvent(
@@ -346,7 +365,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
    */
   async newAudioMessage(
     partnerEntityId: string,
-    audioData: Uint8Array,
+    audioData: string,
     mimeType: string,
     duration: number
   ): Promise<string> {
@@ -357,8 +376,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     
     log.info(`Starting audio message flow for ${partnerEntityId}`);
     
-    // Convert to base64 immediately for storage
-    const base64Audio = uint8ArrayToBase64(audioData);
+    const base64Audio = audioData;
     
     // Generate UUID v7 for message ID (domain layer)
     const messageId = uuidv7();
@@ -406,26 +424,31 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     
     const timeout = setTimeout(() => {
       log.warn(`Transcription timeout for message ${messageId}`);
-      this.pendingTranscriptions.delete(eventId);
-      this.emit('transcription:error' as any, partnerEntityId, messageId, 'Transcription timeout');
+      this.pendingTranscriptions.delete(messageId);
+      this.transcriptionStates.set(messageId, 'failed');
+      this.emit('transcription:failed', partnerEntityId, messageId);
     }, 30000);
     
-    this.pendingTranscriptions.set(eventId, {
+    this.pendingTranscriptions.set(messageId, {
       messageId,
       partnerEntityId,
-      eventId,
       timeout
     });
+    
+    this.transcriptionStates.set(messageId, 'pending');
     
     const event = {
       event_id: eventId,
       event_type: 'STT_INPUT_AUDIO',
       status: 'NEW',
       payload: {
-        audio_bytes: base64Audio,
-        channels: 1,
-        bit_depth: 16,
-        sample_rate: 16000,
+        message_id: messageId,
+        audio_data: {
+          audio_bytes: base64Audio,
+          channels: 1,
+          bit_depth: 16,
+          sample_rate: 16000
+        },
         result_mode: 'return'
       }
     };
@@ -602,24 +625,33 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
     switch (event.event_type) {
       case 'STT_OUTPUT_TEXT':
-        if (event.status === 'SUCCESS' || event.status === 'DONE') {
-          const transcriptionRequest = this.pendingTranscriptions.get(event.event_id);
+        if (event.status === 'NEW') {
+          const messageId = event.payload?.message_id;
+          if (!messageId) {
+            log.warn(`Received STT_OUTPUT_TEXT without message_id, event_id: ${event.event_id}`);
+            break;
+          }
+          
+          const transcriptionRequest = this.pendingTranscriptions.get(messageId);
           if (transcriptionRequest) {
             clearTimeout(transcriptionRequest.timeout);
-            this.pendingTranscriptions.delete(event.event_id);
+            this.pendingTranscriptions.delete(messageId);
+            this.transcriptionStates.delete(messageId);
             
             const text = event.payload?.content || '';
-            log.info(`Received STT transcription for message ${transcriptionRequest.messageId}: "${text}"`);
+            log.info(`Received STT transcription for message ${messageId}: "${text}"`);
             
-            await updateConversationMessage(transcriptionRequest.messageId, {
+            await updateConversationMessage(messageId, {
               content: text
             });
             
-            this.emit('transcription:completed' as any, 
+            this.emit('transcription:completed', 
               transcriptionRequest.partnerEntityId,
-              transcriptionRequest.messageId,
+              messageId,
               text
             );
+          } else {
+            log.warn(`Received STT_OUTPUT_TEXT for unknown message_id: ${messageId}`);
           }
         }
         break;
@@ -713,6 +745,38 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
     // Trigger sync
     SyncService.getInstance().initiateSync();
+  }
+  
+  /**
+   * Retry transcription for a failed message
+   */
+  async retryTranscription(messageId: string, partnerEntityId: string): Promise<void> {
+    const dualSession = this.sessions.get(partnerEntityId);
+    if (!dualSession || dualSession.userSession.status !== 'active') {
+      throw new Error(`No active session for entity ${partnerEntityId}`);
+    }
+    
+    log.info(`Retrying transcription for message ${messageId}`);
+    
+    // Clear failed state
+    this.transcriptionStates.delete(messageId);
+    
+    // Get message from database
+    const message = await getConversationMessage(messageId);
+    
+    if (!message || !message.audio_data) {
+      throw new Error('Message not found or has no audio data');
+    }
+    
+    // Request transcription using existing logic
+    await this.requestTranscription(messageId, partnerEntityId, message.audio_data);
+  }
+  
+  /**
+   * Check if a message has a failed transcription
+   */
+  isTranscriptionFailed(messageId: string): boolean {
+    return this.transcriptionStates.get(messageId) === 'failed';
   }
   
   private generateEventId(): string {
