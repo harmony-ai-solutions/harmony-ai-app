@@ -5,14 +5,22 @@ This diagram shows the service layer architecture and how WebSocket connections 
 ## Service Layer Architecture
 
 ```mermaid
-graph TD
+graph TB
+    subgraph Storage["💾 Storage Layer"]
+        direction LR
+        AS[AsyncStorage]
+        DB[(SQLite DB)]
+    end
+    
     subgraph UI["📱 UI Layer"]
+        direction LR
         Setup[ConnectionSetupScreen]
         Chat[ChatDetailScreen]
         Sync[SyncSettingsScreen]
     end
     
     subgraph Context["🔄 Context Layer"]
+        direction LR
         SyncCtx[SyncConnectionContext]
         EntityCtx[EntitySessionContext]
     end
@@ -27,15 +35,9 @@ graph TD
         AP[AudioPlayer]
     end
     
-    subgraph Storage["💾 Storage Layer"]
-        direction LR
-        AS[AsyncStorage]
-        DB[(SQLite DB)]
-    end
-    
     subgraph WS["🌐 WebSocket Layer"]
         direction LR
-        Factory[Factory]
+        Factory[WebSocketConnectionFactory]
         Secure[Secure TLS]
         Insecure[Insecure TLS]
         Unencrypted[Unencrypted]
