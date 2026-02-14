@@ -18,16 +18,15 @@ sequenceDiagram
     UI->>UI: Validate URL format
     
     alt First Time Pairing
-        Note over UI: User selects security mode
-        User->>UI: Choose: secure/insecure-ssl/unencrypted
+        UI->>AS: Save server URL (ws://)
+        UI->>CM: createConnection('sync', 'sync', ws_url, 'unencrypted')
     else Returning (Token Expired)
         UI->>CSM: getSecurityMode()
-        CSM->>AS: Read saved mode
-        AS-->>UI: Return previous mode
+        CSM->>AS: Read saved mode & URL
+        AS-->>UI: Return previous mode & URL
+        UI->>CM: createConnection('sync', 'sync', url, saved_mode)
     end
     
-    UI->>AS: Save server URL
-    UI->>CM: createConnection('sync', 'sync', url, mode)
     activate CM
     CM->>CM: Create WebSocket
     CM->>HL: WebSocket Connect
@@ -45,12 +44,40 @@ sequenceDiagram
     
     alt User Approves on Desktop
         HL->>SS: HANDSHAKE_ACCEPT
-        Note over SS,HL: JWT, WSS URL, cert, expiry
+        Note over SS,HL: JWT, WSS port, cert, expiry
         SS->>CSM: saveConnectionCredentials()
         CSM->>AS: Store JWT, WSS URL, cert, expiry
-        CSM->>AS: Set paired=true
         SS->>UI: Event: handshake:accepted
-        UI->>User: ✅ Pairing successful
+        
+        Note over UI: Now upgrade to secure connection
+        UI->>CM: disconnectConnection('sync')
+        UI->>CM: createConnection('sync', 'sync', wss_url, 'secure')
+        
+        alt Certificate Validation Success
+            CM->>HL: WSS Connect with cert validation
+            HL-->>CM: Connected
+            UI->>CSM: saveSecurityMode('secure')
+            UI->>User: ✅ Pairing successful (Secure)
+            
+        else Certificate Validation Failed
+            CM->>UI: Event: cert:verification_failed
+            UI->>User: Certificate validation failed
+            
+            alt User Accepts Self-Signed Cert
+                User->>UI: Choose "Accept Certificate"
+                UI->>CM: createConnection('sync', 'sync', wss_url, 'insecure-ssl')
+                CM->>HL: WSS Connect (skip validation)
+                HL-->>CM: Connected
+                UI->>CSM: saveSecurityMode('insecure-ssl')
+                UI->>User: ✅ Pairing successful (Insecure SSL)
+                
+            else User Chooses Unencrypted
+                User->>UI: Choose "Use Unencrypted"
+                UI->>CSM: saveSecurityMode('unencrypted')
+                Note over UI: Keep ws:// connection
+                UI->>User: ✅ Pairing successful (Unencrypted)
+            end
+        end
         
     else User Rejects on Desktop
         HL->>SS: HANDSHAKE_REJECT
