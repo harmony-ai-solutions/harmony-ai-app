@@ -4,34 +4,37 @@
 - Foundation: RN 0.83.1 + TypeScript, organized src/ structure, hot reload, ESLint, Prettier.
 - Navigation: React Navigation Native Stack, type-safe routing.
 - Theming: 6 built-in + custom themes, RGB editor, AsyncStorage persistence, JSON import/export, themed component library (ThemedView, ThemedText, ThemedButton, ThemedCard, ThemedGradient).
-- Database Layer: SQLCipher encryption, React Native Keychain key mgmt, 7 migrations (Harmony Link compatible), complete repository layer:
+- Database Layer: SQLCipher encryption, React Native Keychain key mgmt, forward-only migrations in /src/database/migrations/ (Harmony Link compatible), complete repository layer:
   - Entity repository (11 tests)
-  - Character repository with BLOB handling (18 tests)  
+  - Character repository with base64 image handling (18 tests)  
   - Module repository all 6 types (23 tests)
   - Provider repository all 11 types (32 tests)
-  - Chat messages repository with pagination and bidirectional queries
-  - 84+ total tests covering CRUD, CASCADE, transactions, BLOB data
+  - Chat messages repository with pagination, bidirectional queries, base64 audio storage
+  - 84+ total tests covering CRUD, CASCADE, transactions, base64 data handling
 - App Integration: DatabaseContext, loading screen, error recovery, theme integration.
 - Test Runner: DEV-only DatabaseTestScreen in Settings menu, real-time console, color-coded results, auto-hidden in production.
 - Sync Services: Multi-connection WebSocket architecture, ConnectionManager, SyncService, EntitySessionService, ConnectionStateManager.
-- Sync Screens: ConnectionSetupScreen (handshake flow), SyncSettingsScreen (status, manual sync).
-- Documentation: Comprehensive README, deployment guides (emulator + ADB), troubleshooting, memory bank.
+- Sync Screens: ConnectionSetupScreen (handshake-first flow), SyncSettingsScreen (status, manual sync).
+- Documentation: Comprehensive README, deployment guides (emulator + ADB), troubleshooting, memory bank, Harmony Link integration guide (/docs/HARMONY-LINK-INTEGRATION.md with 5 detailed diagrams).
 - Phase 1: Chat Implementation Complete
-  - Database: Migration 000007 for chat image/audio blob support
-  - Models: Updated ChatMessage interface with audio_data, audio_mime_type, image_data, image_mime_type, vl_model fields
-  - Repository: chat_messages.ts with full CRUD and conversation queries
-  - Audio Services: AudioRecorder.ts (react-native-audio-record), AudioPlayer.ts (react-native-track-player)
+  - Database: chat_messages table with TEXT columns for base64-encoded audio data
+  - Models: ChatMessage interface with audio_data, audio_mime_type fields (image support in progress)
+  - Repository: chat_messages.ts with full CRUD, conversation queries, async transcription updates
+  - Audio Services: AudioRecorder.ts (tap-based with permissions), AudioPlayer.ts (playback controls)
+  - Voice Features: STT (Speech-to-Text) and TTS (Text-to-Speech) integrated and working
   - Native Dependencies: react-native-audio-record, react-native-track-player, react-native-fs, react-native-image-picker
-  - Platform Setup: iOS permissions (NSMicrophoneUsageDescription), Android permissions (RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE)
-  - Events: TYPING_INDICATOR, RECORDING_INDICATOR constants
-  - EntitySessionService: Dual session management, message sending (text/audio/image), event handling
-  - UI Screens: ChatListScreen (conversation overview), ChatDetailScreen (messaging interface)
-  - UI Components: ChatBubble (text/audio/image), ChatInput (text/voice/image), TypingIndicator (animated)
-  - Navigation: ChatDetail route added to AppNavigator
+  - Platform Setup: iOS permissions (NSMicrophoneUsageDescription), Android permissions (RECORD_AUDIO, READ/WRITE_EXTERNAL_STORAGE), runtime checks
+  - Events: TYPING_INDICATOR, RECORDING_INDICATOR, CONNECTION_PING, CONNECTION_PONG, STT_INPUT_AUDIO, STT_OUTPUT_TEXT
+  - EntitySessionService: Dual session management, message sending (text/audio), STT async flow, heartbeat handling
+  - UI Screens: ChatListScreen (entity selection, conversation overview), ChatDetailScreen (messaging with QoL features)
+  - UI Components: ChatBubble (text/audio with context menu), ChatInput (tap-based voice recording), TypingIndicator, NewMessagesDivider
+  - Navigation: ChatDetail route with impersonatedEntityId for roleplay support
+  - QoL Features: Last message actions (delete/edit/regenerate), new messages tracking, mark-as-read, async transcription editing
 @Building: Nothing (Phase 1 complete, ready for testing).
 @Todo:
-- P2 Enhanced: On-device AI (Executorch), voice (STT/TTS), media support, settings screen.
-- P3 Advanced: Custom character creation, memory visualization, sync/offline, messenger integration.
+- Image Messages: Complete UI implementation for image sending/receiving (backend support exists).
+- P2 Enhanced: On-device AI (Executorch), enhanced media support, settings screen.
+- P3 Advanced: Custom character creation, memory visualization, full sync testing, messenger integration.
 - P4 Polish: Performance optimization, comprehensive testing, security audit, Play Store deployment.
 @Issues: None. Clean bootstrap state. No blockers.
-@Metrics: Bootstrap 100%, Database layer 100%, Phase 1 Chat 100%, 84+ tests passing, sync-ready schema.
+@Metrics: Bootstrap 100%, Database layer 100%, Phase 1 Chat 100% (except image UI), Voice Features 100%, 84+ tests passing, sync-ready schema.

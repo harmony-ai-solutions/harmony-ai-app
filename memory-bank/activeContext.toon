@@ -1,32 +1,43 @@
 # Harmony AI App Active Context
 @Focus:
-- Chat Feature Implementation (Complete): Full chat interface with image/audio support, persistent storage, and real-time event handling.
-- Database Layer: Migration 000007 adds chat image/audio blob support, updated ChatMessage model with VL fields.
-- Repository Layer: chat_messages.ts repository with CRUD operations, bidirectional conversation queries, pagination support.
-- Audio Services: AudioRecorder (react-native-audio-record) and AudioPlayer (react-native-track-player) implementations.
-- Native Dependencies: Added react-native-audio-record, react-native-track-player, react-native-fs, react-native-image-picker.
-- iOS/Android Setup: Microphone permissions, storage permissions, Podfile configuration.
-- Event System: Updated EntitySessionService with dual session management (user + partner), typing/recording indicators.
-- UI Screens: ChatListScreen (conversation overview), ChatDetailScreen (messaging interface).
-- UI Components: ChatBubble (text/audio/image), ChatInput (text/voice/image), TypingIndicator (animated dots).
-- Navigation: Updated AppNavigator with ChatDetail route.
-- Multi-Connection WebSocket Architecture: Refactored to support multiple concurrent connections (sync + entity sessions).
-- Sync Services Implementation Complete: EventEmitter3-based event system, WebSocket/WSS support, handshake protocol.
-- Database Implementation Complete: SQLCipher encryption, full repository layer (84 tests), in-app DEV-only test runner, sync tables added.
-- Test Runner Integration: DatabaseTestScreen in Settings menu, real-time console, color-coded results, themed UI.
-- Advanced Theming: RGB editor, custom theme creation/deletion, JSON import/export, 6 built-in themes.
-- Logging Infrastructure: Migrated from console.log to react-native-logs, production-ready levels, colored dev output, unified [Namespace] prefixes.
+- Documentation Complete: Comprehensive Harmony Link integration documentation created in /docs/HARMONY-LINK-INTEGRATION.md with detailed diagrams in /docs/harmony-link-diagrams/.
+- Chat Feature Implementation Complete: Full chat interface with text/audio support, tap-based voice recording, persistent storage, real-time event handling.
+- Database Layer Complete: SQLite with TEXT columns for base64-encoded audio/image data, chat_messages schema with audio/image support. Migrations in /src/database/migrations/.
+- Repository Layer Complete: chat_messages.ts repository with CRUD operations, bidirectional conversation queries, pagination support.
+- Audio Services Complete: AudioRecorder (tap-based with permission handling), AudioPlayer for playback.
+- Voice Features Complete: STT (Speech-to-Text) and TTS (Text-to-Speech) working with Harmony Link integration.
+- Native Dependencies: react-native-audio-record, react-native-track-player, react-native-fs, react-native-image-picker.
+- iOS/Android Setup: Microphone permissions, storage permissions, runtime permission checks.
+- Event System Complete: EntitySessionService with dual session management (user + partner entities), typing/recording indicators, CONNECTION_PING/PONG heartbeat.
+- UI Screens Complete: ChatListScreen (conversation overview with entity selection), ChatDetailScreen (messaging with QoL features).
+- UI Components Complete: ChatBubble (text/audio/image with context menu), ChatInput (tap-based voice recording), TypingIndicator, NewMessagesDivider.
+- Navigation Complete: ChatDetail route with impersonatedEntityId param for roleplay support.
+- Multi-Connection WebSocket Architecture Complete: ConnectionManager supporting multiple concurrent connections (sync + entity sessions), independent lifecycles.
+- Sync Services Complete: EventEmitter3-based events, three security modes (secure/insecure-ssl/unencrypted), handshake-first pairing protocol.
+- Device Pairing Protocol: ws:// handshake → user approval → wss:// upgrade → cert validation → security mode selection.
+- Database Complete: SQLCipher encryption, full repository layer (84+ tests), in-app DEV-only test runner, sync tables.
+- Test Runner: DatabaseTestScreen in Settings menu, real-time console, color-coded results, themed UI.
+- Advanced Theming Complete: RGB editor, custom theme creation/deletion, JSON import/export, 6 built-in themes.
+- Logging Infrastructure: react-native-logs with production-ready levels, colored dev output, unified [Namespace] prefixes.
 - Bootstrap Complete: RN 0.83.1, TypeScript, navigation, Paper UI, organized structure.
 @Next:
-- Chat Testing: Test message sending/receiving, audio playback, image display, sync integration.
-- Sync Protocol: Test SYNC_REQUEST → SYNC_DATA exchange → SYNC_COMPLETE flow.
-- Character Management: Selection UI, profile display, avatar loading, character switching.
+- Image Messages: Complete implementation of image sending/receiving in chat (UI not fully complete).
+- Integration Testing: Test end-to-end chat flows with live Harmony Link backend.
+- Sync Protocol Testing: Validate SYNC_REQUEST → SYNC_DATA → SYNC_COMPLETE → FINALIZE flows.
+- Character Management: Enhanced profiles, avatar caching, character switching improvements.
+- On-Device AI: React Native Executorch integration for offline chat.
 @Decisions:
-- Chat Message Types: Support 'text', 'audio', 'combined', 'image' message types with blob storage for audio/image data.
-- Audio Storage: Uint8Array for binary data, base64 encoding for event transmission.
-- Dual Session Pattern: Mobile app uses dual entity sessions (user + partner) for bidirectional chat with Harmony Link.
-- Real-time Indicators: Typing and recording indicators provide better UX for chat interactions.
-- React Native CLI (not Expo) for full native module control (Executorch, messenger APIs).
+- Chat Message Types: Support 'text', 'audio', 'combined' (image support in progress).
+- Audio Storage: Base64-encoded strings stored in TEXT columns (no BLOB/Uint8Array), transmitted directly via WebSocket.
+- Audio Recording UI: Tap-to-start/stop (not hold-to-record) for better mobile UX.
+- Dual Session Pattern: Each chat requires TWO entity sessions (user + partner) for separate event streams - critical architecture pattern.
+- Multi-Connection Architecture: ConnectionManager handles multiple concurrent WebSocket connections with independent lifecycles.
+- Device Pairing Flow: Handshake FIRST (unencrypted ws://) → user approval → upgrade to wss:// → cert validation → security mode selection.
+- Security Modes: Three options (secure with validation, insecure-ssl without validation, unencrypted ws://).
+- Heartbeat Protocol: Application-level CONNECTION_PING/PONG every 30s to maintain session.
+- Real-time Indicators: Typing and recording indicators provide better UX.
+- Optimistic UI: Store messages locally first, sync in background, handle conflicts.
+- React Native CLI (not Expo) for full native module control.
 - React Native Paper for Material Design 3 consistency.
 - React Navigation for type-safe routing.
 - TypeScript strict mode for type safety.
@@ -34,17 +45,20 @@
 - Dark theme default (matches Harmony Link, OLED-friendly).
 - Database schema 100% compatible with Harmony Link for bidirectional sync.
 - DEV-only test runner using __DEV__ checks for production safety.
-- Logging: Use react-native-logs for all non-test code; preserve console for test runners.
+- Logging: react-native-logs for all non-test code; console for test runners.
 @Learnings:
 - Native Module Integration: react-native-audio-record and react-native-track-player require careful iOS/Android configuration.
-- Audio Recording Flow: Initialize → Start → Stop → Read file → Convert to Uint8Array → Cleanup temp file.
-- Base64 Encoding: Required for transmitting binary data over WebSocket events; use `Buffer.from(data, 'binary').toString('base64')` instead of btoa for React Native compatibility.
+- Runtime Permissions Critical: Always check/request permissions before accessing mic/storage; provide clear error recovery UI.
+- Audio Recording Flow: Initialize → Check permissions → Start → Stop → Read file → Convert to base64 → Store as TEXT → Cleanup temp file.
+- Audio UI Pattern: Tap-to-start/stop works better than hold-to-record on mobile (less accidental recordings).
+- Base64 Storage: Audio/image data stored as base64 TEXT columns (not BLOB), simplifies handling and transmission.
+- Database Migrations: Forward-only SQL migration files in /src/database/migrations/, numbered sequentially, applied automatically on app startup.
 - React Native Track Player v5 Migration:
   - Android build fixed by upgrading to v5.0.0-alpha0 (Kotlin type safety fixes for React Native 0.83.1)
   - API changes: `getPlaybackState()` returns `PlaybackState` object (contains `state` property), use `getProgress()` instead of separate `getPosition()`/`getDuration()` calls
   - Update options: `notificationCapabilities` replaces `compactCapabilities`
   - State enum values are now strings (e.g., State.Playing = "playing")
-- Blob Handling in RN: Uint8Array for in-memory, Base64 for transmission, BLOB for SQLite storage.
+- Base64 Storage Pattern: Audio/image data stored as base64 TEXT in SQLite for simpler handling and cross-platform compatibility.
 - Chat UI Patterns: KeyboardAvoidingView essential for iOS, FlatList with inverted prop for message lists.
 - Image Picker: react-native-image-picker provides good UX with caption support.
 - Pulse Animation: Animated.loop with scale transform creates effective recording indicator.
@@ -55,7 +69,7 @@
 - Gradle 8.13 required (NOT 9.0+) for RN 0.83.1.
 - Database encryption with SQLCipher + React Native Keychain provides secure storage.
 - In-app test runner provides better developer experience than Node-based tests.
-- BLOB handling in SQLite requires Uint8Array → Base64 conversion for UI.
+- Base64 TEXT storage simplifies binary data handling compared to BLOB columns.
 - __DEV__ checks ensure development tools invisible in production builds.
 - ADB PATH setup critical for newcomers.
 - Good foundation prevents technical debt.
@@ -69,10 +83,13 @@
 - Decoupling transport layer from service logic improves testability and scalability.
 - Context separation (SyncConnectionContext vs EntitySessionContext) provides clear responsibility boundaries.
 - React useRef critical for avoiding stale closures in setTimeout/async callbacks (reconnect counter).
-- Reconnect race condition fix: Only schedule reconnect from disconnected event if NOT in isConnecting state (prevents double-scheduling when connection attempt fails).
-- Event listener accumulation: Always call removeAllListeners() before disconnecting to prevent duplicate error messages from old listeners.
+- Reconnect race condition fix: Only schedule reconnect from disconnected event if NOT in isConnecting state.
+- Event listener accumulation: Always call removeAllListeners() before disconnecting to prevent duplicates.
 - Auto-reconnect strategy: Always retry regardless of error type, exponential backoff [1s, 2s, 4s, 8s, 16s, 30s].
-- Logging transport enhancement: Custom transport to stringify Error objects (including stacks) prevents useless '[object Object]' logs.
+- Logging transport enhancement: Custom transport to stringify Error objects (including stacks) prevents '[object Object]' logs.
+- Dual Entity Sessions: Mirror Harmony Link's EntitySessionManager - each chat needs user entity session + partner entity session for bidirectional events.
+- Device Pairing Sequence: Handshake happens FIRST over unencrypted ws://, THEN security mode is selected after cert validation on wss://.
+- Connection Types: 'sync' for device sync, 'entity-{entityId}' for chat sessions - distinct connection lifecycle and event routing.
 @Implementation[Sync]:
 - Multi-Connection Architecture: ConnectionManager manages multiple WebSocket connections (sync + entity sessions).
 - Services[4]: ConnectionManager (transport pool), SyncService (protocol logic), EntitySessionService (session management), ConnectionStateManager (JWT lifecycle).
@@ -81,16 +98,20 @@
 - Protocol: HANDSHAKE_REQUEST → PENDING → ACCEPT → WSS upgrade → SYNC_REQUEST → DATA exchange → COMPLETE → FINALIZE.
 - Entity Sessions: Mirror Harmony Link's EntitySessionManager pattern, on-demand connections per chat.
 - Screens[2]: ConnectionSetupScreen (IP/port input, handshake), SyncSettingsScreen (status, manual sync).
-- Database: sync_devices, sync_history, chat_messages tables (migration 000005).
+- Database: sync_devices, sync_history, chat_messages tables. Migrations in /src/database/migrations/ folder.
 - Error Handling: Connection validation, timeout handling (30s), confirmation tracking, comprehensive logging.
 @Implementation[Chat]:
-- Database: Migration 000007 adds image/audio support to chat_messages table.
-- Repository: chat_messages.ts with createChatMessage, getChatMessagesBetween, getRecentChatMessages, getLastChatMessage, messageExists, deleteChatMessage.
-- Audio Services: AudioRecorder.ts (initialize, startRecording, stopRecording), AudioPlayer.ts (initialize, playAudioBlob, playAudioBase64, control methods).
+- Database: chat_messages table with TEXT columns for base64-encoded audio data. Migrations in /src/database/migrations/.
+- Repository: chat_messages.ts with full CRUD, bidirectional queries, pagination, async transcription updates.
+- Audio Services: AudioRecorder.ts (tap-based recording with permission checks), AudioPlayer.ts (playback controls).
+- Voice Features: STT (Speech-to-Text) and TTS (Text-to-Speech) integrated and working.
 - Native Modules: react-native-audio-record, react-native-track-player, react-native-fs, react-native-image-picker.
-- Platform Setup: iOS (NSMicrophoneUsageDescription, RNTrackPlayer Pod), Android (RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE permissions).
-- Event Constants: TYPING_INDICATOR, RECORDING_INDICATOR added to events system.
-- EntitySessionService: Dual session management (userSession + partnerSession), message sending (text/audio/image), event handling for incoming messages and indicators.
-- UI Screens: ChatListScreen (conversation list with avatars), ChatDetailScreen (messaging with keyboard handling).
-- UI Components: ChatBubble (text/audio/image with themed styling), ChatInput (text/voice/image with pulse animation), TypingIndicator (animated dots).
-- Navigation: ChatDetail route with partnerEntityId and partnerCharacterId params.
+- Platform Setup: iOS (NSMicrophoneUsageDescription), Android (RECORD_AUDIO, READ/WRITE_EXTERNAL_STORAGE), runtime permission checks.
+- Event Constants: TYPING_INDICATOR, RECORDING_INDICATOR, CONNECTION_PING, CONNECTION_PONG, STT_INPUT_AUDIO, STT_OUTPUT_TEXT.
+- EntitySessionService: Dual session management (user + partner), message sending (text/audio), STT async flow, heartbeat handling.
+- UI Screens: ChatListScreen (entity selection, conversation list), ChatDetailScreen (messaging with QoL: last message actions, new messages divider, auto-scroll).
+- UI Components: ChatBubble (context menu for last message: delete/edit/regenerate), ChatInput (tap-based recording, permission recovery), TypingIndicator, NewMessagesDivider.
+- Navigation: ChatDetail route with impersonatedEntityId (roleplay support) and partnerEntityId/partnerCharacterId params.
+- QoL Features: Last message actions, new messages tracking via ChatPreferencesService, mark-as-read on scroll, async transcription editing.
+- Image Messages: Not fully implemented yet (placeholder support exists).
+- Documentation: Complete integration guide in /docs/HARMONY-LINK-INTEGRATION.md with 5 detailed diagram files.
