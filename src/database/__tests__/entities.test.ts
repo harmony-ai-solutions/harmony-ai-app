@@ -88,6 +88,8 @@ export async function runEntityTests(): Promise<TestResult[]> {
           rag_config_id: null,
           stt_config_id: null,
           tts_config_id: null,
+          vision_config_id: null,
+          deleted_at: null,
         });
       })
     );
@@ -105,6 +107,8 @@ export async function runEntityTests(): Promise<TestResult[]> {
           rag_config_id: null,
           stt_config_id: null,
           tts_config_id: null,
+          vision_config_id: null,
+          deleted_at: null,
         });
         const mapping = await entities.getEntityModuleMapping(testEntityId);
         if (!mapping) {
@@ -126,6 +130,8 @@ export async function runEntityTests(): Promise<TestResult[]> {
           rag_config_id: null,
           stt_config_id: null,
           tts_config_id: null,
+          vision_config_id: null,
+          deleted_at: null,
         });
         await entities.updateEntityModuleMapping({
           entity_id: testEntityId,
@@ -135,6 +141,8 @@ export async function runEntityTests(): Promise<TestResult[]> {
           rag_config_id: null,
           stt_config_id: null,
           tts_config_id: null,
+          vision_config_id: null,
+          deleted_at: null,
         });
       })
     );
@@ -152,6 +160,8 @@ export async function runEntityTests(): Promise<TestResult[]> {
           rag_config_id: null,
           stt_config_id: null,
           tts_config_id: null,
+          vision_config_id: null,
+          deleted_at: null,
         });
         await entities.deleteEntity(testEntityId);
         const deletedEntity = await entities.getEntity(testEntityId);

@@ -218,7 +218,15 @@ export async function updateOpenAIProviderConfig(config: OpenAIProviderConfig): 
  */
 export async function isOpenAIProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  const tables = [
+    'backend_configs',
+    'cognition_configs',
+    'movement_configs',
+    'rag_configs',
+    'stt_configs',
+    'tts_configs',
+    'vision_configs',
+  ];
   for (const table of tables) {
     const [results] = await db.executeSql(
       `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'openai' AND provider_config_id = ? AND deleted_at IS NULL`,
@@ -419,7 +427,15 @@ export async function updateOpenRouterProviderConfig(config: OpenRouterProviderC
  */
 export async function isOpenRouterProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  const tables = [
+    'backend_configs',
+    'cognition_configs',
+    'movement_configs',
+    'rag_configs',
+    'stt_configs',
+    'tts_configs',
+    'vision_configs',
+  ];
   for (const table of tables) {
     const [results] = await db.executeSql(
       `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'openrouter' AND provider_config_id = ? AND deleted_at IS NULL`,
@@ -637,7 +653,15 @@ export async function updateOpenAICompatibleProviderConfig(config: OpenAICompati
  */
 export async function isOpenAICompatibleProviderConfigInUse(id: number): Promise<boolean> {
   const db = getDatabase();
-  const tables = ['module_backend_configs', 'module_cognition_configs', 'module_movement_configs', 'module_rag_configs', 'module_stt_configs', 'module_tts_configs'];
+  const tables = [
+    'backend_configs',
+    'cognition_configs',
+    'movement_configs',
+    'rag_configs',
+    'stt_configs',
+    'tts_configs',
+    'vision_configs',
+  ];
   for (const table of tables) {
     const [results] = await db.executeSql(
       `SELECT COUNT(*) as count FROM ${table} WHERE provider = 'openaicompatible' AND provider_config_id = ? AND deleted_at IS NULL`,

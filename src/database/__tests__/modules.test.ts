@@ -57,6 +57,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
           name: 'Updated Backend',
           provider: 'openai',
           provider_config_id: providerId,
+          deleted_at: null,
         });
         await modules.deleteBackendConfig(id);
         await providers.deleteOpenAIProviderConfig(providerId);
@@ -230,6 +231,55 @@ export async function runModuleTests(): Promise<TestResult[]> {
         const retrieved = await modules.getTTSConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
         await modules.deleteTTSConfig(id);
+        await providers.deleteOpenAIProviderConfig(providerId);
+      })
+    );
+
+    // Test 7: Vision Config
+    results.push(
+      await runTestWithCleanup('Vision Config CRUD', async () => {
+        // Create provider config first
+        const providerId = await providers.createOpenAIProviderConfig({
+          name: 'Test Provider Vision',
+          api_key: 'test-key',
+          model: null,
+          max_tokens: null,
+          temperature: null,
+          top_p: null,
+          n: null,
+          stop_tokens: null,
+          embedding_model: null,
+          voice: null,
+          speed: null,
+          format: null,
+        });
+        
+        const id = await modules.createVisionConfig({
+          name: 'Test Vision',
+          provider: 'openai',
+          provider_config_id: providerId,
+          resolution_width: 640,
+          resolution_height: 480,
+        });
+        const retrieved = await modules.getVisionConfig(id);
+        if (!retrieved) throw new Error('Failed to retrieve');
+        if (retrieved.resolution_width !== 640 || retrieved.resolution_height !== 480) {
+          throw new Error('Resolution mismatch');
+        }
+        await modules.updateVisionConfig({
+          id,
+          name: 'Updated Vision',
+          provider: 'openai',
+          provider_config_id: providerId,
+          resolution_width: 1280,
+          resolution_height: 720,
+          deleted_at: null,
+        });
+        const updated = await modules.getVisionConfig(id);
+        if (!updated || updated.resolution_width !== 1280 || updated.resolution_height !== 720) {
+          throw new Error('Update resolution mismatch');
+        }
+        await modules.deleteVisionConfig(id);
         await providers.deleteOpenAIProviderConfig(providerId);
       })
     );

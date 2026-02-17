@@ -42,6 +42,7 @@ export interface EntityModuleMapping {
   rag_config_id: number | null;
   stt_config_id: number | null;
   tts_config_id: number | null;
+  vision_config_id: number | null;
   deleted_at: Date | null;
 }
 
@@ -231,6 +232,16 @@ export interface TTSConfig {
   deleted_at: Date | null;
 }
 
+export interface VisionConfig {
+  id: number;
+  name: string;
+  provider: string;
+  provider_config_id: number;
+  resolution_width: number;
+  resolution_height: number;
+  deleted_at: Date | null;
+}
+
 // ============================================================================
 // Character Image Models
 // ============================================================================
@@ -343,4 +354,5 @@ export type ModuleConfig =
   | STTConfig
   | CognitionConfig
   | RAGConfig
-  | TTSConfig;
+  | TTSConfig
+  | VisionConfig;
