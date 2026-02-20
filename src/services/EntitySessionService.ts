@@ -62,6 +62,28 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     this.setupConnectionListeners();
     this.setupAppStateListener();
   }
+
+  // ---------------------------------------------------------------------------
+  // Internal helpers
+  // ---------------------------------------------------------------------------
+
+  /** Clean up all pending transcriptions for a given partner entity. */
+  private cleanupTranscriptionsForPartner(partnerEntityId: string): void {
+    const transcriptionsToCleanup: string[] = [];
+    for (const [messageId, request] of this.pendingTranscriptions.entries()) {
+      if (request.partnerEntityId === partnerEntityId) {
+        clearTimeout(request.timeout);
+        transcriptionsToCleanup.push(messageId);
+        this.transcriptionStates.set(messageId, 'failed');
+      }
+    }
+    transcriptionsToCleanup.forEach(messageId => {
+      this.pendingTranscriptions.delete(messageId);
+    });
+    if (transcriptionsToCleanup.length > 0) {
+      log.info(`Marked ${transcriptionsToCleanup.length} pending transcriptions as failed for ${partnerEntityId}`);
+    }
+  }
   
   static getInstance(): EntitySessionService {
     if (!EntitySessionService.instance) {
@@ -82,6 +104,55 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   
   private setupConnectionListeners() {
     this.connectionManager.on('event:entity', this.handleEntityEvent.bind(this));
+    // Bug fix #1: listen for entity connection drops so session status is always accurate
+    this.connectionManager.on('disconnected:entity', this.handleEntityDisconnected.bind(this));
+  }
+
+  /**
+   * Handles an entity WebSocket connection dropping (e.g. Harmony Link restart).
+   * Updates the matching EntitySession status to 'disconnected' so that
+   * isDualSessionActive() returns false and callers can properly restart.
+   */
+  private handleEntityDisconnected(entityId: string): void {
+    log.info(`Entity connection dropped for ${entityId}`);
+
+    // If still in the pending-init map, just remove it
+    if (this.pendingSessions.has(entityId)) {
+      const pending = this.pendingSessions.get(entityId)!;
+      pending.status = 'disconnected';
+      this.pendingSessions.delete(entityId);
+      log.info(`Removed pending session for ${entityId}`);
+    }
+
+    // Find the dual session that contains this entity and update its sub-session status
+    for (const [partnerEntityId, session] of this.sessions.entries()) {
+      const isUser    = session.userSession.entityId    === entityId;
+      const isPartner = session.partnerSession.entityId === entityId;
+
+      if (isUser || isPartner) {
+        if (isUser)    session.userSession.status    = 'disconnected';
+        if (isPartner) session.partnerSession.status = 'disconnected';
+
+        log.info(
+          `Session ${partnerEntityId}: user=${session.userSession.status}, partner=${session.partnerSession.status}`
+        );
+
+        // When BOTH sub-sessions have dropped, tear down the dual session
+        if (
+          session.userSession.status    === 'disconnected' &&
+          session.partnerSession.status === 'disconnected'
+        ) {
+          log.info(`Both entity connections lost for ${partnerEntityId} – emitting session:stopped`);
+          this.cleanupTranscriptionsForPartner(partnerEntityId);
+          this.sessions.delete(partnerEntityId);
+          this.emit('session:stopped', partnerEntityId);
+        }
+
+        return;
+      }
+    }
+
+    log.debug(`disconnected:entity for ${entityId} – no matching dual session found`);
   }
   
   /**
@@ -99,8 +170,25 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     
     // Check if session already exists
     if (this.sessions.has(partnerEntityId)) {
-      log.warn(`Session for ${partnerEntityId} already exists`);
-      return this.sessions.get(partnerEntityId)!;
+      const existingSession = this.sessions.get(partnerEntityId)!;
+
+      // If both sub-sessions are still active, just return the live session
+      if (
+        existingSession.userSession.status    === 'active' &&
+        existingSession.partnerSession.status === 'active'
+      ) {
+        log.warn(`Session for ${partnerEntityId} already active, returning existing`);
+        return existingSession;
+      }
+
+      // Session is stale (e.g. connections dropped but cleanup hadn't fired yet) –
+      // tear it down fully so we can create a fresh one below.
+      log.warn(
+        `Session for ${partnerEntityId} is stale ` +
+        `(user=${existingSession.userSession.status}, partner=${existingSession.partnerSession.status}), ` +
+        `cleaning up before restart`
+      );
+      await this.stopSession(partnerEntityId);
     }
     
     log.info(`Starting dual session: user=${impersonatedEntityId}, partner=${partnerEntityId}`);
@@ -249,21 +337,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       await AudioPlayer.stop();
       
       // Clean up all pending transcriptions for this partner
-      const transcriptionsToCleanup: string[] = [];
-      for (const [messageId, request] of this.pendingTranscriptions.entries()) {
-        if (request.partnerEntityId === partnerEntityId) {
-          clearTimeout(request.timeout);
-          transcriptionsToCleanup.push(messageId);
-          this.transcriptionStates.set(messageId, 'failed');
-        }
-      }
-      transcriptionsToCleanup.forEach(messageId => {
-        this.pendingTranscriptions.delete(messageId);
-      });
-      
-      if (transcriptionsToCleanup.length > 0) {
-        log.info(`Marked ${transcriptionsToCleanup.length} pending transcriptions as failed for ${partnerEntityId}`);
-      }
+      this.cleanupTranscriptionsForPartner(partnerEntityId);
       
       // Disconnect user session
       if (this.connectionManager.isConnected(dualSession.userSession.connectionId)) {

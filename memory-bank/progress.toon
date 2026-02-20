@@ -1,5 +1,5 @@
 # Harmony AI App Progress
-@Status: Bootstrap complete. Database layer complete with in-app test runner. Chat feature implementation complete. Ready for testing and refinement.
+@Status: Bootstrap complete. Database layer complete with in-app test runner. Chat feature implementation complete. Connection resilience hardened. Ready for testing and refinement.
 @Completed:
 - Foundation: RN 0.83.1 + TypeScript, organized src/ structure, hot reload, ESLint, Prettier.
 - Navigation: React Navigation Native Stack, type-safe routing.
@@ -30,11 +30,17 @@
   - UI Components: ChatBubble (text/audio with context menu), ChatInput (tap-based voice recording), TypingIndicator, NewMessagesDivider
   - Navigation: ChatDetail route with impersonatedEntityId for roleplay support
   - QoL Features: Last message actions (delete/edit/regenerate), new messages tracking, mark-as-read, async transcription editing
-@Building: Nothing (Phase 1 complete, ready for testing).
+- Phase 2: Dual Entity Chat Session Reconnection Hardening
+  - EntitySessionService: Added disconnected:entity listener → session status updated immediately on entity WS drop; no more phantom "Connected" state after Harmony Link restart.
+  - EntitySessionService.startDualSession: Detects stale (disconnected) sessions in the sessions map and fully cleans them up before creating fresh connections instead of silently returning the dead session.
+  - EntitySessionService: Extracted cleanupTranscriptionsForPartner() helper, reused across stopSession() and handleEntityDisconnected().
+  - SyncConnectionContext: Replaced reconnectTimeoutId React state with useRef; added isPairedRef/isConnectingRef/isReconnectingRef/isConnectedRef mirroring their state counterparts; all event handlers read from refs so closures are never stale. Single useEffect with empty deps [].
+  - EntitySessionContext: Removed activeSessions.size from sync-drop effect deps; calls entitySessionService.closeAllSessions() directly (authoritative service map, not stale React state).
+  - ChatDetailScreen: Split single "init + cleanup" useEffect into two effects: (1) unmount-only lifecycle effect (stops session on screen navigation); (2) isConnected-reactive init effect (restarts session on reconnect, no stopDualSession in cleanup). Eliminates double-stop race condition.
+@Building: Nothing (Phase 1 + reconnect hardening complete, ready for testing).
 @Todo:
 - Image Messages: Complete UI implementation for image sending/receiving (backend support exists).
 - P2 Enhanced: On-device AI (Executorch), enhanced media support, settings screen.
 - P3 Advanced: Custom character creation, memory visualization, full sync testing, messenger integration.
 - P4 Polish: Performance optimization, comprehensive testing, security audit, Play Store deployment.
-@Issues: None. Clean bootstrap state. No blockers.
-@Metrics: Bootstrap 100%, Database layer 100%, Phase 1 Chat 100% (except image UI), Voice Features 100%, 84+ tests passing, sync-ready schema.
+@Metrics: Bootstrap 100%, Database layer 100%, Phase 1 Chat 100% (except image UI), Voice Features 100%, Connection Resilience 100%, 84+ tests passing, sync-ready schema.

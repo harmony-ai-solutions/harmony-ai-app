@@ -110,33 +110,42 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     loadMessagesAndTimestamp();
   }, [partnerEntityId, impersonatedEntityId]);
 
-  // Initialize entity session
+  // Session lifecycle – stop session only when the screen unmounts
+  // (user navigates away).  This is intentionally NOT triggered by isConnected
+  // changes so that EntitySessionContext's own sync-drop cleanup is the sole
+  // owner of that path, eliminating the double-stop race condition (Bug #4).
+  useEffect(() => {
+    return () => {
+      log.info(`Screen unmounting – stopping session for ${partnerEntityId}`);
+      stopDualSession(partnerEntityId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partnerEntityId]);
+
+  // Session initialization – (re)start the session whenever the sync
+  // connection becomes available or the chat target changes.  The service's
+  // startDualSession() handles "already active" and "stale" cases internally
+  // so we do not need an isDualSessionActive guard here.
   useEffect(() => {
     let mounted = true;
-    
+
+    if (!isConnected) {
+      // Sync not connected yet – wait for the next time this effect fires
+      // (when isConnected transitions to true).
+      return;
+    }
+
     const initializeSession = async () => {
-      // Only start if we have an active sync connection
-      if (!isConnected) {
-        log.warn('Cannot start entity session: sync not connected');
-        return;
-      }
-      
-      // Check if session already exists (e.g., navigating back to chat)
-      if (isDualSessionActive(partnerEntityId)) {
-        log.info(`Session already active for ${partnerEntityId}`);
-        return;
-      }
-      
       try {
         log.info(`Initializing dual session for ${partnerEntityId}...`);
         await startDualSession(partnerEntityId, impersonatedEntityId);
-        // Session will be in 'connecting' state, UI will show "Connecting..."
-        // When INIT_ENTITY responses arrive, UI will update to "Connected"
+        // Session starts in 'connecting' state; UI shows "Connecting..."
+        // Status transitions to 'active' when INIT_ENTITY responses arrive.
       } catch (error: any) {
         if (!mounted) return;
-        
+
         log.error('Failed to initialize entity session:', error);
-        
+
         const errorMessage = error?.message || 'Unknown error';
         if (Platform.OS === 'android') {
           ToastAndroid.show(
@@ -152,16 +161,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       }
     };
-    
+
     initializeSession();
-    
-    // Cleanup on unmount
+
     return () => {
       mounted = false;
-      if (isDualSessionActive(partnerEntityId)) {
-        log.info(`Stopping session for ${partnerEntityId} on unmount`);
-        stopDualSession(partnerEntityId);
-      }
     };
   }, [partnerEntityId, impersonatedEntityId, isConnected]);
 
