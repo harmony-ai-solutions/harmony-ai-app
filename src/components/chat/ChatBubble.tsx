@@ -53,50 +53,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     setEditedText(message.content || '');
   }, [message.content]);
 
-  // Preload audio to get duration
-  useEffect(() => {
-    const preloadAudio = async () => {
-      if (message.audio_data && !audioDuration) {
-        try {
-          // Initialize and load the track without playing (with message ID)
-          await AudioPlayer.initialize();
-          await AudioPlayer.loadAudioForMessage(
-            message.id,
-            message.audio_data,
-            message.audio_mime_type || 'audio/wav'
-          );
-          
-          // Get the duration after a brief delay to ensure track is loaded
-          setTimeout(async () => {
-            try {
-              const duration = await AudioPlayer.getDuration();
-              console.log(`Preloaded audio duration for message ${message.id}:`, duration);
-              if (duration && duration > 0) {
-                setAudioDuration(duration);
-              } else if (message.audio_duration) {
-                // Fallback to stored duration
-                setAudioDuration(message.audio_duration);
-              }
-            } catch (error) {
-              console.warn('Could not get duration during preload:', error);
-              if (message.audio_duration) {
-                setAudioDuration(message.audio_duration);
-              }
-            }
-          }, 300);
-        } catch (error) {
-          console.warn('Could not preload audio:', error);
-          // Use stored duration as fallback
-          if (message.audio_duration) {
-            setAudioDuration(message.audio_duration);
-          }
-        }
-      }
-    };
-    
-    preloadAudio();
-  }, [message.audio_data, message.audio_mime_type, message.audio_duration, message.id]);
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {

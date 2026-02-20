@@ -19,6 +19,7 @@
     "@react-navigation/native": "^7.1.26",
     "@react-navigation/native-stack": "^7.9.0",
     "eventemitter3": "^5.0.1",
+    "music-metadata": "^11.12.1",
     "react": "19.2.0",
     "react-native": "0.83.1",
     "react-native-audio-record": "^0.2.2",

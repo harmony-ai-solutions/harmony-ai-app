@@ -30,6 +30,12 @@
   - UI Components: ChatBubble (text/audio with context menu), ChatInput (tap-based voice recording), TypingIndicator, NewMessagesDivider
   - Navigation: ChatDetail route with impersonatedEntityId for roleplay support
   - QoL Features: Last message actions (delete/edit/regenerate), new messages tracking, mark-as-read, async transcription editing
+- Phase 3: Audio Playback Bug Fix & Duration Enrichment
+  - Root Cause Fixed: Removed `preloadAudio` useEffect from ChatBubble that caused a race condition where all audio bubbles simultaneously called `AudioPlayer.loadAudioForMessage()` on mount after reconnect, corrupting the singleton TrackPlayer queue.
+  - AudioPlayer: Added static `getDurationFromBase64(base64Audio, mimeType)` using `music-metadata` v11 (replaced deprecated `music-metadata-browser`); parses audio duration from buffer without any TrackPlayer interaction.
+  - EntitySessionService: After saving an incoming TTS audio message with no duration, immediately parses and persists `audio_duration` to DB via `updateConversationMessage`.
+  - ChatDetailScreen: On load, runs a best-effort `Promise.all` enrichment loop for any historical messages that have `audio_data` but no `audio_duration`; persists to DB so subsequent loads are instant.
+  - ChatBubble: No DB writes at all; duration displayed from `message.audio_duration` prop (from DB) on initial render, then updated to live TrackPlayer value once playback starts.
 - Phase 2: Dual Entity Chat Session Reconnection Hardening
   - EntitySessionService: Added disconnected:entity listener → session status updated immediately on entity WS drop; no more phantom "Connected" state after Harmony Link restart.
   - EntitySessionService.startDualSession: Detects stale (disconnected) sessions in the sessions map and fully cleans them up before creating fresh connections instead of silently returning the dead session.

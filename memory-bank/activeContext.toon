@@ -46,7 +46,14 @@
 - Database schema 100% compatible with Harmony Link for bidirectional sync.
 - DEV-only test runner using __DEV__ checks for production safety.
 - Logging: react-native-logs for all non-test code; console for test runners.
+@Decisions:
+- Audio Duration Storage: audio_duration persisted to DB at message creation time (EntitySessionService for TTS messages) and on-load enrichment (ChatDetailScreen for historical messages). ChatBubble has zero DB writes.
+- AudioPlayer Singleton Pattern: AudioPlayer is a singleton instance; static methods (e.g., getDurationFromBase64) must be called on the class itself (AudioPlayer as AudioPlayerClass), not the singleton default export.
+- music-metadata v11: Replaces deprecated music-metadata-browser; works in Metro/RN bundler environments; parseBuffer(buffer, { mimeType }) returns format.duration in seconds.
 @Learnings:
+- Audio Playback Race Condition (Bug Fix): The `preloadAudio` useEffect in ChatBubble called `AudioPlayer.loadAudioForMessage()` on mount for every audio bubble simultaneously. Since AudioPlayer is a singleton wrapping a single TrackPlayer queue, concurrent `reset()` + `add()` calls from all bubbles corrupted each other's state – the last bubble's audio data was in TrackPlayer but `currentMessageId` might point to a different message. Fix: removed `preloadAudio` useEffect entirely; audio is only loaded when the user explicitly taps play.
+- Audio Duration Enrichment Pattern: Duration is parsed from raw base64 audio using music-metadata (no TrackPlayer interaction). For new messages: EntitySessionService parses and persists immediately after creation. For historical messages: ChatDetailScreen runs a best-effort Promise.all enrichment on load; failures are silently swallowed (bubble shows '--:--').
+- Static vs Instance in AudioPlayer: `export default new AudioPlayer()` is an instance. To call static methods, import the class separately: `import AudioPlayer, { AudioPlayer as AudioPlayerClass } from './AudioPlayer'` then call `AudioPlayerClass.getDurationFromBase64(...)`.
 - Native Module Integration: react-native-audio-record and react-native-track-player require careful iOS/Android configuration.
 - Runtime Permissions Critical: Always check/request permissions before accessing mic/storage; provide clear error recovery UI.
 - Audio Recording Flow: Initialize → Check permissions → Start → Stop → Read file → Convert to base64 → Store as TEXT → Cleanup temp file.

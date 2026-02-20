@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chat & Messaging
 
+#### Fixed
+- Fixed audio messages loading incorrect audio data after reconnection
+  - All audio bubbles now load their own audio only when explicitly tapped for playback
+  - Eliminates race condition where concurrent mount-time preloads corrupted the shared audio queue
+- Audio message duration is now correctly shown before playback begins
+  - Duration is automatically detected from the audio data and stored when messages are received
+
 #### Added
 - Real-time chat interface with AI characters
 - Text messaging with send/receive capabilities

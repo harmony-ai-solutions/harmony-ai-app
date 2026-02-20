@@ -4,6 +4,7 @@ import TrackPlayer, {
   Track,
   PlaybackState,
 } from 'react-native-track-player';
+import { parseBuffer } from 'music-metadata';
 import { Buffer } from 'buffer';
 import { createLogger } from '../utils/logger';
 
@@ -198,6 +199,30 @@ export class AudioPlayer {
   async getDuration(): Promise<number> {
     const progress = await TrackPlayer.getProgress();
     return progress.duration;
+  }
+
+  /**
+   * Parse audio duration from a base64-encoded audio string using music-metadata.
+   * Supports WAV, MP3, OGG, FLAC, AAC, M4A, OPUS and other common formats.
+   * This is a static, side-effect-free helper that never touches TrackPlayer.
+   *
+   * @param base64Audio - Base64-encoded audio data
+   * @param mimeType    - MIME type of the audio (e.g. 'audio/wav', 'audio/mpeg')
+   * @returns Duration in seconds, or null if it could not be determined
+   */
+  static async getDurationFromBase64(
+    base64Audio: string,
+    mimeType: string = 'audio/wav'
+  ): Promise<number | null> {
+    try {
+      const buffer = Buffer.from(base64Audio, 'base64');
+      const metadata = await parseBuffer(buffer, { mimeType });
+      const duration = metadata.format.duration;
+      return duration != null && duration > 0 ? duration : null;
+    } catch (error) {
+      log.warn('Could not parse audio duration from buffer:', error);
+      return null;
+    }
   }
 }
 

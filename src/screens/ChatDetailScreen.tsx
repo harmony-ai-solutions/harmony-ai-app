@@ -208,9 +208,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           newSet.delete(messageId);
           return newSet;
         });
-        // Reload messages to show updated transcription
+        // Reload messages to show updated transcription and scroll to it
         getRecentConversationMessages(impersonatedEntityId, partnerEntityId, 50)
-          .then(setMessages);
+          .then(updatedMessages => {
+            // Transcription completion updates the user's own message - always scroll to it
+            isNearBottom.current = true;
+            setMessages(updatedMessages);
+          });
       }
     };
 
@@ -464,6 +468,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 partnerEntityId,
                 50
               );
+              // Always scroll to the re-sent user message
+              isNearBottom.current = true;
               setMessages(updatedMessages);
               
               if (Platform.OS === 'android') {
@@ -621,6 +627,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [messagesWithDivider]);
 
+  // Capture the final scroll position accurately when a scroll animation or drag ends.
+  // This avoids relying solely on the throttled onScroll event and ensures
+  // isNearBottom.current is correct when the user "lands" at the bottom.
+  const handleScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    isNearBottom.current =
+      contentSize.height - (contentOffset.y + layoutMeasurement.height) < 150;
+  }, []);
+
   // Handle scroll for mark-as-read and near-bottom tracking
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
@@ -643,6 +658,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     }
   }, [messages, lastReadTimestamp, partnerEntityId]);
+
+  // Auto-scroll to bottom whenever the message list changes and the user is near the bottom.
+  // This is the primary mechanism for scrolling on new incoming messages.
+  // A 50 ms delay lets FlatList finish rendering the new item before we scroll.
+  useEffect(() => {
+    if (messages.length > 0 && isNearBottom.current) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 50);
+    }
+  }, [messages]);
 
   const renderMessage = useCallback(({ item }: { item: any }) => {
     // Render divider
@@ -733,9 +759,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.messageList}
           onScroll={handleScroll}
-          scrollEventThrottle={400}
+          scrollEventThrottle={100}
+          onMomentumScrollEnd={handleScrollEnd}
+          onScrollEndDrag={handleScrollEnd}
           onContentSizeChange={() => {
-            // Auto-scroll to bottom whenever content grows and the user is already near the bottom
+            // Auto-scroll to bottom on initial load / layout changes when near the bottom
             if (isNearBottom.current) {
               flatListRef.current?.scrollToEnd({ animated: false });
             }

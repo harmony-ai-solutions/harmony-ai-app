@@ -7,7 +7,7 @@ import ConnectionStateManager from './ConnectionStateManager';
 import { createLogger } from '../utils/logger';
 import { messageExists, createConversationMessage, updateConversationMessage, getConversationMessage } from '../database/repositories/conversation_messages';
 import { SyncService } from './SyncService';
-import AudioPlayer from './AudioPlayer';
+import AudioPlayer, { AudioPlayer as AudioPlayerClass } from './AudioPlayer';
 import { uint8ArrayToBase64 } from '../database/base64';
 import { v7 as uuidv7 } from 'uuid';
 
@@ -816,6 +816,18 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     };
     
     await createConversationMessage(message);
+
+    // Parse and persist audio duration if the backend did not provide it
+    if (message.audio_data && !message.audio_duration) {
+      const duration = await AudioPlayerClass.getDurationFromBase64(
+        message.audio_data,
+        message.audio_mime_type || 'audio/wav'
+      );
+      if (duration) {
+        await updateConversationMessage(messageId, { audio_duration: duration });
+        log.info(`Stored audio duration for message ${messageId}: ${duration.toFixed(2)}s`);
+      }
+    }
 
     // Trigger sync
     SyncService.getInstance().initiateSync();
