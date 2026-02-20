@@ -50,6 +50,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   
   const flatListRef = useRef<FlatList<any>>(null);
   const hasScrolledToNewMessages = useRef(false);
+  // Tracks whether the user is near the bottom of the list; used to decide whether to auto-scroll on new messages
+  const isNearBottom = useRef(true);
 
   // Load partner info (avatar, name)
   useEffect(() => {
@@ -276,6 +278,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         partnerEntityId,
         50
       );
+      // Always scroll to the message the user just sent
+      isNearBottom.current = true;
       setMessages(updatedMessages);
     } catch (error) {
       log.error('Failed to send message:', error);
@@ -300,6 +304,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         partnerEntityId,
         50
       );
+      // Always scroll to the message the user just sent
+      isNearBottom.current = true;
       setMessages(updatedMessages);
     } catch (error) {
       log.error('Failed to save audio message:', error);
@@ -351,6 +357,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           partnerEntityId,
           50
         );
+        // Always scroll to the message the user just sent
+        isNearBottom.current = true;
         setMessages(updatedMessages);
       }
     } catch (error: any) {
@@ -373,6 +381,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         partnerEntityId,
         50
       );
+      // Always scroll to the message the user just sent
+      isNearBottom.current = true;
       setMessages(updatedMessages);
     } catch (error) {
       log.error('Failed to send image:', error);
@@ -436,6 +446,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               }
               
               const lastUserMessage = userMessages[userMessages.length - 1];
+              
+              // Delete the old user message record - sendTextMessage will re-create it with
+              // the current session_id, preventing duplication when the session was restarted
+              await deleteConversationMessage(lastUserMessage.id);
               
               // Resend the user's last message
               await EntitySessionService.sendTextMessage(partnerEntityId, lastUserMessage.content);
@@ -583,7 +597,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             // Close to bottom, scroll to end
             flatListRef.current?.scrollToEnd({ animated: true });
           } else {
-            // Scroll to show divider at top
+            // Scroll to show divider at top; mark not-near-bottom so auto-scroll
+            // on content size change doesn't immediately override this position
+            isNearBottom.current = false;
             try {
               flatListRef.current?.scrollToIndex({
                 index: dividerIndex,
@@ -601,13 +617,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [messagesWithDivider]);
 
-  // Handle scroll for mark-as-read
+  // Handle scroll for mark-as-read and near-bottom tracking
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const scrollPosition = contentOffset.y;
     const totalHeight = contentSize.height;
     const viewportHeight = layoutMeasurement.height;
-    
+
+    // Track whether the user is near the bottom so incoming messages can auto-scroll
+    const distanceFromBottom = totalHeight - (scrollPosition + viewportHeight);
+    isNearBottom.current = distanceFromBottom < 150;
+
     // If scrolled past 75% of content, mark all as read
     if (scrollPosition + viewportHeight > totalHeight * 0.75) {
       if (messages.length > 0) {
@@ -711,12 +731,14 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           onScroll={handleScroll}
           scrollEventThrottle={400}
           onContentSizeChange={() => {
-            if (!hasScrolledToNewMessages.current) {
+            // Auto-scroll to bottom whenever content grows and the user is already near the bottom
+            if (isNearBottom.current) {
               flatListRef.current?.scrollToEnd({ animated: false });
             }
           }}
           onLayout={() => {
-            if (!hasScrolledToNewMessages.current) {
+            // On initial layout, default isNearBottom is true so this scrolls to the end
+            if (isNearBottom.current) {
               flatListRef.current?.scrollToEnd({ animated: false });
             }
           }}
