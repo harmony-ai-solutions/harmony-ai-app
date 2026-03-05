@@ -1,0 +1,40 @@
+{
+  "project": {
+    "name": "Harmony AI Chat - Appium MCP Testing",
+    "type": "mobile-testing-integration",
+    "description": "Implement Appium MCP for end-to-end mobile testing of the Harmony AI Chat application",
+    "version": "0.0.1"
+  },
+  "research": {
+    "mode": "ecosystem",
+    "domain": "mobile-testing-automation",
+    "confidence": "HIGH"
+  },
+  "stack": {
+    "core": "React Native 0.83.1",
+    "language": "TypeScript 5.8.3",
+    "testing": {
+      "unit": "Jest 29.6.3",
+      "e2e": "Appium MCP (proposed)"
+    }
+  },
+  "paths": {
+    "source": "src/",
+    "tests": "__tests__/",
+    "e2e": "e2e/"
+  },
+  "dependencies": {
+    "required": [
+      "appium-mcp",
+      "appium",
+      "@appium/support"
+    ],
+    "optional": [
+      "webdriverio"
+    ]
+  },
+  "platforms": {
+    "primary": "Android",
+    "secondary": "iOS"
+  }
+}
