@@ -18,7 +18,7 @@ This research documents the installation, configuration, and verification steps 
 
 | Decision | Details |
 |----------|---------|
-| **Appium Testing Routing** | Windows/Linux: Android emulator locally, iOS via TestMu AI (formerly LambdaTest) |
+| **Appium Testing Routing** | Windows/Linux: Android emulator locally, iOS via MacinCloud |
 | **React Native Build** | Windows/Linux: Android only locally, cloud for iOS; macOS: both locally |
 | **Docker Strategy** | NOT NEEDED for local testing - Appium runs locally and connects directly to host emulators |
 
@@ -59,6 +59,7 @@ This research documents the installation, configuration, and verification steps 
 |------------|-----------|----------|
 | appium-mcp | @appium/test-support (direct Appium) | MCP provides natural language interface; direct Appium requires more code |
 | npm installation | Docker container | Docker complex for host emulator access; npm simpler for local testing |
+| **LambdaTest / TestMu AI** | **MacinCloud** | **Dropped:** Test-Only CI solutions lack the ability to build as part of the testing CI. **MacinCloud** (baremetal) provides full control. |
 
 ---
 
@@ -393,7 +394,7 @@ describe('Appium MCP Basic Connection', () => {
 1. **Which cloud provider to use?**
    - What we know: BrowserStack, Sauce Labs, LambdaTest, and Kobiton all support Appium
    - What's unclear: Pricing, real device availability, CI integration ease
-   - **Updated recommendation:** Consider LambdaTest or Kobiton as alternatives to BrowserStack (see Cloud Providers section below)
+   - **Updated recommendation:** Since we need to build as part of the testing CI, we will use **MacinCloud** for iOS. Cloud testing frameworks are retained as options for future large-scale e2e-testing with CI builds.
 
 2. **How to handle iOS testing on Windows/Linux?**
    - What we know: Local iOS testing requires macOS

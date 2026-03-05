@@ -13,7 +13,7 @@ export const androidCapabilities = {
 };
 
 export const iosCapabilities = {
-  // Phase 4: iOS via cloud provider (LambdaTest / TestMu AI)
+  // Phase 4: iOS via MacinCloud
   platformName: 'iOS',
   deviceName: 'iPhone 15',
   automationName: 'XCUITest',

@@ -21,7 +21,7 @@ npm run test:e2e
 ## Platform Strategy
 | Host OS | Local Testing | Cloud Testing |
 |---------|--------------|---------------|
-| Windows | Android emulator | iOS via LambdaTest/TestMu AI (Phase 4) |
+| Windows | Android emulator | iOS via MacinCloud (Phase 4) |
 | macOS | iOS simulator | Android emulator |
 
 ## Test Structure
