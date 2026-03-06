@@ -82,21 +82,62 @@ See LICENSE file for details.
 Before you begin, ensure you have the following installed:
 
 > **Note for Windows users**: We recommend using [Chocolatey](https://chocolatey.org/install) package manager for easy installation. Install Chocolatey first, then use the `choco install` commands below.
+> 
+> **Note for macOS users**: We recommend using [Homebrew](https://brew.sh) package manager for easy installation.
+> 
+> **Note for Linux users**: Most distributions have packages available through their native package managers (apt, dnf, pacman, etc.).
 
 ### Required Software
 
 1. **Node.js 18+ and npm**
    - Windows (with Chocolatey): `choco install nodejs-lts`
+   - macOS (with Homebrew): `brew install node@18` or `brew install node` (latest)
+   - Linux (Ubuntu/Debian):
+     ```bash
+     curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+     sudo apt-get install -y nodejs
+     ```
+   - Linux (Fedora):
+     ```bash
+     curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+     sudo dnf install -y nodejs
+     ```
    - Or download from: https://nodejs.org/
    - Verify installation: `node --version` && `npm --version`
 
 2. **JDK 17 (Java Development Kit)**
-   - Windows (with Chocolatey): `choco install openjdk --version=17.0.2`
-   - Set `JAVA_HOME` environment variable
+   - Windows (with Chocolatey): `choco install openjdk17`
+   - macOS (with Homebrew): `brew install openjdk@17`
+     - After installation, add to PATH:
+       ```bash
+       sudo ln -sfn $(brew --prefix)/opt/openjdk@17/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk-17.jdk
+       export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+       ```
+   - Linux (Ubuntu/Debian):
+     ```bash
+     sudo apt update
+     sudo apt install -y openjdk-17-jdk
+     export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+     ```
+   - Linux (Fedora):
+     ```bash
+     sudo dnf install -y java-17-openjdk-devel
+     export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+     ```
+   - Set `JAVA_HOME` environment variable (add to ~/.bashrc or ~/.zshrc for macOS/Linux)
    - Verify installation: `java --version`
 
 3. **Android Studio**
    - Windows (with Chocolatey): `choco install androidstudio`
+   - macOS: Download from https://developer.android.com/studio or install via Homebrew:
+     ```bash
+     brew install --cask android-studio
+     ```
+   - Linux (Ubuntu/Debian):
+     ```bash    
+     # install via snap (if available)
+     sudo snap install android-studio --classic
+     ```
    - Or download from: https://developer.android.com/studio
    - Install Android SDK (API Level 33 or higher recommended)
    - Install Android SDK Platform-Tools
@@ -105,14 +146,41 @@ Before you begin, ensure you have the following installed:
 4. **Android SDK Setup**
    - Set `ANDROID_HOME` environment variable:
      - Windows: `C:\Users\<YourUsername>\AppData\Local\Android\Sdk`
-     - macOS/Linux: `~/Library/Android/sdk` or `~/Android/Sdk`
+     - macOS: `~/Library/Android/sdk`
+     - Linux: `~/Android/Sdk` or `/opt/android-sdk`
    - Add to PATH:
      - `%ANDROID_HOME%\platform-tools` (Windows)
      - `$ANDROID_HOME/platform-tools` (macOS/Linux)
+   - For macOS, add to ~/.bash_profile or ~/.zshrc:
+     ```bash
+     export ANDROID_HOME=$HOME/Library/Android/sdk
+     export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin
+     ```
+   - For Linux, add to ~/.bashrc:
+     ```bash
+     export ANDROID_HOME=$HOME/Android/Sdk
+     export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin
+     ```
 
-5. **Git**: For version control
-  - Windows (with Chocolatey): `choco install git`
-  - Or download from: https://git-scm.com/
+5. **Watchman** (Required for macOS/Linux, recommended for development)
+   - macOS (with Homebrew): `brew install watchman`
+   - Linux (Ubuntu/Debian):
+     ```bash
+     sudo apt install -y watchman
+     ```
+   - Linux (Fedora):
+     ```bash
+     sudo dnf install -y watchman
+     ```
+   - Alternatively, build from source: https://facebook.github.io/watchman/docs/install
+
+6. **Git**: For version control
+   - Windows (with Chocolatey): `choco install git`
+   - macOS: `brew install git` (or use Xcode Command Line Tools: `xcode-select --install`)
+   - Linux (Ubuntu/Debian): `sudo apt install -y git`
+   - Linux (Fedora): `sudo dnf install -y git`
+   - Or download from: https://git-scm.com/
+   - Verify installation: `git --version`
 
 ## 🚀 Installation
 
