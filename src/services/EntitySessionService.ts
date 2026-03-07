@@ -261,7 +261,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       entityId,
       deviceType: 'harmony_app',
       deviceId,
-      capabilities: ['chat', 'voice', 'images'],
+      capabilities: ['chat'],
       connectedAt: Date.now(),
       lastActivity: Date.now(),
       status: 'connecting' // Starts as 'connecting', will become 'active' via event
@@ -620,6 +620,12 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         targetSession.status = 'active';
 
         log.info(`Session activated: ${entityId} -> session_id=${event.payload.session_id}`);
+
+        // Update capabilities from backend response (if provided)
+        if (event.payload.capabilities && Array.isArray(event.payload.capabilities)) {
+          targetSession.capabilities = event.payload.capabilities;
+          log.info(`Entity capabilities updated for ${entityId}: ${event.payload.capabilities.join(', ')}`);
+        }
 
         // Find the dual session this belongs to (may not exist yet if this is the first to complete)
         if (!dualSession) {
