@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chat & Messaging
 
+#### Fixed
+- Fixed audio messages loading incorrect audio data after reconnection
+  - All audio bubbles now load their own audio only when explicitly tapped for playback
+  - Eliminates race condition where concurrent mount-time preloads corrupted the shared audio queue
+- Audio message duration is now correctly shown before playback begins
+  - Duration is automatically detected from the audio data and stored when messages are received
+
 #### Added
 - Real-time chat interface with AI characters
 - Text messaging with send/receive capabilities
@@ -25,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Choose which entity identity to use per conversation
   - Preferences saved automatically for each chat partner
   - Smart defaults favoring "user" entity
+
+#### Fixed
+- Fixed crash when attempting to record audio messages without microphone permission
+- Added proper runtime permission handling for audio recording on Android
+- Improved user feedback when microphone permission is denied
+- Added visual indication of microphone permission state
+- Fixed audio message transcription showing infinite loading animation after timeout or disconnection
+- Added transcription timeout detection (30-second timeout) with visual feedback
+- Added retry button for failed audio transcriptions
+- Automatic cleanup of pending transcriptions when session disconnects
 
 ### Harmony Link Integration
 

@@ -12,12 +12,15 @@ interface ChatBubbleProps {
   message: ConversationMessage;
   isOwn: boolean;
   isLastMessage?: boolean;
+  isTranscriptionFailed?: boolean;
   partnerAvatar?: string | null;
+  partnerName?: string;
   onImagePress?: (imageBase64: string, mimeType: string) => void;
   onSendMessage?: (messageId: string, editedText: string) => void;
   onDelete?: (messageId: string) => void;
   onRegenerate?: (messageId: string) => void;
   onEdit?: (messageId: string, newText: string) => void;
+  onRetryTranscription?: (messageId: string) => void;
   theme: Theme;
 }
 
@@ -25,12 +28,15 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   message,
   isOwn,
   isLastMessage = false,
+  isTranscriptionFailed = false,
   partnerAvatar,
+  partnerName = 'AI',
   onImagePress,
   onSendMessage,
   onDelete,
   onRegenerate,
   onEdit,
+  onRetryTranscription,
   theme,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -46,53 +52,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   useEffect(() => {
     setEditedText(message.content || '');
   }, [message.content]);
-
-  // Preload audio to get duration
-  useEffect(() => {
-    const preloadAudio = async () => {
-      if (message.audio_data && !audioDuration) {
-        try {
-          // Initialize and load the track without playing
-          await AudioPlayer.initialize();
-          await AudioPlayer.stop(); // Reset any previous track
-          
-          // Add the track
-          const uri = `data:${message.audio_mime_type || 'audio/wav'};base64,${message.audio_data}`;
-          await AudioPlayer.playAudio(message.audio_data, message.audio_mime_type || 'audio/wav');
-          
-          // Immediately pause it (so it doesn't play)
-          await AudioPlayer.pause();
-          
-          // Get the duration after a brief delay to ensure track is loaded
-          setTimeout(async () => {
-            try {
-              const duration = await AudioPlayer.getDuration();
-              console.log('Preloaded audio duration:', duration);
-              if (duration && duration > 0) {
-                setAudioDuration(duration);
-              } else if (message.audio_duration) {
-                // Fallback to stored duration
-                setAudioDuration(message.audio_duration);
-              }
-            } catch (error) {
-              console.warn('Could not get duration during preload:', error);
-              if (message.audio_duration) {
-                setAudioDuration(message.audio_duration);
-              }
-            }
-          }, 300);
-        } catch (error) {
-          console.warn('Could not preload audio:', error);
-          // Use stored duration as fallback
-          if (message.audio_duration) {
-            setAudioDuration(message.audio_duration);
-          }
-        }
-      }
-    };
-    
-    preloadAudio();
-  }, [message.audio_data, message.audio_mime_type, message.audio_duration]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -149,6 +108,29 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         await AudioPlayer.pause();
         setIsPlaying(false);
       } else {
+        // Check if the correct audio is loaded
+        if (!AudioPlayer.isMessageLoaded(message.id)) {
+          console.log(`Loading audio for message ${message.id} (current: ${AudioPlayer.getCurrentMessageId()})`);
+          // Wrong audio is loaded, load the correct one
+          await AudioPlayer.loadAudioForMessage(
+            message.id,
+            message.audio_data,
+            message.audio_mime_type || 'audio/wav'
+          );
+          
+          // Update duration if we get it
+          setTimeout(async () => {
+            try {
+              const duration = await AudioPlayer.getDuration();
+              if (duration && duration > 0) {
+                setAudioDuration(duration);
+              }
+            } catch (error) {
+              console.warn('Could not get duration:', error);
+            }
+          }, 300);
+        }
+        
         // Check if playback has finished (position at or near end)
         const progress = await AudioPlayer.getProgress();
         if (audioDuration && progress.position >= audioDuration - 0.5) {
@@ -157,7 +139,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           setCurrentPosition(0);
         }
         
-        // Resume playback (track is already loaded from preload)
+        // Resume playback (track is already loaded)
         await AudioPlayer.resume();
         setIsPlaying(true);
       }
@@ -274,12 +256,27 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           </TouchableOpacity>
         )}
 
-        {isTranscribing && (
+        {isTranscribing && !isTranscriptionFailed && (
           <View style={styles.transcriptionStatus}>
             <ActivityIndicator size="small" color={theme.colors.accent.primary} />
             <ThemedText variant="muted" size={12} style={styles.statusText}>
               Transcribing...
             </ThemedText>
+          </View>
+        )}
+        
+        {isTranscriptionFailed && (
+          <View style={styles.transcriptionStatus}>
+            <ThemedText variant="muted" size={12} style={styles.statusText}>
+              Transcription failed
+            </ThemedText>
+            <TouchableOpacity
+              onPress={() => onRetryTranscription && onRetryTranscription(message.id)}
+              style={[styles.retryButton, { backgroundColor: theme.colors.accent.primary }]}
+            >
+              <IconButton icon="refresh" size={14} iconColor="#fff" style={styles.retryIcon} />
+              <ThemedText style={{ color: '#fff' }} size={12}>Retry</ThemedText>
+            </TouchableOpacity>
           </View>
         )}
         
@@ -405,7 +402,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         <Avatar.Image size={32} source={{ uri: partnerAvatar }} style={styles.avatar} />
       )}
       {!isOwn && !partnerAvatar && (
-        <Avatar.Text size={32} label="AI" style={styles.avatar} />
+        <Avatar.Text 
+          size={32} 
+          label={partnerName.substring(0, 2).toUpperCase()} 
+          style={styles.avatar} 
+        />
       )}
       
       <View style={[
@@ -527,6 +528,18 @@ const styles = StyleSheet.create({
   },
   statusText: {
     marginLeft: 8,
+    marginRight: 8,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  retryIcon: {
+    margin: 0,
+    marginLeft: -4,
   },
   transcriptionToggle: {
     flexDirection: 'row',

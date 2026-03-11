@@ -2,6 +2,10 @@
 
 ## What Works
 
+### Harmony Link Integration Documentation ✅ COMPLETE - February 2026
+- ✅ Created comprehensive integration guide: `/docs/HARMONY-LINK-INTEGRATION.md`
+- ✅ Created 5 detailed diagram files in `/docs/harmony-link-diagrams/` covering connection architecture, device pairing protocol, sync protocol, entity sessions, and message flows
+
 ### Foundation (Bootstrap Complete)
 ✅ **React Native Project Setup**
 - React Native 0.83.1 with TypeScript fully configured
@@ -55,14 +59,15 @@
 ✅ **Database Layer (Local Storage)** ✅ COMPLETE - January 2026
 - **SQLite with SQLCipher encryption** for secure data storage at rest
 - **Secure key management** via React Native Keychain
-- **Forward-only migrations** (4 migrations, 100% Harmony Link compatible)
+- **Forward-only migrations** in `/src/database/migrations/` (100% Harmony Link compatible)
+- **Base64 TEXT storage** for audio/image data (simpler cross-platform handling)
 - **Complete repository layer**:
   - Entity repository with module mappings (11 tests)
-  - Character repository with BLOB/image handling (18 tests)
+  - Character repository with base64 image handling (18 tests)
   - Module repository for all 6 types (23 tests)
   - Provider repository for all 11 types (32 tests)
 - **App integration**: DatabaseContext, loading screen, error recovery
-- **84 comprehensive tests** covering all CRUD operations
+- **84+ comprehensive tests** covering all CRUD operations
 - **In-app test runner**: DEV-only screen in Settings for running tests
 - **Production-ready**: Type-safe, documented, tested
 - **Sync-ready**: Schema compatible with Harmony Link for bidirectional sync
@@ -123,7 +128,7 @@
 - [ ] Text-to-Speech for AI responses
 - [ ] Audio playback controls
 - [ ] Audio message UI
-- [ ] Microphone permissions
+- [x] Microphone permissions
 
 🔄 **Media Support**
 - [ ] Image viewing
@@ -237,6 +242,12 @@
 - Messenger API limitations and restrictions
 
 ## Evolution of Decisions
+
+### February 2026
+**Decision**: Proper Android Runtime Permission Handling
+- **Reason**: Fix crashes occurring when attempting to record audio without granted permissions.
+- **Trade-off**: Slightly more complex UI flow and service initialization logic.
+- **Outcome**: Created reusable permission utility, updated `AudioRecorder` service to check/request permissions, and enhanced `ChatInput` with visual feedback and recovery options.
 
 ### January 2026
 **Decision**: Advanced Theming System with Custom Editor

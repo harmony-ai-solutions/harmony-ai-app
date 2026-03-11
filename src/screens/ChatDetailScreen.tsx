@@ -46,9 +46,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [partnerName, setPartnerName] = useState<string>('Chat');
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
   const [lastReadTimestamp, setLastReadTimestamp] = useState<number>(0);
+  const [failedTranscriptions, setFailedTranscriptions] = useState<Set<string>>(new Set());
   
   const flatListRef = useRef<FlatList<any>>(null);
   const hasScrolledToNewMessages = useRef(false);
+  // Tracks whether the user is near the bottom of the list; used to decide whether to auto-scroll on new messages
+  const isNearBottom = useRef(true);
 
   // Load partner info (avatar, name)
   useEffect(() => {
@@ -80,6 +83,21 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         );
         setMessages(existingMessages);
         
+        // Detect stuck transcriptions (messages with audio but no text that aren't actively transcribing)
+        const stuckTranscriptions = existingMessages
+          .filter(msg => 
+            msg.audio_data && 
+            msg.audio_data.length > 0 && 
+            (!msg.content || msg.content.trim().length === 0) &&
+            msg.sender_entity_id === impersonatedEntityId // Only user's own messages
+          )
+          .map(msg => msg.id);
+        
+        if (stuckTranscriptions.length > 0) {
+          log.info(`Found ${stuckTranscriptions.length} stuck transcriptions on load`);
+          setFailedTranscriptions(new Set(stuckTranscriptions));
+        }
+        
         const timestamp = await ChatPreferencesService.getLastReadTimestamp(partnerEntityId);
         setLastReadTimestamp(timestamp);
       } catch (error) {
@@ -92,33 +110,42 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     loadMessagesAndTimestamp();
   }, [partnerEntityId, impersonatedEntityId]);
 
-  // Initialize entity session
+  // Session lifecycle – stop session only when the screen unmounts
+  // (user navigates away).  This is intentionally NOT triggered by isConnected
+  // changes so that EntitySessionContext's own sync-drop cleanup is the sole
+  // owner of that path, eliminating the double-stop race condition (Bug #4).
+  useEffect(() => {
+    return () => {
+      log.info(`Screen unmounting – stopping session for ${partnerEntityId}`);
+      stopDualSession(partnerEntityId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partnerEntityId]);
+
+  // Session initialization – (re)start the session whenever the sync
+  // connection becomes available or the chat target changes.  The service's
+  // startDualSession() handles "already active" and "stale" cases internally
+  // so we do not need an isDualSessionActive guard here.
   useEffect(() => {
     let mounted = true;
-    
+
+    if (!isConnected) {
+      // Sync not connected yet – wait for the next time this effect fires
+      // (when isConnected transitions to true).
+      return;
+    }
+
     const initializeSession = async () => {
-      // Only start if we have an active sync connection
-      if (!isConnected) {
-        log.warn('Cannot start entity session: sync not connected');
-        return;
-      }
-      
-      // Check if session already exists (e.g., navigating back to chat)
-      if (isDualSessionActive(partnerEntityId)) {
-        log.info(`Session already active for ${partnerEntityId}`);
-        return;
-      }
-      
       try {
         log.info(`Initializing dual session for ${partnerEntityId}...`);
         await startDualSession(partnerEntityId, impersonatedEntityId);
-        // Session will be in 'connecting' state, UI will show "Connecting..."
-        // When INIT_ENTITY responses arrive, UI will update to "Connected"
+        // Session starts in 'connecting' state; UI shows "Connecting..."
+        // Status transitions to 'active' when INIT_ENTITY responses arrive.
       } catch (error: any) {
         if (!mounted) return;
-        
+
         log.error('Failed to initialize entity session:', error);
-        
+
         const errorMessage = error?.message || 'Unknown error';
         if (Platform.OS === 'android') {
           ToastAndroid.show(
@@ -134,16 +161,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       }
     };
-    
+
     initializeSession();
-    
-    // Cleanup on unmount
+
     return () => {
       mounted = false;
-      if (isDualSessionActive(partnerEntityId)) {
-        log.info(`Stopping session for ${partnerEntityId} on unmount`);
-        stopDualSession(partnerEntityId);
-      }
     };
   }, [partnerEntityId, impersonatedEntityId, isConnected]);
 
@@ -180,7 +202,28 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const handleTranscriptionCompleted = (entityId: string, messageId: string, text: string) => {
       if (entityId === partnerEntityId) {
         log.info(`Transcription completed for message ${messageId}: "${text}"`);
-        // Reload messages to show updated transcription
+        // Remove from failed set if it was there
+        setFailedTranscriptions(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(messageId);
+          return newSet;
+        });
+        // Reload messages to show updated transcription and scroll to it
+        getRecentConversationMessages(impersonatedEntityId, partnerEntityId, 50)
+          .then(updatedMessages => {
+            // Transcription completion updates the user's own message - always scroll to it
+            isNearBottom.current = true;
+            setMessages(updatedMessages);
+          });
+      }
+    };
+
+    const handleTranscriptionFailed = (entityId: string, messageId: string) => {
+      if (entityId === partnerEntityId) {
+        log.warn(`Transcription failed for message ${messageId}`);
+        // Add to failed set
+        setFailedTranscriptions(prev => new Set(prev).add(messageId));
+        // Reload messages to trigger re-render
         getRecentConversationMessages(impersonatedEntityId, partnerEntityId, 50)
           .then(setMessages);
       }
@@ -189,13 +232,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     EntitySessionService.on('message:received', handleNewMessage);
     EntitySessionService.on('typing:indicator', handleTyping);
     EntitySessionService.on('recording:indicator', handleRecording);
-    EntitySessionService.on('transcription:completed' as any, handleTranscriptionCompleted);
+    EntitySessionService.on('transcription:completed', handleTranscriptionCompleted);
+    EntitySessionService.on('transcription:failed', handleTranscriptionFailed);
 
     return () => {
       EntitySessionService.off('message:received', handleNewMessage);
       EntitySessionService.off('typing:indicator', handleTyping);
       EntitySessionService.off('recording:indicator', handleRecording);
-      EntitySessionService.off('transcription:completed' as any, handleTranscriptionCompleted);
+      EntitySessionService.off('transcription:completed', handleTranscriptionCompleted);
+      EntitySessionService.off('transcription:failed', handleTranscriptionFailed);
     };
   }, [partnerEntityId, impersonatedEntityId]);
 
@@ -241,13 +286,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         partnerEntityId,
         50
       );
+      // Always scroll to the message the user just sent
+      isNearBottom.current = true;
       setMessages(updatedMessages);
     } catch (error) {
       log.error('Failed to send message:', error);
     }
   }, [partnerEntityId, impersonatedEntityId, isDualSessionActive]);
 
-  const handleSendAudio = useCallback(async (audioData: Uint8Array, duration: number) => {
+  const handleSendAudio = useCallback(async (audioData: string, duration: number) => {
     if (!isDualSessionActive(partnerEntityId)) return;
     
     try {
@@ -265,6 +312,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         partnerEntityId,
         50
       );
+      // Always scroll to the message the user just sent
+      isNearBottom.current = true;
       setMessages(updatedMessages);
     } catch (error) {
       log.error('Failed to save audio message:', error);
@@ -285,9 +334,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
       const base64Audio = message.audio_data; // Already base64 string
 
+      // Update message with final text and change type to 'combined'
+      const updates: any = { message_type: 'combined' };
       if (finalText !== message.content) {
-        await updateConversationMessage(messageId, { content: finalText });
+        updates.content = finalText;
       }
+      await updateConversationMessage(messageId, updates);
 
       const dualSession = EntitySessionService.getSession(partnerEntityId);
       if (dualSession) {
@@ -313,6 +365,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           partnerEntityId,
           50
         );
+        // Always scroll to the message the user just sent
+        isNearBottom.current = true;
         setMessages(updatedMessages);
       }
     } catch (error: any) {
@@ -335,6 +389,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         partnerEntityId,
         50
       );
+      // Always scroll to the message the user just sent
+      isNearBottom.current = true;
       setMessages(updatedMessages);
     } catch (error) {
       log.error('Failed to send image:', error);
@@ -399,6 +455,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               
               const lastUserMessage = userMessages[userMessages.length - 1];
               
+              // Delete the old user message record - sendTextMessage will re-create it with
+              // the current session_id, preventing duplication when the session was restarted
+              await deleteConversationMessage(lastUserMessage.id);
+              
               // Resend the user's last message
               await EntitySessionService.sendTextMessage(partnerEntityId, lastUserMessage.content);
               
@@ -408,6 +468,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 partnerEntityId,
                 50
               );
+              // Always scroll to the re-sent user message
+              isNearBottom.current = true;
               setMessages(updatedMessages);
               
               if (Platform.OS === 'android') {
@@ -475,6 +537,34 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }, [impersonatedEntityId, partnerEntityId]);
 
+  const handleRetryTranscription = useCallback(async (messageId: string) => {
+    try {
+      // Remove from failed set optimistically
+      setFailedTranscriptions(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(messageId);
+        return newSet;
+      });
+      
+      await EntitySessionService.retryTranscription(messageId, partnerEntityId);
+      
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Retrying transcription...', ToastAndroid.SHORT);
+      }
+    } catch (error: any) {
+      log.error('Failed to retry transcription:', error);
+      
+      // Add back to failed set
+      setFailedTranscriptions(prev => new Set(prev).add(messageId));
+      
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(`Retry failed: ${error.message}`, ToastAndroid.LONG);
+      } else {
+        Alert.alert('Retry Failed', error.message);
+      }
+    }
+  }, [partnerEntityId]);
+
   // Calculate messages with divider
   const messagesWithDivider = useMemo(() => {
     if (messages.length === 0 || lastReadTimestamp === 0) {
@@ -517,7 +607,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             // Close to bottom, scroll to end
             flatListRef.current?.scrollToEnd({ animated: true });
           } else {
-            // Scroll to show divider at top
+            // Scroll to show divider at top; mark not-near-bottom so auto-scroll
+            // on content size change doesn't immediately override this position
+            isNearBottom.current = false;
             try {
               flatListRef.current?.scrollToIndex({
                 index: dividerIndex,
@@ -535,13 +627,26 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [messagesWithDivider]);
 
-  // Handle scroll for mark-as-read
+  // Capture the final scroll position accurately when a scroll animation or drag ends.
+  // This avoids relying solely on the throttled onScroll event and ensures
+  // isNearBottom.current is correct when the user "lands" at the bottom.
+  const handleScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    isNearBottom.current =
+      contentSize.height - (contentOffset.y + layoutMeasurement.height) < 150;
+  }, []);
+
+  // Handle scroll for mark-as-read and near-bottom tracking
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const scrollPosition = contentOffset.y;
     const totalHeight = contentSize.height;
     const viewportHeight = layoutMeasurement.height;
-    
+
+    // Track whether the user is near the bottom so incoming messages can auto-scroll
+    const distanceFromBottom = totalHeight - (scrollPosition + viewportHeight);
+    isNearBottom.current = distanceFromBottom < 150;
+
     // If scrolled past 75% of content, mark all as read
     if (scrollPosition + viewportHeight > totalHeight * 0.75) {
       if (messages.length > 0) {
@@ -554,6 +659,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [messages, lastReadTimestamp, partnerEntityId]);
 
+  // Auto-scroll to bottom whenever the message list changes and the user is near the bottom.
+  // This is the primary mechanism for scrolling on new incoming messages.
+  // A 50 ms delay lets FlatList finish rendering the new item before we scroll.
+  useEffect(() => {
+    if (messages.length > 0 && isNearBottom.current) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 50);
+    }
+  }, [messages]);
+
   const renderMessage = useCallback(({ item }: { item: any }) => {
     // Render divider
     if (item.type === 'divider') {
@@ -563,13 +679,16 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // Render message
     const isOwn = item.sender_entity_id === impersonatedEntityId;
     const isLastMessage = messages.length > 0 && item.id === messages[messages.length - 1].id;
+    const isTranscriptionFailed = failedTranscriptions.has(item.id);
     
     return (
       <ChatBubble
         message={item}
         isOwn={isOwn}
         isLastMessage={isLastMessage}
+        isTranscriptionFailed={isTranscriptionFailed}
         partnerAvatar={!isOwn ? partnerAvatar : null}
+        partnerName={partnerName}
         onImagePress={() => {
           // Navigate to full-screen image viewer
         }}
@@ -577,10 +696,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         onDelete={handleDeleteMessage}
         onRegenerate={handleRegenerateMessage}
         onEdit={handleEditMessage}
+        onRetryTranscription={handleRetryTranscription}
         theme={theme!}
       />
     );
-  }, [messages, partnerAvatar, theme, impersonatedEntityId, handleConfirmAndSendMessage, handleDeleteMessage, handleRegenerateMessage, handleEditMessage]);
+  }, [messages, partnerAvatar, theme, impersonatedEntityId, failedTranscriptions, handleConfirmAndSendMessage, handleDeleteMessage, handleRegenerateMessage, handleEditMessage, handleRetryTranscription]);
 
   if (loading) {
     return (
@@ -639,14 +759,18 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.messageList}
           onScroll={handleScroll}
-          scrollEventThrottle={400}
+          scrollEventThrottle={100}
+          onMomentumScrollEnd={handleScrollEnd}
+          onScrollEndDrag={handleScrollEnd}
           onContentSizeChange={() => {
-            if (!hasScrolledToNewMessages.current) {
+            // Auto-scroll to bottom on initial load / layout changes when near the bottom
+            if (isNearBottom.current) {
               flatListRef.current?.scrollToEnd({ animated: false });
             }
           }}
           onLayout={() => {
-            if (!hasScrolledToNewMessages.current) {
+            // On initial layout, default isNearBottom is true so this scrolls to the end
+            if (isNearBottom.current) {
               flatListRef.current?.scrollToEnd({ animated: false });
             }
           }}

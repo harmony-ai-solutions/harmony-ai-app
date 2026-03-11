@@ -1,5 +1,6 @@
 import { NativeModules, Platform } from 'react-native';
 import { createLogger } from '../utils/logger';
+import { checkAndRequestPermission, PERMISSIONS } from '../utils/permissions';
 
 const log = createLogger('[AudioRecorder]');
 
@@ -9,7 +10,7 @@ const log = createLogger('[AudioRecorder]');
 import AudioRecord from 'react-native-audio-record';
 
 export interface RecordingResult {
-  data: Uint8Array;
+  data: string; // Base64 encoded audio
   mimeType: string;
   duration: number; // seconds
 }
@@ -19,9 +20,36 @@ export class AudioRecorder {
   private startTime: number = 0;
 
   /**
+   * Check if audio recording permission is granted
+   */
+  private async checkPermission(): Promise<boolean> {
+    const hasPermission = await checkAndRequestPermission(PERMISSIONS.RECORD_AUDIO);
+    if (!hasPermission) {
+      log.error('Audio recording permission denied');
+    }
+    return hasPermission;
+  }
+
+  /**
+   * Check if audio recording permission is currently granted
+   * Does not request permission, only checks current status
+   */
+  async hasPermission(): Promise<boolean> {
+    // Dynamic import to avoid circular dependency if any, or just use the utility
+    const { checkPermission } = require('../utils/permissions');
+    return await checkPermission(PERMISSIONS.RECORD_AUDIO);
+  }
+
+  /**
    * Initialize audio recorder with options
    */
   async initialize(): Promise<void> {
+    // Check permission before initializing
+    const hasPermission = await this.checkPermission();
+    if (!hasPermission) {
+      throw new Error('RECORD_AUDIO permission is required to record audio');
+    }
+
     const options = {
       sampleRate: 16000,
       channels: 1,
@@ -40,6 +68,12 @@ export class AudioRecorder {
   async startRecording(): Promise<void> {
     if (this.isRecording) {
       throw new Error('Already recording');
+    }
+
+    // Additional safety check for permission
+    const hasPermission = await checkAndRequestPermission(PERMISSIONS.RECORD_AUDIO);
+    if (!hasPermission) {
+      throw new Error('RECORD_AUDIO permission is required to record audio');
     }
 
     this.startTime = Date.now();
@@ -61,27 +95,21 @@ export class AudioRecorder {
     
     const duration = (Date.now() - this.startTime) / 1000;
     
-    // Read the WAV file and convert to Uint8Array
-    // Using react-native-fs to read the file
+    // Read the WAV file using react-native-fs to read the file
     const RNFS = require('react-native-fs');
     const filePath = Platform.OS === 'android' 
       ? audioFile 
       : `${RNFS.DocumentDirectoryPath}/${audioFile}`;
     
     const fileContent = await RNFS.readFile(filePath, 'base64');
-    const binaryString = atob(fileContent);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
 
     // Clean up temp file
     await RNFS.unlink(filePath);
 
-    log.info(`Recording stopped. Duration: ${duration}s, Size: ${bytes.length} bytes`);
+    log.info(`Recording stopped. Duration: ${duration}s, Size: ${fileContent.length} chars (base64)`);
 
     return {
-      data: bytes,
+      data: fileContent,
       mimeType: 'audio/wav',
       duration
     };

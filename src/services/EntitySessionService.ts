@@ -5,10 +5,11 @@ import { Buffer } from 'buffer';
 import ConnectionManager, { ConnectionMode } from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
 import { createLogger } from '../utils/logger';
-import { messageExists, createConversationMessage, updateConversationMessage } from '../database/repositories/conversation_messages';
+import { messageExists, createConversationMessage, updateConversationMessage, getConversationMessage } from '../database/repositories/conversation_messages';
 import { SyncService } from './SyncService';
-import AudioPlayer from './AudioPlayer';
+import AudioPlayer, { AudioPlayer as AudioPlayerClass } from './AudioPlayer';
 import { uint8ArrayToBase64 } from '../database/base64';
+import { v7 as uuidv7 } from 'uuid';
 
 const log = createLogger('[EntitySessionService]');
 
@@ -38,6 +39,8 @@ interface EntitySessionEvents {
   'message:received': (partnerEntityId: string, message: any) => void;
   'typing:indicator': (partnerEntityId: string, entityId: string, isTyping: boolean) => void;
   'recording:indicator': (partnerEntityId: string, entityId: string, isRecording: boolean) => void;
+  'transcription:completed': (partnerEntityId: string, messageId: string, text: string) => void;
+  'transcription:failed': (partnerEntityId: string, messageId: string) => void;
 }
 
 export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
@@ -48,9 +51,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   private pendingTranscriptions: Map<string, {
     messageId: string;
     partnerEntityId: string;
-    eventId: string;
     timeout: any;
   }> = new Map();
+  private transcriptionStates: Map<string, 'pending' | 'failed'> = new Map(); // Track transcription state
   private appStateSubscription: any;
   
   private constructor() {
@@ -58,6 +61,28 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     this.connectionManager = ConnectionManager;
     this.setupConnectionListeners();
     this.setupAppStateListener();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internal helpers
+  // ---------------------------------------------------------------------------
+
+  /** Clean up all pending transcriptions for a given partner entity. */
+  private cleanupTranscriptionsForPartner(partnerEntityId: string): void {
+    const transcriptionsToCleanup: string[] = [];
+    for (const [messageId, request] of this.pendingTranscriptions.entries()) {
+      if (request.partnerEntityId === partnerEntityId) {
+        clearTimeout(request.timeout);
+        transcriptionsToCleanup.push(messageId);
+        this.transcriptionStates.set(messageId, 'failed');
+      }
+    }
+    transcriptionsToCleanup.forEach(messageId => {
+      this.pendingTranscriptions.delete(messageId);
+    });
+    if (transcriptionsToCleanup.length > 0) {
+      log.info(`Marked ${transcriptionsToCleanup.length} pending transcriptions as failed for ${partnerEntityId}`);
+    }
   }
   
   static getInstance(): EntitySessionService {
@@ -79,6 +104,55 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   
   private setupConnectionListeners() {
     this.connectionManager.on('event:entity', this.handleEntityEvent.bind(this));
+    // Bug fix #1: listen for entity connection drops so session status is always accurate
+    this.connectionManager.on('disconnected:entity', this.handleEntityDisconnected.bind(this));
+  }
+
+  /**
+   * Handles an entity WebSocket connection dropping (e.g. Harmony Link restart).
+   * Updates the matching EntitySession status to 'disconnected' so that
+   * isDualSessionActive() returns false and callers can properly restart.
+   */
+  private handleEntityDisconnected(entityId: string): void {
+    log.info(`Entity connection dropped for ${entityId}`);
+
+    // If still in the pending-init map, just remove it
+    if (this.pendingSessions.has(entityId)) {
+      const pending = this.pendingSessions.get(entityId)!;
+      pending.status = 'disconnected';
+      this.pendingSessions.delete(entityId);
+      log.info(`Removed pending session for ${entityId}`);
+    }
+
+    // Find the dual session that contains this entity and update its sub-session status
+    for (const [partnerEntityId, session] of this.sessions.entries()) {
+      const isUser    = session.userSession.entityId    === entityId;
+      const isPartner = session.partnerSession.entityId === entityId;
+
+      if (isUser || isPartner) {
+        if (isUser)    session.userSession.status    = 'disconnected';
+        if (isPartner) session.partnerSession.status = 'disconnected';
+
+        log.info(
+          `Session ${partnerEntityId}: user=${session.userSession.status}, partner=${session.partnerSession.status}`
+        );
+
+        // When BOTH sub-sessions have dropped, tear down the dual session
+        if (
+          session.userSession.status    === 'disconnected' &&
+          session.partnerSession.status === 'disconnected'
+        ) {
+          log.info(`Both entity connections lost for ${partnerEntityId} – emitting session:stopped`);
+          this.cleanupTranscriptionsForPartner(partnerEntityId);
+          this.sessions.delete(partnerEntityId);
+          this.emit('session:stopped', partnerEntityId);
+        }
+
+        return;
+      }
+    }
+
+    log.debug(`disconnected:entity for ${entityId} – no matching dual session found`);
   }
   
   /**
@@ -96,8 +170,25 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     
     // Check if session already exists
     if (this.sessions.has(partnerEntityId)) {
-      log.warn(`Session for ${partnerEntityId} already exists`);
-      return this.sessions.get(partnerEntityId)!;
+      const existingSession = this.sessions.get(partnerEntityId)!;
+
+      // If both sub-sessions are still active, just return the live session
+      if (
+        existingSession.userSession.status    === 'active' &&
+        existingSession.partnerSession.status === 'active'
+      ) {
+        log.warn(`Session for ${partnerEntityId} already active, returning existing`);
+        return existingSession;
+      }
+
+      // Session is stale (e.g. connections dropped but cleanup hadn't fired yet) –
+      // tear it down fully so we can create a fresh one below.
+      log.warn(
+        `Session for ${partnerEntityId} is stale ` +
+        `(user=${existingSession.userSession.status}, partner=${existingSession.partnerSession.status}), ` +
+        `cleaning up before restart`
+      );
+      await this.stopSession(partnerEntityId);
     }
     
     log.info(`Starting dual session: user=${impersonatedEntityId}, partner=${partnerEntityId}`);
@@ -170,7 +261,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       entityId,
       deviceType: 'harmony_app',
       deviceId,
-      capabilities: ['chat', 'voice', 'images'],
+      capabilities: ['chat'],
       connectedAt: Date.now(),
       lastActivity: Date.now(),
       status: 'connecting' // Starts as 'connecting', will become 'active' via event
@@ -245,6 +336,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       // Stop any playing audio
       await AudioPlayer.stop();
       
+      // Clean up all pending transcriptions for this partner
+      this.cleanupTranscriptionsForPartner(partnerEntityId);
+      
       // Disconnect user session
       if (this.connectionManager.isConnected(dualSession.userSession.connectionId)) {
         await this.connectionManager.sendEvent(
@@ -303,8 +397,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for entity ${partnerEntityId}`);
     }
     
+    // Generate UUID v7 for message ID (domain layer)
+    const messageId = uuidv7();
+    
     // Store message locally first (optimistic UI pattern)
-    const messageId = this.generateEventId();
     const message = {
       id: messageId,
       entity_id: dualSession.partnerEntityId,
@@ -325,8 +421,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     await createConversationMessage(message);
     log.info(`Stored text message ${messageId} locally`);
     
-    // Send to partner entity
+    // Send to partner entity with message_id
     const utterance = {
+      message_id: messageId,
       entity_id: dualSession.impersonatedEntityId,
       content: text,
       type: 'UTTERANCE_COMBINED'
@@ -342,7 +439,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
    */
   async newAudioMessage(
     partnerEntityId: string,
-    audioData: Uint8Array,
+    audioData: string,
     mimeType: string,
     duration: number
   ): Promise<string> {
@@ -353,10 +450,11 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     
     log.info(`Starting audio message flow for ${partnerEntityId}`);
     
-    // Convert to base64 immediately for storage
-    const base64Audio = uint8ArrayToBase64(audioData);
+    const base64Audio = audioData;
     
-    const messageId = this.generateEventId();
+    // Generate UUID v7 for message ID (domain layer)
+    const messageId = uuidv7();
+    
     const message = {
       id: messageId,
       entity_id: dualSession.partnerEntityId,
@@ -400,26 +498,31 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     
     const timeout = setTimeout(() => {
       log.warn(`Transcription timeout for message ${messageId}`);
-      this.pendingTranscriptions.delete(eventId);
-      this.emit('transcription:error' as any, partnerEntityId, messageId, 'Transcription timeout');
+      this.pendingTranscriptions.delete(messageId);
+      this.transcriptionStates.set(messageId, 'failed');
+      this.emit('transcription:failed', partnerEntityId, messageId);
     }, 30000);
     
-    this.pendingTranscriptions.set(eventId, {
+    this.pendingTranscriptions.set(messageId, {
       messageId,
       partnerEntityId,
-      eventId,
       timeout
     });
+    
+    this.transcriptionStates.set(messageId, 'pending');
     
     const event = {
       event_id: eventId,
       event_type: 'STT_INPUT_AUDIO',
       status: 'NEW',
       payload: {
-        audio_bytes: base64Audio,
-        channels: 1,
-        bit_depth: 16,
-        sample_rate: 16000,
+        message_id: messageId,
+        audio_data: {
+          audio_bytes: base64Audio,
+          channels: 1,
+          bit_depth: 16,
+          sample_rate: 16000
+        },
         result_mode: 'return'
       }
     };
@@ -446,7 +549,11 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for entity ${partnerEntityId}`);
     }
     
+    // Generate UUID v7 for message ID
+    const messageId = uuidv7();
+    
     const utterance = {
+      message_id: messageId,
       entity_id: dualSession.impersonatedEntityId,
       content: caption || '',
       type: 'UTTERANCE_COMBINED',
@@ -513,6 +620,12 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         targetSession.status = 'active';
 
         log.info(`Session activated: ${entityId} -> session_id=${event.payload.session_id}`);
+
+        // Update capabilities from backend response (if provided)
+        if (event.payload.capabilities && Array.isArray(event.payload.capabilities)) {
+          targetSession.capabilities = event.payload.capabilities;
+          log.info(`Entity capabilities updated for ${entityId}: ${event.payload.capabilities.join(', ')}`);
+        }
 
         // Find the dual session this belongs to (may not exist yet if this is the first to complete)
         if (!dualSession) {
@@ -592,24 +705,33 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
     switch (event.event_type) {
       case 'STT_OUTPUT_TEXT':
-        if (event.status === 'SUCCESS' || event.status === 'DONE') {
-          const transcriptionRequest = this.pendingTranscriptions.get(event.event_id);
+        if (event.status === 'NEW') {
+          const messageId = event.payload?.message_id;
+          if (!messageId) {
+            log.warn(`Received STT_OUTPUT_TEXT without message_id, event_id: ${event.event_id}`);
+            break;
+          }
+          
+          const transcriptionRequest = this.pendingTranscriptions.get(messageId);
           if (transcriptionRequest) {
             clearTimeout(transcriptionRequest.timeout);
-            this.pendingTranscriptions.delete(event.event_id);
+            this.pendingTranscriptions.delete(messageId);
+            this.transcriptionStates.delete(messageId);
             
             const text = event.payload?.content || '';
-            log.info(`Received STT transcription for message ${transcriptionRequest.messageId}: "${text}"`);
+            log.info(`Received STT transcription for message ${messageId}: "${text}"`);
             
-            await updateConversationMessage(transcriptionRequest.messageId, {
+            await updateConversationMessage(messageId, {
               content: text
             });
             
-            this.emit('transcription:completed' as any, 
+            this.emit('transcription:completed', 
               transcriptionRequest.partnerEntityId,
-              transcriptionRequest.messageId,
+              messageId,
               text
             );
+          } else {
+            log.warn(`Received STT_OUTPUT_TEXT for unknown message_id: ${messageId}`);
           }
         }
         break;
@@ -644,7 +766,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       log.info(`Incoming message from ${event.entity_id} in session ${dualSession.partnerEntityId}`);
 
       // Save to database
-      await this.handleIncomingUtterance(dualSession, event.payload);
+      await this.handleIncomingUtterance(dualSession, event.payload, event.event_id);
 
       // Just emit event so UI can reload if this chat is open
       this.emit('message:received', dualSession.partnerEntityId, event.payload);
@@ -656,10 +778,17 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
   private async handleIncomingUtterance(
     dualSession: DualEntitySession,
-    utterance: any
+    utterance: any,
+    eventId: string
   ): Promise<void> {
+    // Get message_id from utterance (protocol field)
+    const messageId = utterance.message_id;
+    if (!messageId) {
+      log.warn(`Received utterance without message_id (event_id: ${eventId}), skipping`);
+      return;
+    }
+    
     // Check for duplicate
-    const messageId = utterance.event_id || this.generateEventId();
     if (await messageExists(messageId)) {
       log.debug(`Message ${messageId} already exists, skipping`);
       return;
@@ -694,8 +823,52 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     
     await createConversationMessage(message);
 
+    // Parse and persist audio duration if the backend did not provide it
+    if (message.audio_data && !message.audio_duration) {
+      const duration = await AudioPlayerClass.getDurationFromBase64(
+        message.audio_data,
+        message.audio_mime_type || 'audio/wav'
+      );
+      if (duration) {
+        await updateConversationMessage(messageId, { audio_duration: duration });
+        log.info(`Stored audio duration for message ${messageId}: ${duration.toFixed(2)}s`);
+      }
+    }
+
     // Trigger sync
     SyncService.getInstance().initiateSync();
+  }
+  
+  /**
+   * Retry transcription for a failed message
+   */
+  async retryTranscription(messageId: string, partnerEntityId: string): Promise<void> {
+    const dualSession = this.sessions.get(partnerEntityId);
+    if (!dualSession || dualSession.userSession.status !== 'active') {
+      throw new Error(`No active session for entity ${partnerEntityId}`);
+    }
+    
+    log.info(`Retrying transcription for message ${messageId}`);
+    
+    // Clear failed state
+    this.transcriptionStates.delete(messageId);
+    
+    // Get message from database
+    const message = await getConversationMessage(messageId);
+    
+    if (!message || !message.audio_data) {
+      throw new Error('Message not found or has no audio data');
+    }
+    
+    // Request transcription using existing logic
+    await this.requestTranscription(messageId, partnerEntityId, message.audio_data);
+  }
+  
+  /**
+   * Check if a message has a failed transcription
+   */
+  isTranscriptionFailed(messageId: string): boolean {
+    return this.transcriptionStates.get(messageId) === 'failed';
   }
   
   private generateEventId(): string {

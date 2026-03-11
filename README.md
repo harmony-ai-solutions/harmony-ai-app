@@ -45,6 +45,17 @@ Harmony AI App is a React Native Android application that serves as a mobile fro
 - **React Native**: https://reactnative.dev/
 - **React Native Paper**: https://callstack.github.io/react-native-paper/
 
+## Permissions
+
+The Harmony AI app requires the following permissions:
+
+### Android
+- **RECORD_AUDIO**: Required for sending voice messages in chats
+- **INTERNET**: Required for connecting to Harmony Link servers
+- **CAMERA**: Required for sending images (requested only when used)
+
+Permissions are requested at runtime when the feature is first used, following Android best practices.
+
 ## 🤝 Contributing
 
 Contributions are welcome! This is an open-source project.

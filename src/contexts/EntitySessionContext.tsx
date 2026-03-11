@@ -47,20 +47,19 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
   
   const canStartSession = isSyncConnected;
 
-  // Monitor sync connection and clean up sessions if it drops
+  // Monitor sync connection and clean up sessions when it drops.
+  // We use entitySessionService.closeAllSessions() directly so we don't need a
+  // stale-closure reference to the activeSessions React state map, and we remove
+  // activeSessions.size from the dependency array to prevent spurious re-runs
+  // while sessions are being torn down one-by-one.
   useEffect(() => {
-    if (!isSyncConnected && activeSessions.size > 0) {
+    if (!isSyncConnected) {
       log.warn('Sync connection lost, clearing all entity sessions');
-
-      // Stop all sessions
-      const partnerIds = Array.from(activeSessions.keys());
-      for (const partnerId of partnerIds) {
-        stopDualSession(partnerId).catch(err => {
-          log.error(`Error stopping session ${partnerId}:`, err);
-        });
-      }
+      // closeAllSessions reads from the service's own authoritative sessions map,
+      // not from React state, so it is always current regardless of batch timing.
+      entitySessionService.closeAllSessions();
     }
-  }, [isSyncConnected, activeSessions.size]);
+  }, [isSyncConnected]);
 
   useEffect(() => {
     const handleSessionStarted = (partnerEntityId: string, dualSession: DualEntitySession) => {

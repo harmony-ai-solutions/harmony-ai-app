@@ -18,6 +18,7 @@ import {migration007} from './migrations/000007_add_chat_images';
 import {migration008} from './migrations/000008_remove_provider_name_unique_constraint';
 import {migration009} from './migrations/000009_add_character_chat_behavior';
 import {migration010} from './migrations/000010_rename_chat_messages';
+import {migration011} from './migrations/000011_add_vision_module';
 
 // Migration definition
 interface Migration {
@@ -79,6 +80,11 @@ const MIGRATIONS: Migration[] = [
     version: 10,
     description: 'rename_chat_messages',
     sql: migration010,
+  },
+  {
+    version: 11,
+    description: 'add_vision_module',
+    sql: migration011,
   },
 ];
 

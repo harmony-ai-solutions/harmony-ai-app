@@ -12,14 +12,15 @@
 - Theme: Centralized via React Native Paper, Harmony Link palette
 - Sync: Optimistic updates, background sync, conflict resolution (last-write-wins)
 @Database:
-- SQLite with SQLCipher encryption, schema matches Harmony Link
+- SQLite with SQLCipher encryption, schema matches Harmony Link, migrations in /src/database/migrations/
+- Storage Pattern: Base64-encoded binary data stored in TEXT columns (audio, images) for simpler cross-platform handling
 - Transaction Pattern CRITICAL: withTransaction() helper CANNOT be used for INSERT operations returning insertId
   - Problem: React Native SQLite uses run-to-completion semantics; Promise resolution occurs AFTER transaction commits
   - Solution: Use direct transaction callbacks with Promise wrappers for INSERT operations
   - Pattern: db.transaction((tx) => { tx.executeSql(..., (_, result) => resolve(result.insertId)) })
 - Safe withTransaction() uses: UPDATE/DELETE with rowsAffected checks, SELECT queries
 - Unsafe withTransaction() uses: INSERT returning insertId, multiple sequential statements
-- All repositories follow this pattern: providers.ts, modules.ts, characters.ts, entities.ts
+- All repositories follow this pattern: providers.ts, modules.ts, characters.ts, entities.ts, conversation_messages.ts
 @Decisions:
 - React Native CLI (not Expo): Full native control for Executorch/messengers
 - React Native Paper: Material Design 3 consistency

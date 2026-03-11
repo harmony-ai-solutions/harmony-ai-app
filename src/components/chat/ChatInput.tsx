@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,6 +7,7 @@ import {
   Animated,
   ActivityIndicator,
   Alert,
+  AppState,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { launchImageLibrary } from 'react-native-image-picker';
@@ -20,7 +21,7 @@ const log = createLogger('[ChatInput]');
 
 interface ChatInputProps {
   onSendText: (text: string) => void;
-  onSendAudio: (audioData: Uint8Array, duration: number) => void;
+  onSendAudio: (audioData: string, duration: number) => void;
   onSendImage: (imageBase64: string, mimeType: string, caption?: string) => void;
   onTypingStart?: () => void;
   disabled?: boolean;
@@ -39,9 +40,38 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [hasRecordPermission, setHasRecordPermission] = useState<boolean | null>(null);
   
   const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Check initial permission
+  useEffect(() => {
+    const checkInitialPermission = async () => {
+      try {
+        const hasPermission = await AudioRecorder.hasPermission();
+        setHasRecordPermission(hasPermission);
+      } catch (error) {
+        log.error('Failed to check audio permission:', error);
+        setHasRecordPermission(false);
+      }
+    };
+
+    checkInitialPermission();
+  }, []);
+
+  // Recheck permission when app returns to foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && hasRecordPermission === false) {
+        AudioRecorder.hasPermission().then(setHasRecordPermission);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [hasRecordPermission]);
 
   // Pulse animation for recording indicator
   const startPulseAnimation = () => {
@@ -80,51 +110,76 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
 
-  const startRecording = useCallback(async () => {
+  const toggleRecording = useCallback(async () => {
     if (disabled) return;
     
-    try {
-      await AudioRecorder.initialize();
-      await AudioRecorder.startRecording();
-      setIsRecording(true);
-      setRecordingDuration(0);
-      startPulseAnimation();
-      
-      recordingTimer.current = setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
-      }, 1000);
-      
-    } catch (error) {
-      log.error('Failed to start recording:', error);
-      Alert.alert('Error', 'Failed to start recording');
-    }
-  }, [disabled]);
-
-  const stopRecording = useCallback(async () => {
-    if (!isRecording) return;
-    
-    try {
-      setIsProcessing(true);
-      
-      if (recordingTimer.current) {
-        clearInterval(recordingTimer.current);
-        recordingTimer.current = null;
+    if (!isRecording) {
+      // Start recording
+      try {
+        // Initialize will check/request permission
+        await AudioRecorder.initialize();
+        
+        // Update permission state
+        setHasRecordPermission(true);
+        
+        await AudioRecorder.startRecording();
+        setIsRecording(true);
+        setRecordingDuration(0);
+        startPulseAnimation();
+        
+        recordingTimer.current = setInterval(() => {
+          setRecordingDuration(prev => prev + 1);
+        }, 1000);
+        
+      } catch (error: any) {
+        log.error('Failed to start recording:', error);
+        
+        // Check if it's a permission error
+        if (error.message?.includes('permission')) {
+          setHasRecordPermission(false);
+          Alert.alert(
+            'Permission Required',
+            'Audio recording permission is required to send voice messages. Please grant permission in your device settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Open Settings',
+                onPress: () => {
+                  const { openAppSettings } = require('../../utils/permissions');
+                  openAppSettings();
+                }
+              }
+            ]
+          );
+        } else {
+          Alert.alert('Error', 'Failed to start recording. Please try again.');
+        }
       }
-      
-      const result = await AudioRecorder.stopRecording();
-      setIsRecording(false);
-      stopPulseAnimation();
-      
-      if (result.data.length > 0) {
-        onSendAudio(result.data, result.duration);
+    } else {
+      // Stop recording
+      try {
+        setIsProcessing(true);
+        
+        if (recordingTimer.current) {
+          clearInterval(recordingTimer.current);
+          recordingTimer.current = null;
+        }
+        
+        const result = await AudioRecorder.stopRecording();
+        setIsRecording(false);
+        stopPulseAnimation();
+        
+        if (result.data.length > 0) {
+          onSendAudio(result.data, result.duration);
+        }
+      } catch (error) {
+        log.error('Failed to stop recording:', error);
+        Alert.alert('Error', 'Failed to stop recording');
+      } finally {
+        setIsProcessing(false);
       }
-    } catch (error) {
-      log.error('Failed to stop recording:', error);
-      Alert.alert('Error', 'Failed to stop recording');
-    } finally {
-      setIsProcessing(false);
     }
-  }, [isRecording, onSendAudio]);
+  }, [disabled, isRecording, onSendAudio]);
 
   const handleImagePick = useCallback(async () => {
     if (disabled) return;
@@ -179,7 +234,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             Recording {formatDuration(recordingDuration)}
           </ThemedText>
           <TouchableOpacity
-            onPress={stopRecording}
+            onPress={toggleRecording}
             style={[styles.stopButton, { backgroundColor: theme.colors.accent.primary }]}
           >
             <Icon name="stop" size={24} color="#fff" />
@@ -233,15 +288,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
-            onPressIn={startRecording}
-            onPressOut={stopRecording}
+            onPress={toggleRecording}
             disabled={disabled || isProcessing}
             style={styles.iconButton}
           >
             <Icon
-              name="microphone"
+              name={hasRecordPermission === false ? "microphone-off" : "microphone"}
               size={28}
-              color={disabled ? theme.colors.text.disabled : theme.colors.accent.primary}
+              color={
+                disabled 
+                  ? theme.colors.text.disabled 
+                  : hasRecordPermission === false
+                  ? theme.colors.status.error
+                  : theme.colors.accent.primary
+              }
             />
           </TouchableOpacity>
         )}

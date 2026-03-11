@@ -164,8 +164,8 @@ export async function createEntityModuleMapping(
     await tx.executeSql(
       `INSERT INTO entity_module_mappings 
        (entity_id, backend_config_id, cognition_config_id, movement_config_id, 
-        rag_config_id, stt_config_id, tts_config_id) 
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        rag_config_id, stt_config_id, tts_config_id, vision_config_id) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         mapping.entity_id,
         mapping.backend_config_id,
@@ -174,6 +174,7 @@ export async function createEntityModuleMapping(
         mapping.rag_config_id,
         mapping.stt_config_id,
         mapping.tts_config_id,
+        mapping.vision_config_id,
       ]
     );
   });
@@ -208,6 +209,7 @@ export async function getEntityModuleMapping(
     rag_config_id: row.rag_config_id,
     stt_config_id: row.stt_config_id,
     tts_config_id: row.tts_config_id,
+    vision_config_id: row.vision_config_id,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
@@ -226,7 +228,8 @@ export async function updateEntityModuleMapping(
       `UPDATE entity_module_mappings 
        SET backend_config_id = ?, cognition_config_id = ?, 
            movement_config_id = ?, rag_config_id = ?, 
-           stt_config_id = ?, tts_config_id = ? 
+           stt_config_id = ?, tts_config_id = ?,
+           vision_config_id = ?
        WHERE entity_id = ?`,
       [
         mapping.backend_config_id,
@@ -235,6 +238,7 @@ export async function updateEntityModuleMapping(
         mapping.rag_config_id,
         mapping.stt_config_id,
         mapping.tts_config_id,
+        mapping.vision_config_id,
         mapping.entity_id,
       ]
     );

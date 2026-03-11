@@ -16,6 +16,7 @@ import {
   RAGConfig,
   STTConfig,
   TTSConfig,
+  VisionConfig,
 } from '../models';
 
 // ============================================================================
@@ -1100,6 +1101,173 @@ export async function deleteTTSConfig(id: number, permanent = false): Promise<vo
       );
       if (result.rowsAffected === 0) {
         throw new Error(`TTS config not found: ${id}`);
+      }
+    }
+  });
+}
+
+// ============================================================================
+// Vision Config Operations
+// ============================================================================
+
+export async function createVisionConfig(
+  config: Omit<VisionConfig, 'id' | 'deleted_at'>
+): Promise<number> {
+  const db = getDatabase();
+  
+  return new Promise<number>((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO vision_configs (name, provider, provider_config_id, resolution_width, resolution_height)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            config.name,
+            config.provider,
+            config.provider_config_id,
+            config.resolution_width,
+            config.resolution_height,
+          ],
+          (_, result) => {
+            resolve(result.insertId!);
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      },
+      (error) => reject(error)
+    );
+  });
+}
+
+export async function getVisionConfig(id: number, includeDeleted = false): Promise<VisionConfig | null> {
+  const db = getDatabase();
+  
+  const query = includeDeleted
+    ? 'SELECT id, name, provider, provider_config_id, resolution_width, resolution_height, deleted_at FROM vision_configs WHERE id = ?'
+    : 'SELECT id, name, provider, provider_config_id, resolution_width, resolution_height, deleted_at FROM vision_configs WHERE id = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [id]);
+  
+  if (results.rows.length === 0) {
+    return null;
+  }
+  
+  const row = results.rows.item(0);
+  return {
+    id: row.id,
+    name: row.name,
+    provider: row.provider,
+    provider_config_id: row.provider_config_id,
+    resolution_width: row.resolution_width,
+    resolution_height: row.resolution_height,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+  };
+}
+
+export async function getVisionConfigByName(name: string, includeDeleted = false): Promise<VisionConfig | null> {
+  const db = getDatabase();
+  
+  const query = includeDeleted
+    ? 'SELECT id, name, provider, provider_config_id, resolution_width, resolution_height, deleted_at FROM vision_configs WHERE name = ?'
+    : 'SELECT id, name, provider, provider_config_id, resolution_width, resolution_height, deleted_at FROM vision_configs WHERE name = ? AND deleted_at IS NULL';
+
+  const [results] = await db.executeSql(query, [name]);
+  
+  if (results.rows.length === 0) {
+    return null;
+  }
+  
+  const row = results.rows.item(0);
+  return {
+    id: row.id,
+    name: row.name,
+    provider: row.provider,
+    provider_config_id: row.provider_config_id,
+    resolution_width: row.resolution_width,
+    resolution_height: row.resolution_height,
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+  };
+}
+
+export async function getAllVisionConfigs(includeDeleted = false): Promise<VisionConfig[]> {
+  const db = getDatabase();
+  
+  const query = includeDeleted
+    ? 'SELECT id, name, provider, provider_config_id, resolution_width, resolution_height, deleted_at FROM vision_configs ORDER BY name'
+    : 'SELECT id, name, provider, provider_config_id, resolution_width, resolution_height, deleted_at FROM vision_configs WHERE deleted_at IS NULL ORDER BY name';
+
+  const [results] = await db.executeSql(query);
+  
+  const configs: VisionConfig[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    const row = results.rows.item(i);
+    configs.push({
+      id: row.id,
+      name: row.name,
+      provider: row.provider,
+      provider_config_id: row.provider_config_id,
+      resolution_width: row.resolution_width,
+      resolution_height: row.resolution_height,
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+    });
+  }
+  
+  return configs;
+}
+
+export async function updateVisionConfig(config: VisionConfig): Promise<void> {
+  const db = getDatabase();
+  
+  return withTransaction(db, async (tx) => {
+    const [result] = await tx.executeSql(
+      `UPDATE vision_configs
+       SET name = ?, provider = ?, provider_config_id = ?, resolution_width = ?, resolution_height = ?
+       WHERE id = ?`,
+      [config.name, config.provider, config.provider_config_id, config.resolution_width, config.resolution_height, config.id]
+    );
+    
+    if (result.rowsAffected === 0) {
+      throw new Error(`Vision config not found: ${config.id}`);
+    }
+  });
+}
+
+/**
+ * Check if a vision config is in use by any entities
+ */
+export async function isVisionConfigInUse(id: number): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT COUNT(*) as count FROM entity_module_mappings WHERE vision_config_id = ? AND deleted_at IS NULL',
+    [id]
+  );
+  return results.rows.item(0).count > 0;
+}
+
+export async function deleteVisionConfig(id: number, permanent = false): Promise<void> {
+  const db = getDatabase();
+  
+  if (!permanent && await isVisionConfigInUse(id)) {
+    throw new Error(`Vision config ${id} is in use and cannot be soft deleted`);
+  }
+
+  return withTransaction(db, async (tx) => {
+    if (permanent) {
+      const [result] = await tx.executeSql('DELETE FROM vision_configs WHERE id = ?', [id]);
+      if (result.rowsAffected === 0) {
+        throw new Error(`Vision config not found: ${id}`);
+      }
+    } else {
+      const now = new Date().toISOString();
+      const [result] = await tx.executeSql(
+        'UPDATE vision_configs SET deleted_at = ? WHERE id = ?',
+        [now, id]
+      );
+      if (result.rowsAffected === 0) {
+        throw new Error(`Vision config not found: ${id}`);
       }
     }
   });

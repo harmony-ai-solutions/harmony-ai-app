@@ -512,6 +512,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'rag_configs',
         'stt_configs',
         'tts_configs',
+        'vision_configs',
         'entities',
         'entity_module_mappings',
         'conversation_messages',
@@ -781,9 +782,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'movement_config_id',
         'rag_config_id',
         'stt_config_id',
-        'tts_config_id'
+        'tts_config_id',
+        'vision_config_id'
       ],
       'backend_configs': ['provider_config_id'],
+      'vision_configs': ['provider_config_id'],
       'cognition_configs': ['provider_config_id'],
       'movement_configs': ['provider_config_id'],
       'rag_configs': ['provider_config_id'],

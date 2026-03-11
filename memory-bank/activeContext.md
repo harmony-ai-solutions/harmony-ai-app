@@ -1,7 +1,7 @@
 # Active Context
 
 ## Current Focus
-**Database Implementation Complete** - SQLite with SQLCipher encryption, complete repository layer, app integration, comprehensive testing, and in-app test runner. Ready for Harmony Link synchronization.
+**Chat & Voice Features Complete** - Full chat implementation with text and voice support (STT/TTS working), tap-based recording, dual entity sessions, QoL features, and comprehensive Harmony Link integration documentation in `/docs/HARMONY-LINK-INTEGRATION.md`. Image messages UI in progress.
 
 ## Recent Work (January 2026)
 
@@ -38,16 +38,17 @@
 ### Database Layer Implementation ✅ COMPLETE
 - ✅ SQLite database with SQLCipher encryption for secure data storage
 - ✅ Secure encryption key management via React Native Keychain
-- ✅ Forward-only migration system (4 migrations, 100% Harmony Link compatible)
+- ✅ Forward-only migration system in `/src/database/migrations/` (100% Harmony Link compatible)
+- ✅ Base64 TEXT storage for audio/image data (simpler cross-platform handling than BLOB columns)
 - ✅ Complete repository layer for all entity types:
   - Entity repository (11 tests)
-  - Character repository with BLOB handling (18 tests)
+  - Character repository with base64 image handling (18 tests)
   - Module repository for all 6 types (23 tests)
   - Provider repository for all 11 types (32 tests)
 - ✅ Database context with automatic initialization
 - ✅ Database loading screen with theme integration
 - ✅ App.tsx integration with error recovery
-- ✅ Comprehensive test suite (84 total tests)
+- ✅ Comprehensive test suite (84+ total tests)
 - ✅ Complete documentation (README, IMPLEMENTATION_SUMMARY, NEXT_STEPS)
 
 ### Advanced Theming System Implementation
@@ -111,14 +112,13 @@ harmony-ai-app/
 - **Audio Transcription Flow**: COMPLETED implementation of an asynchronous audio transcription flow where recordings are first sent to the user's own entity for processing before being forwarded to the partner.
     - **Architecture**: Asynchronous flow using `STT_INPUT_AUDIO` with `result_mode: "return"`.
     - **Key Methods**: Added `EntitySessionService.newAudioMessage()` for initiated messages and handled `STT_OUTPUT_TEXT` responses.
-    - **Database**: Extended `chat_messages` repository with `updateChatMessage()` for atomic async updates.
+    - **Database**: Extended `chat_messages` repository with `updateChatMessage()` for atomic async updates, base64 TEXT storage for audio.
     - **UI**: Updated `ChatBubble` and `ChatDetailScreen` to support a "confirm-before-send" workflow with transcription status and editing.
-1. **Chat Interface**
-   - Message list with FlatList virtualization
-   - Message bubble components (user/AI differentiation)
-   - Text input component
-   - Send button and message handling
-   - Timestamp display
+1. **Image Messages UI** (Backend support exists)
+   - Complete image sending UI
+   - Image viewing in chat bubbles  
+   - Image preview before sending
+   - Image storage optimization
 
 2. **Harmony Link Integration**
    - Backend service implementation
@@ -271,6 +271,10 @@ When adding a new screen to Settings navigation, **ALL 3 files must be updated**
 - Comments for complex logic
 
 ## Resources & References
+
+### Integration Documentation
+- **Harmony Link Integration Overview**: `/docs/HARMONY-LINK-INTEGRATION.md` - Comprehensive integration guide
+- **Detailed Diagrams**: `/docs/harmony-link-diagrams/` - Connection architecture, device pairing, sync protocol, entity sessions, message flows
 
 ### Documentation Links
 - Design Doc: `/design/00 Design Document.md`
