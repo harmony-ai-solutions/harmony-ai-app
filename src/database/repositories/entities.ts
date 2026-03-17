@@ -162,14 +162,15 @@ export async function createEntityModuleMapping(
   
   return withTransaction(db, async (tx) => {
     await tx.executeSql(
-      `INSERT INTO entity_module_mappings 
-       (entity_id, backend_config_id, cognition_config_id, movement_config_id, 
-        rag_config_id, stt_config_id, tts_config_id, vision_config_id) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO entity_module_mappings
+       (entity_id, backend_config_id, cognition_config_id, imagination_config_id,
+        movement_config_id, rag_config_id, stt_config_id, tts_config_id, vision_config_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         mapping.entity_id,
         mapping.backend_config_id,
         mapping.cognition_config_id,
+        mapping.imagination_config_id,
         mapping.movement_config_id,
         mapping.rag_config_id,
         mapping.stt_config_id,
@@ -205,6 +206,7 @@ export async function getEntityModuleMapping(
     entity_id: row.entity_id,
     backend_config_id: row.backend_config_id,
     cognition_config_id: row.cognition_config_id,
+    imagination_config_id: row.imagination_config_id,
     movement_config_id: row.movement_config_id,
     rag_config_id: row.rag_config_id,
     stt_config_id: row.stt_config_id,
@@ -225,15 +227,16 @@ export async function updateEntityModuleMapping(
   
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      `UPDATE entity_module_mappings 
-       SET backend_config_id = ?, cognition_config_id = ?, 
-           movement_config_id = ?, rag_config_id = ?, 
-           stt_config_id = ?, tts_config_id = ?,
-           vision_config_id = ?
+      `UPDATE entity_module_mappings
+       SET backend_config_id = ?, cognition_config_id = ?,
+           imagination_config_id = ?, movement_config_id = ?,
+           rag_config_id = ?, stt_config_id = ?,
+           tts_config_id = ?, vision_config_id = ?
        WHERE entity_id = ?`,
       [
         mapping.backend_config_id,
         mapping.cognition_config_id,
+        mapping.imagination_config_id,
         mapping.movement_config_id,
         mapping.rag_config_id,
         mapping.stt_config_id,

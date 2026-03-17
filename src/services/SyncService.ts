@@ -350,6 +350,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     return new Promise<void>((resolve, reject) => {
       db.transaction(
         (tx) => {
+          // Enable deferred foreign key checking to allow FK references to records
+          // that will be created later in the same transaction (e.g., vision_configs
+          // referenced by character_profiles). FK validation happens at commit time.
+          tx.executeSql('PRAGMA defer_foreign_keys = ON');
+          
           // Apply all buffered records synchronously within transaction
           for (const item of this.incomingDataBuffer) {
             const pkField = item.table === 'entity_module_mappings' ? 'entity_id' : 'id';
@@ -779,6 +784,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'entity_id',
         'backend_config_id',
         'cognition_config_id',
+        'imagination_config_id',
         'movement_config_id',
         'rag_config_id',
         'stt_config_id',

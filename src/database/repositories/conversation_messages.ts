@@ -15,9 +15,9 @@ export async function createConversationMessage(
     `INSERT INTO conversation_messages (
       id, entity_id, sender_entity_id, session_id, content,
       audio_duration, message_type, audio_data, audio_mime_type,
-      image_data, image_mime_type, vl_model, vl_model_interpretation, 
-      vl_model_embedding, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      image_data, image_mime_type, vl_model, vl_model_interpretation,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       message.id,
       message.entity_id,
@@ -32,7 +32,6 @@ export async function createConversationMessage(
       message.image_mime_type,
       message.vl_model,
       message.vl_model_interpretation,
-      message.vl_model_embedding,
       now,
       now
     ]
@@ -86,7 +85,6 @@ export async function getConversationMessagesBetween(
     // Load TEXT columns individually with chunking
     const audioData = await loadTextColumn('conversation_messages', row.id, 'audio_data');
     const imageData = await loadTextColumn('conversation_messages', row.id, 'image_data');
-    const embeddingData = await loadTextColumn('conversation_messages', row.id, 'vl_model_embedding');
 
     messages.push({
       id: row.id,
@@ -102,7 +100,6 @@ export async function getConversationMessagesBetween(
       image_mime_type: row.image_mime_type,
       vl_model: row.vl_model,
       vl_model_interpretation: row.vl_model_interpretation,
-      vl_model_embedding: embeddingData,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -166,7 +163,6 @@ export async function getRecentConversationMessages(
     // Load TEXT columns individually with chunking
     const audioData = await loadTextColumn('conversation_messages', row.id, 'audio_data');
     const imageData = await loadTextColumn('conversation_messages', row.id, 'image_data');
-    const embeddingData = await loadTextColumn('conversation_messages', row.id, 'vl_model_embedding');
 
     messages.push({
       id: row.id,
@@ -182,7 +178,6 @@ export async function getRecentConversationMessages(
       image_mime_type: row.image_mime_type,
       vl_model: row.vl_model,
       vl_model_interpretation: row.vl_model_interpretation,
-      vl_model_embedding: embeddingData,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -225,7 +220,6 @@ export async function getLastConversationMessage(
   // Phase 2: Load TEXT columns with chunking
   const audioData = await loadTextColumn('conversation_messages', row.id, 'audio_data');
   const imageData = await loadTextColumn('conversation_messages', row.id, 'image_data');
-  const embeddingData = await loadTextColumn('conversation_messages', row.id, 'vl_model_embedding');
 
   return {
     id: row.id,
@@ -241,7 +235,6 @@ export async function getLastConversationMessage(
     image_mime_type: row.image_mime_type,
     vl_model: row.vl_model,
     vl_model_interpretation: row.vl_model_interpretation,
-    vl_model_embedding: embeddingData,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -378,7 +371,6 @@ function mapRowToConversationMessage(row: any): ConversationMessage {
     image_mime_type: row.image_mime_type,
     vl_model: row.vl_model,
     vl_model_interpretation: row.vl_model_interpretation,
-    vl_model_embedding: row.vl_model_embedding,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,

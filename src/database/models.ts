@@ -21,6 +21,7 @@ export interface CharacterProfile {
   example_dialogues: string | null;
   typing_speed_wpm: number;
   audio_response_chance_percent: number;
+  vision_config_id: number | null;
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -38,6 +39,7 @@ export interface EntityModuleMapping {
   entity_id: string;
   backend_config_id: number | null;
   cognition_config_id: number | null;
+  imagination_config_id: number | null;
   movement_config_id: number | null;
   rag_config_id: number | null;
   stt_config_id: number | null;
@@ -167,6 +169,15 @@ export interface OllamaProviderConfig {
   deleted_at: Date | null;
 }
 
+export interface ComfyUIProviderConfig {
+  id: number;
+  name: string;
+  base_url: string;
+  api_key: string;
+  workflow_profiles: string;
+  deleted_at: Date | null;
+}
+
 // ============================================================================
 // Module Configuration Models
 // ============================================================================
@@ -242,6 +253,14 @@ export interface VisionConfig {
   deleted_at: Date | null;
 }
 
+export interface ImaginationConfig {
+  id: number;
+  name: string;
+  provider: string;
+  provider_config_id: number;
+  deleted_at: Date | null;
+}
+
 // ============================================================================
 // Character Image Models
 // ============================================================================
@@ -256,8 +275,8 @@ export interface CharacterImage {
   display_order: number;
   vl_model_interpretation: string;
   vl_model: string;
-  vl_model_embedding: string | null; // Base64 encoded embedding
   created_at: Date;
+  updated_at: Date;
   deleted_at: Date | null;
 }
 
@@ -313,7 +332,6 @@ export interface ConversationMessage {
   image_mime_type?: string | null;
   vl_model?: string | null;
   vl_model_interpretation?: string | null;
-  vl_model_embedding?: string | null;
 
   created_at: Date;
   updated_at: Date;
@@ -346,7 +364,8 @@ export type ProviderConfig =
   | CharacterAIProviderConfig
   | LocalAIProviderConfig
   | MistralProviderConfig
-  | OllamaProviderConfig;
+  | OllamaProviderConfig
+  | ComfyUIProviderConfig;
 
 export type ModuleConfig =
   | BackendConfig
@@ -355,4 +374,5 @@ export type ModuleConfig =
   | CognitionConfig
   | RAGConfig
   | TTSConfig
-  | VisionConfig;
+  | VisionConfig
+  | ImaginationConfig;

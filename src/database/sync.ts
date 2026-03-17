@@ -8,8 +8,8 @@ const log = createLogger('[DatabaseSync]');
 const TEXT_TABLES = ['character_image', 'conversation_messages'];
 
 const TEXT_COLUMNS: Record<string, string[]> = {
-  'character_image': ['image_data', 'vl_model_embedding'],
-  'conversation_messages': ['image_data', 'audio_data', 'vl_model_embedding']
+  'character_image': ['image_data'],
+  'conversation_messages': ['image_data', 'audio_data']
 };
 
 // Chunking configuration

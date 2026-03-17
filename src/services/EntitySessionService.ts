@@ -414,8 +414,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       image_data: null,
       image_mime_type: null,
       vl_model: null,
-      vl_model_interpretation: null,
-      vl_model_embedding: null
+      vl_model_interpretation: null
     };
     
     await createConversationMessage(message);
@@ -468,8 +467,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       image_data: null,
       image_mime_type: null,
       vl_model: null,
-      vl_model_interpretation: null,
-      vl_model_embedding: null
+      vl_model_interpretation: null
     };
     
     await createConversationMessage(message);
@@ -817,8 +815,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       image_data: utterance.image_data || null,     // Already base64 from backend
       image_mime_type: utterance.image_mime_type || null,
       vl_model: null, // Will be populated by Harmony Link
-      vl_model_interpretation: null,
-      vl_model_embedding: null
+      vl_model_interpretation: null
     };
     
     await createConversationMessage(message);
