@@ -24,6 +24,7 @@ import {migration013} from './migrations/000013_character_profile_vision_config'
 import {migration014} from './migrations/000014_add_emotion_state';
 import {migration015} from './migrations/000015_add_lifecycle_config';
 import {migration016} from './migrations/000016_add_memories_table_and_emotional_state_bits';
+import {migration017} from './migrations/000017_add_memories_deleted_at';
 
 // Migration definition
 interface Migration {
@@ -115,6 +116,11 @@ const MIGRATIONS: Migration[] = [
     version: 16,
     description: 'add_memories_table_and_emotional_state_bits',
     sql: migration016,
+  },
+  {
+    version: 17,
+    description: 'add_memories_deleted_at',
+    sql: migration017,
   },
 ];
 
