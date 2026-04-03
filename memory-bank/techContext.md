@@ -45,7 +45,11 @@
 - AsyncStorage: Simple key-value storage
 - Future SQLite: Relational database for messages/characters
 - React Native SQLite Storage or WatermelonDB
-- Sync strategy with Harmony Link backend
+- Sync strategy with Harmony Link backend:
+  - **Protocol**: Bidirectional event-driven sync over WebSocket.
+  - **Constraint Management**: Dependency-based sorting of incoming records + `defer_foreign_keys = ON`.
+  - **Schema Handling**: Special handling for tables without `deleted_at` columns (e.g., `emotion_state`).
+  - **Conflict Resolution**: Last-Write-Wins (LWW) via `updated_at` timestamps.
 
 ### Networking
 **Planned: Axios + WebSocket**

@@ -51,6 +51,12 @@
 - ✅ Comprehensive test suite (84+ total tests)
 - ✅ Complete documentation (README, IMPLEMENTATION_SUMMARY, NEXT_STEPS)
 
+### Sync Service Hardening ✅ COMPLETE
+- ✅ **Buffer Sorting**: Implemented `TABLE_ORDER` in `SyncService.ts` to ensure incoming data is applied in correct dependency order (Providers → Modules → Characters → Entities → Mappings → Messages).
+- ✅ **Deferred Foreign Keys**: Standardized use of `PRAGMA defer_foreign_keys = ON` in sync transactions.
+- ✅ **Bidirectional Sync Extension**: Added `imagination_configs` and `provider_config_comfyui` to outbound sync.
+- ✅ **Schema Mismatch Fix**: Implemented `NO_DELETED_AT_TABLES` in `sync.ts` to correctly handle tables like `emotion_state` that lack soft-delete columns.
+
 ### Advanced Theming System Implementation
 - ✅ Implemented `ThemeContext` with `AsyncStorage` persistence for built-in and custom themes.
 - ✅ Created a library of themed components (`ThemedView`, `ThemedText`, `ThemedButton`, `ThemedCard`, `ThemedGradient`).

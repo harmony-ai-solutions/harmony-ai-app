@@ -107,6 +107,12 @@
 - Client authoritative for pending messages
 - Timestamp-based ordering
 
+**Sync Ordering & Dependency Management**
+- **Buffering Strategy**: Incoming sync records are buffered in `incomingDataBuffer` before processing.
+- **Dependency Sorting**: Records are sorted based on `TABLE_ORDER` to satisfy Foreign Key constraints. Providers must exist before Modules, and both must exist before Entities or Mappings.
+- **Deferred Checks**: `PRAGMA defer_foreign_keys = ON` is used within sync transactions to allow temporary violations while records are being applied.
+- **Ordered Application**: The buffer is sorted such that parents are inserted/updated before children, ensuring that when the transaction commits, all FK constraints are satisfied.
+
 ## Communication Patterns
 
 ### Backend Integration
