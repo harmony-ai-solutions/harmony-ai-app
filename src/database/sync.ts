@@ -276,6 +276,10 @@ const getPrimaryKeyField = (table: string): string => {
   if (table === 'entity_module_mappings') {
     return 'entity_id';
   }
+  // emotion_state uses entity_id as primary key
+  if (table === 'emotion_state') {
+    return 'entity_id';
+  }
   // All other tables use id
   return 'id';
 };

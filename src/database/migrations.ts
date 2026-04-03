@@ -21,6 +21,9 @@ import {migration010} from './migrations/000010_rename_chat_messages';
 import {migration011} from './migrations/000011_add_vision_module';
 import {migration012} from './migrations/000012_add_imagination_module';
 import {migration013} from './migrations/000013_character_profile_vision_config';
+import {migration014} from './migrations/000014_add_emotion_state';
+import {migration015} from './migrations/000015_add_lifecycle_config';
+import {migration016} from './migrations/000016_add_memories_table_and_emotional_state_bits';
 
 // Migration definition
 interface Migration {
@@ -97,6 +100,21 @@ const MIGRATIONS: Migration[] = [
     version: 13,
     description: 'character_profile_vision_config',
     sql: migration013,
+  },
+  {
+    version: 14,
+    description: 'add_emotion_state',
+    sql: migration014,
+  },
+  {
+    version: 15,
+    description: 'add_lifecycle_config',
+    sql: migration015,
+  },
+  {
+    version: 16,
+    description: 'add_memories_table_and_emotional_state_bits',
+    sql: migration016,
   },
 ];
 

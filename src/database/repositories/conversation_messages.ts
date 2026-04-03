@@ -16,8 +16,9 @@ export async function createConversationMessage(
       id, entity_id, sender_entity_id, session_id, content,
       audio_duration, message_type, audio_data, audio_mime_type,
       image_data, image_mime_type, vl_model, vl_model_interpretation,
+      emotional_state_bits, memory_id,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       message.id,
       message.entity_id,
@@ -32,8 +33,10 @@ export async function createConversationMessage(
       message.image_mime_type,
       message.vl_model,
       message.vl_model_interpretation,
+      message.emotional_state_bits ?? 0,
+      message.memory_id ?? null,
       now,
-      now
+      now,
     ]
   );
 }
@@ -57,6 +60,7 @@ export async function getConversationMessagesBetween(
     SELECT id, entity_id, sender_entity_id, session_id, content,
            audio_duration, message_type, audio_mime_type,
            image_mime_type, vl_model, vl_model_interpretation,
+           emotional_state_bits, memory_id,
            created_at, updated_at, deleted_at
     FROM conversation_messages 
     WHERE deleted_at IS NULL 
@@ -100,6 +104,8 @@ export async function getConversationMessagesBetween(
       image_mime_type: row.image_mime_type,
       vl_model: row.vl_model,
       vl_model_interpretation: row.vl_model_interpretation,
+      emotional_state_bits: row.emotional_state_bits ?? 0,
+      memory_id: row.memory_id ?? null,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -148,6 +154,7 @@ export async function getRecentConversationMessages(
     `SELECT id, entity_id, sender_entity_id, session_id, content,
             audio_duration, message_type, audio_mime_type,
             image_mime_type, vl_model, vl_model_interpretation,
+            emotional_state_bits, memory_id,
             created_at, updated_at, deleted_at
      FROM conversation_messages 
      WHERE id IN (${placeholders})
@@ -178,6 +185,8 @@ export async function getRecentConversationMessages(
       image_mime_type: row.image_mime_type,
       vl_model: row.vl_model,
       vl_model_interpretation: row.vl_model_interpretation,
+      emotional_state_bits: row.emotional_state_bits ?? 0,
+      memory_id: row.memory_id ?? null,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -202,6 +211,7 @@ export async function getLastConversationMessage(
     `SELECT id, entity_id, sender_entity_id, session_id, content,
             audio_duration, message_type, audio_mime_type,
             image_mime_type, vl_model, vl_model_interpretation,
+            emotional_state_bits, memory_id,
             created_at, updated_at, deleted_at
      FROM conversation_messages 
      WHERE deleted_at IS NULL 
@@ -235,6 +245,8 @@ export async function getLastConversationMessage(
     image_mime_type: row.image_mime_type,
     vl_model: row.vl_model,
     vl_model_interpretation: row.vl_model_interpretation,
+    emotional_state_bits: row.emotional_state_bits ?? 0,
+    memory_id: row.memory_id ?? null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -371,6 +383,8 @@ function mapRowToConversationMessage(row: any): ConversationMessage {
     image_mime_type: row.image_mime_type,
     vl_model: row.vl_model,
     vl_model_interpretation: row.vl_model_interpretation,
+    emotional_state_bits: row.emotional_state_bits ?? 0,
+    memory_id: row.memory_id ?? null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,

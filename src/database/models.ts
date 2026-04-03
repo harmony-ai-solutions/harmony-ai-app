@@ -22,6 +22,7 @@ export interface CharacterProfile {
   typing_speed_wpm: number;
   audio_response_chance_percent: number;
   vision_config_id: number | null;
+  lifecycle_config: string | null; // Opaque JSON blob
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -30,6 +31,7 @@ export interface CharacterProfile {
 export interface Entity {
   id: string;
   character_profile_id: string | null;
+  lifecycle_config: string | null; // Opaque JSON blob
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -333,6 +335,10 @@ export interface ConversationMessage {
   vl_model?: string | null;
   vl_model_interpretation?: string | null;
 
+  // Emotional state and memory (Migrations 14-16)
+  emotional_state_bits: number; // Compact Ekman8 bitfield, opaque
+  memory_id: string | null;     // FK to memories.id, opaque
+
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -376,3 +382,60 @@ export type ModuleConfig =
   | TTSConfig
   | VisionConfig
   | ImaginationConfig;
+
+// ============================================================================
+// Inner Life Models (Migrations 14-16)
+// ============================================================================
+
+export interface EmotionState {
+  entity_id: string;
+
+  joy_intensity: number;
+  sadness_intensity: number;
+  trust_intensity: number;
+  disgust_intensity: number;
+  fear_intensity: number;
+  anger_intensity: number;
+  surprise_intensity: number;
+  anticipation_intensity: number;
+
+  joy_baseline: number;
+  sadness_baseline: number;
+  trust_baseline: number;
+  disgust_baseline: number;
+  fear_baseline: number;
+  anger_baseline: number;
+  surprise_baseline: number;
+  anticipation_baseline: number;
+
+  joy_crystallize_start: Date | null;
+  sadness_crystallize_start: Date | null;
+  trust_crystallize_start: Date | null;
+  disgust_crystallize_start: Date | null;
+  fear_crystallize_start: Date | null;
+  anger_crystallize_start: Date | null;
+  surprise_crystallize_start: Date | null;
+  anticipation_crystallize_start: Date | null;
+
+  last_update: Date;
+  decay_tau: number;
+  high_threshold: number;
+  low_threshold: number;
+  crystallize_intensity: number;
+  crystallize_min_hours: number;
+
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Memory {
+  id: string;
+  entity_id: string;
+  compaction_level: number;
+  content: string;
+  emotional_state_bits: number;
+  start_date: Date | null;
+  end_date: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}

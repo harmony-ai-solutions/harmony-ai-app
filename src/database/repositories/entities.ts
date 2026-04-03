@@ -23,9 +23,9 @@ export async function createEntity(entity: Omit<Entity, 'created_at' | 'updated_
     const now = new Date().toISOString();
     
     await tx.executeSql(
-      `INSERT INTO entities (id, character_profile_id, created_at, updated_at) 
-       VALUES (?, ?, ?, ?)`,
-      [entity.id, entity.character_profile_id, now, now]
+      `INSERT INTO entities (id, character_profile_id, lifecycle_config, created_at, updated_at) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [entity.id, entity.character_profile_id, entity.lifecycle_config ?? null, now, now]
     );
     
     return {
@@ -58,6 +58,7 @@ export async function getEntity(id: string, includeDeleted = false): Promise<Ent
   return {
     id: row.id,
     character_profile_id: row.character_profile_id,
+    lifecycle_config: row.lifecycle_config ?? null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -83,6 +84,7 @@ export async function getAllEntities(includeDeleted = false): Promise<Entity[]> 
     entities.push({
       id: row.id,
       character_profile_id: row.character_profile_id,
+      lifecycle_config: row.lifecycle_config ?? null,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -110,9 +112,9 @@ export async function updateEntity(entity: Entity): Promise<Entity> {
     
     await tx.executeSql(
       `UPDATE entities 
-       SET character_profile_id = ?, updated_at = ? 
+       SET character_profile_id = ?, lifecycle_config = ?, updated_at = ? 
        WHERE id = ?`,
-      [entity.character_profile_id, now, entity.id]
+      [entity.character_profile_id, entity.lifecycle_config ?? null, now, entity.id]
     );
     
     return {
