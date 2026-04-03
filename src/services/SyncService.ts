@@ -348,15 +348,59 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     });
     
     return new Promise<void>((resolve, reject) => {
+      // Sort buffer by dependency order to satisfy FK constraints in correct sequence:
+      // 1. Provider configs (no dependencies)
+      // 2. Module configs (reference provider configs)
+      // 3. character_profiles (no FK deps)
+      // 4. character_image (references character_profiles)
+      // 5. entities (references character_profiles)
+      // 6. entity_module_mappings (references entities + module configs)
+      // 7. conversation_messages, emotion_state, memories (reference entities)
+      const TABLE_ORDER: Record<string, number> = {
+        'provider_config_openai': 1,
+        'provider_config_ollama': 1,
+        'provider_config_openaicompatible': 1,
+        'provider_config_openrouter': 1,
+        'provider_config_harmonyspeech': 1,
+        'provider_config_elevenlabs': 1,
+        'provider_config_kindroid': 1,
+        'provider_config_kajiwoto': 1,
+        'provider_config_characterai': 1,
+        'provider_config_localai': 1,
+        'provider_config_mistral': 1,
+        'provider_config_comfyui': 1,
+        'backend_configs': 2,
+        'cognition_configs': 2,
+        'movement_configs': 2,
+        'rag_configs': 2,
+        'stt_configs': 2,
+        'tts_configs': 2,
+        'vision_configs': 2,
+        'imagination_configs': 2,
+        'character_profiles': 3,
+        'character_image': 4,
+        'entities': 5,
+        'entity_module_mappings': 6,
+        'conversation_messages': 7,
+        'emotion_state': 7,
+        'memories': 7,
+      };
+
+      const sortedBuffer = [...this.incomingDataBuffer].sort((a, b) => {
+        const orderA = TABLE_ORDER[a.table] ?? 99;
+        const orderB = TABLE_ORDER[b.table] ?? 99;
+        return orderA - orderB;
+      });
+
       db.transaction(
         (tx) => {
-          // Enable deferred foreign key checking to allow FK references to records
-          // that will be created later in the same transaction (e.g., vision_configs
-          // referenced by character_profiles). FK validation happens at commit time.
+          // Enable deferred foreign key checking to allow FK references within the
+          // same transaction. Combined with sorted buffer order, this handles
+          // circular deps at commit time.
           tx.executeSql('PRAGMA defer_foreign_keys = ON');
-          
-          // Apply all buffered records synchronously within transaction
-          for (const item of this.incomingDataBuffer) {
+
+          // Apply all buffered records synchronously within transaction (sorted by dependency order)
+          for (const item of sortedBuffer) {
             const pkField = item.table === 'entity_module_mappings' ? 'entity_id' : 'id';
             const pkValue = item.record[pkField];
 
@@ -496,10 +540,9 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     log.info(`Sending local changes since: ${lastSync}`);
 
     try {
-      // Define table order respecting FK dependencies
+      // Define table order respecting FK dependencies (must match server send order)
       const tables = [
-        'character_profiles',
-        'character_image',
+        // Provider configs first (no FK dependencies)
         'provider_config_openai',
         'provider_config_ollama',
         'provider_config_openaicompatible',
@@ -511,6 +554,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'provider_config_characterai',
         'provider_config_localai',
         'provider_config_mistral',
+        'provider_config_comfyui',
+        // Module configs (reference provider configs)
         'backend_configs',
         'cognition_configs',
         'movement_configs',
@@ -518,9 +563,16 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'stt_configs',
         'tts_configs',
         'vision_configs',
+        'imagination_configs',
+        // Character and entity data
+        'character_profiles',
+        'character_image',
         'entities',
         'entity_module_mappings',
+        // Conversation and state data
         'conversation_messages',
+        'emotion_state',
+        'memories',
       ];
 
       // Send each table's records sequentially
@@ -793,6 +845,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       ],
       'backend_configs': ['provider_config_id'],
       'vision_configs': ['provider_config_id'],
+      'imagination_configs': ['provider_config_id'],
       'cognition_configs': ['provider_config_id'],
       'movement_configs': ['provider_config_id'],
       'rag_configs': ['provider_config_id'],

@@ -223,6 +223,9 @@ async function getChangedRecordsWithText(
  * Get changed records for sync
  * Automatically routes TEXT tables to two-phase query
  */
+// Tables that do not have a deleted_at column — deletions cascade from parent entity deletes
+const NO_DELETED_AT_TABLES = ['emotion_state'];
+
 export const getChangedRecords = async (
   table: string,
   lastSyncTimestamp: number
@@ -232,14 +235,27 @@ export const getChangedRecords = async (
     log.info(`Using TEXT-safe two-phase query for table: ${table}`);
     return await getChangedRecordsWithText(table, lastSyncTimestamp);
   }
-  
+
   // Original logic for non-BLOB tables
   log.debug(`Using standard query for table: ${table}`);
   const db = getDatabase();
   let query: string;
   let params: any[];
-  
-  if (lastSyncTimestamp === 0) {
+
+  if (NO_DELETED_AT_TABLES.includes(table)) {
+    // Tables without deleted_at — only filter by created_at / updated_at
+    if (lastSyncTimestamp === 0) {
+      query = `SELECT * FROM ${table}`;
+      params = [];
+    } else {
+      query = `
+        SELECT * FROM ${table}
+        WHERE CAST(strftime('%s', created_at) AS INTEGER) > ?
+           OR CAST(strftime('%s', updated_at) AS INTEGER) > ?
+      `;
+      params = [lastSyncTimestamp, lastSyncTimestamp];
+    }
+  } else if (lastSyncTimestamp === 0) {
     // On first sync, include all non-deleted records (including those with old timestamps)
     query = `
       SELECT * FROM ${table}
