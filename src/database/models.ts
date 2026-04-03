@@ -438,4 +438,5 @@ export interface Memory {
   end_date: Date | null;
   created_at: Date;
   updated_at: Date;
+  deleted_at: Date | null;
 }

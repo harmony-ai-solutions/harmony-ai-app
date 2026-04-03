@@ -11,8 +11,8 @@ export async function insertMemory(memory: Memory): Promise<void> {
     `INSERT INTO memories (
       id, entity_id, compaction_level, content,
       emotional_state_bits, start_date, end_date,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      created_at, updated_at, deleted_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       memory.id,
       memory.entity_id,
@@ -23,6 +23,7 @@ export async function insertMemory(memory: Memory): Promise<void> {
       memory.end_date ? memory.end_date.toISOString() : null,
       memory.created_at instanceof Date ? memory.created_at.toISOString() : memory.created_at,
       memory.updated_at instanceof Date ? memory.updated_at.toISOString() : memory.updated_at,
+      memory.deleted_at ? memory.deleted_at.toISOString() : null,
     ]
   );
 }
@@ -38,8 +39,8 @@ export async function upsertMemory(memory: Memory): Promise<void> {
     `INSERT OR REPLACE INTO memories (
       id, entity_id, compaction_level, content,
       emotional_state_bits, start_date, end_date,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      created_at, updated_at, deleted_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       memory.id,
       memory.entity_id,
@@ -50,6 +51,7 @@ export async function upsertMemory(memory: Memory): Promise<void> {
       memory.end_date ? memory.end_date.toISOString() : null,
       memory.created_at instanceof Date ? memory.created_at.toISOString() : memory.created_at,
       memory.updated_at instanceof Date ? memory.updated_at.toISOString() : memory.updated_at,
+      memory.deleted_at ? memory.deleted_at.toISOString() : null,
     ]
   );
 }
@@ -82,5 +84,6 @@ function mapRowToMemory(row: any): Memory {
     end_date: row.end_date ? new Date(row.end_date) : null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
