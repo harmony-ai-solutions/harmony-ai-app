@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from 'react';
 import {
   StyleSheet,
   FlatList,
@@ -9,8 +15,10 @@ import {
   Alert,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  TouchableOpacity,
 } from 'react-native';
 import { Appbar, Avatar } from 'react-native-paper';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -22,8 +30,18 @@ import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewMessagesDivider } from '../components/chat/NewMessagesDivider';
 import { useEntitySession } from '../contexts/EntitySessionContext';
 import EntitySessionService from '../services/EntitySessionService'; // Still needed for event listeners
-import { getRecentConversationMessages, updateConversationMessage, getConversationMessage, deleteConversationMessage } from '../database/repositories/conversation_messages';
-import { getPrimaryImage, getCharacterProfile, imageToDataURL } from '../database/repositories/characters';
+import {
+  getRecentConversationMessages,
+  updateConversationMessage,
+  getConversationMessage,
+  deleteConversationMessage,
+} from '../database/repositories/conversation_messages';
+import {
+  getPrimaryImage,
+  getCharacterProfile,
+  imageToDataURL,
+} from '../database/repositories/characters';
+import { deleteEntity } from '../database/repositories/entities';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { createLogger } from '../utils/logger';
@@ -34,11 +52,13 @@ const log = createLogger('[ChatDetailScreen]');
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
 export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { partnerEntityId, partnerCharacterId, impersonatedEntityId } = route.params;
+  const { partnerEntityId, partnerCharacterId, impersonatedEntityId } =
+    route.params;
   const { theme } = useAppTheme();
   const { isConnected } = useSyncConnection();
-  const { isDualSessionActive, startDualSession, stopDualSession } = useEntitySession();
-  
+  const { isDualSessionActive, startDualSession, stopDualSession } =
+    useEntitySession();
+
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
@@ -46,8 +66,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [partnerName, setPartnerName] = useState<string>('Chat');
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
   const [lastReadTimestamp, setLastReadTimestamp] = useState<number>(0);
-  const [failedTranscriptions, setFailedTranscriptions] = useState<Set<string>>(new Set());
-  
+  const [failedTranscriptions, setFailedTranscriptions] = useState<Set<string>>(
+    new Set(),
+  );
+
   const flatListRef = useRef<FlatList<any>>(null);
   const hasScrolledToNewMessages = useRef(false);
   // Tracks whether the user is near the bottom of the list; used to decide whether to auto-scroll on new messages
@@ -58,7 +80,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const loadPartnerInfo = async () => {
       // Always set the entity ID as fallback first
       setPartnerName(partnerEntityId);
-      
+
       if (partnerCharacterId) {
         const profile = await getCharacterProfile(partnerCharacterId);
         if (profile) {
@@ -78,30 +100,34 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const loadMessagesAndTimestamp = async () => {
       try {
         setLoading(true);
-        
+
         const existingMessages = await getRecentConversationMessages(
           impersonatedEntityId,
           partnerEntityId,
-          50
+          50,
         );
         setMessages(existingMessages);
-        
+
         // Detect stuck transcriptions (messages with audio but no text that aren't actively transcribing)
         const stuckTranscriptions = existingMessages
-          .filter(msg => 
-            msg.audio_data && 
-            msg.audio_data.length > 0 && 
-            (!msg.content || msg.content.trim().length === 0) &&
-            msg.sender_entity_id === impersonatedEntityId // Only user's own messages
+          .filter(
+            msg =>
+              msg.audio_data &&
+              msg.audio_data.length > 0 &&
+              (!msg.content || msg.content.trim().length === 0) &&
+              msg.sender_entity_id === impersonatedEntityId, // Only user's own messages
           )
           .map(msg => msg.id);
-        
+
         if (stuckTranscriptions.length > 0) {
-          log.info(`Found ${stuckTranscriptions.length} stuck transcriptions on load`);
+          log.info(
+            `Found ${stuckTranscriptions.length} stuck transcriptions on load`,
+          );
           setFailedTranscriptions(new Set(stuckTranscriptions));
         }
-        
-        const timestamp = await ChatPreferencesService.getLastReadTimestamp(partnerEntityId);
+
+        const timestamp =
+          await ChatPreferencesService.getLastReadTimestamp(partnerEntityId);
         setLastReadTimestamp(timestamp);
       } catch (error) {
         log.error('Failed to load messages:', error);
@@ -109,7 +135,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         setLoading(false);
       }
     };
-    
+
     loadMessagesAndTimestamp();
   }, [partnerEntityId, impersonatedEntityId]);
 
@@ -153,13 +179,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         if (Platform.OS === 'android') {
           ToastAndroid.show(
             `Failed to start chat session: ${errorMessage}`,
-            ToastAndroid.LONG
+            ToastAndroid.LONG,
           );
         } else {
           Alert.alert(
             'Connection Error',
             `Could not establish chat session: ${errorMessage}`,
-            [{ text: 'OK' }]
+            [{ text: 'OK' }],
           );
         }
       }
@@ -177,20 +203,37 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const handleNewMessage = (entityId: string) => {
       if (entityId === partnerEntityId) {
         // Reload messages from database
-        getRecentConversationMessages(impersonatedEntityId, partnerEntityId, 50)
-          .then(setMessages);
+        getRecentConversationMessages(
+          impersonatedEntityId,
+          partnerEntityId,
+          50,
+        ).then(setMessages);
       }
     };
-    
-    const handleTyping = (entityId: string, senderId: string, isTypingActive: boolean) => {
-      if (entityId === partnerEntityId && (senderId === partnerEntityId || senderId === '')) {
+
+    const handleTyping = (
+      entityId: string,
+      senderId: string,
+      isTypingActive: boolean,
+    ) => {
+      if (
+        entityId === partnerEntityId &&
+        (senderId === partnerEntityId || senderId === '')
+      ) {
         setIsTyping(isTypingActive);
         if (isTypingActive) setIsRecording(false);
       }
     };
 
-    const handleRecording = (entityId: string, senderId: string, isRecordingActive: boolean) => {
-      if (entityId === partnerEntityId && (senderId === partnerEntityId || senderId === '')) {
+    const handleRecording = (
+      entityId: string,
+      senderId: string,
+      isRecordingActive: boolean,
+    ) => {
+      if (
+        entityId === partnerEntityId &&
+        (senderId === partnerEntityId || senderId === '')
+      ) {
         setIsRecording(isRecordingActive);
         if (isRecordingActive) setIsTyping(false);
       }
@@ -202,7 +245,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       setIsRecording(false);
     }
 
-    const handleTranscriptionCompleted = (entityId: string, messageId: string, text: string) => {
+    const handleTranscriptionCompleted = (
+      entityId: string,
+      messageId: string,
+      text: string,
+    ) => {
       if (entityId === partnerEntityId) {
         log.info(`Transcription completed for message ${messageId}: "${text}"`);
         // Remove from failed set if it was there
@@ -212,12 +259,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           return newSet;
         });
         // Reload messages to show updated transcription and scroll to it
-        getRecentConversationMessages(impersonatedEntityId, partnerEntityId, 50)
-          .then(updatedMessages => {
-            // Transcription completion updates the user's own message - always scroll to it
-            isNearBottom.current = true;
-            setMessages(updatedMessages);
-          });
+        getRecentConversationMessages(
+          impersonatedEntityId,
+          partnerEntityId,
+          50,
+        ).then(updatedMessages => {
+          // Transcription completion updates the user's own message - always scroll to it
+          isNearBottom.current = true;
+          setMessages(updatedMessages);
+        });
       }
     };
 
@@ -227,23 +277,35 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         // Add to failed set
         setFailedTranscriptions(prev => new Set(prev).add(messageId));
         // Reload messages to trigger re-render
-        getRecentConversationMessages(impersonatedEntityId, partnerEntityId, 50)
-          .then(setMessages);
+        getRecentConversationMessages(
+          impersonatedEntityId,
+          partnerEntityId,
+          50,
+        ).then(setMessages);
       }
     };
-    
+
     EntitySessionService.on('message:received', handleNewMessage);
     EntitySessionService.on('typing:indicator', handleTyping);
     EntitySessionService.on('recording:indicator', handleRecording);
-    EntitySessionService.on('transcription:completed', handleTranscriptionCompleted);
+    EntitySessionService.on(
+      'transcription:completed',
+      handleTranscriptionCompleted,
+    );
     EntitySessionService.on('transcription:failed', handleTranscriptionFailed);
 
     return () => {
       EntitySessionService.off('message:received', handleNewMessage);
       EntitySessionService.off('typing:indicator', handleTyping);
       EntitySessionService.off('recording:indicator', handleRecording);
-      EntitySessionService.off('transcription:completed', handleTranscriptionCompleted);
-      EntitySessionService.off('transcription:failed', handleTranscriptionFailed);
+      EntitySessionService.off(
+        'transcription:completed',
+        handleTranscriptionCompleted,
+      );
+      EntitySessionService.off(
+        'transcription:failed',
+        handleTranscriptionFailed,
+      );
     };
   }, [partnerEntityId, impersonatedEntityId]);
 
@@ -252,338 +314,436 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const handleSessionError = (errorPartnerId: string, error: string) => {
       if (errorPartnerId === partnerEntityId) {
         log.error(`Session error for ${partnerEntityId}:`, error);
-        
+
         if (Platform.OS === 'android') {
-          ToastAndroid.show(
-            `Chat session error: ${error}`,
-            ToastAndroid.LONG
-          );
+          ToastAndroid.show(`Chat session error: ${error}`, ToastAndroid.LONG);
         } else {
-          Alert.alert(
-            'Session Error',
-            error,
-            [{ text: 'OK' }]
-          );
+          Alert.alert('Session Error', error, [{ text: 'OK' }]);
         }
       }
     };
-    
+
     EntitySessionService.on('session:error', handleSessionError);
-    
+
     return () => {
       EntitySessionService.off('session:error', handleSessionError);
     };
   }, [partnerEntityId]);
 
-  const handleSendText = useCallback(async (text: string) => {
-    if (!text.trim() || !isDualSessionActive(partnerEntityId)) {
-      log.warn('Cannot send message: session not active');
-      return;
-    }
-    
-    try {
-      await EntitySessionService.sendTextMessage(partnerEntityId, text.trim());
-      // Optimistically reload from database
-      const updatedMessages = await getRecentConversationMessages(
-        impersonatedEntityId,
-        partnerEntityId,
-        50
-      );
-      // Always scroll to the message the user just sent
-      isNearBottom.current = true;
-      setMessages(updatedMessages);
-    } catch (error) {
-      log.error('Failed to send message:', error);
-    }
-  }, [partnerEntityId, impersonatedEntityId, isDualSessionActive]);
-
-  const handleSendAudio = useCallback(async (audioData: string, duration: number) => {
-    if (!isDualSessionActive(partnerEntityId)) return;
-    
-    try {
-      await EntitySessionService.newAudioMessage(
-        partnerEntityId,
-        audioData,
-        'audio/wav',
-        duration
-      );
-      
-      log.info('Audio message saved, awaiting transcription...');
-      
-      const updatedMessages = await getRecentConversationMessages(
-        impersonatedEntityId,
-        partnerEntityId,
-        50
-      );
-      // Always scroll to the message the user just sent
-      isNearBottom.current = true;
-      setMessages(updatedMessages);
-    } catch (error) {
-      log.error('Failed to save audio message:', error);
-    }
-  }, [partnerEntityId, impersonatedEntityId, isDualSessionActive]);
-
-  const handleConfirmAndSendMessage = useCallback(async (messageId: string, finalText: string) => {
-    if (!isDualSessionActive(partnerEntityId)) {
-      log.warn('Cannot send message: session not active');
-      return;
-    }
-    
-    try {
-      const message = await getConversationMessage(messageId);
-      if (!message || !message.audio_data) {
-        throw new Error('Message not found or has no audio');
+  const handleSendText = useCallback(
+    async (text: string) => {
+      if (!text.trim() || !isDualSessionActive(partnerEntityId)) {
+        log.warn('Cannot send message: session not active');
+        return;
       }
 
-      const base64Audio = message.audio_data; // Already base64 string
-
-      // Update message with final text and change type to 'combined'
-      const updates: any = { message_type: 'combined' };
-      if (finalText !== message.content) {
-        updates.content = finalText;
-      }
-      await updateConversationMessage(messageId, updates);
-
-      const dualSession = EntitySessionService.getSession(partnerEntityId);
-      if (dualSession) {
-        const utterance = {
-          entity_id: dualSession.impersonatedEntityId,
-          content: finalText,
-          type: 'UTTERANCE_COMBINED',
-          audio: base64Audio,
-          audio_type: message.audio_mime_type || 'audio/wav',
-          audio_duration: message.audio_duration || 0,
-          message_id: messageId
-        };
-
-        await EntitySessionService.sendUtterance(
-          dualSession.partnerSession.connectionId,
-          utterance
+      try {
+        await EntitySessionService.sendTextMessage(
+          partnerEntityId,
+          text.trim(),
         );
-
-        log.info(`Message ${messageId} sent to partner entity`);
-
+        // Optimistically reload from database
         const updatedMessages = await getRecentConversationMessages(
           impersonatedEntityId,
           partnerEntityId,
-          50
+          50,
         );
         // Always scroll to the message the user just sent
         isNearBottom.current = true;
         setMessages(updatedMessages);
+      } catch (error) {
+        log.error('Failed to send message:', error);
       }
-    } catch (error: any) {
-      log.error('Failed to send message:', error);
-      if (Platform.OS === 'android') {
-        ToastAndroid.show(`Failed to send: ${error.message}`, ToastAndroid.LONG);
-      } else {
-        Alert.alert('Error', `Failed to send message: ${error.message}`);
-      }
-    }
-  }, [partnerEntityId, impersonatedEntityId, isDualSessionActive]);
+    },
+    [partnerEntityId, impersonatedEntityId, isDualSessionActive],
+  );
 
-  const handleSendImage = useCallback(async (imageBase64: string, mimeType: string, caption?: string) => {
-    if (!isDualSessionActive(partnerEntityId)) return;
-    
-    try {
-      await EntitySessionService.sendImageMessage(partnerEntityId, imageBase64, mimeType, caption);
-      const updatedMessages = await getRecentConversationMessages(
-        impersonatedEntityId,
-        partnerEntityId,
-        50
-      );
-      // Always scroll to the message the user just sent
-      isNearBottom.current = true;
-      setMessages(updatedMessages);
-    } catch (error) {
-      log.error('Failed to send image:', error);
-    }
-  }, [partnerEntityId, isDualSessionActive]);
+  const handleSendAudio = useCallback(
+    async (audioData: string, duration: number) => {
+      if (!isDualSessionActive(partnerEntityId)) return;
+
+      try {
+        await EntitySessionService.newAudioMessage(
+          partnerEntityId,
+          audioData,
+          'audio/wav',
+          duration,
+        );
+
+        log.info('Audio message saved, awaiting transcription...');
+
+        const updatedMessages = await getRecentConversationMessages(
+          impersonatedEntityId,
+          partnerEntityId,
+          50,
+        );
+        // Always scroll to the message the user just sent
+        isNearBottom.current = true;
+        setMessages(updatedMessages);
+      } catch (error) {
+        log.error('Failed to save audio message:', error);
+      }
+    },
+    [partnerEntityId, impersonatedEntityId, isDualSessionActive],
+  );
+
+  const handleConfirmAndSendMessage = useCallback(
+    async (messageId: string, finalText: string) => {
+      if (!isDualSessionActive(partnerEntityId)) {
+        log.warn('Cannot send message: session not active');
+        return;
+      }
+
+      try {
+        const message = await getConversationMessage(messageId);
+        if (!message || !message.audio_data) {
+          throw new Error('Message not found or has no audio');
+        }
+
+        const base64Audio = message.audio_data; // Already base64 string
+
+        // Update message with final text and change type to 'combined'
+        const updates: any = { message_type: 'combined' };
+        if (finalText !== message.content) {
+          updates.content = finalText;
+        }
+        await updateConversationMessage(messageId, updates);
+
+        const dualSession = EntitySessionService.getSession(partnerEntityId);
+        if (dualSession) {
+          const utterance = {
+            entity_id: dualSession.impersonatedEntityId,
+            content: finalText,
+            type: 'UTTERANCE_COMBINED',
+            audio: base64Audio,
+            audio_type: message.audio_mime_type || 'audio/wav',
+            audio_duration: message.audio_duration || 0,
+            message_id: messageId,
+          };
+
+          await EntitySessionService.sendUtterance(
+            dualSession.partnerSession.connectionId,
+            utterance,
+          );
+
+          log.info(`Message ${messageId} sent to partner entity`);
+
+          const updatedMessages = await getRecentConversationMessages(
+            impersonatedEntityId,
+            partnerEntityId,
+            50,
+          );
+          // Always scroll to the message the user just sent
+          isNearBottom.current = true;
+          setMessages(updatedMessages);
+        }
+      } catch (error: any) {
+        log.error('Failed to send message:', error);
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(
+            `Failed to send: ${error.message}`,
+            ToastAndroid.LONG,
+          );
+        } else {
+          Alert.alert('Error', `Failed to send message: ${error.message}`);
+        }
+      }
+    },
+    [partnerEntityId, impersonatedEntityId, isDualSessionActive],
+  );
+
+  const handleSendImage = useCallback(
+    async (imageBase64: string, mimeType: string, caption?: string) => {
+      if (!isDualSessionActive(partnerEntityId)) return;
+
+      try {
+        await EntitySessionService.sendImageMessage(
+          partnerEntityId,
+          imageBase64,
+          mimeType,
+          caption,
+        );
+        const updatedMessages = await getRecentConversationMessages(
+          impersonatedEntityId,
+          partnerEntityId,
+          50,
+        );
+        // Always scroll to the message the user just sent
+        isNearBottom.current = true;
+        setMessages(updatedMessages);
+      } catch (error) {
+        log.error('Failed to send image:', error);
+      }
+    },
+    [partnerEntityId, isDualSessionActive],
+  );
 
   const handleTypingStart = useCallback(() => {
     // Send typing indicator if session active
   }, [partnerEntityId, isDualSessionActive]);
 
   // Delete message handler
-  const handleDeleteMessage = useCallback(async (messageId: string) => {
-    Alert.alert(
-      'Delete Message',
-      'Are you sure you want to delete this message?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteConversationMessage(messageId);
-              const updatedMessages = await getRecentConversationMessages(
-                impersonatedEntityId,
-                partnerEntityId,
-                50
-              );
-              setMessages(updatedMessages);
-              
-              if (Platform.OS === 'android') {
-                ToastAndroid.show('Message deleted', ToastAndroid.SHORT);
+  const handleDeleteMessage = useCallback(
+    async (messageId: string) => {
+      Alert.alert(
+        'Delete Message',
+        'Are you sure you want to delete this message?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteConversationMessage(messageId);
+                const updatedMessages = await getRecentConversationMessages(
+                  impersonatedEntityId,
+                  partnerEntityId,
+                  50,
+                );
+                setMessages(updatedMessages);
+
+                if (Platform.OS === 'android') {
+                  ToastAndroid.show('Message deleted', ToastAndroid.SHORT);
+                }
+              } catch (error) {
+                log.error('Failed to delete message:', error);
               }
-            } catch (error) {
-              log.error('Failed to delete message:', error);
-            }
+            },
           },
-        },
-      ]
-    );
-  }, [impersonatedEntityId, partnerEntityId]);
+        ],
+      );
+    },
+    [impersonatedEntityId, partnerEntityId],
+  );
 
   // Regenerate message handler (for partner's last message)
-  const handleRegenerateMessage = useCallback(async (messageId: string) => {
-    Alert.alert(
-      'Regenerate Response',
-      'Delete this response and regenerate a new one?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Regenerate',
-          onPress: async () => {
-            try {
-              // Delete the partner's message
-              await deleteConversationMessage(messageId);
-              
-              // Find the last user message
-              const userMessages = messages.filter(m => m.sender_entity_id === impersonatedEntityId);
-              if (userMessages.length === 0) {
-                throw new Error('No previous message to regenerate from');
+  const handleRegenerateMessage = useCallback(
+    async (messageId: string) => {
+      Alert.alert(
+        'Regenerate Response',
+        'Delete this response and regenerate a new one?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Regenerate',
+            onPress: async () => {
+              try {
+                // Delete the partner's message
+                await deleteConversationMessage(messageId);
+
+                // Find the last user message
+                const userMessages = messages.filter(
+                  m => m.sender_entity_id === impersonatedEntityId,
+                );
+                if (userMessages.length === 0) {
+                  throw new Error('No previous message to regenerate from');
+                }
+
+                const lastUserMessage = userMessages[userMessages.length - 1];
+
+                // Delete the old user message record - sendTextMessage will re-create it with
+                // the current session_id, preventing duplication when the session was restarted
+                await deleteConversationMessage(lastUserMessage.id);
+
+                // Resend the user's last message
+                await EntitySessionService.sendTextMessage(
+                  partnerEntityId,
+                  lastUserMessage.content,
+                );
+
+                // Reload messages
+                const updatedMessages = await getRecentConversationMessages(
+                  impersonatedEntityId,
+                  partnerEntityId,
+                  50,
+                );
+                // Always scroll to the re-sent user message
+                isNearBottom.current = true;
+                setMessages(updatedMessages);
+
+                if (Platform.OS === 'android') {
+                  ToastAndroid.show(
+                    'Regenerating response...',
+                    ToastAndroid.SHORT,
+                  );
+                }
+              } catch (error: any) {
+                log.error('Failed to regenerate:', error);
+                if (Platform.OS === 'android') {
+                  ToastAndroid.show(
+                    `Failed: ${error.message}`,
+                    ToastAndroid.LONG,
+                  );
+                } else {
+                  Alert.alert('Error', error.message);
+                }
               }
-              
-              const lastUserMessage = userMessages[userMessages.length - 1];
-              
-              // Delete the old user message record - sendTextMessage will re-create it with
-              // the current session_id, preventing duplication when the session was restarted
-              await deleteConversationMessage(lastUserMessage.id);
-              
-              // Resend the user's last message
-              await EntitySessionService.sendTextMessage(partnerEntityId, lastUserMessage.content);
-              
-              // Reload messages
-              const updatedMessages = await getRecentConversationMessages(
-                impersonatedEntityId,
-                partnerEntityId,
-                50
-              );
-              // Always scroll to the re-sent user message
-              isNearBottom.current = true;
-              setMessages(updatedMessages);
-              
-              if (Platform.OS === 'android') {
-                ToastAndroid.show('Regenerating response...', ToastAndroid.SHORT);
-              }
-            } catch (error: any) {
-              log.error('Failed to regenerate:', error);
-              if (Platform.OS === 'android') {
-                ToastAndroid.show(`Failed: ${error.message}`, ToastAndroid.LONG);
-              } else {
-                Alert.alert('Error', error.message);
-              }
-            }
+            },
           },
-        },
-      ]
-    );
-  }, [messages, impersonatedEntityId, partnerEntityId]);
+        ],
+      );
+    },
+    [messages, impersonatedEntityId, partnerEntityId],
+  );
 
   // Edit message handler (for user's last message)
-  const handleEditMessage = useCallback(async (messageId: string, newText: string) => {
-    Alert.alert(
-      'Edit and Resend',
-      'Edit and resend this message? This will trigger a new AI response.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Edit & Resend',
-          onPress: async () => {
-            try {
-              // Update the message content
-              await updateConversationMessage(messageId, { content: newText });
-              
-              // Get the message to check if it has audio
-              const message = await getConversationMessage(messageId);
-              if (!message) {
-                throw new Error('Message not found');
-              }
-              
-              // Resend with new text
-              await EntitySessionService.sendTextMessage(partnerEntityId, newText);
-              
-              // Reload messages
-              const updatedMessages = await getRecentConversationMessages(
-                impersonatedEntityId,
-                partnerEntityId,
-                50
-              );
-              setMessages(updatedMessages);
-              
-              if (Platform.OS === 'android') {
-                ToastAndroid.show('Message updated and sent', ToastAndroid.SHORT);
-              }
-            } catch (error: any) {
-              log.error('Failed to edit message:', error);
-              if (Platform.OS === 'android') {
-                ToastAndroid.show(`Failed: ${error.message}`, ToastAndroid.LONG);
-              } else {
-                Alert.alert('Error', error.message);
-              }
-            }
-          },
-        },
-      ]
-    );
-  }, [impersonatedEntityId, partnerEntityId]);
+  const handleEditMessage = useCallback(
+    async (messageId: string, newText: string) => {
+      Alert.alert(
+        'Edit and Resend',
+        'Edit and resend this message? This will trigger a new AI response.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Edit & Resend',
+            onPress: async () => {
+              try {
+                // Update the message content
+                await updateConversationMessage(messageId, {
+                  content: newText,
+                });
 
-  const handleRetryTranscription = useCallback(async (messageId: string) => {
-    try {
-      // Remove from failed set optimistically
-      setFailedTranscriptions(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(messageId);
-        return newSet;
-      });
-      
-      await EntitySessionService.retryTranscription(messageId, partnerEntityId);
-      
-      if (Platform.OS === 'android') {
-        ToastAndroid.show('Retrying transcription...', ToastAndroid.SHORT);
+                // Get the message to check if it has audio
+                const message = await getConversationMessage(messageId);
+                if (!message) {
+                  throw new Error('Message not found');
+                }
+
+                // Resend with new text
+                await EntitySessionService.sendTextMessage(
+                  partnerEntityId,
+                  newText,
+                );
+
+                // Reload messages
+                const updatedMessages = await getRecentConversationMessages(
+                  impersonatedEntityId,
+                  partnerEntityId,
+                  50,
+                );
+                setMessages(updatedMessages);
+
+                if (Platform.OS === 'android') {
+                  ToastAndroid.show(
+                    'Message updated and sent',
+                    ToastAndroid.SHORT,
+                  );
+                }
+              } catch (error: any) {
+                log.error('Failed to edit message:', error);
+                if (Platform.OS === 'android') {
+                  ToastAndroid.show(
+                    `Failed: ${error.message}`,
+                    ToastAndroid.LONG,
+                  );
+                } else {
+                  Alert.alert('Error', error.message);
+                }
+              }
+            },
+          },
+        ],
+      );
+    },
+    [impersonatedEntityId, partnerEntityId],
+  );
+
+  const handleRetryTranscription = useCallback(
+    async (messageId: string) => {
+      try {
+        // Remove from failed set optimistically
+        setFailedTranscriptions(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(messageId);
+          return newSet;
+        });
+
+        await EntitySessionService.retryTranscription(
+          messageId,
+          partnerEntityId,
+        );
+
+        if (Platform.OS === 'android') {
+          ToastAndroid.show('Retrying transcription...', ToastAndroid.SHORT);
+        }
+      } catch (error: any) {
+        log.error('Failed to retry transcription:', error);
+
+        // Add back to failed set
+        setFailedTranscriptions(prev => new Set(prev).add(messageId));
+
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(
+            `Retry failed: ${error.message}`,
+            ToastAndroid.LONG,
+          );
+        } else {
+          Alert.alert('Retry Failed', error.message);
+        }
       }
-    } catch (error: any) {
-      log.error('Failed to retry transcription:', error);
-      
-      // Add back to failed set
-      setFailedTranscriptions(prev => new Set(prev).add(messageId));
-      
-      if (Platform.OS === 'android') {
-        ToastAndroid.show(`Retry failed: ${error.message}`, ToastAndroid.LONG);
-      } else {
-        Alert.alert('Retry Failed', error.message);
-      }
-    }
-  }, [partnerEntityId]);
+    },
+    [partnerEntityId],
+  );
+
+  // ── Entity context menu (AppBar ⋮ button) ───────────────────────────────────
+  const handleEntityContextMenu = useCallback(() => {
+    Alert.alert(partnerName, undefined, [
+      { text: 'Cancel', style: 'cancel' },      
+      {
+        text: 'Delete Entity',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert(
+            'Delete Entity',
+            `Delete "${partnerName}"? Chat history will be preserved but this entity will no longer be accessible.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await deleteEntity(partnerEntityId);
+                    navigation.navigate('ChatList');
+                  } catch (err: any) {
+                    Alert.alert(
+                      'Error',
+                      err?.message ?? 'Failed to delete entity.',
+                    );
+                  }
+                },
+              },
+            ],
+          );
+        },
+      },
+      {
+        text: 'Entity Settings',
+        onPress: () =>
+          navigation.navigate('EntityConfigEdit', {
+            entityId: partnerEntityId,
+          }),
+      },
+    ]);
+  }, [partnerEntityId, partnerName, navigation]);
 
   // Calculate messages with divider
   const messagesWithDivider = useMemo(() => {
     if (messages.length === 0 || lastReadTimestamp === 0) {
       return messages;
     }
-    
+
     // Find the first new message
-    const firstNewIndex = messages.findIndex(m => 
-      m.created_at.getTime() > lastReadTimestamp
+    const firstNewIndex = messages.findIndex(
+      m => m.created_at.getTime() > lastReadTimestamp,
     );
-    
+
     // If no new messages or all messages are new, don't add divider
     if (firstNewIndex === -1 || firstNewIndex === 0) {
       return messages;
     }
-    
+
     // Insert divider before first new message
     const newMessageCount = messages.length - firstNewIndex;
     const result: any[] = [...messages];
@@ -592,18 +752,21 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       type: 'divider',
       count: newMessageCount,
     });
-    
+
     return result;
   }, [messages, lastReadTimestamp]);
 
   // Scroll to new messages on mount
   useEffect(() => {
     if (messagesWithDivider.length > 0 && !hasScrolledToNewMessages.current) {
-      const dividerIndex = messagesWithDivider.findIndex((m: any) => m.type === 'divider');
-      
+      const dividerIndex = messagesWithDivider.findIndex(
+        (m: any) => m.type === 'divider',
+      );
+
       if (dividerIndex !== -1) {
-        const messagesAfterDivider = messagesWithDivider.length - dividerIndex - 1;
-        
+        const messagesAfterDivider =
+          messagesWithDivider.length - dividerIndex - 1;
+
         // Small delay to ensure FlatList is rendered
         setTimeout(() => {
           if (messagesAfterDivider < 3) {
@@ -633,34 +796,47 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Capture the final scroll position accurately when a scroll animation or drag ends.
   // This avoids relying solely on the throttled onScroll event and ensures
   // isNearBottom.current is correct when the user "lands" at the bottom.
-  const handleScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    isNearBottom.current =
-      contentSize.height - (contentOffset.y + layoutMeasurement.height) < 150;
-  }, []);
+  const handleScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } =
+        event.nativeEvent;
+      isNearBottom.current =
+        contentSize.height - (contentOffset.y + layoutMeasurement.height) < 150;
+    },
+    [],
+  );
 
   // Handle scroll for mark-as-read and near-bottom tracking
-  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const scrollPosition = contentOffset.y;
-    const totalHeight = contentSize.height;
-    const viewportHeight = layoutMeasurement.height;
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } =
+        event.nativeEvent;
+      const scrollPosition = contentOffset.y;
+      const totalHeight = contentSize.height;
+      const viewportHeight = layoutMeasurement.height;
 
-    // Track whether the user is near the bottom so incoming messages can auto-scroll
-    const distanceFromBottom = totalHeight - (scrollPosition + viewportHeight);
-    isNearBottom.current = distanceFromBottom < 150;
+      // Track whether the user is near the bottom so incoming messages can auto-scroll
+      const distanceFromBottom =
+        totalHeight - (scrollPosition + viewportHeight);
+      isNearBottom.current = distanceFromBottom < 150;
 
-    // If scrolled past 75% of content, mark all as read
-    if (scrollPosition + viewportHeight > totalHeight * 0.75) {
-      if (messages.length > 0) {
-        const latestTimestamp = messages[messages.length - 1]?.created_at.getTime() || 0;
-        if (latestTimestamp > lastReadTimestamp) {
-          setLastReadTimestamp(latestTimestamp);
-          ChatPreferencesService.setLastReadTimestamp(partnerEntityId, latestTimestamp);
+      // If scrolled past 75% of content, mark all as read
+      if (scrollPosition + viewportHeight > totalHeight * 0.75) {
+        if (messages.length > 0) {
+          const latestTimestamp =
+            messages[messages.length - 1]?.created_at.getTime() || 0;
+          if (latestTimestamp > lastReadTimestamp) {
+            setLastReadTimestamp(latestTimestamp);
+            ChatPreferencesService.setLastReadTimestamp(
+              partnerEntityId,
+              latestTimestamp,
+            );
+          }
         }
       }
-    }
-  }, [messages, lastReadTimestamp, partnerEntityId]);
+    },
+    [messages, lastReadTimestamp, partnerEntityId],
+  );
 
   // Auto-scroll to bottom whenever the message list changes and the user is near the bottom.
   // This is the primary mechanism for scrolling on new incoming messages.
@@ -673,37 +849,52 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [messages]);
 
-  const renderMessage = useCallback(({ item }: { item: any }) => {
-    // Render divider
-    if (item.type === 'divider') {
-      return <NewMessagesDivider count={item.count} theme={theme!} />;
-    }
-    
-    // Render message
-    const isOwn = item.sender_entity_id === impersonatedEntityId;
-    const isLastMessage = messages.length > 0 && item.id === messages[messages.length - 1].id;
-    const isTranscriptionFailed = failedTranscriptions.has(item.id);
-    
-    return (
-      <ChatBubble
-        message={item}
-        isOwn={isOwn}
-        isLastMessage={isLastMessage}
-        isTranscriptionFailed={isTranscriptionFailed}
-        partnerAvatar={!isOwn ? partnerAvatar : null}
-        partnerName={partnerName}
-        onImagePress={() => {
-          // Navigate to full-screen image viewer
-        }}
-        onSendMessage={handleConfirmAndSendMessage}
-        onDelete={handleDeleteMessage}
-        onRegenerate={handleRegenerateMessage}
-        onEdit={handleEditMessage}
-        onRetryTranscription={handleRetryTranscription}
-        theme={theme!}
-      />
-    );
-  }, [messages, partnerAvatar, theme, impersonatedEntityId, failedTranscriptions, handleConfirmAndSendMessage, handleDeleteMessage, handleRegenerateMessage, handleEditMessage, handleRetryTranscription]);
+  const renderMessage = useCallback(
+    ({ item }: { item: any }) => {
+      // Render divider
+      if (item.type === 'divider') {
+        return <NewMessagesDivider count={item.count} theme={theme!} />;
+      }
+
+      // Render message
+      const isOwn = item.sender_entity_id === impersonatedEntityId;
+      const isLastMessage =
+        messages.length > 0 && item.id === messages[messages.length - 1].id;
+      const isTranscriptionFailed = failedTranscriptions.has(item.id);
+
+      return (
+        <ChatBubble
+          message={item}
+          isOwn={isOwn}
+          isLastMessage={isLastMessage}
+          isTranscriptionFailed={isTranscriptionFailed}
+          partnerAvatar={!isOwn ? partnerAvatar : null}
+          partnerName={partnerName}
+          onImagePress={() => {
+            // Navigate to full-screen image viewer
+          }}
+          onSendMessage={handleConfirmAndSendMessage}
+          onDelete={handleDeleteMessage}
+          onRegenerate={handleRegenerateMessage}
+          onEdit={handleEditMessage}
+          onRetryTranscription={handleRetryTranscription}
+          theme={theme!}
+        />
+      );
+    },
+    [
+      messages,
+      partnerAvatar,
+      theme,
+      impersonatedEntityId,
+      failedTranscriptions,
+      handleConfirmAndSendMessage,
+      handleDeleteMessage,
+      handleRegenerateMessage,
+      handleEditMessage,
+      handleRetryTranscription,
+    ],
+  );
 
   if (loading) {
     return (
@@ -715,17 +906,23 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <ThemedView style={styles.container}>
-      <Appbar.Header style={{ backgroundColor: theme?.colors.background.surface }}>
-        <Appbar.BackAction 
+      <Appbar.Header
+        style={{ backgroundColor: theme?.colors.background.surface }}
+      >
+        <Appbar.BackAction
           onPress={() => navigation.goBack()}
           color={theme?.colors.text.primary}
         />
         {partnerAvatar ? (
-          <Avatar.Image size={36} source={{ uri: partnerAvatar }} style={styles.headerAvatar} />
+          <Avatar.Image
+            size={36}
+            source={{ uri: partnerAvatar }}
+            style={styles.headerAvatar}
+          />
         ) : (
-          <Avatar.Text 
-            size={36} 
-            label={partnerName.substring(0, 2).toUpperCase()} 
+          <Avatar.Text
+            size={36}
+            label={partnerName.substring(0, 2).toUpperCase()}
             style={styles.headerAvatar}
           />
         )}
@@ -735,11 +932,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         />
         {isConnected ? (
           isDualSessionActive(partnerEntityId) ? (
-            <ThemedText variant="success" size={12} style={styles.statusIndicator}>
+            <ThemedText
+              variant="success"
+              size={12}
+              style={styles.statusIndicator}
+            >
               Connected
             </ThemedText>
           ) : (
-            <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
+            <ThemedText
+              variant="muted"
+              size={12}
+              style={styles.statusIndicator}
+            >
               Connecting...
             </ThemedText>
           )
@@ -748,6 +953,18 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             Offline
           </ThemedText>
         )}
+        {/* Entity context menu */}
+        <TouchableOpacity
+          onPress={handleEntityContextMenu}
+          style={styles.headerMenuButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Icon
+            name="dots-vertical"
+            size={24}
+            color={theme?.colors.text.primary}
+          />
+        </TouchableOpacity>
       </Appbar.Header>
 
       <KeyboardAvoidingView
@@ -759,7 +976,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           ref={flatListRef}
           data={messagesWithDivider}
           renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
+          keyExtractor={item => item.id}
           contentContainerStyle={styles.messageList}
           onScroll={handleScroll}
           scrollEventThrottle={100}
@@ -778,13 +995,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             }
           }}
         />
-        
-        {isTyping && (
-          <TypingIndicator theme={theme} mode="text" />
-        )}
-        {isRecording && (
-          <TypingIndicator theme={theme} mode="audio" />
-        )}
+
+        {isTyping && <TypingIndicator theme={theme} mode="text" />}
+        {isRecording && <TypingIndicator theme={theme} mode="audio" />}
 
         <ChatInput
           onSendText={handleSendText}
@@ -817,6 +1030,10 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   statusIndicator: {
-    marginRight: 16,
+    marginRight: 8,
+  },
+  headerMenuButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
 });

@@ -30,6 +30,7 @@ export interface CharacterProfile {
 
 export interface Entity {
   id: string;
+  alias: string | null; // Human-readable display name
   character_profile_id: string | null;
   lifecycle_config: string | null; // Opaque JSON blob
   created_at: Date;
@@ -336,8 +337,8 @@ export interface ConversationMessage {
   vl_model_interpretation?: string | null;
 
   // Emotional state and memory (Migrations 14-16)
-  emotional_state_bits: number; // Compact Ekman8 bitfield, opaque
-  memory_id: string | null;     // FK to memories.id, opaque
+  emotional_state_bits: number | 0; // Compact Ekman8 bitfield, opaque
+  memory_id?: string | null; // FK to memories.id, opaque
 
   created_at: Date;
   updated_at: Date;

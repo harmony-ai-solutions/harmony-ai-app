@@ -1,9 +1,11 @@
 # Phase 4: Settings Menu Update
 
 ## Objective
+
 Update `SettingsMenu` to add a "Navigate" section at the top that lets users jump directly between AI Chat, Characters, and Settings — enabling cross-section switching without going back to the Landing Screen. Also clean up menu items pointing to unimplemented screens.
 
 ## Files to Modify
+
 - `src/components/navigation/SettingsMenu.tsx`
 
 ---
@@ -58,6 +60,7 @@ Development (DEV only):
 ```
 
 **Changes:**
+
 - Add new "Navigate" section at the top with quick links
 - Remove `PrivacySettings`, `NotificationSettings`, `About`, `Help` items (not yet implemented — avoids dead-end navigation)
 - Add `ConnectionSetup` to Sync & Connection section (currently only reachable from SyncSettingsScreen)
@@ -75,41 +78,68 @@ Replace the `menuSections` constant with:
 
 ```typescript
 const menuSections: MenuSection[] = [
-    {
-        title: 'Navigate',
-        items: [
-            { icon: 'chat-processing', label: 'AI Chat', screen: 'ChatList' },
-            { icon: 'account-group', label: 'Characters', screen: 'Characters' },
-            { icon: 'tune', label: 'Settings', screen: 'Settings' },
-            { icon: 'home', label: 'Home', screen: 'Landing' },
-        ],
-    },
-    {
-        title: 'User',
-        items: [
-            { icon: 'account-circle', label: 'User Profile', screen: 'ProfileSettings' },
-        ],
-    },
-    {
-        title: 'App Settings',
-        items: [
-            { icon: 'palette', label: 'Appearance & Theme', screen: 'ThemeSettings', badge: '⭐' },
-        ],
-    },
-    {
-        title: 'Sync & Connection',
-        items: [
-            { icon: 'sync', label: 'Sync Settings', screen: 'SyncSettings' },
-            { icon: 'connection', label: 'Connection Setup', screen: 'ConnectionSetup' },
-        ],
-    },
-    ...(__DEV__ ? [{
-        title: 'Development',
-        items: [
-            { icon: 'test-tube', label: 'Database Tests', screen: 'DatabaseTests', badge: 'DEV' },
-            { icon: 'database-eye', label: 'Database Table Viewer', screen: 'DatabaseTableViewer', badge: 'DEV' },
-        ],
-    }] : []),
+  {
+    title: 'Navigate',
+    items: [
+      { icon: 'chat-processing', label: 'AI Chat', screen: 'ChatList' },
+      { icon: 'account-group', label: 'Characters', screen: 'Characters' },
+      { icon: 'tune', label: 'Settings', screen: 'Settings' },
+      { icon: 'home', label: 'Home', screen: 'Landing' },
+    ],
+  },
+  {
+    title: 'User',
+    items: [
+      {
+        icon: 'account-circle',
+        label: 'User Profile',
+        screen: 'ProfileSettings',
+      },
+    ],
+  },
+  {
+    title: 'App Settings',
+    items: [
+      {
+        icon: 'palette',
+        label: 'Appearance & Theme',
+        screen: 'ThemeSettings',
+        badge: '⭐',
+      },
+    ],
+  },
+  {
+    title: 'Sync & Connection',
+    items: [
+      { icon: 'sync', label: 'Sync Settings', screen: 'SyncSettings' },
+      {
+        icon: 'connection',
+        label: 'Connection Setup',
+        screen: 'ConnectionSetup',
+      },
+    ],
+  },
+  ...(__DEV__
+    ? [
+        {
+          title: 'Development',
+          items: [
+            {
+              icon: 'test-tube',
+              label: 'Database Tests',
+              screen: 'DatabaseTests',
+              badge: 'DEV',
+            },
+            {
+              icon: 'database-eye',
+              label: 'Database Table Viewer',
+              screen: 'DatabaseTableViewer',
+              badge: 'DEV',
+            },
+          ],
+        },
+      ]
+    : []),
 ];
 ```
 
@@ -123,11 +153,11 @@ The "Navigate" section items should visually feel distinct from configuration it
 
 ```typescript
 interface MenuItem {
-    icon: string;
-    label: string;
-    screen: string;
-    badge?: string;
-    type?: 'navigate' | 'setting'; // NEW optional field
+  icon: string;
+  label: string;
+  screen: string;
+  badge?: string;
+  type?: 'navigate' | 'setting'; // NEW optional field
 }
 ```
 
@@ -149,6 +179,7 @@ Update `menuSections` Navigate items to include `type: 'navigate'`.
 ### Step 4: Ensure `SettingsMenu` is present on all new screens
 
 The `SettingsMenu` should appear in the Appbar of these screens (verify each has it):
+
 - `ChatListScreen` — already has it ✓
 - `CharactersScreen` — needs it (currently has stub version ✓ but needs update for new screen names)
 - `EntityConfigScreen` — add it (new screen)
@@ -158,10 +189,10 @@ The `SettingsMenu` should appear in the Appbar of these screens (verify each has
 
 ## Progress Checklist
 
-- [ ] Update `menuSections` in `src/components/navigation/SettingsMenu.tsx` with the new "Navigate" section
-- [ ] Remove unimplemented menu items (`PrivacySettings`, `NotificationSettings`, `About`, `Help`)
-- [ ] Add `type?: 'navigate' | 'setting'` to `MenuItem` interface
-- [ ] Apply visual styling difference for navigate-type items (different icon color)
-- [ ] Add `ConnectionSetup` to the Sync & Connection section
-- [ ] Verify `SettingsMenu` is correctly included in `CharactersScreen` and `EntityConfigScreen` appbars
-- [ ] Verify `LandingScreen` does NOT include `SettingsMenu` (uses direct settings icon instead)
+- [x] Update `menuSections` in `src/components/navigation/SettingsMenu.tsx` with the new "Navigate" section
+- [x] Remove unimplemented menu items (`PrivacySettings`, `NotificationSettings`, `About`, `Help`)
+- [x] Add `type?: 'navigate' | 'setting'` to `MenuItem` interface
+- [x] Apply visual styling difference for navigate-type items (different icon color)
+- [x] Add `ConnectionSetup` to the Sync & Connection section
+- [x] Verify `SettingsMenu` is correctly included in `CharactersScreen` and `EntityConfigScreen` appbars
+- [x] Verify `LandingScreen` does NOT include `SettingsMenu` (uses direct settings icon instead)

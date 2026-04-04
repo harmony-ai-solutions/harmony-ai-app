@@ -1,14 +1,12 @@
 import EventEmitter from 'eventemitter3';
 import DeviceInfo from 'react-native-device-info';
 import { Platform, AppState } from 'react-native';
-import { Buffer } from 'buffer';
 import ConnectionManager, { ConnectionMode } from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
 import { createLogger } from '../utils/logger';
 import { messageExists, createConversationMessage, updateConversationMessage, getConversationMessage } from '../database/repositories/conversation_messages';
 import { SyncService } from './SyncService';
 import AudioPlayer, { AudioPlayer as AudioPlayerClass } from './AudioPlayer';
-import { uint8ArrayToBase64 } from '../database/base64';
 import { v7 as uuidv7 } from 'uuid';
 
 const log = createLogger('[EntitySessionService]');
@@ -414,7 +412,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       image_data: null,
       image_mime_type: null,
       vl_model: null,
-      vl_model_interpretation: null
+      vl_model_interpretation: null,
+      emotional_state_bits: 0,
+      memory_id: null
     };
     
     await createConversationMessage(message);
@@ -467,7 +467,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       image_data: null,
       image_mime_type: null,
       vl_model: null,
-      vl_model_interpretation: null
+      vl_model_interpretation: null,
+      emotional_state_bits: 0,
+      memory_id: null
     };
     
     await createConversationMessage(message);
@@ -815,7 +817,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       image_data: utterance.image_data || null,     // Already base64 from backend
       image_mime_type: utterance.image_mime_type || null,
       vl_model: null, // Will be populated by Harmony Link
-      vl_model_interpretation: null
+      vl_model_interpretation: null,
+      emotional_state_bits: 0,
+      memory_id: null
     };
     
     await createConversationMessage(message);

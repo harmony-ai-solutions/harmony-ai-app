@@ -6,7 +6,14 @@ import {
   TouchableOpacity,
   RefreshControl,
 } from 'react-native';
-import { Appbar, Avatar, List, Divider, ActivityIndicator } from 'react-native-paper';
+import {
+  Appbar,
+  Avatar,
+  FAB,
+  List,
+  Divider,
+  ActivityIndicator,
+} from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -16,7 +23,12 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
 import { getAllEntities } from '../database/repositories/entities';
 import { getLastConversationMessage } from '../database/repositories/conversation_messages';
-import { getPrimaryImage, getCharacterProfile, imageToDataURL } from '../database/repositories/characters';
+import {
+  getPrimaryImage,
+  getCharacterProfile,
+  imageToDataURL,
+} from '../database/repositories/characters';
+
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ChatPreferencesService from '../services/ChatPreferencesService';
@@ -36,6 +48,16 @@ interface ChatListItem {
   avatarUri: string | null;
 }
 
+const getEntityDisplayName = (
+  alias: string | null,
+  characterProfileName: string | null,
+  entityId: string,
+): string => {
+  if (alias) return alias;
+  if (characterProfileName) return characterProfileName;
+  return entityId;
+};
+
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export const ChatListScreen: React.FC = () => {
@@ -47,7 +69,7 @@ export const ChatListScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [infoModalVisible, setInfoModalVisible] = useState(false);
-  
+
   // Global impersonation state
   const [impersonatedEntityId, setImpersonatedEntityId] = useState<string>('user');
   const [impersonatedEntityDisplay, setImpersonatedEntityDisplay] = useState<{
@@ -78,7 +100,9 @@ export const ChatListScreen: React.FC = () => {
             // Partner sent the last message - use their character name
             lastMessageSender = entity.id;
             if (entity.character_profile_id) {
-              const profile = await getCharacterProfile(entity.character_profile_id);
+              const profile = await getCharacterProfile(
+                entity.character_profile_id,
+              );
               if (profile) {
                 lastMessageSender = profile.name;
               }
@@ -86,20 +110,29 @@ export const ChatListScreen: React.FC = () => {
           }
         }
 
-        // Get avatar
+        // Get character profile and avatar
         let avatarUri: string | null = null;
-        let characterName = entity.id;
+        let characterProfileName: string | null = null;
         if (entity.character_profile_id) {
-          const profile = await getCharacterProfile(entity.character_profile_id);
-          if (profile) {
-            characterName = profile.name;
-          }
-          const primaryImage = await getPrimaryImage(entity.character_profile_id);
+          const profile = await getCharacterProfile(
+            entity.character_profile_id,
+          );
+          characterProfileName = profile?.name ?? null;
+          const primaryImage = await getPrimaryImage(
+            entity.character_profile_id,
+          );
           if (primaryImage) {
             avatarUri = imageToDataURL(primaryImage);
           }
         }
-        
+
+        // Use alias → character profile name → truncated UUID
+        const characterName = getEntityDisplayName(
+          entity.alias,
+          characterProfileName,
+          entity.id,
+        );
+
         listItems.push({
           entityId: entity.id,
           characterId: entity.character_profile_id,
@@ -107,17 +140,17 @@ export const ChatListScreen: React.FC = () => {
           lastMessage: lastMsg?.content || 'No messages yet',
           lastMessageSender,
           lastMessageTime: lastMsg?.created_at || null,
-          avatarUri
+          avatarUri,
         });
       }
-      
+
       // Sort by last message time (newest first)
       listItems.sort((a, b) => {
         if (!a.lastMessageTime) return 1;
         if (!b.lastMessageTime) return -1;
         return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
       });
-      
+
       setChatList(listItems);
     } catch (error) {
       console.error('Failed to load chat list:', error);
@@ -131,13 +164,16 @@ export const ChatListScreen: React.FC = () => {
   const loadImpersonatedEntity = useCallback(async () => {
     try {
       const allEntities = await getAllEntities();
-      const storedId = await ChatPreferencesService.getGlobalImpersonatedEntity();
+      const storedId =
+        await ChatPreferencesService.getGlobalImpersonatedEntity();
 
       // Pick best default: stored > 'user' entity > first entity
       let resolvedId = storedId;
       if (!resolvedId || !allEntities.some(e => e.id === resolvedId)) {
         const userEntity = allEntities.find(e => e.id === 'user');
-        resolvedId = userEntity ? userEntity.id : allEntities[0]?.id ?? 'user';
+        resolvedId = userEntity
+          ? userEntity.id
+          : (allEntities[0]?.id ?? 'user');
       }
 
       setImpersonatedEntityId(resolvedId);
@@ -162,7 +198,7 @@ export const ChatListScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       loadImpersonatedEntity();
-    }, [loadImpersonatedEntity])
+    }, [loadImpersonatedEntity]),
   );
 
   // Re-run loadChatList when impersonatedEntityId changes
@@ -183,7 +219,7 @@ export const ChatListScreen: React.FC = () => {
       log.warn('Cannot chat with yourself');
       return;
     }
-    
+
     navigation.navigate('ChatDetail', {
       partnerEntityId: item.entityId,
       partnerCharacterId: item.characterId || undefined,
@@ -195,7 +231,7 @@ export const ChatListScreen: React.FC = () => {
     try {
       await ChatPreferencesService.setGlobalImpersonatedEntity(entityId);
       setImpersonatedEntityId(entityId);
-      
+
       // Also update the display info for the banner
       const allEntities = await getAllEntities();
       const entity = allEntities.find(e => e.id === entityId);
@@ -209,7 +245,7 @@ export const ChatListScreen: React.FC = () => {
       } else {
         setImpersonatedEntityDisplay({ name: entityId, avatarUri: null });
       }
-      
+
       setSelectorModalVisible(false);
       // loadChatList will re-run via the useEffect that watches impersonatedEntityId
     } catch (error) {
@@ -222,29 +258,35 @@ export const ChatListScreen: React.FC = () => {
     <TouchableOpacity onPress={() => handleChatPress(item)}>
       <List.Item
         title={item.characterName}
-        description={item.lastMessageSender ? `${item.lastMessageSender}: ${item.lastMessage}` : item.lastMessage}
+        description={
+          item.lastMessageSender
+            ? `${item.lastMessageSender}: ${item.lastMessage}`
+            : item.lastMessage
+        }
         descriptionNumberOfLines={1}
-        left={() => (
+        left={() =>
           item.avatarUri ? (
             <Avatar.Image size={48} source={{ uri: item.avatarUri }} />
           ) : (
-            <Avatar.Text 
-              size={48} 
-              label={item.characterName.substring(0, 2).toUpperCase()} 
+            <Avatar.Text
+              size={48}
+              label={item.characterName.substring(0, 2).toUpperCase()}
             />
           )
-        )}
-        right={() => item.lastMessageTime && (
-          <ThemedText variant="muted" size={12}>
-            {formatTime(item.lastMessageTime)}
-          </ThemedText>
-        )}
+        }
+        right={() =>
+          item.lastMessageTime ? (
+            <ThemedText variant="muted" size={12} style={styles.timeText}>
+              {formatTime(item.lastMessageTime)}
+            </ThemedText>
+          ) : null
+        }
         style={styles.listItem}
       />
       <Divider />
     </TouchableOpacity>
   );
-  
+
   if (loading) {
     return (
       <ThemedView style={[styles.container, styles.centered]}>
@@ -252,19 +294,34 @@ export const ChatListScreen: React.FC = () => {
       </ThemedView>
     );
   }
-  
+
   return (
     <ThemedView style={styles.container}>
-      <Appbar.Header style={{ backgroundColor: theme?.colors.background.surface, zIndex: 10 }}>
+      <Appbar.Header
+        style={{
+          backgroundColor: theme?.colors.background.surface,
+          zIndex: 10,
+        }}
+      >
+        <Appbar.BackAction
+          color={theme?.colors.text.primary}
+          onPress={() => navigation.navigate('Landing')}
+        />
         <Appbar.Content
           title={
             <View style={styles.titleContainer}>
-              <ThemedText variant="primary" style={styles.titleText}>Chats</ThemedText>
+              <ThemedText variant="primary" style={styles.titleText}>
+                Chats
+              </ThemedText>
               <TouchableOpacity
                 onPress={() => setInfoModalVisible(true)}
                 style={styles.infoButton}
               >
-                <Icon name="information-outline" size={20} color={theme?.colors.text.muted} />
+                <Icon
+                  name="information-outline"
+                  size={20}
+                  color={theme?.colors.text.muted}
+                />
               </TouchableOpacity>
             </View>
           }
@@ -274,22 +331,35 @@ export const ChatListScreen: React.FC = () => {
           onPress={() => setSelectorModalVisible(true)}
         >
           <View style={styles.impersonationBannerText}>
-            <ThemedText variant="muted" size={11}>Chatting as</ThemedText>
-            <ThemedText variant="primary" size={14} style={{ fontWeight: '600' }}>
+            <ThemedText variant="muted" size={11}>
+              Chatting as
+            </ThemedText>
+            <ThemedText
+              variant="primary"
+              size={14}
+              style={{ fontWeight: '600' }}
+            >
               {impersonatedEntityDisplay.name}
             </ThemedText>
           </View>
           {impersonatedEntityDisplay.avatarUri ? (
-            <Avatar.Image size={28} source={{ uri: impersonatedEntityDisplay.avatarUri }} />
+            <Avatar.Image
+              size={28}
+              source={{ uri: impersonatedEntityDisplay.avatarUri }}
+            />
           ) : (
             <Avatar.Text
               size={28}
-              label={impersonatedEntityDisplay.name.substring(0, 2).toUpperCase()}
+              label={impersonatedEntityDisplay.name
+                .substring(0, 2)
+                .toUpperCase()}
             />
           )}
         </TouchableOpacity>
         <Appbar.Action
-          icon={() => <Icon name="menu" size={24} color={theme?.colors.text.primary} />}
+          icon={() => (
+            <Icon name="menu" size={24} color={theme?.colors.text.primary} />
+          )}
           onPress={() => setMenuVisible(true)}
         />
       </Appbar.Header>
@@ -297,12 +367,16 @@ export const ChatListScreen: React.FC = () => {
       {!isPaired ? (
         <View style={styles.notPairedContainer}>
           <Icon name="connection" size={64} color={theme?.colors.text.muted} />
-          <ThemedText style={styles.notPairedText}>
-            Not connected to Harmony Link
+          <ThemedText style={styles.notPairedText}>Not connected</ThemedText>
+          <ThemedText variant="muted" size={13} style={styles.notPairedSubText}>
+            Connect to Harmony Link or cloud to load your entities.
           </ThemedText>
           <TouchableOpacity
-            style={[styles.connectButton, { backgroundColor: theme?.colors.accent.primary }]}
-            onPress={() => navigation.navigate('ConnectionSetup' as any)}
+            style={[
+              styles.connectButton,
+              { backgroundColor: theme?.colors.accent.primary },
+            ]}
+            onPress={() => navigation.navigate('ConnectionSetup')}
           >
             <ThemedText variant="primary">Connect Now</ThemedText>
           </TouchableOpacity>
@@ -311,13 +385,17 @@ export const ChatListScreen: React.FC = () => {
         <FlatList
           data={chatList}
           renderItem={renderItem}
-          keyExtractor={(item) => item.entityId}
+          keyExtractor={item => item.entityId}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Icon name="chat-outline" size={64} color={theme?.colors.text.muted} />
+              <Icon
+                name="chat-outline"
+                size={64}
+                color={theme?.colors.text.muted}
+              />
               <ThemedText variant="secondary" style={styles.emptyText}>
                 No conversations yet
               </ThemedText>
@@ -328,11 +406,18 @@ export const ChatListScreen: React.FC = () => {
           }
         />
       )}
-      
+
+      <FAB
+        icon="plus"
+        style={[styles.fab, { backgroundColor: theme?.colors.accent.primary }]}
+        onPress={() => navigation.navigate('CreateAI', {})}
+        color="#fff"
+      />
+
       <SettingsMenu
         visible={menuVisible}
         onClose={() => setMenuVisible(false)}
-        onNavigate={(screen) => navigation.navigate(screen as any)}
+        onNavigate={screen => navigation.navigate(screen as any)}
       />
 
       <ImpersonationSelectorModal
@@ -357,7 +442,7 @@ function formatTime(date: Date): string {
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  
+
   if (days === 0) {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   } else if (days === 1) {
@@ -377,20 +462,21 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 32
+    padding: 32,
   },
-  notPairedText: { marginTop: 16, marginBottom: 24 },
+  notPairedText: { marginTop: 16, marginBottom: 8 },
+  notPairedSubText: { marginBottom: 24, textAlign: 'center' },
   connectButton: {
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 8
+    borderRadius: 8,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 32,
-    marginTop: 100
+    marginTop: 100,
   },
   emptyText: { marginTop: 16, marginBottom: 8 },
   titleContainer: { flexDirection: 'row', alignItems: 'center' },
@@ -406,5 +492,14 @@ const styles = StyleSheet.create({
   },
   impersonationBannerText: {
     alignItems: 'flex-end',
+  },
+  timeText: {
+    alignSelf: 'center',
+    marginRight: 8,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
   },
 });
