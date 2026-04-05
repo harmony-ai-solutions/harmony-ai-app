@@ -11,6 +11,7 @@
 import SQLite, {SQLiteDatabase} from 'react-native-sqlite-storage';
 import RNFS from 'react-native-fs';
 import * as Keychain from 'react-native-keychain';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {runMigrations} from './migrations';
 import {createLogger} from '../utils/logger';
 
@@ -286,6 +287,17 @@ export async function wipeDatabaseCompletely(
       }
     } catch (error) {
       log.warn('Failed to clear encryption key (may not exist):', error);
+    }
+
+    // Step 2b: Clear sync timestamp from AsyncStorage to allow full sync after wipe
+    // This ensures the app requests all data from Harmony Link instead of just changes since last sync
+    try {
+      await AsyncStorage.removeItem('last_sync_timestamp');
+      if (!silent) {
+        log.info('Cleared last_sync_timestamp from AsyncStorage');
+      }
+    } catch (error) {
+      log.warn('Failed to clear last_sync_timestamp:', error);
     }
 
     // Step 3: Force a small delay to ensure SQLite releases all file handles

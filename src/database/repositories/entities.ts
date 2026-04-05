@@ -29,7 +29,7 @@ export async function createEntity(
        VALUES (?, ?, ?, ?, ?, ?)`,
       [
         entity.id,
-        entity.alias ?? null,
+        entity.alias || '',
         entity.character_profile_id,
         entity.lifecycle_config ?? null,
         now,
@@ -69,7 +69,7 @@ export async function getEntity(
   const row = results.rows.item(0);
   return {
     id: row.id,
-    alias: row.alias ?? null,
+    alias: row.alias,
     character_profile_id: row.character_profile_id,
     lifecycle_config: row.lifecycle_config ?? null,
     created_at: new Date(row.created_at),
@@ -98,7 +98,7 @@ export async function getAllEntities(
     const row = results.rows.item(i);
     entities.push({
       id: row.id,
-      alias: row.alias ?? null,
+      alias: row.alias,
       character_profile_id: row.character_profile_id,
       lifecycle_config: row.lifecycle_config ?? null,
       created_at: new Date(row.created_at),
@@ -131,7 +131,7 @@ export async function updateEntity(entity: Entity): Promise<Entity> {
        SET alias = ?, character_profile_id = ?, lifecycle_config = ?, updated_at = ? 
        WHERE id = ?`,
       [
-        entity.alias ?? null,
+        entity.alias || '',
         entity.character_profile_id,
         entity.lifecycle_config ?? null,
         now,
@@ -206,11 +206,19 @@ export async function deleteEntity(
 
   return withTransaction(db, async tx => {
     if (permanent) {
+      // Hard delete - FK cascade will handle entity_module_mappings
       await tx.executeSql('DELETE FROM entities WHERE id = ?', [id]);
     } else {
+      // Soft delete - must manually cascade to entity_module_mappings
+      // (FK ON DELETE CASCADE only works for hard deletes, not soft deletes)
       const now = new Date().toISOString();
       await tx.executeSql(
         'UPDATE entities SET deleted_at = ?, updated_at = ? WHERE id = ?',
+        [now, now, id],
+      );
+      // Also soft-delete the entity_module_mappings to maintain data integrity
+      await tx.executeSql(
+        'UPDATE entity_module_mappings SET deleted_at = ?, updated_at = ? WHERE entity_id = ?',
         [now, now, id],
       );
     }
@@ -346,6 +354,8 @@ export async function createOrUpdateEntityModuleMapping(
   const rowExists = existingCheck.rows.length > 0;
 
   return withTransaction(db, async tx => {
+    // Use explicit ISO 8601 timestamps to ensure compatibility with Harmony Link sync
+      const now = new Date().toISOString();
     if (rowExists) {
       // Row exists → UPDATE in place, preserving the FK-linked row identity.
       await tx.executeSql(
@@ -358,7 +368,7 @@ export async function createOrUpdateEntityModuleMapping(
              stt_config_id          = ?,
              tts_config_id          = ?,
              vision_config_id       = ?,
-             deleted_at             = NULL
+             updated_at             = ?
          WHERE entity_id = ?`,
         [
           mapping.backend_config_id ?? null,
@@ -369,16 +379,18 @@ export async function createOrUpdateEntityModuleMapping(
           mapping.stt_config_id ?? null,
           mapping.tts_config_id ?? null,
           mapping.vision_config_id ?? null,
+          now,  // updated_at - ISO 8601 format
           mapping.entity_id,
         ],
       );
     } else {
-      // No row yet → safe to INSERT.
+      // No row yet → safe to INSERT.      
       await tx.executeSql(
         `INSERT INTO entity_module_mappings
          (entity_id, backend_config_id, cognition_config_id, imagination_config_id,
-          movement_config_id, rag_config_id, stt_config_id, tts_config_id, vision_config_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          movement_config_id, rag_config_id, stt_config_id, tts_config_id, vision_config_id,
+          created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           mapping.entity_id,
           mapping.backend_config_id ?? null,
@@ -389,6 +401,8 @@ export async function createOrUpdateEntityModuleMapping(
           mapping.stt_config_id ?? null,
           mapping.tts_config_id ?? null,
           mapping.vision_config_id ?? null,
+          now,  // created_at - ISO 8601 format
+          now,  // updated_at - ISO 8601 format
         ],
       );
     }

@@ -30,7 +30,7 @@ export interface CharacterProfile {
 
 export interface Entity {
   id: string;
-  alias: string | null; // Human-readable display name
+  alias: string; // Human-readable display name
   character_profile_id: string | null;
   lifecycle_config: string | null; // Opaque JSON blob
   created_at: Date;

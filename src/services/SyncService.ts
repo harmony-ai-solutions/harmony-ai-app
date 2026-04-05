@@ -52,7 +52,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     reject: (reason: any) => void;
     timeoutId: ReturnType<typeof setTimeout>;
   } | null = null;
-  
+
   // Buffer for incoming server data (applied atomically when SYNC_COMPLETE received)
   private incomingDataBuffer: Array<{
     table: string;
@@ -80,7 +80,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
   private routeSyncEvent(data: any) {
     log.info(`Received sync event: ${data.event_type} status: ${data.status}`);
-    
+
     // IGNORE acknowledgment statuses - these are transport/processing confirmations, not actionable events
     // Only process NEW and ERROR status events which contain actionable data
     // EXCEPTION: Allow SYNC_COMPLETE and SYNC_FINALIZE with SUCCESS status through (it's a protocol signal when finishing the sync process)
@@ -88,50 +88,50 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       log.debug(`Ignoring ${data.status} status event: ${data.event_type}`);
       return;
     }
-    
+
     switch (data.event_type) {
       case 'HANDSHAKE_PENDING':
         this.emit('handshake:pending', data.payload);
         break;
-        
+
       case 'HANDSHAKE_ACCEPT':
         this.handleHandshakeAccept(data.payload);
         break;
-        
+
       case 'HANDSHAKE_REJECT':
         this.handleHandshakeReject(data.payload);
         break;
-        
+
       case 'SYNC_REQUEST':
         if (data.status === 'ERROR') {
           this.emit('sync:rejected', data.payload);
         }
         break;
-        
+
       case 'SYNC_ACCEPT':
         this.handleSyncAccept(data.payload);
         break;
-        
+
       case 'SYNC_REJECT':
         this.emit('sync:rejected', data.payload);
         break;
-        
+
       case 'SYNC_DATA':
         this.handleIncomingSyncData(data.payload);
         break;
-        
+
       case 'SYNC_DATA_CONFIRM':
         this.handleSyncDataConfirm(data.payload);
         break;
-        
+
       case 'SYNC_COMPLETE':
         this.handleSyncComplete(data);
         break;
-        
+
       case 'SYNC_FINALIZE':
         this.handleSyncFinalize();
         break;
-        
+
       default:
         log.warn(`Unhandled sync event type: ${data.event_type}`);
     }
@@ -144,7 +144,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   async requestHandshake(): Promise<void> {
     const deviceId = await DeviceInfo.getUniqueId();
     const deviceName = await DeviceInfo.getDeviceName();
-    
+
     const event = {
       event_id: this.generateEventId(),
       event_type: 'HANDSHAKE_REQUEST',
@@ -156,7 +156,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         device_platform: Platform.OS
       }
     };
-    
+
     log.info('Requesting handshake:', event);
     await this.connectionManager.sendEvent('sync', event);
   }
@@ -201,15 +201,15 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
   private async handleHandshakeAccept(payload: any): Promise<void> {
     log.info('Handshake accepted:', payload);
-    
+
     // Resolve pending handshake if exists
     if (this.pendingHandshake) {
       clearTimeout(this.pendingHandshake.timeoutId);
       this.pendingHandshake.resolve(payload);
       this.pendingHandshake = null;
     }
-    
-    await AsyncStorage.setItem('harmony_jwt', payload.jwt_token);    
+
+    await AsyncStorage.setItem('harmony_jwt', payload.jwt_token);
 
     // Get the server URL from the current WebSocket connection
     const currentWsUrl = await AsyncStorage.getItem('harmony_server_url');
@@ -219,10 +219,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       await AsyncStorage.setItem('harmony_wss_url', wssUrl);
       log.info(`Constructed WSS URL: ${wssUrl}`);
     }
-    
+
     await AsyncStorage.setItem('harmony_server_cert', payload.server_cert);
     await AsyncStorage.setItem('harmony_token_expires_at', payload.token_expires_at.toString());
-    
+
     // Only set default security mode if user hasn't chosen one yet
     // Default mode is required to "upgrade" the handler on first handshake,
     // but on Token refresh, we already have one set, so we can keep it as it is.
@@ -230,20 +230,20 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     if (!currentMode) {
       await ConnectionStateManager.saveSecurityMode('secure');
     }
-    
+
     this.emit('handshake:accepted', payload);
   };
 
   private handleHandshakeReject(payload: any): void {
     log.warn('Handshake rejected:', payload);
-    
+
     // Reject pending handshake if exists
     if (this.pendingHandshake) {
       clearTimeout(this.pendingHandshake.timeoutId);
       this.pendingHandshake.reject(new Error(payload.message || 'Device rejected'));
       this.pendingHandshake = null;
     }
-    
+
     this.emit('handshake:rejected', payload);
   }
 
@@ -251,8 +251,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     const lastSync = await this.getLastSyncTimestamp();
     const deviceId = await DeviceInfo.getUniqueId();
     const deviceName = await DeviceInfo.getDeviceName();
-    
-    // new sync session    
+
+    // new sync session
     this.currentSession = {
       sessionId: this.generateEventId(),
       deviceId: deviceId,
@@ -262,7 +262,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       recordsSent: 0,
       recordsReceived: 0
     };
-    
+
     const event = {
       event_id: this.generateEventId(),
       event_type: 'SYNC_REQUEST',
@@ -276,7 +276,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         last_sync_timestamp: lastSync
       }
     };
-    
+
     try {
       log.info('Initiating sync:', event);
       await this.connectionManager.sendEvent('sync', event);
@@ -299,17 +299,17 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       log.warn('Received SYNC_ACCEPT but no current session');
       return;
     }
-    
+
     log.info('Sync accepted:', payload);
     this.currentSession.status = 'in_progress';
     this.currentSession.sessionId = payload.sync_session_id;
-    
+
     // Set phase to SERVER_SENDING and clear buffer
     this.syncPhase = 'SERVER_SENDING';
     this.incomingDataBuffer = [];
 
     this.emit('sync:started', this.currentSession);
-    
+
     // Send SYNC_START to trigger server to send its changes
     const startEvent = {
       event_id: this.generateEventId(),
@@ -319,13 +319,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         sync_session_id: this.currentSession.sessionId
       }
     };
-    
+
     log.info('Sending SYNC_START to trigger server data transmission');
     await this.connectionManager.sendEvent('sync', startEvent);
-    
+
     // DO NOT send local changes yet - wait for server SYNC_COMPLETE
   }
-  
+
   /**
    * Apply buffered sync records in a single atomic transaction
    */
@@ -334,10 +334,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       log.info('No buffered data to apply');
       return;
     }
-    
+
     const db = getDatabase();
     const recordCount = this.incomingDataBuffer.length;
-    
+
     // Debug: Log the buffer contents
     log.info(`Applying ${recordCount} buffered sync records in transaction`);
     log.info('Buffer contents:');
@@ -346,7 +346,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       const pkValue = item.record[pkField];
       log.info(`  [${index + 1}/${recordCount}] ${item.table}.${item.operation} (${pkField}=${pkValue})`);
     });
-    
+
     return new Promise<void>((resolve, reject) => {
       // Sort buffer by dependency order to satisfy FK constraints in correct sequence:
       // 1. Provider configs (no dependencies)
@@ -433,7 +433,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
                     const columns = Object.keys(item.record).join(', ');
                     const placeholders = Object.keys(item.record).map(() => '?').join(', ');
                     const values = Object.values(item.record);
-                    
+
                     tx.executeSql(
                       `INSERT INTO ${item.table} (${columns}) VALUES (${placeholders})`,
                       values,
@@ -444,7 +444,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
                         log.error(`  ❌ INSERT FAILED for ${item.table}:${pkValue}`);
                         log.error(`  Error: ${error.message} (code: ${(error as any).code || 'unknown'})`);
                         log.error(`  SQL: INSERT INTO ${item.table} (${columns}) VALUES (...)`);
-                        
+
                         // Log FK field values to identify constraint violations
                         const fkFields = this.getForeignKeyFields(item.table);
                         if (fkFields.length > 0) {
@@ -454,7 +454,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
                             log.error(`    - ${fk}: ${value === null ? 'NULL' : value === undefined ? 'UNDEFINED' : `"${value}"`}`);
                           });
                         }
-                        
+
                         log.error(`  Full Record:`, JSON.stringify(item.record, null, 2));
                         return false; // Rollback
                       }
@@ -463,7 +463,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
                     // Last-Write-Wins: Compare timestamps
                     const existingUpdated = SyncHelpers.toUnixTimestamp(result.rows.item(0).updated_at);
                     const incomingUpdated = SyncHelpers.toUnixTimestamp(item.record.updated_at);
-                    
+
                     if (incomingUpdated >= existingUpdated) {
                       // Incoming wins - update
                       log.debug(`  Executing UPDATE for ${item.table}:${pkValue}`);
@@ -476,7 +476,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
                         .filter(k => k !== pkField)
                         .map(k => item.record[k]);
                       values.push(pkValue);
-                      
+
                       tx.executeSql(
                         `UPDATE ${item.table} SET ${updates} WHERE ${pkField} = ?`,
                         values,
@@ -507,19 +507,19 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
           log.error('❌ Transaction failed/rolled back:', error);
           log.error(`  Error message: ${error.message}`);
           log.error(`  Error code: ${(error as any).code || 'unknown'}`);
-          
+
           // Critical cleanup on failure
           log.warn('Cleaning up after transaction failure');
           this.incomingDataBuffer = []; // Clear buffer
           this.syncPhase = 'IDLE'; // Reset sync phase
-          
+
           // Clear current session
           if (this.currentSession) {
             log.warn(`Clearing failed sync session: ${this.currentSession.sessionId}`);
             this.currentSession.status = 'failed';
             this.currentSession = null;
           }
-          
+
           reject(error);
         },
         () => {
@@ -535,6 +535,18 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     if (!this.currentSession) {
       log.error('No active sync session');
       return;
+    }
+
+    // Failsafe: Clean up orphan entity_module_mappings before sync
+    // This handles cases where entity was soft-deleted but mapping wasn't cascaded
+    try {
+      const cleanedCount = await SyncHelpers.cleanupOrphanEntityModuleMappings();
+      if (cleanedCount > 0) {
+        log.info(`Cleaned up ${cleanedCount} orphan entity_module_mappings before sync`);
+      }
+    } catch (error) {
+      log.warn('Failed to cleanup orphan entity_module_mappings:', error);
+      // Continue with sync even if cleanup fails
     }
 
     log.info(`Sending local changes since: ${lastSync}`);
@@ -581,17 +593,21 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         log.info(`Found ${records.length} changes in ${table}`);
 
         for (const record of records) {
-          const operation = record.deleted_at ? 'delete' : 
-                           (SyncHelpers.toUnixTimestamp(record.created_at) > lastSync ? 'insert' : 'update');
+          // Failsafe: Normalize timestamps to ISO 8601 format for Harmony Link compatibility
+          // This handles legacy data that may have space-separated timestamps from SQLite DEFAULT
+          const normalizedRecord = SyncHelpers.normalizeRecordTimestamps(record, table);
           
+          const operation = normalizedRecord.deleted_at ? 'delete' :
+                           (SyncHelpers.toUnixTimestamp(normalizedRecord.created_at) > lastSync ? 'insert' : 'update');
+
           // Send record and wait for confirmation
-          await this.sendSyncDataWithConfirmation(table, operation, record);
+          await this.sendSyncDataWithConfirmation(table, operation, normalizedRecord);
         }
       }
 
       // All local changes sent and confirmed
       log.info('Local changes sent, sending SYNC_COMPLETE');
-      
+
       const event = {
         event_id: this.generateEventId(),
         event_type: 'SYNC_COMPLETE',
@@ -600,7 +616,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
           sync_session_id: this.currentSession.sessionId
         }
       };
-      
+
       await this.connectionManager.sendEvent('sync', event);
 
     } catch (error) {
@@ -644,7 +660,9 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       const mbSize = byteSize / (1024 * 1024);
       log.debug(`📊 SYNC_DATA payload size: ${table} ${operation} - ${mbSize.toFixed(2)} MB (${byteSize} bytes)`);
 
-      log.info(`Sending sync data for ${table}:${record.id || 'undefined'}, eventId: ${eventId}`);
+      // Use correct primary key field for entity_module_mappings (entity_id) vs other tables (id)
+      const pkField = table === 'entity_module_mappings' ? 'entity_id' : 'id';
+      log.info(`Sending sync data for ${table}:${record[pkField] || 'undefined'}, eventId: ${eventId}`);
       this.connectionManager.sendEvent('sync', event).catch(reject);
 
       // Set timeout
@@ -663,19 +681,19 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       const pkField = payload.table === 'entity_module_mappings' ? 'entity_id' : 'id';
       const pkValue = payload.record?.[pkField] || 'undefined';
       log.info(`Buffering sync data for ${payload.table}:${pkValue}`);
-      
+
       if (!this.currentSession) {
         log.error('No active sync session');
         return;
       }
-      
+
       // Buffer the incoming data for atomic application later
       this.incomingDataBuffer.push({
         table: payload.table,
         operation: payload.operation,
         record: payload.record
       });
-      
+
       this.currentSession.recordsReceived++;
       this.emit('sync:progress', this.currentSession);
 
@@ -685,7 +703,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         event_id: payload.event_id,
         status: 'SUCCESS'
       };
-      
+
       // DIAGNOSTIC: Validate payload before sending
       if (!confirmPayload.sync_session_id || !confirmPayload.event_id) {
         log.error('⚠️ DIAGNOSTIC: Attempting to send SYNC_DATA_CONFIRM with empty fields!');
@@ -693,21 +711,21 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         log.error(`  event_id: ${confirmPayload.event_id || 'EMPTY'}`);
         log.error(`  Original payload received:`, JSON.stringify(payload, null, 2));
       }
-      
+
       const confirmEvent = {
         event_id: this.generateEventId(),
         event_type: 'SYNC_DATA_CONFIRM',
         status: 'NEW',
         payload: confirmPayload
       };
-      
+
       log.debug(`Sending SYNC_DATA_CONFIRM for event ${confirmPayload.event_id} in session ${confirmPayload.sync_session_id}`);
-      
+
       await this.connectionManager.sendEvent('sync', confirmEvent);
       
     } catch (error: any) {
       log.error('Error buffering sync record:', error);
-      
+
       const errorEvent = {
         event_id: this.generateEventId(),
         event_type: 'SYNC_DATA_CONFIRM',
@@ -720,7 +738,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         }
       };
       await this.connectionManager.sendEvent('sync', errorEvent);
-      
+
       // Emit sync error to notify UI
       this.emit('sync:error', error.message || 'Unknown error');
     }
@@ -757,7 +775,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       log.warn('Received SYNC_COMPLETE but no current session');
       return;
     }
-    
+
     const status = event.status;
     log.info(`Received sync event: SYNC_COMPLETE status: ${status} phase: ${this.syncPhase}`);
 
@@ -773,21 +791,21 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         this.emit('sync:error', 'Failed to apply server data');
         return;
       }
-      
+
       log.info('Starting client data transmission');
       this.syncPhase = 'CLIENT_SENDING';
-      
+
       // Trigger local changes sequentially
       const lastSync = await this.getLastSyncTimestamp();
       this.sendLocalChangesSequentially(lastSync);
       
     } else if (this.syncPhase === 'CLIENT_SENDING' && status === 'SUCCESS' ) {
       // Server acknowledged our SYNC_COMPLETE
-      log.info('Server acknowledged our data transmission complete');      
+      log.info('Server acknowledged our data transmission complete');
       // Both sides complete - send SYNC_FINALIZE
       log.info('Both sides complete, sending SYNC_FINALIZE');
       this.syncPhase = 'FINALIZING';
-      
+
       const finalizeEvent = {
         event_id: this.generateEventId(),
         event_type: 'SYNC_FINALIZE',
@@ -796,7 +814,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
           sync_session_id: this.currentSession!.sessionId
         }
       };
-      
+
       this.connectionManager.sendEvent('sync', finalizeEvent);
     }
   }
@@ -806,14 +824,64 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       log.warn('Received SYNC_FINALIZE but no current session');
       return;
     }
-    
+
     log.info('Finalizing sync session');
-    
+
     await this.updateLastSyncTimestamp(this.currentSession.startTime);
-    
+
+    await this.cleanupSoftDeletedRecords(this.currentSession.startTime);
+
     this.currentSession.status = 'completed';
     this.emit('sync:completed', this.currentSession);
     this.currentSession = null;
+  }
+
+  private async cleanupSoftDeletedRecords(
+    olderThanTimestamp: number,
+  ): Promise<void> {
+    const tables = [
+      'character_profiles',
+      'character_image',
+      'entities',
+      'entity_module_mappings',
+      'conversation_messages',
+      'memories',
+      'provider_config_openai',
+      'provider_config_ollama',
+      'provider_config_openaicompatible',
+      'provider_config_openrouter',
+      'provider_config_harmonyspeech',
+      'provider_config_elevenlabs',
+      'provider_config_kindroid',
+      'provider_config_kajiwoto',
+      'provider_config_characterai',
+      'provider_config_localai',
+      'provider_config_mistral',
+      'backend_configs',
+      'cognition_configs',
+      'movement_configs',
+      'rag_configs',
+      'stt_configs',
+      'tts_configs',
+      'vision_configs',
+      'imagination_configs',
+    ];
+
+    const db = getDatabase();
+    for (const table of tables) {
+      try {
+        await db.executeSql(
+          `DELETE FROM ${table} WHERE deleted_at IS NOT NULL AND CAST(strftime('%s', deleted_at) AS INTEGER) < ?`,
+          [olderThanTimestamp],
+        );
+      } catch (error) {
+        log.warn(
+          `Failed to cleanup soft-deleted records from ${table}:`,
+          error,
+        );
+      }
+    }
+    log.info('Soft-deleted records cleanup completed');
   }
 
   private async getLastSyncTimestamp(): Promise<number> {
@@ -852,7 +920,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       'stt_configs': ['transcription_provider_config_id', 'vad_provider_config_id'],
       'tts_configs': ['provider_config_id'],
     };
-    
+
     return fkMap[table] || [];
   }
 }
