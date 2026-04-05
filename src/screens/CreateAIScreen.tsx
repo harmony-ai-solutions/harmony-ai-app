@@ -24,7 +24,12 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { Appbar } from 'react-native-paper';
+import { ThemedAppbar } from '../components/themed/ThemedAppbar';
+import { ThemedCard } from '../components/themed/ThemedCard';
+import { SectionHeader } from '../components/themed/SectionHeader';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { v4 as uuidv4 } from 'uuid';
@@ -101,35 +106,66 @@ const ModuleConfigPicker: React.FC<ModuleConfigPickerProps> = ({
 
   const selectedLabel =
     options.find(o => o.value === value)?.label ?? 'Disabled';
+  const isDisabled = value === '';
+  const accentPrimary = theme.colors.accent.primary;
+  const accentSecondary =
+    theme.colors.accent.secondary ?? theme.colors.accent.primaryHover;
 
   return (
     <View style={pickerStyles.row}>
       <ThemedText size={13} variant="secondary" style={pickerStyles.label}>
         {label}
       </ThemedText>
+
+      {/* Selector button */}
       <TouchableOpacity
         style={[
           pickerStyles.selector,
           {
-            borderColor: theme.colors.border.default,
-            backgroundColor: theme.colors.background.base,
+            borderColor: isDisabled
+              ? theme.colors.border.default
+              : accentPrimary + '66',
           },
         ]}
         onPress={() => setModalVisible(true)}
         activeOpacity={0.7}
       >
-        <ThemedText size={14} variant="primary" style={{ flex: 1 }}>
-          {selectedLabel}
-        </ThemedText>
-        <ThemedText size={14} variant="muted">
-          ▾
-        </ThemedText>
+        <LinearGradient
+          colors={
+            isDisabled
+              ? [theme.colors.background.elevated, theme.colors.background.surface]
+              : [accentPrimary + '1A', theme.colors.background.elevated]
+          }
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        {!isDisabled && (
+          <LinearGradient
+            colors={[accentPrimary, accentSecondary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={pickerStyles.selectorPip}
+          />
+        )}
+        <View style={pickerStyles.selectorInner}>
+          <ThemedText
+            size={14}
+            variant={isDisabled ? 'muted' : 'primary'}
+            style={{ flex: 1 }}
+          >
+            {selectedLabel}
+          </ThemedText>
+          <ThemedText size={18} variant={isDisabled ? 'muted' : 'accent'}>
+            ▾
+          </ThemedText>
+        </View>
       </TouchableOpacity>
 
       <Modal
         visible={modalVisible}
         transparent
-        animationType="fade"
+        animationType="slide"
         onRequestClose={() => setModalVisible(false)}
       >
         <TouchableOpacity
@@ -137,47 +173,100 @@ const ModuleConfigPicker: React.FC<ModuleConfigPickerProps> = ({
           activeOpacity={1}
           onPress={() => setModalVisible(false)}
         >
-          <View
-            style={[
-              pickerStyles.modalSheet,
-              { backgroundColor: theme.colors.background.elevated },
-            ]}
-          >
-            <ThemedText weight="bold" size={15} style={pickerStyles.modalTitle}>
-              {label}
-            </ThemedText>
+          <TouchableOpacity activeOpacity={1} style={pickerStyles.sheetWrapper}>
+            {/* Sheet gradient */}
+            <LinearGradient
+              colors={[
+                theme.colors.background.elevated,
+                theme.colors.background.surface,
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={[
+                StyleSheet.absoluteFillObject,
+                pickerStyles.sheetGradientRadius,
+              ]}
+            />
+            {/* Drag handle */}
+            <View style={pickerStyles.dragHandleContainer}>
+              <View
+                style={[
+                  pickerStyles.dragHandle,
+                  { backgroundColor: theme.colors.border.default },
+                ]}
+              />
+            </View>
+            {/* Accent stripe */}
+            <LinearGradient
+              colors={[
+                accentPrimary + 'CC',
+                accentSecondary + '66',
+                'transparent',
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={pickerStyles.sheetTopStripe}
+            />
+            {/* Title */}
+            <View style={pickerStyles.modalTitleRow}>
+              <ThemedText weight="bold" size={15}>
+                {label}
+              </ThemedText>
+            </View>
+            {/* Separator */}
+            <View
+              style={[
+                pickerStyles.separator,
+                { backgroundColor: theme.colors.border.default + '66' },
+              ]}
+            />
+            {/* Options */}
             <FlatList
               data={options}
               keyExtractor={item => item.value}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[
-                    pickerStyles.modalItem,
-                    item.value === value && {
-                      backgroundColor: theme.colors.accent.primary + '22',
-                    },
-                  ]}
-                  onPress={() => {
-                    onChange(item.value);
-                    setModalVisible(false);
-                  }}
-                >
-                  <ThemedText
-                    size={14}
-                    variant={item.value === value ? 'accent' : 'primary'}
-                    weight={item.value === value ? 'medium' : 'normal'}
+              style={pickerStyles.optionsList}
+              renderItem={({ item }) => {
+                const isSelected = item.value === value;
+                return (
+                  <TouchableOpacity
+                    style={[
+                      pickerStyles.modalItem,
+                      isSelected && {
+                        backgroundColor: accentPrimary + '1A',
+                      },
+                    ]}
+                    onPress={() => {
+                      onChange(item.value);
+                      setModalVisible(false);
+                    }}
+                    activeOpacity={0.65}
                   >
-                    {item.label}
-                  </ThemedText>
-                  {item.value === value && (
-                    <ThemedText size={14} variant="accent">
-                      ✓
+                    {isSelected && (
+                      <LinearGradient
+                        colors={[accentPrimary, accentSecondary]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 0, y: 1 }}
+                        style={pickerStyles.itemAccentPip}
+                      />
+                    )}
+                    <ThemedText
+                      size={14}
+                      variant={isSelected ? 'accent' : 'primary'}
+                      weight={isSelected ? 'medium' : 'normal'}
+                      style={{ flex: 1, paddingLeft: isSelected ? 10 : 0 }}
+                    >
+                      {item.label}
                     </ThemedText>
-                  )}
-                </TouchableOpacity>
-              )}
+                    {isSelected && (
+                      <ThemedText size={14} variant="accent">
+                        ✓
+                      </ThemedText>
+                    )}
+                  </TouchableOpacity>
+                );
+              }}
             />
-          </View>
+          </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
     </View>
@@ -185,45 +274,74 @@ const ModuleConfigPicker: React.FC<ModuleConfigPickerProps> = ({
 };
 
 const pickerStyles = StyleSheet.create({
-  row: {
-    marginBottom: 12,
-  },
-  label: {
-    marginBottom: 4,
-  },
+  row: { gap: 6, marginBottom: 12 },
+  label: { paddingLeft: 2 },
   selector: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderRadius: 8,
+    minHeight: 44,
+    overflow: 'hidden',
+  },
+  selectorPip: {
+    width: 3,
+    alignSelf: 'stretch',
+  },
+  selectorInner: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 10,
-    minHeight: 44,
+    gap: 8,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'flex-end',
   },
-  modalSheet: {
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingTop: 12,
-    paddingBottom: 32,
+  sheetWrapper: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 36,
     maxHeight: '70%',
+    overflow: 'hidden',
   },
-  modalTitle: {
-    textAlign: 'center',
-    paddingVertical: 12,
+  sheetGradientRadius: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  dragHandleContainer: {
+    alignItems: 'center',
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  dragHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    opacity: 0.5,
+  },
+  sheetTopStripe: { height: 2 },
+  modalTitleRow: {
     paddingHorizontal: 20,
-    marginBottom: 4,
+    paddingVertical: 14,
   },
+  separator: {
+    height: StyleSheet.hairlineWidth,
+  },
+  optionsList: { flexGrow: 0 },
   modalItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingVertical: 14,
     paddingHorizontal: 20,
+  },
+  itemAccentPip: {
+    width: 3,
+    height: 20,
+    borderRadius: 2,
   },
 });
 
@@ -480,12 +598,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <Appbar.Header
-        style={[
-          styles.header,
-          { backgroundColor: theme.colors.background.surface },
-        ]}
-      >
+      <ThemedAppbar style={styles.header}>
         <Appbar.BackAction
           color={theme.colors.text.primary}
           onPress={() => navigation.goBack()}
@@ -494,7 +607,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           title="Create AI Partner"
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
         />
-      </Appbar.Header>
+      </ThemedAppbar>
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
@@ -583,135 +696,75 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
             />
           </View>
 
-          {/* ── Advanced Settings toggle ── */}
-          <TouchableOpacity
-            style={[
-              styles.advancedToggle,
-              {
-                backgroundColor: theme.colors.background.elevated,
-                borderColor: theme.colors.border.default,
-              },
-            ]}
-            onPress={() => setShowAdvanced(prev => !prev)}
-            activeOpacity={0.7}
-          >
-            <ThemedText size={14} weight="medium" variant="primary">
-              {showAdvanced ? '▾' : '▸'} Advanced Settings
-            </ThemedText>
-          </TouchableOpacity>
-
-          {/* ── Advanced Settings panel ── */}
-          {showAdvanced && (
-            <View
-              style={[
-                styles.advancedPanel,
-                {
-                  backgroundColor: theme.colors.background.elevated,
-                  borderColor: theme.colors.border.default,
-                },
-              ]}
+          {/* ── Advanced Settings card ── */}
+          <ThemedCard elevated accentStripe accentTint style={styles.section}>
+            <TouchableOpacity
+              onPress={() => setShowAdvanced(prev => !prev)}
+              activeOpacity={0.7}
             >
-              {/* Loading indicator */}
-              {hasAnyConfigs === null && (
-                <View style={styles.loadingRow}>
-                  <ActivityIndicator
-                    size="small"
-                    color={theme.colors.accent.primary}
+              <SectionHeader
+                title="ADVANCED SETTINGS"
+                right={
+                  <Icon
+                    name={showAdvanced ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={theme.colors.text.muted}
                   />
-                  <ThemedText
-                    size={13}
-                    variant="muted"
-                    style={{ marginLeft: 8 }}
-                  >
-                    Loading module configs...
-                  </ThemedText>
-                </View>
-              )}
+                }
+              />
+            </TouchableOpacity>
 
-              {/* No configs warning */}
-              {hasAnyConfigs === false && (
-                <View style={styles.noConfigsBox}>
-                  <ThemedText
-                    size={14}
-                    variant="muted"
-                    weight="bold"
-                    style={styles.noConfigsWarning}
-                  >
-                    ⚠ No AI modules configured.
-                  </ThemedText>
-                  <ThemedText
-                    size={13}
-                    variant="muted"
-                    style={styles.noConfigsDetail}
-                  >
-                    Connect to Harmony Link or Cloud to configure AI backends.
-                  </ThemedText>
-                  <TouchableOpacity
-                    onPress={() => navigation.navigate('ConnectionSetup')}
-                    style={styles.connectionSetupLink}
-                  >
-                    <ThemedText size={13} variant="accent" weight="medium">
-                      → Connection Setup
+            {showAdvanced && (
+              <View style={styles.sectionContent}>
+                {/* Loading indicator */}
+                {hasAnyConfigs === null && (
+                  <View style={styles.loadingRow}>
+                    <ActivityIndicator
+                      size="small"
+                      color={theme.colors.accent.primary}
+                    />
+                    <ThemedText size={13} variant="muted" style={{ marginLeft: 8 }}>
+                      Loading module configs...
                     </ThemedText>
-                  </TouchableOpacity>
-                </View>
-              )}
+                  </View>
+                )}
 
-              {/* Module pickers — only shown when configs exist */}
-              {hasAnyConfigs === true && (
-                <>
-                  <ModuleConfigPicker
-                    label="Backend"
-                    options={backendOptions}
-                    value={backendConfigId}
-                    onChange={setBackendConfigId}
-                  />
-                  <ModuleConfigPicker
-                    label="Cognition"
-                    options={cognitionOptions}
-                    value={cognitionConfigId}
-                    onChange={setCognitionConfigId}
-                  />
-                  <ModuleConfigPicker
-                    label="Text-to-Speech (TTS)"
-                    options={ttsOptions}
-                    value={ttsConfigId}
-                    onChange={setTtsConfigId}
-                  />
-                  <ModuleConfigPicker
-                    label="Speech-to-Text (STT)"
-                    options={sttOptions}
-                    value={sttConfigId}
-                    onChange={setSttConfigId}
-                  />
-                  <ModuleConfigPicker
-                    label="Memory / RAG"
-                    options={ragOptions}
-                    value={ragConfigId}
-                    onChange={setRagConfigId}
-                  />
-                  <ModuleConfigPicker
-                    label="Movement"
-                    options={movementOptions}
-                    value={movementConfigId}
-                    onChange={setMovementConfigId}
-                  />
-                  <ModuleConfigPicker
-                    label="Vision"
-                    options={visionOptions}
-                    value={visionConfigId}
-                    onChange={setVisionConfigId}
-                  />                  
-                  <ModuleConfigPicker
-                    label="Imagination"
-                    options={imaginationOptions}
-                    value={imaginationConfigId}
-                    onChange={setImaginationConfigId}
-                  />                  
-                </>
-              )}
-            </View>
-          )}
+                {/* No configs warning */}
+                {hasAnyConfigs === false && (
+                  <View style={styles.noConfigsBox}>
+                    <ThemedText size={14} variant="muted" weight="bold" style={styles.noConfigsWarning}>
+                      ⚠ No AI modules configured.
+                    </ThemedText>
+                    <ThemedText size={13} variant="muted" style={styles.noConfigsDetail}>
+                      Connect to Harmony Link or Cloud to configure AI backends.
+                    </ThemedText>
+                    <TouchableOpacity
+                      onPress={() => navigation.navigate('ConnectionSetup')}
+                      style={styles.connectionSetupLink}
+                    >
+                      <ThemedText size={13} variant="accent" weight="medium">
+                        → Connection Setup
+                      </ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Module pickers */}
+                {hasAnyConfigs === true && (
+                  <>
+                    <ModuleConfigPicker label="Backend" options={backendOptions} value={backendConfigId} onChange={setBackendConfigId} />
+                    <ModuleConfigPicker label="Cognition" options={cognitionOptions} value={cognitionConfigId} onChange={setCognitionConfigId} />
+                    <ModuleConfigPicker label="Text-to-Speech (TTS)" options={ttsOptions} value={ttsConfigId} onChange={setTtsConfigId} />
+                    <ModuleConfigPicker label="Speech-to-Text (STT)" options={sttOptions} value={sttConfigId} onChange={setSttConfigId} />
+                    <ModuleConfigPicker label="Memory / RAG" options={ragOptions} value={ragConfigId} onChange={setRagConfigId} />
+                    <ModuleConfigPicker label="Movement" options={movementOptions} value={movementConfigId} onChange={setMovementConfigId} />
+                    <ModuleConfigPicker label="Vision" options={visionOptions} value={visionConfigId} onChange={setVisionConfigId} />
+                    <ModuleConfigPicker label="Imagination" options={imaginationOptions} value={imaginationConfigId} onChange={setImaginationConfigId} />
+                  </>
+                )}
+              </View>
+            )}
+          </ThemedCard>
 
           {/* ── Create button ── */}
           <View style={styles.ctaSection}>
@@ -805,23 +858,15 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
 
-  // ── Advanced toggle ──
-  advancedToggle: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 2,
+  // ── Section card ──
+  section: {
+    padding: 0,
+    overflow: 'hidden',
+    marginBottom: 16,
   },
-
-  // ── Advanced panel ──
-  advancedPanel: {
-    borderWidth: 1,
-    borderTopWidth: 0,
-    borderBottomLeftRadius: 8,
-    borderBottomRightRadius: 8,
+  sectionContent: {
     padding: 16,
-    marginBottom: 20,
+    gap: 0,
   },
   loadingRow: {
     flexDirection: 'row',

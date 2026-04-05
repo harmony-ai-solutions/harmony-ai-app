@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { Appbar } from 'react-native-paper';
+import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -23,14 +24,9 @@ export const LandingScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* Header */}
-      <Appbar.Header
-        style={[
-          styles.header,
-          { backgroundColor: theme.colors.background.surface },
-        ]}
-      >
+      <ThemedAppbar style={styles.header}>
         <Appbar.Content
-          title="Harmony AI"
+          title="Harmony AI Chat"
           titleStyle={{
             color: theme.colors.text.primary,
             fontWeight: 'bold',
@@ -45,7 +41,7 @@ export const LandingScreen: React.FC = () => {
           color={theme.colors.text.primary}
           onPress={() => navigation.navigate('Settings')}
         />
-      </Appbar.Header>
+      </ThemedAppbar>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -85,7 +81,7 @@ export const LandingScreen: React.FC = () => {
         {/* Footer */}
         <View style={styles.footer}>
           <ThemedText variant="muted" size={11}>
-            Harmony AI · v{getAppVersion()}
+            Harmony AI Chat · v{getAppVersion()}
           </ThemedText>
         </View>
       </ScrollView>

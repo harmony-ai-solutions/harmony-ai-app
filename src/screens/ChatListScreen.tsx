@@ -1,17 +1,18 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import {
   StyleSheet,
   View,
   FlatList,
   TouchableOpacity,
   RefreshControl,
+  Image,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import {
   Appbar,
   Avatar,
   FAB,
-  List,
-  Divider,
   ActivityIndicator,
 } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -255,35 +256,79 @@ export const ChatListScreen: React.FC = () => {
   };
 
   const renderItem = ({ item }: { item: ChatListItem }) => (
-    <TouchableOpacity onPress={() => handleChatPress(item)}>
-      <List.Item
-        title={item.characterName}
-        description={
-          item.lastMessageSender
-            ? `${item.lastMessageSender}: ${item.lastMessage}`
-            : item.lastMessage
-        }
-        descriptionNumberOfLines={1}
-        left={() =>
-          item.avatarUri ? (
-            <Avatar.Image size={48} source={{ uri: item.avatarUri }} />
-          ) : (
-            <Avatar.Text
-              size={48}
-              label={item.characterName.substring(0, 2).toUpperCase()}
-            />
-          )
-        }
-        right={() =>
-          item.lastMessageTime ? (
-            <ThemedText variant="muted" size={12} style={styles.timeText}>
-              {formatTime(item.lastMessageTime)}
-            </ThemedText>
-          ) : null
-        }
-        style={styles.listItem}
+    <TouchableOpacity
+      onPress={() => handleChatPress(item)}
+      activeOpacity={0.65}
+      style={styles.rowWrapper}
+    >
+      {/* Subtle prismatic tint from top-left */}
+      <LinearGradient
+        colors={[
+          (theme?.colors.accent.primary ?? '#7c3aed') + '18',
+          'transparent',
+        ]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0.6, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+        pointerEvents="none"
       />
-      <Divider />
+
+      {/* Avatar */}
+      <View
+        style={[
+          styles.avatarContainer,
+          { borderColor: (theme?.colors.accent.primary ?? '#7c3aed') + '44' },
+        ]}
+      >
+        {item.avatarUri ? (
+          <Image
+            source={{ uri: item.avatarUri }}
+            style={styles.avatarImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <LinearGradient
+            colors={[
+              (theme?.colors.accent.primary ?? '#7c3aed') + '33',
+              theme?.colors.background.elevated ?? '#1e1e2e',
+            ]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.avatarFallback}
+          >
+            <ThemedText size={16} weight="bold" style={{ color: theme?.colors.accent.primary }}>
+              {item.characterName.substring(0, 2).toUpperCase()}
+            </ThemedText>
+          </LinearGradient>
+        )}
+      </View>
+
+      {/* Text */}
+      <View style={styles.rowText}>
+        <ThemedText size={15} weight="bold" numberOfLines={1}>
+          {item.characterName}
+        </ThemedText>
+        <ThemedText variant="muted" size={13} numberOfLines={1} style={styles.rowPreview}>
+          {item.lastMessageSender
+            ? `${item.lastMessageSender}: ${item.lastMessage}`
+            : item.lastMessage}
+        </ThemedText>
+      </View>
+
+      {/* Time */}
+      {item.lastMessageTime && (
+        <ThemedText variant="muted" size={12} style={styles.timeText}>
+          {formatTime(item.lastMessageTime)}
+        </ThemedText>
+      )}
+
+      {/* Full-width hairline separator */}
+      <View
+        style={[
+          styles.rowSeparator,
+          { backgroundColor: (theme?.colors.border.default ?? '#333') + '66' },
+        ]}
+      />
     </TouchableOpacity>
   );
 
@@ -297,12 +342,7 @@ export const ChatListScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
-      <Appbar.Header
-        style={{
-          backgroundColor: theme?.colors.background.surface,
-          zIndex: 10,
-        }}
-      >
+      <ThemedAppbar style={{ zIndex: 10 }}>
         <Appbar.BackAction
           color={theme?.colors.text.primary}
           onPress={() => navigation.navigate('Landing')}
@@ -342,19 +382,38 @@ export const ChatListScreen: React.FC = () => {
               {impersonatedEntityDisplay.name}
             </ThemedText>
           </View>
-          {impersonatedEntityDisplay.avatarUri ? (
-            <Avatar.Image
-              size={28}
-              source={{ uri: impersonatedEntityDisplay.avatarUri }}
-            />
-          ) : (
-            <Avatar.Text
-              size={28}
-              label={impersonatedEntityDisplay.name
-                .substring(0, 2)
-                .toUpperCase()}
-            />
-          )}
+          <View
+            style={[
+              styles.impersonationAvatar,
+              { borderColor: (theme?.colors.accent.primary ?? '#7c3aed') + '66' },
+            ]}
+          >
+            {impersonatedEntityDisplay.avatarUri ? (
+              <Image
+                source={{ uri: impersonatedEntityDisplay.avatarUri }}
+                style={styles.impersonationAvatarImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <LinearGradient
+                colors={[
+                  (theme?.colors.accent.primary ?? '#7c3aed') + '33',
+                  theme?.colors.background.elevated ?? '#1e1e2e',
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.impersonationAvatarFallback}
+              >
+                <ThemedText
+                  size={11}
+                  weight="bold"
+                  style={{ color: theme?.colors.accent.primary }}
+                >
+                  {impersonatedEntityDisplay.name.substring(0, 2).toUpperCase()}
+                </ThemedText>
+              </LinearGradient>
+            )}
+          </View>
         </TouchableOpacity>
         <Appbar.Action
           icon={() => (
@@ -362,7 +421,7 @@ export const ChatListScreen: React.FC = () => {
           )}
           onPress={() => setMenuVisible(true)}
         />
-      </Appbar.Header>
+      </ThemedAppbar>
 
       {!isPaired ? (
         <View style={styles.notPairedContainer}>
@@ -457,7 +516,47 @@ function formatTime(date: Date): string {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
-  listItem: { paddingHorizontal: 16 },
+  // ── Chat row ──
+  rowWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    overflow: 'hidden',
+  },
+  avatarContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+  avatarImage: {
+    width: 48,
+    height: 48,
+  },
+  avatarFallback: {
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rowText: {
+    flex: 1,
+    gap: 3,
+  },
+  rowPreview: {
+    lineHeight: 18,
+  },
+  rowSeparator: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+  },
   notPairedContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -492,6 +591,24 @@ const styles = StyleSheet.create({
   },
   impersonationBannerText: {
     alignItems: 'flex-end',
+  },
+  impersonationAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+  impersonationAvatarImage: {
+    width: 30,
+    height: 30,
+  },
+  impersonationAvatarFallback: {
+    width: 30,
+    height: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   timeText: {
     alignSelf: 'center',

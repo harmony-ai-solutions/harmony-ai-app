@@ -18,6 +18,7 @@ import {
   Modal,
   Alert,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
@@ -141,11 +142,6 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Hint text */}
-      <ThemedText size={11} variant="muted" style={styles.hint}>
-        Tap to view full-size · Hold for options
-      </ThemedText>
-
       {/* Full-screen image viewer */}
       <ImageViewerModal
         visible={viewerVisible}
@@ -166,31 +162,77 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
           activeOpacity={1}
           onPress={() => setActionSheetVisible(false)}
         >
-          <View
-            style={[
-              styles.actionSheet,
-              { backgroundColor: theme?.colors.background.elevated },
-            ]}
-          >
-            <ThemedText weight="bold" size={14} style={styles.sheetTitle}>
-              Image Options
-            </ThemedText>
+          <TouchableOpacity activeOpacity={1} style={styles.sheetWrapper}>
+            {/* Sheet gradient background */}
+            <LinearGradient
+              colors={[
+                theme?.colors.background.elevated ?? '#1e1e2e',
+                theme?.colors.background.surface ?? '#181825',
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={[StyleSheet.absoluteFillObject, styles.sheetGradientRadius]}
+            />
+
+            {/* Drag handle */}
+            <View style={styles.dragHandleContainer}>
+              <View
+                style={[
+                  styles.dragHandle,
+                  { backgroundColor: theme?.colors.border.default },
+                ]}
+              />
+            </View>
+
+            {/* Accent stripe */}
+            <LinearGradient
+              colors={[
+                (theme?.colors.accent.primary ?? '#7c3aed') + 'CC',
+                (theme?.colors.accent.secondary ?? theme?.colors.accent.primaryHover ?? '#9f67ff') + '66',
+                'transparent',
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.sheetTopStripe}
+            />
+
+            {/* Title */}
+            <View style={styles.sheetTitleRow}>
+              <ThemedText weight="bold" size={14} style={styles.sheetTitle}>
+                Image Options
+              </ThemedText>
+            </View>
+
+            {/* Hairline separator */}
+            <View
+              style={[
+                styles.separator,
+                { backgroundColor: (theme?.colors.border.default ?? '#333') + '66' },
+              ]}
+            />
 
             {/* Promote to primary — only if not already primary */}
             {!actionTargetIsPrimary && (
               <TouchableOpacity
                 style={[
                   styles.sheetAction,
-                  { borderBottomColor: theme?.colors.border.default },
+                  { borderBottomColor: (theme?.colors.border.default ?? '#333') + '55' },
                 ]}
                 onPress={handleSetPrimary}
+                activeOpacity={0.65}
               >
-                <Icon
-                  name="star-outline"
-                  size={20}
-                  color={theme?.colors.accent.primary}
-                  style={styles.sheetActionIcon}
-                />
+                <View
+                  style={[
+                    styles.sheetActionIconBadge,
+                    { backgroundColor: (theme?.colors.accent.primary ?? '#7c3aed') + '22' },
+                  ]}
+                >
+                  <Icon
+                    name="star-outline"
+                    size={18}
+                    color={theme?.colors.accent.primary}
+                  />
+                </View>
                 <ThemedText size={15}>Set as Primary Image</ThemedText>
               </TouchableOpacity>
             )}
@@ -199,17 +241,27 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
             <TouchableOpacity
               style={[
                 styles.sheetAction,
-                { borderBottomColor: theme?.colors.border.default },
+                { borderBottomColor: (theme?.colors.border.default ?? '#333') + '55' },
               ]}
               onPress={handleDelete}
+              activeOpacity={0.65}
             >
-              <Icon
-                name="trash-can-outline"
-                size={20}
-                color="#f44336"
-                style={styles.sheetActionIcon}
-              />
-              <ThemedText size={15} style={{ color: '#f44336' }}>
+              <View
+                style={[
+                  styles.sheetActionIconBadge,
+                  { backgroundColor: (theme?.colors.status?.error ?? '#f44336') + '22' },
+                ]}
+              >
+                <Icon
+                  name="trash-can-outline"
+                  size={18}
+                  color={theme?.colors.status?.error ?? '#f44336'}
+                />
+              </View>
+              <ThemedText
+                size={15}
+                style={{ color: theme?.colors.status?.error ?? '#f44336' }}
+              >
                 Delete Image
               </ThemedText>
             </TouchableOpacity>
@@ -218,12 +270,13 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
             <TouchableOpacity
               style={styles.sheetCancel}
               onPress={() => setActionSheetVisible(false)}
+              activeOpacity={0.65}
             >
               <ThemedText size={15} variant="muted">
                 Cancel
               </ThemedText>
             </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
     </>
@@ -277,30 +330,57 @@ const styles = StyleSheet.create({
   // Action sheet
   sheetOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'flex-end',
   },
-  actionSheet: {
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingTop: 8,
-    paddingBottom: 32,
+  sheetWrapper: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 36,
+    overflow: 'hidden',
+  },
+  sheetGradientRadius: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  dragHandleContainer: {
+    alignItems: 'center',
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  dragHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    opacity: 0.5,
+  },
+  sheetTopStripe: {
+    height: 2,
+  },
+  sheetTitleRow: {
+    paddingHorizontal: 20,
+    paddingVertical: 14,
   },
   sheetTitle: {
-    textAlign: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
     letterSpacing: 0.3,
+  },
+  separator: {
+    height: StyleSheet.hairlineWidth,
   },
   sheetAction: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
     borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 14,
   },
-  sheetActionIcon: {
-    marginRight: 14,
+  sheetActionIconBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   sheetCancel: {
     alignItems: 'center',

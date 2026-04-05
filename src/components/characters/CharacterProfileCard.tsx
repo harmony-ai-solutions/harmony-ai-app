@@ -6,6 +6,7 @@ import {
   Image,
   Animated,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
@@ -14,6 +15,7 @@ import { CharacterProfile } from '../../database/models';
 interface CharacterProfileCardProps {
   profile: CharacterProfile;
   imageUri: string | null; // base64 data URL or null for placeholder
+  imageCount?: number;     // total images this profile has
   onPress: () => void;
   onLongPress: () => void;
 }
@@ -21,6 +23,7 @@ interface CharacterProfileCardProps {
 export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
   profile,
   imageUri,
+  imageCount = 0,
   onPress,
   onLongPress,
 }) => {
@@ -52,10 +55,7 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
       <TouchableOpacity
         style={[
           styles.card,
-          {
-            backgroundColor: theme.colors.background.elevated,
-            borderColor: theme.colors.border.default,
-          },
+          { borderColor: theme.colors.border.default + '66' },
         ]}
         onPress={onPress}
         onLongPress={onLongPress}
@@ -64,6 +64,17 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
         activeOpacity={1}
         delayLongPress={400}
       >
+        {/* Gradient card background */}
+        <LinearGradient
+          colors={[
+            theme.colors.background.elevated,
+            theme.colors.background.surface,
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+
         {/* Image area — 3:4 aspect ratio */}
         <View
           style={[
@@ -86,6 +97,34 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
               />
             </View>
           )}
+
+          {/* Image count badge */}
+          {imageCount > 1 && (
+            <View
+              style={[
+                styles.imageBadge,
+                { backgroundColor: 'rgba(0,0,0,0.58)' },
+              ]}
+            >
+              <Icon name="image-multiple-outline" size={10} color="#fff" />
+              <ThemedText
+                size={10}
+                weight="medium"
+                style={styles.imageBadgeText}
+              >
+                {imageCount}
+              </ThemedText>
+            </View>
+          )}
+
+          {/* Gradient overlay at bottom of image */}
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.35)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={styles.imageOverlay}
+            pointerEvents="none"
+          />
         </View>
 
         {/* Text area */}
@@ -107,6 +146,18 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
             {profile.description || 'No description provided.'}
           </ThemedText>
         </View>
+
+        {/* Left accent stripe */}
+        {/* <LinearGradient
+          colors={[
+            theme.colors.accent.primary,
+            theme.colors.accent.secondary ?? theme.colors.accent.primaryHover,
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={styles.accentStripe}
+          pointerEvents="none"
+        /> */}
       </TouchableOpacity>
     </Animated.View>
   );
@@ -135,6 +186,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  imageOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 40,
+  },
+  imageBadge: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    gap: 3,
+  },
+  imageBadgeText: {
+    color: '#fff',
+  },
   textContainer: {
     padding: 10,
     gap: 4,
@@ -146,4 +218,11 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     minHeight: 32, // reserve space for 2 lines even when empty
   },
+  // accentStripe: {
+  //   position: 'absolute',
+  //   top: 0,
+  //   left: 0,
+  //   bottom: 0,
+  //   width: 3,
+  // },
 });

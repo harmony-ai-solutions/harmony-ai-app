@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Appbar } from 'react-native-paper';
+import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
@@ -15,7 +16,7 @@ export const AIConfigScreen: React.FC<any> = ({ navigation }) => {
 
     return (
         <ThemedView style={styles.container}>
-            <Appbar.Header style={[styles.header, { backgroundColor: theme.colors.background.surface }]}>
+            <ThemedAppbar style={styles.header}>
                 <Appbar.Content
                     title="AI Configuration"
                     titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
@@ -24,7 +25,7 @@ export const AIConfigScreen: React.FC<any> = ({ navigation }) => {
                     icon={() => <Icon name="menu" size={24} color={theme.colors.text.primary} />}
                     onPress={() => setMenuVisible(true)}
                 />
-            </Appbar.Header>
+            </ThemedAppbar>
 
             <View style={styles.content}>
                 <ThemedText weight="bold" size={24}>

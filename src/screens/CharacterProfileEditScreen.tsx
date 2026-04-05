@@ -10,6 +10,9 @@ import {
   Platform,
 } from 'react-native';
 import { Appbar } from 'react-native-paper';
+import { ThemedAppbar } from '../components/themed/ThemedAppbar';
+import { ThemedCard } from '../components/themed/ThemedCard';
+import { SectionHeader } from '../components/themed/SectionHeader';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
@@ -272,25 +275,12 @@ export const CharacterProfileEditScreen: React.FC = () => {
   const renderSection = (title: string, children: React.ReactNode) => {
     if (!theme) return null;
     return (
-      <View
-        style={[
-          styles.section,
-          {
-            backgroundColor: theme.colors.background.elevated,
-            borderColor: theme.colors.border.default,
-          },
-        ]}
-      >
-        <ThemedText
-          weight="bold"
-          size={12}
-          variant="muted"
-          style={styles.sectionTitle}
-        >
-          {title}
-        </ThemedText>
-        {children}
-      </View>
+      <ThemedCard elevated accentStripe style={styles.section}>
+        <SectionHeader title={title} style={styles.sectionHeaderInCard} />
+        <View style={styles.sectionContent}>
+          {children}
+        </View>
+      </ThemedCard>
     );
   };
 
@@ -332,12 +322,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* Appbar */}
-      <Appbar.Header
-        style={[
-          styles.header,
-          { backgroundColor: theme.colors.background.surface },
-        ]}
-      >
+      <ThemedAppbar style={styles.header}>
         <Appbar.BackAction
           color={theme.colors.text.primary}
           onPress={() => navigation.goBack()}
@@ -359,7 +344,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
             onPress={handleSave}
           />
         )}
-      </Appbar.Header>
+      </ThemedAppbar>
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
@@ -560,19 +545,21 @@ export const CharacterProfileEditScreen: React.FC = () => {
               {isEditMode && profileId ? (
                 <>
                   <ProfileImagePicker
-                    images={images}
-                    primaryImageId={primaryImageId}
-                    onAddImage={handleAddImage}
-                    onSetPrimary={handleSetPrimary}
-                    onDeleteImage={handleDeleteImage}
-                  />
-                  <ThemedText
-                    variant="muted"
-                    size={12}
-                    style={styles.imageHint}
-                  >
-                    Tap to set primary · Long-press to delete
-                  </ThemedText>
+                      images={images}
+                      primaryImageId={primaryImageId}
+                      onAddImage={handleAddImage}
+                      onSetPrimary={handleSetPrimary}
+                      onDeleteImage={handleDeleteImage}
+                    />
+                    <ThemedText
+                      variant="muted"
+                      size={12}
+                      style={styles.imageHint}
+                    >
+                      {images.length > 0
+                        ? `${images.length} image${images.length !== 1 ? 's' : ''} · Tap to view · Hold for options`
+                        : 'Tap + to add images'}
+                    </ThemedText>
                 </>
               ) : (
                 <ThemedText variant="muted" size={13} style={styles.imageHint}>
@@ -616,8 +603,13 @@ const styles = StyleSheet.create({
 
   // Section
   section: {
-    borderRadius: 12,
-    borderWidth: 1,
+    padding: 0,
+    overflow: 'hidden',
+  },
+  sectionHeaderInCard: {
+    // SectionHeader sits flush at the top of the card (no extra margin)
+  },
+  sectionContent: {
     padding: 16,
     gap: 12,
   },

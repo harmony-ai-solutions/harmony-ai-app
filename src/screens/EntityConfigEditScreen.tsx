@@ -24,7 +24,11 @@ import {
   Modal,
   FlatList,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { Appbar } from 'react-native-paper';
+import { ThemedAppbar } from '../components/themed/ThemedAppbar';
+import { ThemedCard } from '../components/themed/ThemedCard';
+import { SectionHeader } from '../components/themed/SectionHeader';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
@@ -376,12 +380,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
   if (isLoading) {
     return (
       <ThemedView style={styles.container}>
-        <Appbar.Header
-          style={[
-            styles.header,
-            { backgroundColor: theme.colors.background.surface },
-          ]}
-        >
+        <ThemedAppbar style={styles.header}>
           <Appbar.BackAction
             color={theme.colors.text.primary}
             onPress={() => navigation.goBack()}
@@ -393,7 +392,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
               fontWeight: 'bold',
             }}
           />
-        </Appbar.Header>
+        </ThemedAppbar>
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={theme.colors.accent.primary} />
         </View>
@@ -407,12 +406,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <Appbar.Header
-        style={[
-          styles.header,
-          { backgroundColor: theme.colors.background.surface },
-        ]}
-      >
+      <ThemedAppbar style={styles.header}>
         <Appbar.BackAction
           color={theme.colors.text.primary}
           onPress={() => navigation.goBack()}
@@ -434,7 +428,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
             onPress={handleSave}
           />
         )}
-      </Appbar.Header>
+      </ThemedAppbar>
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
@@ -446,23 +440,9 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
           showsVerticalScrollIndicator={false}
         >
           {/* ── Identity Section ── */}
-          <View
-            style={[
-              styles.section,
-              {
-                backgroundColor: theme.colors.background.elevated,
-                borderColor: theme.colors.border.default,
-              },
-            ]}
-          >
-            <ThemedText
-              weight="bold"
-              size={12}
-              variant="muted"
-              style={styles.sectionTitle}
-            >
-              IDENTITY
-            </ThemedText>
+          <ThemedCard elevated accentStripe style={styles.section}>
+            <SectionHeader title="Identity" />
+            <View style={styles.sectionContent}>
 
             <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
               Name / Alias
@@ -486,26 +466,13 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
             <ThemedText variant="muted" size={11} style={styles.fieldHint}>
               Must be unique. Defaults to profile name if left blank.
             </ThemedText>
-          </View>
+            </View>
+          </ThemedCard>
 
           {/* ── Character Profile Section ── */}
-          <View
-            style={[
-              styles.section,
-              {
-                backgroundColor: theme.colors.background.elevated,
-                borderColor: theme.colors.border.default,
-              },
-            ]}
-          >
-            <ThemedText
-              weight="bold"
-              size={12}
-              variant="muted"
-              style={styles.sectionTitle}
-            >
-              CHARACTER PROFILE
-            </ThemedText>
+          <ThemedCard elevated accentStripe style={styles.section}>
+            <SectionHeader title="Character Profile" />
+            <View style={styles.sectionContent}>
 
             {/* Profile selector */}
             <TouchableOpacity
@@ -533,26 +500,13 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
 
             {/* Profile preview */}
             {renderProfilePreview()}
-          </View>
+            </View>
+          </ThemedCard>
 
           {/* ── Module Configuration Section ── */}
-          <View
-            style={[
-              styles.section,
-              {
-                backgroundColor: theme.colors.background.elevated,
-                borderColor: theme.colors.border.default,
-              },
-            ]}
-          >
-            <ThemedText
-              weight="bold"
-              size={12}
-              variant="muted"
-              style={styles.sectionTitle}
-            >
-              MODULE CONFIGURATION
-            </ThemedText>
+          <ThemedCard elevated accentStripe style={styles.section}>
+            <SectionHeader title="Module Configuration" />
+            <View style={styles.sectionContent}>
 
             <EntityModuleSelector
               label="Backend"
@@ -601,45 +555,50 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
               configs={imaginationConfigs}
               selectedId={imaginationId}
               onChange={setImaginationId}
-            />            
-          </View>
+            />
+            </View>
+          </ThemedCard>
 
           {/* ── Danger Zone ── */}
-          <View
+          <ThemedCard
+            elevated
             style={[
               styles.section,
               styles.dangerSection,
-              {
-                backgroundColor: theme.colors.background.elevated,
-                borderColor: theme.colors.status.error,
-              },
+              { borderColor: theme.colors.status.error },
             ]}
           >
-            <ThemedText
-              weight="bold"
-              size={12}
-              style={[
-                styles.sectionTitle,
-                { color: theme.colors.status.error },
-              ]}
-            >
-              DANGER ZONE
-            </ThemedText>
+            <SectionHeader
+              title="Danger Zone"
+              accentPip={false}
+              style={{ borderBottomColor: theme.colors.status.error + '44' }}
+            />
+            <View style={styles.sectionContent}>
 
             <TouchableOpacity
               style={[
                 styles.deleteButton,
-                { borderColor: theme.colors.status.error },
+                { borderColor: theme.colors.status.error + '88' },
               ]}
               onPress={handleDelete}
-              activeOpacity={0.7}
+              activeOpacity={0.75}
             >
-              <Icon
-                name="delete-outline"
-                size={18}
-                color={theme.colors.status.error}
-                style={styles.deleteIcon}
+              <LinearGradient
+                colors={[
+                  theme.colors.status.error + '33',
+                  theme.colors.status.error + '11',
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={StyleSheet.absoluteFillObject}
               />
+              <View style={styles.deleteIconBadge}>
+                <Icon
+                  name="delete-outline"
+                  size={16}
+                  color={theme.colors.status.error}
+                />
+              </View>
               <ThemedText
                 size={14}
                 weight="medium"
@@ -648,7 +607,8 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
                 Delete Entity
               </ThemedText>
             </TouchableOpacity>
-          </View>
+            </View>
+          </ThemedCard>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -742,10 +702,12 @@ const styles = StyleSheet.create({
 
   // ── Sections ──
   section: {
-    borderRadius: 12,
-    borderWidth: 1,
+    padding: 0,
+    overflow: 'hidden',
+  },
+  sectionContent: {
     padding: 16,
-    marginBottom: 16,
+    gap: 12,
   },
   dangerSection: {
     borderWidth: 1.5,
@@ -806,12 +768,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 11,
     alignSelf: 'flex-start',
+    gap: 10,
+    overflow: 'hidden',
   },
-  deleteIcon: { marginRight: 8 },
+  deleteIconBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 
   // ── Modal ──
   modalOverlay: {

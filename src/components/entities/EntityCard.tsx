@@ -7,6 +7,7 @@ import {
   Modal,
   TouchableWithoutFeedback,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
@@ -44,95 +45,114 @@ export const EntityCard: React.FC<EntityCardProps> = ({
 
   return (
     <TouchableOpacity
-      style={[
-        styles.card,
-        {
-          backgroundColor: theme.colors.background.elevated,
-          borderColor: theme.colors.border.default,
-        },
-      ]}
+      style={styles.cardOuter}
       onPress={onPress}
-      activeOpacity={0.8}
+      activeOpacity={0.82}
     >
-      {/* Avatar */}
-      <View
-        style={[
-          styles.avatar,
-          { backgroundColor: theme.colors.background.base },
-        ]}
+      <LinearGradient
+        colors={[theme.colors.background.elevated, theme.colors.background.surface]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.card}
       >
-        {item.characterProfileImageUri ? (
-          <Image
-            source={{ uri: item.characterProfileImageUri }}
-            style={styles.avatarImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <Icon
-            name="robot-outline"
-            size={28}
-            color={theme.colors.text.muted}
-          />
-        )}
-      </View>
+        {/* Prismatic tint overlay — top-left bleed */}
+        <LinearGradient
+          colors={[theme.colors.accent.primary + '14', 'transparent']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+          pointerEvents="none"
+        />
 
-      {/* Main content */}
-      <View style={styles.content}>
-        {/* Entity alias */}
-        <ThemedText weight="bold" size={15} numberOfLines={1}>
-          {displayName}
-        </ThemedText>
+        {/* Left accent stripe */}
+        <LinearGradient
+          colors={[theme.colors.accent.primary, theme.colors.accent.secondary]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={styles.accentStripe}
+          pointerEvents="none"
+        />
 
-        {/* Character profile name */}
-        <ThemedText
-          variant="secondary"
-          size={12}
-          numberOfLines={1}
-          style={styles.profileName}
+        {/* Avatar */}
+        <LinearGradient
+          colors={[theme.colors.background.surface, theme.colors.background.base]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.avatar}
         >
-          {item.characterProfileName
-            ? `Character: ${item.characterProfileName}`
-            : 'No character profile'}
-        </ThemedText>
+          {item.characterProfileImageUri ? (
+            <Image
+              source={{ uri: item.characterProfileImageUri }}
+              style={styles.avatarImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <Icon
+              name="robot-outline"
+              size={28}
+              color={theme.colors.text.muted}
+            />
+          )}
+        </LinearGradient>
 
-        {/* Module chips */}
-        {item.activeModuleNames.length > 0 ? (
-          <View style={styles.chipsRow}>
-            {item.activeModuleNames.map(name => (
-              <View
-                key={name}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: theme.colors.accent.primary + '22',
-                    borderColor: theme.colors.accent.primary + '44',
-                  },
-                ]}
-              >
-                <ThemedText
-                  size={10}
-                  style={{ color: theme.colors.accent.primary }}
-                >
-                  {name}
-                </ThemedText>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <ThemedText variant="muted" size={11} style={styles.noModules}>
-            No modules configured
+        {/* Main content */}
+        <View style={styles.content}>
+          {/* Entity alias */}
+          <ThemedText weight="bold" size={15} numberOfLines={1}>
+            {displayName}
           </ThemedText>
-        )}
-      </View>
 
-      {/* Context menu button */}
-      <TouchableOpacity
-        style={styles.menuButton}
-        onPress={() => setMenuVisible(true)}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <Icon name="dots-vertical" size={20} color={theme.colors.text.muted} />
-      </TouchableOpacity>
+          {/* Character profile name */}
+          <ThemedText
+            variant="secondary"
+            size={12}
+            numberOfLines={1}
+            style={styles.profileName}
+          >
+            {item.characterProfileName
+              ? `Character: ${item.characterProfileName}`
+              : 'No character profile'}
+          </ThemedText>
+
+          {/* Module chips */}
+          {item.activeModuleNames.length > 0 ? (
+            <View style={styles.chipsRow}>
+              {item.activeModuleNames.map(name => (
+                <View
+                  key={name}
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: theme.colors.accent.primary + '22',
+                      borderColor: theme.colors.accent.primary + '44',
+                    },
+                  ]}
+                >
+                  <ThemedText
+                    size={10}
+                    style={{ color: theme.colors.accent.primary }}
+                  >
+                    {name}
+                  </ThemedText>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <ThemedText variant="muted" size={11} style={styles.noModules}>
+              No modules configured
+            </ThemedText>
+          )}
+        </View>
+
+        {/* Context menu button */}
+        <TouchableOpacity
+          style={styles.menuButton}
+          onPress={() => setMenuVisible(true)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Icon name="dots-vertical" size={20} color={theme.colors.text.muted} />
+        </TouchableOpacity>
+      </LinearGradient>
 
       {/* Context menu modal */}
       <Modal
@@ -144,11 +164,11 @@ export const EntityCard: React.FC<EntityCardProps> = ({
         <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
           <View style={styles.menuOverlay}>
             <TouchableWithoutFeedback>
-              <View
-                style={[
-                  styles.contextMenu,
-                  { backgroundColor: theme.colors.background.elevated },
-                ]}
+              <LinearGradient
+                colors={[theme.colors.background.elevated, theme.colors.background.surface]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.contextMenu}
               >
                 <TouchableOpacity
                   style={styles.contextMenuItem}
@@ -168,7 +188,7 @@ export const EntityCard: React.FC<EntityCardProps> = ({
                 <View
                   style={[
                     styles.menuDivider,
-                    { backgroundColor: theme.colors.border.default },
+                    { backgroundColor: 'rgba(255,255,255,0.07)' },
                   ]}
                 />
                 <TouchableOpacity
@@ -191,7 +211,7 @@ export const EntityCard: React.FC<EntityCardProps> = ({
                     Delete Entity
                   </ThemedText>
                 </TouchableOpacity>
-              </View>
+              </LinearGradient>
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
@@ -201,14 +221,33 @@ export const EntityCard: React.FC<EntityCardProps> = ({
 };
 
 const styles = StyleSheet.create({
+  cardOuter: {
+    borderRadius: 12,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 5,
+  },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 12,
     borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
     padding: 12,
-    marginBottom: 10,
     gap: 12,
+    overflow: 'hidden',
+  },
+  accentStripe: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    borderTopLeftRadius: 12,
+    borderBottomLeftRadius: 12,
   },
   avatar: {
     width: 52,
@@ -249,11 +288,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     minWidth: 200,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
     elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
   },
   contextMenuItem: {
     flexDirection: 'row',

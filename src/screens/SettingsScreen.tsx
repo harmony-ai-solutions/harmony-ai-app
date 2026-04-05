@@ -11,6 +11,9 @@ import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
+import { ThemedCard } from '../components/themed/ThemedCard';
+import { SectionHeader } from '../components/themed/SectionHeader';
+import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -68,12 +71,7 @@ export const SettingsScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* Header */}
-      <Appbar.Header
-        style={[
-          styles.header,
-          { backgroundColor: theme.colors.background.surface },
-        ]}
-      >
+      <ThemedAppbar style={styles.header}>
         <Appbar.BackAction
           color={theme.colors.text.primary}
           onPress={() => navigation.goBack()}
@@ -87,30 +85,15 @@ export const SettingsScreen: React.FC = () => {
           color={theme.colors.text.primary}
           onPress={() => setMenuVisible(true)}
         />
-      </Appbar.Header>
+      </ThemedAppbar>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {/* ── Connection Card ── */}
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: theme.colors.background.elevated,
-              borderColor: theme.colors.border.default,
-            },
-          ]}
-        >
-          <ThemedText
-            weight="bold"
-            size={14}
-            variant="muted"
-            style={styles.cardTitle}
-          >
-            CONNECTION
-          </ThemedText>
+        <ThemedCard elevated accentStripe accentTint style={styles.card}>
+          <SectionHeader title="Connection" style={styles.sectionHeader} />
 
           <View style={styles.row}>
             <ThemedText variant="secondary">Type</ThemedText>
@@ -136,26 +119,11 @@ export const SettingsScreen: React.FC = () => {
             onPress={() => navigation.navigate('ConnectionSetup')}
             style={styles.cardButton}
           />
-        </View>
+        </ThemedCard>
 
         {/* ── Sync Card ── */}
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: theme.colors.background.elevated,
-              borderColor: theme.colors.border.default,
-            },
-          ]}
-        >
-          <ThemedText
-            weight="bold"
-            size={14}
-            variant="muted"
-            style={styles.cardTitle}
-          >
-            SYNC
-          </ThemedText>
+        <ThemedCard elevated accentStripe style={styles.card}>
+          <SectionHeader title="Sync" style={styles.sectionHeader} />
 
           <View style={styles.row}>
             <ThemedText variant="secondary">Last Sync</ThemedText>
@@ -173,26 +141,11 @@ export const SettingsScreen: React.FC = () => {
             onPress={() => navigation.navigate('SyncSettings')}
             style={styles.cardButton}
           />
-        </View>
+        </ThemedCard>
 
         {/* ── Account Card ── */}
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: theme.colors.background.elevated,
-              borderColor: theme.colors.border.default,
-            },
-          ]}
-        >
-          <ThemedText
-            weight="bold"
-            size={14}
-            variant="muted"
-            style={styles.cardTitle}
-          >
-            ACCOUNT
-          </ThemedText>
+        <ThemedCard elevated accentStripe style={styles.card}>
+          <SectionHeader title="Account" style={styles.sectionHeader} />
 
           <SettingsLinkRow
             icon="account-circle"
@@ -207,27 +160,12 @@ export const SettingsScreen: React.FC = () => {
             theme={theme}
             badge="⭐"
           />
-        </View>
+        </ThemedCard>
 
         {/* ── Development Card (DEV only) ── */}
         {__DEV__ && (
-          <View
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.colors.background.elevated,
-                borderColor: theme.colors.border.default,
-              },
-            ]}
-          >
-            <ThemedText
-              weight="bold"
-              size={14}
-              variant="muted"
-              style={styles.cardTitle}
-            >
-              DEVELOPMENT
-            </ThemedText>
+          <ThemedCard elevated accentStripe style={styles.card}>
+            <SectionHeader title="Development" style={styles.sectionHeader} />
             <SettingsLinkRow
               icon="test-tube"
               label="Database Tests"
@@ -242,7 +180,7 @@ export const SettingsScreen: React.FC = () => {
               onPress={() => navigation.navigate('DatabaseTableViewer')}
               theme={theme}
             />
-          </View>
+          </ThemedCard>
         )}
       </ScrollView>
 
@@ -273,7 +211,7 @@ const SettingsLinkRow: React.FC<SettingsLinkRowProps> = ({
   badge,
 }) => (
   <TouchableOpacity
-    style={[styles.linkRow, { borderBottomColor: theme.colors.border.default }]}
+    style={[styles.linkRow, { borderBottomColor: 'rgba(255,255,255,0.07)' }]}
     onPress={onPress}
     activeOpacity={0.7}
   >
@@ -304,22 +242,28 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   card: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 16,
+    gap: 12,
+    padding: 0,
+    overflow: 'hidden',
+  },
+  sectionHeader: {
+    // Remove default padding from ThemedCard since SectionHeader has its own
+    marginTop: 0,
+  },
+  cardContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
     gap: 12,
   },
-  cardTitle: {
-    letterSpacing: 0.8,
-    marginBottom: 4,
-  },
   cardButton: {
-    marginTop: 4,
+    marginHorizontal: 16,
+    marginBottom: 16,
   },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: 16,
   },
   statusRow: {
     flexDirection: 'row',
@@ -335,6 +279,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
+    paddingHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   linkIcon: {

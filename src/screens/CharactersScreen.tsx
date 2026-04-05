@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Appbar, FAB } from 'react-native-paper';
+import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -38,6 +39,7 @@ export const CharactersScreen: React.FC = () => {
   const [primaryImages, setPrimaryImages] = useState<
     Record<string, string | null>
   >({});
+  const [imageCounts, setImageCounts] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -54,8 +56,9 @@ export const CharactersScreen: React.FC = () => {
       const data = await getAllCharacterProfiles();
       setProfiles(data);
 
-      // Load primary images for all profiles in parallel
+      // Load primary images + image counts for all profiles in parallel
       const imageMap: Record<string, string | null> = {};
+      const countMap: Record<string, number> = {};
       await Promise.all(
         data.map(async profile => {
           try {
@@ -64,12 +67,15 @@ export const CharactersScreen: React.FC = () => {
             imageMap[profile.id] = primary
               ? createDataURL(primary.image_data, primary.mime_type)
               : null;
+            countMap[profile.id] = images.length;
           } catch {
             imageMap[profile.id] = null;
+            countMap[profile.id] = 0;
           }
         }),
       );
       setPrimaryImages(imageMap);
+      setImageCounts(countMap);
     } catch (err) {
       console.error('Failed to load profiles:', err);
     } finally {
@@ -106,6 +112,11 @@ export const CharactersScreen: React.FC = () => {
                 delete next[profile.id];
                 return next;
               });
+              setImageCounts(prev => {
+                const next = { ...prev };
+                delete next[profile.id];
+                return next;
+              });
             } catch {
               Alert.alert('Error', 'Failed to delete profile.');
             }
@@ -124,12 +135,7 @@ export const CharactersScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* Appbar */}
-      <Appbar.Header
-        style={[
-          styles.header,
-          { backgroundColor: theme.colors.background.surface },
-        ]}
-      >
+      <ThemedAppbar style={styles.header}>
         <Appbar.BackAction
           color={theme.colors.text.primary}
           onPress={() => navigation.goBack()}
@@ -143,7 +149,7 @@ export const CharactersScreen: React.FC = () => {
           color={theme.colors.text.primary}
           onPress={() => setMenuVisible(true)}
         />
-      </Appbar.Header>
+      </ThemedAppbar>
 
       {/* Search bar */}
       <View
@@ -216,6 +222,7 @@ export const CharactersScreen: React.FC = () => {
             <CharacterProfileCard
               profile={item}
               imageUri={primaryImages[item.id] ?? null}
+              imageCount={imageCounts[item.id] ?? 0}
               onPress={() => handleEdit(item)}
               onLongPress={() => handleLongPress(item)}
             />

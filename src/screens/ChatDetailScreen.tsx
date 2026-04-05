@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { Appbar, Avatar } from 'react-native-paper';
+import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -906,9 +907,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <ThemedView style={styles.container}>
-      <Appbar.Header
-        style={{ backgroundColor: theme?.colors.background.surface }}
-      >
+      <ThemedAppbar>
         <Appbar.BackAction
           onPress={() => navigation.goBack()}
           color={theme?.colors.text.primary}
@@ -965,7 +964,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             color={theme?.colors.text.primary}
           />
         </TouchableOpacity>
-      </Appbar.Header>
+      </ThemedAppbar>
 
       <KeyboardAvoidingView
         style={styles.content}

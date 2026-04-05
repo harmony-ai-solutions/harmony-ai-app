@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Appbar, FAB } from 'react-native-paper';
+import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -130,12 +131,7 @@ export const EntityConfigScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
-      <Appbar.Header
-        style={[
-          styles.header,
-          { backgroundColor: theme.colors.background.surface },
-        ]}
-      >
+      <ThemedAppbar style={styles.header}>
         <Appbar.BackAction
           color={theme.colors.text.primary}
           onPress={() => navigation.goBack()}
@@ -149,7 +145,7 @@ export const EntityConfigScreen: React.FC = () => {
           color={theme.colors.text.primary}
           onPress={() => setMenuVisible(true)}
         />
-      </Appbar.Header>
+      </ThemedAppbar>
 
       {isLoading ? (
         <View style={styles.centered}>

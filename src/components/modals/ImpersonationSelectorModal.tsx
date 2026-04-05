@@ -1,11 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, FlatList, TouchableOpacity } from 'react-native';
-import { Modal, Portal, Avatar, List, Button, Divider, ActivityIndicator } from 'react-native-paper';
+import {
+  StyleSheet,
+  View,
+  FlatList,
+  TouchableOpacity,
+  Image,
+} from 'react-native';
+import { Modal, Portal, ActivityIndicator } from 'react-native-paper';
+import LinearGradient from 'react-native-linear-gradient';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
+import { ThemedButton } from '../themed/ThemedButton';
 import { getAllEntities } from '../../database/repositories/entities';
-import { getCharacterProfile, getPrimaryImage, imageToDataURL } from '../../database/repositories/characters';
+import {
+  getCharacterProfile,
+  getPrimaryImage,
+  imageToDataURL,
+} from '../../database/repositories/characters';
 import { Entity } from '../../database/models';
 import { createLogger } from '../../utils/logger';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -27,7 +38,7 @@ interface EntityDisplayItem {
 
 const determineDefaultEntity = (
   entities: Entity[],
-  preSelectedEntityId?: string
+  preSelectedEntityId?: string,
 ): string | null => {
   if (entities.length === 0) return null;
 
@@ -42,13 +53,10 @@ const determineDefaultEntity = (
   return entities[0].id;
 };
 
-export const ImpersonationSelectorModal: React.FC<ImpersonationSelectorModalProps> = ({
-  visible,
-  onSelect,
-  onCancel,
-  preSelectedEntityId,
-}) => {
-  const theme = useAppTheme();
+export const ImpersonationSelectorModal: React.FC<
+  ImpersonationSelectorModalProps
+> = ({ visible, onSelect, onCancel, preSelectedEntityId }) => {
+  const { theme } = useAppTheme();
   const [entities, setEntities] = useState<EntityDisplayItem[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,23 +71,21 @@ export const ImpersonationSelectorModal: React.FC<ImpersonationSelectorModalProp
   const loadEntities = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const allEntities = await getAllEntities();
-      // No filter — show all entities
-      
+
       if (allEntities.length === 0) {
         setError('No entities available. Please create a user entity first.');
         setLoading(false);
         return;
       }
-      
-      // Load display information for each entity
+
       const displayItems: EntityDisplayItem[] = [];
       for (const entity of allEntities) {
         let characterName = entity.id;
         let avatarUri: string | null = null;
-        
+
         if (entity.character_profile_id) {
           const profile = await getCharacterProfile(entity.character_profile_id);
           if (profile) {
@@ -90,17 +96,11 @@ export const ImpersonationSelectorModal: React.FC<ImpersonationSelectorModalProp
             avatarUri = imageToDataURL(image);
           }
         }
-        
-        displayItems.push({
-          entityId: entity.id,
-          characterName,
-          avatarUri,
-        });
+
+        displayItems.push({ entityId: entity.id, characterName, avatarUri });
       }
-      
+
       setEntities(displayItems);
-      
-      // Determine default selection
       const defaultId = determineDefaultEntity(allEntities, preSelectedEntityId);
       setSelectedEntityId(defaultId);
     } catch (err) {
@@ -111,72 +111,169 @@ export const ImpersonationSelectorModal: React.FC<ImpersonationSelectorModalProp
     }
   };
 
-  const renderEntityItem = ({ item }: { item: EntityDisplayItem }) => (
-    <TouchableOpacity onPress={() => setSelectedEntityId(item.entityId)}>
-      <List.Item
-        title={item.characterName}
-        description={`Entity ID: ${item.entityId}`}
-        left={() => (
-          item.avatarUri ? (
-            <Avatar.Image size={40} source={{ uri: item.avatarUri }} />
-          ) : (
-            <Avatar.Text 
-              size={40} 
-              label={item.characterName.substring(0, 2).toUpperCase()} 
-            />
-          )
-        )}
-        right={() => (
-          selectedEntityId === item.entityId && (
-            <Icon name="check-circle" size={24} color={theme?.theme?.colors.accent.primary} />
-          )
-        )}
+  if (!theme) return null;
+
+  const accentPrimary = theme.colors.accent.primary;
+  const accentSecondary =
+    theme.colors.accent.secondary ?? theme.colors.accent.primaryHover;
+
+  const renderEntityItem = ({ item }: { item: EntityDisplayItem }) => {
+    const isSelected = selectedEntityId === item.entityId;
+    return (
+      <TouchableOpacity
+        onPress={() => setSelectedEntityId(item.entityId)}
+        activeOpacity={0.65}
         style={[
-          styles.listItem,
-          selectedEntityId === item.entityId && {
-            backgroundColor: theme?.theme?.colors.background.elevated,
-          },
+          styles.entityRow,
+          isSelected && { backgroundColor: accentPrimary + '18' },
         ]}
-      />
-      <Divider />
-    </TouchableOpacity>
-  );
+      >
+        {/* Left accent pip for selected */}
+        {isSelected && (
+          <LinearGradient
+            colors={[accentPrimary, accentSecondary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={styles.rowPip}
+          />
+        )}
+
+        {/* Avatar */}
+        <View
+          style={[
+            styles.avatarContainer,
+            {
+              borderColor: isSelected
+                ? accentPrimary + '88'
+                : theme.colors.border.default + '44',
+            },
+          ]}
+        >
+          {item.avatarUri ? (
+            <Image
+              source={{ uri: item.avatarUri }}
+              style={styles.avatarImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <LinearGradient
+              colors={[accentPrimary + '44', theme.colors.background.elevated]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.avatarFallback}
+            >
+              <ThemedText
+                size={14}
+                weight="bold"
+                style={{ color: accentPrimary }}
+              >
+                {item.characterName.substring(0, 2).toUpperCase()}
+              </ThemedText>
+            </LinearGradient>
+          )}
+        </View>
+
+        {/* Name + ID */}
+        <View style={styles.entityInfo}>
+          <ThemedText
+            size={15}
+            weight={isSelected ? 'bold' : 'medium'}
+            variant={isSelected ? 'accent' : 'primary'}
+            numberOfLines={1}
+          >
+            {item.characterName}
+          </ThemedText>
+          <ThemedText size={12} variant="muted" numberOfLines={1}>
+            {item.entityId}
+          </ThemedText>
+        </View>
+
+        {/* Check icon */}
+        {isSelected && (
+          <Icon name="check-circle" size={20} color={accentPrimary} />
+        )}
+
+        {/* Row separator */}
+        <View
+          style={[
+            styles.rowSeparator,
+            { backgroundColor: theme.colors.border.default + '44' },
+          ]}
+        />
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <Portal>
       <Modal
         visible={visible}
         onDismiss={onCancel}
-        contentContainerStyle={[
-          styles.modalContainer,
-          { backgroundColor: theme?.theme?.colors.background.surface },
-        ]}
+        contentContainerStyle={styles.modalOuter}
       >
-        <ThemedView style={styles.container}>
+        <View style={styles.modalShell}>
+          {/* Gradient background */}
+          <LinearGradient
+            colors={[
+              theme.colors.background.elevated,
+              theme.colors.background.surface,
+            ]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={[StyleSheet.absoluteFillObject, styles.modalRadius]}
+          />
+
+          {/* Prismatic tint */}
+          <LinearGradient
+            colors={[accentPrimary + '10', 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0.6 }}
+            style={[StyleSheet.absoluteFillObject, styles.modalRadius]}
+            pointerEvents="none"
+          />
+
+          {/* Top accent stripe */}
+          <LinearGradient
+            colors={[accentPrimary + 'CC', accentSecondary + '66', 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.topStripe}
+          />
+
           {/* Header */}
           <View style={styles.header}>
-            <ThemedText variant="primary" style={styles.title}>
+            <ThemedText size={18} weight="bold" style={styles.title}>
               Chatting As
             </ThemedText>
-            <ThemedText variant="secondary" size={14}>
+            <ThemedText variant="muted" size={13} style={styles.subtitle}>
               Select the persona you want to use across all chats
             </ThemedText>
           </View>
 
+          {/* Hairline separator */}
+          <View
+            style={[
+              styles.headerSeparator,
+              { backgroundColor: theme.colors.border.default + '55' },
+            ]}
+          />
+
           {/* Content */}
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" />
+              <ActivityIndicator size="large" color={accentPrimary} />
             </View>
           ) : error ? (
             <View style={styles.errorContainer}>
-              <Icon name="alert-circle" size={48} color={theme?.theme?.colors.status.error} />
-              <ThemedText variant="secondary" style={styles.errorText}>
+              <Icon
+                name="alert-circle"
+                size={48}
+                color={theme.colors.status.error}
+              />
+              <ThemedText variant="muted" style={styles.errorText}>
                 {error}
               </ThemedText>
-              <Button mode="contained" onPress={onCancel}>
-                Close
-              </Button>
+              <ThemedButton variant="secondary" label="Close" onPress={onCancel} />
             </View>
           ) : (
             <>
@@ -187,73 +284,138 @@ export const ImpersonationSelectorModal: React.FC<ImpersonationSelectorModalProp
                 style={styles.list}
                 ItemSeparatorComponent={null}
               />
-              
-              {/* Actions */}
+
+              {/* Hairline before actions */}
+              <View
+                style={[
+                  styles.actionsSeparator,
+                  { backgroundColor: theme.colors.border.default + '55' },
+                ]}
+              />
+
+              {/* Action buttons */}
               <View style={styles.actions}>
-                <Button 
-                  mode="outlined" 
+                <ThemedButton
+                  variant="secondary"
+                  label="Cancel"
                   onPress={onCancel}
                   style={styles.button}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  mode="contained" 
+                />
+                <ThemedButton
+                  variant="primary"
+                  label="Confirm"
                   onPress={() => {
-                    if (selectedEntityId) {
-                      onSelect(selectedEntityId);
-                    }
+                    if (selectedEntityId) onSelect(selectedEntityId);
                   }}
                   disabled={!selectedEntityId}
                   style={styles.button}
-                >
-                  Confirm
-                </Button>
+                />
               </View>
             </>
           )}
-        </ThemedView>
+        </View>
       </Modal>
     </Portal>
   );
 };
 
 const styles = StyleSheet.create({
-  modalContainer: {
+  modalOuter: {
     margin: 20,
     borderRadius: 16,
     maxHeight: '80%',
   },
-  container: {
+  modalShell: {
     borderRadius: 16,
     overflow: 'hidden',
   },
+  modalRadius: {
+    borderRadius: 16,
+  },
+  topStripe: {
+    height: 2,
+  },
   header: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 12,
     alignItems: 'center',
   },
   title: {
-    fontSize: 20,
-    fontWeight: '600',
     marginBottom: 4,
+    letterSpacing: 0.3,
+  },
+  subtitle: {
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  headerSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 0,
   },
   loadingContainer: {
     padding: 40,
     alignItems: 'center',
   },
   errorContainer: {
-    padding: 40,
+    padding: 32,
     alignItems: 'center',
+    gap: 12,
   },
   errorText: {
-    marginVertical: 16,
     textAlign: 'center',
+    lineHeight: 20,
   },
   list: {
     maxHeight: 300,
   },
-  listItem: {
-    paddingVertical: 8,
+  // ── Entity row ──
+  entityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  rowPip: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: 3,
+  },
+  avatarContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+  avatarImage: {
+    width: 44,
+    height: 44,
+  },
+  avatarFallback: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  entityInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  rowSeparator: {
+    position: 'absolute',
+    left: 76,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+  },
+  // ── Actions ──
+  actionsSeparator: {
+    height: StyleSheet.hairlineWidth,
   },
   actions: {
     flexDirection: 'row',

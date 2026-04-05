@@ -2,14 +2,15 @@ import React from 'react';
 import {
   Modal,
   View,
-  Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
   TouchableWithoutFeedback,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { ThemedText } from '../themed/ThemedText';
 
 interface SettingsMenuProps {
   visible: boolean;
@@ -114,6 +115,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
 
   if (!theme) return null;
 
+  const accentPrimary = theme.colors.accent.primary;
+  const accentSecondary = theme.colors.accent.secondary ?? theme.colors.accent.primaryHover;
+
   const handleItemPress = (screen: string) => {
     onClose();
     onNavigate(screen);
@@ -129,65 +133,125 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.overlay}>
           <TouchableWithoutFeedback>
-            <View
-              style={[
-                styles.menu,
-                { backgroundColor: theme.colors.background.elevated },
-              ]}
-            >
-              <ScrollView>
+            <View style={styles.menuShell}>
+              {/* Gradient background */}
+              <LinearGradient
+                colors={[
+                  theme.colors.background.elevated,
+                  theme.colors.background.surface,
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+              />
+
+              {/* Prismatic tint from top-left */}
+              <LinearGradient
+                colors={[accentPrimary + '12', 'transparent']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0.6 }}
+                style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                pointerEvents="none"
+              />
+
+              {/* Top accent stripe */}
+              <LinearGradient
+                colors={[accentPrimary + 'CC', accentSecondary + '66', 'transparent']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.menuTopStripe}
+              />
+
+              <ScrollView showsVerticalScrollIndicator={false}>
                 {menuSections.map((section, sectionIndex) => (
                   <View key={sectionIndex}>
-                    <Text
-                      style={[
-                        styles.sectionTitle,
-                        { color: theme.colors.text.muted },
-                      ]}
-                    >
-                      {section.title}
-                    </Text>
-
-                    {section.items.map((item, itemIndex) => (
-                      <TouchableOpacity
-                        key={itemIndex}
-                        style={[
-                          styles.menuItem,
-                          { borderBottomColor: theme.colors.border.default },
-                        ]}
-                        onPress={() => handleItemPress(item.screen)}
-                        activeOpacity={0.7}
+                    {/* Section header */}
+                    <View style={styles.sectionHeader}>
+                      <ThemedText
+                        size={11}
+                        weight="medium"
+                        variant="muted"
+                        style={styles.sectionTitle}
                       >
-                        <Icon
-                          name={item.icon}
-                          size={24}
-                          color={
-                            item.type === 'navigate'
-                              ? (theme.colors.accent.secondary ??
-                                theme.colors.accent.primary)
-                              : theme.colors.accent.primary
-                          }
-                          style={styles.menuIcon}
-                        />
-                        <View style={styles.labelContainer}>
-                          <Text
+                        {section.title.toUpperCase()}
+                      </ThemedText>
+                    </View>
+
+                    {section.items.map((item, itemIndex) => {
+                      const isNavigate = item.type === 'navigate';
+                      const iconColor = isNavigate
+                        ? (accentSecondary ?? accentPrimary)
+                        : accentPrimary;
+                      const isLastInSection = itemIndex === section.items.length - 1;
+
+                      return (
+                        <TouchableOpacity
+                          key={itemIndex}
+                          style={styles.menuItem}
+                          onPress={() => handleItemPress(item.screen)}
+                          activeOpacity={0.65}
+                        >
+                          {/* Icon badge */}
+                          <View
                             style={[
-                              styles.menuLabel,
-                              { color: theme.colors.text.primary },
+                              styles.iconBadge,
+                              { backgroundColor: iconColor + '1A' },
                             ]}
                           >
-                            {item.label}
-                          </Text>
-                          {item.badge && (
-                            <Text style={styles.badge}>{item.badge}</Text>
+                            <Icon name={item.icon} size={18} color={iconColor} />
+                          </View>
+
+                          {/* Label */}
+                          <View style={styles.labelContainer}>
+                            <ThemedText size={15} weight="medium">
+                              {item.label}
+                            </ThemedText>
+                            {item.badge && (
+                              <View
+                                style={[
+                                  styles.badgePill,
+                                  { backgroundColor: accentPrimary + '22' },
+                                ]}
+                              >
+                                <ThemedText
+                                  size={10}
+                                  weight="bold"
+                                  style={{ color: accentPrimary }}
+                                >
+                                  {item.badge}
+                                </ThemedText>
+                              </View>
+                            )}
+                          </View>
+
+                          <Icon
+                            name="chevron-right"
+                            size={18}
+                            color={theme.colors.text.muted}
+                          />
+
+                          {/* Row separator (not on last item of section) */}
+                          {!isLastInSection && (
+                            <View
+                              style={[
+                                styles.itemSeparator,
+                                { backgroundColor: theme.colors.border.default + '44' },
+                              ]}
+                            />
                           )}
-                        </View>
-                        <Icon
-                          name="chevron-right"
-                          size={20}
-                          color={theme.colors.text.muted}
-                        />
-                      </TouchableOpacity>
-                    ))}
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    {/* Section separator */}
+                    {sectionIndex < menuSections.length - 1 && (
+                      <View
+                        style={[
+                          styles.sectionSeparator,
+                          { backgroundColor: theme.colors.border.default + '66' },
+                        ]}
+                      />
+                    )}
                   </View>
                 ))}
               </ScrollView>
@@ -206,48 +270,70 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     alignItems: 'flex-end',
   },
-  menu: {
+  menuShell: {
     width: 300,
     maxHeight: '80%',
-    marginTop: 56, // Below header
+    marginTop: 56,
     marginRight: 8,
-    borderRadius: 12,
+    borderRadius: 14,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 10,
     overflow: 'hidden',
   },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
+  menuGradientRadius: {
+    borderRadius: 14,
+  },
+  menuTopStripe: {
+    height: 2,
+  },
+  sectionHeader: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginTop: 8,
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  sectionTitle: {
+    letterSpacing: 0.8,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: 13,
     paddingHorizontal: 16,
-    borderBottomWidth: 1,
+    gap: 12,
   },
-  menuIcon: {
-    marginRight: 16,
+  iconBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
   },
   labelContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
-  menuLabel: {
-    fontSize: 16,
-    fontWeight: '500',
+  badgePill: {
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
   },
-  badge: {
-    marginLeft: 8,
-    fontSize: 12,
+  itemSeparator: {
+    position: 'absolute',
+    left: 62,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+  },
+  sectionSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 0,
+    marginTop: 4,
+    marginBottom: 2,
   },
 });

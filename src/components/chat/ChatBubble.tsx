@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { Avatar, IconButton, Menu } from 'react-native-paper';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
@@ -409,14 +410,28 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         />
       )}
       
-      <View style={[
-        styles.bubble,
-        isOwn 
-          ? [styles.ownBubble, { backgroundColor: theme.colors.accent.primary + '20' }]
-          : [styles.partnerBubble, { backgroundColor: theme.colors.background.elevated }],
-      ]}>
-        {renderContent()}
-      </View>
+      {isOwn ? (
+        // Own bubble: accent gradient at ~55-35% opacity — gives colour depth
+        // without washing out text or audio controls.
+        <LinearGradient
+          colors={[theme.colors.accent.primary + 'B3', (theme.colors.accent.secondary ?? theme.colors.accent.primaryHover) + '80']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.bubble, styles.ownBubble, { backgroundColor: theme.colors.background.surface }]}
+        >
+          {renderContent()}
+        </LinearGradient>
+      ) : (
+        // Partner bubble: subtle elevated→surface gradient
+        <LinearGradient
+          colors={[theme.colors.background.elevated, theme.colors.background.surface]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.bubble, styles.partnerBubble]}
+        >
+          {renderContent()}
+        </LinearGradient>
+      )}
     </View>
   );
 };
