@@ -509,8 +509,10 @@ export async function setPrimaryImage(profileId: string, imageId: number): Promi
 export async function getPrimaryImage(profileId: string): Promise<CharacterImage | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, character_profile_id, image_data, mime_type, description,
+  // First, get just the metadata WITHOUT image_data to avoid CursorWindow issues
+  // with large images (>2MB). The image_data is loaded separately via loadTextColumn.
+  const [metaResults] = await db.executeSql(
+    `SELECT id, character_profile_id, mime_type, description,
             is_primary, display_order, vl_model_interpretation, vl_model,
             created_at, deleted_at
      FROM character_image
@@ -519,13 +521,13 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
     [profileId]
   );
   
-  if (results.rows.length === 0) {
+  if (metaResults.rows.length === 0) {
     return null;
   }
   
-  const row = results.rows.item(0);
+  const row = metaResults.rows.item(0);
   
-  // Load TEXT fields with chunking if needed
+  // Load image_data separately using chunked loading to avoid CursorWindow limit
   const imageData = await loadTextColumn('character_image', row.id, 'image_data');
   
   return {
