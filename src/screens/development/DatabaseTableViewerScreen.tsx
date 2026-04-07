@@ -45,6 +45,9 @@ export const DatabaseTableViewerScreen: React.FC = () => {
     const [isPortrait, setIsPortrait] = useState(true);
     const [dropdownVisible, setDropdownVisible] = useState(false);
     const [wipeConfirmVisible, setWipeConfirmVisible] = useState(false);
+    const [currentPage, setCurrentPage] = useState(0);
+    const [totalRows, setTotalRows] = useState(0);
+    const PAGE_SIZE = 5;
     const scrollViewRef = useRef<ScrollView>(null);
 
     // Check orientation on mount and window changes
@@ -70,7 +73,8 @@ export const DatabaseTableViewerScreen: React.FC = () => {
     // Load table data when selection changes
     useEffect(() => {
         if (selectedTable) {
-            loadTableData(selectedTable);
+            setCurrentPage(0);
+            loadTableData(selectedTable, 0);
         }
     }, [selectedTable]);
 
@@ -105,26 +109,53 @@ export const DatabaseTableViewerScreen: React.FC = () => {
         }
     };
 
-    const loadTableData = async (tableName: string) => {
+    const loadTableData = async (tableName: string, page: number) => {
         setIsLoading(true);
         setError(null);
-        
+
         try {
             // Get table schema
             const schemaResult = await executeRawQuery(`PRAGMA table_info(${tableName})`);
             const columnList: ColumnInfo[] = [];
-            
+
             for (let i = 0; i < schemaResult.rows.length; i++) {
                 const row = schemaResult.rows.item(i);
                 columnList.push({ name: row.name, type: row.type });
             }
-            
+
             setColumns(columnList);
 
-            // Get all rows from the table
-            const dataResult = await executeRawQuery(`SELECT * FROM ${tableName}`);
+            // Get total row count for pagination
+            const countResult = await executeRawQuery(`SELECT COUNT(*) as count FROM ${tableName}`);
+            const total = countResult.rows.item(0).count as number;
+            setTotalRows(total);
+
+            // Build a SELECT that shields large TEXT/BLOB columns from overloading memory.
+            // Any column whose stored value exceeds MAX_CELL_CHARS chars is replaced with
+            // a "[Large data: N chars]" placeholder directly in SQLite so it is never
+            // transferred to JS as a giant string.
+            const MAX_CELL_CHARS = 2000;
+            const selectParts = columnList.map(col => {
+                const upperType = col.type.toUpperCase();
+                if (upperType === 'TEXT' || upperType === 'BLOB' || upperType === '') {
+                    // Use SQLite CASE to truncate inline
+                    return (
+                        `CASE WHEN length("${col.name}") > ${MAX_CELL_CHARS} ` +
+                        `THEN '[Large data: ' || length("${col.name}") || ' chars]' ` +
+                        `ELSE "${col.name}" END AS "${col.name}"`
+                    );
+                }
+                return `"${col.name}"`;
+            });
+            const selectClause = selectParts.join(', ');
+
+            // Get paginated rows
+            const offset = page * PAGE_SIZE;
+            const dataResult = await executeRawQuery(
+                `SELECT ${selectClause} FROM ${tableName} LIMIT ${PAGE_SIZE} OFFSET ${offset}`
+            );
             const rowList: any[] = [];
-            
+
             for (let i = 0; i < dataResult.rows.length; i++) {
                 try {
                     const row = dataResult.rows.item(i);
@@ -140,7 +171,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                     rowList.push({ _error: `Row ${i} could not be loaded` });
                 }
             }
-            
+
             setRows(rowList);
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Failed to load table data';
@@ -151,19 +182,37 @@ export const DatabaseTableViewerScreen: React.FC = () => {
         }
     };
 
+    const handlePrevPage = () => {
+        if (!selectedTable || currentPage <= 0) return;
+        const newPage = currentPage - 1;
+        setCurrentPage(newPage);
+        loadTableData(selectedTable, newPage);
+    };
+
+    const handleNextPage = () => {
+        if (!selectedTable) return;
+        const totalPages = Math.ceil(totalRows / PAGE_SIZE);
+        if (currentPage >= totalPages - 1) return;
+        const newPage = currentPage + 1;
+        setCurrentPage(newPage);
+        loadTableData(selectedTable, newPage);
+    };
+
     const handleWipeDatabase = async () => {
         setWipeConfirmVisible(false);
         setIsLoading(true);
         setError(null);
-        
+
         try {
             log.info('Wiping database...');
             await clearDatabaseData();
-            
+
             // Reset state
             setSelectedTable(null);
             setColumns([]);
             setRows([]);
+            setCurrentPage(0);
+            setTotalRows(0);
             
             // Reload tables
             await loadTables();
@@ -373,7 +422,8 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                         {selectedTable}
                     </Text>
                     <Text style={[styles.tableSubtitle, { color: theme.colors.text.secondary }]}>
-                        {rows.length} rows • {columns.length} columns
+                        {totalRows} rows • {columns.length} columns
+                        {totalRows > PAGE_SIZE && ` • Page ${currentPage + 1} of ${Math.ceil(totalRows / PAGE_SIZE)}`}
                     </Text>
                 </View>
 
@@ -425,7 +475,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                                     >
                                         <View style={[styles.cell, styles.indexCell]}>
                                             <Text style={[styles.indexText, { color: theme.colors.text.muted }]}>
-                                                {rowIndex + 1}
+                                                {currentPage * PAGE_SIZE + rowIndex + 1}
                                             </Text>
                                         </View>
                                         {columns.map((col) => (
@@ -450,6 +500,29 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                         </ScrollView>
                     </View>
                 </ScrollView>
+
+                {/* Pagination Controls */}
+                {totalRows > PAGE_SIZE && (
+                    <View style={[styles.paginationBar, { backgroundColor: theme.colors.background.surface, borderTopColor: 'rgba(255,255,255,0.1)' }]}>
+                        <TouchableOpacity
+                            style={[styles.pageButton, currentPage <= 0 && styles.pageButtonDisabled, { borderColor: theme.colors.accent.primary }]}
+                            onPress={handlePrevPage}
+                            disabled={currentPage <= 0}
+                        >
+                            <Icon name="chevron-left" size={14} color={currentPage <= 0 ? theme.colors.text.muted : theme.colors.accent.primary} />
+                        </TouchableOpacity>
+                        <Text style={[styles.pageInfo, { color: theme.colors.text.secondary }]}>
+                            {`Rows ${currentPage * PAGE_SIZE + 1}–${Math.min((currentPage + 1) * PAGE_SIZE, totalRows)} of ${totalRows}`}
+                        </Text>
+                        <TouchableOpacity
+                            style={[styles.pageButton, currentPage >= Math.ceil(totalRows / PAGE_SIZE) - 1 && styles.pageButtonDisabled, { borderColor: theme.colors.accent.primary }]}
+                            onPress={handleNextPage}
+                            disabled={currentPage >= Math.ceil(totalRows / PAGE_SIZE) - 1}
+                        >
+                            <Icon name="chevron-right" size={14} color={currentPage >= Math.ceil(totalRows / PAGE_SIZE) - 1 ? theme.colors.text.muted : theme.colors.accent.primary} />
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
         );
     };
@@ -490,7 +563,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                             { backgroundColor: theme.colors.accent.primary },
                             isLoading && styles.buttonDisabled
                         ]}
-                        onPress={() => selectedTable ? loadTableData(selectedTable) : loadTables()}
+                        onPress={() => selectedTable ? loadTableData(selectedTable, currentPage) : loadTables()}
                         disabled={isLoading}
                     >
                         <Icon name="refresh" size={20} color="#ffffff" />
@@ -899,5 +972,25 @@ const styles = StyleSheet.create({
     buttonText: {
         fontSize: 14,
         fontWeight: '600',
+    },
+    paginationBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderTopWidth: 0.5,
+    },
+    pageButton: {
+        padding: 4,
+        borderRadius: 4,
+        borderWidth: 1,
+    },
+    pageButtonDisabled: {
+        opacity: 0.35,
+    },
+    pageInfo: {
+        fontSize: 6.5,
+        fontWeight: '500',
     },
 });

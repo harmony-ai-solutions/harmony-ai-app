@@ -342,7 +342,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     log.info(`Applying ${recordCount} buffered sync records in transaction`);
     log.info('Buffer contents:');
     this.incomingDataBuffer.forEach((item, index) => {
-      const pkField = item.table === 'entity_module_mappings' ? 'entity_id' : 'id';
+      const pkField = (item.table === 'entity_module_mappings' || item.table === 'emotion_state') ? 'entity_id' : 'id';
       const pkValue = item.record[pkField];
       log.info(`  [${index + 1}/${recordCount}] ${item.table}.${item.operation} (${pkField}=${pkValue})`);
     });
@@ -401,7 +401,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
           // Apply all buffered records synchronously within transaction (sorted by dependency order)
           for (const item of sortedBuffer) {
-            const pkField = item.table === 'entity_module_mappings' ? 'entity_id' : 'id';
+            const pkField = (item.table === 'entity_module_mappings' || item.table === 'emotion_state') ? 'entity_id' : 'id';
             const pkValue = item.record[pkField];
 
             if (item.operation === 'delete') {
@@ -660,8 +660,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       const mbSize = byteSize / (1024 * 1024);
       log.debug(`📊 SYNC_DATA payload size: ${table} ${operation} - ${mbSize.toFixed(2)} MB (${byteSize} bytes)`);
 
-      // Use correct primary key field for entity_module_mappings (entity_id) vs other tables (id)
-      const pkField = table === 'entity_module_mappings' ? 'entity_id' : 'id';
+      // Use correct primary key field for tables using entity_id (entity_module_mappings, emotion_state) vs others (id)
+      const pkField = (table === 'entity_module_mappings' || table === 'emotion_state') ? 'entity_id' : 'id';
       log.info(`Sending sync data for ${table}:${record[pkField] || 'undefined'}, eventId: ${eventId}`);
       this.connectionManager.sendEvent('sync', event).catch(reject);
 
@@ -677,8 +677,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
   private async handleIncomingSyncData(payload: any): Promise<void> {
     try {
-      // Better logging for primary key (handle both 'id' and 'entity_id')
-      const pkField = payload.table === 'entity_module_mappings' ? 'entity_id' : 'id';
+      // Better logging for primary key (handle both 'id' and 'entity_id' for mapping/state tables)
+      const pkField = (payload.table === 'entity_module_mappings' || payload.table === 'emotion_state') ? 'entity_id' : 'id';
       const pkValue = payload.record?.[pkField] || 'undefined';
       log.info(`Buffering sync data for ${payload.table}:${pkValue}`);
 
