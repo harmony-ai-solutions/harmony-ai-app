@@ -4,7 +4,7 @@
     "plan": { "model": "anthropic/claude-sonnet-4-6" },
     "build": { "model": "opencode-go/minimax-m2.5" },
     "coder": { "model": "google/gemini-3-flash-preview" },
-    "code-expert": { "model": "zai/glm-5.1" },
+    "code-expert": { "model": "opencode-go/minimax-m2.5" },
     "gsd-advisor-researcher": { "model": "opencode-go/minimax-m2.5" },
     "gsd-assumptions-analyzer": { "model": "anthropic/claude-sonnet-4-6" },
     "gsd-codebase-mapper": { "model": "opencode-go/minimax-m2.5" },
