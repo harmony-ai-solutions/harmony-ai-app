@@ -17,8 +17,9 @@ export async function createConversationMessage(
       audio_duration, message_type, audio_data, audio_mime_type,
       image_data, image_mime_type, vl_model, vl_model_interpretation,
       emotional_state_bits, memory_id,
+      is_recon_followup, is_edited, edit_of_message_id,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       message.id,
       message.entity_id,
@@ -35,6 +36,9 @@ export async function createConversationMessage(
       message.vl_model_interpretation,
       message.emotional_state_bits ?? 0,
       message.memory_id ?? null,
+      message.is_recon_followup ? 1 : 0,
+      message.is_edited ? 1 : 0,
+      message.edit_of_message_id ?? null,
       now,
       now,
     ]
@@ -106,6 +110,9 @@ export async function getConversationMessagesBetween(
       vl_model_interpretation: row.vl_model_interpretation,
       emotional_state_bits: row.emotional_state_bits ?? 0,
       memory_id: row.memory_id ?? null,
+      is_recon_followup: row.is_recon_followup === 1,
+      is_edited: row.is_edited === 1,
+      edit_of_message_id: row.edit_of_message_id || null,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -155,6 +162,7 @@ export async function getRecentConversationMessages(
             audio_duration, message_type, audio_mime_type,
             image_mime_type, vl_model, vl_model_interpretation,
             emotional_state_bits, memory_id,
+            is_recon_followup, is_edited, edit_of_message_id,
             created_at, updated_at, deleted_at
      FROM conversation_messages 
      WHERE id IN (${placeholders})
@@ -187,6 +195,9 @@ export async function getRecentConversationMessages(
       vl_model_interpretation: row.vl_model_interpretation,
       emotional_state_bits: row.emotional_state_bits ?? 0,
       memory_id: row.memory_id ?? null,
+      is_recon_followup: row.is_recon_followup === 1,
+      is_edited: row.is_edited === 1,
+      edit_of_message_id: row.edit_of_message_id || null,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -212,6 +223,7 @@ export async function getLastConversationMessage(
             audio_duration, message_type, audio_mime_type,
             image_mime_type, vl_model, vl_model_interpretation,
             emotional_state_bits, memory_id,
+            is_recon_followup, is_edited, edit_of_message_id,
             created_at, updated_at, deleted_at
      FROM conversation_messages 
      WHERE deleted_at IS NULL 
@@ -247,6 +259,9 @@ export async function getLastConversationMessage(
     vl_model_interpretation: row.vl_model_interpretation,
     emotional_state_bits: row.emotional_state_bits ?? 0,
     memory_id: row.memory_id ?? null,
+    is_recon_followup: row.is_recon_followup === 1,
+    is_edited: row.is_edited === 1,
+    edit_of_message_id: row.edit_of_message_id || null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -313,6 +328,21 @@ export async function updateConversationMessage(
   if (updates.image_mime_type !== undefined) {
     updateFields.push('image_mime_type = ?');
     values.push(updates.image_mime_type);
+  }
+
+  if (updates.is_recon_followup !== undefined) {
+    updateFields.push('is_recon_followup = ?');
+    values.push(updates.is_recon_followup ? 1 : 0);
+  }
+
+  if (updates.is_edited !== undefined) {
+    updateFields.push('is_edited = ?');
+    values.push(updates.is_edited ? 1 : 0);
+  }
+
+  if (updates.edit_of_message_id !== undefined) {
+    updateFields.push('edit_of_message_id = ?');
+    values.push(updates.edit_of_message_id ?? null);
   }
 
   if (updateFields.length === 0) {
@@ -385,6 +415,9 @@ function mapRowToConversationMessage(row: any): ConversationMessage {
     vl_model_interpretation: row.vl_model_interpretation,
     emotional_state_bits: row.emotional_state_bits ?? 0,
     memory_id: row.memory_id ?? null,
+    is_recon_followup: row.is_recon_followup === 1,
+    is_edited: row.is_edited === 1,
+    edit_of_message_id: row.edit_of_message_id || null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,

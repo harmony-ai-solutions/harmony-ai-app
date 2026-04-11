@@ -189,6 +189,7 @@ function normalizeBooleanFields(table: string, record: any): any {
   // Define tables and their boolean fields
   const booleanFields: Record<string, string[]> = {
     'character_image': ['is_primary'],
+    'conversation_messages': ['is_recon_followup', 'is_edited'],
     // Add other tables with boolean fields as needed
   };
 

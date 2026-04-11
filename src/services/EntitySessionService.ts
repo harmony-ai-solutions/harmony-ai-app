@@ -35,6 +35,7 @@ interface EntitySessionEvents {
   'session:stopped': (partnerEntityId: string) => void;
   'session:error': (partnerEntityId: string, error: string) => void;
   'message:received': (partnerEntityId: string, message: any) => void;
+  'message:edited': (partnerEntityId: string, payload: { message_id: string; content: string; is_edited: boolean; edit_of_message_id?: string }) => void;
   'typing:indicator': (partnerEntityId: string, entityId: string, isTyping: boolean) => void;
   'recording:indicator': (partnerEntityId: string, entityId: string, isRecording: boolean) => void;
   'transcription:completed': (partnerEntityId: string, messageId: string, text: string) => void;
@@ -414,7 +415,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       vl_model: null,
       vl_model_interpretation: null,
       emotional_state_bits: 0,
-      memory_id: null
+      memory_id: null,
+      is_recon_followup: false,
+      is_edited: false
     };
     
     await createConversationMessage(message);
@@ -469,7 +472,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       vl_model: null,
       vl_model_interpretation: null,
       emotional_state_bits: 0,
-      memory_id: null
+      memory_id: null,
+      is_recon_followup: false,
+      is_edited: false
     };
     
     await createConversationMessage(message);
@@ -741,6 +746,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         await this.handleIncomingMessage(dualSession, event);
         break;
 
+      case 'ENTITY_UTTERANCE_EDIT':
+        await this.handleIncomingMessageEdit(dualSession, event);
+        break;
+
       case 'TYPING_INDICATOR':
         // Handle typing indicator
         const isTyping = event.payload?.is_typing || false;
@@ -776,6 +785,37 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
   }
 
+  private async handleIncomingMessageEdit(dualSession: DualEntitySession, event: any): Promise<void> {
+    try {
+      const messageId = event.payload?.message_id || event.payload?.edit_of_message_id;
+      const newContent = event.payload?.content;
+
+      if (!messageId || !newContent) {
+        log.warn(`Received ENTITY_UTTERANCE_EDIT without message_id or content, event_id: ${event.event_id}`);
+        return;
+      }
+
+      log.info(`Processing message edit for ${messageId}: new content length=${newContent.length}`);
+
+      // Update the existing message in the database
+      await updateConversationMessage(messageId, {
+        content: newContent,
+        is_edited: true,
+      });
+
+      // Emit event so UI can re-render if this chat is open
+      this.emit('message:edited', dualSession.partnerEntityId, {
+        message_id: messageId,
+        content: newContent,
+        is_edited: true,
+        edit_of_message_id: event.payload?.edit_of_message_id,
+      });
+
+    } catch (error) {
+      log.error('Failed to handle incoming message edit:', error);
+    }
+  }
+  
   private async handleIncomingUtterance(
     dualSession: DualEntitySession,
     utterance: any,
@@ -819,7 +859,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       vl_model: null, // Will be populated by Harmony Link
       vl_model_interpretation: null,
       emotional_state_bits: 0,
-      memory_id: null
+      memory_id: null,
+      is_recon_followup: utterance.is_recon_followup || false,
+      is_edited: utterance.is_edited || false,
+      edit_of_message_id: utterance.edit_of_message_id || null,
     };
     
     await createConversationMessage(message);

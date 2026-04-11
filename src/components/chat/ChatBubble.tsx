@@ -311,9 +311,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             ) : (
               <>
                 {(!hasAudioWithTranscription || isPendingSend || showTranscription) && (
-                  <ThemedText variant={isOwn ? 'primary' : 'secondary'} style={styles.textContent}>
-                    {message.content}
-                  </ThemedText>
+                  <View style={styles.textContentContainer}>
+                    <ThemedText variant={isOwn ? 'primary' : 'secondary'} style={styles.textContent}>
+                      {message.content}
+                    </ThemedText>
+                    {message.is_edited && (
+                      <ThemedText variant="muted" size={11} style={styles.editedIndicator}>
+                        (edited)
+                      </ThemedText>
+                    )}
+                  </View>
                 )}
               </>
             )}
@@ -476,6 +483,16 @@ const styles = StyleSheet.create({
   textContent: {
     fontSize: 16,
     lineHeight: 22,
+  },
+  textContentContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+  },
+  editedIndicator: {
+    marginLeft: 6,
+    fontStyle: 'italic',
+    opacity: 0.6,
   },
   timestampRow: {
     flexDirection: 'row',

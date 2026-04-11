@@ -340,6 +340,11 @@ export interface ConversationMessage {
   emotional_state_bits: number | 0; // Compact Ekman8 bitfield, opaque
   memory_id?: string | null; // FK to memories.id, opaque
 
+  // Recon tracking (Migration 19)
+  is_recon_followup: boolean;       // true if message originated from recon evaluation
+  is_edited: boolean;              // true if message was edited via recon
+  edit_of_message_id?: string | null; // references original message for edits
+
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;

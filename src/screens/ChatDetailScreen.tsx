@@ -331,7 +331,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     };
 
+    const handleIncomingMessageEdit = (entityId: string) => {
+      if (entityId === partnerEntityId) {
+        // Reload messages from database to show the updated content
+        getRecentConversationMessages(
+          impersonatedEntityId,
+          partnerEntityId,
+          50,
+        ).then(setMessages);
+      }
+    };
+
     EntitySessionService.on('message:received', handleNewMessage);
+    EntitySessionService.on('message:edited', handleIncomingMessageEdit);
     EntitySessionService.on('typing:indicator', handleTyping);
     EntitySessionService.on('recording:indicator', handleRecording);
     EntitySessionService.on(
@@ -342,6 +354,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
     return () => {
       EntitySessionService.off('message:received', handleNewMessage);
+      EntitySessionService.off('message:edited', handleIncomingMessageEdit);
       EntitySessionService.off('typing:indicator', handleTyping);
       EntitySessionService.off('recording:indicator', handleRecording);
       EntitySessionService.off(
