@@ -60,6 +60,9 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     record: any;
   }> = [];
 
+  // Track IDs of records received from server this session to exclude from local changes
+  private serverRecordIds: Set<string> = new Set();
+
   private constructor() {
     super();
     this.connectionManager = connectionManagerInstance;
@@ -251,6 +254,9 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     const lastSync = await this.getLastSyncTimestamp();
     const deviceId = await DeviceInfo.getUniqueId();
     const deviceName = await DeviceInfo.getDeviceName();
+
+    // Clear server to ensure we have a clean session
+    this.serverRecordIds.clear();
 
     // new sync session
     this.currentSession = {
@@ -511,6 +517,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
           // Critical cleanup on failure
           log.warn('Cleaning up after transaction failure');
           this.incomingDataBuffer = []; // Clear buffer
+          this.serverRecordIds.clear(); // Clear server record tracking
           this.syncPhase = 'IDLE'; // Reset sync phase
 
           // Clear current session
@@ -592,7 +599,23 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         const records = await SyncHelpers.getChangedRecords(table, lastSync);
         log.info(`Found ${records.length} changes in ${table}`);
 
-        for (const record of records) {
+        // Filter out records that were received from the server this session
+        // These have updated_at set to current time (when applied) but should not be sent back
+        const pkField = (table === 'entity_module_mappings' || table === 'emotion_state') ? 'entity_id' : 'id';
+        const filteredRecords = records.filter(record => {
+          const recordKey = `${table}:${record[pkField]}`;
+          if (this.serverRecordIds.has(recordKey)) {
+            log.debug(`Excluding server-received record: ${recordKey}`);
+            return false;
+          }
+          return true;
+        });
+
+        if (filteredRecords.length < records.length) {
+          log.info(`Filtered to ${filteredRecords.length} local-only changes in ${table} (excluded ${records.length - filteredRecords.length} server records)`);
+        }
+
+        for (const record of filteredRecords) {
           // Failsafe: Normalize timestamps to ISO 8601 format for Harmony Link compatibility
           // This handles legacy data that may have space-separated timestamps from SQLite DEFAULT
           const normalizedRecord = SyncHelpers.normalizeRecordTimestamps(record, table);
@@ -694,6 +717,12 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         record: payload.record
       });
 
+      // Track server record IDs to exclude from local changes later
+      const recordPkField = (payload.table === 'entity_module_mappings' || payload.table === 'emotion_state') ? 'entity_id' : 'id';
+      if (payload.record?.[recordPkField]) {
+        this.serverRecordIds.add(`${payload.table}:${payload.record[recordPkField]}`);
+      }
+
       this.currentSession.recordsReceived++;
       this.emit('sync:progress', this.currentSession);
 
@@ -788,6 +817,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       } catch (error) {
         log.error('Failed to apply server data:', error);
         this.incomingDataBuffer = []; // Clear buffer on error
+        this.serverRecordIds.clear(); // Clear server record tracking
         this.emit('sync:error', 'Failed to apply server data');
         return;
       }
@@ -795,7 +825,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       log.info('Starting client data transmission');
       this.syncPhase = 'CLIENT_SENDING';
 
-      // Trigger local changes sequentially
+      // Use lastSync as cutoff - records changed since last sync
+      // Server-received records are filtered out by checking serverRecordIds
       const lastSync = await this.getLastSyncTimestamp();
       this.sendLocalChangesSequentially(lastSync);
       
@@ -834,6 +865,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     this.currentSession.status = 'completed';
     this.emit('sync:completed', this.currentSession);
     this.currentSession = null;
+
+    // Clear server record tracking for next sync session
+    this.serverRecordIds.clear();
+    log.debug('Cleared server record tracking');
   }
 
   private async cleanupSoftDeletedRecords(
