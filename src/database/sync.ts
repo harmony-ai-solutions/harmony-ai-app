@@ -476,3 +476,35 @@ export const cleanupOrphanEntityModuleMappings = async (): Promise<number> => {
   log.info(`Cleaned up ${cleanedCount} orphan entity_module_mappings`);
   return cleanedCount;
 };
+
+/**
+ * Failsafe: Clean up orphaned memories (memories with no referencing conversation_messages).
+ * This cleanup is necessary because memory promotion hard-deletes source memories on Harmony Link,
+ * which don't propagate through the sync pipeline (no soft-delete to sync).
+ * Orphaned memories are identified via LEFT JOIN where conversation_messages.id IS NULL.
+ *
+ * This function should be called after sync completes to ensure data integrity.
+ *
+ * @returns Number of deleted orphaned memories
+ */
+export const cleanupOrphanedMemories = async (): Promise<number> => {
+  const db = getDatabase();
+
+  const [result] = await db.executeSql(`
+    DELETE FROM memories
+    WHERE id IN (
+      SELECT m.id FROM memories m
+      LEFT JOIN conversation_messages cm ON m.id = cm.memory_id
+      WHERE cm.id IS NULL
+    )
+  `);
+
+  const deletedCount = result.rowsAffected || 0;
+  if (deletedCount > 0) {
+    log.info(`Cleaned up ${deletedCount} orphaned memories`);
+  } else {
+    log.debug('No orphaned memories found');
+  }
+
+  return deletedCount;
+};

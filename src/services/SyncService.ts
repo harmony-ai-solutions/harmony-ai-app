@@ -862,6 +862,19 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
     await this.cleanupSoftDeletedRecords(this.currentSession.startTime);
 
+    // Clean up orphaned memories
+    // This is necessary because memory promotion hard-deletes source memories on Harmony Link,
+    // which don't propagate through sync pipeline (no soft-delete to sync).
+    try {
+      const deletedCount = await SyncHelpers.cleanupOrphanedMemories();
+      if (deletedCount > 0) {
+        log.info(`Cleaned up ${deletedCount} orphaned memories after sync`);
+      }
+    } catch (error) {
+      log.error('Failed to clean up orphaned memories:', error);
+      // Don't fail sync - cleanup is best-effort
+    }
+
     this.currentSession.status = 'completed';
     this.emit('sync:completed', this.currentSession);
     this.currentSession = null;
