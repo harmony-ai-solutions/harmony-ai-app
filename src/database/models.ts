@@ -69,6 +69,13 @@ export interface OpenAIProviderConfig {
   voice: string | null;
   speed: number | null;
   format: string | null;
+  // New LLM params (Migration 20)
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  max_completion_tokens: number | null;
+  seed: number | null;
+  response_format: string | null; // JSON string
+  reasoning_effort: string | null;
   deleted_at: Date | null;
 }
 
@@ -82,6 +89,17 @@ export interface OpenRouterProviderConfig {
   top_p: number | null;
   n: number | null;
   stop_tokens: string | null; // JSON array
+  // New LLM params (Migration 20)
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  max_completion_tokens: number | null;
+  seed: number | null;
+  response_format: string | null; // JSON string
+  top_k: number | null;
+  top_a: number | null;
+  min_p: number | null;
+  repetition_penalty: number | null;
+  chat_template_kwargs: string | null; // JSON string
   deleted_at: Date | null;
 }
 
@@ -97,6 +115,13 @@ export interface OpenAICompatibleProviderConfig {
   n: number | null;
   stop_tokens: string | null; // JSON array
   embedding_model: string | null;
+  // New LLM params (Migration 20)
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  max_completion_tokens: number | null;
+  seed: number | null;
+  response_format: string | null; // JSON string
+  chat_template_kwargs: string | null; // JSON string
   deleted_at: Date | null;
 }
 

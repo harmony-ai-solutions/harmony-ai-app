@@ -27,6 +27,7 @@ import { migration016 } from './migrations/000016_add_memories_table_and_emotion
 import { migration017 } from './migrations/000017_add_memories_deleted_at';
 import { migration018 } from './migrations/000018_add_entity_alias';
 import { migration019 } from './migrations/000019_add_recon_tracking';
+import { migration020 } from './migrations/000020_add_provider_llm_params';
 
 // Migration definition
 interface Migration {
@@ -133,6 +134,11 @@ const MIGRATIONS: Migration[] = [
     version: 19,
     description: 'add_recon_tracking',
     sql: migration019,
+  },
+  {
+    version: 20,
+    description: 'add_provider_llm_params',
+    sql: migration020,
   },
 ];
 

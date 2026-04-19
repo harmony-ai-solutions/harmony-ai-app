@@ -42,8 +42,10 @@ export async function createOpenAIProviderConfig(
         tx.executeSql(
           `INSERT INTO provider_config_openai (
             name, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, voice, speed, format
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            stop_tokens, embedding_model, voice, speed, format,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, reasoning_effort
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             config.name,
             config.api_key,
@@ -57,6 +59,12 @@ export async function createOpenAIProviderConfig(
             config.voice,
             config.speed,
             config.format,
+            config.frequency_penalty,
+            config.presence_penalty,
+            config.max_completion_tokens,
+            config.seed,
+            config.response_format,
+            config.reasoning_effort,
           ],
           (_, result) => {
             resolve(result.insertId!);
@@ -77,10 +85,14 @@ export async function getOpenAIProviderConfig(id: number, includeDeleted = false
   
   const query = includeDeleted
     ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, voice, speed, format, deleted_at
+            stop_tokens, embedding_model, voice, speed, format,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, reasoning_effort, deleted_at
      FROM provider_config_openai WHERE id = ?`
     : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, voice, speed, format, deleted_at
+            stop_tokens, embedding_model, voice, speed, format,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, reasoning_effort, deleted_at
      FROM provider_config_openai WHERE id = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [id]);
@@ -104,6 +116,12 @@ export async function getOpenAIProviderConfig(id: number, includeDeleted = false
     voice: row.voice,
     speed: row.speed,
     format: row.format,
+    frequency_penalty: row.frequency_penalty,
+    presence_penalty: row.presence_penalty,
+    max_completion_tokens: row.max_completion_tokens,
+    seed: row.seed,
+    response_format: row.response_format,
+    reasoning_effort: row.reasoning_effort,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
@@ -113,10 +131,14 @@ export async function getOpenAIProviderConfigByName(name: string, includeDeleted
   
   const query = includeDeleted
     ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, voice, speed, format, deleted_at
+            stop_tokens, embedding_model, voice, speed, format,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, reasoning_effort, deleted_at
      FROM provider_config_openai WHERE name = ?`
     : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, voice, speed, format, deleted_at
+            stop_tokens, embedding_model, voice, speed, format,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, reasoning_effort, deleted_at
      FROM provider_config_openai WHERE name = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [name]);
@@ -140,6 +162,12 @@ export async function getOpenAIProviderConfigByName(name: string, includeDeleted
     voice: row.voice,
     speed: row.speed,
     format: row.format,
+    frequency_penalty: row.frequency_penalty,
+    presence_penalty: row.presence_penalty,
+    max_completion_tokens: row.max_completion_tokens,
+    seed: row.seed,
+    response_format: row.response_format,
+    reasoning_effort: row.reasoning_effort,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
@@ -149,10 +177,14 @@ export async function getAllOpenAIProviderConfigs(includeDeleted = false): Promi
   
   const query = includeDeleted
     ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, voice, speed, format, deleted_at
+            stop_tokens, embedding_model, voice, speed, format,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, reasoning_effort, deleted_at
      FROM provider_config_openai ORDER BY name`
     : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, voice, speed, format, deleted_at
+            stop_tokens, embedding_model, voice, speed, format,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, reasoning_effort, deleted_at
      FROM provider_config_openai WHERE deleted_at IS NULL ORDER BY name`;
 
   const [results] = await db.executeSql(query);
@@ -174,6 +206,12 @@ export async function getAllOpenAIProviderConfigs(includeDeleted = false): Promi
       voice: row.voice,
       speed: row.speed,
       format: row.format,
+      frequency_penalty: row.frequency_penalty,
+      presence_penalty: row.presence_penalty,
+      max_completion_tokens: row.max_completion_tokens,
+      seed: row.seed,
+      response_format: row.response_format,
+      reasoning_effort: row.reasoning_effort,
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
@@ -189,7 +227,9 @@ export async function updateOpenAIProviderConfig(config: OpenAIProviderConfig): 
       `UPDATE provider_config_openai
        SET name = ?, api_key = ?, model = ?, max_tokens = ?, temperature = ?,
            top_p = ?, n = ?, stop_tokens = ?, embedding_model = ?,
-           voice = ?, speed = ?, format = ?
+           voice = ?, speed = ?, format = ?,
+           frequency_penalty = ?, presence_penalty = ?, max_completion_tokens = ?,
+           seed = ?, response_format = ?, reasoning_effort = ?
        WHERE id = ?`,
       [
         config.name,
@@ -204,6 +244,12 @@ export async function updateOpenAIProviderConfig(config: OpenAIProviderConfig): 
         config.voice,
         config.speed,
         config.format,
+        config.frequency_penalty,
+        config.presence_penalty,
+        config.max_completion_tokens,
+        config.seed,
+        config.response_format,
+        config.reasoning_effort,
         config.id,
       ]
     );
@@ -278,8 +324,11 @@ export async function createOpenRouterProviderConfig(
       (tx) => {
         tx.executeSql(
       `INSERT INTO provider_config_openrouter (
-        name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens,
+        frequency_penalty, presence_penalty, max_completion_tokens,
+        seed, response_format, top_k, top_a, min_p, repetition_penalty,
+        chat_template_kwargs
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         config.name,
         config.api_key,
@@ -289,6 +338,16 @@ export async function createOpenRouterProviderConfig(
         config.top_p,
         config.n,
         config.stop_tokens,
+        config.frequency_penalty,
+        config.presence_penalty,
+        config.max_completion_tokens,
+        config.seed,
+        config.response_format,
+        config.top_k,
+        config.top_a,
+        config.min_p,
+        config.repetition_penalty,
+        config.chat_template_kwargs,
       ],
       (_, result) => {
             resolve(result.insertId!);
@@ -308,9 +367,15 @@ export async function getOpenRouterProviderConfig(id: number, includeDeleted = f
   const db = getDatabase();
   
   const query = includeDeleted
-    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, top_k, top_a, min_p, repetition_penalty,
+            chat_template_kwargs, deleted_at
      FROM provider_config_openrouter WHERE id = ?`
-    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, top_k, top_a, min_p, repetition_penalty,
+            chat_template_kwargs, deleted_at
      FROM provider_config_openrouter WHERE id = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [id]);
@@ -330,6 +395,16 @@ export async function getOpenRouterProviderConfig(id: number, includeDeleted = f
     top_p: row.top_p,
     n: row.n,
     stop_tokens: row.stop_tokens,
+    frequency_penalty: row.frequency_penalty,
+    presence_penalty: row.presence_penalty,
+    max_completion_tokens: row.max_completion_tokens,
+    seed: row.seed,
+    response_format: row.response_format,
+    top_k: row.top_k,
+    top_a: row.top_a,
+    min_p: row.min_p,
+    repetition_penalty: row.repetition_penalty,
+    chat_template_kwargs: row.chat_template_kwargs,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
@@ -338,9 +413,15 @@ export async function getOpenRouterProviderConfigByName(name: string, includeDel
   const db = getDatabase();
   
   const query = includeDeleted
-    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, top_k, top_a, min_p, repetition_penalty,
+            chat_template_kwargs, deleted_at
      FROM provider_config_openrouter WHERE name = ?`
-    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, top_k, top_a, min_p, repetition_penalty,
+            chat_template_kwargs, deleted_at
      FROM provider_config_openrouter WHERE name = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [name]);
@@ -360,6 +441,16 @@ export async function getOpenRouterProviderConfigByName(name: string, includeDel
     top_p: row.top_p,
     n: row.n,
     stop_tokens: row.stop_tokens,
+    frequency_penalty: row.frequency_penalty,
+    presence_penalty: row.presence_penalty,
+    max_completion_tokens: row.max_completion_tokens,
+    seed: row.seed,
+    response_format: row.response_format,
+    top_k: row.top_k,
+    top_a: row.top_a,
+    min_p: row.min_p,
+    repetition_penalty: row.repetition_penalty,
+    chat_template_kwargs: row.chat_template_kwargs,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
@@ -368,9 +459,15 @@ export async function getAllOpenRouterProviderConfigs(includeDeleted = false): P
   const db = getDatabase();
   
   const query = includeDeleted
-    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+    ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, top_k, top_a, min_p, repetition_penalty,
+            chat_template_kwargs, deleted_at
      FROM provider_config_openrouter ORDER BY name`
-    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens, deleted_at
+    : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n, stop_tokens,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, top_k, top_a, min_p, repetition_penalty,
+            chat_template_kwargs, deleted_at
      FROM provider_config_openrouter WHERE deleted_at IS NULL ORDER BY name`;
 
   const [results] = await db.executeSql(query);
@@ -388,6 +485,16 @@ export async function getAllOpenRouterProviderConfigs(includeDeleted = false): P
       top_p: row.top_p,
       n: row.n,
       stop_tokens: row.stop_tokens,
+      frequency_penalty: row.frequency_penalty,
+      presence_penalty: row.presence_penalty,
+      max_completion_tokens: row.max_completion_tokens,
+      seed: row.seed,
+      response_format: row.response_format,
+      top_k: row.top_k,
+      top_a: row.top_a,
+      min_p: row.min_p,
+      repetition_penalty: row.repetition_penalty,
+      chat_template_kwargs: row.chat_template_kwargs,
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
@@ -402,7 +509,10 @@ export async function updateOpenRouterProviderConfig(config: OpenRouterProviderC
     const [result] = await tx.executeSql(
       `UPDATE provider_config_openrouter
        SET name = ?, api_key = ?, model = ?, max_tokens = ?, temperature = ?,
-           top_p = ?, n = ?, stop_tokens = ?
+           top_p = ?, n = ?, stop_tokens = ?,
+           frequency_penalty = ?, presence_penalty = ?, max_completion_tokens = ?,
+           seed = ?, response_format = ?, top_k = ?, top_a = ?, min_p = ?,
+           repetition_penalty = ?, chat_template_kwargs = ?
        WHERE id = ?`,
       [
         config.name,
@@ -413,6 +523,16 @@ export async function updateOpenRouterProviderConfig(config: OpenRouterProviderC
         config.top_p,
         config.n,
         config.stop_tokens,
+        config.frequency_penalty,
+        config.presence_penalty,
+        config.max_completion_tokens,
+        config.seed,
+        config.response_format,
+        config.top_k,
+        config.top_a,
+        config.min_p,
+        config.repetition_penalty,
+        config.chat_template_kwargs,
         config.id,
       ]
     );
@@ -488,8 +608,10 @@ export async function createOpenAICompatibleProviderConfig(
         tx.executeSql(
       `INSERT INTO provider_config_openaicompatible (
         name, base_url, api_key, model, max_tokens, temperature, top_p, n,
-        stop_tokens, embedding_model
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        stop_tokens, embedding_model,
+        frequency_penalty, presence_penalty, max_completion_tokens,
+        seed, response_format, chat_template_kwargs
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         config.name,
         config.base_url,
@@ -501,6 +623,12 @@ export async function createOpenAICompatibleProviderConfig(
         config.n,
         config.stop_tokens,
         config.embedding_model,
+        config.frequency_penalty,
+        config.presence_penalty,
+        config.max_completion_tokens,
+        config.seed,
+        config.response_format,
+        config.chat_template_kwargs,
       ],
           (_, result) => {
             resolve(result.insertId!);
@@ -521,10 +649,14 @@ export async function getOpenAICompatibleProviderConfig(id: number, includeDelet
   
   const query = includeDeleted
     ? `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, deleted_at
+            stop_tokens, embedding_model,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible WHERE id = ?`
     : `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, deleted_at
+            stop_tokens, embedding_model,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible WHERE id = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [id]);
@@ -546,6 +678,12 @@ export async function getOpenAICompatibleProviderConfig(id: number, includeDelet
     n: row.n,
     stop_tokens: row.stop_tokens,
     embedding_model: row.embedding_model,
+    frequency_penalty: row.frequency_penalty,
+    presence_penalty: row.presence_penalty,
+    max_completion_tokens: row.max_completion_tokens,
+    seed: row.seed,
+    response_format: row.response_format,
+    chat_template_kwargs: row.chat_template_kwargs,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
@@ -555,10 +693,14 @@ export async function getOpenAICompatibleProviderConfigByName(name: string, incl
   
   const query = includeDeleted
     ? `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, deleted_at
+            stop_tokens, embedding_model,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible WHERE name = ?`
     : `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, deleted_at
+            stop_tokens, embedding_model,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible WHERE name = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [name]);
@@ -580,6 +722,12 @@ export async function getOpenAICompatibleProviderConfigByName(name: string, incl
     n: row.n,
     stop_tokens: row.stop_tokens,
     embedding_model: row.embedding_model,
+    frequency_penalty: row.frequency_penalty,
+    presence_penalty: row.presence_penalty,
+    max_completion_tokens: row.max_completion_tokens,
+    seed: row.seed,
+    response_format: row.response_format,
+    chat_template_kwargs: row.chat_template_kwargs,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
@@ -589,10 +737,14 @@ export async function getAllOpenAICompatibleProviderConfigs(includeDeleted = fal
   
   const query = includeDeleted
     ? `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, deleted_at
+            stop_tokens, embedding_model,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible ORDER BY name`
     : `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
-            stop_tokens, embedding_model, deleted_at
+            stop_tokens, embedding_model,
+            frequency_penalty, presence_penalty, max_completion_tokens,
+            seed, response_format, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible WHERE deleted_at IS NULL ORDER BY name`;
 
   const [results] = await db.executeSql(query);
@@ -612,6 +764,12 @@ export async function getAllOpenAICompatibleProviderConfigs(includeDeleted = fal
       n: row.n,
       stop_tokens: row.stop_tokens,
       embedding_model: row.embedding_model,
+      frequency_penalty: row.frequency_penalty,
+      presence_penalty: row.presence_penalty,
+      max_completion_tokens: row.max_completion_tokens,
+      seed: row.seed,
+      response_format: row.response_format,
+      chat_template_kwargs: row.chat_template_kwargs,
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
