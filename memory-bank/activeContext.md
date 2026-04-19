@@ -1,7 +1,7 @@
 # Active Context
 
 ## Current Focus
-**Chat & Voice Features Complete** - Full chat implementation with text and voice support (STT/TTS working), tap-based recording, dual entity sessions, QoL features, and comprehensive Harmony Link integration documentation in `/docs/HARMONY-LINK-INTEGRATION.md`. Image messages UI in progress.
+**LLM Parameter Sync Complete** - Added new LLM parameters (top_k, top_a, min_p, repetition_penalty, chat_template_kwargs) to OpenAI and OpenAI Compatible providers in both Harmony Link (Go) and Harmony AI App (TypeScript). Database migrations already existed (migration 000020). Updated models, repository layer, and verified sync process works automatically via JSON serialization.
 
 ## Recent Work (January 2026)
 

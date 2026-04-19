@@ -2,6 +2,14 @@
 
 ## What Works
 
+### LLM Parameter Sync ✅ COMPLETE - April 2026
+- ✅ Added new LLM parameters (top_k, top_a, min_p, repetition_penalty, chat_template_kwargs) to OpenAI and OpenAI Compatible providers
+- ✅ Migration 000020 already existed with all new columns in both Harmony Link and Harmony AI App
+- ✅ Updated Go models (provider_openai.go, provider_openai_compatible.go) with new fields and sync conversion methods
+- ✅ Updated TypeScript models (src/database/models.ts) with new fields
+- ✅ Updated repository layer in both apps (Go and TypeScript) for CRUD operations
+- ✅ Sync process works automatically via JSON serialization - no additional sync handler changes needed
+
 ### Harmony Link Integration Documentation ✅ COMPLETE - February 2026
 - ✅ Created comprehensive integration guide: `/docs/HARMONY-LINK-INTEGRATION.md`
 - ✅ Created 5 detailed diagram files in `/docs/harmony-link-diagrams/` covering connection architecture, device pairing protocol, sync protocol, entity sessions, and message flows

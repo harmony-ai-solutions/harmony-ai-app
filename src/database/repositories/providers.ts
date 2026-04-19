@@ -44,8 +44,9 @@ export async function createOpenAIProviderConfig(
             name, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model, voice, speed, format,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, reasoning_effort
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            seed, response_format, reasoning_effort,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             config.name,
             config.api_key,
@@ -65,6 +66,11 @@ export async function createOpenAIProviderConfig(
             config.seed,
             config.response_format,
             config.reasoning_effort,
+            config.top_k,
+            config.top_a,
+            config.min_p,
+            config.repetition_penalty,
+            config.chat_template_kwargs,
           ],
           (_, result) => {
             resolve(result.insertId!);
@@ -87,12 +93,14 @@ export async function getOpenAIProviderConfig(id: number, includeDeleted = false
     ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model, voice, speed, format,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, reasoning_effort, deleted_at
+            seed, response_format, reasoning_effort,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openai WHERE id = ?`
     : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model, voice, speed, format,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, reasoning_effort, deleted_at
+            seed, response_format, reasoning_effort,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openai WHERE id = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [id]);
@@ -122,6 +130,11 @@ export async function getOpenAIProviderConfig(id: number, includeDeleted = false
     seed: row.seed,
     response_format: row.response_format,
     reasoning_effort: row.reasoning_effort,
+    top_k: row.top_k,
+    top_a: row.top_a,
+    min_p: row.min_p,
+    repetition_penalty: row.repetition_penalty,
+    chat_template_kwargs: row.chat_template_kwargs,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
@@ -133,12 +146,14 @@ export async function getOpenAIProviderConfigByName(name: string, includeDeleted
     ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model, voice, speed, format,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, reasoning_effort, deleted_at
+            seed, response_format, reasoning_effort,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openai WHERE name = ?`
     : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model, voice, speed, format,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, reasoning_effort, deleted_at
+            seed, response_format, reasoning_effort,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openai WHERE name = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [name]);
@@ -168,6 +183,11 @@ export async function getOpenAIProviderConfigByName(name: string, includeDeleted
     seed: row.seed,
     response_format: row.response_format,
     reasoning_effort: row.reasoning_effort,
+    top_k: row.top_k,
+    top_a: row.top_a,
+    min_p: row.min_p,
+    repetition_penalty: row.repetition_penalty,
+    chat_template_kwargs: row.chat_template_kwargs,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
@@ -179,12 +199,14 @@ export async function getAllOpenAIProviderConfigs(includeDeleted = false): Promi
     ? `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model, voice, speed, format,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, reasoning_effort, deleted_at
+            seed, response_format, reasoning_effort,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openai ORDER BY name`
     : `SELECT id, name, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model, voice, speed, format,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, reasoning_effort, deleted_at
+            seed, response_format, reasoning_effort,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openai WHERE deleted_at IS NULL ORDER BY name`;
 
   const [results] = await db.executeSql(query);
@@ -212,6 +234,11 @@ export async function getAllOpenAIProviderConfigs(includeDeleted = false): Promi
       seed: row.seed,
       response_format: row.response_format,
       reasoning_effort: row.reasoning_effort,
+      top_k: row.top_k,
+      top_a: row.top_a,
+      min_p: row.min_p,
+      repetition_penalty: row.repetition_penalty,
+      chat_template_kwargs: row.chat_template_kwargs,
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
@@ -229,7 +256,8 @@ export async function updateOpenAIProviderConfig(config: OpenAIProviderConfig): 
            top_p = ?, n = ?, stop_tokens = ?, embedding_model = ?,
            voice = ?, speed = ?, format = ?,
            frequency_penalty = ?, presence_penalty = ?, max_completion_tokens = ?,
-           seed = ?, response_format = ?, reasoning_effort = ?
+           seed = ?, response_format = ?, reasoning_effort = ?,
+           top_k = ?, top_a = ?, min_p = ?, repetition_penalty = ?, chat_template_kwargs = ?
        WHERE id = ?`,
       [
         config.name,
@@ -250,6 +278,11 @@ export async function updateOpenAIProviderConfig(config: OpenAIProviderConfig): 
         config.seed,
         config.response_format,
         config.reasoning_effort,
+        config.top_k,
+        config.top_a,
+        config.min_p,
+        config.repetition_penalty,
+        config.chat_template_kwargs,
         config.id,
       ]
     );
@@ -610,8 +643,9 @@ export async function createOpenAICompatibleProviderConfig(
         name, base_url, api_key, model, max_tokens, temperature, top_p, n,
         stop_tokens, embedding_model,
         frequency_penalty, presence_penalty, max_completion_tokens,
-        seed, response_format, chat_template_kwargs
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        seed, response_format,
+        top_k, top_a, min_p, repetition_penalty, chat_template_kwargs
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         config.name,
         config.base_url,
@@ -628,6 +662,10 @@ export async function createOpenAICompatibleProviderConfig(
         config.max_completion_tokens,
         config.seed,
         config.response_format,
+        config.top_k,
+        config.top_a,
+        config.min_p,
+        config.repetition_penalty,
         config.chat_template_kwargs,
       ],
           (_, result) => {
@@ -651,12 +689,14 @@ export async function getOpenAICompatibleProviderConfig(id: number, includeDelet
     ? `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, chat_template_kwargs, deleted_at
+            seed, response_format,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible WHERE id = ?`
     : `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, chat_template_kwargs, deleted_at
+            seed, response_format,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible WHERE id = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [id]);
@@ -683,6 +723,10 @@ export async function getOpenAICompatibleProviderConfig(id: number, includeDelet
     max_completion_tokens: row.max_completion_tokens,
     seed: row.seed,
     response_format: row.response_format,
+    top_k: row.top_k,
+    top_a: row.top_a,
+    min_p: row.min_p,
+    repetition_penalty: row.repetition_penalty,
     chat_template_kwargs: row.chat_template_kwargs,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
@@ -695,12 +739,14 @@ export async function getOpenAICompatibleProviderConfigByName(name: string, incl
     ? `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, chat_template_kwargs, deleted_at
+            seed, response_format,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible WHERE name = ?`
     : `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, chat_template_kwargs, deleted_at
+            seed, response_format,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible WHERE name = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [name]);
@@ -727,6 +773,10 @@ export async function getOpenAICompatibleProviderConfigByName(name: string, incl
     max_completion_tokens: row.max_completion_tokens,
     seed: row.seed,
     response_format: row.response_format,
+    top_k: row.top_k,
+    top_a: row.top_a,
+    min_p: row.min_p,
+    repetition_penalty: row.repetition_penalty,
     chat_template_kwargs: row.chat_template_kwargs,
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
@@ -739,12 +789,14 @@ export async function getAllOpenAICompatibleProviderConfigs(includeDeleted = fal
     ? `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, chat_template_kwargs, deleted_at
+            seed, response_format,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible ORDER BY name`
     : `SELECT id, name, base_url, api_key, model, max_tokens, temperature, top_p, n,
             stop_tokens, embedding_model,
             frequency_penalty, presence_penalty, max_completion_tokens,
-            seed, response_format, chat_template_kwargs, deleted_at
+            seed, response_format,
+            top_k, top_a, min_p, repetition_penalty, chat_template_kwargs, deleted_at
      FROM provider_config_openaicompatible WHERE deleted_at IS NULL ORDER BY name`;
 
   const [results] = await db.executeSql(query);
@@ -769,6 +821,10 @@ export async function getAllOpenAICompatibleProviderConfigs(includeDeleted = fal
       max_completion_tokens: row.max_completion_tokens,
       seed: row.seed,
       response_format: row.response_format,
+      top_k: row.top_k,
+      top_a: row.top_a,
+      min_p: row.min_p,
+      repetition_penalty: row.repetition_penalty,
       chat_template_kwargs: row.chat_template_kwargs,
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
@@ -784,7 +840,10 @@ export async function updateOpenAICompatibleProviderConfig(config: OpenAICompati
     const [result] = await tx.executeSql(
       `UPDATE provider_config_openaicompatible
        SET name = ?, base_url = ?, api_key = ?, model = ?, max_tokens = ?,
-           temperature = ?, top_p = ?, n = ?, stop_tokens = ?, embedding_model = ?
+           temperature = ?, top_p = ?, n = ?, stop_tokens = ?, embedding_model = ?,
+           frequency_penalty = ?, presence_penalty = ?, max_completion_tokens = ?,
+           seed = ?, response_format = ?,
+           top_k = ?, top_a = ?, min_p = ?, repetition_penalty = ?, chat_template_kwargs = ?
        WHERE id = ?`,
       [
         config.name,
@@ -797,6 +856,16 @@ export async function updateOpenAICompatibleProviderConfig(config: OpenAICompati
         config.n,
         config.stop_tokens,
         config.embedding_model,
+        config.frequency_penalty,
+        config.presence_penalty,
+        config.max_completion_tokens,
+        config.seed,
+        config.response_format,
+        config.top_k,
+        config.top_a,
+        config.min_p,
+        config.repetition_penalty,
+        config.chat_template_kwargs,
         config.id,
       ]
     );

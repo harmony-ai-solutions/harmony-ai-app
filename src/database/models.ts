@@ -76,6 +76,11 @@ export interface OpenAIProviderConfig {
   seed: number | null;
   response_format: string | null; // JSON string
   reasoning_effort: string | null;
+  top_k: number | null;
+  top_a: number | null;
+  min_p: number | null;
+  repetition_penalty: number | null;
+  chat_template_kwargs: string | null; // JSON string
   deleted_at: Date | null;
 }
 
@@ -121,6 +126,10 @@ export interface OpenAICompatibleProviderConfig {
   max_completion_tokens: number | null;
   seed: number | null;
   response_format: string | null; // JSON string
+  top_k: number | null;
+  top_a: number | null;
+  min_p: number | null;
+  repetition_penalty: number | null;
   chat_template_kwargs: string | null; // JSON string
   deleted_at: Date | null;
 }
