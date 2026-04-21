@@ -16,7 +16,11 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   TouchableOpacity,
+  Modal,
+  View,
+  TouchableWithoutFeedback,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { Appbar, Avatar } from 'react-native-paper';
 import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -106,6 +110,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Controls visibility of the new-messages divider. Set to false when the user
   // scrolls to the bottom of the list (they've now seen all new messages).
   const [showDivider, setShowDivider] = useState(true);
+  // Entity context menu visibility
+  const [menuVisible, setMenuVisible] = useState(false);
 
   // Load partner info (avatar, name)
   useEffect(() => {
@@ -747,45 +753,39 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // ── Entity context menu (AppBar ⋮ button) ───────────────────────────────────
   const handleEntityContextMenu = useCallback(() => {
-    Alert.alert(partnerName, undefined, [
-      { text: 'Cancel', style: 'cancel' },      
-      {
-        text: 'Delete Entity',
-        style: 'destructive',
-        onPress: () => {
-          Alert.alert(
-            'Delete Entity',
-            `Delete "${partnerName}"? Chat history will be preserved but this entity will no longer be accessible.`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: async () => {
-                  try {
-                    await deleteEntity(partnerEntityId);
-                    navigation.navigate('ChatList');
-                  } catch (err: any) {
-                    Alert.alert(
-                      'Error',
-                      err?.message ?? 'Failed to delete entity.',
-                    );
-                  }
-                },
-              },
-            ],
-          );
+    setMenuVisible(true);
+  }, []);
+
+  const handleDeleteEntity = useCallback(() => {
+    setMenuVisible(false);
+    Alert.alert(
+      'Delete Entity',
+      `Delete "${partnerName}"? Chat history will be preserved but this entity will no longer be accessible.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteEntity(partnerEntityId);
+              navigation.navigate('ChatList');
+            } catch (err: any) {
+              Alert.alert(
+                'Error',
+                err?.message ?? 'Failed to delete entity.',
+              );
+            }
+          },
         },
-      },
-      {
-        text: 'Entity Settings',
-        onPress: () =>
-          navigation.navigate('EntityConfigEdit', {
-            entityId: partnerEntityId,
-          }),
-      },
-    ]);
+      ],
+    );
   }, [partnerEntityId, partnerName, navigation]);
+
+  const handleEntitySettings = useCallback(() => {
+    setMenuVisible(false);
+    navigation.navigate('EntityConfigEdit', { entityId: partnerEntityId });
+  }, [partnerEntityId, navigation]);
 
   // Calculate messages with divider AND compute the initial scroll target in one pass.
   // The scroll target MUST be computed synchronously during render (not in a useEffect)
@@ -1030,6 +1030,102 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         </TouchableOpacity>
       </ThemedAppbar>
 
+      {/* ── Entity context menu (styled like SettingsMenu) ── */}
+      <Modal
+        visible={menuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
+          <View style={styles.menuOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.menuShell}>
+                {/* Gradient background */}
+                <LinearGradient
+                  colors={[
+                    theme!.colors.background.elevated,
+                    theme!.colors.background.surface,
+                  ]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 0, y: 1 }}
+                  style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                />
+
+                {/* Prismatic tint */}
+                <LinearGradient
+                  colors={[theme!.colors.accent.primary + '12', 'transparent']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0.6 }}
+                  style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                  pointerEvents="none"
+                />
+
+                {/* Top accent stripe */}
+                <LinearGradient
+                  colors={[
+                    theme!.colors.accent.primary + 'CC',
+                    (theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover) + '66',
+                    'transparent',
+                  ]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.menuTopStripe}
+                />
+
+                {/* Entity Settings */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleEntitySettings}
+                  activeOpacity={0.65}
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: theme!.colors.accent.primary + '1A' },
+                    ]}
+                  >
+                    <Icon name="cog" size={18} color={theme!.colors.accent.primary} />
+                  </View>
+                  <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
+                    Entity Settings
+                  </ThemedText>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
+
+                {/* Separator */}
+                <View
+                  style={[
+                    styles.menuItemSeparator,
+                    { backgroundColor: theme!.colors.border.default + '44' },
+                  ]}
+                />
+
+                {/* Delete Entity */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleDeleteEntity}
+                  activeOpacity={0.65}
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: theme!.colors.status.error + '1A' },
+                    ]}
+                  >
+                    <Icon name="delete-outline" size={18} color={theme!.colors.status.error} />
+                  </View>
+                  <ThemedText size={15} weight="medium" style={{ flex: 1, color: theme!.colors.status.error }}>
+                    Delete Entity
+                  </ThemedText>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
       <KeyboardAvoidingView
         style={[styles.content, !isReadyToShow && styles.hidden]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1202,5 +1298,50 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
+  },
+
+  // ── Entity context menu (matches SettingsMenu styling) ──
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+  },
+  menuShell: {
+    width: 260,
+    marginTop: 56,
+    marginRight: 8,
+    borderRadius: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 10,
+    overflow: 'hidden',
+  },
+  menuGradientRadius: {
+    borderRadius: 14,
+  },
+  menuTopStripe: {
+    height: 2,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  menuIconBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  menuItemSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 62,
   },
 });

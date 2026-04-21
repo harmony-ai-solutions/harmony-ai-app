@@ -117,7 +117,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Per-chat entity preferences
   - Last sync timestamps
 
+### Entity Configuration
+
+#### Added
+- Modular config infrastructure mirroring Harmony Link web frontend
+  - `providerFieldSchemas.ts` — schema-driven field definitions for all provider types (OpenAI, OpenAI Compatible, OpenRouter, ElevenLabs, Kindroid, etc.)
+  - `moduleConfiguration.ts` — module type definitions, provider options per module, and MODULES/PROVIDERS constants
+  - `moduleDefaults.ts` — PROVIDER_DEFAULTS and MODULE_DEFAULTS for form initialization
+  - `configHelpers.ts` — utility functions for provider field resolution
+- Module config editor screen (`ModuleConfigEditScreen`) with inline provider config editing
+  - Provider type selector chips with dynamic form field rendering
+  - Dual-slot support: standard modules (single "provider" slot) and STT (dual "transcription"/"vad" slots)
+  - Advanced Sampling Parameters for OpenAI-family providers (OPENAI_FAMILY: openai, openaicompatible, openrouter)
+  - Provider config auto-created/updated during module config save via `saveProviderConfig()`
+- Entity config integration with edit/create buttons on module selectors
+  - `EntityModuleSelectorWithActions` wrapper component with ✏️ and ＋ buttons
+  - Navigation: EntityConfigEditScreen → ModuleConfigEditScreen → inline provider fields
+- DB schema sync — migration 021: added `sampling_preset_name` and `extra_params` columns to module config tables
+- Updated database models, migrations registry, and provider repository layer for new columns
+
 ### User Interface
+
+#### Added
+- Styled entity context menu in chat screen (⋮ button)
+  - Custom Modal with LinearGradient background, prismatic tint, accent stripe
+  - Icon badge rows with chevron-right — matching SettingsMenu visual language
+  - Full theme integration (accent colors, background elevated/surface, border, text muted, status error)
+- Top bar headers on previously unheadered screens
+  - ThemeSettingsScreen: "Appearance & Theme" header
+  - ConnectionSetupScreen: "Connection Setup" header (removed inline title from scroll content)
+  - SyncSettingsScreen: "Data Synchronization" header (removed inline title from scroll content)
+- Tappable settings cards for Connection and Sync
+  - Entire ThemedCard wrapped in TouchableOpacity for navigation
+  - Subtle bottom row with muted label + chevron-right hint matching SettingsLinkRow pattern
+  - Removed large outline buttons from Connection/Sync cards
+
+#### Changed
+- "Reset Security Mode" button moved from SyncSettingsScreen to ConnectionSetupScreen
+  - Button now appears alongside other connection management actions (Connect & Pair, Reconnect, Unpair Device)
+  - Security mode display row remains in SyncSettingsScreen
+  - Button uses `variant="outline"` with consistent margin styling
 
 #### Added
 - Bottom navigation with tabs

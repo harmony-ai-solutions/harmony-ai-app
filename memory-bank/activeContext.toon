@@ -61,10 +61,10 @@
 - Base64 Storage: Audio/image data stored as base64 TEXT columns (not BLOB), simplifies handling and transmission.
 - Database Migrations: Forward-only SQL migration files in /src/database/migrations/, numbered sequentially, applied automatically on app startup.
 - React Native Track Player v5 Migration:
-  - Android build fixed by upgrading to v5.0.0-alpha0 (Kotlin type safety fixes for React Native 0.83.1)
-  - API changes: `getPlaybackState()` returns `PlaybackState` object (contains `state` property), use `getProgress()` instead of separate `getPosition()`/`getDuration()` calls
-  - Update options: `notificationCapabilities` replaces `compactCapabilities`
-  - State enum values are now strings (e.g., State.Playing = "playing")
+   - Android build fixed by upgrading to v5.0.0-alpha0 (Kotlin type safety fixes for React Native 0.83.1)
+   - API changes: `getPlaybackState()` returns `PlaybackState` object (contains `state` property), use `getProgress()` instead of separate `getPosition()`/`getDuration()` calls
+   - Update options: `notificationCapabilities` replaces `compactCapabilities`
+   - State enum values are now strings (e.g., State.Playing = "playing")
 - Base64 Storage Pattern: Audio/image data stored as base64 TEXT in SQLite for simpler handling and cross-platform compatibility.
 - Chat UI Patterns: KeyboardAvoidingView essential for iOS, FlatList with inverted prop for message lists.
 - Image Picker: react-native-image-picker provides good UX with caption support.
@@ -86,7 +86,7 @@
 - Android emulator uses 10.0.2.2 to access host's localhost (not 127.0.0.1).
 - Harmony Link must bind to 0.0.0.0 (not localhost) for emulator connectivity.
 - HANDSHAKE_PENDING event handler essential for user feedback during device approval.
-- ConnectionManager pattern enables multiple concurrent connections with independent lifecycles and event routing.
+- ConnectionManager pattern enables multiple concurrent connections with independent lifecycles.
 - Decoupling transport layer from service logic improves testability and scalability.
 - Context separation (SyncConnectionContext vs EntitySessionContext) provides clear responsibility boundaries.
 - React useRef critical for avoiding stale closures in setTimeout/async callbacks (reconnect counter).
@@ -97,6 +97,9 @@
 - Dual Entity Sessions: Mirror Harmony Link's EntitySessionManager - each chat needs user entity session + partner entity session for bidirectional events.
 - Device Pairing Sequence: Handshake happens FIRST over unencrypted ws://, THEN security mode is selected after cert validation on wss://.
 - Connection Types: 'sync' for device sync, 'entity-{entityId}' for chat sessions - distinct connection lifecycle and event routing.
+- Preset Sync Pattern: App does NOT use Harmony Link management API — all preset data flows through WebSocket sync pipeline. Preset name is plain text input, extra params edited as key-value pairs locally.
+- Schema-Driven Config: App uses same providerFieldSchemas.ts as Harmony Link web frontend — ensures consistent provider configuration experience across platforms.
+- chat_template_kwargs Dropped: Both Go backend and app dropped this dead column in migration 021 — no longer needed for template customization.
 @Implementation[Sync]:
 - Multi-Connection Architecture: ConnectionManager manages multiple WebSocket connections (sync + entity sessions).
 - Services[4]: ConnectionManager (transport pool), SyncService (protocol logic), EntitySessionService (session management), ConnectionStateManager (JWT lifecycle).
@@ -122,3 +125,13 @@
 - QoL Features: Last message actions, new messages tracking via ChatPreferencesService, mark-as-read on scroll, async transcription editing.
 - Image Messages: Not fully implemented yet (placeholder support exists).
 - Documentation: Complete integration guide in /docs/HARMONY-LINK-INTEGRATION.md with 5 detailed diagram files.
+@Implementation[SamplingPresets]:
+- App does NOT call Harmony Link management API for presets — only syncs via WebSocket
+- Preset name is plain text input (user types name that exists on server)
+- Extra params edited locally as key-value pairs (typical_p, tfs, dry_*, etc.)
+- Precedence: explicit config > extraParams > preset values > library defaults
+- DB: migration 021 added sampling_preset_name + extra_params TEXT columns to module config tables
+- Provider config auto-created/updated during module config save via saveProviderConfig()
+- Advanced Sampling Parameters component for OpenAI-family providers (openai, openaicompatible, openrouter)
+- Provider field schemas in app mirror Harmony Link frontend (providerFieldSchemas.ts, moduleConfiguration.ts, moduleDefaults.ts)
+- chat_template_kwargs column dropped from both Go backend and app (migration 021)

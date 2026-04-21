@@ -20,6 +20,7 @@ import { DatabaseTestScreen } from '../screens/development/DatabaseTestScreen';
 import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
 import { ConnectionSetupScreen } from '../screens/setup/ConnectionSetupScreen';
 import { SyncSettingsScreen } from '../screens/settings/SyncSettingsScreen';
+import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen';
 
 export type RootStackParamList = {
   Landing: undefined;
@@ -40,6 +41,10 @@ export type RootStackParamList = {
   ThemeSettings: undefined;
   ThemeEditor: { themeId?: string } | undefined;
   ProfileSettings: undefined;
+  ModuleConfigEdit: {
+    moduleType: string;
+    configId?: number;
+  };
   DatabaseTests?: undefined;
   DatabaseTableViewer?: undefined;
 };
@@ -86,6 +91,10 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen
           name="ProfileSettings"
           component={ProfileSettingsScreen}
+        />
+        <Stack.Screen
+          name="ModuleConfigEdit"
+          component={ModuleConfigEditScreen}
         />
         {__DEV__ && (
           <>

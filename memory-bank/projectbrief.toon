@@ -16,3 +16,16 @@
 @Innovation: Mobile-first AI chat + flexible backends (privacy or convenience). On-device AI for offline. Messenger integration vision for everyday platforms.
 @Users: Privacy-conscious users, Harmony Link users, power users, content creators, AI app developers.
 @Reqs: Android primary (iOS community), React Native, Harmony Link APIs (WS/REST), SQLite persistence with sync, Executorch integration, Material Design 3, text/voice/image support, character memory.
+@RecentUpdates[SDK+Presets]:
+- Harmony Link backend migrated from go-openai to openai-go v3 SDK
+- New Sampling Preset system: YAML preset files loaded from <dataDir>/presets/*.yaml
+- Presets enable advanced LLM sampling control (typical_p, tfs, dry_*, etc.)
+- App syncs preset name + extra params via WebSocket (not management API)
+- DB migration 021 adds sampling_preset_name + extra_params to module config tables
+- Extended params stored as JSON in extra_params column
+- Precedence: explicit config > extraParams > preset values > library defaults
+@RecentUpdates[Phase09]:
+- New LLM API parameters from Phase 09 flow through sync pipeline to app
+- Provider config parameters across 8 layers: migration → models → repos → sync → clients → frontend schemas
+- Key-value-list field type for editing extra_params in UI
+- Lifecycle Settings UI added to Harmony Link (not synced to app — autonomy controlled locally)

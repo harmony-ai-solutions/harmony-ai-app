@@ -38,3 +38,11 @@
 - Error Boundaries: Graceful error handling
 @Performance: FlatList virtualization, image lazy loading/caching, memoization, clean listener management.
 @Security: HTTPS only, token auth, encrypted storage, no credentials in code.
+@ProviderArchitecture:
+- App mirrors Harmony Link's provider config system via sync, not management API
+- Provider types: openai, openaicompatible, openrouter (OpenAI family with extended params), elevenlabs, kindroid, kajiwoto, characterai, harmonyspeech (stt/vad/tts), comfyui, tts_openai, rag_*, stt_openai/vad_openai
+- Schema-driven forms: providerFieldSchemas.ts defines fields per provider type
+- Module-specific schemas: tts_openai has voice/speed (not max_tokens/temperature)
+- Sampling preset sync: sampling_preset_name + extra_params columns via migration 021
+- Extra params stored as JSON TEXT, edited as key-value pairs in UI
+- Advanced sampling params: typical_p, tfs, dry_multiplier, dry_base, dry_allowed_length, dry_sequence_breakers, xtc_probability, xtc_threshold

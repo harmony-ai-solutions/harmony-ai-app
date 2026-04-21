@@ -50,3 +50,11 @@
 - P3 Advanced: Custom character creation, memory visualization, full sync testing, messenger integration.
 - P4 Polish: Performance optimization, comprehensive testing, security audit, Play Store deployment.
 @Metrics: Bootstrap 100%, Database layer 100%, Phase 1 Chat 100% (except image UI), Voice Features 100%, Connection Resilience 100%, 84+ tests passing, sync-ready schema.
+@NewFeatures[Phase09-ProviderConfig]:
+- New LLM API parameters exposed via sync pipeline from Harmony Link management UI
+- App receives extended sampling parameters via WebSocket sync (sampling_preset_name, extra_params)
+- Provider config updates flow through sync: Go backend migrations → models → repos → sync → app
+- 8-layer parameter flow: migration → models → repos → sync → clients → frontend schemas → key-value-list field type
+- App must handle new columns: sampling_preset_name (TEXT), extra_params (JSON TEXT)
+- Provider field schemas support advanced params: typical_p, tfs, dry_multiplier, dry_base, dry_allowed_length, dry_sequence_breakers, xtc_probability, xtc_threshold
+- Key-value-list field type enables editing extra_params as editable key-value pairs in UI

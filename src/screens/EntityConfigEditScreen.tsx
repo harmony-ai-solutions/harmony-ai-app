@@ -9,7 +9,7 @@
  * entityId is always set when navigating here from EntityConfigScreen.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -30,16 +30,15 @@ import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
-import {
-  EntityModuleSelector,
-  ModuleConfigOption,
-} from '../components/entities/EntityModuleSelector';
+import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
+import { EntityModuleSelectorWithActions } from '../components/entities/EntityModuleSelectorWithActions';
 
 import {
   getEntity,
@@ -117,6 +116,40 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
       loadEntityData(entityId);
     }
   }, [entityId]);
+
+  // ── Refresh module configs when returning from ModuleConfigEdit ──────────
+  useFocusEffect(
+    useCallback(() => {
+      if (entityId) {
+        reloadModuleConfigs();
+      }
+    }, [entityId])
+  );
+
+  const reloadModuleConfigs = async () => {
+    try {
+      const [cognition, tts, stt, vision, rag, imagination, movement, backend] = await Promise.all([
+        getAllCognitionConfigs(),
+        getAllTTSConfigs(),
+        getAllSTTConfigs(),
+        getAllVisionConfigs(),
+        getAllRAGConfigs(),
+        getAllImaginationConfigs(),
+        getAllMovementConfigs(),
+        getAllBackendConfigs(),
+      ]);
+      setCognitionConfigs(cognition);
+      setTtsConfigs(tts);
+      setSttConfigs(stt);
+      setVisionConfigs(vision);
+      setRagConfigs(rag);
+      setImaginationConfigs(imagination);
+      setMovementConfigs(movement);
+      setBackendConfigs(backend);
+    } catch (err) {
+      console.error('Failed to reload module configs:', err);
+    }
+  };
 
   const loadProfileImage = async (profileId: string) => {
     try {
@@ -508,50 +541,58 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
             <SectionHeader title="Module Configuration" />
             <View style={styles.sectionContent}>
 
-            <EntityModuleSelector
+            <EntityModuleSelectorWithActions
               label="Backend"
+              moduleType="backend"
               configs={backendConfigs}
               selectedId={backendId}
               onChange={setBackendId}
             />
-            <EntityModuleSelector
+            <EntityModuleSelectorWithActions
               label="Cognition"
+              moduleType="cognition"
               configs={cognitionConfigs}
               selectedId={cognitionId}
               onChange={setCognitionId}
             />
-            <EntityModuleSelector
+            <EntityModuleSelectorWithActions
               label="Text-to-Speech (TTS)"
+              moduleType="tts"
               configs={ttsConfigs}
               selectedId={ttsId}
               onChange={setTtsId}
             />
-            <EntityModuleSelector
+            <EntityModuleSelectorWithActions
               label="Speech-to-Text (STT)"
+              moduleType="stt"
               configs={sttConfigs}
               selectedId={sttId}
               onChange={setSttId}
             />
-            <EntityModuleSelector
+            <EntityModuleSelectorWithActions
               label="Memory / RAG"
+              moduleType="rag"
               configs={ragConfigs}
               selectedId={ragId}
               onChange={setRagId}
             />
-            <EntityModuleSelector
+            <EntityModuleSelectorWithActions
               label="Movement"
+              moduleType="movement"
               configs={movementConfigs}
               selectedId={movementId}
               onChange={setMovementId}
             />
-            <EntityModuleSelector
+            <EntityModuleSelectorWithActions
               label="Vision"
+              moduleType="vision"
               configs={visionConfigs}
               selectedId={visionId}
               onChange={setVisionId}
             />            
-            <EntityModuleSelector
+            <EntityModuleSelectorWithActions
               label="Imagination"
+              moduleType="imagination"
               configs={imaginationConfigs}
               selectedId={imaginationId}
               onChange={setImaginationId}

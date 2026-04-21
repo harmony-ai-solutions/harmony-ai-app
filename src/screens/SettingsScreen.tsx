@@ -10,7 +10,6 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
-import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { ThemedAppbar } from '../components/themed/ThemedAppbar';
@@ -92,56 +91,62 @@ export const SettingsScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
         {/* ── Connection Card ── */}
-        <ThemedCard elevated accentStripe accentTint style={styles.card}>
-          <SectionHeader title="Connection" style={styles.sectionHeader} />
+        <TouchableOpacity
+          onPress={() => navigation.navigate('ConnectionSetup')}
+          activeOpacity={0.7}
+        >
+          <ThemedCard elevated accentStripe accentTint style={styles.card}>
+            <SectionHeader title="Connection" style={styles.sectionHeader} />
 
-          <View style={styles.row}>
-            <ThemedText variant="secondary">Type</ThemedText>
-            <ThemedText weight="bold">{connectionType}</ThemedText>
-          </View>
-
-          <View style={styles.row}>
-            <ThemedText variant="secondary">Status</ThemedText>
-            <View style={styles.statusRow}>
-              <View
-                style={[
-                  styles.statusDot,
-                  { backgroundColor: connectionStatusColor },
-                ]}
-              />
-              <ThemedText weight="bold">{connectionStatusText}</ThemedText>
+            <View style={styles.row}>
+              <ThemedText variant="secondary">Type</ThemedText>
+              <ThemedText weight="bold">{connectionType}</ThemedText>
             </View>
-          </View>
 
-          <ThemedButton
-            variant="outline"
-            label="Configure Connection"
-            onPress={() => navigation.navigate('ConnectionSetup')}
-            style={styles.cardButton}
-          />
-        </ThemedCard>
+            <View style={styles.row}>
+              <ThemedText variant="secondary">Status</ThemedText>
+              <View style={styles.statusRow}>
+                <View
+                  style={[
+                    styles.statusDot,
+                    { backgroundColor: connectionStatusColor },
+                  ]}
+                />
+                <ThemedText weight="bold">{connectionStatusText}</ThemedText>
+              </View>
+            </View>
+
+            <View style={[styles.row, styles.tapHintRow]}>
+              <ThemedText variant="muted" size={11}>Configure connection</ThemedText>
+              <Icon name="chevron-right" size={18} color={theme.colors.text.muted} />
+            </View>
+          </ThemedCard>
+        </TouchableOpacity>
 
         {/* ── Sync Card ── */}
-        <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title="Sync" style={styles.sectionHeader} />
+        <TouchableOpacity
+          onPress={() => navigation.navigate('SyncSettings')}
+          activeOpacity={0.7}
+        >
+          <ThemedCard elevated accentStripe style={styles.card}>
+            <SectionHeader title="Sync" style={styles.sectionHeader} />
 
-          <View style={styles.row}>
-            <ThemedText variant="secondary">Last Sync</ThemedText>
-            <ThemedText weight="bold">{lastSyncTime}</ThemedText>
-          </View>
+            <View style={styles.row}>
+              <ThemedText variant="secondary">Last Sync</ThemedText>
+              <ThemedText weight="bold">{lastSyncTime}</ThemedText>
+            </View>
 
-          <View style={styles.row}>
-            <ThemedText variant="secondary">Status</ThemedText>
-            <ThemedText weight="bold">{syncStatusText}</ThemedText>
-          </View>
+            <View style={styles.row}>
+              <ThemedText variant="secondary">Status</ThemedText>
+              <ThemedText weight="bold">{syncStatusText}</ThemedText>
+            </View>
 
-          <ThemedButton
-            variant="outline"
-            label="Sync Settings"
-            onPress={() => navigation.navigate('SyncSettings')}
-            style={styles.cardButton}
-          />
-        </ThemedCard>
+            <View style={[styles.row, styles.tapHintRow]}>
+              <ThemedText variant="muted" size={11}>Sync settings</ThemedText>
+              <Icon name="chevron-right" size={18} color={theme.colors.text.muted} />
+            </View>
+          </ThemedCard>
+        </TouchableOpacity>
 
         {/* ── Account Card ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
@@ -255,9 +260,11 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     gap: 12,
   },
-  cardButton: {
-    marginHorizontal: 16,
-    marginBottom: 16,
+  tapHintRow: {
+    paddingTop: 4,
+    paddingBottom: 12,
+    justifyContent: 'flex-end',
+    gap: 4,
   },
   row: {
     flexDirection: 'row',

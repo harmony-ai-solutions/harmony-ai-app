@@ -23,3 +23,14 @@
 - P4 Advanced: Custom character creation, memory viz, relationship graphs
 @Differentiators: Privacy-first (self-hosted option unique), character persistence (deep memory), open-source (full transparency), ecosystem integration (Harmony Link/games), realistic behavior (advanced timing/personality).
 @Metrics: Adoption (MAU, retention), engagement (messages/day, session length), performance (latency, sync reliability), privacy (self-hosted vs cloud split).
+@NewCapabilities[SDK+Presets]:
+- Extended sampling control: App users benefit from advanced LLM parameters synced from Harmony Link
+- Sampling presets: Preset names and custom parameters flow through sync pipeline
+- Provider flexibility: Same schema-driven config system as web UI — consistent experience
+- Fine-tuned responses: typical_p, tfs, dry_* params enable better response quality control
+- Future-proof: openai-go v3 SDK ensures compatibility with latest OpenAI API features
+@NewCapabilities[Phase09]:
+- More provider options: New LLM API parameters exposed in management UI flow to app
+- Better config control: Key-value list editing for advanced parameters
+- Consistent config: Same provider field schemas as Harmony Link web frontend
+- Note: Lifecycle settings (autonomy config) added to web UI but app handles autonomy locally

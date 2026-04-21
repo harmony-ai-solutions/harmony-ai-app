@@ -22,6 +22,8 @@ interface EntityModuleSelectorProps {
   selectedId: string; // '' = disabled
   onChange: (id: string) => void;
   isLoading?: boolean;
+  /** Hide the inline label — used by EntityModuleSelectorWithActions which renders its own label row */
+  hideLabel?: boolean;
 }
 
 export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
@@ -30,6 +32,7 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
   selectedId,
   onChange,
   isLoading = false,
+  hideLabel = false,
 }) => {
   const { theme } = useAppTheme();
   const [modalVisible, setModalVisible] = useState(false);
@@ -47,9 +50,11 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
 
   return (
     <View style={styles.container}>
-      <ThemedText size={13} variant="secondary" style={styles.label}>
-        {label}
-      </ThemedText>
+      {!hideLabel && (
+        <ThemedText size={13} variant="secondary" style={styles.label}>
+          {label}
+        </ThemedText>
+      )}
 
       {/* ── Selector button ── */}
       <TouchableOpacity

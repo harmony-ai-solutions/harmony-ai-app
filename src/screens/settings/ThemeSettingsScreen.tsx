@@ -7,6 +7,7 @@ import {
     StyleSheet,
     Alert,
 } from 'react-native';
+import { Appbar } from 'react-native-paper';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Switch } from 'react-native-paper';
@@ -15,6 +16,7 @@ import { isErrorWithCode, errorCodes } from '@react-native-documents/picker';
 import RNFS from 'react-native-fs';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
+import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
 import { ThemeCard } from '../../components/settings/ThemeCard';
 import { Theme } from '../../theme/types';
 
@@ -136,6 +138,16 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
     return (
         <View style={[styles.container, { backgroundColor: theme.colors.background.base }]}>
+            <ThemedAppbar style={styles.header}>
+                <Appbar.BackAction
+                    color={theme.colors.text.primary}
+                    onPress={() => navigation.goBack()}
+                />
+                <Appbar.Content
+                    title="Appearance & Theme"
+                    titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
+                />
+            </ThemedAppbar>
             <ScrollView>
                 {/* System Theme Toggle */}
                 <View
@@ -254,6 +266,9 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+    },
+    header: {
+        elevation: 4,
     },
     section: {
         margin: 16,

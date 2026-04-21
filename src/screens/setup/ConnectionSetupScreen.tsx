@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, ScrollView, TextInput, Alert } from 'react-native';
+import { Appbar } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { createLogger } from '../../utils/logger';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
+import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
 import { ThemedButton } from '../../components/themed/ThemedButton';
 import { CertificateVerificationModal } from '../../components/modals/CertificateVerificationModal';
 import { CertificateDetailsModal } from '../../components/modals/CertificateDetailsModal';
@@ -330,8 +332,17 @@ export const ConnectionSetupScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
+      <ThemedAppbar style={styles.header}>
+        <Appbar.BackAction
+          color={theme.colors.text.primary}
+          onPress={() => navigation.goBack()}
+        />
+        <Appbar.Content
+          title="Connection Setup"
+          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
+        />
+      </ThemedAppbar>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <ThemedText size={24} weight="bold" style={styles.title}>Harmony Link Sync</ThemedText>
         <ThemedText variant="secondary" style={styles.description}>
           {isPaired 
             ? 'View and manage your Harmony Link connection settings.' 
@@ -438,6 +449,31 @@ export const ConnectionSetupScreen: React.FC = () => {
                 }}
                 variant="secondary"
               />
+              {securityMode && (
+                <ThemedButton
+                  label="Reset Security Mode"
+                  onPress={async () => {
+                    Alert.alert(
+                      'Reset Security Mode',
+                      'This will clear your security preference and you will be prompted to choose a connection method on next connection attempt.',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Reset',
+                          style: 'destructive',
+                          onPress: async () => {
+                            await ConnectionStateManager.clearSecurityMode();
+                            setSecurityMode('secure');
+                            showToast('Security mode reset');
+                          },
+                        },
+                      ],
+                    );
+                  }}
+                  variant="outline"
+                  style={styles.reconnectButton}
+                />
+              )}
             </View>
           )}
 
@@ -470,12 +506,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  header: {
+    elevation: 4,
+  },
   scrollContent: {
     padding: 20,
     alignItems: 'center',
-  },
-  title: {
-    marginBottom: 10,
   },
   description: {
     textAlign: 'center',

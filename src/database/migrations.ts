@@ -28,6 +28,7 @@ import { migration017 } from './migrations/000017_add_memories_deleted_at';
 import { migration018 } from './migrations/000018_add_entity_alias';
 import { migration019 } from './migrations/000019_add_recon_tracking';
 import { migration020 } from './migrations/000020_add_provider_llm_params';
+import { migration021 } from './migrations/000021_add_sampling_preset_and_extra_params';
 
 // Migration definition
 interface Migration {
@@ -139,6 +140,11 @@ const MIGRATIONS: Migration[] = [
     version: 20,
     description: 'add_provider_llm_params',
     sql: migration020,
+  },
+  {
+    version: 21,
+    description: 'add_sampling_preset_and_extra_params',
+    sql: migration021,
   },
 ];
 

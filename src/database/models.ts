@@ -80,7 +80,8 @@ export interface OpenAIProviderConfig {
   top_a: number | null;
   min_p: number | null;
   repetition_penalty: number | null;
-  chat_template_kwargs: string | null; // JSON string
+  sampling_preset_name: string;
+  extra_params: string; // JSON string e.g. '{"typical_p": 0.95}'
   deleted_at: Date | null;
 }
 
@@ -104,7 +105,8 @@ export interface OpenRouterProviderConfig {
   top_a: number | null;
   min_p: number | null;
   repetition_penalty: number | null;
-  chat_template_kwargs: string | null; // JSON string
+  sampling_preset_name: string;
+  extra_params: string; // JSON string e.g. '{"typical_p": 0.95}'
   deleted_at: Date | null;
 }
 
@@ -130,7 +132,8 @@ export interface OpenAICompatibleProviderConfig {
   top_a: number | null;
   min_p: number | null;
   repetition_penalty: number | null;
-  chat_template_kwargs: string | null; // JSON string
+  sampling_preset_name: string;
+  extra_params: string; // JSON string e.g. '{"typical_p": 0.95}'
   deleted_at: Date | null;
 }
 
