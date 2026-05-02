@@ -28,6 +28,7 @@ export interface EntitySession {
   connectedAt: number;
   lastActivity: number;
   status: 'connecting' | 'active' | 'disconnected';
+  resumed?: boolean;              // true if this session was resumed from a suspended state on Harmony Link
 }
 
 interface EntitySessionEvents {
@@ -258,7 +259,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       sessionId: '', // Will be set when INIT_ENTITY response arrives
       connectionId,
       entityId,
-      deviceType: 'harmony_app',
+      deviceType: 'phone',
       deviceId,
       capabilities: ['chat'],
       connectedAt: Date.now(),
@@ -632,6 +633,12 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
           log.info(`Entity capabilities updated for ${entityId}: ${event.payload.capabilities.join(', ')}`);
         }
 
+        // Log if session was resumed from a suspended state on Harmony Link
+        if (event.payload.resumed) {
+          log.info(`Session ${entityId} was RESUMED from suspended state on Harmony Link`);
+          targetSession.resumed = true;
+        }
+
         // Find the dual session this belongs to (may not exist yet if this is the first to complete)
         if (!dualSession) {
           // Search for dual session containing this entity
@@ -654,6 +661,11 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
             this.pendingSessions.delete(dualSession.partnerSession.entityId);
             
             this.emit('session:started', dualSession.partnerEntityId, dualSession);
+
+            // Trigger sync to pick up any pending messages from Harmony Link
+            SyncService.getInstance().initiateSync().catch(err => {
+              log.warn('Auto-sync on session start failed (non-critical):', err);
+            });
           } else {
             log.info(`Dual session partially active: user=${dualSession.userSession.status}, partner=${dualSession.partnerSession.status}`);
           }

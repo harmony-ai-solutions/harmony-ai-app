@@ -142,6 +142,11 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setNextReconnectIn(0);
       setLastConnectionError('');
       showToast('Connected to Harmony Link');
+
+      // Trigger background sync to pick up any messages generated while disconnected
+      SyncService.getInstance().initiateSync().catch(err => {
+        log.warn('Auto-sync on connect failed (non-critical):', err);
+      });
     };
 
     const handleSyncDisconnected = () => {

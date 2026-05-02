@@ -155,7 +155,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       payload: {
         device_id: deviceId,
         device_name: deviceName,
-        device_type: 'harmony_app',
+        device_type: 'phone',
         device_platform: Platform.OS
       }
     };
@@ -251,6 +251,18 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   }
 
   async initiateSync(): Promise<void> {
+    // Guard: Skip if sync is already in progress
+    if (this.currentSession && this.currentSession.status === 'in_progress') {
+      log.info('Sync already in progress, skipping');
+      return;
+    }
+
+    // Guard: Check connection is available
+    if (!this.connectionManager.isConnected('sync')) {
+      log.warn('Cannot initiate sync: sync connection not available');
+      return;
+    }
+
     const lastSync = await this.getLastSyncTimestamp();
     const deviceId = await DeviceInfo.getUniqueId();
     const deviceName = await DeviceInfo.getDeviceName();
@@ -276,7 +288,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       payload: {
         device_id: deviceId,
         device_name: deviceName,
-        device_type: 'harmony_app',
+        device_type: 'phone',
         device_platform: Platform.OS,
         current_utc_timestamp: this.currentSession.startTime,
         last_sync_timestamp: lastSync
