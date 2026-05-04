@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator, Text } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { Avatar, IconButton, Menu } from 'react-native-paper';
 import { ThemedText } from '../themed/ThemedText';
@@ -24,6 +24,48 @@ interface ChatBubbleProps {
   onRetryTranscription?: (messageId: string) => void;
   theme: Theme;
 }
+
+/**
+ * FormattedRPText renders message content with roleplay-aware formatting.
+ * Text between asterisks (*action*) is rendered in italic with the accent color.
+ * All other text is rendered normally.
+ */
+const FormattedRPText: React.FC<{
+  content: string;
+  isOwn: boolean;
+  accentColor: string;
+}> = ({ content, isOwn, accentColor }) => {
+  // Split on asterisk-delimited segments: *text*
+  // The regex captures alternating [non-asterisk, asterisk] groups
+  const parts = content.split(/(\*[^*]+\*)/g);
+
+  if (parts.length <= 1 && !content.includes('*')) {
+    // No asterisk-delimited content — return plain text
+    return <>{content}</>;
+  }
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+          // Non-verbal action — italic with accent color, asterisks stripped
+          return (
+            <Text
+              key={index}
+              style={{
+                fontStyle: 'italic',
+                color: isOwn ? undefined : accentColor,
+              }}
+            >
+              {part.slice(1, -1)}
+            </Text>
+          );
+        }
+        return <React.Fragment key={index}>{part}</React.Fragment>;
+      })}
+    </>
+  );
+};
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
   message,
@@ -313,7 +355,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 {(!hasAudioWithTranscription || isPendingSend || showTranscription) && (
                   <View style={styles.textContentContainer}>
                     <ThemedText variant={isOwn ? 'primary' : 'secondary'} style={styles.textContent}>
-                      {message.content}
+                      <FormattedRPText
+                        content={isPendingSend && editedText !== message.content ? editedText : message.content}
+                        isOwn={isOwn}
+                        accentColor={theme.colors.accent.primary}
+                      />
                     </ThemedText>
                     {message.is_edited && (
                       <ThemedText variant="muted" size={11} style={styles.editedIndicator}>
@@ -372,7 +418,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           <ThemedText variant="muted" size={10} style={styles.timestamp}>
             {formatTime(message.created_at)}
           </ThemedText>
-          {isLastMessage && !isPendingSend && !isEditing && (
+          {isLastMessage && !isEditing && (
             <Menu
               visible={menuVisible}
               onDismiss={() => setMenuVisible(false)}
