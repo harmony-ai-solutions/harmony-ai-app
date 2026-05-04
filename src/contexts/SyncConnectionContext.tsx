@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import ConnectionStateManager from '../services/ConnectionStateManager';
 import ConnectionManager from '../services/connection/ConnectionManager';
-import SyncService from '../services/SyncService';
+import SyncService, { SyncService as SyncServiceClass } from '../services/SyncService';
 import { ToastAndroid, Platform, Alert } from 'react-native';
 import { createLogger } from '../utils/logger';
 
@@ -144,7 +144,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       showToast('Connected to Harmony Link');
 
       // Trigger background sync to pick up any messages generated while disconnected
-      SyncService.getInstance().initiateSync().catch(err => {
+      SyncServiceClass.getInstance().initiateSync().catch((err: any) => {
         log.warn('Auto-sync on connect failed (non-critical):', err);
       });
     };
