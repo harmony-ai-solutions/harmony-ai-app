@@ -190,7 +190,7 @@ function normalizeBooleanFields(table: string, record: any): any {
   const booleanFields: Record<string, string[]> = {
     'character_image': ['is_primary'],
     'conversation_messages': ['is_recon_followup', 'is_edited'],
-    // Add other tables with boolean fields as needed
+    'entity_emoji_actions': ['auto_generated', 'is_default'],
   };
 
   const fields = booleanFields[table];
@@ -349,7 +349,7 @@ export const getChangedRecords = async (
   
   const records: any[] = [];
   for (let i = 0; i < result.rows.length; i++) {
-    records.push(result.rows.item(i));
+    records.push(normalizeBooleanFields(table, result.rows.item(i)));
   }
   
   log.debug(`Found ${records.length} record(s) in ${table}`);

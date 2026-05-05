@@ -427,7 +427,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
    */
   async sendTextMessage(
     partnerEntityId: string,
-    text: string
+    text: string,
+    additionalEffects?: any | null
   ): Promise<void> {
     const dualSession = this.sessions.get(partnerEntityId);
     if (!dualSession || dualSession.partnerSession.status !== 'active') {
@@ -468,6 +469,12 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       content: text,
       type: 'UTTERANCE_COMBINED'
     };
+
+    // Attach additional effects if present
+    if (additionalEffects && additionalEffects.emotionEffects && additionalEffects.emotionEffects.length > 0) {
+      (utterance as any).additional_effects = additionalEffects;
+      log.info(`Sending message ${messageId} with ${additionalEffects.emotionEffects.length} additional emotion effects`);
+    }
     
     await this.sendUtterance(dualSession.partnerSession.connectionId, utterance);
     dualSession.partnerSession.lastActivity = Date.now();

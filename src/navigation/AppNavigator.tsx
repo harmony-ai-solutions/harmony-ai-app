@@ -15,6 +15,7 @@ import { EntityConfigEditScreen } from '../screens/EntityConfigEditScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
+import { EmojiActionEditorScreen } from '../screens/settings/EmojiActionEditorScreen';
 import { ProfileSettingsScreen } from '../screens/settings/ProfileSettingsScreen';
 import { DatabaseTestScreen } from '../screens/development/DatabaseTestScreen';
 import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
@@ -40,6 +41,10 @@ export type RootStackParamList = {
   SyncSettings: undefined;
   ThemeSettings: undefined;
   ThemeEditor: { themeId?: string } | undefined;
+  EmojiActionEditor: {
+    entityId: string;
+    entityName: string;
+  };
   ProfileSettings: undefined;
   ModuleConfigEdit: {
     moduleType: string;
@@ -88,6 +93,10 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen name="SyncSettings" component={SyncSettingsScreen} />
         <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
         <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />
+        <Stack.Screen
+          name="EmojiActionEditor"
+          component={EmojiActionEditorScreen}
+        />
         <Stack.Screen
           name="ProfileSettings"
           component={ProfileSettingsScreen}

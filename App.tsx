@@ -15,6 +15,7 @@ import { ThemeProvider, usePaperTheme, useAppTheme } from './src/contexts/ThemeC
 import { DatabaseProvider, useDatabase } from './src/contexts/DatabaseContext';
 import { SyncConnectionProvider, useSyncConnection } from './src/contexts/SyncConnectionContext';
 import { EntitySessionProvider } from './src/contexts/EntitySessionContext';
+import { EmojiProvider } from './src/contexts/EmojiContext';
 import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoadingScreen';
 import { InitialPairingModal } from './src/components/modals/InitialPairingModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -105,7 +106,9 @@ function App() {
         <DatabaseProvider>
           <SyncConnectionProvider>
             <EntitySessionProvider>
-              <AppContent />
+              <EmojiProvider>
+                <AppContent />
+              </EmojiProvider>
             </EntitySessionProvider>
           </SyncConnectionProvider>
         </DatabaseProvider>

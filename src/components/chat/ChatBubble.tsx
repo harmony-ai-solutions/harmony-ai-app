@@ -6,6 +6,8 @@ import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
 import { Theme } from '../../theme/types';
 import { ConversationMessage } from '../../database/models';
+import { EmojiAwareText } from '../emoji/EmojiAwareText';
+import EmojiService from '../../services/EmojiService';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -28,20 +30,21 @@ interface ChatBubbleProps {
 /**
  * FormattedRPText renders message content with roleplay-aware formatting.
  * Text between asterisks (*action*) is rendered in italic with the accent color.
- * All other text is rendered normally.
+ * All other text is rendered with emoji support via EmojiAwareText.
  */
 const FormattedRPText: React.FC<{
   content: string;
   isOwn: boolean;
   accentColor: string;
-}> = ({ content, isOwn, accentColor }) => {
-  // Split on asterisk-delimited segments: *text*
-  // The regex captures alternating [non-asterisk, asterisk] groups
-  const parts = content.split(/(\*[^*]+\*)/g);
+  textColor: string;
+}> = ({ content, isOwn, accentColor, textColor }) => {
+  // Parse shortcodes first
+  const normalizedContent = EmojiService.parseShortcodes(content);
 
-  if (parts.length <= 1 && !content.includes('*')) {
-    // No asterisk-delimited content — return plain text
-    return <>{content}</>;
+  const parts = normalizedContent.split(/(\*[^*]+\*)/g);
+
+  if (parts.length <= 1 && !normalizedContent.includes('*')) {
+    return <EmojiAwareText content={normalizedContent} fontSize={16} color={textColor} />;
   }
 
   return (
@@ -54,14 +57,14 @@ const FormattedRPText: React.FC<{
               key={index}
               style={{
                 fontStyle: 'italic',
-                color: isOwn ? undefined : accentColor,
+                color: isOwn ? textColor : accentColor,
               }}
             >
               {part.slice(1, -1)}
             </Text>
           );
         }
-        return <React.Fragment key={index}>{part}</React.Fragment>;
+        return <EmojiAwareText key={index} content={part} fontSize={16} color={textColor} />;
       })}
     </>
   );
@@ -359,6 +362,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                         content={isPendingSend && editedText !== message.content ? editedText : message.content}
                         isOwn={isOwn}
                         accentColor={theme.colors.accent.primary}
+                        textColor={isOwn ? theme.colors.text.primary : theme.colors.text.secondary}
                       />
                     </ThemedText>
                     {message.is_edited && (

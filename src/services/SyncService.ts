@@ -8,6 +8,7 @@ import connectionManagerInstance from './connection/ConnectionManager';
 import type { ConnectionManager } from './connection/ConnectionManager';
 import { getDatabase } from '../database/connection';
 import { createLogger } from '../utils/logger';
+import EntityEmojiActionService from './EntityEmojiActionService';
 
 const log = createLogger('[SyncService]');
 
@@ -401,6 +402,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'entity_module_mappings': 6,
         'conversation_messages': 7,
         'emotion_state': 7,
+        'entity_emoji_actions': 7,
         'memories': 7,
       };
 
@@ -544,6 +546,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         () => {
           log.info(`✅ Transaction committed successfully - applied ${recordCount} records`);
           this.incomingDataBuffer = []; // Clear buffer after successful commit
+
+          // Invalidate service caches that may be stale after incoming sync
+          EntityEmojiActionService.invalidateAllCaches();
+
           resolve();
         }
       );
@@ -603,6 +609,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         // Conversation and state data
         'conversation_messages',
         'emotion_state',
+        'entity_emoji_actions',  // NEW: emoji action mappings
         'memories',
       ];
 
@@ -906,6 +913,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       'entity_module_mappings',
       'conversation_messages',
       'memories',
+      'entity_emoji_actions',
       'provider_config_openai',
       'provider_config_ollama',
       'provider_config_openaicompatible',

@@ -19,6 +19,7 @@ import {
   Modal,
   View,
   TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { Appbar, Avatar } from 'react-native-paper';
@@ -30,9 +31,12 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ChatBubble } from '../components/chat/ChatBubble';
-import { ChatInput } from '../components/chat/ChatInput';
+import { ChatInput, ChatInputRef } from '../components/chat/ChatInput';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewMessagesDivider } from '../components/chat/NewMessagesDivider';
+import { EmojiPickerInline } from '../components/emoji/EmojiPickerInline';
+import EntityEmojiActionService from '../services/EntityEmojiActionService';
+import { EmojiEntry } from '../types/emoji';
 import { useEntitySession } from '../contexts/EntitySessionContext';
 import EntitySessionService from '../services/EntitySessionService'; // Still needed for event listeners
 import {
@@ -74,6 +78,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [failedTranscriptions, setFailedTranscriptions] = useState<Set<string>>(
     new Set(),
   );
+
+  const chatInputRef = useRef<ChatInputRef>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const flatListRef = useRef<FlatList<any>>(null);
   // NEW ref — frozen at mount, used only for divider computation
@@ -408,6 +415,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [partnerEntityId]);
 
+  // Seed emoji action defaults when session becomes active
+  useEffect(() => {
+    if (partnerEntityId && isDualSessionActive(partnerEntityId)) {
+      EntityEmojiActionService.seedDefaults(partnerEntityId).catch(err => {
+        log.warn('Failed to seed emoji action defaults:', err);
+      });
+    }
+  }, [partnerEntityId, isDualSessionActive]);
+
   const handleSendText = useCallback(
     async (text: string) => {
       if (!text.trim() || !isDualSessionActive(partnerEntityId)) {
@@ -416,10 +432,27 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       try {
+        // Resolve emoji actions: substitute emojis with RP text + collect effects
+        let sendText = text.trim();
+        let additionalEffects = null;
+
+        const resolved = await EntityEmojiActionService.resolveMessageActions(
+          partnerEntityId,
+          sendText,
+        );
+
+        if (resolved.hasActions) {
+          sendText = resolved.substitutedText;
+          additionalEffects = resolved.effects;
+          log.info(`Resolved emoji actions: ${resolved.effects.emotionEffects.length} effects`);
+        }
+
         await EntitySessionService.sendTextMessage(
           partnerEntityId,
-          text.trim(),
+          sendText,
+          additionalEffects,
         );
+
         // Optimistically reload from database
         const updatedMessages = await getRecentConversationMessages(
           impersonatedEntityId,
@@ -435,6 +468,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     },
     [partnerEntityId, impersonatedEntityId, isDualSessionActive],
   );
+
+  const handleEmojiSelected = useCallback((emoji: EmojiEntry) => {
+    chatInputRef.current?.insertEmoji(emoji.native);
+  }, []);
 
   const handleSendAudio = useCallback(
     async (audioData: string, duration: number) => {
@@ -480,24 +517,42 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         const base64Audio = message.audio_data; // Already base64 string
 
-        // Update message with final text and change type to 'combined'
+        // Resolve emoji actions in the text
+        let sendText = finalText;
+        let additionalEffects = null;
+
+        const resolved = await EntityEmojiActionService.resolveMessageActions(
+          partnerEntityId,
+          sendText,
+        );
+
+        if (resolved.hasActions) {
+          sendText = resolved.substitutedText;
+          additionalEffects = resolved.effects;
+        }
+
+        // Update message with final (substituted) text and change type to 'combined'
         const updates: any = { message_type: 'combined' };
-        if (finalText !== message.content) {
-          updates.content = finalText;
+        if (sendText !== message.content) {
+          updates.content = sendText;
         }
         await updateConversationMessage(messageId, updates);
 
         const dualSession = EntitySessionService.getSession(partnerEntityId);
         if (dualSession) {
-          const utterance = {
+          const utterance: any = {
             entity_id: dualSession.impersonatedEntityId,
-            content: finalText,
+            content: sendText,
             type: 'UTTERANCE_COMBINED',
             audio: base64Audio,
             audio_type: message.audio_mime_type || 'audio/wav',
             audio_duration: message.audio_duration || 0,
             message_id: messageId,
           };
+
+          if (additionalEffects) {
+            utterance.additional_effects = additionalEffects;
+          }
 
           await EntitySessionService.sendUtterance(
             dualSession.partnerSession.connectionId,
@@ -1287,13 +1342,33 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         )}
 
         <ChatInput
+          ref={chatInputRef}
           onSendText={handleSendText}
           onSendAudio={handleSendAudio}
           onSendImage={handleSendImage}
           onTypingStart={handleTypingStart}
+          onEmojiToggle={() => {
+            if (!showEmojiPicker) Keyboard.dismiss();
+            setShowEmojiPicker(prev => !prev);
+          }}
+          showEmojiButton={true}
           disabled={!isDualSessionActive(partnerEntityId)}
+          entityId={partnerEntityId}
           theme={theme!}
         />
+        {showEmojiPicker && (
+          <EmojiPickerInline
+            onEmojiSelected={handleEmojiSelected}
+            entityId={partnerEntityId}
+            onOpenActionEditor={() => {
+              setShowEmojiPicker(false);
+              navigation.navigate('EmojiActionEditor', {
+                entityId: partnerEntityId,
+                entityName: partnerName,
+              });
+            }}
+          />
+        )}
       </KeyboardAvoidingView>
     </ThemedView>
   );

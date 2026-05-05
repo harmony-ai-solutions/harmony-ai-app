@@ -29,6 +29,8 @@ import { migration018 } from './migrations/000018_add_entity_alias';
 import { migration019 } from './migrations/000019_add_recon_tracking';
 import { migration020 } from './migrations/000020_add_provider_llm_params';
 import { migration021 } from './migrations/000021_add_sampling_preset_and_extra_params';
+import { migration022 } from './migrations/000022_add_entity_emoji_actions';
+import { migration023 } from './migrations/000023_add_emoji_actions_deleted_at';
 
 // Migration definition
 interface Migration {
@@ -145,6 +147,16 @@ const MIGRATIONS: Migration[] = [
     version: 21,
     description: 'add_sampling_preset_and_extra_params',
     sql: migration021,
+  },
+  {
+    version: 22,
+    description: 'add_entity_emoji_actions',
+    sql: migration022,
+  },
+  {
+    version: 23,
+    description: 'add_emoji_actions_deleted_at',
+    sql: migration023,
   },
 ];
 

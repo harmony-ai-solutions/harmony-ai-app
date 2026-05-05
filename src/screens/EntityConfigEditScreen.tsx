@@ -602,6 +602,33 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
             </View>
           </ThemedCard>
 
+          {/* ── Emoji Actions ── */}
+          <ThemedCard elevated style={styles.section}>
+            <SectionHeader title="Emoji Actions" accentPip={false} />
+            <View style={styles.sectionContent}>
+              <TouchableOpacity
+                style={[styles.menuRow, { borderBottomColor: theme.colors.border.default }]}
+                onPress={() => navigation.navigate('EmojiActionEditor', {
+                  entityId: entityId!,
+                  entityName: alias || entityId!.substring(0, 8),
+                })}
+              >
+                <View style={styles.menuRowLeft}>
+                  <Icon name="emoticon-outline" size={24} color={theme.colors.accent.primary} />
+                  <ThemedText variant="primary" style={styles.menuRowText}>
+                    Emoji Actions
+                  </ThemedText>
+                </View>
+                <View style={styles.menuRowRight}>
+                  <ThemedText variant="secondary" style={styles.menuRowHint}>
+                    Customize emoji behaviors
+                  </ThemedText>
+                  <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
+                </View>
+              </TouchableOpacity>
+            </View>
+          </ThemedCard>
+
           {/* ── Danger Zone ── */}
           <ThemedCard
             elevated
@@ -851,5 +878,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 20,
+  },
+
+  // ── Emoji Actions menu row ──
+  menuRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  menuRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  menuRowText: {
+    fontSize: 16,
+  },
+  menuRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  menuRowHint: {
+    fontSize: 13,
   },
 });
