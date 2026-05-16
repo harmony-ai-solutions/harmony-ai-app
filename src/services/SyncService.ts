@@ -33,6 +33,7 @@ export interface SyncSession {
   recordsSent: number;
   recordsReceived: number;
   error?: string;
+  forceFullSync?: boolean;
 }
 
 export class SyncService extends EventEmitter<SyncServiceEvents> {
@@ -251,7 +252,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     this.emit('handshake:rejected', payload);
   }
 
-  async initiateSync(): Promise<void> {
+  async initiateSync(forceFullSync: boolean = false): Promise<void> {
     // Guard: Skip if sync is already in progress
     if (this.currentSession && this.currentSession.status === 'in_progress') {
       log.info('Sync already in progress, skipping');
@@ -264,7 +265,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       return;
     }
 
-    const lastSync = await this.getLastSyncTimestamp();
+    const lastSync = forceFullSync ? 0 : await this.getLastSyncTimestamp();
     const deviceId = await DeviceInfo.getUniqueId();
     const deviceName = await DeviceInfo.getDeviceName();
 
@@ -279,7 +280,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       startTime: Math.floor(Date.now() / 1000),
       status: 'pending',
       recordsSent: 0,
-      recordsReceived: 0
+      recordsReceived: 0,
+      forceFullSync: forceFullSync
     };
 
     const event = {
@@ -292,7 +294,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         device_type: 'phone',
         device_platform: Platform.OS,
         current_utc_timestamp: this.currentSession.startTime,
-        last_sync_timestamp: lastSync
+        last_sync_timestamp: forceFullSync ? 0 : lastSync,
+        force_full_sync: forceFullSync
       }
     };
 
@@ -313,6 +316,15 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     }
   }
 
+  /**
+   * Forces a complete re-sync by requesting all data from the server
+   * and re-sending all local data. Useful after data migrations.
+   */
+  async forceFullSync(): Promise<void> {
+    log.info('Forcing full re-sync');
+    return this.initiateSync(true);
+  }
+
   private async handleSyncAccept(payload: any): Promise<void> {
     if (!this.currentSession) {
       log.warn('Received SYNC_ACCEPT but no current session');
@@ -322,6 +334,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     log.info('Sync accepted:', payload);
     this.currentSession.status = 'in_progress';
     this.currentSession.sessionId = payload.sync_session_id;
+
+    // Store force_full_sync flag from server response
+    if (payload.force_full_sync) {
+      this.currentSession.forceFullSync = true;
+    }
 
     // Set phase to SERVER_SENDING and clear buffer
     this.syncPhase = 'SERVER_SENDING';
@@ -846,7 +863,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
       // Use lastSync as cutoff - records changed since last sync
       // Server-received records are filtered out by checking serverRecordIds
-      const lastSync = await this.getLastSyncTimestamp();
+      // Use 0 as lastSync for force full sync to re-send all local data
+      const lastSync = this.currentSession?.forceFullSync ? 0 : await this.getLastSyncTimestamp();
       this.sendLocalChangesSequentially(lastSync);
       
     } else if (this.syncPhase === 'CLIENT_SENDING' && status === 'SUCCESS' ) {

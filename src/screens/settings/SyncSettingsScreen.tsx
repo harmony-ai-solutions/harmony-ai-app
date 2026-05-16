@@ -126,6 +126,36 @@ export const SyncSettingsScreen: React.FC = () => {
     }
   };
 
+  const handleForceFullSync = () => {
+    if (!isConnected) {
+      Alert.alert('Not Connected', 'Please connect to Harmony Link first from the Connection Setup screen.');
+      return;
+    }
+
+    Alert.alert(
+      'Force Full Re-Sync',
+      'This will re-sync ALL data between this device and Harmony Link. This can take a while and may use significant bandwidth.\n\nUse this only if you suspect data is out of sync.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Re-Sync Everything',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsSyncing(true);
+              await SyncService.forceFullSync();
+            } catch (err: any) {
+              setIsSyncing(false);
+              const errorMsg = err?.message || 'Unknown error';
+              log.error('Force full sync initiation failed:', errorMsg);
+              showToast('Failed to start full re-sync: ' + errorMsg);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const getConnectionStatusText = () => {
     if (!isPaired) {
       return 'Not Paired';
@@ -241,6 +271,14 @@ export const SyncSettingsScreen: React.FC = () => {
           style={styles.syncButton}
         />
 
+        <ThemedButton
+          label="Force Full Re-Sync"
+          onPress={handleForceFullSync}
+          disabled={isSyncing || !isConnected}
+          variant="outline"
+          style={styles.dangerButton}
+        />
+
         {!isPaired && (
           <ThemedText variant="secondary" style={styles.warningText}>
             ⚠️ Not paired with Harmony Link. Go to Connection Setup to pair your device.
@@ -306,6 +344,9 @@ const styles = StyleSheet.create({
   },
   syncButton: {
     marginTop: 10,
+    marginBottom: 10,
+  },
+  dangerButton: {
     marginBottom: 10,
   },
   infoText: {
