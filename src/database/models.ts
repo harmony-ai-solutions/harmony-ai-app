@@ -356,11 +356,31 @@ export interface SyncHistory {
   deleted_at: Date | null;
 }
 
+export interface Interaction {
+  id: string;
+  entity_id: string;
+  interaction_scope: string;
+  participant_key: string | null;
+  participant_ids: string;
+  status: string;
+  started_at: string;
+  last_activity_at: string;
+  ended_at: string | null;
+  memory_id: string | null;
+  continued_interaction_id: string | null;
+  metadata: string | null;
+  summary: string | null;
+  presence_type: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
 export interface ConversationMessage {
   id: string;
   entity_id: string;
   sender_entity_id: string;
-  session_id: string | null;
+  interaction_id: string | null;
   content: string;
   audio_duration: number | null;
   message_type: 'text' | 'audio' | 'combined' | 'image';
@@ -375,9 +395,8 @@ export interface ConversationMessage {
   vl_model?: string | null;
   vl_model_interpretation?: string | null;
 
-  // Emotional state and memory (Migrations 14-16)
+  // Emotional state (Migrations 14-16)
   emotional_state_bits: number | 0; // Compact Ekman8 bitfield, opaque
-  memory_id?: string | null; // FK to memories.id, opaque
 
   // Recon tracking (Migration 19)
   is_recon_followup: boolean;       // true if message originated from recon evaluation

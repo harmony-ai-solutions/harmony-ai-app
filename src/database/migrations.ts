@@ -31,6 +31,11 @@ import { migration020 } from './migrations/000020_add_provider_llm_params';
 import { migration021 } from './migrations/000021_add_sampling_preset_and_extra_params';
 import { migration022 } from './migrations/000022_add_entity_emoji_actions';
 import { migration023 } from './migrations/000023_add_emoji_actions_deleted_at';
+import { migration024 } from './migrations/000024_create_interactions_table';
+import { migration025 } from './migrations/000025_drop_session_id';
+import { migration026 } from './migrations/000026_add_interaction_summary';
+import { migration027 } from './migrations/000027_interaction_memory_fields';
+import { migration028 } from './migrations/000028_add_presence_type';
 
 // Migration definition
 interface Migration {
@@ -157,6 +162,31 @@ const MIGRATIONS: Migration[] = [
     version: 23,
     description: 'add_emoji_actions_deleted_at',
     sql: migration023,
+  },
+  {
+    version: 24,
+    description: 'create_interactions_table',
+    sql: migration024,
+  },
+  {
+    version: 25,
+    description: 'drop_session_id',
+    sql: migration025,
+  },
+  {
+    version: 26,
+    description: 'add_interaction_summary',
+    sql: migration026,
+  },
+  {
+    version: 27,
+    description: 'interaction_memory_fields',
+    sql: migration027,
+  },
+  {
+    version: 28,
+    description: 'add_presence_type',
+    sql: migration028,
   },
 ];
 
