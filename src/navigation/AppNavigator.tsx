@@ -27,9 +27,12 @@ export type RootStackParamList = {
   Landing: undefined;
   ChatList: undefined;
   ChatDetail: {
-    partnerEntityId: string;
-    partnerCharacterId?: string;
-    impersonatedEntityId: string;
+    interactionId: string;           // existing interaction or temp UUIDv7
+    participantKey?: string;         // for temp UUIDv7 path
+    participantIds?: string[];       // ALL participants including own entity
+    entityId: string;                // impersonated entity (ownEntityId)
+    // Display info for header (derived from participants)
+    entityName?: string;             // display name for header (private: partner name; group: comma-joined names)
   };
   Characters: undefined;
   CharacterProfileEdit: { profileId?: string };

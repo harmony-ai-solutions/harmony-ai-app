@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import EntitySessionService, { EntitySession, DualEntitySession } from '../services/EntitySessionService';
+import EntitySessionService, { InteractionSession } from '../services/EntitySessionService';
 import { useSyncConnection } from './SyncConnectionContext';
 import { createLogger } from '../utils/logger';
 
@@ -19,16 +19,16 @@ const DEFAULT_RETRY_POLICY = {
 };
 
 interface EntitySessionContextType {
-  // Dual session management
-  activeSessions: Map<string, DualEntitySession>;
-  isDualSessionActive: (partnerEntityId: string) => boolean;
-  startDualSession: (partnerEntityId: string, impersonatedEntityId?: string, replyMode?: string) => Promise<void>;
-  stopDualSession: (partnerEntityId: string) => Promise<void>;
-  getDualSession: (partnerEntityId: string) => DualEntitySession | null;
-  
+  // Interaction session management
+  activeSessions: Map<string, InteractionSession>;
+  isSessionActive: (interactionId: string) => boolean;
+  startInteractionSession: (ownEntityId: string, participantIds: string[], replyMode?: string) => Promise<void>;
+  stopInteractionSession: (interactionId: string) => Promise<void>;
+  getInteractionSession: (interactionId: string) => InteractionSession | null;
+
   // Message sending
-  sendMessage: (partnerEntityId: string, message: string) => Promise<void>;
-  
+  sendMessage: (interactionId: string, message: string) => Promise<void>;
+
   // Connection requirements
   canStartSession: boolean;
 }
@@ -40,64 +40,57 @@ interface EntitySessionProviderProps {
 }
 
 export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ children }) => {
-  const [activeSessions, setActiveSessions] = useState<Map<string, DualEntitySession>>(new Map());
+  const [activeSessions, setActiveSessions] = useState<Map<string, InteractionSession>>(new Map());
   const [retryState, setRetryState] = useState<Map<string, RetryState>>(new Map());
   const entitySessionService = EntitySessionService;
   const { isConnected: isSyncConnected } = useSyncConnection();
-  
+
   const canStartSession = isSyncConnected;
 
   // Monitor sync connection and clean up sessions when it drops.
-  // We use entitySessionService.closeAllSessions() directly so we don't need a
-  // stale-closure reference to the activeSessions React state map, and we remove
-  // activeSessions.size from the dependency array to prevent spurious re-runs
-  // while sessions are being torn down one-by-one.
   useEffect(() => {
     if (!isSyncConnected) {
       log.warn('Sync connection lost, clearing all entity sessions');
-      // closeAllSessions reads from the service's own authoritative sessions map,
-      // not from React state, so it is always current regardless of batch timing.
       entitySessionService.closeAllSessions();
     }
   }, [isSyncConnected]);
 
   useEffect(() => {
-    const handleSessionStarted = (partnerEntityId: string, dualSession: DualEntitySession) => {
-      log.info('Dual session started for partner:', partnerEntityId);
-      
+    const handleSessionStarted = (interactionId: string, session: InteractionSession) => {
+      log.info('Interaction session started:', interactionId);
+
       // Clear retry state and timers
       setRetryState(prev => {
         const newMap = new Map(prev);
-        const retry = newMap.get(partnerEntityId);
+        const retry = newMap.get(interactionId);
         if (retry?.retryTimer) {
           clearTimeout(retry.retryTimer);
         }
-        newMap.delete(partnerEntityId);
+        newMap.delete(interactionId);
         return newMap;
       });
 
       setActiveSessions(prev => {
         const newMap = new Map(prev);
-        newMap.set(partnerEntityId, dualSession);
-        return newMap;
-      });
-    };
-
-    const handleSessionStopped = (partnerEntityId: string) => {
-      log.info('Dual session stopped for partner:', partnerEntityId);
-      setActiveSessions(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(partnerEntityId);
+        newMap.set(interactionId, session);
         return newMap;
       });
     };
 
-    const handleSessionError = (partnerEntityId: string, error: string) => {
-      log.error('Session error for partner:', partnerEntityId, error);
-      // Optionally remove failed session from map
+    const handleSessionStopped = (interactionId: string) => {
+      log.info('Interaction session stopped:', interactionId);
       setActiveSessions(prev => {
         const newMap = new Map(prev);
-        newMap.delete(partnerEntityId);
+        newMap.delete(interactionId);
+        return newMap;
+      });
+    };
+
+    const handleSessionError = (interactionId: string, error: string) => {
+      log.error('Session error for interaction:', interactionId, error);
+      setActiveSessions(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(interactionId);
         return newMap;
       });
     };
@@ -113,152 +106,186 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     };
   }, []);
 
-  const startDualSession = async (partnerEntityId: string, impersonatedEntityId: string = 'user', replyMode: string = 'realistic'): Promise<void> => {
+  const startInteractionSession = async (
+    ownEntityId: string,
+    participantIds: string[],
+    replyMode: string = 'realistic'
+  ): Promise<void> => {
     if (!canStartSession) {
       throw new Error('Sync connection required for entity sessions');
     }
 
-    // Clear any existing retry state
+    // This uses the interactionId tracking from retry state
+    // Use participantIds to create a temporary key for retry tracking
+    const tempKey = participantIds.sort().join('+');
+
+    // Clear any existing retry state for this key
     setRetryState(prev => {
       const newMap = new Map(prev);
-      const retry = newMap.get(partnerEntityId);
+      const retry = newMap.get(tempKey);
       if (retry?.retryTimer) {
         clearTimeout(retry.retryTimer);
       }
-      newMap.delete(partnerEntityId);
+      newMap.delete(tempKey);
       return newMap;
     });
 
-    log.info(`Starting dual session: partner=${partnerEntityId}, user=${impersonatedEntityId}`);
-    
+    log.info(`Starting interaction session: ownEntity=${ownEntityId}, participants=[${participantIds.join(', ')}]`);
+
     try {
-      // This will create sessions in 'connecting' state and return immediately
+      // This will create N+1 connections in 'connecting' state and return immediately
       // The sessions will transition to 'active' when INIT_ENTITY responses arrive
-      const dualSession = await entitySessionService.startDualSession(partnerEntityId, impersonatedEntityId, replyMode);
-      
-      // Add to state immediately (sessions are 'connecting')
+      const session = await entitySessionService.startInteractionSession(ownEntityId, participantIds, replyMode);
+
+      // Add to state immediately (connections are 'connecting')
       setActiveSessions(prev => {
         const newMap = new Map(prev);
-        newMap.set(partnerEntityId, dualSession);
+        newMap.set(session.interactionId, session);
         return newMap;
       });
-      
+
       // Start monitoring for initialization timeout
-      startInitializationTimer(partnerEntityId, impersonatedEntityId);
+      startInitializationTimer(session.interactionId, ownEntityId, participantIds);
     } catch (error) {
-      log.error(`Failed to start dual session for ${partnerEntityId}:`, error);
+      log.error(`Failed to start interaction session:`, error);
       // Attempt retry
-      scheduleRetry(partnerEntityId, impersonatedEntityId, error);
+      scheduleRetry(tempKey, ownEntityId, participantIds, error);
       throw error;
     }
   };
 
-  const startInitializationTimer = (partnerEntityId: string, impersonatedEntityId: string) => {
-    // Wait up to 15 seconds for both sessions to become active
+  const startInitializationTimer = (
+    interactionId: string,
+    ownEntityId: string,
+    participantIds: string[]
+  ) => {
+    // Wait up to 15 seconds for all connections to become active
     const timeoutId = setTimeout(() => {
       setActiveSessions(currentSessions => {
-        const session = currentSessions.get(partnerEntityId);
-        
+        const session = currentSessions.get(interactionId);
+
         if (!session) {
-          log.warn(`Initialization timeout: session ${partnerEntityId} no longer exists`);
+          log.warn(`Initialization timeout: session ${interactionId} no longer exists`);
           return currentSessions;
         }
-        
-        // Check if still not active
-        if (session.userSession.status !== 'active' || session.partnerSession.status !== 'active') {
-          log.warn(`Initialization timeout for ${partnerEntityId}: user=${session.userSession.status}, partner=${session.partnerSession.status}`);
-          
+
+        // Check if any connection is still not active
+        const allActive = Array.from(session.connections.values()).every(
+          conn => conn.status === 'active'
+        );
+
+        if (!allActive) {
+          const statuses = Array.from(session.connections.entries())
+            .map(([eid, conn]) => `${eid}=${conn.status}`)
+            .join(', ');
+          log.warn(`Initialization timeout for ${interactionId}: ${statuses}`);
+
           // Trigger retry
           const error = new Error('Session initialization timeout');
-          scheduleRetry(partnerEntityId, impersonatedEntityId, error);
+          scheduleRetry(interactionId, ownEntityId, participantIds, error);
         }
         return currentSessions;
       });
     }, 15000); // 15 second timeout
-    
+
     // Store timeout ID in retry state
     setRetryState(prev => {
       const newMap = new Map(prev);
-      const current = newMap.get(partnerEntityId) || {
+      const current = newMap.get(interactionId) || {
         attempts: 0,
         nextRetryDelay: DEFAULT_RETRY_POLICY.initialDelay
       };
       current.retryTimer = timeoutId;
-      newMap.set(partnerEntityId, current);
+      newMap.set(interactionId, current);
       return newMap;
     });
   };
 
-  const scheduleRetry = (partnerEntityId: string, impersonatedEntityId: string, error: any) => {
+  const scheduleRetry = (
+    key: string,
+    ownEntityId: string,
+    participantIds: string[],
+    error: any
+  ) => {
     // Check if this is a retryable error
     if (!isRetryableError(error)) {
-      log.info(`Error is not retryable for ${partnerEntityId}, giving up`);
+      log.info(`Error is not retryable for ${key}, giving up`);
       return;
     }
-    
+
     setRetryState(prev => {
-      const currentRetry = prev.get(partnerEntityId) || {
+      const currentRetry = prev.get(key) || {
         attempts: 0,
         nextRetryDelay: DEFAULT_RETRY_POLICY.initialDelay
       };
-      
+
       // Check if we've exceeded max attempts
       if (currentRetry.attempts >= DEFAULT_RETRY_POLICY.maxAttempts) {
-        log.error(`Max retry attempts (${DEFAULT_RETRY_POLICY.maxAttempts}) exceeded for ${partnerEntityId}`);
-        
-        // Emit permanent failure
-        entitySessionService.emit('session:error', partnerEntityId, 
+        log.error(`Max retry attempts (${DEFAULT_RETRY_POLICY.maxAttempts}) exceeded for ${key}`);
+
+        // Emit permanent failure - use a generic key
+        entitySessionService.emit('session:error' as any, key,
           `Failed to initialize session after ${currentRetry.attempts} attempts`);
-        
+
         const newMap = new Map(prev);
-        newMap.delete(partnerEntityId);
+        newMap.delete(key);
         return newMap;
       }
-      
+
       const nextAttempt = currentRetry.attempts + 1;
       const delay = Math.min(
         currentRetry.nextRetryDelay,
         DEFAULT_RETRY_POLICY.maxDelay
       );
-      
-      log.info(`Scheduling retry ${nextAttempt}/${DEFAULT_RETRY_POLICY.maxAttempts} for ${partnerEntityId} in ${delay}ms`);
-      
+
+      log.info(`Scheduling retry ${nextAttempt}/${DEFAULT_RETRY_POLICY.maxAttempts} for ${key} in ${delay}ms`);
+
       const newMap = new Map(prev);
-      newMap.set(partnerEntityId, {
+      newMap.set(key, {
         attempts: nextAttempt,
         nextRetryDelay: delay * DEFAULT_RETRY_POLICY.backoffMultiplier,
         retryTimer: setTimeout(() => {
-          retryInitialization(partnerEntityId, impersonatedEntityId);
+          retryInitialization(key, ownEntityId, participantIds);
         }, delay)
       });
       return newMap;
     });
   };
 
-  const retryInitialization = async (partnerEntityId: string, impersonatedEntityId: string, replyMode?: string) => {
-    log.info(`Retrying initialization for ${partnerEntityId}`);
-    
-    // Clean up any existing session
-    await stopDualSession(partnerEntityId);
-    
+  const retryInitialization = async (
+    key: string,
+    ownEntityId: string,
+    participantIds: string[],
+    replyMode?: string
+  ) => {
+    log.info(`Retrying initialization for ${key}`);
+
+    // Clean up any existing sessions with these participants
+    // Find any active session that matches this participant set
+    for (const [interactionId, session] of activeSessions.entries()) {
+      if (session.ownEntityId === ownEntityId &&
+          session.participantIds.sort().join('+') === participantIds.sort().join('+')) {
+        await stopInteractionSession(interactionId);
+      }
+    }
+
     // Retry
     try {
-      await startDualSession(partnerEntityId, impersonatedEntityId, replyMode);
+      await startInteractionSession(ownEntityId, participantIds, replyMode);
     } catch (error) {
-      log.error(`Retry failed for ${partnerEntityId}:`, error);
-      // scheduleRetry will be called again by startDualSession's catch block
+      log.error(`Retry failed for ${key}:`, error);
     }
   };
 
   const isRetryableError = (error: any): boolean => {
     const message = error?.message || '';
     // Don't retry if error explicitly says it's permanent
-    if (message.includes('invalid entity') || 
+    if (message.includes('invalid entity') ||
         message.includes('not found') ||
         message.includes('Sync connection required')) {
       return false;
     }
-    
+
     // Retry on network errors, timeouts, connection failures
     if (message.includes('timeout') ||
         message.includes('Connection') ||
@@ -267,58 +294,59 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
         error?.code === 'ETIMEDOUT') {
       return true;
     }
-    
+
     // Default: retry (conservative approach)
     return true;
   };
 
-  const stopDualSession = async (partnerEntityId: string): Promise<void> => {
-    log.info(`Stopping dual session for partner ${partnerEntityId}`);
-    
+  const stopInteractionSession = async (interactionId: string): Promise<void> => {
+    log.info(`Stopping interaction session for ${interactionId}`);
+
     // Cancel any pending retries
     setRetryState(prev => {
-      const retry = prev.get(partnerEntityId);
+      const retry = prev.get(interactionId);
       if (retry?.retryTimer) {
         clearTimeout(retry.retryTimer);
-        log.info(`Cancelled pending retry for ${partnerEntityId}`);
+        log.info(`Cancelled pending retry for ${interactionId}`);
       }
-      
+
       const newMap = new Map(prev);
-      newMap.delete(partnerEntityId);
+      newMap.delete(interactionId);
       return newMap;
     });
-    
-    await entitySessionService.stopSession(partnerEntityId);
+
+    await entitySessionService.stopInteractionSession(interactionId);
     // Session will be removed from state via handleSessionStopped event
   };
 
-  const sendMessage = async (partnerEntityId: string, message: string): Promise<void> => {
-    const session = activeSessions.get(partnerEntityId);
+  const sendMessage = async (interactionId: string, message: string): Promise<void> => {
+    const session = activeSessions.get(interactionId);
     if (!session) {
-      throw new Error(`No active session for partner ${partnerEntityId}`);
+      throw new Error(`No active session for interaction ${interactionId}`);
     }
-    await entitySessionService.sendTextMessage(partnerEntityId, message);
+    await entitySessionService.sendTextMessage(interactionId, message);
   };
 
-  const isDualSessionActive = (partnerEntityId: string): boolean => {
-    const session = activeSessions.get(partnerEntityId);
+  const isSessionActive = (interactionId: string): boolean => {
+    const session = activeSessions.get(interactionId);
     if (!session) return false;
-    
-    // BOTH sessions must be 'active', not just 'connecting'
-    return session.userSession.status === 'active' && 
-           session.partnerSession.status === 'active';
+
+    // ALL connections must be 'active' (not just 'connecting')
+    return Array.from(session.connections.values()).every(
+      conn => conn.status === 'active'
+    );
   };
 
-  const getDualSession = (partnerEntityId: string): DualEntitySession | null => {
-    return activeSessions.get(partnerEntityId) || null;
+  const getInteractionSession = (interactionId: string): InteractionSession | null => {
+    return activeSessions.get(interactionId) || null;
   };
 
   const value: EntitySessionContextType = {
     activeSessions,
-    isDualSessionActive,
-    startDualSession,
-    stopDualSession,
-    getDualSession,
+    isSessionActive,
+    startInteractionSession,
+    stopInteractionSession,
+    getInteractionSession,
     sendMessage,
     canStartSession,
   };
