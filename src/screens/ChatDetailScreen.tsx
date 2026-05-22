@@ -38,7 +38,7 @@ import { EmojiPickerInline } from '../components/emoji/EmojiPickerInline';
 import EntityEmojiActionService from '../services/EntityEmojiActionService';
 import { EmojiEntry } from '../types/emoji';
 import { useEntitySession } from '../contexts/EntitySessionContext';
-import EntitySessionService from '../services/EntitySessionService'; // Still needed for event listeners
+import EntitySessionService, { InteractionSession } from '../services/EntitySessionService'; // Still needed for event listeners
 import {
   getConversationMessagesByParticipantKey,
   getRecentConversationMessages,
@@ -57,9 +57,21 @@ import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { createLogger } from '../utils/logger';
 import { ConversationMessage } from '../database/models';
-import { getInteractionById } from '../database/repositories/interactions';
+import {
+  deriveParticipantKey,
+  deriveScopeFromParticipants,
+} from '../database/repositories/interactions';
 
 const log = createLogger('[ChatDetailScreen]');
+
+// TODO: Automatic scrollback pagination — when the user scrolls near the top of the
+// message list, older messages should be loaded via getConversationMessagesByParticipantKey
+// with a beforeTimestamp cursor (the created_at of the oldest currently loaded message).
+// The initial load and refresh calls should use the same page size, but refreshes (new message,
+// edit, delete) currently replace the entire list — they need to be changed to smart-merge
+// (append new, keep older pages) so the user doesn't lose already-loaded history.
+// For now, this constant controls the fixed window size shown on open and refresh.
+const MESSAGES_PAGE_SIZE = 200;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
@@ -98,6 +110,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const chatInputRef = useRef<ChatInputRef>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
+  // Track the canonical interactionId — starts as temp UUIDv7 from route params,
+  // updated to the server-assigned canonical ID when INIT_ENTITY response arrives.
+  // Using a ref (not state) avoids re-render cascades and stale closure issues
+  // in event listeners that need the current ID at callback time.
+  const currentInteractionIdRef = useRef(routeInteractionId);
+
   const flatListRef = useRef<FlatList<any>>(null);
   const sessionDividerTimestamp = useRef<number>(0);
   const isInitialScrollDone = useRef(false);
@@ -118,17 +136,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Derive participantKey if not provided (for group chats or new)
   useEffect(() => {
     if (!participantKey && participantIds.length > 0) {
-      // Derive from participantIds and ownEntityId
-      const scope = participantIds.length <= 2 ? 'private' : 'group';
-      const otherIds = participantIds.filter(id => id !== ownEntityId);
-      if (scope === 'private' && otherIds.length > 0) {
-        const partnerId = otherIds[0];
-        const key = ownEntityId < partnerId
-          ? `${ownEntityId}+${partnerId}`
-          : `${partnerId}+${ownEntityId}`;
-        setParticipantKey(key);
-      } else if (scope === 'group') {
-        const key = [...participantIds].sort().join('+');
+      const scope = deriveScopeFromParticipants(participantIds);
+      const key = deriveParticipantKey(participantIds, ownEntityId, scope);
+      if (key) {
         setParticipantKey(key);
       }
     }
@@ -233,7 +243,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         const existingMessages = await getRecentConversationMessages(
           ownEntityId,
           participantKey,
-          50,
+          MESSAGES_PAGE_SIZE,
         );
         setMessages(existingMessages);
         loadedMessagesRef.current = existingMessages;
@@ -280,11 +290,32 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     lastReadTimestampRef.current = lastReadTimestamp;
   }, [lastReadTimestamp]);
 
+  // Track canonical interactionId — temp UUIDv7 is replaced by server's canonical
+  // ID when INIT_ENTITY response arrives. This listener updates the ref so all
+  // service calls and event comparisons use the correct ID.
+  useEffect(() => {
+    const handleSessionStarted = (interactionId: string, session: InteractionSession) => {
+      if (session.ownEntityId === ownEntityId) {
+        const screenParticipants = [...participantIds].sort().join('+');
+        const sessionParticipants = [...session.participantIds].sort().join('+');
+        if (screenParticipants === sessionParticipants && interactionId !== currentInteractionIdRef.current) {
+          log.info(`InteractionId updated from ${currentInteractionIdRef.current} to canonical ${interactionId}`);
+          currentInteractionIdRef.current = interactionId;
+        }
+      }
+    };
+
+    EntitySessionService.on('session:started', handleSessionStarted);
+    return () => {
+      EntitySessionService.off('session:started', handleSessionStarted);
+    };
+  }, [ownEntityId, participantIds]);
+
   // Session lifecycle – stop session only when the screen unmounts
   useEffect(() => {
     return () => {
-      log.info(`Screen unmounting – stopping session for ${routeInteractionId}`);
-      stopInteractionSession(routeInteractionId);
+      log.info(`Screen unmounting – stopping session for ${currentInteractionIdRef.current}`);
+      stopInteractionSession(currentInteractionIdRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeInteractionId]);
@@ -335,13 +366,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Listen for new messages and typing indicator
   useEffect(() => {
     const handleNewMessage = (receivedInteractionId: string) => {
-      if (receivedInteractionId === routeInteractionId) {
+      if (receivedInteractionId === currentInteractionIdRef.current) {
         // Reload messages from database
         if (participantKey) {
           getRecentConversationMessages(
             ownEntityId,
             participantKey,
-            50,
+            MESSAGES_PAGE_SIZE,
           ).then(setMessages);
         }
       }
@@ -353,7 +384,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       isTypingActive: boolean,
     ) => {
       if (
-        receivedInteractionId === routeInteractionId &&
+        receivedInteractionId === currentInteractionIdRef.current &&
         (senderId !== ownEntityId || senderId === '')
       ) {
         setIsTyping(isTypingActive);
@@ -367,7 +398,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       isRecordingActive: boolean,
     ) => {
       if (
-        receivedInteractionId === routeInteractionId &&
+        receivedInteractionId === currentInteractionIdRef.current &&
         (senderId !== ownEntityId || senderId === '')
       ) {
         setIsRecording(isRecordingActive);
@@ -376,7 +407,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     };
 
     // Cleanup indicators when session becomes inactive
-    if (!isSessionActive(routeInteractionId)) {
+    if (!isSessionActive(currentInteractionIdRef.current)) {
       setIsTyping(false);
       setIsRecording(false);
     }
@@ -386,7 +417,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       messageId: string,
       text: string,
     ) => {
-      if (receivedInteractionId === routeInteractionId) {
+      if (receivedInteractionId === currentInteractionIdRef.current) {
         log.info(`Transcription completed for message ${messageId}: "${text}"`);
         setFailedTranscriptions(prev => {
           const newSet = new Set(prev);
@@ -397,7 +428,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           getRecentConversationMessages(
             ownEntityId,
             participantKey,
-            50,
+            MESSAGES_PAGE_SIZE,
           ).then(updatedMessages => {
             pendingOwnMessageScroll.current = true;
             setMessages(updatedMessages);
@@ -410,26 +441,26 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       receivedInteractionId: string,
       messageId: string,
     ) => {
-      if (receivedInteractionId === routeInteractionId) {
+      if (receivedInteractionId === currentInteractionIdRef.current) {
         log.warn(`Transcription failed for message ${messageId}`);
         setFailedTranscriptions(prev => new Set(prev).add(messageId));
         if (participantKey) {
           getRecentConversationMessages(
             ownEntityId,
             participantKey,
-            50,
+            MESSAGES_PAGE_SIZE,
           ).then(setMessages);
         }
       }
     };
 
     const handleIncomingMessageEdit = (receivedInteractionId: string) => {
-      if (receivedInteractionId === routeInteractionId) {
+      if (receivedInteractionId === currentInteractionIdRef.current) {
         if (participantKey) {
           getRecentConversationMessages(
             ownEntityId,
             participantKey,
-            50,
+            MESSAGES_PAGE_SIZE,
           ).then(setMessages);
         }
       }
@@ -464,8 +495,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Listen for session errors
   useEffect(() => {
     const handleSessionError = (errorInteractionId: string, error: string) => {
-      if (errorInteractionId === routeInteractionId) {
-        log.error(`Session error for ${routeInteractionId}:`, error);
+      if (errorInteractionId === currentInteractionIdRef.current) {
+        log.error(`Session error for ${currentInteractionIdRef.current}:`, error);
 
         if (Platform.OS === 'android') {
           ToastAndroid.show(`Chat session error: ${error}`, ToastAndroid.LONG);
@@ -484,9 +515,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // Seed emoji action defaults when session becomes active
   useEffect(() => {
-    if (routeInteractionId && isSessionActive(routeInteractionId)) {
+    if (currentInteractionIdRef.current && isSessionActive(currentInteractionIdRef.current)) {
       // Use interactionId as the key for emoji defaults
-      EntityEmojiActionService.seedDefaults(routeInteractionId).catch(err => {
+      EntityEmojiActionService.seedDefaults(currentInteractionIdRef.current).catch(err => {
         log.warn('Failed to seed emoji action defaults:', err);
       });
     }
@@ -494,7 +525,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleSendText = useCallback(
     async (text: string) => {
-      if (!text.trim() || !isSessionActive(routeInteractionId)) {
+      if (!text.trim() || !isSessionActive(currentInteractionIdRef.current)) {
         log.warn('Cannot send message: session not active');
         return;
       }
@@ -505,7 +536,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         let additionalEffects = null;
 
         const resolved = await EntityEmojiActionService.resolveMessageActions(
-          routeInteractionId,
+          currentInteractionIdRef.current,
           sendText,
         );
 
@@ -516,7 +547,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
 
         await EntitySessionService.sendTextMessage(
-          routeInteractionId,
+          currentInteractionIdRef.current,
           sendText,
           additionalEffects,
         );
@@ -526,7 +557,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           const updatedMessages = await getRecentConversationMessages(
             ownEntityId,
             participantKey,
-            50,
+            MESSAGES_PAGE_SIZE,
           );
           pendingOwnMessageScroll.current = true;
           setMessages(updatedMessages);
@@ -544,11 +575,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleSendAudio = useCallback(
     async (audioData: string, duration: number) => {
-      if (!isSessionActive(routeInteractionId)) return;
+      if (!isSessionActive(currentInteractionIdRef.current)) return;
 
       try {
         await EntitySessionService.newAudioMessage(
-          routeInteractionId,
+          currentInteractionIdRef.current,
           audioData,
           'audio/wav',
           duration,
@@ -560,7 +591,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           const updatedMessages = await getRecentConversationMessages(
             ownEntityId,
             participantKey,
-            50,
+            MESSAGES_PAGE_SIZE,
           );
           pendingOwnMessageScroll.current = true;
           setMessages(updatedMessages);
@@ -574,7 +605,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleConfirmAndSendMessage = useCallback(
     async (messageId: string, finalText: string) => {
-      if (!isSessionActive(routeInteractionId)) {
+      if (!isSessionActive(currentInteractionIdRef.current)) {
         log.warn('Cannot send message: session not active');
         return;
       }
@@ -592,7 +623,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         let additionalEffects = null;
 
         const resolved = await EntityEmojiActionService.resolveMessageActions(
-          routeInteractionId,
+          currentInteractionIdRef.current,
           sendText,
         );
 
@@ -608,8 +639,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
         await updateConversationMessage(messageId, updates);
 
-        // Use InteractionSession to send to ALL partner connections
-        const session = EntitySessionService.getInteractionSession(routeInteractionId);
+        // Build the combined utterance (audio + text)
+        const session = EntitySessionService.getInteractionSession(currentInteractionIdRef.current);
         if (session) {
           const utterance: any = {
             entity_id: session.ownEntityId,
@@ -625,8 +656,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             utterance.additional_effects = additionalEffects;
           }
 
-          await EntitySessionService.sendUtterance(
-            session.connections.get(session.ownEntityId)!.connectionId,
+          // Send to ALL partner connections (participant-agnostic broadcast)
+          await EntitySessionService.sendCombinedMessage(
+            currentInteractionIdRef.current,
             utterance,
           );
 
@@ -636,7 +668,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             const updatedMessages = await getRecentConversationMessages(
               ownEntityId,
               participantKey,
-              50,
+              MESSAGES_PAGE_SIZE,
             );
             pendingOwnMessageScroll.current = true;
             setMessages(updatedMessages);
@@ -659,11 +691,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleSendImage = useCallback(
     async (imageBase64: string, mimeType: string, caption?: string) => {
-      if (!isSessionActive(routeInteractionId)) return;
+      if (!isSessionActive(currentInteractionIdRef.current)) return;
 
       try {
         await EntitySessionService.sendImageMessage(
-          routeInteractionId,
+          currentInteractionIdRef.current,
           imageBase64,
           mimeType,
           caption,
@@ -672,7 +704,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           const updatedMessages = await getRecentConversationMessages(
             ownEntityId,
             participantKey,
-            50,
+            MESSAGES_PAGE_SIZE,
           );
           pendingOwnMessageScroll.current = true;
           setMessages(updatedMessages);
@@ -706,7 +738,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   const updatedMessages = await getRecentConversationMessages(
                     ownEntityId,
                     participantKey,
-                    50,
+                    MESSAGES_PAGE_SIZE,
                   );
                   setMessages(updatedMessages);
                 }
@@ -751,7 +783,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 await deleteConversationMessage(lastUserMessage.id);
 
                 await EntitySessionService.sendTextMessage(
-                  routeInteractionId,
+                  currentInteractionIdRef.current,
                   lastUserMessage.content,
                 );
 
@@ -759,7 +791,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   const updatedMessages = await getRecentConversationMessages(
                     ownEntityId,
                     participantKey,
-                    50,
+                    MESSAGES_PAGE_SIZE,
                   );
                   pendingOwnMessageScroll.current = true;
                   setMessages(updatedMessages);
@@ -787,7 +819,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         ],
       );
     },
-    [messages, ownEntityId, routeInteractionId, participantKey],
+    [messages, ownEntityId, currentInteractionIdRef, participantKey],
   );
 
   // Edit message handler
@@ -812,7 +844,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 }
 
                 await EntitySessionService.sendTextMessage(
-                  routeInteractionId,
+                  currentInteractionIdRef.current,
                   newText,
                 );
 
@@ -820,7 +852,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   const updatedMessages = await getRecentConversationMessages(
                     ownEntityId,
                     participantKey,
-                    50,
+                    MESSAGES_PAGE_SIZE,
                   );
                   setMessages(updatedMessages);
                 }
@@ -861,7 +893,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         await EntitySessionService.retryTranscription(
           messageId,
-          routeInteractionId,
+          currentInteractionIdRef.current,
         );
 
         if (Platform.OS === 'android') {
@@ -934,9 +966,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     await ChatPreferencesService.setReplyMode(routeInteractionId, newMode);
 
     // Send to Harmony Link if session is active
-    if (isSessionActive(routeInteractionId)) {
+    if (isSessionActive(currentInteractionIdRef.current)) {
       try {
-        await EntitySessionService.setReplyMode(routeInteractionId, newMode);
+        await EntitySessionService.setReplyMode(currentInteractionIdRef.current, newMode);
       } catch (error) {
         log.error('Failed to send reply mode update:', error);
       }
@@ -1118,7 +1150,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           titleStyle={{ color: theme?.colors.text.primary }}
         />
         {isConnected ? (
-          isSessionActive(routeInteractionId) ? (
+          isSessionActive(currentInteractionIdRef.current) ? (
             <ThemedText
               variant="success"
               size={12}
@@ -1145,7 +1177,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           onPress={handleToggleReplyMode}
           style={styles.replyModeButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          disabled={!isSessionActive(routeInteractionId)}
+          disabled={!isSessionActive(currentInteractionIdRef.current)}
         >
           <ThemedText
             size={11}
@@ -1273,8 +1305,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           scrollEventThrottle={100}
           onMomentumScrollEnd={handleScrollEnd}
           onScrollEndDrag={handleScrollEnd}
-          initialNumToRender={50}
-          maxToRenderPerBatch={50}
+          initialNumToRender={MESSAGES_PAGE_SIZE}
+          maxToRenderPerBatch={MESSAGES_PAGE_SIZE}
           windowSize={21}
           onScrollToIndexFailed={() => {
             flatListRef.current?.scrollToEnd({ animated: false });
@@ -1361,18 +1393,18 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             setShowEmojiPicker(prev => !prev);
           }}
           showEmojiButton={true}
-          disabled={!isSessionActive(routeInteractionId)}
-          entityId={routeInteractionId}
+          disabled={!isSessionActive(currentInteractionIdRef.current)}
+          entityId={currentInteractionIdRef.current}
           theme={theme!}
         />
         {showEmojiPicker && (
           <EmojiPickerInline
             onEmojiSelected={handleEmojiSelected}
-            entityId={routeInteractionId}
+            entityId={currentInteractionIdRef.current}
             onOpenActionEditor={() => {
               setShowEmojiPicker(false);
               navigation.navigate('EmojiActionEditor', {
-                entityId: routeInteractionId,
+                entityId: currentInteractionIdRef.current,
                 entityName: headerName,
               });
             }}

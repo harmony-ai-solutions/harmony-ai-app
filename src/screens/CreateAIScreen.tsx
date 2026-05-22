@@ -34,6 +34,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { v4 as uuidv4, v7 as uuidv7 } from 'uuid';
+import { deriveParticipantKey, deriveScopeFromParticipants } from '../database/repositories/interactions';
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -539,9 +540,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
       // 6. Navigate to ChatDetail — replace so back goes to ChatList, not here
       const participantIds = [impersonatedEntityId ?? 'user', entityId];
-      const participantKey = impersonatedEntityId && impersonatedEntityId < entityId
-        ? `${impersonatedEntityId}+${entityId}`
-        : `${entityId}+${impersonatedEntityId}`;
+      const scope = deriveScopeFromParticipants(participantIds);
+      const participantKey = deriveParticipantKey(participantIds, impersonatedEntityId ?? 'user', scope);
       const tempInteractionId = uuidv7();
       navigation.replace('ChatDetail', {
         interactionId: tempInteractionId,

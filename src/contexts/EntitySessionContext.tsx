@@ -59,19 +59,35 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     const handleSessionStarted = (interactionId: string, session: InteractionSession) => {
       log.info('Interaction session started:', interactionId);
 
-      // Clear retry state and timers
+      // Clear retry state and timers — clean up by both interactionId and
+      // participant-based fallback key (used when session creation failed)
       setRetryState(prev => {
         const newMap = new Map(prev);
+        // Clean up by interactionId
         const retry = newMap.get(interactionId);
         if (retry?.retryTimer) {
           clearTimeout(retry.retryTimer);
         }
         newMap.delete(interactionId);
+        // Also clean up by participant-based fallback key
+        const fallbackKey = session.participantIds.sort().join('+');
+        const fallbackRetry = newMap.get(fallbackKey);
+        if (fallbackRetry?.retryTimer) {
+          clearTimeout(fallbackRetry.retryTimer);
+        }
+        newMap.delete(fallbackKey);
         return newMap;
       });
 
       setActiveSessions(prev => {
         const newMap = new Map(prev);
+        // Remove stale entries with temp UUIDv7 keys pointing to the same session
+        // (the InteractionService re-keys from temp UUIDv7 to canonical ID)
+        for (const [key, existing] of newMap.entries()) {
+          if (existing === session && key !== interactionId) {
+            newMap.delete(key);
+          }
+        }
         newMap.set(interactionId, session);
         return newMap;
       });
@@ -115,18 +131,18 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
       throw new Error('Sync connection required for entity sessions');
     }
 
-    // This uses the interactionId tracking from retry state
-    // Use participantIds to create a temporary key for retry tracking
-    const tempKey = participantIds.sort().join('+');
+    // Derive a participant-based key for pre-session retry deduplication.
+    // After the session is created, we switch to interactionId as the primary key.
+    const participantKey = participantIds.sort().join('+');
 
-    // Clear any existing retry state for this key
+    // Clear any existing retry state for this participant set
     setRetryState(prev => {
       const newMap = new Map(prev);
-      const retry = newMap.get(tempKey);
+      const retry = newMap.get(participantKey);
       if (retry?.retryTimer) {
         clearTimeout(retry.retryTimer);
       }
-      newMap.delete(tempKey);
+      newMap.delete(participantKey);
       return newMap;
     });
 
@@ -144,12 +160,12 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
         return newMap;
       });
 
-      // Start monitoring for initialization timeout
+      // Use session.interactionId as the primary key for all subsequent tracking
       startInitializationTimer(session.interactionId, ownEntityId, participantIds);
     } catch (error) {
       log.error(`Failed to start interaction session:`, error);
-      // Attempt retry
-      scheduleRetry(tempKey, ownEntityId, participantIds, error);
+      // No interactionId available — use participant-based fallback key for retry
+      scheduleRetry(participantKey, ownEntityId, participantIds, error);
       throw error;
     }
   };
@@ -159,44 +175,59 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     ownEntityId: string,
     participantIds: string[]
   ) => {
+    // Use participantKey consistently as the retry state key so that
+    // handleSessionStarted can find and cancel it via fallbackKey.
+    // (interactionId may change from temp UUIDv7 to canonical — can't rely on it)
+    const participantKey = participantIds.sort().join('+');
+
     // Wait up to 15 seconds for all connections to become active
     const timeoutId = setTimeout(() => {
       setActiveSessions(currentSessions => {
-        const session = currentSessions.get(interactionId);
+        // Find session by participant match (key may have changed from temp UUIDv7 to canonical)
+        let foundSession: InteractionSession | null = null;
+        let foundKey: string | null = null;
+        for (const [key, s] of currentSessions.entries()) {
+          if (s.ownEntityId === ownEntityId &&
+              s.participantIds.sort().join('+') === participantKey) {
+            foundSession = s;
+            foundKey = key;
+            break;
+          }
+        }
 
-        if (!session) {
-          log.warn(`Initialization timeout: session ${interactionId} no longer exists`);
+        if (!foundSession || !foundKey) {
+          log.warn(`Initialization timeout: session for participants [${participantIds.join(', ')}] no longer exists`);
           return currentSessions;
         }
 
         // Check if any connection is still not active
-        const allActive = Array.from(session.connections.values()).every(
+        const allActive = Array.from(foundSession.connections.values()).every(
           conn => conn.status === 'active'
         );
 
         if (!allActive) {
-          const statuses = Array.from(session.connections.entries())
+          const statuses = Array.from(foundSession.connections.entries())
             .map(([eid, conn]) => `${eid}=${conn.status}`)
             .join(', ');
-          log.warn(`Initialization timeout for ${interactionId}: ${statuses}`);
+          log.warn(`Initialization timeout for ${foundKey}: ${statuses}`);
 
-          // Trigger retry
+          // Trigger retry using participantKey (consistent with startInteractionSession catch path)
           const error = new Error('Session initialization timeout');
-          scheduleRetry(interactionId, ownEntityId, participantIds, error);
+          scheduleRetry(participantKey, ownEntityId, participantIds, error);
         }
         return currentSessions;
       });
     }, 15000); // 15 second timeout
 
-    // Store timeout ID in retry state
+    // Store timeout ID in retry state under participantKey (not interactionId)
     setRetryState(prev => {
       const newMap = new Map(prev);
-      const current = newMap.get(interactionId) || {
+      const current = newMap.get(participantKey) || {
         attempts: 0,
         nextRetryDelay: DEFAULT_RETRY_POLICY.initialDelay
       };
       current.retryTimer = timeoutId;
-      newMap.set(interactionId, current);
+      newMap.set(participantKey, current);
       return newMap;
     });
   };
@@ -302,16 +333,28 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
   const stopInteractionSession = async (interactionId: string): Promise<void> => {
     log.info(`Stopping interaction session for ${interactionId}`);
 
-    // Cancel any pending retries
+    // Cancel any pending retries — clean up by both interactionId and
+    // participant-based fallback key to prevent orphaned timers
+    const session = activeSessions.get(interactionId);
     setRetryState(prev => {
+      const newMap = new Map(prev);
+      // Clean up by interactionId
       const retry = prev.get(interactionId);
       if (retry?.retryTimer) {
         clearTimeout(retry.retryTimer);
         log.info(`Cancelled pending retry for ${interactionId}`);
       }
-
-      const newMap = new Map(prev);
       newMap.delete(interactionId);
+      // Also clean up by participant-based fallback key
+      if (session) {
+        const fallbackKey = session.participantIds.sort().join('+');
+        const fallbackRetry = prev.get(fallbackKey);
+        if (fallbackRetry?.retryTimer) {
+          clearTimeout(fallbackRetry.retryTimer);
+          log.info(`Cancelled pending fallback retry for ${fallbackKey}`);
+        }
+        newMap.delete(fallbackKey);
+      }
       return newMap;
     });
 

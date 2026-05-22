@@ -230,6 +230,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       return;
     }
 
+    const deviceId = await DeviceInfo.getUniqueId();
+
     const event = {
       event_id: this.generateEventId(),
       event_type: 'INIT_ENTITY',
@@ -238,7 +240,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         entity_id: entityId,
         participant_ids: session.participantIds, // ALWAYS includes own entity per D-21
         device_type: 'phone',
-        device_id: '', // Will be filled by caller
+        device_id: deviceId,
         device_platform: Platform.OS,
         capabilities: ['chat'],
         tts_output_type: 'binary',
@@ -538,11 +540,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
   }
 
-  closeAllSessions(): void {
+  async closeAllSessions(): Promise<void> {
     const interactionIds = Array.from(this.sessions.keys());
-    for (const id of interactionIds) {
-      this.stopInteractionSession(id);
-    }
+    await Promise.all(interactionIds.map(id => this.stopInteractionSession(id)));
   }
 
   // ---------------------------------------------------------------------------
@@ -746,6 +746,30 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     // Generate UUID v7 for message ID
     const messageId = uuidv7();
 
+    // Store message locally with interaction_id and entity_id = ownEntityId per D-02/D-35
+    const message = {
+      id: messageId,
+      entity_id: session.ownEntityId,
+      sender_entity_id: session.ownEntityId,
+      interaction_id: session.interactionId,
+      content: caption || '',
+      audio_duration: null,
+      message_type: 'image' as 'image',
+      audio_data: null,
+      audio_mime_type: null,
+      image_data: imageBase64,
+      image_mime_type: mimeType,
+      vl_model: null,
+      vl_model_interpretation: null,
+      emotional_state_bits: 0,
+      is_recon_followup: false,
+      is_edited: false,
+      edit_of_message_id: null,
+    };
+
+    await createConversationMessage(message);
+    log.info(`Stored image message ${messageId} locally for interaction ${interactionId}`);
+
     const utterance = {
       message_id: messageId,
       entity_id: session.ownEntityId,
@@ -760,6 +784,32 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
 
     log.info(`Sent image message ${messageId} to ${partnerConnectionIds.length} partner(s) for interaction ${interactionId}`);
+  }
+
+  /**
+   * Send a combined utterance (e.g., audio+text) to ALL partner connections
+   * in a participant-agnostic broadcast. Used by ChatDetailScreen for
+   * audio confirmation flow (handleConfirmAndSendMessage).
+   */
+  async sendCombinedMessage(
+    interactionId: string,
+    utterance: any
+  ): Promise<void> {
+    const session = this.sessions.get(interactionId);
+    if (!session) {
+      throw new Error(`No active session for interaction ${interactionId}`);
+    }
+
+    const partnerConnectionIds = this.getPartnerConnectionIds(session);
+    if (partnerConnectionIds.length === 0) {
+      throw new Error(`No active partner connections for interaction ${interactionId}`);
+    }
+
+    for (const connectionId of partnerConnectionIds) {
+      await this.sendUtterance(connectionId, utterance);
+    }
+
+    log.info(`Sent combined message ${utterance.message_id} to ${partnerConnectionIds.length} partner(s) for interaction ${interactionId}`);
   }
 
   public async sendUtterance(connectionId: string, utterance: any): Promise<void> {
@@ -890,6 +940,12 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
           event.payload.entity_id,
           event.payload.is_recording
         );
+        break;
+
+      case 'SET_REPLY_MODE':
+        // The server should never broadcast SET_REPLY_MODE to clients.
+        // Log a warning in case this ever happens unexpectedly.
+        log.warn(`Received unexpected SET_REPLY_MODE from server for entity ${entityId} in interaction ${interactionId} — dropping event (server should not broadcast SET_REPLY_MODE)`);
         break;
 
       default:
