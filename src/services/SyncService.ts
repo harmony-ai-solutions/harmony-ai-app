@@ -417,10 +417,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'character_image': 4,
         'entities': 5,
         'entity_module_mappings': 6,
-        'conversation_messages': 7,
-        'emotion_state': 7,
-        'entity_emoji_actions': 7,
-        'memories': 7,
+        'interactions': 7,
+        'conversation_messages': 8,
+        'emotion_state': 8,
+        'entity_emoji_actions': 8,
+        'memories': 8,
       };
 
       const sortedBuffer = [...this.incomingDataBuffer].sort((a, b) => {
@@ -623,10 +624,12 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'character_image',
         'entities',
         'entity_module_mappings',
+        // Interactions (referenced by conversation_messages)
+        'interactions',
         // Conversation and state data
         'conversation_messages',
         'emotion_state',
-        'entity_emoji_actions',  // NEW: emoji action mappings
+        'entity_emoji_actions',  // emoji action mappings
         'memories',
       ];
 
@@ -929,6 +932,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       'character_image',
       'entities',
       'entity_module_mappings',
+      'interactions',
       'conversation_messages',
       'memories',
       'entity_emoji_actions',
@@ -997,6 +1001,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'tts_config_id',
         'vision_config_id'
       ],
+      'interactions': ['entity_id', 'memory_id'],
       'backend_configs': ['provider_config_id'],
       'vision_configs': ['provider_config_id'],
       'imagination_configs': ['provider_config_id'],

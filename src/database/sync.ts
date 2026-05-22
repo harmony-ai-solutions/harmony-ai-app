@@ -5,6 +5,7 @@ import { Transaction } from 'react-native-sqlite-storage';
 const log = createLogger('[DatabaseSync]');
 
 // TEXT table configuration (for large base64 fields)
+// interactions is NOT a TEXT table — participant_ids, metadata, summary columns are small enough
 const TEXT_TABLES = ['character_image', 'conversation_messages'];
 
 const TEXT_COLUMNS: Record<string, string[]> = {
@@ -490,12 +491,14 @@ export const cleanupOrphanEntityModuleMappings = async (): Promise<number> => {
 export const cleanupOrphanedMemories = async (): Promise<number> => {
   const db = getDatabase();
 
+  // Memory link now lives on interactions (not conversation_messages) per Phase 5
+  // JOIN on interactions.memory_id to find orphaned memories
   const [result] = await db.executeSql(`
     DELETE FROM memories
     WHERE id IN (
       SELECT m.id FROM memories m
-      LEFT JOIN conversation_messages cm ON m.id = cm.memory_id
-      WHERE cm.id IS NULL
+      LEFT JOIN interactions i ON m.id = i.memory_id
+      WHERE i.id IS NULL
     )
   `);
 
