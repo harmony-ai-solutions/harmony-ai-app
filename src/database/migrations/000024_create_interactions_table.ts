@@ -10,19 +10,21 @@ CREATE TABLE IF NOT EXISTS interactions (
   started_at TEXT NOT NULL,
   last_activity_at TEXT NOT NULL,
   ended_at TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  deleted_at TEXT
+  metadata TEXT,
+  deleted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes for interaction lookups
-CREATE INDEX IF NOT EXISTS idx_interactions_entity_scope_key ON interactions(entity_id, interaction_scope, participant_key);
-CREATE INDEX IF NOT EXISTS idx_interactions_entity_id ON interactions(entity_id);
-CREATE INDEX IF NOT EXISTS idx_interactions_status ON interactions(status);
+-- Per D-07: composite index for scope-aware lookup (REQ-8.1.1)
+CREATE INDEX idx_interactions_lookup ON interactions(entity_id, interaction_scope, participant_key);
 
--- Add interaction_id column to conversation_messages (nullable for now — populated via sync)
+-- Index for finding active interactions by entity (status + recency)
+CREATE INDEX idx_interactions_active ON interactions(entity_id, status, last_activity_at DESC);
+
+-- Per D-08: add interaction_id to conversation_messages (nullable for now — populated via sync)
 ALTER TABLE conversation_messages ADD COLUMN interaction_id TEXT;
 
--- Index for JOIN performance
-CREATE INDEX IF NOT EXISTS idx_conversation_messages_interaction_id ON conversation_messages(interaction_id);
+-- Per D-08: index on interaction_id for Phase 2 query patterns
+CREATE INDEX idx_conversation_messages_interaction_id ON conversation_messages(interaction_id);
 `;

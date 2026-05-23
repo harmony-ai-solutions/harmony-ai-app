@@ -52,5 +52,7 @@ DROP TABLE conversation_messages;
 ALTER TABLE conversation_messages_new RENAME TO conversation_messages;
 
 -- Recreate indexes
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_entity ON conversation_messages(entity_id);
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_interaction_id ON conversation_messages(interaction_id);
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_memory_id ON conversation_messages(memory_id);
 `;

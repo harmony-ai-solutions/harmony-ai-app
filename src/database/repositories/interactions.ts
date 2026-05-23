@@ -225,6 +225,38 @@ export async function getRecentPhoneInteractions(
 }
 
 /**
+ * Check if an entity has any phone interactions (regardless of status or messages).
+ * Used to determine if an entity should be shown in the "no messages yet" section.
+ *
+ * @param entityId - The entity to check
+ * @param partnerEntityId - The potential chat partner
+ * @returns true if a phone interaction exists between these entities
+ */
+export async function entityHasPhoneInteraction(
+  entityId: string,
+  partnerEntityId: string
+): Promise<boolean> {
+  const db = getDatabase();
+  
+  // Derive the participant key (same logic as deriveParticipantKey)
+  const participantKey = entityId < partnerEntityId
+    ? `${entityId}+${partnerEntityId}`
+    : `${partnerEntityId}+${entityId}`;
+
+  const [results] = await db.executeSql(
+    `SELECT 1 FROM interactions
+     WHERE entity_id = ?
+       AND participant_key = ?
+       AND presence_type = 'phone'
+       AND deleted_at IS NULL
+     LIMIT 1`,
+    [entityId, participantKey]
+  );
+
+  return results.rows.length > 0;
+}
+
+/**
  * Get the last conversation message for an interaction identified by
  * entity_id and participant_key with presence_type = 'phone'.
  * Used for chat list preview.

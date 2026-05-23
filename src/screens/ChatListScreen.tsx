@@ -24,18 +24,19 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
 import { getAllEntities } from '../database/repositories/entities';
-import { getLastConversationMessage } from '../database/repositories/conversation_messages';
 import {
   getRecentPhoneInteractions,
   getLastInteractionMessage,
-  deriveParticipantKey,
   deriveScopeFromParticipants,
+  deriveParticipantKey,
+  entityHasPhoneInteraction,
 } from '../database/repositories/interactions';
 import {
   getPrimaryImage,
   getCharacterProfile,
   imageToDataURL,
 } from '../database/repositories/characters';
+import { v7 as uuidv7 } from 'uuid';
 
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -43,7 +44,6 @@ import ChatPreferencesService from '../services/ChatPreferencesService';
 import { ImpersonationSelectorModal } from '../components/modals/ImpersonationSelectorModal';
 import { InfoModal } from '../components/modals/InfoModal';
 import { createLogger } from '../utils/logger';
-import { v7 as uuidv7 } from 'uuid';
 
 const log = createLogger('[ChatListScreen]');
 
@@ -105,6 +105,7 @@ export const ChatListScreen: React.FC = () => {
 
       const listItems: ChatListItem[] = [];
       const seenPrivateKeys = new Set<string>(); // For deduping private interactions per D-01
+      const seenPartnerEntityIds = new Set<string>(); // Track entities with phone interactions to prevent duplicates
 
       for (const interaction of interactions) {
         let participantIds: string[];
@@ -127,6 +128,9 @@ export const ChatListScreen: React.FC = () => {
           // Find the partner entity (the one that's NOT the impersonated entity)
           const partnerEntityId = participantIds.find(id => id !== activeEntityId);
           if (!partnerEntityId) continue;
+
+          // Mark this partner as seen to prevent duplicate entries in the "no messages yet" section
+          seenPartnerEntityIds.add(partnerEntityId);
 
           const entity = entityMap.get(partnerEntityId);
 
@@ -232,8 +236,81 @@ export const ChatListScreen: React.FC = () => {
         }
       }
 
-      // Sort by last message time (newest first)
+      // Add entities that have NO phone interactions yet (not chatted with via phone)
+      // These appear at the bottom of the list with "No messages yet"
+      // Note: seenPartnerEntityIds is already populated in the first loop above
+      for (const entity of entities) {
+        // Skip the active (impersonated) entity
+        if (entity.id === activeEntityId) {
+          continue;
+        }
+
+        // Skip entities that already have a phone interaction (already in listItems)
+        // This prevents duplicate "No messages yet" entries for entities with phone interactions
+        if (seenPartnerEntityIds.has(entity.id)) {
+          continue;
+        }
+
+        // Check if this entity has any phone interaction with the active entity
+        // This is the key fix: we need to check if there's a phone interaction BEFORE
+        // adding the entity as "no messages yet"
+        const hasPhoneInteraction = await entityHasPhoneInteraction(activeEntityId, entity.id);
+        if (hasPhoneInteraction) {
+          // This entity already has a phone interaction - it should have been added
+          // in the first loop. Skip it to avoid duplicates.
+          continue;
+        }
+
+        // Get character profile and avatar
+        let avatarUri: string | null = null;
+        let characterProfileName: string | null = null;
+        if (entity.character_profile_id) {
+          const profile = await getCharacterProfile(entity.character_profile_id);
+          characterProfileName = profile?.name ?? null;
+          const primaryImage = await getPrimaryImage(entity.character_profile_id);
+          if (primaryImage) {
+            avatarUri = imageToDataURL(primaryImage);
+          }
+        }
+
+        const characterName = getEntityDisplayName(
+          entity.alias || null,
+          characterProfileName,
+          entity.id,
+        );
+
+        // Derive participantKey for the potential private interaction
+        const potentialParticipantIds = [activeEntityId, entity.id];
+        const scope = deriveScopeFromParticipants(potentialParticipantIds);
+        const participantKey = deriveParticipantKey(
+          potentialParticipantIds,
+          activeEntityId,
+          scope,
+        );
+
+        // Generate a temp interactionId for navigation (ChatDetailScreen
+        // will replace it with the canonical server-assigned ID via INIT_ENTITY)
+        const tempInteractionId = uuidv7();
+
+        listItems.push({
+          interactionId: tempInteractionId,
+          entityId: entity.id,
+          characterId: entity.character_profile_id ?? null,
+          characterName,
+          lastMessage: 'No messages yet',
+          lastMessageSender: '',
+          lastMessageTime: null,
+          avatarUri,
+          participantKey,
+          participantIds: potentialParticipantIds,
+          isGroup: false,
+        });
+      }
+
+      // Sort by last message time (newest first), entities without
+      // messages (null time) sort to the bottom
       listItems.sort((a, b) => {
+        if (!a.lastMessageTime && !b.lastMessageTime) return 0;
         if (!a.lastMessageTime) return 1;
         if (!b.lastMessageTime) return -1;
         return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
