@@ -3,12 +3,12 @@
 - Screen Components: Full-page views, navigation, screen state
 - Presentational Components: Pure display, props-driven, reusable
 - Container Components: Data fetching, side effects, service connection
-- State: Local (useState) → Context (theme/auth) → Redux/Zustand (future complex state)
+- State: Local (useState) → Context (theme/auth/emoji) → Redux/Zustand (future complex state)
 - Navigation: Stack (primary), Modal (future)
 @Components:
-- Screens: HomeScreen, ChatScreen, CharacterListScreen
-- Services: HarmonyLinkService (REST), WebSocketService (real-time)
-- Storage: SQLite (messages/characters), AsyncStorage (settings)
+- Screens: HomeScreen, ChatScreen, CharacterListScreen, EmojiActionEditorScreen
+- Services: HarmonyLinkService (REST), WebSocketService (real-time), EmojiService, EntityEmojiActionService
+- Storage: SQLite (messages/characters/interactions/emoji_actions), AsyncStorage (settings/preferences/reply mode)
 - Theme: Centralized via React Native Paper, Harmony Link palette
 - Sync: Optimistic updates, background sync, conflict resolution (last-write-wins)
 @Database:
@@ -20,7 +20,10 @@
   - Pattern: db.transaction((tx) => { tx.executeSql(..., (_, result) => resolve(result.insertId)) })
 - Safe withTransaction() uses: UPDATE/DELETE with rowsAffected checks, SELECT queries
 - Unsafe withTransaction() uses: INSERT returning insertId, multiple sequential statements
-- All repositories follow this pattern: providers.ts, modules.ts, characters.ts, entities.ts, conversation_messages.ts
+- All repositories follow this pattern: providers.ts, modules.ts, characters.ts, entities.ts, conversation_messages.ts, interactions.ts, emoji_actions.ts
+- Interaction Pattern: Tables prefixed with interactions_*, keyed by interaction_id, participant_key derived from sorted entity ID pairs
+- Emoji Pattern: emoji_actions table with entity-level mappings, JSON emotion_effects column, soft delete via deleted_at
+- JOIN Query Pattern: conversation_messages JOIN interactions for chat list previews (last message per interaction), with two-phase TEXT column loading for audio/image data
 @Decisions:
 - React Native CLI (not Expo): Full native control for Executorch/messengers
 - React Native Paper: Material Design 3 consistency
@@ -46,3 +49,26 @@
 - Sampling preset sync: sampling_preset_name + extra_params columns via migration 021
 - Extra params stored as JSON TEXT, edited as key-value pairs in UI
 - Advanced sampling params: typical_p, tfs, dry_multiplier, dry_base, dry_allowed_length, dry_sequence_breakers, xtc_probability, xtc_threshold
+@InteractionSession:
+- Replaces DualEntitySession pattern: sessions are scoped to interaction IDs (not entity-pair IDs)
+- InteractionSession interface: interactionId, interaction, participantIds, ownEntityId, connections Map (entityId → connection info), pendingTranscriptions Map
+- Events keyed by interactionId: 'session:started', 'session:stopped', 'message:received', 'typing:indicator', etc.
+- Participant-agnostic: supports N participants per session (world/private/group)
+- Navigation adapted: ChatDetailScreen uses interactionId for session lookup instead of partnerEntityId
+- Participant key derivation: private (sorted pair "entityA+entityB"), group (sorted join of all IDs), world (empty string)
+- Scope derivation: 0-1 participants → world, 2 → private, 3+ → group
+@EmojiArchitecture:
+- Emoji Sets: native (platform default), twemoji (Twitter sprite), noto (Google sprite) — selected via EmojiContext
+- Emoji Picker: Modal (full-screen, category tabs, search) and Inline (compact for chat input)
+- Emoji Data: Pre-built emoji data service (EmojiService) loading from bundled data, category-based organization
+- Emoji Actions: Entity-level emoji→action mappings stored in emoji_actions table
+  - Action types: trigger custom emotion effects on emoji send
+  - Emotion effects: Ekman8 emotion deltas (joy/sadness/trust/disgust/fear/anger/surprise/anticipation)
+  - Resolution: EmojiService scans outgoing message text, resolves emoji → actions → AdditionalEffects payload → sent with SEND_MESSAGE
+- Emoji-Aware Text: EmojiAwareText segments text into emoji/text spans; EmojiText renders with proper sprite caching
+- DB: Migrations 22-23 via emoji_actions repository with soft delete pattern
+@SessionResume:
+- Session resume flow: INIT_ENTITY response includes `resumed: true` flag on Harmony Link side
+- EntitySessionService checks resumed flag; if true, avoids re-creating connection and reconciles pending state
+- Dangling event sync: On reconnect, backend refires any events that were queued while disconnected
+- Reply mode: EntitySession passes `reply_mode` as capability during INIT_ENTITY; ChatPreferencesService stores per-partner preference

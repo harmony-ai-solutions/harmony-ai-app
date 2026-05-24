@@ -9,13 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chat & Messaging
 
-#### Fixed
-- Fixed audio messages loading incorrect audio data after reconnection
-  - All audio bubbles now load their own audio only when explicitly tapped for playback
-  - Eliminates race condition where concurrent mount-time preloads corrupted the shared audio queue
-- Audio message duration is now correctly shown before playback begins
-  - Duration is automatically detected from the audio data and stored when messages are received
-
 #### Added
 - Real-time chat interface with AI characters
 - Text messaging with send/receive capabilities
@@ -24,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatic transcription via Harmony Link STT module
   - Edit transcription before sending
   - Send audio + text to chat partners
-- Image message support with send/receive capabilities
+- Image message support with send/receive capabilities (UI not fully complete)
 - Message history with persistent storage
 - Typing indicators showing when partner is composing a message
 - Chat list showing all conversations with last message preview
@@ -32,8 +25,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Choose which entity identity to use per conversation
   - Preferences saved automatically for each chat partner
   - Smart defaults favoring "user" entity
+- Per-chat-partner reply mode toggle (instant vs. realistic reply times)
+  - "Realistic" mode introduces a simulated typing delay matching average human response time
+  - "Instant" mode delivers replies immediately without delay
+  - Preference persisted per chat partner via AsyncStorage
+  - Defaults to "realistic" when no preference is stored
+  - Reply mode sent as `reply_mode` capability during session initialization (`INIT_ENTITY`)
+- Resume sessions on disconnect with dangling event synchronization
+  - Sessions are automatically resumed when connection is re-established
+  - Backend re-fires any events that were queued during disconnection
+  - Session resume indicated via `resumed: true` flag in `INIT_ENTITY` response
+- Emoji picker with three configurable emoji sets (Native, Twemoji, Noto)
+  - Full-screen modal with category tabs and search
+  - Inline compact variant for chat input use
+  - Skin tone selector with 5 modifier options
+  - Keyword-based emoji search
+  - Emoji autocomplete in chat input
+- Emoji-aware text rendering in chat bubbles
+  - Intelligent text/emoji segmentation via `EmojiAwareText`
+  - Sprite-based emoji display with caching via `EmojiText`
+  - Cross-set style preference persistence
+- Emoji Action system for per-entity emoji behavior
+  - Entity-level emoji-to-action mappings stored in dedicated database table
+  - Each emoji can trigger emotion effects on the target entity
+  - Emotion effects based on the Ekman8 emotion model (joy, sadness, trust, disgust, fear, anger, surprise, anticipation)
+  - Signed intensity deltas (-5.0 to +5.0) for each emotion per emoji
+  - Action definitions include optional style customization and cooldown
+- Emoji Action editor screen for entity-level management
+  - Action list with enable/disable toggle per emoji
+  - Action creation and editing modals
+  - Per-emoji emotion effect customization
+- Message send pipeline integration for emoji actions
+  - Outgoing messages scanned for emoji with configured actions
+  - `AdditionalEffects` payload generated and sent with `SEND_MESSAGE` events
+  - Emotion effects delivered to Harmony Link for entity state updates
+- Database migrations for emoji actions (022–023)
+- Emoji action synchronization over WebSocket sync pipeline
+- Emoji style preferences persisted via AsyncStorage
+- Interaction system for session management
+  - Interaction data model mirroring Harmony Link Go struct with fields: id, entity_id, scope, participant_key, participant_ids, status, presence_type, summary, memory_id, continued_interaction_id
+  - Scope types: "world" (0-1 participants), "private" (2 participants), "group" (3+ participants)
+  - Participant key derivation: alphabetically sorted entity ID pairs for deterministic lookup
+  - Presence type: "phone" for chat interactions
+  - Interaction repository with full CRUD: `getInteractionById`, `getInteractionByParticipantKey`, `createInteraction`, `updateInteraction`, `getActiveInteractionsByEntity`, `getRecentPhoneInteractions`, `entityHasPhoneInteraction`, `getLastInteractionMessage`
+- Database migrations for interaction system (024–028)
+- JOIN-based query for chat list last message preview (`conversation_messages JOIN interactions`)
+- Interaction sync integration over WebSocket pipeline
+- ChatListScreen adapted to InteractionSession model with JOIN-based interaction queries
+- ChatDetailScreen refactored for InteractionSession lifecycle with reply mode toggle
+- Force full database synchronization option in SyncSettingsScreen
+
+#### Changed
+- Refactored `DualEntitySession` to `InteractionSession` — session management is now interaction-scoped instead of entity-pair-scoped
+  - `InteractionSession` interface: interactionId, interaction, participantIds, ownEntityId, per-connection status tracking
+  - Events keyed by `interactionId` instead of `partnerEntityId`: `session:started`, `session:stopped`, `message:received`, etc.
+  - Supports N participants per session (world/private/group scopes)
+  - Navigation adapted to use `interactionId` for session lookup
 
 #### Fixed
+- Fixed audio messages loading incorrect audio data after reconnection
+  - All audio bubbles now load their own audio only when explicitly tapped for playback
+  - Eliminates race condition where concurrent mount-time preloads corrupted the shared audio queue
+- Audio message duration is now correctly shown before playback begins
+  - Duration is automatically detected from the audio data and stored when messages are received
 - Fixed crash when attempting to record audio messages without microphone permission
 - Added proper runtime permission handling for audio recording on Android
 - Improved user feedback when microphone permission is denied
@@ -42,8 +96,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added transcription timeout detection (30-second timeout) with visual feedback
 - Added retry button for failed audio transcriptions
 - Automatic cleanup of pending transcriptions when session disconnects
+- Chat list UI fixes for edge cases with interaction-based rendering
+- Message ID handling consistency across send and receive flows
+- Cleanup of deprecated methods from previous session management approach
 
-### Harmony Link Integration
+### Harmony Link Integration & Device Sync
 
 #### Added
 - Device pairing system with Harmony Link backend
@@ -62,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Sync characters from Harmony Link
   - Sync messages and conversation history
   - Sync module and provider configurations
+  - Sync interactions and emoji actions over WebSocket pipeline
   - Manual sync trigger with progress tracking
 - Connection status monitoring
   - Visual connection indicators
@@ -72,7 +130,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Unpair device option
   - Clear all pairing data and credentials
 
-### Theming & Personalization
+### User Interface & Experience
 
 #### Added
 - Dynamic theming system with instant switching
@@ -94,115 +152,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Delete custom themes (built-in themes protected)
   - Theme preview cards with color swatches
 - Theme persistence across app restarts
+- Bottom navigation with tabs (Chats, Characters)
+- Hamburger menu (settings) accessible from all main screens
+- Settings screens (Appearance & Theme, Data Synchronization, Connection Setup, Theme Editor)
+- Chat interface components
+  - Message bubbles with sender differentiation and character avatars
+  - Timestamp display with smart formatting (today/yesterday/date)
+  - Scrollable message history
+  - Keyboard-aware input area
+  - Connection status indicator in header
+- Empty state messages with helpful prompts and visual icons
+- Styled entity context menu in chat screen (⋮ button)
+  - Custom Modal with LinearGradient background, prismatic tint, accent stripe
+  - Icon badge rows with chevron-right — matching SettingsMenu visual language
+- Top bar headers on previously unheadered screens (ThemeSettings, ConnectionSetup, SyncSettings)
+- Tappable settings cards for Connection and Sync with chevron-right hints
+- Pull-to-refresh on chat list
+- Real-time message updates without manual refresh
+- Toast notifications for connection status, sync completion, message confirmations, errors
+- Loading indicators (database initialization, message loading, sync progress)
+- Offline awareness with clear indication and "Connect Now" prompts
+- Smart time formatting ("Just now", "Yesterday", day names, dates)
+- Safe area bottom insets applied to all scrollable screens for Android system navigation bar support
+  - ChatInput, CharacterProfileEditScreen, CharactersScreen, ChatListScreen, CreateAIScreen
+  - EntityConfigEditScreen, EntityConfigScreen, LandingScreen, SettingsScreen, ModuleConfigEditScreen
 
-### Data Storage & Security
+#### Changed
+- "Reset Security Mode" button moved from SyncSettingsScreen to ConnectionSetupScreen
+  - Button now appears alongside other connection management actions (Connect & Pair, Reconnect, Unpair Device)
+  - Security mode display row remains in SyncSettingsScreen
+
+### Data Management & Configuration
 
 #### Added
 - Encrypted local database with SQLCipher
   - 256-bit encryption for all stored data
   - Secure key storage via device keychain
   - Hardware-backed encryption when available
-- Character profile storage
-  - Character names, personalities, and attributes
-  - Character avatars with image support
-  - Character card fields (creator, version, tags)
-- Message persistence
-  - Complete chat history storage
-  - Audio data embedded in messages
-  - Image messages with BLOB storage
-  - Message metadata (timestamps, sender info)
-- Settings and preferences storage
-  - Connection credentials (encrypted)
-  - Theme preferences
-  - Per-chat entity preferences
-  - Last sync timestamps
-
-### Entity Configuration
-
-#### Added
+- Character profile storage (names, personalities, attributes, avatars, card fields)
+- Message persistence (complete chat history, audio/image data embedded, metadata)
+- Settings and preferences storage (encrypted credentials, themes, entity preferences, sync timestamps)
 - Modular config infrastructure mirroring Harmony Link web frontend
-  - `providerFieldSchemas.ts` — schema-driven field definitions for all provider types (OpenAI, OpenAI Compatible, OpenRouter, ElevenLabs, Kindroid, etc.)
+  - `providerFieldSchemas.ts` — schema-driven field definitions for all provider types
   - `moduleConfiguration.ts` — module type definitions, provider options per module, and MODULES/PROVIDERS constants
   - `moduleDefaults.ts` — PROVIDER_DEFAULTS and MODULE_DEFAULTS for form initialization
   - `configHelpers.ts` — utility functions for provider field resolution
 - Module config editor screen (`ModuleConfigEditScreen`) with inline provider config editing
   - Provider type selector chips with dynamic form field rendering
   - Dual-slot support: standard modules (single "provider" slot) and STT (dual "transcription"/"vad" slots)
-  - Advanced Sampling Parameters for OpenAI-family providers (OPENAI_FAMILY: openai, openaicompatible, openrouter)
+  - Advanced Sampling Parameters for OpenAI-family providers
   - Provider config auto-created/updated during module config save via `saveProviderConfig()`
 - Entity config integration with edit/create buttons on module selectors
   - `EntityModuleSelectorWithActions` wrapper component with ✏️ and ＋ buttons
-  - Navigation: EntityConfigEditScreen → ModuleConfigEditScreen → inline provider fields
-- DB schema sync — migration 021: added `sampling_preset_name` and `extra_params` columns to module config tables
-- Updated database models, migrations registry, and provider repository layer for new columns
-
-### User Interface
-
-#### Added
-- Styled entity context menu in chat screen (⋮ button)
-  - Custom Modal with LinearGradient background, prismatic tint, accent stripe
-  - Icon badge rows with chevron-right — matching SettingsMenu visual language
-  - Full theme integration (accent colors, background elevated/surface, border, text muted, status error)
-- Top bar headers on previously unheadered screens
-  - ThemeSettingsScreen: "Appearance & Theme" header
-  - ConnectionSetupScreen: "Connection Setup" header (removed inline title from scroll content)
-  - SyncSettingsScreen: "Data Synchronization" header (removed inline title from scroll content)
-- Tappable settings cards for Connection and Sync
-  - Entire ThemedCard wrapped in TouchableOpacity for navigation
-  - Subtle bottom row with muted label + chevron-right hint matching SettingsLinkRow pattern
-  - Removed large outline buttons from Connection/Sync cards
-
-#### Changed
-- "Reset Security Mode" button moved from SyncSettingsScreen to ConnectionSetupScreen
-  - Button now appears alongside other connection management actions (Connect & Pair, Reconnect, Unpair Device)
-  - Security mode display row remains in SyncSettingsScreen
-  - Button uses `variant="outline"` with consistent margin styling
-
-#### Added
-- Bottom navigation with tabs
-  - Chats tab (conversation list)
-  - Characters tab (placeholder for future features)
-- Hamburger menu (settings) accessible from all main screens
-- Settings screens
-  - Appearance & Theme settings
-  - Data Synchronization settings
-  - Connection Setup screen
-  - Theme Editor screen
-- Chat interface
-  - Message bubbles with sender differentiation
-  - Character avatars in messages
-  - Timestamp display with smart formatting (today/yesterday/date)
-  - Scrollable message history
-  - Keyboard-aware input area
-  - Connection status indicator in header
-- Empty state messages
-  - Helpful prompts when no conversations exist
-  - Connection guidance when not paired
-  - Visual icons for better user guidance
-
-### User Experience
-
-#### Added
-- Pull-to-refresh on chat list
-- Real-time message updates without manual refresh
-- Toast notifications for important events
-  - Connection status changes
-  - Sync completion
-  - Message send confirmations
-  - Error notifications
-- Loading indicators
-  - Database initialization screen
-  - Message loading spinners
-  - Sync progress display with record counts
-- Offline awareness
-  - Clear indication when not connected
-  - Graceful degradation of features requiring connection
-  - "Connect Now" prompts with direct navigation
-- Smart time formatting
-  - "Just now" for recent messages
-  - "Yesterday" for previous day
-  - Day names for last week
-  - Dates for older messages
+- DB schema sync — migration 021: `sampling_preset_name` and `extra_params` columns
+- Comprehensive type definitions for emoji system (`src/types/emoji.ts`)
+- Database migrations for emoji actions (022–023) and interactions (024–028)
 
 ## Initial Bootstrap
 
