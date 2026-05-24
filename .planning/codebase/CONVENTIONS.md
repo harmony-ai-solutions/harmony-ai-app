@@ -1,28 +1,34 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-03-05
+**Analysis Date:** 2026-05-24
 
 ## Naming Patterns
 
 **Files:**
-- Components: PascalCase (e.g., `ChatBubble.tsx`, `ThemedButton.tsx`)
-- Services: PascalCase with Service suffix (e.g., `SyncService.ts`, `AudioPlayer.ts`)
-- Repositories: PascalCase (e.g., `characters.ts`, `entities.ts`)
-- Utilities: camelCase (e.g., `base64.ts`, `connection.ts`)
+- Components: PascalCase (e.g., `ChatBubble.tsx`, `ThemedButton.tsx`, `EmojiAwareText.tsx`)
+- Services: PascalCase with Service suffix (e.g., `SyncService.ts`, `EntitySessionService.ts`, `EntityEmojiActionService.ts`)
+- Services without Service suffix: PascalCase (e.g., `AudioPlayer.ts`, `EmojiService.ts`)
+- Repositories: PascalCase (e.g., `characters.ts`, `entities.ts`, `interactions.ts`, `emoji_actions.ts`)
+- Utilities: camelCase (e.g., `base64.ts`, `connection.ts`, `emojiSprite.ts`)
 - Types: PascalCase (e.g., `types.d.ts`)
-- Tests: `.test.ts` or `.test.tsx` suffix (e.g., `SyncService.test.ts`)
+- Tests: `.test.ts` or `.test.tsx` suffix (e.g., `SyncService.test.ts`, `memories.test.ts`)
+- Migrations: Zero-padded numeric prefix (e.g., `000024_create_interactions_table.ts`)
 
 **Functions:**
-- camelCase (e.g., `createCharacterProfile`, `getDatabase`)
-- Async functions: Prefix with action verb (e.g., `createX`, `getX`, `updateX`, `deleteX`)
+- camelCase (e.g., `createCharacterProfile`, `getDatabase`, `initiateSync`)
+- Async functions: Prefix with action verb (e.g., `createX`, `getX`, `updateX`, `deleteX`, `startX`, `stopX`)
+- Repository functions: Exported directly as named functions from module
 
 **Variables:**
-- camelCase (e.g., `currentSession`, `syncPhase`)
+- camelCase (e.g., `currentSession`, `syncPhase`, `interactionId`)
 - Private class properties: Prefix with underscore (e.g., `_instance`, `_connectionManager`)
+- Private class properties also used without underscore in newer code: `this.connectionManager`, `this.sessions` (Map type)
 
 **Types/Interfaces:**
-- PascalCase (e.g., `SyncServiceEvents`, `CharacterProfile`, `ChatBubbleProps`)
-- Event interfaces: Suffix with `Events` (e.g., `SyncServiceEvents`)
+- PascalCase (e.g., `SyncServiceEvents`, `CharacterProfile`, `ChatBubbleProps`, `InteractionSession`, `EntitySession`)
+- Event interfaces: Suffix with `Events` (e.g., `SyncServiceEvents`, `EntitySessionEvents`, `ConnectionManagerEvents`)
+- Props interfaces: Suffix with `Props` (e.g., `ChatBubbleProps`, `ThemedButtonProps`)
+- Context types: Suffix with `Type` or `ContextType` (e.g., `EntitySessionContextType`)
 
 ## Code Style
 
@@ -38,30 +44,50 @@
 - Config: `.eslintrc.js` extends `@react-native` preset
 
 **TypeScript:**
-- Strict mode enabled via `@react-native/typescript-config`
+- Strict mode enabled via `@react-native/typescript-config` (v0.83.1)
 - Version: 5.8.3
+- `"types": ["jest"]` in `tsconfig.json` for test type support
 
 ## Import Organization
 
 **Order:**
-1. React imports (`import React from 'react'`)
-2. React Native imports (`import { StyleSheet, View } from 'react-native'`)
-3. Third-party library imports (`import { Avatar, IconButton } from 'react-native-paper'`)
-4. Relative imports from same package (`../components/...`, `./services/...`)
-
-**Example from** [`src/components/chat/ChatBubble.tsx`](src/components/chat/ChatBubble.tsx:1):
-```typescript
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator } from 'react-native';
-import { Avatar, IconButton, Menu } from 'react-native-paper';
-import { ThemedText } from '../themed/ThemedText';
-import AudioPlayer from '../../services/AudioPlayer';
-import { Theme } from '../../theme/types';
-import { ConversationMessage } from '../../database/models';
-```
+1. Standard library / Node modules (e.g., `import http from 'http'`)
+2. Third-party library imports (e.g., `import EventEmitter from 'eventemitter3'`, `import { Avatar, IconButton } from 'react-native-paper'`)
+3. React imports (`import React from 'react'`)
+4. React Native imports (`import { StyleSheet, View } from 'react-native'`)
+5. Relative imports from same package (`../components/...`, `./services/...`, `../../database/models`)
 
 **Path Aliases:**
 - Not detected - all imports use relative paths
+
+**Specific import patterns:**
+- Database repository imports use namespace import: `import * as characters from '../repositories/characters'`
+- Service imports use default export of singleton: `import EntitySessionService from '../../services/EntitySessionService'`
+- Type-only imports for interfaces: `import type { ConnectionManager } from './connection/ConnectionManager'`
+
+## Event System
+
+**Library:** `eventemitter3` (v5.0.1) - replaces Node.js EventEmitter
+
+**Pattern:**
+```typescript
+import EventEmitter from 'eventemitter3';
+
+interface ServiceEvents {
+  'event:name': (param1: string, param2: any) => void;
+}
+
+export class MyService extends EventEmitter<ServiceEvents> {
+  // ...
+  private constructor() {
+    super();
+  }
+}
+```
+
+**Used by:** All major services - `SyncService`, `EntitySessionService`, `ConnectionStateManager`, `ConnectionManager`, `BaseWebSocketConnection`
+
+**Event naming convention:** `domain:action` (colon-separated, e.g., `'sync:started'`, `'session:started'`, `'message:received'`)
 
 ## Error Handling
 
@@ -70,14 +96,7 @@ import { ConversationMessage } from '../../database/models';
 - Return `null` for not-found cases (e.g., `getCharacterProfile` returns `Promise<CharacterProfile | null>`)
 - Emit error events for service-level failures (e.g., `this.emit('sync:error', error)`)
 - Log errors with contextual information using logger utility
-
-**Example from** [`src/services/SyncService.ts`](src/services/SyncService.ts:82):
-```typescript
-private routeSyncEvent(data: any) {
-  log.info(`Received sync event: ${data.event_type} status: ${data.status}`);
-  // ...
-}
-```
+- Use `InstanceType<typeof setTimeout>` for timeout return types (e.g., `ReturnType<typeof setTimeout>`)
 
 ## Logging
 
@@ -86,10 +105,16 @@ private routeSyncEvent(data: any) {
 **Pattern:** Create logger with context tag
 ```typescript
 import { createLogger } from '../utils/logger';
-const log = createLogger('[SyncService]');
+const log = createLogger('[ServiceName]');
 ```
 
 **Log levels:** `log.info()`, `log.debug()`, `log.warn()`, `log.error()`
+
+**Configuration** (in `src/utils/logger.ts`):
+- Development (`__DEV__`): All levels enabled (debug, info, warn, error)
+- Production: Only ERROR level
+- Error objects automatically stringified with stack traces
+- Timestamps shown in dev only
 
 ## Comments
 
@@ -97,20 +122,8 @@ const log = createLogger('[SyncService]');
 - JSDoc for public API functions (exported functions)
 - Inline comments for complex logic or protocol-specific behavior
 - TODO/FIXME comments for technical debt
-
-**JSDoc Usage:**
-- Used for exported functions in repositories and services
-- Includes description and parameter types
-
-**Example from** [`src/database/repositories/characters.ts`](src/database/repositories/characters.ts:19):
-```typescript
-/**
- * Create a new character profile
- */
-export async function createCharacterProfile(
-  profile: Omit<CharacterProfile, 'created_at' | 'updated_at' | 'deleted_at'>
-): Promise<CharacterProfile> {
-```
+- Section comments with visual separators: `// ============================================================================`
+- Design doc references: `// Per D-03/D-32/D-35:` style comments referencing design documents
 
 ## Function Design
 
@@ -127,12 +140,17 @@ export async function createCharacterProfile(
 - Return `null` for not-found cases
 - Return arrays for collection queries
 
+**Private methods:**
+- Prefix private methods with `private` keyword (TypeScript)
+- Helper methods organized under `// ---- Internal helpers ----` section comments
+
 ## Module Design
 
 **Exports:**
 - Named exports for functions and types
-- Singleton pattern for services (e.g., `SyncService.getInstance()`)
-- Repository functions exported directly
+- Singleton pattern for services via `getInstance()` static method
+- Repository functions exported directly as named exports
+- Some services export both the class AND a default singleton instance (e.g., `EntityEmojiActionService`)
 
 **Barrel Files:**
 - Use `index.ts` for re-exporting (e.g., `src/database/index.ts`)
@@ -140,53 +158,35 @@ export async function createCharacterProfile(
 **Class-based Services:**
 - Singleton pattern with private constructor
 - Static `getInstance()` method
-- Extend EventEmitter for event-driven communication
+- Extend `EventEmitter` from `eventemitter3` for event-driven communication
 
-**Example from** [`src/services/SyncService.ts`](src/services/SyncService.ts:37):
-```typescript
-export class SyncService extends EventEmitter<SyncServiceEvents> {
-  private static instance: SyncService;
-  
-  private constructor() {
-    super();
-    // ...
-  }
-
-  static getInstance(): SyncService {
-    if (!SyncService.instance) {
-      SyncService.instance = new SyncService();
-    }
-    return SyncService.instance;
-  }
-}
-```
+**Alternative module pattern:**
+- Function-based modules with named exports (e.g., `src/database/repositories/`, `src/utils/`)
+- No class wrapper - exports are standalone async functions
 
 ## Component Patterns
 
 **React Components:**
 - Functional components with TypeScript
-- Use `React.FC<Props>` type for component definition
+- Use `React.FC<Props>` type for component definition (preferred)
 - Destructure props in function signature
 - Default values for optional props
 
-**Example from** [`src/components/chat/ChatBubble.tsx`](src/components/chat/ChatBubble.tsx:27):
-```typescript
-export const ChatBubble: React.FC<ChatBubbleProps> = ({
-  message,
-  isOwn,
-  isLastMessage = false,
-  isTranscriptionFailed = false,
-  partnerAvatar,
-  partnerName = 'AI',
-  // ...
-  theme,
-}) => {
-```
+**Theming:**
+- Use `useAppTheme()` hook from `ThemeContext` (e.g., `const { theme } = useAppTheme()`)
+- Components reference `theme` object for colors, spacing, typography
+- Themed wrapper components in `src/components/themed/` (e.g., `ThemedText`, `ThemedButton`, `ThemedCard`, `ThemedView`, `ThemedGradient`)
 
 **Hooks:**
 - Use built-in hooks (`useState`, `useEffect`, `useRef`, `useCallback`)
 - Custom hooks for reusable logic (e.g., contexts in `src/contexts/`)
 
+**Context Pattern:**
+- Create context with `createContext<Type | undefined>(undefined)`
+- Provider component as `export const XProvider: React.FC<Props>`
+- Consumer hook as `export function useX(): XType`
+- Hook throws if used outside provider: `if (!context) throw new Error(...)`
+
 ---
 
-*Convention analysis: 2026-03-05*
+*Convention analysis: 2026-05-24*

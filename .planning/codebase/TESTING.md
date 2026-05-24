@@ -1,6 +1,6 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-03-05
+**Analysis Date:** 2026-05-24
 
 ## Test Framework
 
@@ -10,20 +10,28 @@
 - Preset: `react-native`
 
 **Assertion Library:**
-- Jest built-in expect
+- Jest built-in `expect`
 
 **Run Commands:**
 ```bash
-npm test                    # Run all tests
+npm test                    # Run all Jest tests
 npm test -- --watch         # Watch mode
-npm test -- --coverage      # Coverage (if configured)
 ```
+
+**Additional Test Runners:**
+- `run-db-tests.js`: Standalone Node.js script for database integration tests (runs via `node run-db-tests.js`)
+- Database tests execute against a REAL SQLite database (not mocked)
+
+**E2E (scaffolded but not active):**
+- Appium MCP-based E2E test scaffolding was added (commit `23e8eb4`) with basic connection test
+- Directory `e2e/` not present in current working tree
+- Pattern used: `describe`/`it` with Jest in `e2e/appium/tests/basic-connection.test.ts`
 
 ## Test File Organization
 
 **Location:**
-- Co-located with source in `__tests__/` directory for integration tests
-- Co-located with source in `src/database/__tests__/` for database tests
+- Root `__tests__/` directory for app-level integration tests (Jest)
+- `src/database/__tests__/` for database repository tests (standalone runner)
 
 **Naming:**
 - `.test.ts` for unit/integration tests
@@ -32,272 +40,234 @@ npm test -- --coverage      # Coverage (if configured)
 **Structure:**
 ```
 __tests__/
-├── App.test.tsx                    # Main app test
+├── App.test.tsx                    # Main app smoke test
 └── services/
-    └── SyncService.test.ts         # Service tests
+    └── SyncService.test.ts         # Service integration tests (631 lines)
 
 src/database/__tests__/
-├── characters.test.ts              # Repository tests
-├── entities.test.ts
-├── modules.test.ts
-├── providers.test.ts
-├── test-utils.ts                   # Test helpers
-└── run-all-tests.ts                # Test runner
+├── characters.test.ts              # Character repository tests (401 lines)
+├── entities.test.ts                # Entity repository tests (223 lines)
+├── modules.test.ts                 # Module repository tests (299 lines)
+├── providers.test.ts               # Provider repository tests (215 lines)
+├── memories.test.ts                # Memory cleanup tests (235 lines) - NEW
+├── test-utils.ts                   # Test helpers (TestResult, runTest, runTestWithCleanup)
+└── run-all-tests.ts                # Comprehensive test runner with summary output
 ```
+
+**Database test files last updated:**
+- `memories.test.ts`: April 2026
+- `characters.test.ts`: March 2026
+- `entities.test.ts`: March 2026
+- `modules.test.ts`: March 2026
+- `providers.test.ts`: January 2026
 
 ## Test Structure
 
-**Suite Organization:**
-- Use `test()` function for individual tests
+**Jest Tests (Root `__tests__/`):**
 - Use `describe()` for grouping related tests
+- Use `test()` or `it()` for individual tests
 - Async tests with `async/await`
+- `beforeEach`/`afterEach` for setup/teardown
 
-**Patterns:**
+**Database Tests (`src/database/__tests__/`):**
+- NO Jest - custom test runner using exported async functions
+- Each test file exports a `runXTests(): Promise<TestResult[]>` function
+- Tests are named strings passed to `runTestWithCleanup()`
+- Use `console.log` for output (not Jest's test runner)
 
-**Simple Component Test** from [`__tests__/App.test.tsx`](__tests__/App.test.tsx:9):
+**Pattern for database tests:**
 ```typescript
-test('renders correctly', async () => {
-  await ReactTestRenderer.act(() => {
-    ReactTestRenderer.create(<App />);
-  });
-});
+export async function runEntityTests(): Promise<TestResult[]> {
+  const results: TestResult[] = [];
+  try {
+    await initializeDatabase(true);
+    await clearDatabaseData(true);
+
+    results.push(
+      await runTestWithCleanup('Create Entity', async () => {
+        const testEntityId = 'test-entity-' + Date.now();
+        const created = await entities.createEntity({ id: testEntityId, character_profile_id: null });
+        if (!created || created.id !== testEntityId) {
+          throw new Error('Entity creation failed or ID mismatch');
+        }
+      })
+    );
+    // ... more tests
+  } catch (error) {
+    console.error('Critical failure:', error);
+  }
+  return results;
+}
 ```
 
-**Service Integration Test** from [`__tests__/services/SyncService.test.ts`](__tests__/services/SyncService.test.ts:1):
-```typescript
-/**
- * SyncService Test Suite
- * 
- * Mirrors the synchronization_test.go test suite from Harmony Link
- * Tests the complete bidirectional sync protocol flow using mocks
- */
+## Database Test Utilities
 
-import { SyncService } from '../../src/services/SyncService';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+**File:** `src/database/__tests__/test-utils.ts`
 
-// Mock modules
-jest.mock('react-native-device-info', () => ({
-  getUniqueId: jest.fn(() => Promise.resolve('test-device-001')),
-  getDeviceName: jest.fn(() => Promise.resolve('Test Device')),
-}));
+- `TestResult` interface: `{ name: string; passed: boolean; error?: string; duration?: number }`
+- `runTest(name, fn)`: Wraps a test function, returns TestResult with timing
+- `runTestWithCleanup(name, fn)`: Same as runTest but always runs `clearDatabaseData(true)` after (even on failure)
 
-jest.mock('react-native', () => ({
-  Platform: {
-    OS: 'test',
-  },
-}));
-
-// Mock SyncHelpers
-jest.mock('../../src/database/sync');
-```
+**Test Runner:** `src/database/__tests__/run-all-tests.ts`
+- Orchestrates all database test suites in phases
+- Prints formatted output with ✅/❌ indicators and timing
+- Returns summary: "X tests | Y passed | Z failed"
+- Phases: Entities → Characters → Modules → Providers
 
 ## Mocking
 
 **Framework:** Jest
 
-**Patterns:**
+**Setup file:** `jest.setup.js` - Mocks for all React Native native modules:
+- `react-native-sqlite-storage`: Mock `openDatabase` with `executeSql` stub
+- `react-native-fs`: Mock file system operations
+- `react-native-keychain`: Mock credential storage
+- `@react-native-async-storage/async-storage`: Mock all storage methods
+- `@react-native-documents/picker`: Mock document picker
+- `react-native-paper`: Mock UI components as string mocks
+- `react-native-vector-icons/MaterialCommunityIcons`: Mock as 'Icon' string
+- `react-native-websocket-self-signed`: Mock WebSocket
+- `react-native/Libraries/Utilities/Platform`: Mock Platform.select
 
-**Mocking React Native Modules** from [`jest.setup.js`](jest.setup.js:1):
+**Patterns in SyncService test:**
 ```typescript
-// Mock react-native-sqlite-storage
-jest.mock('react-native-sqlite-storage', () => ({
-  enablePromise: jest.fn(),
-  DEBUG: jest.fn(),
-  openDatabase: jest.fn(() => Promise.resolve({
-    executeSql: jest.fn(() => Promise.resolve([{ rows: { length: 0, item: jest.fn() } }])),
-    transaction: jest.fn(),
-    close: jest.fn(() => Promise.resolve()),
-  })),
+// Jest module mocking
+jest.mock('react-native-device-info', () => ({
+  getUniqueId: jest.fn(() => Promise.resolve('test-device-001')),
 }));
 
-// Mock react-native-fs
-jest.mock('react-native-fs', () => ({
-  DocumentDirectoryPath: '/mock/documents',
-  mkdir: jest.fn(() => Promise.resolve()),
-  exists: jest.fn(() => Promise.resolve(false)),
-  unlink: jest.fn(() => Promise.resolve()),
-  readFile: jest.fn(() => Promise.resolve('')),
-  writeFile: jest.fn(() => Promise.resolve()),
-}));
+jest.mock('../../src/database/sync');
 
-// Mock react-native-keychain
-jest.mock('react-native-keychain', () => ({
-  ACCESSIBLE: {
-    WHEN_UNLOCKED: 'WhenUnlocked',
-  },
-  getGenericPassword: jest.fn(() => Promise.resolve(false)),
-  setGenericPassword: jest.fn(() => Promise.resolve()),
-  resetGenericPassword: jest.fn(() => Promise.resolve()),
-}));
-
-// Mock AsyncStorage
-jest.mock('@react-native-async-storage/async-storage', () => ({
-  getItem: jest.fn(() => Promise.resolve(null)),
-  setItem: jest.fn(() => Promise.resolve()),
-  removeItem: jest.fn(() => Promise.resolve()),
-  clear: jest.fn(() => Promise.resolve()),
-}));
-```
-
-**Mocking with Type Safety** from [`__tests__/services/SyncService.test.ts`](__tests__/services/SyncService.test.ts:30):
-```typescript
-// Import to get access to mocked functions
-import * as SyncHelpers from '../../src/database/sync';
-
-// Get the mocked functions
+// Type-safe mock function casting
 const mockGetChangedRecords = SyncHelpers.getChangedRecords as jest.MockedFunction<typeof SyncHelpers.getChangedRecords>;
-const mockApplySyncRecord = SyncHelpers.applySyncRecord as jest.MockedFunction<typeof SyncHelpers.applySyncRecord>;
-const mockToUnixTimestamp = SyncHelpers.toUnixTimestamp as jest.MockedFunction<typeof SyncHelpers.toUnixTimestamp>;
+
+// Inline mock class for complex scenarios (MockConnectionManager)
+class MockConnectionManager {
+  // Simulates full server behavior
+}
 ```
 
 **What to Mock:**
-- React Native native modules (sqlite, fs, keychain, etc.)
-- Third-party services (device-info, async-storage)
-- External APIs and network calls
+- React Native native modules
+- Database helpers in service tests
+- External APIs and connections
+- AsyncStorage in service/integration tests
 
 **What NOT to Mock:**
-- Business logic in pure TypeScript functions
-- Repository functions (tested with real database via test utilities)
+- Business logic in pure TypeScript
+- Repository functions in database tests (tested against real SQLite)
 
 ## Fixtures and Factories
 
-**Test Data:**
-- Inline test data creation in test functions
-- Use timestamps for unique IDs (e.g., `'test-profile-' + Date.now()`)
-
-**Location:**
-- Test utilities in [`src/database/__tests__/test-utils.ts`](src/database/__tests__/test-utils.ts:1)
-
-**Test Utilities** from [`src/database/__tests__/test-utils.ts`](src/database/__tests__/test-utils.ts:20):
-```typescript
-/**
- * Wrapper to run a test case and capture its result
- */
-export async function runTest(
-  name: string,
-  testFn: () => Promise<void>
-): Promise<TestResult> {
-  const startTime = Date.now();
-  try {
-    await testFn();
-    return {
-      name,
-      passed: true,
-      duration: Date.now() - startTime,
-    };
-  } catch (error) {
-    return {
-      name,
-      passed: false,
-      error: (error as Error).message || String(error),
-      duration: Date.now() - startTime,
-    };
-  }
-}
-
-/**
- * Wrapper to run a test case with automatic database cleanup
- */
-export async function runTestWithCleanup(
-  name: string,
-  testFn: () => Promise<void>
-): Promise<TestResult> {
-  const result = await runTest(name, testFn);
-
-  // Always cleanup after test, even if it failed
-  try {
-    await clearDatabaseData(true);
-  } catch (error) {
-    console.error(`[Test Cleanup] Failed to cleanup after "${name}":`, error);
-  }
-
-  return result;
-}
-```
+**Patterns observed:**
+- Inline test data creation in test functions using `Date.now()` for unique IDs
+- Test entities use prefix + timestamp pattern: `'test-entity-' + Date.now()`
+- Database tests create real records in SQLite, then verify them
+- Service tests use in-memory Maps to simulate database storage
 
 ## Coverage
 
 **Requirements:** Not explicitly enforced
-
-**View Coverage:** Not configured in current setup
+**View Coverage:** Not configured in current Jest setup (no `--coverage` flag in npm scripts)
 
 ## Test Types
 
 **Unit Tests:**
-- Test individual service methods with mocked dependencies
-- Example: [`__tests__/services/SyncService.test.ts`](__tests__/services/SyncService.test.ts) - 632 lines
+- `__tests__/services/SyncService.test.ts` (631 lines)
+- Tests individual service methods with mocked dependencies
+- Uses inline MockConnectionManager class to simulate full protocol flow
 
 **Integration Tests:**
-- Test database repositories with real SQLite database
-- Use test utilities for setup/teardown
-- Example: [`src/database/__tests__/characters.test.ts`](src/database/__tests__/characters.test.ts) - 409 lines
+- `src/database/__tests__/*.test.ts` - All 5 database test files
+- Test against real SQLite database with `initializeDatabase(true)` and `clearDatabaseData(true)`
+- Tests CRUD operations, CASCADE deletes, error handling edge cases
+- `memories.test.ts` tests orphaned memory cleanup with linked conversation messages
 
 **E2E Tests:**
-- Not detected in current codebase
+- Scaffolded via Appium MCP (commit `23e8eb4`) but directory not in current HEAD
+- Would use `describe`/`it` pattern with Jest and http module for connectivity checks
+- Not currently runnable
 
 ## Database Testing Pattern
 
-**Setup/Teardown** from [`src/database/__tests__/characters.test.ts`](src/database/__tests__/characters.test.ts:13):
+**Setup/Teardown with real SQLite:**
 ```typescript
+import { initializeDatabase, clearDatabaseData } from '../connection';
+import * as characters from '../repositories/characters';
+import { runTestWithCleanup, TestResult } from './test-utils';
+
 export async function runCharacterTests(): Promise<TestResult[]> {
   const results: TestResult[] = [];
-
   try {
-    console.log('[Test Setup] Initializing database...');
-    await initializeDatabase(true);
-    await clearDatabaseData(true);
+    await initializeDatabase(true);    // Fresh DB with migrations
+    await clearDatabaseData(true);     // Clean all data
 
-    // Test 1: Create Character Profile
     results.push(
       await runTestWithCleanup('Create Character Profile', async () => {
         const testProfileId = 'test-profile-' + Date.now();
         await characters.createCharacterProfile({
           id: testProfileId,
           name: 'Test Character',
-          description: 'A test character for database testing',
-          // ... more fields
+          // ... all fields
         });
+        // Verify by retrieving
+        const retrieved = await characters.getCharacterProfile(testProfileId);
+        if (!retrieved) throw new Error('Failed to create');
       })
     );
-    // ... more tests
+  } finally {
+    await clearDatabaseData(true);
   }
+  return results;
 }
 ```
 
 ## Common Patterns
 
-**Async Testing:**
+**Async Testing (Jest SyncService):**
 ```typescript
-test('async operation', async () => {
-  const result = await someAsyncFunction();
-  expect(result).toBe(expectedValue);
-});
+test('should sync data', async () => {
+  // Setup using Promises for event-based assertions
+  const syncCompleted = new Promise(resolve => syncService.on('sync:completed', resolve));
+  
+  await syncService.initiateSync();
+  await syncCompleted;
+  
+  // Assert
+  expect(characters.length).toBe(2);
+}, 10000); // Timeout of 10s for async operations
 ```
 
-**Error Testing:**
+**Error Testing (Jest):**
 ```typescript
-test('throws error', async () => {
-  await expect(async () => {
-    await failingFunction();
-  }).rejects.toThrow('Expected error message');
-});
+it('should handle sync data errors gracefully', async () => {
+  mockApplySyncRecord.mockRejectedValueOnce(new Error('Database error'));
+  
+  const syncCompleted = new Promise(resolve => syncService.on('sync:completed', resolve));
+  await syncService.initiateSync();
+  await syncCompleted;
+  
+  const errorConfirm = confirmEvents.find((e: any) => e.payload.status === 'ERROR');
+  expect(errorConfirm).toBeDefined();
+}, 10000);
 ```
 
-**Mocking Class Methods:**
+**Error Testing (Database, throw-based):**
 ```typescript
-class MockConnectionManager {
-  private eventHandlers: Map<string, Function> = new Map();
-  
-  on(event: string, handler: Function) {
-    this.eventHandlers.set(event, handler);
+// Tests expect functions to throw on invalid operations
+await runTestWithCleanup('Delete Non-existent Entity (Error Handling)', async () => {
+  try {
+    await entities.deleteEntity('non-existent-id');
+    throw new Error('Should have thrown error');
+  } catch (error) {
+    if ((error as Error).message === 'Should have thrown error') {
+      throw error; // Re-throw if no error was thrown
+    }
+    // Correctly threw - test passes
   }
-  
-  async sendEvent(connectionType: string, event: any) {
-    // Simulate server responses
-  }
-}
+});
 ```
 
 ---
 
-*Testing analysis: 2026-03-05*
+*Testing analysis: 2026-05-24*
