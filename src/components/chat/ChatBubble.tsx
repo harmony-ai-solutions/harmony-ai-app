@@ -38,15 +38,20 @@ const FormattedRPText: React.FC<{
   accentColor: string;
   textColor: string;
 }> = ({ content, isOwn, accentColor, textColor }) => {
-  // Parse shortcodes first
+  // Parse shortcodes first — converts :emoji: to native emoji characters
   const normalizedContent = EmojiService.parseShortcodes(content);
 
   const parts = normalizedContent.split(/(\*[^*]+\*)/g);
 
+  // When there's no action text, just render plain text through ThemedText's <Text> parent
   if (parts.length <= 1 && !normalizedContent.includes('*')) {
-    return <EmojiAwareText content={normalizedContent} fontSize={16} color={textColor} />;
+    return <>{normalizedContent}</>;
   }
 
+  // Render all segments as <Text> children so they flow inline.
+  // Emoji shortcodes are already resolved to native characters by parseShortcodes,
+  // so they display correctly as text glyphs inside the parent <Text> tree.
+  // This avoids React Native's invalid View-in-Text nesting that caused the overlap.
   return (
     <>
       {parts.map((part, index) => {
@@ -64,7 +69,7 @@ const FormattedRPText: React.FC<{
             </Text>
           );
         }
-        return <EmojiAwareText key={index} content={part} fontSize={16} color={textColor} />;
+        return <Text key={index}>{part}</Text>;
       })}
     </>
   );
