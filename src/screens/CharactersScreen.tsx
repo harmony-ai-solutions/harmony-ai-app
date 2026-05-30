@@ -20,6 +20,9 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[CharactersScreen]');
 import { CharacterProfileCard } from '../components/characters/CharacterProfileCard';
 import {
   getAllCharacterProfiles,
@@ -79,7 +82,7 @@ export const CharactersScreen: React.FC = () => {
       setPrimaryImages(imageMap);
       setImageCounts(countMap);
     } catch (err) {
-      console.error('Failed to load profiles:', err);
+      log.error('Failed to load profiles:', err);
     } finally {
       setIsLoading(false);
     }

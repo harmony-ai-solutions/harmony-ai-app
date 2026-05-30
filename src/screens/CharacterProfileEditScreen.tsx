@@ -34,6 +34,9 @@ import {
   setPrimaryImage,
 } from '../database/repositories/characters';
 import { CharacterImage } from '../database/models';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[CharacterProfileEditScreen]');
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = RouteProp<RootStackParamList, 'CharacterProfileEdit'>;
@@ -101,7 +104,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       const primary = imgs.find(img => img.is_primary === true);
       setPrimaryImageId(primary?.id ?? null);
     } catch (err) {
-      console.error('Failed to load profile:', err);
+      log.error('Failed to load profile:', err);
       Alert.alert('Error', 'Failed to load profile data.');
     } finally {
       setIsLoadingProfile(false);
@@ -175,7 +178,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       }
       navigation.goBack();
     } catch (err) {
-      console.error('Failed to save profile:', err);
+      log.error('Failed to save profile:', err);
       Alert.alert('Error', 'Failed to save profile. Please try again.');
     } finally {
       setIsSaving(false);
@@ -233,7 +236,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
         }
       }
     } catch (err) {
-      console.error('Failed to add image:', err);
+      log.error('Failed to add image:', err);
       Alert.alert('Error', 'Failed to add image.');
     }
   };
@@ -248,7 +251,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
         prev.map(img => ({ ...img, is_primary: img.id === imageId })),
       );
     } catch (err) {
-      console.error('Failed to set primary image:', err);
+      log.error('Failed to set primary image:', err);
       Alert.alert('Error', 'Failed to set primary image.');
     }
   };
@@ -268,7 +271,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
         }
       }
     } catch (err) {
-      console.error('Failed to delete image:', err);
+      log.error('Failed to delete image:', err);
       Alert.alert('Error', 'Failed to delete image.');
     }
   };

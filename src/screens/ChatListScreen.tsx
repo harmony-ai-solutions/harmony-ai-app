@@ -318,7 +318,7 @@ export const ChatListScreen: React.FC = () => {
 
       setChatList(listItems);
     } catch (error) {
-      console.error('Failed to load chat list:', error);
+      log.error('Failed to load chat list:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);

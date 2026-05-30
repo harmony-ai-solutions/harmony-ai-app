@@ -16,6 +16,9 @@ import { Appbar } from 'react-native-paper';
 import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('[ModuleConfigEditScreen]');
 
 import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
 import { ThemedCard } from '../../components/themed/ThemedCard';
@@ -249,7 +252,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
         }
       }
     } catch (error) {
-      console.error('Failed to load config:', error);
+      log.error('Failed to load config:', error);
     } finally {
       setLoading(false);
     }
@@ -328,7 +331,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
         return newId;
       }
     } catch (error) {
-      console.error(`Failed to save ${providerType} provider config:`, error);
+      log.error(`Failed to save ${providerType} provider config:`, error);
       throw error;
     }
   };
@@ -418,7 +421,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
       
       navigation.goBack();
     } catch (error) {
-      console.error('Failed to save:', error);
+      log.error('Failed to save:', error);
       Alert.alert('Error', 'Failed to save configuration');
     } finally {
       setSaving(false);

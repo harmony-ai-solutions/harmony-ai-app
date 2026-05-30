@@ -8,7 +8,9 @@ import { Theme } from '../../theme/types';
 import { ConversationMessage } from '../../database/models';
 import { EmojiAwareText } from '../emoji/EmojiAwareText';
 import EmojiService from '../../services/EmojiService';
+import { createLogger } from '../../utils/logger';
 
+const log = createLogger('[ChatBubble]');
 const { width: screenWidth } = Dimensions.get('window');
 
 interface ChatBubbleProps {
@@ -161,7 +163,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       } else {
         // Check if the correct audio is loaded
         if (!AudioPlayer.isMessageLoaded(message.id)) {
-          console.log(`Loading audio for message ${message.id} (current: ${AudioPlayer.getCurrentMessageId()})`);
+          log.debug(`Loading audio for message ${message.id} (current: ${AudioPlayer.getCurrentMessageId()})`);
           // Wrong audio is loaded, load the correct one
           await AudioPlayer.loadAudioForMessage(
             message.id,
@@ -177,7 +179,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 setAudioDuration(duration);
               }
             } catch (error) {
-              console.warn('Could not get duration:', error);
+              log.warn('Could not get duration:', error);
             }
           }, 300);
         }
@@ -195,7 +197,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         setIsPlaying(true);
       }
     } catch (error) {
-      console.error('Failed to toggle playback:', error);
+      log.error('Failed to toggle playback:', error);
       setIsPlaying(false);
     }
   };

@@ -33,6 +33,9 @@ import { SectionHeader } from '../components/themed/SectionHeader';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[EntityConfigEditScreen]');
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -149,7 +152,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
       setMovementConfigs(movement);
       setBackendConfigs(backend);
     } catch (err) {
-      console.error('Failed to reload module configs:', err);
+      log.error('Failed to reload module configs:', err);
     }
   };
 
@@ -253,7 +256,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
       setMovementConfigs(movement);
       setBackendConfigs(backend);
     } catch (err) {
-      console.error('Failed to load entity:', err);
+      log.error('Failed to load entity:', err);
     } finally {
       setIsLoading(false);
     }

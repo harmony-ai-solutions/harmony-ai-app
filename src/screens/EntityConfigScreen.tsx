@@ -18,6 +18,9 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[EntityConfigScreen]');
 import { EntityCard, EntityListItem } from '../components/entities/EntityCard';
 import {
   getAllEntities,
@@ -91,7 +94,7 @@ export const EntityConfigScreen: React.FC = () => {
       );
       setEntityItems(items);
     } catch (err) {
-      console.error('Failed to load entities:', err);
+      log.error('Failed to load entities:', err);
     } finally {
       setIsLoading(false);
     }

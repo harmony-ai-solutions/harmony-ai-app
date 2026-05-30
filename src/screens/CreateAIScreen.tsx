@@ -35,6 +35,9 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { v4 as uuidv4, v7 as uuidv7 } from 'uuid';
 import { deriveParticipantKey, deriveScopeFromParticipants } from '../database/repositories/interactions';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[CreateAIScreen]');
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -449,7 +452,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setAvatarMimeType(asset.type ?? 'image/jpeg');
       }
     } catch (err) {
-      console.error('Failed to pick avatar:', err);
+      log.error('Failed to pick avatar:', err);
     }
   };
 
@@ -504,9 +507,10 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       // 3. Create entity with alias = name
       await createEntity({
         id: entityId,
-        alias: '',
+        alias: name.trim(),
         character_profile_id: profileId,
         lifecycle_config: '{}',
+        rag_reindex_required: 1,
       });
 
       // 4. Create entity module mapping
