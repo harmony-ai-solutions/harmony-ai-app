@@ -36,6 +36,7 @@ import { migration025 } from './migrations/000025_drop_session_id';
 import { migration026 } from './migrations/000026_add_interaction_summary';
 import { migration027 } from './migrations/000027_interaction_memory_fields';
 import { migration028 } from './migrations/000028_add_presence_type';
+import { migration029 } from './migrations/000029_rag_reindex_flag';
 
 // Migration definition
 interface Migration {
@@ -187,8 +188,13 @@ const MIGRATIONS: Migration[] = [
     version: 28,
     description: 'add_presence_type',
     sql: migration028,
-  },
-];
+   },
+   {
+    version: 29,
+    description: 'rag_reindex_flag',
+    sql: migration029,
+   },
+  ];
 
 /**
  * Create the schema_migrations table if it doesn't exist

@@ -35,6 +35,7 @@ export interface Entity {
   alias: string; // Human-readable display name
   character_profile_id: string | null;
   lifecycle_config: string | null; // Opaque JSON blob
+  rag_reindex_required: number; // 0 or 1 flag for RAG vector store re-index
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;

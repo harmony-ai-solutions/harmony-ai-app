@@ -25,13 +25,14 @@ export async function createEntity(
     const now = new Date().toISOString();
 
     await tx.executeSql(
-      `INSERT INTO entities (id, alias, character_profile_id, lifecycle_config, created_at, updated_at) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO entities (id, alias, character_profile_id, lifecycle_config, rag_reindex_required, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         entity.id,
         entity.alias || '',
         entity.character_profile_id,
         entity.lifecycle_config ?? null,
+        entity.rag_reindex_required ?? 1,
         now,
         now,
       ],
@@ -72,6 +73,7 @@ export async function getEntity(
     alias: row.alias,
     character_profile_id: row.character_profile_id,
     lifecycle_config: row.lifecycle_config ?? null,
+    rag_reindex_required: row.rag_reindex_required ?? 1,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -101,6 +103,7 @@ export async function getAllEntities(
       alias: row.alias,
       character_profile_id: row.character_profile_id,
       lifecycle_config: row.lifecycle_config ?? null,
+      rag_reindex_required: row.rag_reindex_required ?? 1,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -127,13 +130,14 @@ export async function updateEntity(entity: Entity): Promise<Entity> {
     const now = new Date().toISOString();
 
     await tx.executeSql(
-      `UPDATE entities 
-       SET alias = ?, character_profile_id = ?, lifecycle_config = ?, updated_at = ? 
+      `UPDATE entities
+       SET alias = ?, character_profile_id = ?, lifecycle_config = ?, rag_reindex_required = ?, updated_at = ?
        WHERE id = ?`,
       [
         entity.alias || '',
         entity.character_profile_id,
         entity.lifecycle_config ?? null,
+        entity.rag_reindex_required ?? 1,
         now,
         entity.id,
       ],
@@ -154,7 +158,7 @@ export async function updateEntity(entity: Entity): Promise<Entity> {
 export async function updateEntityFields(
   id: string,
   fields: Partial<
-    Pick<Entity, 'character_profile_id' | 'alias' | 'lifecycle_config'>
+    Pick<Entity, 'character_profile_id' | 'alias' | 'lifecycle_config' | 'rag_reindex_required'>
   >,
 ): Promise<void> {
   const db = getDatabase();
@@ -174,6 +178,10 @@ export async function updateEntityFields(
   if ('lifecycle_config' in fields) {
     setClauses.push('lifecycle_config = ?');
     values.push(fields.lifecycle_config ?? null);
+  }
+  if ('rag_reindex_required' in fields) {
+    setClauses.push('rag_reindex_required = ?');
+    values.push(fields.rag_reindex_required ?? 1);
   }
 
   values.push(id);
