@@ -6,7 +6,7 @@ import * as SyncHelpers from '../database/sync';
 import ConnectionStateManager from './ConnectionStateManager';
 import connectionManagerInstance from './connection/ConnectionManager';
 import type { ConnectionManager } from './connection/ConnectionManager';
-import { getDatabase } from '../database/connection';
+import { getDatabase, getSyncDatabase } from '../database/connection';
 import { createLogger } from '../utils/logger';
 import EntityEmojiActionService from './EntityEmojiActionService';
 
@@ -380,7 +380,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       return;
     }
 
-    const db = getDatabase();
+    // Use the dedicated sync database connection so the heavy write-
+    // transaction does not block the main connection used by UI queries
+    // (ChatDetailScreen message loading, chat-list previews, etc.).
+    // WAL mode allows concurrent reads on the main connection.
+    const db = await getSyncDatabase();
     const recordCount = this.incomingDataBuffer.length;
 
     // Debug: Log the buffer contents

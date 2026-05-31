@@ -1309,7 +1309,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
       <KeyboardAvoidingView
         style={[styles.content, !isReadyToShow && styles.hidden]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <FlatList

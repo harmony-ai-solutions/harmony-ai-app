@@ -350,14 +350,16 @@ export const ConnectionSetupScreen: React.FC = () => {
         </ThemedText>
 
         <View style={styles.form}>
-          <ThemedText weight="medium">Harmony Link IP Address</ThemedText>
+          <ThemedText weight="medium">Harmony Link Address</ThemedText>
           <TextInput
             style={[styles.input, { color: theme.colors.text.primary }]}
             value={url}
             onChangeText={setUrl}
-            placeholder="e.g. 192.168.1.10"
+            placeholder="e.g. 192.168.1.10 or harmony-link.local"
             placeholderTextColor={theme.colors.text.muted}
-            keyboardType="numeric"
+            keyboardType="url"
+            autoCapitalize="none"
+            autoCorrect={false}
             editable={!isPaired}
           />
 

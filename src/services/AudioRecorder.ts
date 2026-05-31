@@ -17,6 +17,7 @@ export interface RecordingResult {
 
 export class AudioRecorder {
   private isRecording: boolean = false;
+  private isInitialized: boolean = false;
   private startTime: number = 0;
 
   /**
@@ -44,6 +45,14 @@ export class AudioRecorder {
    * Initialize audio recorder with options
    */
   async initialize(): Promise<void> {
+    // Skip re-initialization — calling AudioRecord.init() while the native
+    // module is in a non-clean state (e.g. from a previous failed or
+    // abandoned recording) can cause start() to fail silently or throw.
+    if (this.isInitialized) {
+      log.info('Audio recorder already initialized, skipping');
+      return;
+    }
+
     // Check permission before initializing
     const hasPermission = await this.checkPermission();
     if (!hasPermission) {
@@ -58,8 +67,16 @@ export class AudioRecorder {
       wavFile: 'temp_recording.wav'
     };
 
-    AudioRecord.init(options);
-    log.info('Audio recorder initialized');
+    try {
+      AudioRecord.init(options);
+      this.isInitialized = true;
+      log.info('Audio recorder initialized');
+    } catch (initError: any) {
+      // Reset state so a subsequent attempt will retry init
+      this.isInitialized = false;
+      log.error('AudioRecord.init() failed:', initError);
+      throw new Error(`Failed to initialize audio recorder: ${initError?.message || initError}`);
+    }
   }
 
   /**
@@ -76,10 +93,26 @@ export class AudioRecorder {
       throw new Error('RECORD_AUDIO permission is required to record audio');
     }
 
-    this.startTime = Date.now();
-    this.isRecording = true;
-    AudioRecord.start();
-    log.info('Recording started');
+    // Ensure the native module has been initialized before attempting to start
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    try {
+      this.startTime = Date.now();
+      AudioRecord.start();
+      this.isRecording = true;
+      log.info('Recording started');
+    } catch (startError: any) {
+      // CRITICAL: Do NOT leave isRecording = true when start fails.
+      // Previously, isRecording was set to true BEFORE start(), which meant
+      // a failed start permanently broke all subsequent recording attempts
+      // (every call hit the "Already recording" guard).
+      this.isRecording = false;
+      this.isInitialized = false; // Force re-init on next attempt
+      log.error('AudioRecord.start() failed:', startError);
+      throw new Error(`Failed to start recording: ${startError?.message || startError}`);
+    }
   }
 
   /**
@@ -90,29 +123,47 @@ export class AudioRecorder {
       throw new Error('Not recording');
     }
 
-    const audioFile = await AudioRecord.stop();
-    this.isRecording = false;
-    
-    const duration = (Date.now() - this.startTime) / 1000;
-    
-    // Read the WAV file using react-native-fs to read the file
-    const RNFS = require('react-native-fs');
-    const filePath = Platform.OS === 'android' 
-      ? audioFile 
-      : `${RNFS.DocumentDirectoryPath}/${audioFile}`;
-    
-    const fileContent = await RNFS.readFile(filePath, 'base64');
+    try {
+      const audioFile = await AudioRecord.stop();
+      this.isRecording = false;
 
-    // Clean up temp file
-    await RNFS.unlink(filePath);
+      const duration = (Date.now() - this.startTime) / 1000;
 
-    log.info(`Recording stopped. Duration: ${duration}s, Size: ${fileContent.length} chars (base64)`);
+      if (!audioFile) {
+        log.warn('AudioRecord.stop() returned empty path');
+        this.isInitialized = false; // Force re-init on next attempt
+        throw new Error('No audio file produced');
+      }
 
-    return {
-      data: fileContent,
-      mimeType: 'audio/wav',
-      duration
-    };
+      // Read the WAV file using react-native-fs to read the file
+      const RNFS = require('react-native-fs');
+      const filePath = Platform.OS === 'android'
+        ? audioFile
+        : `${RNFS.DocumentDirectoryPath}/${audioFile}`;
+
+      const fileContent = await RNFS.readFile(filePath, 'base64');
+
+      // Clean up temp file
+      try {
+        await RNFS.unlink(filePath);
+      } catch (unlinkError) {
+        log.warn('Failed to delete temp recording file:', unlinkError);
+      }
+
+      log.info(`Recording stopped. Duration: ${duration}s, Size: ${fileContent.length} chars (base64)`);
+
+      return {
+        data: fileContent,
+        mimeType: 'audio/wav',
+        duration
+      };
+    } catch (error: any) {
+      // Ensure clean state even on failure
+      this.isRecording = false;
+      this.isInitialized = false; // Force re-init on next attempt
+      log.error('stopRecording failed:', error);
+      throw error;
+    }
   }
 
   /**
