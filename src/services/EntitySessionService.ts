@@ -359,8 +359,12 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         pendingTranscriptions: new Map(),
       };
 
-      // Create WebSocket connections for ALL participants (N+1 per D-18)
-      for (const entityId of participantIds) {
+      // Create WebSocket connections for ALL participants in PARALLEL (N+1 per D-18).
+      // Previously this was a serial for-loop with await — each WS connection (TCP + TLS +
+      // WS handshake) had to complete before the next one started.  For a 2-participant chat
+      // that meant ~2-6 s of sequential network I/O.  Running all connections concurrently
+      // collapses total wall-clock time to the single slowest handshake.
+      await Promise.all(participantIds.map(async (entityId) => {
         const connectionId = `entity-${entityId}`;
         connections.set(entityId, {
           connectionId,
@@ -383,7 +387,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
         this.pendingSessions.set(entityId, entitySession);
 
-        // Create WebSocket connection
+        // Create WebSocket connection (TCP + TLS + WS handshake)
         await this.connectionManager.createConnection(
           connectionId,
           'entity',
@@ -414,7 +418,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         await this.connectionManager.sendEvent(connectionId, initEvent);
 
         log.info(`INIT_ENTITY sent for ${entityId}, waiting for backend response via events...`);
-      }
+      }));
 
       // Store the session (all connections in 'connecting' status)
       this.sessions.set(tempInteractionId, session);

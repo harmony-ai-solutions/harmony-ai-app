@@ -130,6 +130,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [showDivider, setShowDivider] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
   const [replyMode, setReplyMode] = useState<string>('realistic');
+  const replyModeRef = useRef<string>('realistic');
   const [isGroupChat, setIsGroupChat] = useState(false);
   const [headerName, setHeaderName] = useState<string>('Chat');
 
@@ -223,16 +224,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     resolveHeaderName();
   }, [ownEntityId, participantIds, isGroupChat, routeEntityName]);
 
-  // Load reply mode preference
+  // Load reply mode preference using participantKey (stable across navigation).
+  // routeInteractionId changes every visit (new canonical ID per session), so it
+  // cannot be used as a persistence key — the mode would be "forgotten" each time.
   useEffect(() => {
+    if (!participantKey) return;
     const loadReplyMode = async () => {
-      const savedMode = await ChatPreferencesService.getReplyMode(routeInteractionId);
-      if (savedMode) {
-        setReplyMode(savedMode);
-      }
+      const savedMode = await ChatPreferencesService.getReplyMode(participantKey);
+      const mode = savedMode || 'realistic';
+      setReplyMode(mode);
+      replyModeRef.current = mode;
     };
     loadReplyMode();
-  }, [routeInteractionId]);
+  }, [participantKey]);
 
   // Load messages and last-read timestamp
   useEffect(() => {
@@ -329,17 +333,20 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   useEffect(() => {
     let mounted = true;
 
-    if (!isConnected) {
+    if (!isConnected || !participantKey) {
       return;
     }
 
     const initializeSession = async () => {
       try {
         log.info(`Initializing interaction session for ${routeInteractionId}...`);
-        // Load reply mode right before starting session
-        const savedMode = await ChatPreferencesService.getReplyMode(routeInteractionId);
-        setReplyMode(savedMode || 'realistic');
-        await startInteractionSession(ownEntityId, participantIds, savedMode || 'realistic');
+        // Read reply mode fresh from storage to avoid race with loadReplyMode
+        // useEffect.  Uses participantKey (stable) — NOT routeInteractionId.
+        const savedMode = await ChatPreferencesService.getReplyMode(participantKey);
+        const mode = savedMode || 'realistic';
+        setReplyMode(mode);
+        replyModeRef.current = mode;
+        await startInteractionSession(ownEntityId, participantIds, mode);
       } catch (error: any) {
         if (!mounted) return;
 
@@ -366,7 +373,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => {
       mounted = false;
     };
-  }, [routeInteractionId, ownEntityId, participantIds, isConnected]);
+  }, [routeInteractionId, ownEntityId, participantIds, isConnected, participantKey]);
 
   // Listen for new messages and typing indicator
   useEffect(() => {
@@ -967,8 +974,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const newMode = replyMode === 'realistic' ? 'instant' : 'realistic';
     setReplyMode(newMode);
 
-    // Persist locally
-    await ChatPreferencesService.setReplyMode(routeInteractionId, newMode);
+    // Persist locally using participantKey (stable across navigations)
+    await ChatPreferencesService.setReplyMode(participantKey, newMode);
+    replyModeRef.current = newMode;
 
     // Send to Harmony Link if session is active
     if (isSessionActive(currentInteractionIdRef.current)) {
@@ -978,7 +986,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         log.error('Failed to send reply mode update:', error);
       }
     }
-  }, [replyMode, routeInteractionId, isSessionActive]);
+  }, [replyMode, participantKey, isSessionActive]);
 
   // Calculate messages with divider AND compute the initial scroll target
   const { messagesWithDivider, initialScrollTarget } = useMemo(() => {
