@@ -652,11 +652,18 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         log.info(`Found ${records.length} changes in ${table}`);
 
         // Filter out records that were received from the server this session
-        // These have updated_at set to current time (when applied) but should not be sent back
+        // These have updated_at set to current time (when applied) but should not be sent back.
+        // EXCEPTION: locally-deleted records must still be pushed so the server learns about
+        // the deletion, even if the server sent the record back during the pull phase (LWW
+        // would have kept the local version because its updated_at is newer).
         const pkField = (table === 'entity_module_mappings' || table === 'emotion_state') ? 'entity_id' : 'id';
         const filteredRecords = records.filter(record => {
           const recordKey = `${table}:${record[pkField]}`;
           if (this.serverRecordIds.has(recordKey)) {
+            if (record.deleted_at) {
+              log.debug(`Allowing locally-deleted server-received record through: ${recordKey}`);
+              return true;
+            }
             log.debug(`Excluding server-received record: ${recordKey}`);
             return false;
           }

@@ -384,21 +384,35 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           </View>
         )}
 
+        {isEditing && !isPendingSend && (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              onPress={handleEditCancel}
+              style={styles.actionButton}
+            >
+              <ThemedText variant="muted" size={12}>Cancel</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleEditSave}
+              style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
+            >
+              <ThemedText style={{ color: '#fff' }} size={12}>Save</ThemedText>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {isPendingSend && (
           <View style={styles.actionButtons}>
             {isEditing ? (
               <>
                 <TouchableOpacity
-                  onPress={() => {
-                    setEditedText(message.content || '');
-                    setIsEditing(false);
-                  }}
+                  onPress={handleEditCancel}
                   style={styles.actionButton}
                 >
                   <ThemedText variant="muted" size={12}>Cancel</ThemedText>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setIsEditing(false)}
+                  onPress={handleEditSave}
                   style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
                 >
                   <ThemedText style={{ color: '#fff' }} size={12}>Save</ThemedText>

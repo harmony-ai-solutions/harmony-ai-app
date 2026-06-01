@@ -846,14 +846,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             text: 'Edit & Resend',
             onPress: async () => {
               try {
-                await updateConversationMessage(messageId, {
-                  content: newText,
-                });
-
-                const message = await getConversationMessage(messageId);
-                if (!message) {
-                  throw new Error('Message not found');
-                }
+                // Soft-delete the original so only the replacement appears
+                await deleteConversationMessage(messageId);
 
                 await EntitySessionService.sendTextMessage(
                   currentInteractionIdRef.current,
