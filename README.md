@@ -2,6 +2,17 @@
 
 Open Source Android AI Chat Application - Your AI companions powered by your own backend or Harmony Cloud.
 
+## Downloads
+
+Pre-built binaries are available for tagged releases:
+
+| Platform | Download | Install Guide |
+|----------|----------|---------------|
+| Android | [Latest APK](https://download.soulbits.app/app/latest/harmony-ai-app-android.apk) | Enable "Install from unknown sources" → download → open |
+| iOS | [Latest IPA](https://download.soulbits.app/app/latest/harmony-ai-app-ios.ipa) | Requires sideloading via [Sideloadly](https://sideloadly.io/) or [AltStore](https://altstore.io/) |
+
+See [INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions.
+
 ## 🎯 Project Overview
 
 Harmony AI App is a React Native Android application that serves as a mobile frontend for the Harmony Link ecosystem. It provides:

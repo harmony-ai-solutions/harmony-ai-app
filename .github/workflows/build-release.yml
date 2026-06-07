@@ -1,0 +1,207 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number for the build'
+        default: 'v0.0.0-dev'
+
+jobs:
+  # ──────────────────────────────────────────────
+  # Job 1: Build Android APK
+  # ──────────────────────────────────────────────
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set VERSION variable
+        run: |
+          INPUTS_VERSION='${{ github.event.inputs.version }}'
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' && -n "${INPUTS_VERSION}" ]]; then
+            VERSION="${INPUTS_VERSION}"
+          else
+            VERSION="v0.0.0-dev"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Decode release keystore
+        run: |
+          echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+
+      - name: Build release APK
+        working-directory: android
+        env:
+          RELEASE_KEYSTORE_FILE: release.keystore
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          # Update versionName in build.gradle
+          sed -i "s/versionName \"[^\"]*\"/versionName \"${VERSION}\"/" app/build.gradle
+          ./gradlew assembleRelease
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_S3_UPLOAD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_S3_UPLOAD_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Upload APK to S3 (versioned)
+        run: |
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+          S3_PATH="s3://soulbits-releases/app/${VERSION}/harmony-ai-app-${VERSION}-android.apk"
+          echo "Uploading ${APK_PATH} to ${S3_PATH}"
+          aws s3 cp "${APK_PATH}" "${S3_PATH}"
+
+      - name: Update latest APK pointer
+        run: |
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+          LATEST_PATH="s3://soulbits-releases/app/latest/harmony-ai-app-android.apk"
+          echo "Updating latest pointer: ${LATEST_PATH}"
+          aws s3 cp "${APK_PATH}" "${LATEST_PATH}"
+
+      - name: Print download URLs
+        run: |
+          echo "✅ APK uploaded successfully!"
+          echo "📥 Versioned: https://download.soulbits.app/app/${VERSION}/harmony-ai-app-${VERSION}-android.apk"
+          echo "📥 Latest:    https://download.soulbits.app/app/latest/harmony-ai-app-android.apk"
+
+  # ──────────────────────────────────────────────
+  # Job 2: Build iOS IPA (unsigned, for sideloading)
+  # ──────────────────────────────────────────────
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install
+
+      - name: Set VERSION variable
+        run: |
+          INPUTS_VERSION='${{ github.event.inputs.version }}'
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' && -n "${INPUTS_VERSION}" ]]; then
+            VERSION="${INPUTS_VERSION}"
+          else
+            VERSION="v0.0.0-dev"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Build unsigned iOS app
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -workspace HarmonyAIChat.xcworkspace \
+            -scheme HarmonyAIChat \
+            -sdk iphoneos \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            -derivedDataPath build \
+            clean archive \
+            -archivePath build/HarmonyAIChat.xcarchive
+
+      - name: Package unsigned IPA
+        run: |
+          chmod +x scripts/package-ios-ipa.sh
+          ./scripts/package-ios-ipa.sh \
+            ios/build/HarmonyAIChat.xcarchive/Products/Applications/HarmonyAIChat.app \
+            harmony-ai-app-${VERSION}-ios.ipa
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_S3_UPLOAD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_S3_UPLOAD_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Upload IPA to S3 (versioned)
+        run: |
+          S3_PATH="s3://soulbits-releases/app/${VERSION}/harmony-ai-app-${VERSION}-ios.ipa"
+          echo "Uploading IPA to ${S3_PATH}"
+          aws s3 cp "harmony-ai-app-${VERSION}-ios.ipa" "${S3_PATH}"
+
+      - name: Update latest IPA pointer
+        run: |
+          LATEST_PATH="s3://soulbits-releases/app/latest/harmony-ai-app-ios.ipa"
+          echo "Updating latest pointer: ${LATEST_PATH}"
+          aws s3 cp "harmony-ai-app-${VERSION}-ios.ipa" "${LATEST_PATH}"
+
+      - name: Print download URLs
+        run: |
+          echo "✅ IPA uploaded successfully!"
+          echo "📥 Versioned: https://download.soulbits.app/app/${VERSION}/harmony-ai-app-${VERSION}-ios.ipa"
+          echo "📥 Latest:    https://download.soulbits.app/app/latest/harmony-ai-app-ios.ipa"
+
+  # ──────────────────────────────────────────────
+  # Job 3: Create GitHub Release with download links
+  # ──────────────────────────────────────────────
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-android, build-ios]
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Harmony AI App ${{ github.ref_name }}
+          body: |
+            ## Downloads
+
+            | Platform | Download |
+            |----------|----------|
+            | Android | [APK](https://download.soulbits.app/app/${{ github.ref_name }}/harmony-ai-app-${{ github.ref_name }}-android.apk) |
+            | iOS | [IPA](https://download.soulbits.app/app/${{ github.ref_name }}/harmony-ai-app-${{ github.ref_name }}-ios.ipa) |
+
+            **Latest builds** (always up-to-date): [Android APK](https://download.soulbits.app/app/latest/harmony-ai-app-android.apk) · [iOS IPA](https://download.soulbits.app/app/latest/harmony-ai-app-ios.ipa)
+
+            See [INSTALLATION.md](https://github.com/harmony-ai-solutions/harmony-ai-app/blob/main/docs/INSTALLATION.md) for installation instructions.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
