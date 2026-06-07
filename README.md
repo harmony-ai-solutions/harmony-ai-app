@@ -2,6 +2,17 @@
 
 Open Source Android AI Chat Application - Your AI companions powered by your own backend or Harmony Cloud.
 
+## Downloads
+
+Pre-built binaries are available for tagged releases:
+
+| Platform | Download | Install Guide |
+|----------|----------|---------------|
+| Android | [Latest APK](https://download.soulbits.app/app/latest/harmony-ai-app-android.apk) | Enable "Install from unknown sources" → download → open |
+| iOS | [Latest IPA](https://download.soulbits.app/app/latest/harmony-ai-app-ios.ipa) | Requires sideloading via [Sideloadly](https://sideloadly.io/) or [AltStore](https://altstore.io/) |
+
+See [INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions.
+
 ## 🎯 Project Overview
 
 Harmony AI App is a React Native Android application that serves as a mobile frontend for the Harmony Link ecosystem. It provides:
@@ -70,6 +81,40 @@ Contributions are welcome! This is an open-source project.
 Apache 2.0 License
 
 See LICENSE file for details.
+
+## 📋 Third-Party Licenses & Attribution
+
+This project uses the following third-party emoji assets:
+
+### Google Noto Emoji
+- **Source:** [googlefonts/noto-emoji](https://github.com/googlefonts/noto-emoji)
+- **License:** [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) (tools & images) / [SIL Open Font License 1.1](https://scripts.sil.org/OFL) (fonts)
+- **Copyright:** Google LLC
+- **Usage:** Emoji images used under the Apache 2.0 license. Fonts used under the SIL OFL 1.1 license.
+
+### Twemoji (Twitter Emoji)
+- **Source:** [jdecked/twemoji](https://github.com/jdecked/twemoji) (active community fork of [twitter/twemoji](https://github.com/twitter/twemoji))
+- **License:** [MIT License](https://opensource.org/licenses/MIT) (code) / [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) (graphics)
+- **Copyright:** Twitter, Inc and other contributors
+- **Usage:** Twemoji graphics are licensed under CC-BY 4.0, which requires attribution. This notice serves as that attribution.
+
+### Emoji Data
+- **Source:** [iamcal/emoji-data](https://github.com/iamcal/emoji-data)
+- **License:** [MIT License](https://opensource.org/licenses/MIT)
+- **Copyright:** Cal Henderson
+- **Usage:** Emoji metadata (names, categories, sprite sheet coordinates) used under the MIT license.
+
+### Emoji Mart
+- **Source:** [missive/emoji-mart](https://github.com/missive/emoji-mart)
+- **License:** [MIT License](https://opensource.org/licenses/MIT)
+- **Copyright:** Missive Inc.
+- **Usage:** Emoji search index and metadata used under the MIT license.
+
+### Emoji Regex
+- **Source:** [mathiasbynens/emoji-regex](https://github.com/mathiasbynens/emoji-regex)
+- **License:** [MIT License](https://opensource.org/licenses/MIT)
+- **Copyright:** Mathias Bynens
+- **Usage:** Unicode emoji detection regex used under the MIT license.
 
 ## 🔗 Links
 

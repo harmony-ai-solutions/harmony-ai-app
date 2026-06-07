@@ -138,8 +138,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           is_primary: true,
           display_order: 0,
           vl_model_interpretation: 'Test interpretation',
-          vl_model: 'test-model',
-          vl_model_embedding: null,
+          vl_model: 'test-model'
         });
       })
     );
@@ -169,8 +168,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           is_primary: true,
           display_order: 0,
           vl_model_interpretation: 'Test interpretation',
-          vl_model: 'test-model',
-          vl_model_embedding: null,
+          vl_model: 'test-model'
         });
         const retrieved = await characters.getCharacterImage(imageId);
         if (!retrieved) {
@@ -224,8 +222,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           is_primary: true,
           display_order: 0,
           vl_model_interpretation: 'Test interpretation',
-          vl_model: 'test-model',
-          vl_model_embedding: null,
+          vl_model: 'test-model'
         });
         const primary = await characters.getPrimaryImage(testProfileId);
         if (!primary) {
@@ -247,7 +244,6 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           description: 'Test',
           vl_model_interpretation: 'Test',
           vl_model: 'Test',
-          vl_model_embedding: null,
           created_at: new Date(),
           updated_at: new Date(),
         };
@@ -301,8 +297,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           mime_type: 'image/png',
           description: '',
           vl_model_interpretation: '',
-          vl_model: '',
-          vl_model_embedding: null,
+          vl_model: ''
         };
         const id1 = await characters.createCharacterImage({
           ...baseParams,
@@ -346,8 +341,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           display_order: 0,
           description: '',
           vl_model_interpretation: '',
-          vl_model: '',
-          vl_model_embedding: null,
+          vl_model: ''
         });
         await characters.deleteCharacterImage(id);
         const retrieved = await characters.getCharacterImage(id);
@@ -381,8 +375,7 @@ export async function runCharacterTests(): Promise<TestResult[]> {
           display_order: 0,
           description: '',
           vl_model_interpretation: '',
-          vl_model: '',
-          vl_model_embedding: null,
+          vl_model: ''
         });
         await characters.deleteCharacterProfile(testProfileId);
         const profile = await characters.getCharacterProfile(testProfileId);

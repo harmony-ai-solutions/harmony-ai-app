@@ -1,8 +1,8 @@
 # Harmony AI App Tech Context
 @Core: React Native 0.83.1, TypeScript, React Navigation (Native Stack), React Native Paper (MD3).
-@State: React Hooks (current), Context API (theme/auth), Redux/Zustand (future complex state).
-@Data: SQLite (messages/characters, future), AsyncStorage (settings, current), SQLCipher encryption, React Native Keychain (secure storage).
-@Network: Axios (REST), WebSocket (real-time), reconnection logic, retry with backoff.
+@State: React Hooks (current), Context API (theme/auth/emoji), Redux/Zustand (future complex state).
+@Data: SQLite (messages/characters/interactions/emoji_actions, future), AsyncStorage (settings/preferences/reply mode), SQLCipher encryption, React Native Keychain (secure storage).
+@Network: Axios (REST), WebSocket (real-time), reconnection logic, retry with backoff, session resume on reconnect.
 @Build: Metro Bundler, Gradle 8.13 (NOT 9.0+), Android SDK API 24-33, JDK 17.
 @Dev Tools: TypeScript compiler, ESLint, Prettier, Jest, React Native Debugger, hot reload.
 @Future Integrations:
@@ -10,9 +10,39 @@
 - Audio: React Native Voice (STT), React Native TTS
 - Media: Image Picker, Camera, FFmpeg
 - Services: FCM (push), biometric auth, cloud backup
-@APIs: Harmony Link REST (characters, config, messages, sync) + WebSocket (real-time messages, status, typing).
-@Performance: Lazy loading, image optimization, FlatList virtualization, memoization, code splitting.
+@APIs: Harmony Link REST (characters, config, messages, sync) + WebSocket (real-time messages, status, typing, emoji actions, interactions).
+@Performance: Lazy loading, image optimization, FlatList virtualization, memoization, code splitting, JOIN-based queries for chat list previews.
 @Security: EncryptedStorage, HTTPS, token auth, SSL pinning (consideration), no plaintext credentials.
 @Platforms: Android 7.0+ (API 24), target API 33.
 @Workflow: Local dev with Metro → emulator/ADB testing → release builds → Play Store (future).
-@Key Deps: react 19.2.0, react-native 0.83.1, @react-navigation/*  ^7.x, react-native-paper ^5.x, @react-native-async-storage/async-storage ^2.x, react-native-sqlite-storage ^6.x.
+@Key Deps: react 19.2.0, react-native 0.83.1, @react-navigation/*  ^7.x, react-native-paper ^5.x, @react-native-async-storage/async-storage ^2.x, react-native-sqlite-storage ^6.x, eventemitter3 ^5.x, uuid ^10.x, music-metadata v11, react-native-device-info.
+@ModularConfig:
+- App mirrors Harmony Link frontend's schema-driven provider configuration approach
+- providerFieldSchemas.ts: 15 provider schemas (openai, openaicompatible, openrouter, elevenlabs, kindroid, kajiwoto, characterai, harmonyspeech_stt/vad/tts, comfyui, tts_openai, rag_*, stt_openai/vad_openai, google, xai, anthropic). No module-specific schemas — one schema per provider, module-specific fields merged into main schemas with tooltips.
+- moduleConfiguration.ts: module type definitions, provider options per module (movement includes Google/xAI/Anthropic), MODULES/PROVIDERS constants
+- moduleDefaults.ts: PROVIDER_DEFAULTS and MODULE_DEFAULTS for form initialization (Google/xAI/Anthropic defaults: maxtokens 200)
+- configHelpers.ts: utility functions for provider field resolution
+- Inline provider config editing in ModuleConfigEditScreen (provider type chips + form fields)
+- Advanced Sampling Parameters component for OpenAI-family extended params
+- Dual-slot support: standard modules (single "provider" slot), STT (dual "transcription"/"vad" slots)
+- Model field unification: migration 000030, single `model` column per provider config table
+- Shared isProviderConfigInUse() helper with UNION ALL for existence checks
+@Phase09-LifecycleUI:
+- Harmony Link management UI adds Lifecycle Settings tab to character profile
+- Exposes lifecycle_config fields for per-entity autonomy configuration
+- Not directly synced to app (app receives emotion state via sync, not lifecycle config)
+- App's autonomy behavior controlled locally, not via Harmony Link lifecycle settings
+@Interactions:
+- DB: interactions table with entity_id, interaction_scope, participant_key, participant_ids, status, presence_type, summary, memory_id, continued_interaction_id
+- Migrations 24-28 sequentially applied: create_interactions, drop_session_id, add_summary, memory_lifecycle_fields, add_presence_type
+- Repository: interactions.ts with CRUD, participant key derivation, scope derivation, JOIN-based chat list queries
+- Participant key derivation: sorted entity ID pair join for private, sorted full set join for group, empty string for world
+- Chat list query pattern: JOIN conversation_messages + interactions for single-round-trip last message preview, two-phase TEXT column loading for large audio/image data
+@Emoji:
+- Emoji Sets: native (platform default), twemoji (Twitter 64px sprite), noto (Google 64px sprite) — bundled as PNG spritesheets in src/assets/emoji/sheets/
+- Emoji Data: Pre-built category-organized data (src/services/EmojiService.ts), keyword-based search, skin tone variants (5 modifiers)
+- DB: emoji_actions table (migrations 22-23) with per-entity emoji → action mappings, emotion_effects JSON column, cooldown_seconds, soft delete via deleted_at
+- Emotion model: Ekman8 base emotions (joy, sadness, trust, disgust, fear, anger, surprise, anticipation) with signed delta intensity (-5.0 to +5.0)
+- AdditionalEffects payload: { emotionEffects: EmotionEffect[] } — packaged per SEND_MESSAGE via EmojiService.resolveMessageActions()
+- EmojiAwareText: Segments text into emoji/text spans using regex; EmojiText renders with sprite caching
+- Context: EmojiContext (style preferences, set selection, skin tone), EmojiProvider wraps app root

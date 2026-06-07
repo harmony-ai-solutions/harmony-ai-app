@@ -11,6 +11,7 @@
 import SQLite, {SQLiteDatabase} from 'react-native-sqlite-storage';
 import RNFS from 'react-native-fs';
 import * as Keychain from 'react-native-keychain';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {runMigrations} from './migrations';
 import {createLogger} from '../utils/logger';
 
@@ -27,6 +28,12 @@ const ENCRYPTION_KEY_USERNAME = 'db_encryption_key';
 
 // Global database instance
 let db: SQLiteDatabase | null = null;
+
+// Secondary database connection used exclusively by the sync pipeline.
+// WAL mode (enabled in configureDatabase) allows concurrent reads on the
+// main connection while this one runs heavy write transactions — so
+// ChatDetailScreen message queries are never blocked by a sync.
+let syncDb: SQLiteDatabase | null = null;
 
 /**
  * Generate a cryptographically secure random encryption key
@@ -288,6 +295,17 @@ export async function wipeDatabaseCompletely(
       log.warn('Failed to clear encryption key (may not exist):', error);
     }
 
+    // Step 2b: Clear sync timestamp from AsyncStorage to allow full sync after wipe
+    // This ensures the app requests all data from Harmony Link instead of just changes since last sync
+    try {
+      await AsyncStorage.removeItem('last_sync_timestamp');
+      if (!silent) {
+        log.info('Cleared last_sync_timestamp from AsyncStorage');
+      }
+    } catch (error) {
+      log.warn('Failed to clear last_sync_timestamp:', error);
+    }
+
     // Step 3: Force a small delay to ensure SQLite releases all file handles
     await new Promise(resolve => setTimeout(() => resolve(undefined), 200));
 
@@ -354,4 +372,67 @@ export async function executeRawQuery(
   const database = getDatabase();
   const [results] = await database.executeSql(sql, params);
   return results;
+}
+
+/**
+ * Get a secondary database connection reserved for sync write-transactions.
+ *
+ * The main `getDatabase()` connection is used by all UI-facing reads (message
+ * loading, chat-list queries, etc.).  The sync pipeline's `applyBufferedSyncData`
+ * can hold a write-transaction for several seconds while applying hundreds of
+ * records.  Because the app uses a single shared connection, that transaction
+ * blocks every other `executeSql` call — including the queries that
+ * ChatDetailScreen needs to load messages on entry.
+ *
+ * Opening a *second* connection to the same encrypted database gives the sync
+ * pipeline its own transaction scope.  With WAL mode enabled
+ * (`PRAGMA journal_mode = WAL`, set in `configureDatabase`), SQLite allows
+ * concurrent reads on the main connection while this one writes — so the UI
+ * stays responsive even during a full sync.
+ *
+ * No migrations are run on this connection; they are guaranteed to have been
+ * applied already by the primary connection during `initializeDatabase()`.
+ */
+export async function getSyncDatabase(): Promise<SQLiteDatabase> {
+  if (syncDb) {
+    return syncDb;
+  }
+
+  if (!db) {
+    throw new Error(
+      'Main database not initialized. Call initializeDatabase() first.',
+    );
+  }
+
+  log.info('Opening secondary database connection for sync…');
+
+  const encryptionKey = await getOrCreateEncryptionKey();
+  syncDb = await SQLite.openDatabase({
+    name: DATABASE_NAME,
+    location: 'default',
+    key: encryptionKey,
+  });
+
+  // Apply the same PRAGMA settings (foreign keys, WAL, synchronous)
+  await configureDatabase(syncDb);
+
+  log.info('Sync database connection opened');
+  return syncDb;
+}
+
+/**
+ * Close the secondary sync database connection.
+ * Called during app shutdown alongside closeDatabase().
+ */
+export async function closeSyncDatabase(): Promise<void> {
+  if (syncDb) {
+    try {
+      await syncDb.close();
+      log.info('Sync database connection closed');
+      syncDb = null;
+    } catch (error) {
+      log.error('Failed to close sync database:', error);
+      syncDb = null;
+    }
+  }
 }

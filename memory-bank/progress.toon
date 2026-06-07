@@ -1,5 +1,5 @@
 # Harmony AI App Progress
-@Status: Bootstrap complete. Database layer complete with in-app test runner. Chat feature implementation complete. Connection resilience hardened. Ready for testing and refinement.
+@Status: Bootstrap complete. Database layer complete with in-app test runner. Chat feature implementation complete. Connection resilience hardened. Session resume, emoji features, interactions data layer, and UI adaptation complete. Provider expansion (xAI/Google/Anthropic) and model field unification complete. Working on vision/imagination module integration.
 @Completed:
 - Foundation: RN 0.83.1 + TypeScript, organized src/ structure, hot reload, ESLint, Prettier.
 - Navigation: React Navigation Native Stack, type-safe routing.
@@ -10,11 +10,13 @@
   - Module repository all 6 types (23 tests)
   - Provider repository all 11 types (32 tests)
   - Chat messages repository with pagination, bidirectional queries, base64 audio storage
+  - Interaction repository with CRUD, participant key derivation, JOIN-based queries
+  - Emoji actions repository (entity-level emoji action mappings)
   - 84+ total tests covering CRUD, CASCADE, transactions, base64 data handling
 - App Integration: DatabaseContext, loading screen, error recovery, theme integration.
 - Test Runner: DEV-only DatabaseTestScreen in Settings menu, real-time console, color-coded results, auto-hidden in production.
 - Sync Services: Multi-connection WebSocket architecture, ConnectionManager, SyncService, EntitySessionService, ConnectionStateManager.
-- Sync Screens: ConnectionSetupScreen (handshake-first flow), SyncSettingsScreen (status, manual sync).
+- Sync Screens: ConnectionSetupScreen (handshake-first flow), SyncSettingsScreen (status, manual sync, force full sync).
 - Documentation: Comprehensive README, deployment guides (emulator + ADB), troubleshooting, memory bank, Harmony Link integration guide (/docs/HARMONY-LINK-INTEGRATION.md with 5 detailed diagrams).
 - Phase 1: Chat Implementation Complete
   - Database: chat_messages table with TEXT columns for base64-encoded audio data
@@ -25,11 +27,11 @@
   - Native Dependencies: react-native-audio-record, react-native-track-player, react-native-fs, react-native-image-picker
   - Platform Setup: iOS permissions (NSMicrophoneUsageDescription), Android permissions (RECORD_AUDIO, READ/WRITE_EXTERNAL_STORAGE), runtime checks
   - Events: TYPING_INDICATOR, RECORDING_INDICATOR, CONNECTION_PING, CONNECTION_PONG, STT_INPUT_AUDIO, STT_OUTPUT_TEXT
-  - EntitySessionService: Dual session management, message sending (text/audio), STT async flow, heartbeat handling
-  - UI Screens: ChatListScreen (entity selection, conversation overview), ChatDetailScreen (messaging with QoL features)
-  - UI Components: ChatBubble (text/audio with context menu), ChatInput (tap-based voice recording), TypingIndicator, NewMessagesDivider
+  - EntitySessionService: InteractionSession management, message sending (text/audio), STT async flow, heartbeat handling, reply mode support
+  - UI Screens: ChatListScreen (entity selection, conversation overview via JOIN), ChatDetailScreen (messaging with QoL features, reply mode toggle)
+  - UI Components: ChatBubble (text/audio/emoji with context menu), ChatInput (tap-based voice recording, emoji autocomplete), TypingIndicator, NewMessagesDivider
   - Navigation: ChatDetail route with impersonatedEntityId for roleplay support
-  - QoL Features: Last message actions (delete/edit/regenerate), new messages tracking, mark-as-read, async transcription editing
+  - QoL Features: Last message actions (delete/edit/regenerate), new messages tracking, mark-as-read, async transcription editing, reply mode toggle
 - Phase 3: Audio Playback Bug Fix & Duration Enrichment
   - Root Cause Fixed: Removed `preloadAudio` useEffect from ChatBubble that caused a race condition where all audio bubbles simultaneously called `AudioPlayer.loadAudioForMessage()` on mount after reconnect, corrupting the singleton TrackPlayer queue.
   - AudioPlayer: Added static `getDurationFromBase64(base64Audio, mimeType)` using `music-metadata` v11 (replaced deprecated `music-metadata-browser`); parses audio duration from buffer without any TrackPlayer interaction.
@@ -43,10 +45,37 @@
   - SyncConnectionContext: Replaced reconnectTimeoutId React state with useRef; added isPairedRef/isConnectingRef/isReconnectingRef/isConnectedRef mirroring their state counterparts; all event handlers read from refs so closures are never stale. Single useEffect with empty deps [].
   - EntitySessionContext: Removed activeSessions.size from sync-drop effect deps; calls entitySessionService.closeAllSessions() directly (authoritative service map, not stale React state).
   - ChatDetailScreen: Split single "init + cleanup" useEffect into two effects: (1) unmount-only lifecycle effect (stops session on screen navigation); (2) isConnected-reactive init effect (restarts session on reconnect, no stopDualSession in cleanup). Eliminates double-stop race condition.
-@Building: Nothing (Phase 1 + reconnect hardening complete, ready for testing).
+- Safe Area Bottom Insets: Android system navigation bar safe area padding applied to all scrollable screens and ChatInput.
+- Session Resume: Sessions auto-resume on disconnect; dangling events reconciled with clients on reconnect.
+- Instant vs. Realistic Reply Times: Per-chat-partner reply mode toggle persisted via AsyncStorage; defaults to "realistic".
+- Emoji Features: Full emoji picker (native/Twemoji/Noto sets), EmojiAction system with Ekman8 emotion effects, entity-level action customization, DB migrations 22-23, emoji_actions repository, EmojiContext provider, emoji autocomplete in ChatInput, emoji-rich text rendering.
+- Interactions Data Layer: Interaction model (mirrors Go struct), interactions.repository (full CRUD, JOIN queries, participant key derivation), migrations 24-28 (interactions table, drop session_id, interaction summary, memory lifecycle fields, presence_type).
+- Session Refactor to InteractionSession: DualEntitySession replaced by InteractionSession; events keyed by interactionId (not partnerEntityId); supports N participants per session.
+- UI Adaptation: ChatListScreen and ChatDetailScreen adapted to InteractionSession model; JOIN-based queries for chat list previews.
+- Force Full DB Sync: Option in SyncSettingsScreen to trigger full re-synchronization.
+- Cleanup: Deprecated methods removed, review fixes applied, codebase map updated.
+- Provider Expansion + Model Unification (Complete): Full xAI/Google/Anthropic provider support, model field consolidation, dead code cleanup across app.
+  - Migration 000030: DB migration adds Google/xAI/Anthropic config tables; unifies model columns (`embedding_model`/`image_model`/`imagination_model` → `model`).
+  - providers.ts: 21 provider CRUD functions (15 providers). Restored + fixed after garbled state. Fixed `module_` prefixed table bug for 8 providers. Added xAI/Google/Anthropic CRUD functions.
+  - providerFieldSchemas.ts: 15 provider schemas. Module-specific fields merged into main provider schemas with tooltips. Dead module-specific schema keys removed.
+  - ModuleConfigEditScreen.tsx: PROVIDER_REPOSITORIES map + OPENAI_FAMILY array includes all 15 providers. Google/xAI/Anthropic import + config support.
+  - moduleConfiguration.ts: Movement providerOptions includes Google/xAI/Anthropic.
+  - moduleDefaults.ts: PROVIDER_DEFAULTS has all provider entries. Movement defaults for Google/xAI/Anthropic (maxtokens: 200).
+  - Unified `isInUse` to shared `isProviderConfigInUse()` helper — single UNION ALL query.
+@Building: Vision module integration, Imagination module integration, Emoji action backend pipeline.
 @Todo:
+- Vision Module: Complete integration with Harmony Link vision module for image understanding.
+- Imagination Module: Complete integration with Harmony Link imagination module for autonomous entity actions.
 - Image Messages: Complete UI implementation for image sending/receiving (backend support exists).
 - P2 Enhanced: On-device AI (Executorch), enhanced media support, settings screen.
 - P3 Advanced: Custom character creation, memory visualization, full sync testing, messenger integration.
 - P4 Polish: Performance optimization, comprehensive testing, security audit, Play Store deployment.
-@Metrics: Bootstrap 100%, Database layer 100%, Phase 1 Chat 100% (except image UI), Voice Features 100%, Connection Resilience 100%, 84+ tests passing, sync-ready schema.
+@Metrics: Bootstrap 100%, Database layer 100%, Chat 100% (except image UI), Voice Features 100%, Connection Resilience 100%, Session Resume 100%, Emoji Features 100%, Interactions Data Layer 100%, UI Adaptation 100%, 84+ tests passing, sync-ready schema.
+@NewFeatures[ProviderExpansion]:
+- xAI/Google/Anthropic providers supported across all module types (backend, cognition, movement, vision, imagination, rag, stt, tts)
+- Model field unification: single `model` column per provider config table (migration 000030)
+- 15 provider schemas in providerFieldSchemas.ts (up from 9)
+- Dead code removed: module-specific field schemas merged into main provider schemas
+- Shared isProviderConfigInUse() helper replaces 8 separate existence checks
+- Movement module: Google/xAI/Anthropic provider options with maxtokens: 200 defaults
+- Full audit: build clean, all provider CRUD functions verified

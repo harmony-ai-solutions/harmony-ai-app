@@ -4,6 +4,8 @@
  * to ensure schema compatibility for data synchronization.
  */
 
+import type { EmotionEffect, MetabolismVector } from '../types/emoji';
+
 // ============================================================================
 // Core Entity & Character Models
 // ============================================================================
@@ -21,6 +23,8 @@ export interface CharacterProfile {
   example_dialogues: string | null;
   typing_speed_wpm: number;
   audio_response_chance_percent: number;
+  vision_config_id: number | null;
+  lifecycle_config: string | null; // Opaque JSON blob
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -28,7 +32,10 @@ export interface CharacterProfile {
 
 export interface Entity {
   id: string;
+  alias: string; // Human-readable display name
   character_profile_id: string | null;
+  lifecycle_config: string | null; // Opaque JSON blob
+  rag_reindex_required: number; // 0 or 1 flag for RAG vector store re-index
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -38,6 +45,7 @@ export interface EntityModuleMapping {
   entity_id: string;
   backend_config_id: number | null;
   cognition_config_id: number | null;
+  imagination_config_id: number | null;
   movement_config_id: number | null;
   rag_config_id: number | null;
   stt_config_id: number | null;
@@ -60,10 +68,22 @@ export interface OpenAIProviderConfig {
   top_p: number | null;
   n: number | null;
   stop_tokens: string | null; // JSON array
-  embedding_model: string | null;
   voice: string | null;
   speed: number | null;
   format: string | null;
+  // New LLM params (Migration 20)
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  max_completion_tokens: number | null;
+  seed: number | null;
+  response_format: string | null; // JSON string
+  reasoning_effort: string | null;
+  top_k: number | null;
+  top_a: number | null;
+  min_p: number | null;
+  repetition_penalty: number | null;
+  sampling_preset_name: string;
+  extra_params: string; // JSON string e.g. '{"typical_p": 0.95}'
   deleted_at: Date | null;
 }
 
@@ -77,6 +97,24 @@ export interface OpenRouterProviderConfig {
   top_p: number | null;
   n: number | null;
   stop_tokens: string | null; // JSON array
+  // New LLM params (Migration 20)
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  max_completion_tokens: number | null;
+  seed: number | null;
+  response_format: string | null; // JSON string
+  top_k: number | null;
+  top_a: number | null;
+  min_p: number | null;
+  repetition_penalty: number | null;
+  sampling_preset_name: string;
+  extra_params: string; // JSON string e.g. '{"typical_p": 0.95}'
+  // Provider expansion fields (Migration 30)
+  voice: string | null;
+  speed: number | null;
+  format: string | null;
+  image_aspect_ratio: string | null;
+  image_size: string | null;
   deleted_at: Date | null;
 }
 
@@ -91,7 +129,18 @@ export interface OpenAICompatibleProviderConfig {
   top_p: number | null;
   n: number | null;
   stop_tokens: string | null; // JSON array
-  embedding_model: string | null;
+  // New LLM params (Migration 20)
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  max_completion_tokens: number | null;
+  seed: number | null;
+  response_format: string | null; // JSON string
+  top_k: number | null;
+  top_a: number | null;
+  min_p: number | null;
+  repetition_penalty: number | null;
+  sampling_preset_name: string;
+  extra_params: string; // JSON string e.g. '{"typical_p": 0.95}'
   deleted_at: Date | null;
 }
 
@@ -148,7 +197,7 @@ export interface CharacterAIProviderConfig {
 export interface LocalAIProviderConfig {
   id: number;
   name: string;
-  embedding_model: string;
+  model: string;
   deleted_at: Date | null;
 }
 
@@ -163,7 +212,73 @@ export interface OllamaProviderConfig {
   id: number;
   name: string;
   base_url: string;
-  embedding_model: string | null;
+  model: string | null;
+  deleted_at: Date | null;
+}
+
+export interface ComfyUIProviderConfig {
+  id: number;
+  name: string;
+  base_url: string;
+  api_key: string;
+  workflow_profiles: string;
+  deleted_at: Date | null;
+}
+
+export interface XAIProviderConfig {
+  id: number;
+  name: string;
+  api_key: string;
+  model: string | null;
+  max_tokens: number | null;
+  max_completion_tokens: number | null;
+  temperature: number | null;
+  top_p: number | null;
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  n: number | null;
+  stop_tokens: string | null; // JSON array
+  seed: number | null;
+  response_format: string | null;
+  reasoning_effort: string | null;
+  sampling_preset_name: string;
+  extra_params: string; // JSON string
+  image_aspect_ratio: string | null;
+  image_resolution: string | null;
+  deleted_at: Date | null;
+}
+
+export interface GoogleProviderConfig {
+  id: number;
+  name: string;
+  api_key: string;
+  model: string | null;
+  max_output_tokens: number | null;
+  temperature: number | null;
+  top_p: number | null;
+  top_k: number | null;
+  stop_tokens: string | null; // JSON array
+  seed: number | null;
+  response_mime_type: string | null;
+  sampling_preset_name: string;
+  extra_params: string; // JSON string
+  number_of_images: number | null;
+  aspect_ratio: string | null;
+  deleted_at: Date | null;
+}
+
+export interface AnthropicProviderConfig {
+  id: number;
+  name: string;
+  api_key: string;
+  model: string | null;
+  max_tokens: number | null;
+  temperature: number | null;
+  top_p: number | null;
+  top_k: number | null;
+  stop_sequences: string | null; // JSON array
+  sampling_preset_name: string;
+  extra_params: string; // JSON string
   deleted_at: Date | null;
 }
 
@@ -242,6 +357,14 @@ export interface VisionConfig {
   deleted_at: Date | null;
 }
 
+export interface ImaginationConfig {
+  id: number;
+  name: string;
+  provider: string;
+  provider_config_id: number;
+  deleted_at: Date | null;
+}
+
 // ============================================================================
 // Character Image Models
 // ============================================================================
@@ -256,8 +379,8 @@ export interface CharacterImage {
   display_order: number;
   vl_model_interpretation: string;
   vl_model: string;
-  vl_model_embedding: string | null; // Base64 encoded embedding
   created_at: Date;
+  updated_at: Date;
   deleted_at: Date | null;
 }
 
@@ -295,11 +418,31 @@ export interface SyncHistory {
   deleted_at: Date | null;
 }
 
+export interface Interaction {
+  id: string;
+  entity_id: string;
+  interaction_scope: string;
+  participant_key: string | null;
+  participant_ids: string;
+  status: string;
+  started_at: string;
+  last_activity_at: string;
+  ended_at: string | null;
+  memory_id: string | null;
+  continued_interaction_id: string | null;
+  metadata: string | null;
+  summary: string | null;
+  presence_type: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
 export interface ConversationMessage {
   id: string;
   entity_id: string;
   sender_entity_id: string;
-  session_id: string | null;
+  interaction_id: string | null;
   content: string;
   audio_duration: number | null;
   message_type: 'text' | 'audio' | 'combined' | 'image';
@@ -313,7 +456,14 @@ export interface ConversationMessage {
   image_mime_type?: string | null;
   vl_model?: string | null;
   vl_model_interpretation?: string | null;
-  vl_model_embedding?: string | null;
+
+  // Emotional state (Migrations 14-16)
+  emotional_state_bits: number | 0; // Compact Ekman8 bitfield, opaque
+
+  // Recon tracking (Migration 19)
+  is_recon_followup: boolean;       // true if message originated from recon evaluation
+  is_edited: boolean;              // true if message was edited via recon
+  edit_of_message_id?: string | null; // references original message for edits
 
   created_at: Date;
   updated_at: Date;
@@ -346,7 +496,11 @@ export type ProviderConfig =
   | CharacterAIProviderConfig
   | LocalAIProviderConfig
   | MistralProviderConfig
-  | OllamaProviderConfig;
+  | OllamaProviderConfig
+  | ComfyUIProviderConfig
+  | XAIProviderConfig
+  | GoogleProviderConfig
+  | AnthropicProviderConfig;
 
 export type ModuleConfig =
   | BackendConfig
@@ -355,4 +509,76 @@ export type ModuleConfig =
   | CognitionConfig
   | RAGConfig
   | TTSConfig
-  | VisionConfig;
+  | VisionConfig
+  | ImaginationConfig;
+
+// ============================================================================
+// Inner Life Models (Migrations 14-16)
+// ============================================================================
+
+export interface EmotionState {
+  entity_id: string;
+
+  joy_intensity: number;
+  sadness_intensity: number;
+  trust_intensity: number;
+  disgust_intensity: number;
+  fear_intensity: number;
+  anger_intensity: number;
+  surprise_intensity: number;
+  anticipation_intensity: number;
+
+  joy_baseline: number;
+  sadness_baseline: number;
+  trust_baseline: number;
+  disgust_baseline: number;
+  fear_baseline: number;
+  anger_baseline: number;
+  surprise_baseline: number;
+  anticipation_baseline: number;
+
+  joy_crystallize_start: Date | null;
+  sadness_crystallize_start: Date | null;
+  trust_crystallize_start: Date | null;
+  disgust_crystallize_start: Date | null;
+  fear_crystallize_start: Date | null;
+  anger_crystallize_start: Date | null;
+  surprise_crystallize_start: Date | null;
+  anticipation_crystallize_start: Date | null;
+
+  last_update: Date;
+  decay_tau: number;
+  high_threshold: number;
+  low_threshold: number;
+  crystallize_intensity: number;
+  crystallize_min_hours: number;
+
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Memory {
+  id: string;
+  entity_id: string;
+  compaction_level: number;
+  content: string;
+  emotional_state_bits: number;
+  start_date: Date | null;
+  end_date: Date | null;
+  created_at: Date;
+  updated_at: Date;
+  deleted_at: Date | null;
+}
+
+export interface EmojiAction {
+  id: string;
+  entityId: string;
+  emojiNative: string;
+  emotionEffect: EmotionEffect | null;
+  metabolismVector: MetabolismVector | null;
+  substitutionText: string | null;
+  autoGenerated: boolean;
+  isDefault: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}

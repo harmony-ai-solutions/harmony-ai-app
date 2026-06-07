@@ -1,209 +1,339 @@
 import React from 'react';
 import {
-    Modal,
-    View,
-    Text,
-    TouchableOpacity,
-    StyleSheet,
-    ScrollView,
-    TouchableWithoutFeedback,
+  Modal,
+  View,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  TouchableWithoutFeedback,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { ThemedText } from '../themed/ThemedText';
 
 interface SettingsMenuProps {
-    visible: boolean;
-    onClose: () => void;
-    onNavigate: (screen: string) => void;
+  visible: boolean;
+  onClose: () => void;
+  onNavigate: (screen: string) => void;
 }
 
 interface MenuSection {
-    title: string;
-    items: MenuItem[];
+  title: string;
+  items: MenuItem[];
 }
 
 interface MenuItem {
-    icon: string;
-    label: string;
-    screen: string;
-    badge?: string;
+  icon: string;
+  label: string;
+  screen: string;
+  badge?: string;
+  type?: 'navigate' | 'setting';
 }
 
 const menuSections: MenuSection[] = [
-    {
-        title: 'User',
-        items: [
-            { icon: 'account-circle', label: 'User Profile', screen: 'ProfileSettings' },
-        ],
-    },
-    {
-        title: 'App Settings',
-        items: [
-            { icon: 'palette', label: 'Appearance & Theme', screen: 'ThemeSettings', badge: '⭐' },
-            { icon: 'shield-lock', label: 'Data & Privacy', screen: 'PrivacySettings' },
-            { icon: 'bell', label: 'Notifications', screen: 'NotificationSettings' },
-        ],
-    },
-    {
-        title: 'Sync & Connection',
-        items: [
-            { icon: 'sync', label: 'Sync Settings', screen: 'SyncSettings' },
-        ],
-    },
-    {
-        title: 'Info',
-        items: [
-            { icon: 'information', label: 'About', screen: 'About' },
-            { icon: 'help-circle', label: 'Help & Support', screen: 'Help' },
-        ],
-    },
-    ...(__DEV__ ? [{
-        title: 'Development',
-        items: [
-            { icon: 'test-tube', label: 'Database Tests', screen: 'DatabaseTests', badge: 'DEV' },
-            { icon: 'database-eye', label: 'Database Table Viewer', screen: 'DatabaseTableViewer', badge: 'DEV' },
-        ],
-    }] : []),
+  {
+    title: 'Navigate',
+    items: [
+      {
+        icon: 'chat-processing',
+        label: 'AI Chat',
+        screen: 'ChatList',
+        type: 'navigate',
+      },
+      {
+        icon: 'account-group',
+        label: 'Characters',
+        screen: 'Characters',
+        type: 'navigate',
+      },
+      { icon: 'tune', label: 'Settings', screen: 'Settings', type: 'navigate' },
+      { icon: 'home', label: 'Home', screen: 'Landing', type: 'navigate' },
+    ],
+  },
+  {
+    title: 'User',
+    items: [
+      {
+        icon: 'account-circle',
+        label: 'User Profile',
+        screen: 'ProfileSettings',
+      },
+    ],
+  },
+  {
+    title: 'App Settings',
+    items: [
+      {
+        icon: 'palette',
+        label: 'Appearance & Theme',
+        screen: 'ThemeSettings',
+        badge: '⭐',
+      },
+    ],
+  },
+  {
+    title: 'Sync & Connection',
+    items: [
+      { icon: 'sync', label: 'Sync Settings', screen: 'SyncSettings' },
+      {
+        icon: 'connection',
+        label: 'Connection Setup',
+        screen: 'ConnectionSetup',
+      },
+    ],
+  },
+  ...(__DEV__
+    ? [
+        {
+          title: 'Development',
+          items: [
+            {
+              icon: 'test-tube',
+              label: 'Database Tests',
+              screen: 'DatabaseTests',
+              badge: 'DEV',
+            },
+            {
+              icon: 'database-eye',
+              label: 'Database Table Viewer',
+              screen: 'DatabaseTableViewer',
+              badge: 'DEV',
+            },
+          ],
+        },
+      ]
+    : []),
 ];
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({
-    visible,
-    onClose,
-    onNavigate,
+  visible,
+  onClose,
+  onNavigate,
 }) => {
-    const { theme } = useAppTheme();
+  const { theme } = useAppTheme();
 
-    if (!theme) return null;
+  if (!theme) return null;
 
-    const handleItemPress = (screen: string) => {
-        onClose();
-        onNavigate(screen);
-    };
+  const accentPrimary = theme.colors.accent.primary;
+  const accentSecondary = theme.colors.accent.secondary ?? theme.colors.accent.primaryHover;
 
-    return (
-        <Modal
-            visible={visible}
-            transparent
-            animationType="fade"
-            onRequestClose={onClose}
-        >
-            <TouchableWithoutFeedback onPress={onClose}>
-                <View style={styles.overlay}>
-                    <TouchableWithoutFeedback>
-                        <View
-                            style={[
-                                styles.menu,
-                                { backgroundColor: theme.colors.background.elevated },
-                            ]}
+  const handleItemPress = (screen: string) => {
+    onClose();
+    onNavigate(screen);
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <TouchableWithoutFeedback onPress={onClose}>
+        <View style={styles.overlay}>
+          <TouchableWithoutFeedback>
+            <View style={styles.menuShell}>
+              {/* Gradient background */}
+              <LinearGradient
+                colors={[
+                  theme.colors.background.elevated,
+                  theme.colors.background.surface,
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+              />
+
+              {/* Prismatic tint from top-left */}
+              <LinearGradient
+                colors={[accentPrimary + '12', 'transparent']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0.6 }}
+                style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                pointerEvents="none"
+              />
+
+              {/* Top accent stripe */}
+              <LinearGradient
+                colors={[accentPrimary + 'CC', accentSecondary + '66', 'transparent']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.menuTopStripe}
+              />
+
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {menuSections.map((section, sectionIndex) => (
+                  <View key={sectionIndex}>
+                    {/* Section header */}
+                    <View style={styles.sectionHeader}>
+                      <ThemedText
+                        size={11}
+                        weight="medium"
+                        variant="muted"
+                        style={styles.sectionTitle}
+                      >
+                        {section.title.toUpperCase()}
+                      </ThemedText>
+                    </View>
+
+                    {section.items.map((item, itemIndex) => {
+                      const isNavigate = item.type === 'navigate';
+                      const iconColor = isNavigate
+                        ? (accentSecondary ?? accentPrimary)
+                        : accentPrimary;
+                      const isLastInSection = itemIndex === section.items.length - 1;
+
+                      return (
+                        <TouchableOpacity
+                          key={itemIndex}
+                          style={styles.menuItem}
+                          onPress={() => handleItemPress(item.screen)}
+                          activeOpacity={0.65}
                         >
-                            <ScrollView>
-                                {menuSections.map((section, sectionIndex) => (
-                                    <View key={sectionIndex}>
-                                        <Text
-                                            style={[
-                                                styles.sectionTitle,
-                                                { color: theme.colors.text.muted },
-                                            ]}
-                                        >
-                                            {section.title}
-                                        </Text>
+                          {/* Icon badge */}
+                          <View
+                            style={[
+                              styles.iconBadge,
+                              { backgroundColor: iconColor + '1A' },
+                            ]}
+                          >
+                            <Icon name={item.icon} size={18} color={iconColor} />
+                          </View>
 
-                                        {section.items.map((item, itemIndex) => (
-                                            <TouchableOpacity
-                                                key={itemIndex}
-                                                style={[
-                                                    styles.menuItem,
-                                                    { borderBottomColor: theme.colors.border.default },
-                                                ]}
-                                                onPress={() => handleItemPress(item.screen)}
-                                                activeOpacity={0.7}
-                                            >
-                                                <Icon
-                                                    name={item.icon}
-                                                    size={24}
-                                                    color={theme.colors.accent.primary}
-                                                    style={styles.menuIcon}
-                                                />
-                                                <View style={styles.labelContainer}>
-                                                    <Text
-                                                        style={[
-                                                            styles.menuLabel,
-                                                            { color: theme.colors.text.primary },
-                                                        ]}
-                                                    >
-                                                        {item.label}
-                                                    </Text>
-                                                    {item.badge && (
-                                                        <Text style={styles.badge}>{item.badge}</Text>
-                                                    )}
-                                                </View>
-                                                <Icon
-                                                    name="chevron-right"
-                                                    size={20}
-                                                    color={theme.colors.text.muted}
-                                                />
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                ))}
-                            </ScrollView>
-                        </View>
-                    </TouchableWithoutFeedback>
-                </View>
-            </TouchableWithoutFeedback>
-        </Modal>
-    );
+                          {/* Label */}
+                          <View style={styles.labelContainer}>
+                            <ThemedText size={15} weight="medium">
+                              {item.label}
+                            </ThemedText>
+                            {item.badge && (
+                              <View
+                                style={[
+                                  styles.badgePill,
+                                  { backgroundColor: accentPrimary + '22' },
+                                ]}
+                              >
+                                <ThemedText
+                                  size={10}
+                                  weight="bold"
+                                  style={{ color: accentPrimary }}
+                                >
+                                  {item.badge}
+                                </ThemedText>
+                              </View>
+                            )}
+                          </View>
+
+                          <Icon
+                            name="chevron-right"
+                            size={18}
+                            color={theme.colors.text.muted}
+                          />
+
+                          {/* Row separator (not on last item of section) */}
+                          {!isLastInSection && (
+                            <View
+                              style={[
+                                styles.itemSeparator,
+                                { backgroundColor: theme.colors.border.default + '44' },
+                              ]}
+                            />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    {/* Section separator */}
+                    {sectionIndex < menuSections.length - 1 && (
+                      <View
+                        style={[
+                          styles.sectionSeparator,
+                          { backgroundColor: theme.colors.border.default + '66' },
+                        ]}
+                      />
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          </TouchableWithoutFeedback>
+        </View>
+      </TouchableWithoutFeedback>
+    </Modal>
+  );
 };
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        justifyContent: 'flex-start',
-        alignItems: 'flex-end',
-    },
-    menu: {
-        width: 300,
-        maxHeight: '80%',
-        marginTop: 56, // Below header
-        marginRight: 8,
-        borderRadius: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 8,
-        overflow: 'hidden',
-    },
-    sectionTitle: {
-        fontSize: 12,
-        fontWeight: '600',
-        textTransform: 'uppercase',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        marginTop: 8,
-    },
-    menuItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 16,
-        paddingHorizontal: 16,
-        borderBottomWidth: 1,
-    },
-    menuIcon: {
-        marginRight: 16,
-    },
-    labelContainer: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    menuLabel: {
-        fontSize: 16,
-        fontWeight: '500',
-    },
-    badge: {
-        marginLeft: 8,
-        fontSize: 12,
-    },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+  },
+  menuShell: {
+    width: 300,
+    maxHeight: '80%',
+    marginTop: 56,
+    marginRight: 8,
+    borderRadius: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 10,
+    overflow: 'hidden',
+  },
+  menuGradientRadius: {
+    borderRadius: 14,
+  },
+  menuTopStripe: {
+    height: 2,
+  },
+  sectionHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  sectionTitle: {
+    letterSpacing: 0.8,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  iconBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  labelContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  badgePill: {
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  itemSeparator: {
+    position: 'absolute',
+    left: 62,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+  },
+  sectionSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 0,
+    marginTop: 4,
+    marginBottom: 2,
+  },
 });

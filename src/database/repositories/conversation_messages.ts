@@ -10,19 +10,21 @@ export async function createConversationMessage(
 ): Promise<void> {
   const db = getDatabase();
   const now = new Date().toISOString();
-  
+
   await db.executeSql(
     `INSERT INTO conversation_messages (
-      id, entity_id, sender_entity_id, session_id, content,
+      id, entity_id, sender_entity_id, interaction_id, content,
       audio_duration, message_type, audio_data, audio_mime_type,
-      image_data, image_mime_type, vl_model, vl_model_interpretation, 
-      vl_model_embedding, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      image_data, image_mime_type, vl_model, vl_model_interpretation,
+      emotional_state_bits,
+      is_recon_followup, is_edited, edit_of_message_id,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       message.id,
       message.entity_id,
       message.sender_entity_id,
-      message.session_id,
+      message.interaction_id,
       message.content,
       message.audio_duration,
       message.message_type,
@@ -32,67 +34,74 @@ export async function createConversationMessage(
       message.image_mime_type,
       message.vl_model,
       message.vl_model_interpretation,
-      message.vl_model_embedding,
+      message.emotional_state_bits ?? 0,
+      message.is_recon_followup ? 1 : 0,
+      message.is_edited ? 1 : 0,
+      message.edit_of_message_id ?? null,
       now,
-      now
+      now,
     ]
   );
 }
 
 /**
- * Get chat messages between two entities (bidirectional conversation)
- * Ordered chronologically (oldest first)
- * 
+ * Get conversation messages for a specific interaction by participant_key.
+ * Used for ChatDetailScreen for both initial load and scrollback.
+ *
+ * Queries via JOIN on interactions table using participant_key scope.
+ * Ordered chronologically (oldest first) for paginated results.
+ *
  * Uses two-phase query and chunking to avoid CursorWindow overflow.
  */
-export async function getConversationMessagesBetween(
-  entityA: string,
-  entityB: string,
+export async function getConversationMessagesByParticipantKey(
+  entityId: string,
+  participantKey: string,
   limit: number = 20,
-  beforeTimestamp?: number
+  beforeTimestamp?: string
 ): Promise<ConversationMessage[]> {
   const db = getDatabase();
-  
-  // Phase 1: Get metadata without BLOBs
+
+  // Phase 1: Get metadata without BLOBs via JOIN
   let query = `
-    SELECT id, entity_id, sender_entity_id, session_id, content,
-           audio_duration, message_type, audio_mime_type,
-           image_mime_type, vl_model, vl_model_interpretation,
-           created_at, updated_at, deleted_at
-    FROM conversation_messages 
-    WHERE deleted_at IS NULL 
-    AND (
-      (entity_id = ? AND sender_entity_id = ?) OR
-      (entity_id = ? AND sender_entity_id = ?)
-    )
+    SELECT cm.id, cm.entity_id, cm.sender_entity_id, cm.interaction_id, cm.content,
+           cm.audio_duration, cm.message_type, cm.audio_mime_type,
+           cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
+           cm.emotional_state_bits,
+           cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
+           cm.created_at, cm.updated_at, cm.deleted_at
+    FROM conversation_messages cm
+    JOIN interactions i ON cm.interaction_id = i.id
+    WHERE i.entity_id = ?
+      AND i.participant_key = ?
+      AND i.presence_type = 'phone'
+      AND cm.deleted_at IS NULL
   `;
-  const params: any[] = [entityA, entityB, entityB, entityA];
-  
+  const params: any[] = [entityId, participantKey];
+
   if (beforeTimestamp) {
-    query += ` AND CAST(strftime('%s', created_at) AS INTEGER) < ?`;
+    query += ` AND CAST(strftime('%s', cm.created_at) AS INTEGER) < ?`;
     params.push(beforeTimestamp);
   }
-  
-  query += ` ORDER BY created_at ASC LIMIT ?`;
+
+  query += ` ORDER BY cm.created_at DESC LIMIT ?`;
   params.push(limit);
-  
+
   const [results] = await db.executeSql(query, params);
-  
+
   // Phase 2: Load each message's TEXT columns individually with chunking
   const messages: ConversationMessage[] = [];
   for (let i = 0; i < results.rows.length; i++) {
     const row = results.rows.item(i);
-    
+
     // Load TEXT columns individually with chunking
     const audioData = await loadTextColumn('conversation_messages', row.id, 'audio_data');
     const imageData = await loadTextColumn('conversation_messages', row.id, 'image_data');
-    const embeddingData = await loadTextColumn('conversation_messages', row.id, 'vl_model_embedding');
 
     messages.push({
       id: row.id,
       entity_id: row.entity_id,
       sender_entity_id: row.sender_entity_id,
-      session_id: row.session_id,
+      interaction_id: row.interaction_id,
       content: row.content,
       audio_duration: row.audio_duration,
       message_type: row.message_type,
@@ -102,77 +111,84 @@ export async function getConversationMessagesBetween(
       image_mime_type: row.image_mime_type,
       vl_model: row.vl_model,
       vl_model_interpretation: row.vl_model_interpretation,
-      vl_model_embedding: embeddingData,
+      emotional_state_bits: row.emotional_state_bits ?? 0,
+      is_recon_followup: row.is_recon_followup === 1,
+      is_edited: row.is_edited === 1,
+      edit_of_message_id: row.edit_of_message_id || null,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
-  return messages;
+
+  // Return in chronological order (oldest first) for display
+  return messages.reverse();
 }
 
 /**
- * Get most recent chat messages between two entities (for initial load)
- * Ordered chronologically (oldest first of the batch)
- * 
+ * Get most recent conversation messages for a participant_key (for initial load).
+ * Returns the N most recent messages in chronological order.
+ *
  * Uses two-phase query and chunking to avoid CursorWindow overflow.
+ * Replaced the old getRecentConversationMessages which used OR-pattern.
  */
 export async function getRecentConversationMessages(
-  entityA: string,
-  entityB: string,
+  entityId: string,
+  participantKey: string,
   limit: number = 20
 ): Promise<ConversationMessage[]> {
   const db = getDatabase();
-  
-  // First get the IDs ordered by newest first
+
+  // First get the IDs ordered by newest first via JOIN
   const [idResults] = await db.executeSql(
-    `SELECT id FROM conversation_messages 
-     WHERE deleted_at IS NULL 
-     AND (
-       (entity_id = ? AND sender_entity_id = ?) OR
-       (entity_id = ? AND sender_entity_id = ?)
-     )
-     ORDER BY created_at DESC 
+    `SELECT cm.id FROM conversation_messages cm
+     JOIN interactions i ON cm.interaction_id = i.id
+     WHERE i.entity_id = ?
+       AND i.participant_key = ?
+       AND i.presence_type = 'phone'
+       AND cm.deleted_at IS NULL
+     ORDER BY cm.created_at DESC
      LIMIT ?`,
-    [entityA, entityB, entityB, entityA, limit]
+    [entityId, participantKey, limit]
   );
-  
+
   if (idResults.rows.length === 0) return [];
-  
+
   // Extract IDs
   const ids: string[] = [];
   for (let i = 0; i < idResults.rows.length; i++) {
     ids.push(idResults.rows.item(i).id);
   }
-  
+
   // Now fetch full records (metadata) in chronological order
   const placeholders = ids.map(() => '?').join(',');
   const [results] = await db.executeSql(
-    `SELECT id, entity_id, sender_entity_id, session_id, content,
-            audio_duration, message_type, audio_mime_type,
-            image_mime_type, vl_model, vl_model_interpretation,
-            created_at, updated_at, deleted_at
-     FROM conversation_messages 
-     WHERE id IN (${placeholders})
-     ORDER BY created_at ASC`,
+    `SELECT cm.id, cm.entity_id, cm.sender_entity_id, cm.interaction_id, cm.content,
+            cm.audio_duration, cm.message_type, cm.audio_mime_type,
+            cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
+            cm.emotional_state_bits,
+            cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
+            cm.created_at, cm.updated_at, cm.deleted_at
+     FROM conversation_messages cm
+     WHERE cm.id IN (${placeholders})
+     ORDER BY cm.created_at ASC`,
     ids
   );
-  
+
   // Phase 2: Load each message's TEXT columns individually with chunking
   const messages: ConversationMessage[] = [];
   for (let i = 0; i < results.rows.length; i++) {
     const row = results.rows.item(i);
-    
+
     // Load TEXT columns individually with chunking
     const audioData = await loadTextColumn('conversation_messages', row.id, 'audio_data');
     const imageData = await loadTextColumn('conversation_messages', row.id, 'image_data');
-    const embeddingData = await loadTextColumn('conversation_messages', row.id, 'vl_model_embedding');
 
     messages.push({
       id: row.id,
       entity_id: row.entity_id,
       sender_entity_id: row.sender_entity_id,
-      session_id: row.session_id,
+      interaction_id: row.interaction_id,
       content: row.content,
       audio_duration: row.audio_duration,
       message_type: row.message_type,
@@ -182,7 +198,10 @@ export async function getRecentConversationMessages(
       image_mime_type: row.image_mime_type,
       vl_model: row.vl_model,
       vl_model_interpretation: row.vl_model_interpretation,
-      vl_model_embedding: embeddingData,
+      emotional_state_bits: row.emotional_state_bits ?? 0,
+      is_recon_followup: row.is_recon_followup === 1,
+      is_edited: row.is_edited === 1,
+      edit_of_message_id: row.edit_of_message_id || null,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -192,46 +211,48 @@ export async function getRecentConversationMessages(
 }
 
 /**
- * Get last message for chat list preview
- * 
+ * Get last message for chat list preview using JOIN-based query.
+ * Replaced the old getLastConversationMessage which used OR-pattern.
+ *
  * Uses two-phase query and chunking to avoid CursorWindow overflow.
  */
 export async function getLastConversationMessage(
-  entityA: string,
-  entityB: string
+  entityId: string,
+  participantKey: string
 ): Promise<ConversationMessage | null> {
   const db = getDatabase();
-  
-  // Phase 1: Get metadata for the last message
+
+  // Phase 1: Get metadata for the last message via JOIN
   const [results] = await db.executeSql(
-    `SELECT id, entity_id, sender_entity_id, session_id, content,
-            audio_duration, message_type, audio_mime_type,
-            image_mime_type, vl_model, vl_model_interpretation,
-            created_at, updated_at, deleted_at
-     FROM conversation_messages 
-     WHERE deleted_at IS NULL 
-     AND (
-       (entity_id = ? AND sender_entity_id = ?) OR
-       (entity_id = ? AND sender_entity_id = ?)
-     )
-     ORDER BY created_at DESC 
+    `SELECT cm.id, cm.entity_id, cm.sender_entity_id, cm.interaction_id, cm.content,
+            cm.audio_duration, cm.message_type, cm.audio_mime_type,
+            cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
+            cm.emotional_state_bits,
+            cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
+            cm.created_at, cm.updated_at, cm.deleted_at
+     FROM conversation_messages cm
+     JOIN interactions i ON cm.interaction_id = i.id
+     WHERE i.entity_id = ?
+       AND i.participant_key = ?
+       AND i.presence_type = 'phone'
+       AND cm.deleted_at IS NULL
+     ORDER BY cm.created_at DESC
      LIMIT 1`,
-    [entityA, entityB, entityB, entityA]
+    [entityId, participantKey]
   );
-  
+
   if (results.rows.length === 0) return null;
   const row = results.rows.item(0);
 
   // Phase 2: Load TEXT columns with chunking
   const audioData = await loadTextColumn('conversation_messages', row.id, 'audio_data');
   const imageData = await loadTextColumn('conversation_messages', row.id, 'image_data');
-  const embeddingData = await loadTextColumn('conversation_messages', row.id, 'vl_model_embedding');
 
   return {
     id: row.id,
     entity_id: row.entity_id,
     sender_entity_id: row.sender_entity_id,
-    session_id: row.session_id,
+    interaction_id: row.interaction_id,
     content: row.content,
     audio_duration: row.audio_duration,
     message_type: row.message_type,
@@ -241,7 +262,10 @@ export async function getLastConversationMessage(
     image_mime_type: row.image_mime_type,
     vl_model: row.vl_model,
     vl_model_interpretation: row.vl_model_interpretation,
-    vl_model_embedding: embeddingData,
+    emotional_state_bits: row.emotional_state_bits ?? 0,
+    is_recon_followup: row.is_recon_followup === 1,
+    is_edited: row.is_edited === 1,
+    edit_of_message_id: row.edit_of_message_id || null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -310,6 +334,26 @@ export async function updateConversationMessage(
     values.push(updates.image_mime_type);
   }
 
+  if (updates.interaction_id !== undefined) {
+    updateFields.push('interaction_id = ?');
+    values.push(updates.interaction_id);
+  }
+
+  if (updates.is_recon_followup !== undefined) {
+    updateFields.push('is_recon_followup = ?');
+    values.push(updates.is_recon_followup ? 1 : 0);
+  }
+
+  if (updates.is_edited !== undefined) {
+    updateFields.push('is_edited = ?');
+    values.push(updates.is_edited ? 1 : 0);
+  }
+
+  if (updates.edit_of_message_id !== undefined) {
+    updateFields.push('edit_of_message_id = ?');
+    values.push(updates.edit_of_message_id ?? null);
+  }
+
   if (updateFields.length === 0) {
     throw new Error('No fields to update');
   }
@@ -368,7 +412,7 @@ function mapRowToConversationMessage(row: any): ConversationMessage {
     id: row.id,
     entity_id: row.entity_id,
     sender_entity_id: row.sender_entity_id,
-    session_id: row.session_id,
+    interaction_id: row.interaction_id,
     content: row.content,
     audio_duration: row.audio_duration,
     message_type: row.message_type,
@@ -378,7 +422,10 @@ function mapRowToConversationMessage(row: any): ConversationMessage {
     image_mime_type: row.image_mime_type,
     vl_model: row.vl_model,
     vl_model_interpretation: row.vl_model_interpretation,
-    vl_model_embedding: row.vl_model_embedding,
+    emotional_state_bits: row.emotional_state_bits ?? 0,
+    is_recon_followup: row.is_recon_followup === 1,
+    is_edited: row.is_edited === 1,
+    edit_of_message_id: row.edit_of_message_id || null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,

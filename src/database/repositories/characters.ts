@@ -31,9 +31,10 @@ export async function createCharacterProfile(
       `INSERT INTO character_profiles (
         id, name, description, personality, appearance, backstory,
         voice_characteristics, base_prompt, scenario, example_dialogues,
-        typing_speed_wpm, audio_response_chance_percent,
+        typing_speed_wpm, audio_response_chance_percent, vision_config_id,
+        lifecycle_config,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         profile.id,
         profile.name,
@@ -47,6 +48,8 @@ export async function createCharacterProfile(
         profile.example_dialogues,
         profile.typing_speed_wpm,
         profile.audio_response_chance_percent,
+        profile.vision_config_id ?? null,
+        profile.lifecycle_config ?? null,
         now,
         now,
       ]
@@ -71,13 +74,15 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
   const query = includeDeleted
     ? `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
-              typing_speed_wpm, audio_response_chance_percent,
+              typing_speed_wpm, audio_response_chance_percent, vision_config_id,
+              lifecycle_config,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE id = ?`
     : `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
-              typing_speed_wpm, audio_response_chance_percent,
+              typing_speed_wpm, audio_response_chance_percent, vision_config_id,
+              lifecycle_config,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE id = ? AND deleted_at IS NULL`;
@@ -102,6 +107,8 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
     example_dialogues: row.example_dialogues,
     typing_speed_wpm: row.typing_speed_wpm,
     audio_response_chance_percent: row.audio_response_chance_percent,
+    vision_config_id: row.vision_config_id ?? null,
+    lifecycle_config: row.lifecycle_config ?? null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -118,13 +125,15 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
   const query = includeDeleted
     ? `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
-              typing_speed_wpm, audio_response_chance_percent,
+              typing_speed_wpm, audio_response_chance_percent, vision_config_id,
+              lifecycle_config,
               created_at, updated_at, deleted_at
        FROM character_profiles
        ORDER BY name`
     : `SELECT id, name, description, personality, appearance, backstory,
               voice_characteristics, base_prompt, scenario, example_dialogues,
-              typing_speed_wpm, audio_response_chance_percent,
+              typing_speed_wpm, audio_response_chance_percent, vision_config_id,
+              lifecycle_config,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE deleted_at IS NULL
@@ -148,6 +157,8 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
       example_dialogues: row.example_dialogues,
       typing_speed_wpm: row.typing_speed_wpm,
       audio_response_chance_percent: row.audio_response_chance_percent,
+      vision_config_id: row.vision_config_id ?? null,
+      lifecycle_config: row.lifecycle_config ?? null,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -173,7 +184,7 @@ export async function updateCharacterProfile(profile: CharacterProfile): Promise
            backstory = ?, voice_characteristics = ?, base_prompt = ?,
            scenario = ?, example_dialogues = ?,
            typing_speed_wpm = ?, audio_response_chance_percent = ?,
-           updated_at = ?
+           vision_config_id = ?, lifecycle_config = ?, updated_at = ?
        WHERE id = ?`,
       [
         profile.name,
@@ -187,6 +198,8 @@ export async function updateCharacterProfile(profile: CharacterProfile): Promise
         profile.example_dialogues,
         profile.typing_speed_wpm,
         profile.audio_response_chance_percent,
+        profile.vision_config_id ?? null,
+        profile.lifecycle_config ?? null,
         now,
         profile.id,
       ]
@@ -267,8 +280,8 @@ export async function createCharacterImage(
         tx.executeSql(
           `INSERT INTO character_image (
             character_profile_id, image_data, mime_type, description,
-            is_primary, display_order, vl_model_interpretation, vl_model, vl_model_embedding
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            is_primary, display_order, vl_model_interpretation, vl_model
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             image.character_profile_id,
             image.image_data,
@@ -278,7 +291,6 @@ export async function createCharacterImage(
             image.display_order,
             image.vl_model_interpretation,
             image.vl_model,
-            image.vl_model_embedding,
           ],
           (_, result) => {
             resolve(result.insertId!);
@@ -304,12 +316,12 @@ export async function getCharacterImage(id: number, includeDeleted = false): Pro
   const query = includeDeleted
     ? `SELECT id, character_profile_id, image_data, mime_type, description,
               is_primary, display_order, vl_model_interpretation, vl_model,
-              vl_model_embedding, created_at, deleted_at
+              created_at, deleted_at
        FROM character_image
        WHERE id = ?`
     : `SELECT id, character_profile_id, image_data, mime_type, description,
               is_primary, display_order, vl_model_interpretation, vl_model,
-              vl_model_embedding, created_at, deleted_at
+              created_at, deleted_at
        FROM character_image
        WHERE id = ? AND deleted_at IS NULL`;
 
@@ -323,7 +335,6 @@ export async function getCharacterImage(id: number, includeDeleted = false): Pro
   
   // Load TEXT fields with chunking if needed
   const imageData = await loadTextColumn('character_image', id, 'image_data');
-  const embeddingData = await loadTextColumn('character_image', id, 'vl_model_embedding');
   
   return {
     id: row.id,
@@ -335,8 +346,8 @@ export async function getCharacterImage(id: number, includeDeleted = false): Pro
     display_order: row.display_order,
     vl_model_interpretation: row.vl_model_interpretation,
     vl_model: row.vl_model,
-    vl_model_embedding: embeddingData, // Base64 string or null
     created_at: new Date(row.created_at),
+    updated_at: new Date(row.created_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }
@@ -375,7 +386,6 @@ export async function getCharacterImages(profileId: string, includeDeleted = fal
     
     // Load TEXT columns individually with chunking
     const imageData = await loadTextColumn('character_image', metadata.id, 'image_data');
-    const embeddingData = await loadTextColumn('character_image', metadata.id, 'vl_model_embedding');
     
     images.push({
       id: metadata.id,
@@ -387,8 +397,8 @@ export async function getCharacterImages(profileId: string, includeDeleted = fal
       display_order: metadata.display_order,
       vl_model_interpretation: metadata.vl_model_interpretation,
       vl_model: metadata.vl_model,
-      vl_model_embedding: embeddingData, // Base64 string or null
       created_at: new Date(metadata.created_at),
+      updated_at: new Date(metadata.created_at),
       deleted_at: metadata.deleted_at ? new Date(metadata.deleted_at) : null,
     });
   }
@@ -499,25 +509,26 @@ export async function setPrimaryImage(profileId: string, imageId: number): Promi
 export async function getPrimaryImage(profileId: string): Promise<CharacterImage | null> {
   const db = getDatabase();
   
-  const [results] = await db.executeSql(
-    `SELECT id, character_profile_id, image_data, mime_type, description,
+  // First, get just the metadata WITHOUT image_data to avoid CursorWindow issues
+  // with large images (>2MB). The image_data is loaded separately via loadTextColumn.
+  const [metaResults] = await db.executeSql(
+    `SELECT id, character_profile_id, mime_type, description,
             is_primary, display_order, vl_model_interpretation, vl_model,
-            vl_model_embedding, created_at, deleted_at
+            created_at, deleted_at
      FROM character_image
      WHERE character_profile_id = ? AND is_primary = 1 AND deleted_at IS NULL
      LIMIT 1`,
     [profileId]
   );
   
-  if (results.rows.length === 0) {
+  if (metaResults.rows.length === 0) {
     return null;
   }
   
-  const row = results.rows.item(0);
+  const row = metaResults.rows.item(0);
   
-  // Load TEXT fields with chunking if needed
+  // Load image_data separately using chunked loading to avoid CursorWindow limit
   const imageData = await loadTextColumn('character_image', row.id, 'image_data');
-  const embeddingData = await loadTextColumn('character_image', row.id, 'vl_model_embedding');
   
   return {
     id: row.id,
@@ -529,8 +540,8 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
     display_order: row.display_order,
     vl_model_interpretation: row.vl_model_interpretation,
     vl_model: row.vl_model,
-    vl_model_embedding: embeddingData, // Base64 string or null
     created_at: new Date(row.created_at),
+    updated_at: new Date(row.created_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }

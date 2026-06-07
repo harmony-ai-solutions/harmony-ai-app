@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
+import { Appbar } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
+import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
 import { ThemedButton } from '../../components/themed/ThemedButton';
 import SyncService, { SyncSession } from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
@@ -34,7 +36,7 @@ export const SyncSettingsScreen: React.FC = () => {
         const date = new Date(parseInt(timestamp) * 1000);
         setLastSyncTime(date.toLocaleString());
       }
-      
+
       const mode = await ConnectionStateManager.getSecurityMode();
       if (mode) {
         setSecurityMode(mode);
@@ -124,6 +126,36 @@ export const SyncSettingsScreen: React.FC = () => {
     }
   };
 
+  const handleForceFullSync = () => {
+    if (!isConnected) {
+      Alert.alert('Not Connected', 'Please connect to Harmony Link first from the Connection Setup screen.');
+      return;
+    }
+
+    Alert.alert(
+      'Force Full Re-Sync',
+      'This will re-sync ALL data between this device and Harmony Link. This can take a while and may use significant bandwidth.\n\nUse this only if you suspect data is out of sync.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Re-Sync Everything',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsSyncing(true);
+              await SyncService.forceFullSync();
+            } catch (err: any) {
+              setIsSyncing(false);
+              const errorMsg = err?.message || 'Unknown error';
+              log.error('Force full sync initiation failed:', errorMsg);
+              showToast('Failed to start full re-sync: ' + errorMsg);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const getConnectionStatusText = () => {
     if (!isPaired) {
       return 'Not Paired';
@@ -168,31 +200,21 @@ export const SyncSettingsScreen: React.FC = () => {
     }
   };
 
-  const handleResetSecurityMode = async () => {
-    Alert.alert(
-      'Reset Security Mode',
-      'This will clear your security preference and you will be prompted to choose a connection method on next connection attempt.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Reset', 
-          style: 'destructive',
-          onPress: async () => {
-            await ConnectionStateManager.clearSecurityMode();
-            setSecurityMode('secure');
-            showToast('Security mode reset');
-          }
-        }
-      ]
-    );
-  };
-
   if (!theme) return null;
 
   return (
     <ThemedView style={styles.container}>
+      <ThemedAppbar style={styles.header}>
+        <Appbar.BackAction
+          color={theme.colors.text.primary}
+          onPress={() => navigation.goBack()}
+        />
+        <Appbar.Content
+          title="Data Synchronization"
+          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
+        />
+      </ThemedAppbar>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <ThemedText size={24} weight="bold" style={styles.title}>Data Synchronization</ThemedText>
         
         <TouchableOpacity 
           onPress={() => navigation.navigate('ConnectionSetup')}
@@ -249,14 +271,13 @@ export const SyncSettingsScreen: React.FC = () => {
           style={styles.syncButton}
         />
 
-        {isPaired && securityMode && (
-          <ThemedButton
-            label="Reset Security Mode"
-            onPress={handleResetSecurityMode}
-            variant="ghost"
-            style={styles.resetButton}
-          />
-        )}
+        <ThemedButton
+          label="Force Full Re-Sync"
+          onPress={handleForceFullSync}
+          disabled={isSyncing || !isConnected}
+          variant="outline"
+          style={styles.dangerButton}
+        />
 
         {!isPaired && (
           <ThemedText variant="secondary" style={styles.warningText}>
@@ -288,11 +309,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  header: {
+    elevation: 4,
+  },
   scrollContent: {
     padding: 20,
-  },
-  title: {
-    marginBottom: 20,
   },
   card: {
     backgroundColor: 'rgba(150, 150, 150, 0.1)',
@@ -325,8 +346,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 10,
   },
-  resetButton: {
-    marginBottom: 20,
+  dangerButton: {
+    marginBottom: 10,
   },
   infoText: {
     textAlign: 'center',

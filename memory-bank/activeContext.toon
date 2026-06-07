@@ -1,5 +1,6 @@
 # Harmony AI App Active Context
 @Focus:
+- Provider Expansion Complete: xAI/Google/Anthropic provider support added across all module types. Model field unification (migration 000030). Dead code cleanup. 15 provider schemas in providerFieldSchemas.ts. 21 provider CRUD functions in providers.ts. ModuleConfigEditScreen supports all 15 providers. Module defaults include Google/xAI/Anthropic (maxtokens: 200).
 - Documentation Complete: Comprehensive Harmony Link integration documentation created in /docs/HARMONY-LINK-INTEGRATION.md with detailed diagrams in /docs/harmony-link-diagrams/.
 - Chat Feature Implementation Complete: Full chat interface with text/audio support, tap-based voice recording, persistent storage, real-time event handling.
 - Database Layer Complete: SQLite with TEXT columns for base64-encoded audio/image data, chat_messages schema with audio/image support. Migrations in /src/database/migrations/.
@@ -20,7 +21,18 @@
 - Advanced Theming Complete: RGB editor, custom theme creation/deletion, JSON import/export, 6 built-in themes.
 - Logging Infrastructure: react-native-logs with production-ready levels, colored dev output, unified [Namespace] prefixes.
 - Bootstrap Complete: RN 0.83.1, TypeScript, navigation, Paper UI, organized structure.
+- Safe Area Inserts Applied: Android system navigation bar safe area bottom padding across all screens (ChatInput, CharacterProfileEdit, Characters, ChatList, CreateAI, EntityConfigEdit, EntityConfig, Landing, Settings, ModuleConfigEdit).
+- Session Resume Implemented: Sessions auto-resume on disconnect; dangling events reconciled and synced to clients on reconnect.
+- Reply Mode Feature: Per-chat-partner instant vs. realistic reply time toggle, persisted via AsyncStorage.
+- Emoji Features Complete: Full emoji picker (native/Twemoji/Noto sets), EmojiAction system with Ekman8 emotion effects, entity-level per-emoji action customization, DB migrations 22-23, emoji_actions repository.
+- Interactions Data Layer Complete: Interaction model, repository (CRUD, participant key derivation, scope derivation), migrations 24-28 (interactions table, drop session_id, interaction summary, memory lifecycle fields, presence_type).
+- Session Management Refactored: InteractionSession replaces DualEntitySession — sessions are interaction-scoped (not entity-pair-scoped), events keyed by interactionId.
+- Chat Screens Adapted: ChatListScreen and ChatDetailScreen adapted to InteractionSession model; JOIN-based queries for chat list previews (conversation_messages JOIN interactions).
+- Force Full DB Sync: Option to force full database synchronization at the sync settings screen.
 @Next:
+- Vision Module Integration: Complete integration with Harmony Link vision module for image understanding and multimodal interactions.
+- Imagination Module Integration: Complete integration with Harmony Link imagination module for autonomous entity actions and initiative behaviors.
+- Emoji Action Backend Pipeline: Complete send-pipeline integration of emoji action AdditionalEffects payload with Harmony Link backend.
 - Image Messages: Complete implementation of image sending/receiving in chat (UI not fully complete).
 - Integration Testing: Test end-to-end chat flows with live Harmony Link backend.
 - Sync Protocol Testing: Validate SYNC_REQUEST → SYNC_DATA → SYNC_COMPLETE → FINALIZE flows.
@@ -46,6 +58,11 @@
 - Database schema 100% compatible with Harmony Link for bidirectional sync.
 - DEV-only test runner using __DEV__ checks for production safety.
 - Logging: react-native-logs for all non-test code; console for test runners.
+- InteractionSession Pattern: Replaces DualEntitySession; sessions scoped to interaction IDs (not partner entity pairs); events keyed by interactionId.
+- Reply Mode: Per-chat-partner AsyncStorage preference; defaults to "realistic" (simulated typing delay), toggle to "instant".
+- Emoji Action System: Entity-level emoji → action mappings persisted in DB (emoji_actions table), synced via WebSocket pipeline.
+- Emoji Sets: Supports native (platform default), Twemoji (Twitter), and Noto (Google) sprite sheets via EmojiContext.
+- Ekman8 Emotion Model: Emoji actions map to 8-base emotion deltas (joy, sadness, trust, disgust, fear, anger, surprise, anticipation), sent as additional_effects with messages.
 @Decisions:
 - Audio Duration Storage: audio_duration persisted to DB at message creation time (EntitySessionService for TTS messages) and on-load enrichment (ChatDetailScreen for historical messages). ChatBubble has zero DB writes.
 - AudioPlayer Singleton Pattern: AudioPlayer is a singleton instance; static methods (e.g., getDurationFromBase64) must be called on the class itself (AudioPlayer as AudioPlayerClass), not the singleton default export.
@@ -61,10 +78,10 @@
 - Base64 Storage: Audio/image data stored as base64 TEXT columns (not BLOB), simplifies handling and transmission.
 - Database Migrations: Forward-only SQL migration files in /src/database/migrations/, numbered sequentially, applied automatically on app startup.
 - React Native Track Player v5 Migration:
-  - Android build fixed by upgrading to v5.0.0-alpha0 (Kotlin type safety fixes for React Native 0.83.1)
-  - API changes: `getPlaybackState()` returns `PlaybackState` object (contains `state` property), use `getProgress()` instead of separate `getPosition()`/`getDuration()` calls
-  - Update options: `notificationCapabilities` replaces `compactCapabilities`
-  - State enum values are now strings (e.g., State.Playing = "playing")
+   - Android build fixed by upgrading to v5.0.0-alpha0 (Kotlin type safety fixes for React Native 0.83.1)
+   - API changes: `getPlaybackState()` returns `PlaybackState` object (contains `state` property), use `getProgress()` instead of separate `getPosition()`/`getDuration()` calls
+   - Update options: `notificationCapabilities` replaces `compactCapabilities`
+   - State enum values are now strings (e.g., State.Playing = "playing")
 - Base64 Storage Pattern: Audio/image data stored as base64 TEXT in SQLite for simpler handling and cross-platform compatibility.
 - Chat UI Patterns: KeyboardAvoidingView essential for iOS, FlatList with inverted prop for message lists.
 - Image Picker: react-native-image-picker provides good UX with caption support.
@@ -86,7 +103,7 @@
 - Android emulator uses 10.0.2.2 to access host's localhost (not 127.0.0.1).
 - Harmony Link must bind to 0.0.0.0 (not localhost) for emulator connectivity.
 - HANDSHAKE_PENDING event handler essential for user feedback during device approval.
-- ConnectionManager pattern enables multiple concurrent connections with independent lifecycles and event routing.
+- ConnectionManager pattern enables multiple concurrent connections with independent lifecycles.
 - Decoupling transport layer from service logic improves testability and scalability.
 - Context separation (SyncConnectionContext vs EntitySessionContext) provides clear responsibility boundaries.
 - React useRef critical for avoiding stale closures in setTimeout/async callbacks (reconnect counter).
@@ -97,28 +114,68 @@
 - Dual Entity Sessions: Mirror Harmony Link's EntitySessionManager - each chat needs user entity session + partner entity session for bidirectional events.
 - Device Pairing Sequence: Handshake happens FIRST over unencrypted ws://, THEN security mode is selected after cert validation on wss://.
 - Connection Types: 'sync' for device sync, 'entity-{entityId}' for chat sessions - distinct connection lifecycle and event routing.
+- Preset Sync Pattern: App does NOT use Harmony Link management API — all preset data flows through WebSocket sync pipeline. Preset name is plain text input, extra params edited as key-value pairs locally.
+- Schema-Driven Config: App uses same providerFieldSchemas.ts as Harmony Link web frontend — ensures consistent provider configuration experience across platforms.
+- Module-Specific Schemas Dead Code: UI looks up `PROVIDER_SCHEMAS[providerType]` by base provider ID — module-specific schema keys (e.g., `tts_openai`) were dead code. Module-specific fields merged into main provider schemas with tooltips.
+- isProviderConfigInUse Pattern: Single UNION ALL across all module config tables is more reliable and maintainable than 8 separate existence checks.
+- providers.ts Garble Prevention: When regenerating a file with many similar CRUD functions, verify all function signatures and table names match — agent can garble large files with repetitive patterns. 15 provider schemas, no module-specific schemas (one schema per provider across all modules).
+- chat_template_kwargs Dropped: Both Go backend and app dropped this dead column in migration 021 — no longer needed for template customization.
+- Model Field Unification: Migration 000030 consolidates `embedding_model`/`image_model`/`imagination_model` into single `model` column per provider config table. RAG structs keep `EmbeddingModel` domain name, mapper bridges.
+- Generic Provider Mappers: One extract/load pair per provider in Go backend, not per module. Module-specific mapper variants deleted as dead code.
+- Shared isProviderConfigInUse: Single UNION ALL query replacing 8 separate existence checks for provider config deletion safety.
+- InteractionSession Migration: Refactored from DualEntitySession (keyed by partnerEntityId) to InteractionSession (keyed by interactionId). Events are now interaction-scoped, not entity-pair-scoped. Supports N participants per session.
+- JOIN Query Performance: JOIN-based queries for chat list (conversation_messages JOIN interactions) reduced N+1 queries to single round-trip for last message preview.
+- Session Resume Flow: INIT_ENTITY response now includes `resumed: true` flag; service checks if backend had a suspended session and reconciles state without re-creating connection.
+- Reply Mode Implementation: ChatDetailScreen reads replyMode from active session; EntitySessionService sets it during INIT_ENTITY as `reply_mode` in session capabilities.
+- Emoji Action Resolution: EmojiService scans outgoing message text for emoji characters, resolves against entity's emoji_actions table, produces AdditionalEffects payload sent with SEND_MESSAGE event.
+- Reply Mode Default: Defaults to "realistic" if no preference stored; toggle persists per chat partner in AsyncStorage.
 @Implementation[Sync]:
 - Multi-Connection Architecture: ConnectionManager manages multiple WebSocket connections (sync + entity sessions).
 - Services[4]: ConnectionManager (transport pool), SyncService (protocol logic), EntitySessionService (session management), ConnectionStateManager (JWT lifecycle).
-- Contexts[2]: SyncConnectionContext (sync connection state/actions), EntitySessionContext (entity session management).
+- Contexts[3]: SyncConnectionContext (sync connection state/actions), EntitySessionContext (interaction session management), EmojiContext (emoji style preferences).
 - EventEmitter3: Type-safe pub/sub pattern, connection-specific event routing (event:sync, event:entity).
 - Protocol: HANDSHAKE_REQUEST → PENDING → ACCEPT → WSS upgrade → SYNC_REQUEST → DATA exchange → COMPLETE → FINALIZE.
-- Entity Sessions: Mirror Harmony Link's EntitySessionManager pattern, on-demand connections per chat.
-- Screens[2]: ConnectionSetupScreen (IP/port input, handshake), SyncSettingsScreen (status, manual sync).
-- Database: sync_devices, sync_history, chat_messages tables. Migrations in /src/database/migrations/ folder.
+- Entity Sessions: Session resume on reconnect, dangling event reconciliation.
+- Screens[2]: ConnectionSetupScreen (IP/port input, handshake), SyncSettingsScreen (status, manual sync, force full sync).
+- Database: sync_devices, sync_history, chat_messages, interactions, emoji_actions tables. Migrations in /src/database/migrations/ folder.
 - Error Handling: Connection validation, timeout handling (30s), confirmation tracking, comprehensive logging.
 @Implementation[Chat]:
 - Database: chat_messages table with TEXT columns for base64-encoded audio data. Migrations in /src/database/migrations/.
-- Repository: chat_messages.ts with full CRUD, bidirectional queries, pagination, async transcription updates.
+- Repository: chat_messages.ts with full CRUD, bidirectional queries, pagination, async transcription updates. JOIN-based interaction queries.
 - Audio Services: AudioRecorder.ts (tap-based recording with permission checks), AudioPlayer.ts (playback controls).
 - Voice Features: STT (Speech-to-Text) and TTS (Text-to-Speech) integrated and working.
 - Native Modules: react-native-audio-record, react-native-track-player, react-native-fs, react-native-image-picker.
 - Platform Setup: iOS (NSMicrophoneUsageDescription), Android (RECORD_AUDIO, READ/WRITE_EXTERNAL_STORAGE), runtime permission checks.
 - Event Constants: TYPING_INDICATOR, RECORDING_INDICATOR, CONNECTION_PING, CONNECTION_PONG, STT_INPUT_AUDIO, STT_OUTPUT_TEXT.
-- EntitySessionService: Dual session management (user + partner), message sending (text/audio), STT async flow, heartbeat handling.
-- UI Screens: ChatListScreen (entity selection, conversation list), ChatDetailScreen (messaging with QoL: last message actions, new messages divider, auto-scroll).
-- UI Components: ChatBubble (context menu for last message: delete/edit/regenerate), ChatInput (tap-based recording, permission recovery), TypingIndicator, NewMessagesDivider.
+- EntitySessionService: InteractionSession management (replaces DualSession), message sending (text/audio), STT async flow, heartbeat handling, reply mode support, session resume.
+- UI Screens: ChatListScreen (entity selection, conversation list via JOIN), ChatDetailScreen (messaging with QoL: last message actions, new messages divider, auto-scroll, reply mode toggle).
+- UI Components: ChatBubble (context menu for last message: delete/edit/regenerate, emoji-rich text), ChatInput (tap-based recording, permission recovery, emoji autocomplete), TypingIndicator, NewMessagesDivider.
 - Navigation: ChatDetail route with impersonatedEntityId (roleplay support) and partnerEntityId/partnerCharacterId params.
-- QoL Features: Last message actions, new messages tracking via ChatPreferencesService, mark-as-read on scroll, async transcription editing.
+- QoL Features: Last message actions, new messages tracking via ChatPreferencesService, mark-as-read on scroll, async transcription editing, reply mode toggle.
 - Image Messages: Not fully implemented yet (placeholder support exists).
 - Documentation: Complete integration guide in /docs/HARMONY-LINK-INTEGRATION.md with 5 detailed diagram files.
+@Implementation[Interactions]:
+- DB Migrations: 000024-000028 covering interactions table, drop session_id, interaction summary, memory lifecycle fields, presence_type.
+- Model: Interaction interface (matches Harmony Link Go struct) with id, entity_id, scope, participant_key, participant_ids, status, presence_type, summary, memory_id, continued_interaction_id.
+- Repository: interactions.ts with full CRUD (getInteractionById, createInteraction, updateInteraction), query by participant key, entity-scoped active interactions, getRecentPhoneInteractions, entityHasPhoneInteraction, getLastInteractionMessage (JOIN-based with TEXT column loading).
+- Derivation Functions: deriveScopeFromParticipants (world/private/group), deriveParticipantKey (sorted pair/group join/empty for world).
+- Sync Integration: SyncService syncs interactions via WebSocket pipeline; conversation_messages refactored to JOIN-based queries for chat list preview.
+- Session Refactor: InteractionSession replaces DualEntitySession; events keyed by interactionId; supports N participants per session; navigation adapted.
+@Implementation[Emoji]:
+- Emoji Types: Ekman8Emotion (joy, sadness, trust, disgust, fear, anger, surprise, anticipation), EmotionEffect (emotion + signed delta), MetabolismVector, EmojiAction, AdditionalEffects, ResolvedMessageActions.
+- Emoji Picker Components: EmojiPickerModal (full-screen with category tabs), EmojiPickerInline (compact for chat), EmojiGrid (virtualized grid), EmojiItem (single emoji with skin tone), EmojiSearchBar (keyword search), CategoryTabBar (swipeable category tabs), SkinToneSelector (5 skin tone modifiers), EmojiAutocomplete (inline text replacement).
+- Emoji Display: EmojiAwareText (intelligent emoji/text segmentation), EmojiText (renders emoji in chat bubbles), ChatBubble custom rendering for emoji-rich messages.
+- Emoji Services: EmojiService (data loading, search, skin tone variants), EmojiContext (style preferences, provider state management), EntityEmojiActionService (action CRUD + message resolution).
+- Emoji Actions: EmojiActionEditorScreen (entity-level action management), EmojiActionCard (action list item), EmojiActionEditModal (action editor), CustomEmojiActionInput (custom action mapping).
+- DB Migrations: 000022 (entity_emoji_actions table with emoji, action_type, emotion_effects JSON, style/bubble_color, cooldown_seconds), 000023 (deleted_at for soft deletes).
+- Sync: emoji_actions synced via WebSocket pipeline, AdditionalEffects payload sent with SEND_MESSAGE events.
+@Implementation[SamplingPresets]:
+- App does NOT call Harmony Link management API for presets — only syncs via WebSocket
+- Preset name is plain text input (user types name that exists on server)
+- Extra params edited locally as key-value pairs (typical_p, tfs, dry_*, etc.)
+- Precedence: explicit config > extraParams > preset values > library defaults
+- DB: migration 021 added sampling_preset_name + extra_params TEXT columns to module config tables
+- Provider config auto-created/updated during module config save via saveProviderConfig()
+- Advanced Sampling Parameters component for OpenAI-family providers (openai, openaicompatible, openrouter)
+- Provider field schemas in app mirror Harmony Link frontend (providerFieldSchemas.ts, moduleConfiguration.ts, moduleDefaults.ts)
+- chat_template_kwargs column dropped from both Go backend and app (migration 021)

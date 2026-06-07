@@ -31,7 +31,6 @@ export async function runModuleTests(): Promise<TestResult[]> {
           top_p: null,
           n: null,
           stop_tokens: null,
-          embedding_model: null,
           voice: null,
           speed: null,
           format: null,
@@ -106,7 +105,6 @@ export async function runModuleTests(): Promise<TestResult[]> {
           top_p: null,
           n: null,
           stop_tokens: null,
-          embedding_model: null,
           voice: null,
           speed: null,
           format: null,
@@ -121,7 +119,6 @@ export async function runModuleTests(): Promise<TestResult[]> {
           top_p: null,
           n: null,
           stop_tokens: null,
-          embedding_model: null,
           voice: null,
           speed: null,
           format: null,
@@ -158,7 +155,6 @@ export async function runModuleTests(): Promise<TestResult[]> {
           top_p: null,
           n: null,
           stop_tokens: null,
-          embedding_model: null,
           voice: null,
           speed: null,
           format: null,
@@ -185,7 +181,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
         const providerId = await providers.createOllamaProviderConfig({
           name: 'Test Provider RAG',
           base_url: 'http://localhost:11434',
-          embedding_model: null,
+          model: null,
         });
         
         const id = await modules.createRAGConfig({
@@ -214,7 +210,6 @@ export async function runModuleTests(): Promise<TestResult[]> {
           top_p: null,
           n: null,
           stop_tokens: null,
-          embedding_model: null,
           voice: null,
           speed: null,
           format: null,
@@ -248,7 +243,6 @@ export async function runModuleTests(): Promise<TestResult[]> {
           top_p: null,
           n: null,
           stop_tokens: null,
-          embedding_model: null,
           voice: null,
           speed: null,
           format: null,

@@ -29,7 +29,6 @@ export async function runProviderTests(): Promise<TestResult[]> {
           top_p: null,
           n: null,
           stop_tokens: null,
-          embedding_model: null,
           voice: null,
           speed: null,
           format: null,
@@ -72,7 +71,6 @@ export async function runProviderTests(): Promise<TestResult[]> {
           top_p: null,
           n: null,
           stop_tokens: null,
-          embedding_model: null,
         });
         const retrieved = await providers.getOpenAICompatibleProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
@@ -165,7 +163,7 @@ export async function runProviderTests(): Promise<TestResult[]> {
       await runTestWithCleanup('LocalAI Provider CRUD', async () => {
         const id = await providers.createLocalAIProviderConfig({
           name: 'Test LocalAI',
-          embedding_model: 'bert',
+          model: 'bert',
         });
         const retrieved = await providers.getLocalAIProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
@@ -192,7 +190,7 @@ export async function runProviderTests(): Promise<TestResult[]> {
         const id = await providers.createOllamaProviderConfig({
           name: 'Test Ollama',
           base_url: 'http://ollama',
-          embedding_model: null,
+          model: null,
         });
         const retrieved = await providers.getOllamaProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');

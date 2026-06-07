@@ -1,0 +1,27 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "plan": { "model": "zai-coding-plan/glm-5.1" },
+    "build": { "model": "opencode-go/deepseek-v4-flash" },
+    "coder": { "model": "opencode-go/deepseek-v4-flash" },
+    "code-expert": { "model": "opencode-go/deepseek-v4-flash" },
+    "gsd-advisor-researcher": { "model": "opencode-go/deepseek-v4-flash" },
+    "gsd-assumptions-analyzer": { "model": "anthropic/claude-sonnet-4-6" },
+    "gsd-codebase-mapper": { "model": "opencode-go/deepseek-v4-flash" },
+    "gsd-debugger": { "model": "zai-coding-plan/glm-5.1" },
+    "gsd-executor": { "model": "opencode-go/deepseek-v4-flash" },
+    "gsd-integration-checker": { "model": "anthropic/claude-sonnet-4-6" },
+    "gsd-nyquist-auditor": { "model": "opencode-go/deepseek-v4-flash" },
+    "gsd-phase-researcher": { "model": "opencode-go/deepseek-v4-flash" },
+    "gsd-plan-checker": { "model": "anthropic/claude-sonnet-4-6" },
+    "gsd-planner": { "model": "zai-coding-plan/glm-5.1" },
+    "gsd-project-researcher": { "model": "opencode-go/deepseek-v4-flash" },
+    "gsd-research-synthesizer": { "model": "anthropic/claude-opus-4-6" },
+    "gsd-roadmapper": { "model": "anthropic/claude-opus-4-6" },
+    "gsd-ui-auditor": { "model": "anthropic/claude-sonnet-4-6" },
+    "gsd-ui-checker": { "model": "anthropic/claude-sonnet-4-6" },
+    "gsd-ui-researcher": { "model": "opencode-go/deepseek-v4-flash" },
+    "gsd-user-profiler": { "model": "opencode-go/deepseek-v4-flash" },
+    "gsd-verifier": { "model": "zai-coding-plan/glm-5.1" }
+  }
+}

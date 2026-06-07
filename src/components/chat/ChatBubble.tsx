@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator, Text } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { Avatar, IconButton, Menu } from 'react-native-paper';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
 import { Theme } from '../../theme/types';
 import { ConversationMessage } from '../../database/models';
+import { EmojiAwareText } from '../emoji/EmojiAwareText';
+import EmojiService from '../../services/EmojiService';
+import { createLogger } from '../../utils/logger';
 
+const log = createLogger('[ChatBubble]');
 const { width: screenWidth } = Dimensions.get('window');
 
 interface ChatBubbleProps {
@@ -23,6 +28,54 @@ interface ChatBubbleProps {
   onRetryTranscription?: (messageId: string) => void;
   theme: Theme;
 }
+
+/**
+ * FormattedRPText renders message content with roleplay-aware formatting.
+ * Text between asterisks (*action*) is rendered in italic with the accent color.
+ * All other text is rendered with emoji support via EmojiAwareText.
+ */
+const FormattedRPText: React.FC<{
+  content: string;
+  isOwn: boolean;
+  accentColor: string;
+  textColor: string;
+}> = ({ content, isOwn, accentColor, textColor }) => {
+  // Parse shortcodes first — converts :emoji: to native emoji characters
+  const normalizedContent = EmojiService.parseShortcodes(content);
+
+  const parts = normalizedContent.split(/(\*[^*]+\*)/g);
+
+  // When there's no action text, just render plain text through ThemedText's <Text> parent
+  if (parts.length <= 1 && !normalizedContent.includes('*')) {
+    return <>{normalizedContent}</>;
+  }
+
+  // Render all segments as <Text> children so they flow inline.
+  // Emoji shortcodes are already resolved to native characters by parseShortcodes,
+  // so they display correctly as text glyphs inside the parent <Text> tree.
+  // This avoids React Native's invalid View-in-Text nesting that caused the overlap.
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+          // Non-verbal action — italic with accent color, asterisks stripped
+          return (
+            <Text
+              key={index}
+              style={{
+                fontStyle: 'italic',
+                color: isOwn ? textColor : accentColor,
+              }}
+            >
+              {part.slice(1, -1)}
+            </Text>
+          );
+        }
+        return <Text key={index}>{part}</Text>;
+      })}
+    </>
+  );
+};
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
   message,
@@ -110,7 +163,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       } else {
         // Check if the correct audio is loaded
         if (!AudioPlayer.isMessageLoaded(message.id)) {
-          console.log(`Loading audio for message ${message.id} (current: ${AudioPlayer.getCurrentMessageId()})`);
+          log.debug(`Loading audio for message ${message.id} (current: ${AudioPlayer.getCurrentMessageId()})`);
           // Wrong audio is loaded, load the correct one
           await AudioPlayer.loadAudioForMessage(
             message.id,
@@ -126,7 +179,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 setAudioDuration(duration);
               }
             } catch (error) {
-              console.warn('Could not get duration:', error);
+              log.warn('Could not get duration:', error);
             }
           }, 300);
         }
@@ -144,7 +197,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         setIsPlaying(true);
       }
     } catch (error) {
-      console.error('Failed to toggle playback:', error);
+      log.error('Failed to toggle playback:', error);
       setIsPlaying(false);
     }
   };
@@ -310,12 +363,41 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             ) : (
               <>
                 {(!hasAudioWithTranscription || isPendingSend || showTranscription) && (
-                  <ThemedText variant={isOwn ? 'primary' : 'secondary'} style={styles.textContent}>
-                    {message.content}
-                  </ThemedText>
+                  <View style={styles.textContentContainer}>
+                    <ThemedText variant={isOwn ? 'primary' : 'secondary'} style={styles.textContent}>
+                      <FormattedRPText
+                        content={isPendingSend && editedText !== message.content ? editedText : message.content}
+                        isOwn={isOwn}
+                        accentColor={theme.colors.accent.primary}
+                        textColor={isOwn ? theme.colors.text.primary : theme.colors.text.secondary}
+                      />
+                    </ThemedText>
+                    {message.is_edited && (
+                      <ThemedText variant="muted" size={11} style={styles.editedIndicator}>
+                        (edited)
+                      </ThemedText>
+                    )}
+                  </View>
                 )}
               </>
             )}
+          </View>
+        )}
+
+        {isEditing && !isPendingSend && (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              onPress={handleEditCancel}
+              style={styles.actionButton}
+            >
+              <ThemedText variant="muted" size={12}>Cancel</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleEditSave}
+              style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
+            >
+              <ThemedText style={{ color: '#fff' }} size={12}>Save</ThemedText>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -324,16 +406,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {isEditing ? (
               <>
                 <TouchableOpacity
-                  onPress={() => {
-                    setEditedText(message.content || '');
-                    setIsEditing(false);
-                  }}
+                  onPress={handleEditCancel}
                   style={styles.actionButton}
                 >
                   <ThemedText variant="muted" size={12}>Cancel</ThemedText>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setIsEditing(false)}
+                  onPress={handleEditSave}
                   style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
                 >
                   <ThemedText style={{ color: '#fff' }} size={12}>Save</ThemedText>
@@ -364,7 +443,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           <ThemedText variant="muted" size={10} style={styles.timestamp}>
             {formatTime(message.created_at)}
           </ThemedText>
-          {isLastMessage && !isPendingSend && !isEditing && (
+          {isLastMessage && !isEditing && (
             <Menu
               visible={menuVisible}
               onDismiss={() => setMenuVisible(false)}
@@ -402,21 +481,43 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         <Avatar.Image size={32} source={{ uri: partnerAvatar }} style={styles.avatar} />
       )}
       {!isOwn && !partnerAvatar && (
-        <Avatar.Text 
-          size={32} 
-          label={partnerName.substring(0, 2).toUpperCase()} 
-          style={styles.avatar} 
-        />
+        <LinearGradient
+          colors={[
+            theme.colors.accent.primary + '33',
+            theme.colors.background.elevated,
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.avatarFallback}
+        >
+          <ThemedText size={13} weight="bold" style={{ color: theme.colors.accent.primary }}>
+            {partnerName.substring(0, 2).toUpperCase()}
+          </ThemedText>
+        </LinearGradient>
       )}
       
-      <View style={[
-        styles.bubble,
-        isOwn 
-          ? [styles.ownBubble, { backgroundColor: theme.colors.accent.primary + '20' }]
-          : [styles.partnerBubble, { backgroundColor: theme.colors.background.elevated }],
-      ]}>
-        {renderContent()}
-      </View>
+      {isOwn ? (
+        // Own bubble: accent gradient at ~55-35% opacity — gives colour depth
+        // without washing out text or audio controls.
+        <LinearGradient
+          colors={[theme.colors.accent.primary + 'B3', (theme.colors.accent.secondary ?? theme.colors.accent.primaryHover) + '80']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.bubble, styles.ownBubble, { backgroundColor: theme.colors.background.surface }]}
+        >
+          {renderContent()}
+        </LinearGradient>
+      ) : (
+        // Partner bubble: subtle elevated→surface gradient
+        <LinearGradient
+          colors={[theme.colors.background.elevated, theme.colors.background.surface]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.bubble, styles.partnerBubble]}
+        >
+          {renderContent()}
+        </LinearGradient>
+      )}
     </View>
   );
 };
@@ -447,6 +548,14 @@ const styles = StyleSheet.create({
   avatar: {
     marginRight: 8,
   },
+  avatarFallback: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
   bubble: {
     width: screenWidth * 0.75,
     borderRadius: 16,
@@ -461,6 +570,16 @@ const styles = StyleSheet.create({
   textContent: {
     fontSize: 16,
     lineHeight: 22,
+  },
+  textContentContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+  },
+  editedIndicator: {
+    marginLeft: 6,
+    fontStyle: 'italic',
+    opacity: 0.6,
   },
   timestampRow: {
     flexDirection: 'row',

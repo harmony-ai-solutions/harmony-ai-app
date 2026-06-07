@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useImperativeHandle } from 'react';
 import {
   StyleSheet,
   View,
@@ -9,6 +9,7 @@ import {
   Alert,
   AppState,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { ThemedView } from '../themed/ThemedView';
@@ -16,34 +17,57 @@ import { ThemedText } from '../themed/ThemedText';
 import AudioRecorder from '../../services/AudioRecorder';
 import { Theme } from '../../theme/types';
 import { createLogger } from '../../utils/logger';
+import { EmojiAutocomplete } from '../emoji/EmojiAutocomplete';
+import EmojiService from '../../services/EmojiService';
+import { EmojiEntry } from '../../types/emoji';
+import { EmojiActionInput } from './EmojiActionInput';
 
 const log = createLogger('[ChatInput]');
+
+export interface ChatInputRef {
+  insertEmoji: (emoji: string) => void;
+}
 
 interface ChatInputProps {
   onSendText: (text: string) => void;
   onSendAudio: (audioData: string, duration: number) => void;
   onSendImage: (imageBase64: string, mimeType: string, caption?: string) => void;
   onTypingStart?: () => void;
+  onEmojiToggle?: () => void;
+  showEmojiButton?: boolean;
   disabled?: boolean;
   theme: Theme;
+  entityId?: string | null;
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({
+export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
   onSendText,
   onSendAudio,
   onSendImage,
   onTypingStart,
+  onEmojiToggle,
+  showEmojiButton = true,
   disabled = false,
   theme,
-}) => {
+  entityId,
+}, ref) => {
+  const { bottom: safeBottom } = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [hasRecordPermission, setHasRecordPermission] = useState<boolean | null>(null);
-  
+  const [autocompleteResults, setAutocompleteResults] = useState<EmojiEntry[]>([]);
+  const [shortcodePrefix, setShortcodePrefix] = useState('');
+
   const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useImperativeHandle(ref, () => ({
+    insertEmoji: (emoji: string) => {
+      setText(prev => prev + emoji);
+    },
+  }));
 
   // Check initial permission
   useEffect(() => {
@@ -101,6 +125,43 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     if (newText.length === 1 && onTypingStart) {
       onTypingStart();
     }
+    detectShortcodeAutocomplete(newText);
+  };
+
+  const detectShortcodeAutocomplete = (text: string) => {
+    const lastColonIndex = text.lastIndexOf(':');
+    if (lastColonIndex === -1) {
+      setAutocompleteResults([]);
+      setShortcodePrefix('');
+      return;
+    }
+    if (lastColonIndex === text.length - 1) {
+      const popular = EmojiService.searchByShortcodePrefix('', 8);
+      setAutocompleteResults(popular);
+      setShortcodePrefix('');
+      return;
+    }
+    const prefix = text.slice(lastColonIndex + 1);
+    if (prefix.includes(' ') || prefix.includes(':')) {
+      setAutocompleteResults([]);
+      setShortcodePrefix('');
+      return;
+    }
+    const results = EmojiService.searchByShortcodePrefix(prefix.toLowerCase(), 8);
+    setAutocompleteResults(results);
+    setShortcodePrefix(prefix);
+  };
+
+  const handleAutocompleteSelect = (emoji: EmojiEntry) => {
+    const lastColonIndex = text.lastIndexOf(':');
+    if (lastColonIndex === -1) return;
+    const before = text.slice(0, lastColonIndex);
+    const after = text.slice(lastColonIndex + shortcodePrefix.length + 1);
+    const newText = before + emoji.native + after;
+    setText(newText);
+    setAutocompleteResults([]);
+    setShortcodePrefix('');
+    if (onTypingStart) onTypingStart();
   };
 
   const handleSend = () => {
@@ -219,7 +280,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   if (isRecording) {
     return (
-      <ThemedView style={[styles.container, { backgroundColor: theme.colors.background.surface }]}>
+      <ThemedView style={[styles.container, { backgroundColor: theme.colors.background.surface, paddingBottom: safeBottom }]}>
         <View style={styles.recordingContainer}>
           <Animated.View
             style={[
@@ -245,8 +306,29 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   }
 
   return (
-    <ThemedView style={[styles.container, { backgroundColor: theme.colors.background.surface }]}>
+    <ThemedView style={[styles.container, { backgroundColor: theme.colors.background.surface, paddingBottom: safeBottom }]}>
+      <EmojiAutocomplete
+        results={autocompleteResults}
+        query={shortcodePrefix}
+        onSelect={handleAutocompleteSelect}
+        onDismiss={() => { setAutocompleteResults([]); setShortcodePrefix(''); }}
+        theme={theme}
+      />
       <View style={styles.inputRow}>
+        {showEmojiButton && onEmojiToggle && (
+          <TouchableOpacity
+            onPress={onEmojiToggle}
+            disabled={disabled || isProcessing}
+            style={styles.iconButton}
+          >
+            <Icon
+              name="emoticon-outline"
+              size={24}
+              color={disabled ? theme.colors.text.disabled : theme.colors.accent.primary}
+            />
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           onPress={handleImagePick}
           disabled={disabled || isProcessing}
@@ -260,17 +342,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         </TouchableOpacity>
 
         <View style={[styles.inputContainer, { backgroundColor: theme.colors.background.elevated }]}>
-          <TextInput
+          <EmojiActionInput
             value={text}
             onChangeText={handleTextChange}
             placeholder="Type a message..."
             placeholderTextColor={theme.colors.text.muted}
-            style={[styles.input, { color: theme.colors.text.primary }]}
-            multiline
+            textColor={theme.colors.text.primary}
+            backgroundColor={theme.colors.background.elevated}
             maxLength={2000}
             editable={!disabled && !isProcessing}
             onSubmitEditing={handleSend}
             blurOnSubmit={false}
+            entityId={entityId ?? null}
+            theme={theme}
           />
         </View>
 
@@ -308,7 +392,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       </View>
     </ThemedView>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -332,11 +416,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 8,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    maxHeight: 100,
+    // 4 lines × 22px line-height + 2 × 8px vertical padding = 104px
+    maxHeight: 104,
   },
   input: {
     fontSize: 16,
-    maxHeight: 80,
+    // 4 lines of text (lineHeight 22px each)
+    maxHeight: 88,
   },
   sendButton: {
     width: 40,

@@ -5,6 +5,8 @@ import { oceanBreeze } from './oceanBreeze';
 import { forestNight } from './forestNight';
 import { sunsetGlow } from './sunsetGlow';
 import { pureDark } from './pureDark';
+import { soulBitsDark } from './soulBitsDark';
+import { soulBitsLight } from './soulBitsLight';
 
 /**
  * All default themes
@@ -16,6 +18,8 @@ export const defaultThemes: Theme[] = [
     forestNight,
     sunsetGlow,
     pureDark,
+    soulBitsDark,
+    soulBitsLight,
 ];
 
 /**
@@ -44,4 +48,6 @@ export {
     forestNight,
     sunsetGlow,
     pureDark,
+    soulBitsDark,
+    soulBitsLight,
 };

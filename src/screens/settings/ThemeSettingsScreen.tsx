@@ -7,6 +7,7 @@ import {
     StyleSheet,
     Alert,
 } from 'react-native';
+import { Appbar } from 'react-native-paper';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Switch } from 'react-native-paper';
@@ -14,9 +15,13 @@ import * as DocumentPicker from '@react-native-documents/picker';
 import { isErrorWithCode, errorCodes } from '@react-native-documents/picker';
 import RNFS from 'react-native-fs';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useEmoji } from '../../contexts/EmojiContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
+import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
 import { ThemeCard } from '../../components/settings/ThemeCard';
+import { EmojiStyleCard } from '../../components/settings/EmojiStyleCard';
 import { Theme } from '../../theme/types';
+import { EmojiSet } from '../../types/emoji';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ThemeSettings'>;
 
@@ -32,6 +37,14 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
         syncWithHarmonyLink,
         syncStatus,
     } = useAppTheme();
+
+    const { emojiSet, setEmojiSet } = useEmoji();
+
+    const EMOJI_STYLES = [
+        { set: 'native' as EmojiSet, label: 'Native (System)', description: 'Use your device\'s built-in emoji style', sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
+        { set: 'noto' as EmojiSet, label: 'Google Noto', description: 'Colorful, modern emoji by Google (Apache 2.0)', sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
+        { set: 'twemoji' as EmojiSet, label: 'Twemoji', description: 'Clean, flat emoji originally by Twitter/X (CC-BY 4.0)', sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
+    ];
 
     const [systemThemeEnabled, setSystemThemeEnabled] = useState(themeMode === 'system');
 
@@ -136,6 +149,16 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
     return (
         <View style={[styles.container, { backgroundColor: theme.colors.background.base }]}>
+            <ThemedAppbar style={styles.header}>
+                <Appbar.BackAction
+                    color={theme.colors.text.primary}
+                    onPress={() => navigation.goBack()}
+                />
+                <Appbar.Content
+                    title="Appearance & Theme"
+                    titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
+                />
+            </ThemedAppbar>
             <ScrollView>
                 {/* System Theme Toggle */}
                 <View
@@ -246,6 +269,28 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                         </TouchableOpacity>
                     )}
                 </View>
+
+                {/* Emoji Style Section */}
+                <View style={styles.emojiSection}>
+                    <Text style={[styles.label, { color: theme.colors.text.muted }]}>
+                        EMOJI STYLE
+                    </Text>
+                    <Text style={[styles.sectionDescription, { color: theme.colors.text.secondary }]}>
+                        Choose how emojis look in chat messages
+                    </Text>
+                    {EMOJI_STYLES.map((style) => (
+                        <EmojiStyleCard
+                            key={style.set}
+                            emojiSet={style.set}
+                            label={style.label}
+                            description={style.description}
+                            sampleEmojis={style.sampleEmojis}
+                            isActive={emojiSet === style.set}
+                            onPress={() => setEmojiSet(style.set)}
+                            theme={theme}
+                        />
+                    ))}
+                </View>
             </ScrollView>
         </View>
     );
@@ -254,6 +299,9 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+    },
+    header: {
+        elevation: 4,
     },
     section: {
         margin: 16,
@@ -329,5 +377,14 @@ const styles = StyleSheet.create({
         height: 8,
         borderRadius: 4,
         marginLeft: 8,
+    },
+    emojiSection: {
+        paddingHorizontal: 16,
+        paddingBottom: 24,
+    },
+    sectionDescription: {
+        fontSize: 14,
+        marginBottom: 16,
+        marginTop: -8,
     },
 });
