@@ -1,4 +1,4 @@
-package ai.projectharmony.chat
+package ai.soulbits.chat
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate

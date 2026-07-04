@@ -1,4 +1,4 @@
-package ai.projectharmony.chat
+package ai.soulbits.chat
 
 import android.app.Application
 import com.facebook.react.PackageList
