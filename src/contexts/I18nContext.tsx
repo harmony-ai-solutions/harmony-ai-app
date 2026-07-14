@@ -117,27 +117,47 @@ const i18nConfig: InitOptions = {
 
 let i18nInitialized = false;
 
-async function initializeI18n(): Promise<void> {
+/**
+ * Synchronous initialization with bundled resources.
+ * Resources are statically imported (no network fetch), so init() resolves
+ * immediately. We call this at module load so useTranslation() in child
+ * components never sees an uninitialized i18n instance.
+ */
+function initializeI18nSync(): void {
   if (i18nInitialized) return;
 
   try {
-    // Load stored language preference
-    const storedLang = await AsyncStorage.getItem(STORAGE_KEY_LANGUAGE);
-    if (storedLang && storedLang in SUPPORTED_LANGUAGES) {
-      i18nConfig.lng = storedLang;
-    }
-
-    await i18n.use(initReactI18next).init(i18nConfig);
+    i18n.use(initReactI18next).init(i18nConfig);
     i18nInitialized = true;
-    log.info('i18n initialized with language:', i18n.language);
+    log.info('i18n initialized synchronously with language:', i18n.language);
   } catch (err) {
-    log.error('Failed to initialize i18n:', err);
-    // Fallback: init without async storage
-    await i18n.use(initReactI18next).init({
-      ...i18nConfig,
-      lng: 'en',
-    });
-    i18nInitialized = true;
+    log.error('Failed to initialize i18n synchronously:', err);
+    // Fallback: try with explicit en
+    try {
+      i18n.use(initReactI18next).init({ ...i18nConfig, lng: 'en' });
+      i18nInitialized = true;
+    } catch (err2) {
+      log.error('i18n fallback init also failed:', err2);
+    }
+  }
+}
+
+// Initialize immediately at module load
+initializeI18nSync();
+
+/**
+ * Async initialization that loads the stored language preference from
+ * AsyncStorage and switches if needed. Called from the provider's useEffect.
+ */
+async function loadStoredLanguage(): Promise<void> {
+  try {
+    const storedLang = await AsyncStorage.getItem(STORAGE_KEY_LANGUAGE);
+    if (storedLang && storedLang in SUPPORTED_LANGUAGES && storedLang !== i18n.language) {
+      await i18n.changeLanguage(storedLang);
+      log.info('Loaded stored language:', storedLang);
+    }
+  } catch (err) {
+    log.error('Failed to load stored language:', err);
   }
 }
 
@@ -152,7 +172,9 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({ children }) => {
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>('en');
 
   useEffect(() => {
-    initializeI18n().then(() => {
+    // i18n is already initialized synchronously at module load.
+    // Just load the stored language preference and mark as ready.
+    loadStoredLanguage().finally(() => {
       setCurrentLanguage(i18n.language as SupportedLanguage);
       setIsInitialized(true);
     });
