@@ -17,6 +17,7 @@ import { SectionHeader } from '../components/themed/SectionHeader';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
+import { useTranslation } from 'react-i18next';
 import { v4 as uuidv4 } from 'uuid';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -45,6 +46,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const { theme } = useAppTheme();
+  const { t } = useTranslation('characters');
   const { bottom: safeBottom } = useSafeAreaInsets();
 
   const { profileId } = route.params ?? {};
@@ -105,7 +107,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       setPrimaryImageId(primary?.id ?? null);
     } catch (err) {
       log.error('Failed to load profile:', err);
-      Alert.alert('Error', 'Failed to load profile data.');
+      Alert.alert(t('common:error'), t('loadFailed'));
     } finally {
       setIsLoadingProfile(false);
     }
@@ -179,7 +181,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       navigation.goBack();
     } catch (err) {
       log.error('Failed to save profile:', err);
-      Alert.alert('Error', 'Failed to save profile. Please try again.');
+      Alert.alert(t('common:error'), t('saveFailed'));
     } finally {
       setIsSaving(false);
     }
@@ -189,8 +191,8 @@ export const CharacterProfileEditScreen: React.FC = () => {
   const handleAddImage = async () => {
     if (!profileId) {
       Alert.alert(
-        'Save First',
-        'Please save the profile before adding images.',
+        t('saveFirst'),
+        t('saveFirstMessage'),
       );
       return;
     }
@@ -208,7 +210,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
         const base64Data = asset.base64;
 
         if (!base64Data) {
-          Alert.alert('Error', 'Could not read image data.');
+          Alert.alert(t('common:error'), t('imageError'));
           return;
         }
 
@@ -237,7 +239,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       }
     } catch (err) {
       log.error('Failed to add image:', err);
-      Alert.alert('Error', 'Failed to add image.');
+      Alert.alert(t('common:error'), t('addImageFailed'));
     }
   };
 
@@ -252,7 +254,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       );
     } catch (err) {
       log.error('Failed to set primary image:', err);
-      Alert.alert('Error', 'Failed to set primary image.');
+      Alert.alert(t('common:error'), t('setPrimaryFailed'));
     }
   };
 
@@ -272,7 +274,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       }
     } catch (err) {
       log.error('Failed to delete image:', err);
-      Alert.alert('Error', 'Failed to delete image.');
+      Alert.alert(t('common:error'), t('deleteImageFailed'));
     }
   };
 
@@ -333,7 +335,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
           onPress={() => navigation.goBack()}
         />
         <Appbar.Content
-          title={isEditMode ? 'Edit Profile' : 'Create Profile'}
+          title={isEditMode ? t('editProfile') : t('createProfile')}
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
         />
         {isSaving ? (
@@ -370,7 +372,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
                   style={[styles.input, inputStyle()]}
                   value={name}
                   onChangeText={setName}
-                  placeholder="Character name"
+                  placeholder={t('namePlaceholder')}
                   placeholderTextColor={theme.colors.text.muted}
                   returnKeyType="next"
                 />,
@@ -411,7 +413,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
                   style={[styles.input, styles.multilineInput, inputStyle()]}
                   value={appearance}
                   onChangeText={setAppearance}
-                  placeholder="Physical appearance description"
+                  placeholder={t('appearancePlaceholder')}
                   placeholderTextColor={theme.colors.text.muted}
                   multiline
                   numberOfLines={3}
@@ -425,7 +427,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
                   style={[styles.input, styles.multilineInput, inputStyle()]}
                   value={backstory}
                   onChangeText={setBackstory}
-                  placeholder="Character backstory and history"
+                  placeholder={t('backstoryPlaceholder')}
                   placeholderTextColor={theme.colors.text.muted}
                   multiline
                   numberOfLines={4}
@@ -445,7 +447,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
                   style={[styles.input, styles.multilineInput, inputStyle()]}
                   value={voiceCharacteristics}
                   onChangeText={setVoiceCharacteristics}
-                  placeholder="Voice tone, style, speech patterns"
+                  placeholder={t('voicePlaceholder')}
                   placeholderTextColor={theme.colors.text.muted}
                   multiline
                   numberOfLines={3}
@@ -505,7 +507,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
                   style={[styles.input, styles.multilineInput, inputStyle()]}
                   value={basePrompt}
                   onChangeText={setBasePrompt}
-                  placeholder="System prompt for the AI character"
+                  placeholder={t('basePromptPlaceholder')}
                   placeholderTextColor={theme.colors.text.muted}
                   multiline
                   numberOfLines={5}
@@ -519,7 +521,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
                   style={[styles.input, styles.multilineInput, inputStyle()]}
                   value={scenario}
                   onChangeText={setScenario}
-                  placeholder="Setting and scenario for interactions"
+                  placeholder={t('scenarioPlaceholder')}
                   placeholderTextColor={theme.colors.text.muted}
                   multiline
                   numberOfLines={3}
@@ -533,7 +535,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
                   style={[styles.input, styles.multilineInput, inputStyle()]}
                   value={exampleDialogues}
                   onChangeText={setExampleDialogues}
-                  placeholder="Example conversations to guide the character"
+                  placeholder={t('exampleDialoguesPlaceholder')}
                   placeholderTextColor={theme.colors.text.muted}
                   multiline
                   numberOfLines={5}

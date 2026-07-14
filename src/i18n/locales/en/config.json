@@ -1,0 +1,16 @@
+{
+  "aiConfig": "AI Configuration",
+  "syncSettings": "Sync Settings",
+  "configureSync": "Configure sync settings",
+  "moduleConfigEdit": "Edit Module Config",
+  "configName": "Config Name",
+  "configNamePlaceholder": "Enter config name",
+  "noModules": "No modules configured yet",
+  "addModule": "Add Module",
+  "addNew": "Add New",
+  "saveConfig": "Save Config",
+  "savedToast": "Config saved",
+  "saveFailed": "Failed to save: {{message}}",
+  "deleteConfig": "Delete Config",
+  "deleteConfirm": "Delete this config? This cannot be undone."
+}

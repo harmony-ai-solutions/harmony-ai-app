@@ -12,6 +12,7 @@ import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
@@ -40,6 +41,7 @@ export const EntityConfigScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
+  const { t } = useTranslation('entityConfig');
   const [menuVisible, setMenuVisible] = useState(false);
   const [entityItems, setEntityItems] = useState<EntityListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -108,14 +110,14 @@ export const EntityConfigScreen: React.FC = () => {
   );
 
   const handleDelete = (item: EntityListItem) => {
+    const entityName = item.characterProfileName || item.entity.alias || item.entity.id.substring(0, 8);
     Alert.alert(
-      'Delete Entity',
-      `Delete "${item.entity.alias ?? item.entity.id.substring(0, 8)}"? ` +
-        'Chat history will be preserved but the entity will no longer be accessible.',
+      t('deleteEntity'),
+      t('deleteConfirm', { name: entityName }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common:cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common:delete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -124,7 +126,7 @@ export const EntityConfigScreen: React.FC = () => {
                 prev.filter(e => e.entity.id !== item.entity.id),
               );
             } catch {
-              Alert.alert('Error', 'Failed to delete entity.');
+              Alert.alert(t('common:error'), t('deleteFailed') || 'Failed to delete entity.');
             }
           },
         },
@@ -142,7 +144,7 @@ export const EntityConfigScreen: React.FC = () => {
           onPress={() => navigation.goBack()}
         />
         <Appbar.Content
-          title="Entity Config"
+          title={t('title')}
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
         />
         <Appbar.Action

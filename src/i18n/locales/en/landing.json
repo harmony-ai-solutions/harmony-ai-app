@@ -1,0 +1,15 @@
+{
+  "title": "Harmony AI Chat",
+  "aiChat": {
+    "title": "AI Chat",
+    "description": "Continue your conversations with AI partners"
+  },
+  "characters": {
+    "title": "Characters",
+    "description": "Manage AI character profiles"
+  },
+  "settings": {
+    "title": "Settings",
+    "description": "Connection, sync & account"
+  }
+}

@@ -3,6 +3,7 @@ import { View, StyleSheet, ScrollView, TextInput, Alert } from 'react-native';
 import { Appbar } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useTranslation } from 'react-i18next';
 import { createLogger } from '../../utils/logger';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../../components/themed/ThemedText';
@@ -24,10 +25,11 @@ export const ConnectionSetupScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { showToast, isPaired, isConnected, isConnecting, reconnect } = useSyncConnection();
+  const { t } = useTranslation('connection');
   
   const [url, setUrl] = useState('192.168.1.');
   const [port, setPort] = useState('8080');
-  const [status, setStatus] = useState('Idle');
+  const [status, setStatus] = useState(t('idle'));
   const [isManuallyConnecting, setIsManuallyConnecting] = useState(false);
   const [showCertModal, setShowCertModal] = useState(false);
   const [showCertDetailsModal, setShowCertDetailsModal] = useState(false);
@@ -338,24 +340,24 @@ export const ConnectionSetupScreen: React.FC = () => {
           onPress={() => navigation.goBack()}
         />
         <Appbar.Content
-          title="Connection Setup"
+          title={t('title')}
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
         />
       </ThemedAppbar>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <ThemedText variant="secondary" style={styles.description}>
-          {isPaired 
-            ? 'View and manage your Harmony Link connection settings.' 
-            : 'Connect your app to Harmony Link to sync characters, messages, and configurations across devices.'}
+          {isPaired
+            ? t('descriptionPaired')
+            : t('descriptionUnpaired')}
         </ThemedText>
 
         <View style={styles.form}>
-          <ThemedText weight="medium">Harmony Link Address</ThemedText>
+          <ThemedText weight="medium">{t('addressLabel')}</ThemedText>
           <TextInput
             style={[styles.input, { color: theme.colors.text.primary }]}
             value={url}
             onChangeText={setUrl}
-            placeholder="e.g. 192.168.1.10 or harmony-link.local"
+            placeholder={t('addressPlaceholder')}
             placeholderTextColor={theme.colors.text.muted}
             keyboardType="url"
             autoCapitalize="none"
@@ -363,7 +365,7 @@ export const ConnectionSetupScreen: React.FC = () => {
             editable={!isPaired}
           />
 
-          <ThemedText weight="medium">Port</ThemedText>
+          <ThemedText weight="medium">{t('portLabel')}</ThemedText>
           <TextInput
             style={[styles.input, { color: theme.colors.text.primary }]}
             value={port}
@@ -376,19 +378,19 @@ export const ConnectionSetupScreen: React.FC = () => {
 
           {isPaired && securityMode && (
             <>
-              <ThemedText weight="medium">Security Mode</ThemedText>
+              <ThemedText weight="medium">{t('securityMode')}</ThemedText>
               <View style={[styles.input, { justifyContent: 'center' }]}>
                 <ThemedText>
-                  {securityMode === 'secure' && '🔒 Secure (Verified SSL)'}
-                  {securityMode === 'insecure-ssl' && '🔓 Trusted Certificate (Self-Signed)'}
-                  {securityMode === 'unencrypted' && '⚠️ Unencrypted (No SSL)'}
+                  {securityMode === 'secure' && t('secureMode')}
+                  {securityMode === 'insecure-ssl' && t('insecureSSlMode')}
+                  {securityMode === 'unencrypted' && t('unencryptedMode')}
                 </ThemedText>
               </View>
             </>
           )}
 
           <View style={styles.statusContainer}>
-            <ThemedText>Status: </ThemedText>
+            <ThemedText>{t('statusLabel')}</ThemedText>
             <ThemedText weight="medium" style={[styles.statusText, { 
               color: isPaired ? (isConnected ? '#4CAF50' : '#F44336') : theme.colors.accent.primary 
             }]}>
@@ -398,7 +400,7 @@ export const ConnectionSetupScreen: React.FC = () => {
 
           {!isPaired ? (
             <ThemedButton
-              label={isManuallyConnecting ? "Connecting..." : "Connect & Pair"}
+              label={isManuallyConnecting ? t('connecting') : t('connectPair')}
               onPress={handleConnect}
               disabled={isManuallyConnecting || isConnecting}
             />
@@ -406,7 +408,7 @@ export const ConnectionSetupScreen: React.FC = () => {
             <View style={styles.pairedActions}>
               {!isConnected && (
                 <ThemedButton
-                  label={isConnecting ? "Reconnecting..." : "Reconnect"}
+                  label={isConnecting ? t('reconnecting') : t('reconnect')}
                   onPress={async () => {
                     try {
                       setStatus('Reconnecting...');
@@ -424,15 +426,15 @@ export const ConnectionSetupScreen: React.FC = () => {
                 />
               )}
               <ThemedButton
-                label="Unpair Device"
+                label={t('unpairDevice')}
                 onPress={async () => {
                 Alert.alert(
-                  'Unpair Device',
-                  'This will remove all pairing data. You will need to pair again to sync with Harmony Link.',
+                  t('unpairTitle'),
+                  t('unpairMessage'),
                   [
-                    { text: 'Cancel', style: 'cancel' },
+                    { text: t('common:cancel'), style: 'cancel' },
                     {
-                      text: 'Unpair',
+                      text: t('unpair'),
                       style: 'destructive',
                       onPress: async () => {
                         await ConnectionStateManager.clearAllCredentials();
@@ -453,15 +455,15 @@ export const ConnectionSetupScreen: React.FC = () => {
               />
               {securityMode && (
                 <ThemedButton
-                  label="Reset Security Mode"
+                  label={t('resetSecurityMode')}
                   onPress={async () => {
                     Alert.alert(
-                      'Reset Security Mode',
-                      'This will clear your security preference and you will be prompted to choose a connection method on next connection attempt.',
+                      t('resetSecurityTitle'),
+                      t('resetSecurityMessage'),
                       [
-                        { text: 'Cancel', style: 'cancel' },
+                        { text: t('common:cancel'), style: 'cancel' },
                         {
-                          text: 'Reset',
+                          text: t('reset'),
                           style: 'destructive',
                           onPress: async () => {
                             await ConnectionStateManager.clearSecurityMode();

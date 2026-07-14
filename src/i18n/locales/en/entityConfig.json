@@ -1,0 +1,19 @@
+{
+  "title": "Entity Configuration",
+  "noEntities": "No entities configured",
+  "noEntitiesHint": "Create character profiles to start building entities.",
+  "entityModules": "Entity Modules",
+  "editEntity": "Edit Entity",
+  "deleteEntity": "Delete Entity",
+  "deleteConfirm": "Delete \"{{name}}\"? This cannot be undone.",
+  "entityName": "Entity Name",
+  "entityNamePlaceholder": "Enter entity name",
+  "alias": "Alias",
+  "aliasPlaceholder": "Display name",
+  "characterProfile": "Character Profile",
+  "noProfile": "No profile assigned",
+  "saveEntity": "Save Entity",
+  "savedToast": "Entity saved",
+  "saveFailed": "Failed to save entity: {{message}}",
+  "createFailed": "Failed to create entity: {{message}}"
+}

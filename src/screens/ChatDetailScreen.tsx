@@ -26,6 +26,7 @@ import { Appbar, Avatar } from 'react-native-paper';
 import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
@@ -76,6 +77,7 @@ const MESSAGES_PAGE_SIZE = 200;
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
 export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
+  const { t } = useTranslation('chatDetail');
   const {
     interactionId: routeInteractionId,
     participantKey: routeParticipantKey,
@@ -355,14 +357,14 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         const errorMessage = error?.message || 'Unknown error';
         if (Platform.OS === 'android') {
           ToastAndroid.show(
-            `Failed to start chat session: ${errorMessage}`,
+            `${t('common:error')}: ${errorMessage}`,
             ToastAndroid.LONG,
           );
         } else {
           Alert.alert(
-            'Connection Error',
-            `Could not establish chat session: ${errorMessage}`,
-            [{ text: 'OK' }],
+            t('common:error'),
+            `${t('common:error')}: ${errorMessage}`,
+            [{ text: t('common:ok') }],
           );
         }
       }
@@ -513,7 +515,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         if (Platform.OS === 'android') {
           ToastAndroid.show(`Chat session error: ${error}`, ToastAndroid.LONG);
         } else {
-          Alert.alert('Session Error', error, [{ text: 'OK' }]);
+          Alert.alert(t('common:error'), error, [{ text: t('common:ok') }]);
         }
       }
     };
@@ -694,7 +696,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             ToastAndroid.LONG,
           );
         } else {
-          Alert.alert('Error', `Failed to send message: ${error.message}`);
+          Alert.alert(t('common:error'), t('common:error') + `: ${error.message}`);
         }
       }
     },
@@ -946,8 +948,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               navigation.navigate('ChatList');
             } catch (err: any) {
               Alert.alert(
-                'Error',
-                err?.message ?? 'Failed to delete entity.',
+                t('common:error'),
+                err?.message ?? t('common:error'),
               );
             }
           },

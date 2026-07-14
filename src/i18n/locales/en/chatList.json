@@ -1,0 +1,13 @@
+{
+  "title": "Chats",
+  "chattingAs": "Chatting as",
+  "notConnected": "Not connected",
+  "notConnectedHint": "Connect to Harmony Link or cloud to load your entities.",
+  "connectNow": "Connect Now",
+  "noConversations": "No conversations yet",
+  "noConversationsHint": "Sync with Harmony Link to load your entities",
+  "noMessagesYet": "No messages yet",
+  "you": "You",
+  "aboutTitle": "About Chats & Roleplay",
+  "aboutMessage": "Select an AI Entity from the list below to start chatting with. Each entity represents a unique AI personality you can interact with.\n\nUse the 'Chatting as' banner at the top to choose which persona you want to use. This determines how each AI entity relates to you — for example, you could chat as yourself, or adopt a fictional character.\n\nAI Entities learn individual relationships during interaction and may behave very differently depending on the Persona you are using."
+}

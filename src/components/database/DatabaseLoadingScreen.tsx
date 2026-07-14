@@ -7,6 +7,7 @@
 import React, {useState} from 'react';
 import {View, StyleSheet, ActivityIndicator, Alert} from 'react-native';
 import {Text, Button} from 'react-native-paper';
+import {useTranslation} from 'react-i18next';
 import {useDatabase} from '../../contexts/DatabaseContext';
 import {useAppTheme} from '../../contexts/ThemeContext';
 import {wipeDatabaseCompletely} from '../../database';
@@ -17,30 +18,31 @@ import {wipeDatabaseCompletely} from '../../database';
 export function DatabaseLoadingScreen() {
   const {isLoading, error, retryInitialization} = useDatabase();
   const {theme} = useAppTheme();
+  const {t} = useTranslation('database');
   const [isWiping, setIsWiping] = useState(false);
 
   const handleWipeDatabase = () => {
     Alert.alert(
-      '⚠️ Wipe Database',
-      'This will permanently delete all data and reinitialize the database with a fresh schema. This action cannot be undone.\n\nAre you sure you want to continue?',
+      t('wipeConfirmTitle'),
+      t('wipeConfirmMessage'),
       [
         {
-          text: 'Cancel',
+          text: t('common:cancel'),
           style: 'cancel',
         },
         {
-          text: 'Wipe & Reinitialize',
+          text: t('wipeReinit'),
           style: 'destructive',
           onPress: async () => {
             setIsWiping(true);
             try {
               await wipeDatabaseCompletely();
               Alert.alert(
-                'Success',
-                'Database has been wiped and reinitialized successfully!',
+                t('wipeSuccess'),
+                t('wipeSuccessMessage'),
                 [
                   {
-                    text: 'OK',
+                    text: t('common:ok'),
                     onPress: () => {
                       setIsWiping(false);
                       retryInitialization();
@@ -51,11 +53,11 @@ export function DatabaseLoadingScreen() {
             } catch (err) {
               const errorMessage = err instanceof Error ? err.message : String(err);
               Alert.alert(
-                'Error',
-                `Failed to wipe database: ${errorMessage}`,
+                t('common:error'),
+                t('wipeFailed', { message: errorMessage }),
                 [
                   {
-                    text: 'OK',
+                    text: t('common:ok'),
                     onPress: () => setIsWiping(false),
                   },
                 ]
@@ -73,24 +75,24 @@ export function DatabaseLoadingScreen() {
       <View style={[styles.container, {backgroundColor: theme?.colors.background.base || '#000'}]}>
         <View style={styles.content}>
           <Text style={[styles.title, {color: theme?.colors.status.error || '#ff5252'}]}>
-            Database Error
+            {t('errorTitle')}
           </Text>
           <Text style={[styles.message, {color: theme?.colors.text.primary || '#fff'}]}>
-            Failed to initialize the database. This may be due to:
+            {t('errorDescription')}
           </Text>
           <View style={styles.errorList}>
             <Text style={[styles.errorItem, {color: theme?.colors.text.secondary || '#ccc'}]}>
-              • Insufficient storage space
+              {t('errorStorage')}
             </Text>
             <Text style={[styles.errorItem, {color: theme?.colors.text.secondary || '#ccc'}]}>
-              • Database file corruption
+              {t('errorCorruption')}
             </Text>
             <Text style={[styles.errorItem, {color: theme?.colors.text.secondary || '#ccc'}]}>
-              • Permission issues
+              {t('errorPermissions')}
             </Text>
           </View>
           <Text style={[styles.errorDetails, {color: theme?.colors.text.secondary || '#ccc'}]}>
-            Error: {error}
+            {t('errorPrefix')}{error}
           </Text>
           
           <View style={styles.buttonContainer}>
@@ -100,7 +102,7 @@ export function DatabaseLoadingScreen() {
               style={styles.retryButton}
               disabled={isWiping}
               buttonColor={theme?.colors.accent.primary || '#8e24aa'}>
-              Retry Initialization
+              {t('retryInit')}
             </Button>
             
             <Button
@@ -111,7 +113,7 @@ export function DatabaseLoadingScreen() {
               loading={isWiping}
               textColor={theme?.colors.status.warning || '#ff9800'}
               buttonColor="transparent">
-              {isWiping ? 'Wiping Database...' : 'Wipe & Reinitialize'}
+              {isWiping ? t('wiping') : t('wipeReinit')}
             </Button>
           </View>
         </View>
@@ -129,10 +131,10 @@ export function DatabaseLoadingScreen() {
           style={styles.spinner}
         />
         <Text style={[styles.title, {color: theme?.colors.text.primary || '#fff'}]}>
-          Initializing Database
+          {t('initializing')}
         </Text>
         <Text style={[styles.message, {color: theme?.colors.text.secondary || '#ccc'}]}>
-          Setting up encrypted storage...
+          {t('settingUp')}
         </Text>
       </View>
     </View>

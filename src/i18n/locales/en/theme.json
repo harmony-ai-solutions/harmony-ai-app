@@ -1,0 +1,22 @@
+{
+  "title": "Appearance & Theme",
+  "systemTheme": "System Theme",
+  "emojiStyle": "Emoji Style",
+  "nativeLabel": "Native (System)",
+  "nativeDesc": "Use your device's built-in emoji style",
+  "notoLabel": "Google Noto",
+  "notoDesc": "Colorful, modern emoji by Google (Apache 2.0)",
+  "twemojiLabel": "Twemoji",
+  "twemojiDesc": "Clean, flat emoji originally by Twitter/X (CC-BY 4.0)",
+  "yourThemes": "Your Themes",
+  "noCustomThemes": "No custom themes yet",
+  "noCustomThemesHint": "Create a custom theme to personalize your experience",
+  "createTheme": "Create Theme",
+  "importTheme": "Import Theme",
+  "exportTheme": "Export Theme",
+  "deleteTheme": "Delete Theme",
+  "deleteThemeConfirm": "Delete \"{{name}}\"? This cannot be undone.",
+  "syncThemes": "Sync with Harmony Link",
+  "pendingChanges": "Pending changes",
+  "importFailed": "Failed to import theme: {{message}}"
+}

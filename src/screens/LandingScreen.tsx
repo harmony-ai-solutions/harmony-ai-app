@@ -5,6 +5,7 @@ import { Appbar } from 'react-native-paper';
 import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
@@ -20,6 +21,7 @@ export const LandingScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
+  const { t } = useTranslation('landing');
 
   if (!theme) return null;
 
@@ -28,7 +30,7 @@ export const LandingScreen: React.FC = () => {
       {/* Header */}
       <ThemedAppbar style={styles.header}>
         <Appbar.Content
-          title="Harmony AI Chat"
+          title={t('title')}
           titleStyle={{
             color: theme.colors.text.primary,
             fontWeight: 'bold',
@@ -55,8 +57,8 @@ export const LandingScreen: React.FC = () => {
         {/* Hero: AI Chat card */}
         <LandingCard
           icon="chat-processing"
-          title="AI Chat"
-          description="Continue your conversations with AI partners"
+          title={t('aiChat.title')}
+          description={t('aiChat.description')}
           variant="hero"
           onPress={() => navigation.navigate('ChatList')}
           style={styles.heroCard}
@@ -66,15 +68,15 @@ export const LandingScreen: React.FC = () => {
         <View style={styles.secondaryRow}>
           <LandingCard
             icon="account-group"
-            title="Characters"
-            description="Manage AI character profiles"
+            title={t('characters.title')}
+            description={t('characters.description')}
             variant="secondary"
             onPress={() => navigation.navigate('Characters')}
           />
           <LandingCard
             icon="tune"
-            title="Settings"
-            description="Connection, sync & account"
+            title={t('settings.title')}
+            description={t('settings.description')}
             variant="secondary"
             onPress={() => navigation.navigate('Settings')}
           />
@@ -83,7 +85,7 @@ export const LandingScreen: React.FC = () => {
         {/* Footer */}
         <View style={[styles.footer, { paddingBottom: 16 + safeBottom }]}>
           <ThemedText variant="muted" size={11}>
-            Harmony AI Chat · v{getAppVersion()}
+            {t('common:version', { version: getAppVersion() })}
           </ThemedText>
         </View>
       </ScrollView>

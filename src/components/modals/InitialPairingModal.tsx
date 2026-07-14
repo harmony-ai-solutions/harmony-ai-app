@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal, View, StyleSheet } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedButton } from '../themed/ThemedButton';
@@ -15,6 +16,7 @@ export const InitialPairingModal: React.FC<InitialPairingModalProps> = ({
   onPair,
   onMaybeLater
 }) => {
+  const { t } = useTranslation('modals');
   return (
     <Modal
       visible={visible}
@@ -25,27 +27,27 @@ export const InitialPairingModal: React.FC<InitialPairingModalProps> = ({
       <View style={styles.overlay}>
         <ThemedView style={styles.modal}>
           <ThemedText size={24} weight="bold" style={styles.title}>
-            Welcome to Harmony AI
+            {t('welcomeTitle')}
           </ThemedText>
           
           <ThemedText style={styles.description}>
-            Would you like to connect to Harmony Link to sync your characters, messages, and settings across devices?
+            {t('welcomeDescription')}
           </ThemedText>
           
           <View style={styles.features}>
-            <ThemedText style={styles.feature}>✓ Sync characters across devices</ThemedText>
-            <ThemedText style={styles.feature}>✓ Backup your data</ThemedText>
-            <ThemedText style={styles.feature}>✓ Access from multiple devices</ThemedText>
+            <ThemedText style={styles.feature}>{t('featureSync')}</ThemedText>
+            <ThemedText style={styles.feature}>{t('featureBackup')}</ThemedText>
+            <ThemedText style={styles.feature}>{t('featureMultiDevice')}</ThemedText>
           </View>
           
           <View style={styles.buttonContainer}>
             <ThemedButton
-              label="Connect to Harmony Link"
+              label={t('connectButton')}
               onPress={onPair}
               style={styles.primaryButton}
             />
             <ThemedButton
-              label="Maybe Later"
+              label={t('maybeLater')}
               onPress={onMaybeLater}
               variant="secondary"
               style={styles.secondaryButton}
@@ -53,7 +55,7 @@ export const InitialPairingModal: React.FC<InitialPairingModalProps> = ({
           </View>
           
           <ThemedText variant="secondary" style={styles.note}>
-            You can always connect later from Settings
+            {t('connectLater')}
           </ThemedText>
         </ThemedView>
       </View>

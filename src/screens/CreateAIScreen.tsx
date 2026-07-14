@@ -34,6 +34,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { v4 as uuidv4, v7 as uuidv7 } from 'uuid';
+import { useTranslation } from 'react-i18next';
 import { deriveParticipantKey, deriveScopeFromParticipants } from '../database/repositories/interactions';
 import { createLogger } from '../utils/logger';
 
@@ -357,6 +358,7 @@ const pickerStyles = StyleSheet.create({
 export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
+  const { t } = useTranslation('createAI');
 
   // ── Core fields ──────────────────────────────────────────────────────────────
   const [name, setName] = useState('');
@@ -459,7 +461,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // ── Save & Create ────────────────────────────────────────────────────────────
   const handleCreate = async () => {
     if (!name.trim()) {
-      Alert.alert('Name Required', 'Please give your AI a name.');
+      Alert.alert(t('nameRequired'), t('nameRequiredMessage'));
       return;
     }
 
@@ -556,8 +558,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       });
     } catch (err: any) {
       Alert.alert(
-        'Error',
-        'Failed to create AI partner: ' + (err?.message ?? 'Unknown error'),
+        t('common:error'),
+        t('createFailed', { message: err?.message ?? 'Unknown error' }),
       );
     } finally {
       setIsSaving(false);
@@ -617,7 +619,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           onPress={() => navigation.goBack()}
         />
         <Appbar.Content
-          title="Create AI Partner"
+          title={t('title')}
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
         />
       </ThemedAppbar>
@@ -656,10 +658,10 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                     variant="muted"
                     style={styles.avatarHint}
                   >
-                    + Photo
+                    {t('photo')}
                   </ThemedText>
                   <ThemedText size={11} variant="muted">
-                    (optional)
+                    {t('common:optional')}
                   </ThemedText>
                 </View>
               )}
@@ -670,7 +672,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 style={styles.changePhotoLink}
               >
                 <ThemedText size={13} variant="accent">
-                  Change photo
+                  {t('changePhoto')}
                 </ThemedText>
               </TouchableOpacity>
             )}
@@ -679,13 +681,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           {/* ── Name field ── */}
           <View style={styles.fieldGroup}>
             <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-              Name *
+              {t('nameLabel')}
             </ThemedText>
             <TextInput
               style={[styles.input, inputStyle]}
               value={name}
               onChangeText={setName}
-              placeholder="e.g. Aria, Max, Luna..."
+              placeholder={t('namePlaceholder')}
               placeholderTextColor={theme.colors.text.muted}
               returnKeyType="next"
               autoCorrect={false}
@@ -695,13 +697,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           {/* ── Personality field ── */}
           <View style={styles.fieldGroup}>
             <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-              Personality (optional)
+              {t('personalityLabel')}
             </ThemedText>
             <TextInput
               style={[styles.input, styles.multilineInput, inputStyle]}
               value={personality}
               onChangeText={setPersonality}
-              placeholder="e.g. Helpful, playful, curious..."
+              placeholder={t('personalityPlaceholder')}
               placeholderTextColor={theme.colors.text.muted}
               multiline
               numberOfLines={3}
@@ -716,7 +718,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
               activeOpacity={0.7}
             >
               <SectionHeader
-                title="ADVANCED SETTINGS"
+                title={t('advancedSettings')}
                 right={
                   <Icon
                     name={showAdvanced ? 'chevron-up' : 'chevron-down'}
@@ -737,7 +739,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                       color={theme.colors.accent.primary}
                     />
                     <ThemedText size={13} variant="muted" style={{ marginLeft: 8 }}>
-                      Loading module configs...
+                      {t('loadingConfigs')}
                     </ThemedText>
                   </View>
                 )}
@@ -746,17 +748,17 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 {hasAnyConfigs === false && (
                   <View style={styles.noConfigsBox}>
                     <ThemedText size={14} variant="muted" weight="bold" style={styles.noConfigsWarning}>
-                      ⚠ No AI modules configured.
+                      {t('noConfigsWarning')}
                     </ThemedText>
                     <ThemedText size={13} variant="muted" style={styles.noConfigsDetail}>
-                      Connect to Harmony Link or Cloud to configure AI backends.
+                      {t('noConfigsDetail')}
                     </ThemedText>
                     <TouchableOpacity
                       onPress={() => navigation.navigate('ConnectionSetup')}
                       style={styles.connectionSetupLink}
                     >
                       <ThemedText size={13} variant="accent" weight="medium">
-                        → Connection Setup
+                        {t('connectionSetup')}
                       </ThemedText>
                     </TouchableOpacity>
                   </View>
@@ -765,14 +767,14 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 {/* Module pickers */}
                 {hasAnyConfigs === true && (
                   <>
-                    <ModuleConfigPicker label="Backend" options={backendOptions} value={backendConfigId} onChange={setBackendConfigId} />
-                    <ModuleConfigPicker label="Cognition" options={cognitionOptions} value={cognitionConfigId} onChange={setCognitionConfigId} />
-                    <ModuleConfigPicker label="Text-to-Speech (TTS)" options={ttsOptions} value={ttsConfigId} onChange={setTtsConfigId} />
-                    <ModuleConfigPicker label="Speech-to-Text (STT)" options={sttOptions} value={sttConfigId} onChange={setSttConfigId} />
-                    <ModuleConfigPicker label="Memory / RAG" options={ragOptions} value={ragConfigId} onChange={setRagConfigId} />
-                    <ModuleConfigPicker label="Movement" options={movementOptions} value={movementConfigId} onChange={setMovementConfigId} />
-                    <ModuleConfigPicker label="Vision" options={visionOptions} value={visionConfigId} onChange={setVisionConfigId} />
-                    <ModuleConfigPicker label="Imagination" options={imaginationOptions} value={imaginationConfigId} onChange={setImaginationConfigId} />
+                    <ModuleConfigPicker label={t('moduleBackend')} options={backendOptions} value={backendConfigId} onChange={setBackendConfigId} />
+                    <ModuleConfigPicker label={t('moduleCognition')} options={cognitionOptions} value={cognitionConfigId} onChange={setCognitionConfigId} />
+                    <ModuleConfigPicker label={t('moduleTTS')} options={ttsOptions} value={ttsConfigId} onChange={setTtsConfigId} />
+                    <ModuleConfigPicker label={t('moduleSTT')} options={sttOptions} value={sttConfigId} onChange={setSttConfigId} />
+                    <ModuleConfigPicker label={t('moduleRAG')} options={ragOptions} value={ragConfigId} onChange={setRagConfigId} />
+                    <ModuleConfigPicker label={t('moduleMovement')} options={movementOptions} value={movementConfigId} onChange={setMovementConfigId} />
+                    <ModuleConfigPicker label={t('moduleVision')} options={visionOptions} value={visionConfigId} onChange={setVisionConfigId} />
+                    <ModuleConfigPicker label={t('moduleImagination')} options={imaginationOptions} value={imaginationConfigId} onChange={setImaginationConfigId} />
                   </>
                 )}
               </View>
@@ -788,7 +790,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
               />
             ) : (
               <ThemedButton
-                label="Start Chatting  →"
+                label={t('startChatting')}
                 onPress={handleCreate}
                 variant="primary"
                 disabled={isSaving}

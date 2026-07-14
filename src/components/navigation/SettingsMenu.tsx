@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Modal,
   View,
@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 
@@ -31,78 +32,39 @@ interface MenuItem {
   type?: 'navigate' | 'setting';
 }
 
-const menuSections: MenuSection[] = [
+const getMenuSections = (t: ReturnType<typeof useTranslation<'navigation'>>['t']): MenuSection[] => [
   {
-    title: 'Navigate',
+    title: t('nav.title'),
     items: [
-      {
-        icon: 'chat-processing',
-        label: 'AI Chat',
-        screen: 'ChatList',
-        type: 'navigate',
-      },
-      {
-        icon: 'account-group',
-        label: 'Characters',
-        screen: 'Characters',
-        type: 'navigate',
-      },
-      { icon: 'tune', label: 'Settings', screen: 'Settings', type: 'navigate' },
-      { icon: 'home', label: 'Home', screen: 'Landing', type: 'navigate' },
+      { icon: 'chat-processing', label: t('nav.aiChat'), screen: 'ChatList', type: 'navigate' },
+      { icon: 'account-group', label: t('nav.characters'), screen: 'Characters', type: 'navigate' },
+      { icon: 'tune', label: t('nav.settings'), screen: 'Settings', type: 'navigate' },
+      { icon: 'home', label: t('nav.home'), screen: 'Landing', type: 'navigate' },
     ],
   },
   {
-    title: 'User',
-    items: [
-      {
-        icon: 'account-circle',
-        label: 'User Profile',
-        screen: 'ProfileSettings',
-      },
-    ],
+    title: t('user.title'),
+    items: [{ icon: 'account-circle', label: t('user.userProfile'), screen: 'ProfileSettings' }],
   },
   {
-    title: 'App Settings',
-    items: [
-      {
-        icon: 'palette',
-        label: 'Appearance & Theme',
-        screen: 'ThemeSettings',
-        badge: '⭐',
-      },
-    ],
+    title: t('appSettings.title'),
+    items: [{ icon: 'palette', label: t('appSettings.appearanceTheme'), screen: 'ThemeSettings', badge: '⭐' }],
   },
   {
-    title: 'Sync & Connection',
+    title: t('syncConnection.title'),
     items: [
-      { icon: 'sync', label: 'Sync Settings', screen: 'SyncSettings' },
-      {
-        icon: 'connection',
-        label: 'Connection Setup',
-        screen: 'ConnectionSetup',
-      },
+      { icon: 'sync', label: t('syncConnection.syncSettings'), screen: 'SyncSettings' },
+      { icon: 'connection', label: t('syncConnection.connectionSetup'), screen: 'ConnectionSetup' },
     ],
   },
   ...(__DEV__
-    ? [
-        {
-          title: 'Development',
-          items: [
-            {
-              icon: 'test-tube',
-              label: 'Database Tests',
-              screen: 'DatabaseTests',
-              badge: 'DEV',
-            },
-            {
-              icon: 'database-eye',
-              label: 'Database Table Viewer',
-              screen: 'DatabaseTableViewer',
-              badge: 'DEV',
-            },
-          ],
-        },
-      ]
+    ? [{
+        title: t('development.title'),
+        items: [
+          { icon: 'test-tube', label: t('development.databaseTests'), screen: 'DatabaseTests', badge: 'DEV' },
+          { icon: 'database-eye', label: t('development.databaseTableViewer'), screen: 'DatabaseTableViewer', badge: 'DEV' },
+        ],
+      }]
     : []),
 ];
 
@@ -112,6 +74,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   onNavigate,
 }) => {
   const { theme } = useAppTheme();
+  const { t } = useTranslation('navigation');
+
+  const menuSections = useMemo(() => getMenuSections(t), [t]);
 
   if (!theme) return null;
 

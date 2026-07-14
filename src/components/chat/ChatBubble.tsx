@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator, Text } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { Avatar, IconButton, Menu } from 'react-native-paper';
+import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
 import { Theme } from '../../theme/types';
@@ -92,6 +93,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   onRetryTranscription,
   theme,
 }) => {
+  const { t } = useTranslation('chatDetail');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(message.content || '');
@@ -313,7 +315,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           <View style={styles.transcriptionStatus}>
             <ActivityIndicator size="small" color={theme.colors.accent.primary} />
             <ThemedText variant="muted" size={12} style={styles.statusText}>
-              Transcribing...
+              {t('transcribing')}
             </ThemedText>
           </View>
         )}
@@ -321,14 +323,14 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         {isTranscriptionFailed && (
           <View style={styles.transcriptionStatus}>
             <ThemedText variant="muted" size={12} style={styles.statusText}>
-              Transcription failed
+              {t('transcriptionFailed')}
             </ThemedText>
             <TouchableOpacity
               onPress={() => onRetryTranscription && onRetryTranscription(message.id)}
               style={[styles.retryButton, { backgroundColor: theme.colors.accent.primary }]}
             >
               <IconButton icon="refresh" size={14} iconColor="#fff" style={styles.retryIcon} />
-              <ThemedText style={{ color: '#fff' }} size={12}>Retry</ThemedText>
+              <ThemedText style={{ color: '#fff' }} size={12}>{t('retry')}</ThemedText>
             </TouchableOpacity>
           </View>
         )}
@@ -339,7 +341,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             style={styles.transcriptionToggle}
           >
             <ThemedText variant="muted" size={12}>
-              Transcription
+              {t('transcription')}
             </ThemedText>
             <IconButton
               icon={showTranscription ? 'chevron-up' : 'chevron-down'}
@@ -374,7 +376,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                     </ThemedText>
                     {message.is_edited && (
                       <ThemedText variant="muted" size={11} style={styles.editedIndicator}>
-                        (edited)
+                        {t('edited')}
                       </ThemedText>
                     )}
                   </View>
@@ -390,13 +392,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               onPress={handleEditCancel}
               style={styles.actionButton}
             >
-              <ThemedText variant="muted" size={12}>Cancel</ThemedText>
+              <ThemedText variant="muted" size={12}>{t('cancel')}</ThemedText>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleEditSave}
               style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
             >
-              <ThemedText style={{ color: '#fff' }} size={12}>Save</ThemedText>
+              <ThemedText style={{ color: '#fff' }} size={12}>{t('save')}</ThemedText>
             </TouchableOpacity>
           </View>
         )}
@@ -409,13 +411,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                   onPress={handleEditCancel}
                   style={styles.actionButton}
                 >
-                  <ThemedText variant="muted" size={12}>Cancel</ThemedText>
+                  <ThemedText variant="muted" size={12}>{t('cancel')}</ThemedText>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={handleEditSave}
                   style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
                 >
-                  <ThemedText style={{ color: '#fff' }} size={12}>Save</ThemedText>
+                  <ThemedText style={{ color: '#fff' }} size={12}>{t('save')}</ThemedText>
                 </TouchableOpacity>
               </>
             ) : (
@@ -425,14 +427,14 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                   style={styles.actionButton}
                 >
                   <IconButton icon="pencil" size={16} iconColor={theme.colors.text.muted} />
-                  <ThemedText variant="muted" size={12}>Edit</ThemedText>
+                  <ThemedText variant="muted" size={12}>{t('edit')}</ThemedText>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => onSendMessage && onSendMessage(message.id, editedText)}
                   style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
                 >
                   <IconButton icon="send" size={16} iconColor="#fff" />
-                  <ThemedText style={{ color: '#fff' }} size={12}>Send</ThemedText>
+                  <ThemedText style={{ color: '#fff' }} size={12}>{t('send')}</ThemedText>
                 </TouchableOpacity>
               </>
             )}
@@ -459,13 +461,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             >
               {isOwn ? (
                 <>
-                  <Menu.Item onPress={handleEditStart} title="Edit" leadingIcon="pencil" />
-                  <Menu.Item onPress={handleDelete} title="Delete" leadingIcon="delete" />
+                  <Menu.Item onPress={handleEditStart} title={t('edit')} leadingIcon="pencil" />
+                  <Menu.Item onPress={handleDelete} title={t('delete')} leadingIcon="delete" />
                 </>
               ) : (
                 <>
-                  <Menu.Item onPress={handleRegenerate} title="Regenerate" leadingIcon="refresh" />
-                  <Menu.Item onPress={handleDelete} title="Delete" leadingIcon="delete" />
+                  <Menu.Item onPress={handleRegenerate} title={t('regenerate')} leadingIcon="refresh" />
+                  <Menu.Item onPress={handleDelete} title={t('delete')} leadingIcon="delete" />
                 </>
               )}
             </Menu>
