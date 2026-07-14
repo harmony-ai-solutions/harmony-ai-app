@@ -18,6 +18,7 @@ import {
 } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
@@ -78,6 +79,7 @@ export const ChatListScreen: React.FC = () => {
   const { bottom: safeBottom } = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp>();
   const { isPaired } = useSyncConnection();
+  const { t } = useTranslation('chatList');
   const [menuVisible, setMenuVisible] = useState(false);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,7 +143,7 @@ export const ChatListScreen: React.FC = () => {
           let lastMessageSender = '';
           if (lastMsg) {
             if (lastMsg.sender_entity_id === activeEntityId) {
-              lastMessageSender = 'You';
+              lastMessageSender = t('you');
             } else {
               lastMessageSender = partnerEntityId;
               if (entity?.character_profile_id) {
@@ -177,7 +179,7 @@ export const ChatListScreen: React.FC = () => {
             entityId: partnerEntityId,
             characterId: entity?.character_profile_id ?? null,
             characterName,
-            lastMessage: lastMsg?.content || 'No messages yet',
+            lastMessage: lastMsg?.content || t('noMessagesYet'),
             lastMessageSender,
             lastMessageTime: lastMsg?.created_at || null,
             avatarUri,
@@ -225,7 +227,7 @@ export const ChatListScreen: React.FC = () => {
             entityId: '', // No single partner for groups
             characterId: null,
             characterName: groupName,
-            lastMessage: lastMsg?.content || 'No messages yet',
+            lastMessage: lastMsg?.content || t('noMessagesYet'),
             lastMessageSender: '',
             lastMessageTime: lastMsg?.created_at || null,
             avatarUri,
@@ -297,7 +299,7 @@ export const ChatListScreen: React.FC = () => {
           entityId: entity.id,
           characterId: entity.character_profile_id ?? null,
           characterName,
-          lastMessage: 'No messages yet',
+          lastMessage: t('noMessagesYet'),
           lastMessageSender: '',
           lastMessageTime: null,
           avatarUri,
@@ -531,7 +533,7 @@ export const ChatListScreen: React.FC = () => {
           title={
             <View style={styles.titleContainer}>
               <ThemedText variant="primary" style={styles.titleText}>
-                Chats
+                {t('title')}
               </ThemedText>
               <TouchableOpacity
                 onPress={() => setInfoModalVisible(true)}
@@ -552,7 +554,7 @@ export const ChatListScreen: React.FC = () => {
         >
           <View style={styles.impersonationBannerText}>
             <ThemedText variant="muted" size={11}>
-              Chatting as
+              {t('chattingAs')}
             </ThemedText>
             <ThemedText
               variant="primary"
@@ -606,9 +608,9 @@ export const ChatListScreen: React.FC = () => {
       {!isPaired ? (
         <View style={styles.notPairedContainer}>
           <Icon name="connection" size={64} color={theme?.colors.text.muted} />
-          <ThemedText style={styles.notPairedText}>Not connected</ThemedText>
+          <ThemedText style={styles.notPairedText}>{t('notConnected')}</ThemedText>
           <ThemedText variant="muted" size={13} style={styles.notPairedSubText}>
-            Connect to Harmony Link or cloud to load your entities.
+            {t('notConnectedHint')}
           </ThemedText>
           <TouchableOpacity
             style={[
@@ -617,7 +619,7 @@ export const ChatListScreen: React.FC = () => {
             ]}
             onPress={() => navigation.navigate('ConnectionSetup')}
           >
-            <ThemedText variant="primary">Connect Now</ThemedText>
+            <ThemedText variant="primary">{t('connectNow')}</ThemedText>
           </TouchableOpacity>
         </View>
       ) : (
@@ -636,10 +638,10 @@ export const ChatListScreen: React.FC = () => {
                 color={theme?.colors.text.muted}
               />
               <ThemedText variant="secondary" style={styles.emptyText}>
-                No conversations yet
+                {t('noConversations')}
               </ThemedText>
               <ThemedText variant="muted" size={12}>
-                Sync with Harmony Link to load your entities
+                {t('noConversationsHint')}
               </ThemedText>
             </View>
           }
@@ -669,8 +671,8 @@ export const ChatListScreen: React.FC = () => {
       <InfoModal
         visible={infoModalVisible}
         onClose={() => setInfoModalVisible(false)}
-        title="About Chats & Roleplay"
-        message="Select an AI Entity from the list below to start chatting with. Each entity represents a unique AI personality you can interact with.\n\nUse the 'Chatting as' banner at the top to choose which persona you want to use. This determines how each AI entity relates to you — for example, you could chat as yourself, or adopt a fictional character.\n\nAI Entities learn individual relationships during interaction and may behave very differently depending on the Persona you are using."
+        title={t('aboutTitle')}
+        message={t('aboutMessage')}
         icon="chat-processing"
       />
     </ThemedView>

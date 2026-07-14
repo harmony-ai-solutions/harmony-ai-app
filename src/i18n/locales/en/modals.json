@@ -1,0 +1,12 @@
+{
+  "welcomeTitle": "Welcome to Harmony AI",
+  "welcomeDescription": "Would you like to connect to Harmony Link to sync your characters, messages, and settings across devices?",
+  "featureSync": "✓ Sync characters across devices",
+  "featureBackup": "✓ Backup your data",
+  "featureMultiDevice": "✓ Access from multiple devices",
+  "connectButton": "Connect to Harmony Link",
+  "maybeLater": "Maybe Later",
+  "connectLater": "You can always connect later from Settings",
+  "infoTitle": "Information",
+  "aboutChats": "About Chats & Roleplay"
+}

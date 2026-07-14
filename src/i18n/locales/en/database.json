@@ -1,0 +1,18 @@
+{
+  "initializing": "Initializing Database",
+  "settingUp": "Setting up encrypted storage...",
+  "errorTitle": "Database Error",
+  "errorDescription": "Failed to initialize the database. This may be due to:",
+  "errorStorage": "• Insufficient storage space",
+  "errorCorruption": "• Database file corruption",
+  "errorPermissions": "• Permission issues",
+  "errorPrefix": "Error: ",
+  "retryInit": "Retry Initialization",
+  "wipeReinit": "Wipe & Reinitialize",
+  "wiping": "Wiping Database...",
+  "wipeConfirmTitle": "⚠️ Wipe Database",
+  "wipeConfirmMessage": "This will permanently delete all data and reinitialize the database with a fresh schema. This action cannot be undone.\n\nAre you sure you want to continue?",
+  "wipeSuccess": "Success",
+  "wipeSuccessMessage": "Database has been wiped and reinitialized successfully!",
+  "wipeFailed": "Failed to wipe database: {{message}}"
+}

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Appbar } from 'react-native-paper';
 import { ThemedAppbar } from '../components/themed/ThemedAppbar';
+import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
@@ -10,6 +11,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 export const AIConfigScreen: React.FC<any> = ({ navigation }) => {
     const { theme } = useAppTheme();
+    const { t } = useTranslation('config');
     const [menuVisible, setMenuVisible] = useState(false);
 
     if (!theme) return null;
@@ -18,7 +20,7 @@ export const AIConfigScreen: React.FC<any> = ({ navigation }) => {
         <ThemedView style={styles.container}>
             <ThemedAppbar style={styles.header}>
                 <Appbar.Content
-                    title="AI Configuration"
+                    title={t('aiConfig')}
                     titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
                 />
                 <Appbar.Action
@@ -29,10 +31,10 @@ export const AIConfigScreen: React.FC<any> = ({ navigation }) => {
 
             <View style={styles.content}>
                 <ThemedText weight="bold" size={24}>
-                    AI Configuration
+                    {t('aiConfig')}
                 </ThemedText>
                 <ThemedText variant="secondary" style={styles.subtext}>
-                    Coming Soon
+                    {t('common:comingSoon')}
                 </ThemedText>
             </View>
 

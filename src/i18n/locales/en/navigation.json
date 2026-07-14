@@ -1,0 +1,27 @@
+{
+  "nav": {
+    "title": "Navigate",
+    "aiChat": "AI Chat",
+    "characters": "Characters",
+    "settings": "Settings",
+    "home": "Home"
+  },
+  "user": {
+    "title": "User",
+    "userProfile": "User Profile"
+  },
+  "appSettings": {
+    "title": "App Settings",
+    "appearanceTheme": "Appearance & Theme"
+  },
+  "syncConnection": {
+    "title": "Sync & Connection",
+    "syncSettings": "Sync Settings",
+    "connectionSetup": "Connection Setup"
+  },
+  "development": {
+    "title": "Development",
+    "databaseTests": "Database Tests",
+    "databaseTableViewer": "Database Table Viewer"
+  }
+}

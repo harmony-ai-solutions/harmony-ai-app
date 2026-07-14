@@ -1,0 +1,13 @@
+{
+  "title": "User Profile",
+  "displayName": "Display Name",
+  "displayNamePlaceholder": "Enter your display name",
+  "bio": "Bio",
+  "bioPlaceholder": "Tell us about yourself...",
+  "avatar": "Avatar",
+  "changeAvatar": "Change Avatar",
+  "removeAvatar": "Remove Avatar",
+  "saveChanges": "Save Changes",
+  "profileUpdated": "Profile updated successfully",
+  "updateFailed": "Failed to update profile: {{message}}"
+}

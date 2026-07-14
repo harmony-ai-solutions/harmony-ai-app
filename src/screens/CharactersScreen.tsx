@@ -14,6 +14,7 @@ import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
@@ -38,6 +39,7 @@ export const CharactersScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
+  const { t } = useTranslation('characters');
 
   const [menuVisible, setMenuVisible] = useState(false);
   const [profiles, setProfiles] = useState<CharacterProfile[]>([]);
@@ -101,12 +103,12 @@ export const CharactersScreen: React.FC = () => {
 
   const handleLongPress = (profile: CharacterProfile) => {
     Alert.alert(
-      'Delete Profile',
-      `Delete "${profile.name}"? This cannot be undone.`,
+      t('deleteConfirmTitle'),
+      t('deleteConfirmMessage', { name: profile.name }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common:cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common:delete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -123,7 +125,7 @@ export const CharactersScreen: React.FC = () => {
                 return next;
               });
             } catch {
-              Alert.alert('Error', 'Failed to delete profile.');
+              Alert.alert(t('common:error'), t('deleteFailed'));
             }
           },
         },
@@ -146,7 +148,7 @@ export const CharactersScreen: React.FC = () => {
           onPress={() => navigation.goBack()}
         />
         <Appbar.Content
-          title="AI Characters"
+          title={t('title')}
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
         />
         <Appbar.Action
@@ -171,7 +173,7 @@ export const CharactersScreen: React.FC = () => {
         />
         <TextInput
           style={[styles.searchInput, { color: theme.colors.text.primary }]}
-          placeholder="Search characters..."
+          placeholder={t('searchPlaceholder')}
           placeholderTextColor={theme.colors.text.muted}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -200,17 +202,17 @@ export const CharactersScreen: React.FC = () => {
             color={theme.colors.text.muted}
           />
           <ThemedText weight="bold" size={18} style={styles.emptyTitle}>
-            {searchQuery ? 'No results found' : 'No character profiles yet'}
+            {searchQuery ? t('noResults') : t('noProfiles')}
           </ThemedText>
           <ThemedText variant="muted" size={14} style={styles.emptySubtext}>
             {searchQuery
-              ? 'Try a different search term.'
-              : 'Create a character profile to start chatting.'}
+              ? t('noResultsHint')
+              : t('noProfilesHint')}
           </ThemedText>
           {!searchQuery && (
             <ThemedButton
               variant="primary"
-              label="Create First Profile"
+              label={t('createFirst')}
               onPress={handleCreateNew}
               style={styles.emptyButton}
             />

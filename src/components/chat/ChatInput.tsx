@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { launchImageLibrary } from 'react-native-image-picker';
+import { useTranslation } from 'react-i18next';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
 import AudioRecorder from '../../services/AudioRecorder';
@@ -52,6 +53,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
   entityId,
 }, ref) => {
   const { bottom: safeBottom } = useSafeAreaInsets();
+  const { t } = useTranslation('chatDetail');
   const [text, setText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -199,12 +201,12 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
         if (error.message?.includes('permission')) {
           setHasRecordPermission(false);
           Alert.alert(
-            'Permission Required',
-            'Audio recording permission is required to send voice messages. Please grant permission in your device settings.',
+            t('permissionRequired'),
+            t('permissionMessage'),
             [
-              { text: 'Cancel', style: 'cancel' },
+              { text: t('common:cancel'), style: 'cancel' },
               {
-                text: 'Open Settings',
+                text: t('openSettings'),
                 onPress: () => {
                   const { openAppSettings } = require('../../utils/permissions');
                   openAppSettings();
@@ -213,7 +215,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
             ]
           );
         } else {
-          Alert.alert('Error', 'Failed to start recording. Please try again.');
+          Alert.alert(t('common:error'), t('recordingFailed'));
         }
       }
     } else {
@@ -235,7 +237,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
         }
       } catch (error) {
         log.error('Failed to stop recording:', error);
-        Alert.alert('Error', 'Failed to stop recording');
+        Alert.alert(t('common:error'), t('recordingStopFailed'));
       } finally {
         setIsProcessing(false);
       }
@@ -256,11 +258,11 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
         const asset = result.assets[0];
         if (asset.base64 && asset.type) {
           Alert.prompt(
-            'Add Caption (Optional)',
-            'Enter a message to send with the image',
+            t('addCaption'),
+            t('addCaptionMessage'),
             [
-              { text: 'Skip', onPress: () => onSendImage(asset.base64!, asset.type!) },
-              { text: 'Send', onPress: (caption?: string) => onSendImage(asset.base64!, asset.type!, caption) },
+              { text: t('skip'), onPress: () => onSendImage(asset.base64!, asset.type!) },
+              { text: t('send'), onPress: (caption?: string) => onSendImage(asset.base64!, asset.type!, caption) },
             ],
             'plain-text'
           );
@@ -268,7 +270,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
       }
     } catch (error) {
       log.error('Failed to pick image:', error);
-      Alert.alert('Error', 'Failed to select image');
+      Alert.alert(t('common:error'), t('imagePickFailed'));
     }
   }, [disabled, onSendImage]);
 
@@ -292,7 +294,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
             ]}
           />
           <ThemedText variant="primary" style={styles.recordingText}>
-            Recording {formatDuration(recordingDuration)}
+            {t('recording', { duration: formatDuration(recordingDuration) })}
           </ThemedText>
           <TouchableOpacity
             onPress={toggleRecording}
@@ -345,7 +347,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
           <EmojiActionInput
             value={text}
             onChangeText={handleTextChange}
-            placeholder="Type a message..."
+            placeholder={t('typeMessage')}
             placeholderTextColor={theme.colors.text.muted}
             textColor={theme.colors.text.primary}
             backgroundColor={theme.colors.background.elevated}

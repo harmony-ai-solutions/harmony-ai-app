@@ -1,0 +1,23 @@
+{
+  "title": "Settings",
+  "connection": "Connection",
+  "sync": "Sync",
+  "account": "Account",
+  "development": "Development",
+  "type": "Type",
+  "status": "Status",
+  "lastSync": "Last Sync",
+  "never": "Never",
+  "connected": "Connected",
+  "reconnecting": "Reconnecting…",
+  "disconnected": "Disconnected",
+  "notPaired": "Not paired",
+  "upToDate": "✓ Up to date",
+  "offline": "⚠ Offline",
+  "configureConnection": "Configure connection",
+  "syncSettings": "Sync settings",
+  "userProfile": "User Profile",
+  "appearanceTheme": "Appearance & Theme",
+  "databaseTests": "Database Tests",
+  "databaseTableViewer": "Database Table Viewer"
+}

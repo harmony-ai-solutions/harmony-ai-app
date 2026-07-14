@@ -1,0 +1,16 @@
+export { default as common } from './en/common.json';
+export { default as landing } from './en/landing.json';
+export { default as chatList } from './en/chatList.json';
+export { default as chatDetail } from './en/chatDetail.json';
+export { default as characters } from './en/characters.json';
+export { default as createAI } from './en/createAI.json';
+export { default as settings } from './en/settings.json';
+export { default as connection } from './en/connection.json';
+export { default as theme } from './en/theme.json';
+export { default as profile } from './en/profile.json';
+export { default as entityConfig } from './en/entityConfig.json';
+export { default as modals } from './en/modals.json';
+export { default as navigation } from './en/navigation.json';
+export { default as database } from './en/database.json';
+export { default as config } from './en/config.json';
+export { default as development } from './en/development.json';

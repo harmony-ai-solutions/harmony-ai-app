@@ -16,8 +16,10 @@ import { DatabaseProvider, useDatabase } from './src/contexts/DatabaseContext';
 import { SyncConnectionProvider, useSyncConnection } from './src/contexts/SyncConnectionContext';
 import { EntitySessionProvider } from './src/contexts/EntitySessionContext';
 import { EmojiProvider } from './src/contexts/EmojiContext';
+import { I18nProvider } from './src/contexts/I18nContext';
 import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoadingScreen';
 import { InitialPairingModal } from './src/components/modals/InitialPairingModal';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
@@ -25,7 +27,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  */
 function AppContent() {
   const paperTheme = usePaperTheme();
-  const { theme } = useAppTheme();
+  const { theme, loading: themeLoading } = useAppTheme();
   const { isReady, isLoading } = useDatabase();
   const { isPaired } = useSyncConnection();
   const [showPairingModal, setShowPairingModal] = useState(false);
@@ -72,8 +74,11 @@ function AppContent() {
     setShowPairingModal(false);
   };
 
-  // Show loading screen while database initializes
-  if (isLoading || !isReady) {
+  // Show loading screen while database OR theme initializes.
+  // themeLoading guards against the race where DB finishes init before
+  // ThemeContext.loadTheme() resolves — without it, every screen in the
+  // navigator returns null (if (!theme) return null) → blank white page.
+  if (isLoading || !isReady || themeLoading) {
     return <DatabaseLoadingScreen />;
   }
 
@@ -101,19 +106,23 @@ function AppContent() {
  */
 function App() {
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <DatabaseProvider>
-          <SyncConnectionProvider>
-            <EntitySessionProvider>
-              <EmojiProvider>
-                <AppContent />
-              </EmojiProvider>
-            </EntitySessionProvider>
-          </SyncConnectionProvider>
-        </DatabaseProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <I18nProvider>
+            <DatabaseProvider>
+              <SyncConnectionProvider>
+                  <EntitySessionProvider>
+                    <EmojiProvider>
+                      <AppContent />
+                    </EmojiProvider>
+                  </EntitySessionProvider>
+              </SyncConnectionProvider>
+            </DatabaseProvider>
+          </I18nProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 
