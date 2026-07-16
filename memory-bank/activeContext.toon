@@ -1,5 +1,10 @@
 # Harmony AI App Active Context
 @Focus:
+- Cloud Auth Layer (Phase 5) Complete: First HTTP layer + cloud auth for soulbits-cloud-backend. `src/config/cloud.ts` (CLOUD_HOSTS, WS_PATHS, OAUTH, AUTH_ENDPOINTS); `src/services/auth/` (tokenStorage Keychain `com.harmonyai.cloud.auth`, authFetch thin wrapper, AuthService singleton with fetch()/401-refresh-retry, login/register/loginWithGoogle/loginWithApple/refresh/logout/getProfile/getToken/getTokenExpiresAt/invalidate/resendVerification); `src/contexts/AuthContext.tsx` (status: loading|authenticated|unauthenticated). Provider wired between Database and SyncConnection. `getTokenExpiresAt()` from backend `expires_at` (NOT PASETO decode).
+- Login UIs: `screens/auth/{LoginScreen,RegisterScreen,VerifyPrompt}` + mode toggle in `ConnectionSetupScreen` (self-hosted/cloud, `harmony_mode` persisted). New `auth` i18n namespace registered in `I18nContext`.
+- Social Login: Google (`@react-native-google-signin/google-signin`, typed error discriminator, non-GMS fallback) + Apple (`@invertase/react-native-apple-authentication`, iOS-only AppleButton). Both handle 409 email-conflict messaging.
+- Circular-dep lesson: 401-refresh-retry logic lives on AuthService.fetch(); authFetch.ts is a thin one-way wrapper (authFetch→AuthService→tokenStorage) — NO dynamic import.
+- Credential separation: cloud PASETO in Keychain (`com.harmonyai.cloud.auth`); self-hosted `harmony_jwt` in AsyncStorage untouched.
 - Provider Expansion Complete: xAI/Google/Anthropic provider support added across all module types. Model field unification (migration 000030). Dead code cleanup. 15 provider schemas in providerFieldSchemas.ts. 21 provider CRUD functions in providers.ts. ModuleConfigEditScreen supports all 15 providers. Module defaults include Google/xAI/Anthropic (maxtokens: 200).
 - Documentation Complete: Comprehensive Harmony Link integration documentation created in /docs/HARMONY-LINK-INTEGRATION.md with detailed diagrams in /docs/harmony-link-diagrams/.
 - Chat Feature Implementation Complete: Full chat interface with text/audio support, tap-based voice recording, persistent storage, real-time event handling.

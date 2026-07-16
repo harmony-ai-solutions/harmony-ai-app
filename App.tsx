@@ -13,6 +13,7 @@ import { NavigationContainerRef } from '@react-navigation/native';
 import { AppNavigator, RootStackParamList } from './src/navigation/AppNavigator';
 import { ThemeProvider, usePaperTheme, useAppTheme } from './src/contexts/ThemeContext';
 import { DatabaseProvider, useDatabase } from './src/contexts/DatabaseContext';
+import { AuthProvider } from './src/contexts/AuthContext';
 import { SyncConnectionProvider, useSyncConnection } from './src/contexts/SyncConnectionContext';
 import { EntitySessionProvider } from './src/contexts/EntitySessionContext';
 import { EmojiProvider } from './src/contexts/EmojiContext';
@@ -111,13 +112,15 @@ function App() {
         <ThemeProvider>
           <I18nProvider>
             <DatabaseProvider>
-              <SyncConnectionProvider>
-                  <EntitySessionProvider>
-                    <EmojiProvider>
-                      <AppContent />
-                    </EmojiProvider>
-                  </EntitySessionProvider>
-              </SyncConnectionProvider>
+              <AuthProvider>
+                <SyncConnectionProvider>
+                    <EntitySessionProvider>
+                      <EmojiProvider>
+                        <AppContent />
+                      </EmojiProvider>
+                    </EntitySessionProvider>
+                </SyncConnectionProvider>
+              </AuthProvider>
             </DatabaseProvider>
           </I18nProvider>
         </ThemeProvider>

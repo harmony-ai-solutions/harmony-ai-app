@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, ScrollView, TextInput, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, TextInput, Alert, TouchableOpacity } from 'react-native';
 import { Appbar } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -17,6 +17,7 @@ import ConnectionManager from '../../services/connection/ConnectionManager';
 import SyncService from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
+import { useAuth } from '../../contexts/AuthContext';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 const log = createLogger('ConnectionSetupScreen');
@@ -26,7 +27,42 @@ export const ConnectionSetupScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { showToast, isPaired, isConnected, isConnecting, reconnect } = useSyncConnection();
   const { t } = useTranslation('connection');
+  const { t: ta } = useTranslation('auth');
+  const { status: authStatus } = useAuth();
   
+  // ── Mode toggle state ─────────────────────────────────────────────────
+  const [harmonyMode, setHarmonyMode] = useState<'selfhosted' | 'cloud'>('selfhosted');
+
+  // Load persisted mode on mount
+  useEffect(() => {
+    AsyncStorage.getItem('harmony_mode').then(saved => {
+      if (saved === 'cloud' || saved === 'selfhosted') {
+        setHarmonyMode(saved);
+      }
+    });
+  }, []);
+
+  const handleModeChange = useCallback(
+    (mode: 'selfhosted' | 'cloud') => {
+      setHarmonyMode(mode);
+      AsyncStorage.setItem('harmony_mode', mode).catch(() => {});
+
+      if (mode === 'cloud') {
+        if (authStatus === 'authenticated') {
+          // Cloud mode, authenticated — navigate to cloud connect flow
+          // TODO Phase 6-2: implement cloud connection flow
+          log.info('Cloud mode selected and authenticated — Phase 6-2 placeholder');
+          showToast(ta('mode_cloudComingSoon'));
+        } else if (authStatus === 'unauthenticated') {
+          // Cloud mode, not authenticated — push Login screen
+          navigation.navigate('Login');
+        }
+        // If authStatus is 'loading', do nothing — AuthContext will resolve
+      }
+    },
+    [authStatus, navigation, showToast, ta],
+  );
+
   const [url, setUrl] = useState('192.168.1.');
   const [port, setPort] = useState('8080');
   const [status, setStatus] = useState(t('idle'));
@@ -351,6 +387,93 @@ export const ConnectionSetupScreen: React.FC = () => {
             : t('descriptionUnpaired')}
         </ThemedText>
 
+        {/* ── Mode toggle ── */}
+        <View style={styles.modeSection}>
+          <ThemedText weight="bold" style={styles.modeTitle}>
+            {ta('mode_title')}
+          </ThemedText>
+          <ThemedText variant="secondary" style={styles.modeDescription}>
+            {ta('mode_description')}
+          </ThemedText>
+
+          <View style={styles.modeToggleRow}>
+            <TouchableOpacity
+              style={[
+                styles.modeOption,
+                {
+                  borderColor:
+                    harmonyMode === 'selfhosted'
+                      ? theme.colors.accent.primary
+                      : theme.colors.border.default,
+                  backgroundColor:
+                    harmonyMode === 'selfhosted'
+                      ? theme.colors.accent.primary + '18'
+                      : theme.colors.background.elevated,
+                },
+              ]}
+              onPress={() => handleModeChange('selfhosted')}
+              activeOpacity={0.7}
+            >
+              <ThemedText
+                weight="medium"
+                variant={harmonyMode === 'selfhosted' ? 'accent' : 'primary'}
+              >
+                {ta('mode_selfhosted')}
+              </ThemedText>
+              <ThemedText
+                size={12}
+                variant={harmonyMode === 'selfhosted' ? 'secondary' : 'muted'}
+                style={styles.modeOptionDesc}
+              >
+                {ta('mode_selfhosted_desc')}
+              </ThemedText>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.modeOption,
+                {
+                  borderColor:
+                    harmonyMode === 'cloud'
+                      ? theme.colors.accent.primary
+                      : theme.colors.border.default,
+                  backgroundColor:
+                    harmonyMode === 'cloud'
+                      ? theme.colors.accent.primary + '18'
+                      : theme.colors.background.elevated,
+                },
+              ]}
+              onPress={() => handleModeChange('cloud')}
+              activeOpacity={0.7}
+            >
+              <ThemedText
+                weight="medium"
+                variant={harmonyMode === 'cloud' ? 'accent' : 'primary'}
+              >
+                {ta('mode_cloud')}
+              </ThemedText>
+              <ThemedText
+                size={12}
+                variant={harmonyMode === 'cloud' ? 'secondary' : 'muted'}
+                style={styles.modeOptionDesc}
+              >
+                {ta('mode_cloud_desc')}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+
+          {harmonyMode === 'cloud' && (
+            <ThemedText variant="secondary" size={12} style={styles.modeHint}>
+              {authStatus === 'loading'
+                ? ta('mode_cloudCheckingAuth')
+                : authStatus === 'authenticated'
+                  ? ta('mode_cloudReady')
+                  : ta('mode_cloudSignInRequired')}
+            </ThemedText>
+          )}
+        </View>
+
+        {harmonyMode === 'selfhosted' && (
         <View style={styles.form}>
           <ThemedText weight="medium">{t('addressLabel')}</ThemedText>
           <TextInput
@@ -482,6 +605,8 @@ export const ConnectionSetupScreen: React.FC = () => {
           )}
 
         </View>
+        )}
+
 
       </ScrollView>
 
@@ -544,6 +669,40 @@ const styles = StyleSheet.create({
   },
   pairedActions: {
     gap: 10,
+  },
+  // ── Mode toggle ──
+  modeSection: {
+    width: '100%',
+    maxWidth: 400,
+    marginBottom: 24,
+  },
+  modeTitle: {
+    fontSize: 15,
+    marginBottom: 4,
+  },
+  modeDescription: {
+    fontSize: 13,
+    marginBottom: 16,
+    opacity: 0.8,
+  },
+  modeToggleRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modeOption: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    padding: 14,
+    gap: 4,
+  },
+  modeOptionDesc: {
+    lineHeight: 16,
+  },
+  modeHint: {
+    marginTop: 8,
+    textAlign: 'center',
+    opacity: 0.7,
   },
   reconnectButton: {
     marginBottom: 10,
