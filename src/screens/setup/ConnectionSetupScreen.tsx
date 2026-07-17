@@ -751,6 +751,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   reconnectButton: {
-    marginBottom: 10,
+    width: '100%',
   },
 });

@@ -18,6 +18,7 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { ThemedButton } from '../../components/themed/ThemedButton';
 import { ThemedView } from '../../components/themed/ThemedView';
 import runAllTests from '../../database/test-runner';
 import { clearDatabaseData } from '../../database';
@@ -303,28 +304,13 @@ export const DatabaseTestScreen: React.FC = () => {
 
             {/* Action Buttons */}
             <View style={styles.actions}>
-                <TouchableOpacity
-                    style={[
-                        styles.actionButton,
-                        styles.runButton,
-                        { backgroundColor: theme.colors.accent.primary },
-                        isRunning && styles.buttonDisabled
-                    ]}
+                <ThemedButton
+                    label={isRunning ? 'Running Tests...' : 'Run All Tests'}
+                    icon={isRunning ? undefined : 'play-circle'}
+                    iconSize={20}
                     onPress={runTests}
                     disabled={isRunning}
-                >
-                    {isRunning ? (
-                        <>
-                            <ActivityIndicator color="#ffffff" size="small" />
-                            <Text style={styles.buttonText}>Running Tests...</Text>
-                        </>
-                    ) : (
-                        <>
-                            <Icon name="play-circle" size={20} color="#ffffff" />
-                            <Text style={styles.buttonText}>Run All Tests</Text>
-                        </>
-                    )}
-                </TouchableOpacity>
+                />
 
                 <TouchableOpacity
                     style={[

@@ -16,6 +16,7 @@ import { createLogger } from '../../utils/logger';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ThemedButton } from '../../components/themed/ThemedButton';
 import { EmojiActionCard } from '../../components/settings/EmojiActionCard';
 import { EmojiActionEditModal } from '../../components/settings/EmojiActionEditModal';
 import { EntityEmojiActionService } from '../../services/EntityEmojiActionService';
@@ -162,15 +163,13 @@ export const EmojiActionEditorScreen: React.FC = () => {
         <ThemedText variant="secondary" size={14}>
           {actions.length} action{actions.length !== 1 ? 's' : ''}
         </ThemedText>
-        <TouchableOpacity
-          style={[styles.addButton, { backgroundColor: colors.accent.primary }]}
+        <ThemedButton
+          label="Add Action"
+          icon="plus"
+          iconSize={18}
           onPress={handleAddNew}
-        >
-          <Icon name="plus" size={18} color={colors.background.base} />
-          <ThemedText size={13} style={{ color: colors.background.base, fontWeight: '600' }}>
-            Add Action
-          </ThemedText>
-        </TouchableOpacity>
+          style={styles.addButton}
+        />
       </View>
     </View>
   );

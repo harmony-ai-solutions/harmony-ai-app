@@ -45,5 +45,15 @@ export const midnightRose: Theme = {
             secondary: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
             surface: 'linear-gradient(135deg, rgba(236, 72, 153, 0.05) 0%, rgba(167, 139, 250, 0.05) 100%)',
         },
+        glass: {
+            cardOpacity: 0.35,
+            borderGradientStart: 'rgba(255, 255, 255, 0.12)',
+            borderGradientEnd: 'rgba(236, 72, 153, 0.15)',
+        },
+        typography: {
+            headerOpacity: 1.0,
+            subtextOpacity: 0.70,
+            captionOpacity: 0.50,
+        },
     },
 };

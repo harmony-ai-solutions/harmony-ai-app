@@ -67,6 +67,33 @@ export interface Gradients {
 }
 
 /**
+ * Glassmorphism design tokens.
+ * Controls the translucent "frosted glass" appearance of cards and panels.
+ */
+export interface GlassTokens {
+  /** Card background opacity — 0.30–0.40 for the glass bleed-through effect */
+  cardOpacity: number;
+  /** 1dp gradient border start (top-left light hit) — transparent white */
+  borderGradientStart: string;
+  /** 1dp gradient border end — transparent accent color */
+  borderGradientEnd: string;
+}
+
+/**
+ * Typography hierarchy tokens.
+ * Defines opacity levels for the visual text hierarchy
+ * (headers at full contrast, sub-text at reduced opacity for depth).
+ */
+export interface TypographyTokens {
+  /** Header text opacity — 1.0 for full white contrast */
+  headerOpacity: number;
+  /** Sub-text / detail text opacity — ~0.70 for visual depth */
+  subtextOpacity: number;
+  /** Caption / muted text opacity — ~0.50 for lowest emphasis */
+  captionOpacity: number;
+}
+
+/**
  * Complete color palette for a theme
  */
 export interface ThemeColors {
@@ -76,6 +103,8 @@ export interface ThemeColors {
   text: TextColors;
   border: BorderColors;
   gradients: Gradients;
+  glass: GlassTokens;
+  typography: TypographyTokens;
 }
 
 /**

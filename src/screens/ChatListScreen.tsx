@@ -23,6 +23,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
+import { ThemedButton } from '../components/themed/ThemedButton';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
 import { getAllEntities } from '../database/repositories/entities';
 import {
@@ -612,15 +613,11 @@ export const ChatListScreen: React.FC = () => {
           <ThemedText variant="muted" size={13} style={styles.notPairedSubText}>
             {t('notConnectedHint')}
           </ThemedText>
-          <TouchableOpacity
-            style={[
-              styles.connectButton,
-              { backgroundColor: theme?.colors.accent.primary },
-            ]}
+          <ThemedButton
+            label={t('connectNow')}
             onPress={() => navigation.navigate('ConnectionSetup')}
-          >
-            <ThemedText variant="primary">{t('connectNow')}</ThemedText>
-          </TouchableOpacity>
+            style={styles.connectButton}
+          />
         </View>
       ) : (
         <FlatList
@@ -748,9 +745,7 @@ const styles = StyleSheet.create({
   notPairedText: { marginTop: 16, marginBottom: 8 },
   notPairedSubText: { marginBottom: 24, textAlign: 'center' },
   connectButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
+    width: '100%',
   },
   emptyContainer: {
     flex: 1,

@@ -14,12 +14,11 @@ interface SectionHeaderProps {
 }
 
 /**
- * A styled section header bar that mirrors the Harmony Link
- * `character-editor-section-header` pattern:
- *  - Gradient background fading left (elevated) to transparent
- *  - Uppercase, letter-spaced muted label
- *  - Optional 4 px left accent pip
- *  - Optional right slot for icons / actions
+ * Glassmorphism section header — Phase 2.
+ *
+ * Gradient background fading from elevated to transparent (left→right),
+ * with a 1dp hairline gradient separator at the bottom and an optional
+ * 3px left accent pip.
  */
 export const SectionHeader: React.FC<SectionHeaderProps> = ({
     title,
@@ -31,15 +30,10 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 
     if (!theme) return null;
 
-    const glassBorder = theme.colors.accent.primary + '14'; // ~8% opacity
+    const { borderGradientStart, borderGradientEnd } = theme.colors.glass;
 
     return (
-        <LinearGradient
-            colors={[theme.colors.background.elevated + '80', 'transparent']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={[styles.container, { borderBottomColor: glassBorder }, style]}
-        >
+        <View style={[styles.container, style]}>
             {accentPip && (
                 <LinearGradient
                     colors={[theme.colors.accent.primary, theme.colors.accent.secondary]}
@@ -51,12 +45,21 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
             <ThemedText
                 variant="muted"
                 weight="bold"
+                hierarchy="caption"
                 style={[styles.label, right ? styles.labelFlex : undefined]}
             >
                 {title.toUpperCase()}
             </ThemedText>
             {right && <View style={styles.rightSlot}>{right}</View>}
-        </LinearGradient>
+
+            {/* 1dp gradient separator at the bottom */}
+            <LinearGradient
+                colors={[borderGradientStart, borderGradientEnd]}
+                start={{ x: 0.2, y: 0 }}
+                end={{ x: 0.85, y: 0 }}
+                style={styles.separator}
+            />
+        </View>
     );
 };
 
@@ -67,8 +70,6 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         paddingHorizontal: 16,
         gap: 10,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        // borderBottomColor applied dynamically via accent glass tint
     },
     pip: {
         width: 3,
@@ -85,5 +86,12 @@ const styles = StyleSheet.create({
     },
     rightSlot: {
         marginLeft: 4,
+    },
+    separator: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: StyleSheet.hairlineWidth,
     },
 });

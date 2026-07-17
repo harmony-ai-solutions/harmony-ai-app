@@ -19,6 +19,7 @@ import { useEmoji } from '../../contexts/EmojiContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
 import { ThemedView } from '../../components/themed/ThemedView';
+import { ThemedButton } from '../../components/themed/ThemedButton';
 import { ThemeCard } from '../../components/settings/ThemeCard';
 import { EmojiStyleCard } from '../../components/settings/EmojiStyleCard';
 import { Theme } from '../../theme/types';
@@ -85,7 +86,6 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                     {
                         text: 'Create Copy',
                         onPress: () => {
-                            // Navigate to editor with this theme as base
                             navigation.navigate('ThemeEditor', { themeId: themeToEdit.id });
                         },
                     },
@@ -228,16 +228,12 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
                 {/* Actions */}
                 <View style={styles.actionsSection}>
-                    <TouchableOpacity
-                        style={[
-                            styles.actionButton,
-                            { backgroundColor: theme.colors.accent.primary },
-                        ]}
+                    <ThemedButton
+                        label="Create Custom Theme"
+                        icon="plus-circle"
+                        iconSize={20}
                         onPress={handleCreateCustom}
-                    >
-                        <Icon name="plus-circle" size={20} color="#ffffff" />
-                        <Text style={styles.actionButtonText}>Create Custom Theme</Text>
-                    </TouchableOpacity>
+                    />
 
                     <TouchableOpacity
                         style={[

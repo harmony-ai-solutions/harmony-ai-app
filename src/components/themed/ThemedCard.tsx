@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet, ViewProps } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { hexToRgba } from '../../utils/colorUtils';
 
 interface ThemedCardProps extends ViewProps {
     elevated?: boolean;
@@ -12,9 +13,14 @@ interface ThemedCardProps extends ViewProps {
 }
 
 /**
- * Glassmorphism card component.
- * Renders a translucent, glass-like surface with accent-tinted borders
- * and soft glow shadows. Uses the current theme's colors for the glass effect.
+ * Glassmorphism card — Phase 2 "SoulBits Look".
+ *
+ * Design rules:
+ *  - Single-layer glass element with 1dp hairline gradient border
+ *    (transparent-white → transparent-accent), no nested dark borders.
+ *  - Card background at 30–40 % opacity over the deep base colour,
+ *    producing a high-intensity frosted-glass bleed-through.
+ *  - Optional left accent stripe and prismatic accent-tint overlay.
  */
 export const ThemedCard: React.FC<ThemedCardProps> = ({
     children,
@@ -28,74 +34,82 @@ export const ThemedCard: React.FC<ThemedCardProps> = ({
 
     if (!theme) return <View style={style} {...props}>{children}</View>;
 
-    // Glass background: semi-transparent surface/elevated
-    const glassBgStart = elevated
-        ? theme.colors.background.elevated + 'D9'  // ~85% opacity
-        : theme.colors.background.surface + 'B3';   // ~70% opacity
-    const glassBgEnd = elevated
-        ? theme.colors.background.surface + '99'    // ~60% opacity
-        : theme.colors.background.base + '73';       // ~45% opacity
+    // ── Glass material ──────────────────────────────────────────────────────
+    const bgHex = elevated
+        ? theme.colors.background.elevated
+        : theme.colors.background.surface;
+    const glassOpacity = theme.colors.glass.cardOpacity;
+    const glassBgStart = hexToRgba(bgHex, glassOpacity);
+    const glassBgEnd = hexToRgba(bgHex, glassOpacity * 0.55);
 
-    // Glass border: accent-tinted translucent
-    const glassBorder = theme.colors.accent.primary + '21'; // ~13% opacity
-
-    // Glow shadow: accent-colored soft glow
-    const glowColor = theme.colors.accent.primary;
+    // ── Hairline gradient border ────────────────────────────────────────────
+    const { borderGradientStart, borderGradientEnd } = theme.colors.glass;
 
     return (
         <LinearGradient
-            colors={[glassBgStart, glassBgEnd]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.card, { borderColor: glassBorder, shadowColor: glowColor }, style]}
+            colors={[borderGradientStart, borderGradientEnd]}
+            start={{ x: 0.2, y: 0 }}
+            end={{ x: 0.85, y: 1 }}
+            style={[styles.borderOuter, style]}
             {...props}
         >
-            {/* Prismatic accent tint overlay — top-left bleed */}
-            {accentTint && (
-                <LinearGradient
-                    colors={[theme.colors.accent.primary + '14', 'transparent']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={StyleSheet.absoluteFillObject}
-                    pointerEvents="none"
-                />
-            )}
+            {/* Single glass-material surface — no inner border, no shadow */}
+            <LinearGradient
+                colors={[glassBgStart, glassBgEnd]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.glassInner}
+            >
+                {/* Prismatic accent tint — top-left corner bleed */}
+                {accentTint && (
+                    <LinearGradient
+                        colors={[
+                            theme.colors.accent.primary + '14',
+                            'transparent',
+                        ]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={StyleSheet.absoluteFillObject}
+                        pointerEvents="none"
+                    />
+                )}
 
-            {children}
+                {children}
 
-            {/* Left accent stripe — rendered after children so it stays on top */}
-            {accentStripe && (
-                <LinearGradient
-                    colors={[theme.colors.accent.primary, theme.colors.accent.secondary]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 1 }}
-                    style={styles.accentStripe}
-                    pointerEvents="none"
-                />
-            )}
+                {/* Left accent stripe — rendered after children so it stays on top */}
+                {accentStripe && (
+                    <LinearGradient
+                        colors={[theme.colors.accent.primary, theme.colors.accent.secondary]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 0, y: 1 }}
+                        style={styles.accentStripeBar}
+                        pointerEvents="none"
+                    />
+                )}
+            </LinearGradient>
         </LinearGradient>
     );
 };
 
 const styles = StyleSheet.create({
-    card: {
+    borderOuter: {
         borderRadius: 16,
-        borderWidth: 1,
-        padding: 16,
-        overflow: 'hidden',
-        // Soft shadow with accent glow
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 16,
-        elevation: 4,
+        // 1dp hairline = padding simulates the gradient border thickness
+        padding: StyleSheet.hairlineWidth,
     },
-    accentStripe: {
+    glassInner: {
+        borderRadius: 15,
+        overflow: 'hidden',
+        // Flat single-layer: no inner shadow — clean, modern glass surface
+        padding: 16,
+    },
+    accentStripeBar: {
         position: 'absolute',
         left: 0,
         top: 0,
         bottom: 0,
         width: 3,
-        borderTopLeftRadius: 16,
-        borderBottomLeftRadius: 16,
+        borderTopLeftRadius: 15,
+        borderBottomLeftRadius: 15,
     },
 });

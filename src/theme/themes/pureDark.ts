@@ -45,5 +45,15 @@ export const pureDark: Theme = {
             secondary: 'linear-gradient(135deg, #000000 0%, #0a0a0a 100%)',
             surface: 'linear-gradient(135deg, rgba(107, 114, 128, 0.05) 0%, rgba(75, 85, 99, 0.05) 100%)',
         },
+        glass: {
+            cardOpacity: 0.35,
+            borderGradientStart: 'rgba(255, 255, 255, 0.10)',
+            borderGradientEnd: 'rgba(107, 114, 128, 0.15)',
+        },
+        typography: {
+            headerOpacity: 1.0,
+            subtextOpacity: 0.70,
+            captionOpacity: 0.50,
+        },
     },
 };

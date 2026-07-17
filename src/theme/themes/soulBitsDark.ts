@@ -45,5 +45,15 @@ export const soulBitsDark: Theme = {
             secondary: 'linear-gradient(135deg, #13191c 0%, #282f42 100%)',
             surface: 'linear-gradient(135deg, rgba(143, 59, 167, 0.08) 0%, rgba(45, 35, 112, 0.08) 100%)',
         },
+        glass: {
+            cardOpacity: 0.35,
+            borderGradientStart: 'rgba(255, 255, 255, 0.12)',
+            borderGradientEnd: 'rgba(143, 59, 167, 0.15)',
+        },
+        typography: {
+            headerOpacity: 1.0,
+            subtextOpacity: 0.70,
+            captionOpacity: 0.50,
+        },
     },
 };

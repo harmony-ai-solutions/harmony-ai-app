@@ -45,5 +45,15 @@ export const oceanBreeze: Theme = {
             secondary: 'linear-gradient(135deg, #0c4a6e 0%, #075985 100%)',
             surface: 'linear-gradient(135deg, rgba(6, 182, 212, 0.05) 0%, rgba(14, 165, 233, 0.05) 100%)',
         },
+        glass: {
+            cardOpacity: 0.35,
+            borderGradientStart: 'rgba(255, 255, 255, 0.12)',
+            borderGradientEnd: 'rgba(6, 182, 212, 0.15)',
+        },
+        typography: {
+            headerOpacity: 1.0,
+            subtextOpacity: 0.70,
+            captionOpacity: 0.50,
+        },
     },
 };
