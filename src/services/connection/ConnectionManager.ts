@@ -6,7 +6,7 @@ import { createLogger } from '../../utils/logger';
 const log = createLogger('[ConnectionManager]');
 
 export type ConnectionType = 'sync' | 'entity';
-export type ConnectionMode = 'unencrypted' | 'secure' | 'insecure-ssl';
+export type ConnectionMode = 'unencrypted' | 'secure' | 'insecure-ssl' | 'cloud';
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error';
 
 export interface ConnectionInfo {

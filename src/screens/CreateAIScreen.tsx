@@ -518,14 +518,14 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       // 4. Create entity module mapping
       await createEntityModuleMapping({
         entity_id: entityId,
-        backend_config_id: backendConfigId ? parseInt(backendConfigId, 10) : null,
-        cognition_config_id: cognitionConfigId ? parseInt(cognitionConfigId, 10) : null,
-        tts_config_id: ttsConfigId ? parseInt(ttsConfigId, 10) : null,
-        stt_config_id: sttConfigId ? parseInt(sttConfigId, 10) : null,
-        vision_config_id: visionConfigId ? parseInt(visionConfigId, 10) : null,
-        rag_config_id: ragConfigId ? parseInt(ragConfigId, 10) : null,
-        imagination_config_id: imaginationConfigId ? parseInt(imaginationConfigId, 10) : null,
-        movement_config_id: movementConfigId ? parseInt(movementConfigId, 10) : null,
+        backend_config_id: backendConfigId ?? null,
+        cognition_config_id: cognitionConfigId ?? null,
+        tts_config_id: ttsConfigId ?? null,
+        stt_config_id: sttConfigId ?? null,
+        vision_config_id: visionConfigId ?? null,
+        rag_config_id: ragConfigId ?? null,
+        imagination_config_id: imaginationConfigId ?? null,
+        movement_config_id: movementConfigId ?? null,
         deleted_at: null,
       });
 

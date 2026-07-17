@@ -43,26 +43,57 @@ import {
 } from '../../database/repositories/modules';
 import {
   createOpenAIProviderConfig, updateOpenAIProviderConfig, getOpenAIProviderConfig, deleteOpenAIProviderConfig,
+} from '../../database/repositories/providers/OpenAIProviderConfigRepository';
+import {
   createOpenAICompatibleProviderConfig, updateOpenAICompatibleProviderConfig, getOpenAICompatibleProviderConfig, deleteOpenAICompatibleProviderConfig,
+} from '../../database/repositories/providers/OpenAICompatibleProviderConfigRepository';
+import {
   createOpenRouterProviderConfig, updateOpenRouterProviderConfig, getOpenRouterProviderConfig, deleteOpenRouterProviderConfig,
+} from '../../database/repositories/providers/OpenRouterProviderConfigRepository';
+import {
   createElevenLabsProviderConfig, updateElevenLabsProviderConfig, getElevenLabsProviderConfig, deleteElevenLabsProviderConfig,
+} from '../../database/repositories/providers/ElevenLabsProviderConfigRepository';
+import {
   createHarmonySpeechProviderConfig, updateHarmonySpeechProviderConfig, getHarmonySpeechProviderConfig, deleteHarmonySpeechProviderConfig,
+} from '../../database/repositories/providers/HarmonySpeechProviderConfigRepository';
+import {
   createKindroidProviderConfig, updateKindroidProviderConfig, getKindroidProviderConfig, deleteKindroidProviderConfig,
+} from '../../database/repositories/providers/KindroidProviderConfigRepository';
+import {
   createKajiwotoProviderConfig, updateKajiwotoProviderConfig, getKajiwotoProviderConfig, deleteKajiwotoProviderConfig,
+} from '../../database/repositories/providers/KajiwotoProviderConfigRepository';
+import {
   createCharacterAIProviderConfig, updateCharacterAIProviderConfig, getCharacterAIProviderConfig, deleteCharacterAIProviderConfig,
+} from '../../database/repositories/providers/CharacterAIProviderConfigRepository';
+import {
   createLocalAIProviderConfig, updateLocalAIProviderConfig, getLocalAIProviderConfig, deleteLocalAIProviderConfig,
+} from '../../database/repositories/providers/LocalAIProviderConfigRepository';
+import {
   createMistralProviderConfig, updateMistralProviderConfig, getMistralProviderConfig, deleteMistralProviderConfig,
+} from '../../database/repositories/providers/MistralProviderConfigRepository';
+import {
   createOllamaProviderConfig, updateOllamaProviderConfig, getOllamaProviderConfig, deleteOllamaProviderConfig,
+} from '../../database/repositories/providers/OllamaProviderConfigRepository';
+import {
   createComfyUIProviderConfig, updateComfyUIProviderConfig, getComfyUIProviderConfig, deleteComfyUIProviderConfig,
+} from '../../database/repositories/providers/ComfyUIProviderConfigRepository';
+import {
   createGoogleProviderConfig, updateGoogleProviderConfig, getGoogleProviderConfig, deleteGoogleProviderConfig,
+} from '../../database/repositories/providers/GoogleProviderConfigRepository';
+import {
   createXAIProviderConfig, updateXAIProviderConfig, getXAIProviderConfig, deleteXAIProviderConfig,
+} from '../../database/repositories/providers/XAIProviderConfigRepository';
+import {
   createAnthropicProviderConfig, updateAnthropicProviderConfig, getAnthropicProviderConfig, deleteAnthropicProviderConfig,
-} from '../../database/repositories/providers';
+} from '../../database/repositories/providers/AnthropicProviderConfigRepository';
+import {
+  createSoulbitsCloudProviderConfig, updateSoulbitsCloudProviderConfig, getSoulbitsCloudProviderConfig, deleteSoulbitsCloudProviderConfig,
+} from '../../database/repositories/providers/SoulbitsCloudProviderConfigRepository';
 
 type RootStackParamList = {
   ModuleConfigEdit: {
     moduleType: string;
-    configId?: number;
+    configId?: string;
   };
 };
 
@@ -72,10 +103,10 @@ type ModuleConfigEditNavigationProp = NativeStackNavigationProp<RootStackParamLi
 const OPENAI_FAMILY = ['openai', 'openaicompatible', 'openrouter', 'google', 'xai', 'anthropic'];
 
 const MODULE_REPOSITORIES: Record<string, {
-  create: (config: any) => Promise<number>;
+  create: (config: any) => Promise<string>;
   update: (config: any) => Promise<void>;
-  get: (id: number) => Promise<any | null>;
-  delete: (id: number) => Promise<void>;
+  get: (id: string) => Promise<any | null>;
+  delete: (id: string) => Promise<void>;
 }> = {
   backend: { create: createBackendConfig, update: updateBackendConfig, get: getBackendConfig, delete: deleteBackendConfig },
   cognition: { create: createCognitionConfig, update: updateCognitionConfig, get: getCognitionConfig, delete: deleteCognitionConfig },
@@ -88,10 +119,10 @@ const MODULE_REPOSITORIES: Record<string, {
 };
 
 const PROVIDER_REPOSITORIES: Record<string, {
-  create: (config: any) => Promise<number>;
+  create: (config: any) => Promise<string>;
   update: (config: any) => Promise<void>;
-  get: (id: number) => Promise<any | null>;
-  delete: (id: number) => Promise<void>;
+  get: (id: string) => Promise<any | null>;
+  delete: (id: string) => Promise<void>;
 }> = {
   openai: { create: createOpenAIProviderConfig, update: updateOpenAIProviderConfig, get: getOpenAIProviderConfig, delete: deleteOpenAIProviderConfig },
   openaicompatible: { create: createOpenAICompatibleProviderConfig, update: updateOpenAICompatibleProviderConfig, get: getOpenAICompatibleProviderConfig, delete: deleteOpenAICompatibleProviderConfig },
@@ -108,6 +139,7 @@ const PROVIDER_REPOSITORIES: Record<string, {
   google: { create: createGoogleProviderConfig, update: updateGoogleProviderConfig, get: getGoogleProviderConfig, delete: deleteGoogleProviderConfig },
   xai: { create: createXAIProviderConfig, update: updateXAIProviderConfig, get: getXAIProviderConfig, delete: deleteXAIProviderConfig },
   anthropic: { create: createAnthropicProviderConfig, update: updateAnthropicProviderConfig, get: getAnthropicProviderConfig, delete: deleteAnthropicProviderConfig },
+  soulbitscloud: { create: createSoulbitsCloudProviderConfig, update: updateSoulbitsCloudProviderConfig, get: getSoulbitsCloudProviderConfig, delete: deleteSoulbitsCloudProviderConfig },
 };
 
 export const ModuleConfigEditScreen: React.FC = () => {
@@ -130,7 +162,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
   // For standard modules: 'provider' (single slot)
   // For STT: 'transcription' and 'vad' (two slots)
   const [providerForms, setProviderForms] = useState<Record<string, {
-    providerConfigId: number | null;
+    providerConfigId: string | null;
     values: Record<string, any>;
   }>>({});
   
@@ -311,7 +343,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const saveProviderConfig = async (
     providerType: string,
     slot: string,
-  ): Promise<number | null> => {
+  ): Promise<string | null> => {
     const pRepo = PROVIDER_REPOSITORIES[providerType];
     if (!pRepo) return null;
 

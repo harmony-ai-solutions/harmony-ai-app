@@ -4,7 +4,9 @@
 
 import {initializeDatabase, clearDatabaseData} from '../connection';
 import * as modules from '../repositories/modules';
-import * as providers from '../repositories/providers';
+import * as openai from '../repositories/providers/OpenAIProviderConfigRepository';
+import * as openrouter from '../repositories/providers/OpenRouterProviderConfigRepository';
+import * as ollama from '../repositories/providers/OllamaProviderConfigRepository';
 import {runTestWithCleanup, TestResult} from './test-utils';
 
 /**
@@ -22,7 +24,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
     results.push(
       await runTestWithCleanup('Backend Config CRUD', async () => {
         // Create provider config first
-        const providerId = await providers.createOpenAIProviderConfig({
+        const providerId = await openai.createOpenAIProviderConfig({
           name: 'Test Provider',
           api_key: 'test-key',
           model: null,
@@ -38,7 +40,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
         
         console.log('[DEBUG] Provider ID returned:', providerId, 'Type:', typeof providerId);
         
-        if (!providerId || typeof providerId !== 'number') {
+        if (!providerId || typeof providerId !== 'string') {
           throw new Error(`Provider creation failed. Got ID: ${providerId} (type: ${typeof providerId})`);
         }
         
@@ -59,7 +61,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
           deleted_at: null,
         });
         await modules.deleteBackendConfig(id);
-        await providers.deleteOpenAIProviderConfig(providerId);
+        await openai.deleteOpenAIProviderConfig(providerId);
       })
     );
 
@@ -67,7 +69,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
     results.push(
       await runTestWithCleanup('Movement Config CRUD', async () => {
         // Create provider config first
-        const providerId = await providers.createOpenRouterProviderConfig({
+        const providerId = await openrouter.createOpenRouterProviderConfig({
           name: 'Test Provider Movement',
           api_key: 'test-key',
           model: null,
@@ -88,7 +90,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
         const retrieved = await modules.getMovementConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
         await modules.deleteMovementConfig(id);
-        await providers.deleteOpenRouterProviderConfig(providerId);
+        await openrouter.deleteOpenRouterProviderConfig(providerId);
       })
     );
 
@@ -96,7 +98,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
     results.push(
       await runTestWithCleanup('STT Config CRUD', async () => {
         // Create provider configs first (STT needs two)
-        const transcriptionProviderId = await providers.createOpenAIProviderConfig({
+        const transcriptionProviderId = await openai.createOpenAIProviderConfig({
           name: 'Test Provider STT Transcription',
           api_key: 'test-key',
           model: null,
@@ -110,7 +112,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
           format: null,
         });
         
-        const vadProviderId = await providers.createOpenAIProviderConfig({
+        const vadProviderId = await openai.createOpenAIProviderConfig({
           name: 'Test Provider STT VAD',
           api_key: 'test-key',
           model: null,
@@ -137,8 +139,8 @@ export async function runModuleTests(): Promise<TestResult[]> {
         const retrieved = await modules.getSTTConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
         await modules.deleteSTTConfig(id);
-        await providers.deleteOpenAIProviderConfig(transcriptionProviderId);
-        await providers.deleteOpenAIProviderConfig(vadProviderId);
+        await openai.deleteOpenAIProviderConfig(transcriptionProviderId);
+        await openai.deleteOpenAIProviderConfig(vadProviderId);
       })
     );
 
@@ -146,7 +148,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
     results.push(
       await runTestWithCleanup('Cognition Config CRUD', async () => {
         // Create provider config first
-        const providerId = await providers.createOpenAIProviderConfig({
+        const providerId = await openai.createOpenAIProviderConfig({
           name: 'Test Provider Cognition',
           api_key: 'test-key',
           model: null,
@@ -170,7 +172,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
         const retrieved = await modules.getCognitionConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
         await modules.deleteCognitionConfig(id);
-        await providers.deleteOpenAIProviderConfig(providerId);
+        await openai.deleteOpenAIProviderConfig(providerId);
       })
     );
 
@@ -178,7 +180,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
     results.push(
       await runTestWithCleanup('RAG Config CRUD', async () => {
         // Create provider config first
-        const providerId = await providers.createOllamaProviderConfig({
+        const providerId = await ollama.createOllamaProviderConfig({
           name: 'Test Provider RAG',
           base_url: 'http://localhost:11434',
           model: null,
@@ -193,7 +195,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
         const retrieved = await modules.getRAGConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
         await modules.deleteRAGConfig(id);
-        await providers.deleteOllamaProviderConfig(providerId);
+        await ollama.deleteOllamaProviderConfig(providerId);
       })
     );
 
@@ -201,7 +203,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
     results.push(
       await runTestWithCleanup('TTS Config CRUD', async () => {
         // Create provider config first
-        const providerId = await providers.createOpenAIProviderConfig({
+        const providerId = await openai.createOpenAIProviderConfig({
           name: 'Test Provider TTS',
           api_key: 'test-key',
           model: null,
@@ -226,7 +228,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
         const retrieved = await modules.getTTSConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
         await modules.deleteTTSConfig(id);
-        await providers.deleteOpenAIProviderConfig(providerId);
+        await openai.deleteOpenAIProviderConfig(providerId);
       })
     );
 
@@ -234,7 +236,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
     results.push(
       await runTestWithCleanup('Vision Config CRUD', async () => {
         // Create provider config first
-        const providerId = await providers.createOpenAIProviderConfig({
+        const providerId = await openai.createOpenAIProviderConfig({
           name: 'Test Provider Vision',
           api_key: 'test-key',
           model: null,
@@ -274,7 +276,7 @@ export async function runModuleTests(): Promise<TestResult[]> {
           throw new Error('Update resolution mismatch');
         }
         await modules.deleteVisionConfig(id);
-        await providers.deleteOpenAIProviderConfig(providerId);
+        await openai.deleteOpenAIProviderConfig(providerId);
       })
     );
 

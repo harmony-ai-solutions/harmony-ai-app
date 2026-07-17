@@ -55,7 +55,7 @@ export type RootStackParamList = {
   ProfileSettings: undefined;
   ModuleConfigEdit: {
     moduleType: string;
-    configId?: number;
+    configId?: string;
   };
   DatabaseTests?: undefined;
   DatabaseTableViewer?: undefined;

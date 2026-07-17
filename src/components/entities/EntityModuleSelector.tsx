@@ -12,7 +12,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 
 export interface ModuleConfigOption {
-  id: number;
+  id: string;
   name: string;
 }
 

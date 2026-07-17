@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, ScrollView, TextInput, Alert, TouchableOpacity } from 'react-native';
-import { Appbar } from 'react-native-paper';
+import { Appbar, ActivityIndicator } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ConnectionManager from '../../services/connection/ConnectionManager';
 import SyncService from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
+import { cloudSessionService, type CloudSessionStatus } from '../../services/cloud/CloudSessionService';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { useAuth } from '../../contexts/AuthContext';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
@@ -31,36 +32,58 @@ export const ConnectionSetupScreen: React.FC = () => {
   const { status: authStatus } = useAuth();
   
   // ── Mode toggle state ─────────────────────────────────────────────────
-  const [harmonyMode, setHarmonyMode] = useState<'selfhosted' | 'cloud'>('selfhosted');
+  const [connectionMode, setConnectionMode] = useState<'selfhosted' | 'cloud'>('selfhosted');
 
   // Load persisted mode on mount
   useEffect(() => {
-    AsyncStorage.getItem('harmony_mode').then(saved => {
+    AsyncStorage.getItem('connection_mode').then(saved => {
       if (saved === 'cloud' || saved === 'selfhosted') {
-        setHarmonyMode(saved);
+        setConnectionMode(saved);
       }
     });
   }, []);
 
+  // ── Cloud session status (spawning/ready/error) drives the hint + spinner ──
+  const [cloudStatus, setCloudStatus] = useState<CloudSessionStatus>(cloudSessionService.getStatus());
+
+  useEffect(() => {
+    const onStatus = (s: CloudSessionStatus) => setCloudStatus(s);
+    cloudSessionService.on('status', onStatus);
+    return () => { cloudSessionService.off('status', onStatus); };
+  }, []);
+
+  // Apply the mode change (mutation) — extracted so the confirm dialog can call it.
+  const applyModeChange = useCallback((mode: 'selfhosted' | 'cloud') => {
+    setConnectionMode(mode);
+    AsyncStorage.setItem('connection_mode', mode).catch(() => {}); // canonical key (6-3A)
+    if (mode === 'cloud') {
+      if (authStatus === 'authenticated') {
+        // Explicitly spawn the cloud session — AuthContext's listener only fires on auth:changed,
+        // not on mode change, so an already-authenticated user switching to cloud needs this.
+        cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on mode switch:', e));
+      } else if (authStatus === 'unauthenticated') {
+        navigation.navigate('Login');
+      }
+      // authStatus === 'loading' → do nothing; AuthContext resolves.
+    }
+  }, [authStatus, navigation]);
+
   const handleModeChange = useCallback(
     (mode: 'selfhosted' | 'cloud') => {
-      setHarmonyMode(mode);
-      AsyncStorage.setItem('harmony_mode', mode).catch(() => {});
+      if (mode === connectionMode) return; // no-op when re-selecting current source
 
-      if (mode === 'cloud') {
-        if (authStatus === 'authenticated') {
-          // Cloud mode, authenticated — navigate to cloud connect flow
-          // TODO Phase 6-2: implement cloud connection flow
-          log.info('Cloud mode selected and authenticated — Phase 6-2 placeholder');
-          showToast(ta('mode_cloudComingSoon'));
-        } else if (authStatus === 'unauthenticated') {
-          // Cloud mode, not authenticated — push Login screen
-          navigation.navigate('Login');
-        }
-        // If authStatus is 'loading', do nothing — AuthContext will resolve
-      }
+      Alert.alert(
+        ta('switch_warning_title'),
+        mode === 'cloud'
+          ? ta('switch_warning_message_cloud')
+          : ta('switch_warning_message_selfhosted'),
+        [
+          { text: t('common:cancel'), style: 'cancel' },
+          { text: ta('switch_confirm'), onPress: () => applyModeChange(mode) },
+        ],
+      );
     },
-    [authStatus, navigation, showToast, ta],
+    [connectionMode, applyModeChange, ta, t],
   );
 
   const [url, setUrl] = useState('192.168.1.');
@@ -402,11 +425,11 @@ export const ConnectionSetupScreen: React.FC = () => {
                 styles.modeOption,
                 {
                   borderColor:
-                    harmonyMode === 'selfhosted'
+                    connectionMode === 'selfhosted'
                       ? theme.colors.accent.primary
                       : theme.colors.border.default,
                   backgroundColor:
-                    harmonyMode === 'selfhosted'
+                    connectionMode === 'selfhosted'
                       ? theme.colors.accent.primary + '18'
                       : theme.colors.background.elevated,
                 },
@@ -416,13 +439,13 @@ export const ConnectionSetupScreen: React.FC = () => {
             >
               <ThemedText
                 weight="medium"
-                variant={harmonyMode === 'selfhosted' ? 'accent' : 'primary'}
+                variant={connectionMode === 'selfhosted' ? 'accent' : 'primary'}
               >
                 {ta('mode_selfhosted')}
               </ThemedText>
               <ThemedText
                 size={12}
-                variant={harmonyMode === 'selfhosted' ? 'secondary' : 'muted'}
+                variant={connectionMode === 'selfhosted' ? 'secondary' : 'muted'}
                 style={styles.modeOptionDesc}
               >
                 {ta('mode_selfhosted_desc')}
@@ -434,11 +457,11 @@ export const ConnectionSetupScreen: React.FC = () => {
                 styles.modeOption,
                 {
                   borderColor:
-                    harmonyMode === 'cloud'
+                    connectionMode === 'cloud'
                       ? theme.colors.accent.primary
                       : theme.colors.border.default,
                   backgroundColor:
-                    harmonyMode === 'cloud'
+                    connectionMode === 'cloud'
                       ? theme.colors.accent.primary + '18'
                       : theme.colors.background.elevated,
                 },
@@ -448,13 +471,13 @@ export const ConnectionSetupScreen: React.FC = () => {
             >
               <ThemedText
                 weight="medium"
-                variant={harmonyMode === 'cloud' ? 'accent' : 'primary'}
+                variant={connectionMode === 'cloud' ? 'accent' : 'primary'}
               >
                 {ta('mode_cloud')}
               </ThemedText>
               <ThemedText
                 size={12}
-                variant={harmonyMode === 'cloud' ? 'secondary' : 'muted'}
+                variant={connectionMode === 'cloud' ? 'secondary' : 'muted'}
                 style={styles.modeOptionDesc}
               >
                 {ta('mode_cloud_desc')}
@@ -462,18 +485,31 @@ export const ConnectionSetupScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
 
-          {harmonyMode === 'cloud' && (
-            <ThemedText variant="secondary" size={12} style={styles.modeHint}>
-              {authStatus === 'loading'
-                ? ta('mode_cloudCheckingAuth')
-                : authStatus === 'authenticated'
-                  ? ta('mode_cloudReady')
-                  : ta('mode_cloudSignInRequired')}
-            </ThemedText>
+          {connectionMode === 'cloud' && (
+            <View style={styles.modeHintBlock}>
+              {authStatus === 'loading' ? (
+                <ThemedText variant="secondary" size={12} style={styles.modeHint}>{ta('mode_cloudCheckingAuth')}</ThemedText>
+              ) : authStatus === 'authenticated' ? (
+                cloudStatus === 'spawning' ? (
+                  <View style={styles.cloudSpawningRow}>
+                    <ActivityIndicator size="small" color={theme.colors.accent.primary} />
+                    <ThemedText variant="secondary" size={12} style={styles.modeHint}>{ta('cloud_spawning')}</ThemedText>
+                  </View>
+                ) : cloudStatus === 'ready' ? (
+                  <ThemedText variant="secondary" size={12} style={styles.modeHint}>{ta('cloud_ready')}</ThemedText>
+                ) : cloudStatus === 'error' ? (
+                  <ThemedText variant="secondary" size={12} style={[styles.modeHint, { color: '#F44336' }]}>{ta('cloud_error')}</ThemedText>
+                ) : (
+                  <ThemedText variant="secondary" size={12} style={styles.modeHint}>{ta('mode_cloudReady')}</ThemedText>
+                )
+              ) : (
+                <ThemedText variant="secondary" size={12} style={styles.modeHint}>{ta('mode_cloudSignInRequired')}</ThemedText>
+              )}
+            </View>
           )}
         </View>
 
-        {harmonyMode === 'selfhosted' && (
+        {connectionMode === 'selfhosted' && (
         <View style={styles.form}>
           <ThemedText weight="medium">{t('addressLabel')}</ThemedText>
           <TextInput
@@ -703,6 +739,16 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     opacity: 0.7,
+  },
+  modeHintBlock: {
+    marginTop: 8,
+  },
+  cloudSpawningRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    justifyContent: 'center',
   },
   reconnectButton: {
     marginBottom: 10,

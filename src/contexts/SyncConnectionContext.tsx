@@ -4,6 +4,7 @@ import ConnectionManager from '../services/connection/ConnectionManager';
 import SyncService, { SyncService as SyncServiceClass } from '../services/SyncService';
 import { ToastAndroid, Platform, Alert } from 'react-native';
 import { createLogger } from '../utils/logger';
+import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
 
 const log = createLogger('[SyncConnectionContext]');
 
@@ -258,17 +259,23 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setIsConnectingSync(true);
       log.info('Connecting to sync...');
       
-      const savedMode = await ConnectionStateManager.getSecurityMode();
-      const url = savedMode === 'unencrypted'
-        ? await ConnectionStateManager.getWSUrl()
-        : await ConnectionStateManager.getWSSUrl();
-      
+      const source = await ConnectionStateManager.getCurrentSource();
+      let url: string;
+      let mode: string;
+      if (source === 'cloud') {
+        url = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.sync}`;
+        mode = 'cloud';
+      } else {
+        mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
+        url = mode === 'unencrypted'
+          ? (await ConnectionStateManager.getWSUrl()) ?? ''
+          : (await ConnectionStateManager.getWSSUrl()) ?? '';
+      }
+
       if (!url) {
         throw new Error('No server URL configured');
       }
-      
-      const mode = savedMode || 'secure';
-      
+
       await connectionManager.createConnection('sync', 'sync', url, mode as any);
       
       log.info('Sync connection established');
