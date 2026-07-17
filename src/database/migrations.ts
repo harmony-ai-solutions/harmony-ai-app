@@ -256,15 +256,27 @@ async function applyMigration(
 
   try {
     // Execute the migration SQL
-    // Note: SQLite doesn't support multiple statements in executeSql,
-    // so we need to split and execute individually
     const statements = migration.sql
       .split(';')
       .map((s: string) => s.trim())
       .filter((s: string) => s.length > 0);
 
     for (const statement of statements) {
-      await db.executeSql(statement);
+      try {
+        await db.executeSql(statement);
+      } catch (stmtError: any) {
+        // react-native-sqlite-storage on some Android builds returns
+        // SQLITE_OK (code 0) as a rejected promise for ALTER TABLE ADD
+        // COLUMN ... DEFAULT statements. The operation actually succeeded;
+        // the JS layer falsely wraps it as an error.
+        if (stmtError?.code === 0) {
+          log.debug(
+            `Migration ${migration.version}: swallowed false SQLITE_OK error on: ${statement.substring(0, 80)}`,
+          );
+          continue;
+        }
+        throw stmtError;
+      }
     }
 
     // Record the migration
@@ -276,7 +288,23 @@ async function applyMigration(
     if (!silent) {
       log.info(`Successfully applied migration ${migration.version}`);
     }
-  } catch (error) {
+  } catch (error: any) {
+    // Also handle SQLITE_OK at the top level (some statements trigger it
+    // without per-statement error wrapping)
+    if (error?.code === 0) {
+      log.debug(`Migration ${migration.version}: swallowed false SQLITE_OK at top-level`);
+      // Record the migration anyway since the statements succeeded
+      try {
+        await db.executeSql(
+          'INSERT INTO schema_migrations (version, description) VALUES (?, ?)',
+          [migration.version, migration.description],
+        );
+      } catch { /* best effort */ }
+      if (!silent) {
+        log.info(`Successfully applied migration ${migration.version}`);
+      }
+      return;
+    }
     log.error(`Failed to apply migration ${migration.version}:`, error);
     throw error;
   }

@@ -74,17 +74,20 @@ ALTER TABLE provider_config_openrouter ADD COLUMN image_size TEXT DEFAULT '';
 
 -- Unify embedding_model into model for pre-existing tables
 
--- OpenAI: already has 'model' column. Copy data, then drop.
+-- OpenAI: already has 'model' column. Copy data from embedding_model.
+-- DROP COLUMN skipped: requires SQLite 3.35.0+ (many Android devices ship older).
+-- embedding_model column remains as dead weight; all code reads from 'model'.
 UPDATE provider_config_openai SET model = embedding_model WHERE (model IS NULL OR model = '') AND embedding_model IS NOT NULL AND embedding_model != '';
-ALTER TABLE provider_config_openai DROP COLUMN embedding_model;
 
 -- OpenAI Compatible: already has 'model' column.
 UPDATE provider_config_openaicompatible SET model = embedding_model WHERE (model IS NULL OR model = '') AND embedding_model IS NOT NULL AND embedding_model != '';
-ALTER TABLE provider_config_openaicompatible DROP COLUMN embedding_model;
 
--- LocalAI: has NO 'model' column, only 'embedding_model'. Just rename it.
-ALTER TABLE provider_config_localai RENAME COLUMN embedding_model TO model;
+-- LocalAI: has NO 'model' column, only 'embedding_model'.
+-- RENAME COLUMN requires SQLite 3.25.0+ — use ALTER TABLE ADD + UPDATE instead.
+ALTER TABLE provider_config_localai ADD COLUMN model TEXT DEFAULT '';
+UPDATE provider_config_localai SET model = embedding_model WHERE (model IS NULL OR model = '') AND embedding_model IS NOT NULL AND embedding_model != '';
 
--- Ollama: has NO 'model' column, only 'embedding_model'. Just rename it.
-ALTER TABLE provider_config_ollama RENAME COLUMN embedding_model TO model;
+-- Ollama: has NO 'model' column, only 'embedding_model'.
+ALTER TABLE provider_config_ollama ADD COLUMN model TEXT DEFAULT '';
+UPDATE provider_config_ollama SET model = embedding_model WHERE (model IS NULL OR model = '') AND embedding_model IS NOT NULL AND embedding_model != '';
 `;

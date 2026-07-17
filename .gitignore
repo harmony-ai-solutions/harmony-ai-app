@@ -85,3 +85,6 @@ yarn-error.log
 # Gitnexus and repo-local hf cache
 .gitnexus
 undefined/
+
+# Windows reserved device name (accidental creation via e.g. `ping > nul`)
+nul
