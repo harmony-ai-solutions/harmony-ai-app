@@ -18,6 +18,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { useEmoji } from '../../contexts/EmojiContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemeCard } from '../../components/settings/ThemeCard';
 import { EmojiStyleCard } from '../../components/settings/EmojiStyleCard';
 import { Theme } from '../../theme/types';
@@ -148,7 +149,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
     };
 
     return (
-        <View style={[styles.container, { backgroundColor: theme.colors.background.base }]}>
+        <ThemedView style={styles.container}>
             <ThemedAppbar style={styles.header}>
                 <Appbar.BackAction
                     color={theme.colors.text.primary}
@@ -292,7 +293,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                     ))}
                 </View>
             </ScrollView>
-        </View>
+        </ThemedView>
     );
 };
 

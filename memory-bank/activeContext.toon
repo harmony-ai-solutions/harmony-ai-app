@@ -29,6 +29,7 @@
 - Session Management Refactored: InteractionSession replaces DualEntitySession — sessions are interaction-scoped (not entity-pair-scoped), events keyed by interactionId.
 - Chat Screens Adapted: ChatListScreen and ChatDetailScreen adapted to InteractionSession model; JOIN-based queries for chat list previews (conversation_messages JOIN interactions).
 - Force Full DB Sync: Option to force full database synchronization at the sync settings screen.
+- Dynamic Atmospheric Background: Aurora/Nebula animated background with stardust particles integrated as a persistent layer behind the navigation stack. Uses Haute Goth palette (Deep Goth Blue-Black, Neon Magenta, Indigo) with 5 animated gradient blobs, prime-number cycle durations, and 40 drifting light particles with twinkling opacity.
 @Next:
 - Vision Module Integration: Complete integration with Harmony Link vision module for image understanding and multimodal interactions.
 - Imagination Module Integration: Complete integration with Harmony Link imagination module for autonomous entity actions and initiative behaviors.

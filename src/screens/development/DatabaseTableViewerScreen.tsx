@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { ThemedView } from '../../components/themed/ThemedView';
 import { executeRawQuery, clearDatabaseData } from '../../database/connection';
 import { createLogger } from '../../utils/logger';
 import { createDataURL } from '../../database/base64';
@@ -530,7 +531,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
     if (!theme) return null;
 
     return (
-        <View style={[styles.container, { backgroundColor: theme.colors.background.base }]}>
+        <ThemedView style={styles.container}>
             {/* Header */}
             <View style={[styles.header, { backgroundColor: theme.colors.background.surface }]}>
                 <View style={styles.headerContent}>
@@ -654,7 +655,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                     </View>
                 </View>
             </Modal>
-        </View>
+        </ThemedView>
     );
 };
 
