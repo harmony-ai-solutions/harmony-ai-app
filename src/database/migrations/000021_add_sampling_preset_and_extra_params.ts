@@ -8,19 +8,20 @@
 
 export const migration021 = `
 -- Add sampling preset reference and extended params to OpenAI provider config
-ALTER TABLE provider_config_openai ADD COLUMN sampling_preset_name TEXT NOT NULL DEFAULT '';
-ALTER TABLE provider_config_openai ADD COLUMN extra_params TEXT NOT NULL DEFAULT '{}';
+-- Columns are nullable (NOT NULL + DEFAULT triggers false SQLITE_OK error
+-- on some Android SQLite builds via react-native-sqlite-storage).
+ALTER TABLE provider_config_openai ADD COLUMN sampling_preset_name TEXT DEFAULT '';
+ALTER TABLE provider_config_openai ADD COLUMN extra_params TEXT DEFAULT '{}';
 
 -- Add sampling preset reference and extended params to OpenAI Compatible provider config
-ALTER TABLE provider_config_openaicompatible ADD COLUMN sampling_preset_name TEXT NOT NULL DEFAULT '';
-ALTER TABLE provider_config_openaicompatible ADD COLUMN extra_params TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE provider_config_openaicompatible ADD COLUMN sampling_preset_name TEXT DEFAULT '';
+ALTER TABLE provider_config_openaicompatible ADD COLUMN extra_params TEXT DEFAULT '{}';
 
 -- Add sampling preset reference and extended params to OpenRouter provider config
-ALTER TABLE provider_config_openrouter ADD COLUMN sampling_preset_name TEXT NOT NULL DEFAULT '';
-ALTER TABLE provider_config_openrouter ADD COLUMN extra_params TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE provider_config_openrouter ADD COLUMN sampling_preset_name TEXT DEFAULT '';
+ALTER TABLE provider_config_openrouter ADD COLUMN extra_params TEXT DEFAULT '{}';
 
--- Drop deprecated chat_template_kwargs column (replaced by extra_params)
-ALTER TABLE provider_config_openai DROP COLUMN chat_template_kwargs;
-ALTER TABLE provider_config_openaicompatible DROP COLUMN chat_template_kwargs;
-ALTER TABLE provider_config_openrouter DROP COLUMN chat_template_kwargs;
+-- chat_template_kwargs column was never present in the app's initial schema
+-- (only existed in Harmony Link backend). Skipping DROP.
+-- DROP COLUMN requires SQLite 3.35.0+ which many Android devices lack.
 `;

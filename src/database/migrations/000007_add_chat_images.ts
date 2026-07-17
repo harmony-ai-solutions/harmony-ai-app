@@ -6,8 +6,9 @@ ALTER TABLE chat_messages ADD COLUMN vl_model TEXT;
 ALTER TABLE chat_messages ADD COLUMN vl_model_interpretation TEXT;
 ALTER TABLE chat_messages ADD COLUMN vl_model_embedding TEXT;
 
--- 2. AUDIO: Replace audio_file with text+mime_type
-ALTER TABLE chat_messages DROP COLUMN audio_file;
+-- 2. AUDIO: Add audio_data + audio_mime_type columns
+-- Note: audio_file column from initial schema is left in place (dead column).
+-- DROP COLUMN requires SQLite 3.35.0+ which many Android devices lack.
 ALTER TABLE chat_messages ADD COLUMN audio_data TEXT;
 ALTER TABLE chat_messages ADD COLUMN audio_mime_type TEXT;
 
