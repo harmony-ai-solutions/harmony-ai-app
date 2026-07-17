@@ -51,8 +51,13 @@ export const LandingScreen: React.FC = () => {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Branded gradient stripe at the top */}
+        {/* SoulBits hero gradient accent stripe */}
         <ThemedGradient gradient="primary" style={styles.gradientAccent} />
+
+        {/* Hero subtitle / eyebrow */}
+        <ThemedText variant="muted" size={11} style={styles.sectionEyebrow}>
+          {t('welcomeEyebrow')}
+        </ThemedText>
 
         {/* Hero: AI Chat card */}
         <LandingCard
@@ -82,8 +87,9 @@ export const LandingScreen: React.FC = () => {
           />
         </View>
 
-        {/* Footer */}
-        <View style={[styles.footer, { paddingBottom: 16 + safeBottom }]}>
+        {/* Footer — glass separator + version */}
+        <View style={[styles.footer, { paddingBottom: 24 + safeBottom }]}>
+          <View style={[styles.footerSeparator, { backgroundColor: theme.colors.accent.primary + '1F' }]} />
           <ThemedText variant="muted" size={11}>
             {t('common:version', { version: getAppVersion() })}
           </ThemedText>
@@ -108,7 +114,12 @@ const styles = StyleSheet.create({
   gradientAccent: {
     height: 4,
     borderRadius: 2,
-    marginBottom: 8,
+    marginBottom: 0,
+  },
+  sectionEyebrow: {
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: -4,
   },
   heroCard: {
     marginBottom: 4,
@@ -122,5 +133,11 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 16,
     alignItems: 'center',
+  },
+  footerSeparator: {
+    width: 40,
+    height: 2,
+    borderRadius: 1,
+    marginBottom: 12,
   },
 });

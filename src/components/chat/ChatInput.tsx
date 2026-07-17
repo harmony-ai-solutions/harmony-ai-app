@@ -280,14 +280,20 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Glass styling tokens
+  const glassBg = theme.colors.background.surface + 'CC';    // ~80% opacity
+  const glassBorder = theme.colors.accent.primary + '18';     // ~9% opacity
+  const inputGlassBg = theme.colors.background.elevated + '80'; // ~50% opacity
+  const glowColor = theme.colors.accent.primary;
+
   if (isRecording) {
     return (
-      <ThemedView style={[styles.container, { backgroundColor: theme.colors.background.surface, paddingBottom: safeBottom }]}>
+      <ThemedView style={[styles.container, { backgroundColor: glassBg, borderTopColor: glassBorder, paddingBottom: safeBottom }]}>
         <View style={styles.recordingContainer}>
           <Animated.View
             style={[
               styles.recordingIndicator,
-              { 
+              {
                 backgroundColor: theme.colors.status.error,
                 transform: [{ scale: pulseAnim }],
               },
@@ -298,7 +304,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
           </ThemedText>
           <TouchableOpacity
             onPress={toggleRecording}
-            style={[styles.stopButton, { backgroundColor: theme.colors.accent.primary }]}
+            style={[styles.stopButton, { backgroundColor: theme.colors.accent.primary, shadowColor: glowColor }]}
           >
             <Icon name="stop" size={24} color="#fff" />
           </TouchableOpacity>
@@ -308,7 +314,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
   }
 
   return (
-    <ThemedView style={[styles.container, { backgroundColor: theme.colors.background.surface, paddingBottom: safeBottom }]}>
+    <ThemedView style={[styles.container, { backgroundColor: glassBg, borderTopColor: glassBorder, paddingBottom: safeBottom }]}>
       <EmojiAutocomplete
         results={autocompleteResults}
         query={shortcodePrefix}
@@ -343,14 +349,14 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
           />
         </TouchableOpacity>
 
-        <View style={[styles.inputContainer, { backgroundColor: theme.colors.background.elevated }]}>
+        <View style={[styles.inputContainer, { backgroundColor: inputGlassBg, borderColor: glassBorder }]}>
           <EmojiActionInput
             value={text}
             onChangeText={handleTextChange}
             placeholder={t('typeMessage')}
             placeholderTextColor={theme.colors.text.muted}
             textColor={theme.colors.text.primary}
-            backgroundColor={theme.colors.background.elevated}
+            backgroundColor={'transparent'}
             maxLength={2000}
             editable={!disabled && !isProcessing}
             onSubmitEditing={handleSend}
@@ -364,7 +370,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
           <TouchableOpacity
             onPress={handleSend}
             disabled={disabled || isProcessing}
-            style={[styles.sendButton, { backgroundColor: theme.colors.accent.primary }]}
+            style={[styles.sendButton, { backgroundColor: theme.colors.accent.primary, shadowColor: glowColor }]}
           >
             {isProcessing ? (
               <ActivityIndicator size="small" color="#fff" />
@@ -382,8 +388,8 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
               name={hasRecordPermission === false ? "microphone-off" : "microphone"}
               size={28}
               color={
-                disabled 
-                  ? theme.colors.text.disabled 
+                disabled
+                  ? theme.colors.text.disabled
                   : hasRecordPermission === false
                   ? theme.colors.status.error
                   : theme.colors.accent.primary
@@ -400,8 +406,8 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.1)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    // borderTopColor applied dynamically via theme
   },
   inputRow: {
     flexDirection: 'row',
@@ -414,7 +420,9 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flex: 1,
-    borderRadius: 20,
+    borderRadius: 14,
+    borderWidth: 1,
+    // borderColor applied dynamically via theme glass border
     marginHorizontal: 8,
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -432,6 +440,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
+    // Glass glow shadow — accent tinted
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   recordingContainer: {
     flexDirection: 'row',
@@ -457,5 +470,10 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
+    // Glass glow shadow — accent tinted
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
 });

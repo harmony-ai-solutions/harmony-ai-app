@@ -28,17 +28,22 @@ export const LandingCard: React.FC<LandingCardProps> = ({
 
   const isHero = variant === 'hero';
 
+  // Glass border: accent-tinted translucent
+  const glassBorder = theme.colors.accent.primary + '1F'; // ~12% opacity
+  const glassBgStart = theme.colors.background.elevated + 'D9'; // ~85% opacity
+  const glassBgEnd = theme.colors.background.surface + '99';   // ~60% opacity
+
   return (
     <TouchableOpacity
-      style={[isHero ? styles.heroCard : styles.secondaryCard, style]}
+      style={[isHero ? styles.heroCard : styles.secondaryCard, { shadowColor: theme.colors.accent.primary }, style]}
       onPress={onPress}
       activeOpacity={0.82}
     >
       <LinearGradient
-        colors={[theme.colors.background.elevated, theme.colors.background.surface]}
+        colors={[glassBgStart, glassBgEnd]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[styles.gradient, isHero ? styles.heroInner : styles.secondaryInner]}
+        style={[styles.gradient, { borderColor: glassBorder }, isHero ? styles.heroInner : styles.secondaryInner]}
       >
         {/* Prismatic tint overlay */}
         <LinearGradient
@@ -106,28 +111,28 @@ export const LandingCard: React.FC<LandingCardProps> = ({
 const styles = StyleSheet.create({
   heroCard: {
     width: '100%',
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
-    shadowColor: '#000',
+    // Glass glow shadow — accent tinted via dynamic shadowColor
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.28,
-    shadowRadius: 14,
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
     elevation: 6,
   },
   secondaryCard: {
     flex: 1,
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
-    shadowColor: '#000',
+    // Glass glow shadow — accent tinted via dynamic shadowColor
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.22,
-    shadowRadius: 10,
+    shadowOpacity: 0.15,
+    shadowRadius: 14,
     elevation: 4,
   },
   gradient: {
+    // Glass border: accent-tinted translucent (borderColor applied dynamically)
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   heroInner: {

@@ -11,9 +11,8 @@ interface ThemedAppbarProps {
 }
 
 /**
- * A wrapper around React Native Paper's `Appbar.Header` that applies a
- * horizontal elevated→surface gradient background, matching the Harmony Link
- * desktop app header chrome pattern.
+ * A glassmorphism Appbar header with accent-tinted gradient background,
+ * matching the SoulBits Portal dock/header glass pattern.
  *
  * Usage:
  * ```tsx
@@ -34,17 +33,21 @@ export const ThemedAppbar: React.FC<ThemedAppbarProps> = ({ children, style }) =
         );
     }
 
+    // Glass header: semi-transparent with accent tint border
+    const glassBg = theme.colors.background.surface + 'CC'; // ~80% opacity
+    const glassBorder = theme.colors.accent.primary + '1A'; // ~10% opacity
+
     return (
         <View style={[styles.wrapper, style]}>
             <LinearGradient
-                colors={[theme.colors.background.elevated, theme.colors.background.surface]}
+                colors={[theme.colors.background.elevated + 'E6', glassBg]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.gradient}
             >
                 {/* Subtle prismatic tint at the top edge */}
                 <LinearGradient
-                    colors={[theme.colors.accent.primary + '12', 'transparent']}
+                    colors={[theme.colors.accent.primary + '0F', 'transparent']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 0.6, y: 1 }}
                     style={StyleSheet.absoluteFillObject}
@@ -53,8 +56,8 @@ export const ThemedAppbar: React.FC<ThemedAppbarProps> = ({ children, style }) =
                 <Appbar.Header style={styles.appbar}>
                     {children}
                 </Appbar.Header>
-                {/* Bottom separator */}
-                <View style={[styles.separator, { backgroundColor: 'rgba(255,255,255,0.07)' }]} />
+                {/* Bottom glass separator */}
+                <View style={[styles.separator, { backgroundColor: glassBorder }]} />
             </LinearGradient>
         </View>
     );
@@ -63,11 +66,11 @@ export const ThemedAppbar: React.FC<ThemedAppbarProps> = ({ children, style }) =
 const styles = StyleSheet.create({
     wrapper: {
         overflow: 'hidden',
-        elevation: 4,
+        elevation: 3,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
     },
     gradient: {
         // Appbar.Header has its own height, we just wrap it

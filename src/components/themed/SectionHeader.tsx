@@ -31,12 +31,14 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 
     if (!theme) return null;
 
+    const glassBorder = theme.colors.accent.primary + '14'; // ~8% opacity
+
     return (
         <LinearGradient
-            colors={[theme.colors.background.elevated, 'transparent']}
+            colors={[theme.colors.background.elevated + '80', 'transparent']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
-            style={[styles.container, style]}
+            style={[styles.container, { borderBottomColor: glassBorder }, style]}
         >
             {accentPip && (
                 <LinearGradient
@@ -62,21 +64,21 @@ const styles = StyleSheet.create({
     container: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 8,
+        paddingVertical: 10,
         paddingHorizontal: 16,
         gap: 10,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255,255,255,0.07)',
+        // borderBottomColor applied dynamically via accent glass tint
     },
     pip: {
-        width: 4,
-        height: 16,
-        borderRadius: 2,
+        width: 3,
+        height: 18,
+        borderRadius: 99,
         flexShrink: 0,
     },
     label: {
         fontSize: 11,
-        letterSpacing: 0.8,
+        letterSpacing: 1.0,
     },
     labelFlex: {
         flex: 1,
