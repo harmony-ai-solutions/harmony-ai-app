@@ -10,6 +10,7 @@ interface ThemedViewProps extends ViewProps {
 /**
  * Opacity per variant for glassmorphism bleed-through.
  * base: 75% — lets 25% aurora through for vivid glass feel
+ * base: 75% — lets 25% aurora through for vivid glass feel
  * surface: 85% — panels let 15% through for depth
  * elevated: 93% — cards stay mostly solid for text readability
  */

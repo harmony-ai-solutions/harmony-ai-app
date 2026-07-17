@@ -1,27 +1,38 @@
 import React from 'react';
-import { TouchableOpacity, Text, StyleSheet, ViewStyle } from 'react-native';
+import { TouchableOpacity, Text, View, StyleSheet, ViewStyle } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedGradient } from './ThemedGradient';
+import { hexToRgba } from '../../utils/colorUtils';
 
 interface ThemedButtonProps {
     label: string;
     onPress: () => void;
     variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
+    /** MaterialCommunityIcons name to show before the label */
+    icon?: string;
+    iconSize?: number;
+    iconColor?: string;
     style?: ViewStyle;
     disabled?: boolean;
 }
 
 /**
- * Themed button with SoulBits Portal glassmorphism styling.
- * Primary: gradient fill with glow shadow (matches Portal .btn-primary)
- * Secondary: glass backdrop with accent border (matches Portal .btn-secondary)
- * Outline: transparent with accent border
- * Ghost: transparent, no border
+ * Themed button.
+ *
+ * Primary:    gradient fill + glow shadow (brand CTA). Stretches full-width by default.
+ * Secondary:  glass backdrop with 1dp hairline gradient border.
+ * Outline:    transparent with 1dp gradient border.
+ * Ghost:      transparent, no border, subdued text.
  */
 export const ThemedButton: React.FC<ThemedButtonProps> = ({
     label,
     onPress,
     variant = 'primary',
+    icon,
+    iconSize = 18,
+    iconColor,
     style,
     disabled = false,
 }) => {
@@ -29,72 +40,104 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
 
     if (!theme) return null;
 
-    // Glass border color: accent-tinted translucent
-    const glassBorder = theme.colors.accent.primary + '1F'; // ~12% opacity
+    const { borderGradientStart, borderGradientEnd } = theme.colors.glass;
     const glowColor = theme.colors.accent.primary;
 
+    const renderContent = (textColor: string, textLetterSpacing: number = 0.5) => (
+        <View style={styles.contentRow}>
+            {icon && (
+                <Icon
+                    name={icon}
+                    size={iconSize}
+                    color={iconColor ?? textColor}
+                    style={styles.icon}
+                />
+            )}
+            <Text style={[styles.label, { color: textColor, letterSpacing: textLetterSpacing }]}>
+                {label}
+            </Text>
+        </View>
+    );
+
+    // ── Primary: gradient fill + glow shadow ─────────────────────────────────
     if (variant === 'primary') {
         return (
             <TouchableOpacity
                 onPress={onPress}
                 disabled={disabled}
                 activeOpacity={0.8}
-                style={[styles.container, styles.primaryShadow, { shadowColor: glowColor }, style]}
+                style={[styles.container, styles.glowShadow, { shadowColor: glowColor }, style]}
             >
-                <ThemedGradient gradient="primary" style={styles.gradient}>
-                    <Text style={[styles.label, { color: '#ffffff', letterSpacing: 0.5 }]}>{label}</Text>
+                <ThemedGradient gradient="primary" style={styles.gradientFill}>
+                    {renderContent('#ffffff')}
                 </ThemedGradient>
             </TouchableOpacity>
         );
     }
 
+    // ── Secondary: glass with 1dp gradient border ────────────────────────────
     if (variant === 'secondary') {
         return (
             <TouchableOpacity
                 onPress={onPress}
                 disabled={disabled}
                 activeOpacity={0.7}
-                style={[
-                    styles.container,
-                    styles.glassButton,
-                    {
-                        borderColor: glassBorder,
-                        shadowColor: glowColor,
-                    },
-                    style,
-                ]}
+                style={[styles.container, style]}
             >
-                <Text style={[styles.label, { color: theme.colors.text.primary, letterSpacing: 0.5 }]}>
-                    {label}
-                </Text>
+                <LinearGradient
+                    colors={[borderGradientStart, borderGradientEnd]}
+                    start={{ x: 0.2, y: 0 }}
+                    end={{ x: 0.85, y: 1 }}
+                    style={styles.borderOuter}
+                >
+                    <LinearGradient
+                        colors={[
+                            hexToRgba(theme.colors.background.elevated, theme.colors.glass.cardOpacity),
+                            hexToRgba(theme.colors.background.surface, theme.colors.glass.cardOpacity * 0.55),
+                        ]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.glassInnerBtn}
+                    >
+                        {renderContent(theme.colors.text.primary)}
+                    </LinearGradient>
+                </LinearGradient>
             </TouchableOpacity>
         );
     }
 
-    const getStyles = () => {
-        switch (variant) {
-            case 'outline':
-                return {
-                    backgroundColor: 'transparent',
-                    borderWidth: 1,
-                    borderColor: glassBorder,
-                    labelColor: theme.colors.accent.primary,
-                };
-            case 'ghost':
-                return {
-                    backgroundColor: 'transparent',
-                    labelColor: theme.colors.text.secondary,
-                };
-            default:
-                return {
-                    backgroundColor: theme.colors.accent.primary,
-                    labelColor: '#ffffff',
-                };
-        }
-    };
+    // ── Outline: transparent with 1dp gradient border ────────────────────────
+    if (variant === 'outline') {
+        return (
+            <TouchableOpacity
+                onPress={onPress}
+                disabled={disabled}
+                activeOpacity={0.7}
+                style={[styles.container, style]}
+            >
+                <LinearGradient
+                    colors={[borderGradientStart, borderGradientEnd]}
+                    start={{ x: 0.2, y: 0 }}
+                    end={{ x: 0.85, y: 1 }}
+                    style={styles.borderOuter}
+                >
+                    <LinearGradient
+                        colors={[
+                            hexToRgba(theme.colors.background.surface, 0.15),
+                            hexToRgba(theme.colors.background.surface, 0.08),
+                        ]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.glassInnerBtn}
+                    >
+                        {renderContent(theme.colors.accent.primary)}
+                    </LinearGradient>
+                </LinearGradient>
+            </TouchableOpacity>
+        );
+    }
 
-    const currentStyles = getStyles();
-
+    // ── Ghost: no border, subtle text ────────────────────────────────────────
     return (
         <TouchableOpacity
             onPress={onPress}
@@ -102,17 +145,11 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
             activeOpacity={0.7}
             style={[
                 styles.container,
-                {
-                    backgroundColor: currentStyles.backgroundColor,
-                    borderWidth: (currentStyles as any).borderWidth || 0,
-                    borderColor: (currentStyles as any).borderColor || 'transparent',
-                },
+                { backgroundColor: 'transparent' },
                 style,
             ]}
         >
-            <Text style={[styles.label, { color: currentStyles.labelColor }]}>
-                {label}
-            </Text>
+            {renderContent(theme.colors.text.secondary)}
         </TouchableOpacity>
     );
 };
@@ -120,35 +157,46 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
 const styles = StyleSheet.create({
     container: {
         borderRadius: 14,
-        overflow: 'hidden',
         height: 48,
         justifyContent: 'center',
         alignItems: 'center',
+        overflow: 'hidden',
+        // Stretch full-width by default — screen style overrides can constrain if needed
+        alignSelf: 'stretch',
     },
-    primaryShadow: {
-        // Glow shadow matching SoulBits .btn-primary hover state
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 16,
-        elevation: 6,
+    borderOuter: {
+        borderRadius: 14,
+        padding: StyleSheet.hairlineWidth,
+        width: '100%',
+        height: '100%',
     },
-    glassButton: {
-        // Glass secondary button matching SoulBits .btn-secondary
-        backgroundColor: 'rgba(255,255,255,0.06)',
-        borderWidth: 1,
-        // Subtle glow
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.12,
-        shadowRadius: 10,
-        elevation: 3,
+    glassInnerBtn: {
+        borderRadius: 13,
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 24,
     },
-    gradient: {
+    gradientFill: {
         width: '100%',
         height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
         paddingHorizontal: 24,
+        borderRadius: 14,
     },
+    contentRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    glowShadow: {
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 16,
+        elevation: 6,
+    },
+    icon: {},
     label: {
         fontSize: 15,
         fontWeight: '600',

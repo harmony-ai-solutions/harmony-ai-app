@@ -546,6 +546,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   reconnectButton: {
-    marginBottom: 10,
+    width: '100%',
   },
 });

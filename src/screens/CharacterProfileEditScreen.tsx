@@ -669,5 +669,6 @@ const styles = StyleSheet.create({
   // Save button
   saveButton: {
     marginTop: 8,
+    width: '100%',
   },
 });

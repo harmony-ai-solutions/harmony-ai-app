@@ -1,16 +1,16 @@
 import React from 'react';
-import { TouchableOpacity, View, StyleSheet, ViewStyle } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
+import { TouchableOpacity, View, StyleSheet, ViewStyle, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { hexToRgba } from '../../utils/colorUtils';
 
 interface LandingCardProps {
-  icon: string; // MaterialCommunityIcons name
+  icon: string;
   title: string;
   description: string;
   onPress: () => void;
-  variant?: 'hero' | 'secondary'; // hero = full-width prominent, secondary = half-width
+  variant?: 'hero' | 'secondary';
   style?: ViewStyle;
 }
 
@@ -27,83 +27,71 @@ export const LandingCard: React.FC<LandingCardProps> = ({
   if (!theme) return null;
 
   const isHero = variant === 'hero';
+  const CARD_RADIUS = 20;
 
-  // Glass border: accent-tinted translucent
-  const glassBorder = theme.colors.accent.primary + '1F'; // ~12% opacity
-  const glassBgStart = theme.colors.background.elevated + 'D9'; // ~85% opacity
-  const glassBgEnd = theme.colors.background.surface + '99';   // ~60% opacity
+  // Single uniform glass color — flat translucent layer, no gradient
+  const glassBg = hexToRgba(theme.colors.background.elevated, theme.colors.glass.cardOpacity);
 
   return (
     <TouchableOpacity
-      style={[isHero ? styles.heroCard : styles.secondaryCard, { shadowColor: theme.colors.accent.primary }, style]}
+      style={[
+        isHero ? styles.heroCard : styles.secondaryCard,
+        {
+          backgroundColor: glassBg,
+          shadowColor: theme.colors.accent.primary,
+        },
+        style,
+      ]}
       onPress={onPress}
       activeOpacity={0.82}
     >
-      <LinearGradient
-        colors={[glassBgStart, glassBgEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.gradient, { borderColor: glassBorder }, isHero ? styles.heroInner : styles.secondaryInner]}
-      >
-        {/* Prismatic tint overlay */}
-        <LinearGradient
-          colors={[theme.colors.accent.primary + '14', 'transparent']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
+      {/* Left accent stripe — shown on hero */}
+      {isHero && (
+        <View
+          style={[styles.accentStripe, { backgroundColor: theme.colors.accent.primary }]}
           pointerEvents="none"
         />
+      )}
 
-        {/* Left accent stripe — shown on hero */}
-        {isHero && (
-          <LinearGradient
-            colors={[theme.colors.accent.primary, theme.colors.accent.secondary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={styles.accentStripe}
-            pointerEvents="none"
-          />
-        )}
+      {/* Icon badge */}
+      <View
+        style={[
+          styles.iconContainer,
+          isHero ? styles.iconContainerHero : styles.iconContainerSecondary,
+          { backgroundColor: theme.colors.accent.primary + '1A' },
+        ]}
+      >
+        <Icon
+          name={icon}
+          size={isHero ? 36 : 28}
+          color={theme.colors.accent.primary}
+        />
+      </View>
 
-        {/* Icon badge with gradient */}
-        <LinearGradient
-          colors={[theme.colors.accent.primary + '33', theme.colors.accent.secondary + '1A']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.iconContainer, isHero ? styles.iconContainerHero : styles.iconContainerSecondary]}
+      {/* Text */}
+      <View style={styles.textContainer}>
+        <ThemedText weight="bold" size={isHero ? 20 : 16} style={styles.title}>
+          {title}
+        </ThemedText>
+        <ThemedText
+          variant="secondary"
+          size={isHero ? 14 : 12}
+          style={styles.description}
         >
+          {description}
+        </ThemedText>
+      </View>
+
+      {/* Arrow — only on hero card */}
+      {isHero && (
+        <View style={styles.arrowContainer}>
           <Icon
-            name={icon}
-            size={isHero ? 36 : 28}
-            color={theme.colors.accent.primary}
+            name="chevron-right"
+            size={20}
+            color={theme.colors.text.muted}
           />
-        </LinearGradient>
-
-        {/* Text */}
-        <View style={styles.textContainer}>
-          <ThemedText weight="bold" size={isHero ? 20 : 16} style={styles.title}>
-            {title}
-          </ThemedText>
-          <ThemedText
-            variant="secondary"
-            size={isHero ? 14 : 12}
-            style={styles.description}
-          >
-            {description}
-          </ThemedText>
         </View>
-
-        {/* Arrow — only on hero card (horizontal layout) */}
-        {isHero && (
-          <View style={styles.arrowContainer}>
-            <Icon
-              name="chevron-right"
-              size={20}
-              color={theme.colors.text.muted}
-            />
-          </View>
-        )}
-      </LinearGradient>
+      )}
     </TouchableOpacity>
   );
 };
@@ -113,41 +101,35 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 20,
     overflow: 'hidden',
-    // Glass glow shadow — accent tinted via dynamic shadowColor
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.2,
-    shadowRadius: 18,
-    elevation: 6,
-  },
-  secondaryCard: {
-    flex: 1,
-    borderRadius: 20,
-    overflow: 'hidden',
-    // Glass glow shadow — accent tinted via dynamic shadowColor
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 14,
-    elevation: 4,
-  },
-  gradient: {
-    // Glass border: accent-tinted translucent (borderColor applied dynamically)
-    borderWidth: 1,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  heroInner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
     paddingHorizontal: 20,
     paddingVertical: 20,
     minHeight: 100,
+    ...Platform.select({
+      ios: {
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.2,
+        shadowRadius: 18,
+      },
+    }),
   },
-  secondaryInner: {
+  secondaryCard: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
     flexDirection: 'column',
     alignItems: 'flex-start',
     padding: 20,
     minHeight: 120,
+    ...Platform.select({
+      ios: {
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 14,
+      },
+    }),
   },
   accentStripe: {
     position: 'absolute',
@@ -165,7 +147,7 @@ const styles = StyleSheet.create({
   iconContainerHero: {
     width: 56,
     height: 56,
-    marginLeft: 4, // account for stripe
+    marginLeft: 4,
   },
   iconContainerSecondary: {
     width: 52,

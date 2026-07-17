@@ -53,10 +53,7 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
       style={[styles.wrapper, { transform: [{ scale: scaleAnim }] }]}
     >
       <TouchableOpacity
-        style={[
-          styles.card,
-          { borderColor: theme.colors.border.default + '66' },
-        ]}
+        style={styles.card}
         onPress={onPress}
         onLongPress={onLongPress}
         onPressIn={handlePressIn}
@@ -170,7 +167,6 @@ const styles = StyleSheet.create({
   },
   card: {
     borderRadius: 12,
-    borderWidth: 1,
     overflow: 'hidden',
   },
   imageContainer: {

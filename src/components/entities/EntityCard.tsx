@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Modal,
   TouchableWithoutFeedback,
+  Platform,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -224,18 +225,17 @@ const styles = StyleSheet.create({
   cardOuter: {
     borderRadius: 12,
     marginBottom: 10,
-    shadowColor: '#000',
+    // iOS shadow only — avoids Android elevation dark halo on glass
+    shadowColor: 'transparent',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.22,
     shadowRadius: 10,
-    elevation: 5,
+    elevation: 0,
   },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
     padding: 12,
     gap: 12,
     overflow: 'hidden',
