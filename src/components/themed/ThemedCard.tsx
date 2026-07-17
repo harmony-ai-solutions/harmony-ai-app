@@ -11,6 +11,11 @@ interface ThemedCardProps extends ViewProps {
     accentTint?: boolean;
 }
 
+/**
+ * Glassmorphism card component.
+ * Renders a translucent, glass-like surface with accent-tinted borders
+ * and soft glow shadows. Uses the current theme's colors for the glass effect.
+ */
 export const ThemedCard: React.FC<ThemedCardProps> = ({
     children,
     style,
@@ -23,26 +28,32 @@ export const ThemedCard: React.FC<ThemedCardProps> = ({
 
     if (!theme) return <View style={style} {...props}>{children}</View>;
 
-    const gradientStart = elevated
-        ? theme.colors.background.elevated
-        : theme.colors.background.surface;
-    // For non-elevated: surface → base; for elevated: elevated → surface
-    const gradientEnd = elevated
-        ? theme.colors.background.surface
-        : theme.colors.background.base;
+    // Glass background: semi-transparent surface/elevated
+    const glassBgStart = elevated
+        ? theme.colors.background.elevated + 'D9'  // ~85% opacity
+        : theme.colors.background.surface + 'B3';   // ~70% opacity
+    const glassBgEnd = elevated
+        ? theme.colors.background.surface + '99'    // ~60% opacity
+        : theme.colors.background.base + '73';       // ~45% opacity
+
+    // Glass border: accent-tinted translucent
+    const glassBorder = theme.colors.accent.primary + '21'; // ~13% opacity
+
+    // Glow shadow: accent-colored soft glow
+    const glowColor = theme.colors.accent.primary;
 
     return (
         <LinearGradient
-            colors={[gradientStart, gradientEnd]}
+            colors={[glassBgStart, glassBgEnd]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={[styles.card, style]}
+            style={[styles.card, { borderColor: glassBorder, shadowColor: glowColor }, style]}
             {...props}
         >
-            {/* Prismatic accent tint overlay — top-left bleed, renders behind content */}
+            {/* Prismatic accent tint overlay — top-left bleed */}
             {accentTint && (
                 <LinearGradient
-                    colors={[theme.colors.accent.primary + '17', 'transparent']}
+                    colors={[theme.colors.accent.primary + '14', 'transparent']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={StyleSheet.absoluteFillObject}
@@ -68,15 +79,14 @@ export const ThemedCard: React.FC<ThemedCardProps> = ({
 
 const styles = StyleSheet.create({
     card: {
-        borderRadius: 12,
+        borderRadius: 16,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.06)',
         padding: 16,
         overflow: 'hidden',
-        shadowColor: '#000',
+        // Soft shadow with accent glow
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.22,
-        shadowRadius: 10,
+        shadowOpacity: 0.15,
+        shadowRadius: 16,
         elevation: 4,
     },
     accentStripe: {
@@ -85,7 +95,7 @@ const styles = StyleSheet.create({
         top: 0,
         bottom: 0,
         width: 3,
-        borderTopLeftRadius: 12,
-        borderBottomLeftRadius: 12,
+        borderTopLeftRadius: 16,
+        borderBottomLeftRadius: 16,
     },
 });

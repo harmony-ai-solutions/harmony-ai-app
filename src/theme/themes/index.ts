@@ -1,4 +1,5 @@
 import { Theme } from '../types';
+import { hauteGoth } from './hauteGoth';
 import { midnightRose } from './midnightRose';
 import { classicHarmony } from './classicHarmony';
 import { oceanBreeze } from './oceanBreeze';
@@ -9,10 +10,12 @@ import { soulBitsDark } from './soulBitsDark';
 import { soulBitsLight } from './soulBitsLight';
 
 /**
- * All default themes
+ * All default themes — Haute Goth is the default.
+ * Other themes remain available for user switching.
  */
 export const defaultThemes: Theme[] = [
-    midnightRose,      // Default theme
+    hauteGoth,         // NEW DEFAULT — Dark Academia Glassmorphism
+    midnightRose,
     classicHarmony,
     oceanBreeze,
     forestNight,
@@ -25,7 +28,7 @@ export const defaultThemes: Theme[] = [
 /**
  * Default theme ID
  */
-export const DEFAULT_THEME_ID = 'midnight-rose';
+export const DEFAULT_THEME_ID = 'haute-goth';
 
 /**
  * Get theme by ID
@@ -38,10 +41,11 @@ export function getThemeById(themeId: string): Theme | undefined {
  * Get default theme
  */
 export function getDefaultTheme(): Theme {
-    return midnightRose;
+    return hauteGoth;
 }
 
 export {
+    hauteGoth,
     midnightRose,
     classicHarmony,
     oceanBreeze,
