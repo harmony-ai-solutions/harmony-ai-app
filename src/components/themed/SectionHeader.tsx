@@ -30,8 +30,6 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 
     if (!theme) return null;
 
-    const { borderGradientStart, borderGradientEnd } = theme.colors.glass;
-
     return (
         <View style={[styles.container, style]}>
             {accentPip && (
@@ -51,14 +49,6 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
                 {title.toUpperCase()}
             </ThemedText>
             {right && <View style={styles.rightSlot}>{right}</View>}
-
-            {/* 1dp gradient separator at the bottom */}
-            <LinearGradient
-                colors={[borderGradientStart, borderGradientEnd]}
-                start={{ x: 0.2, y: 0 }}
-                end={{ x: 0.85, y: 0 }}
-                style={styles.separator}
-            />
         </View>
     );
 };

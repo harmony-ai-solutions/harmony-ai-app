@@ -17,6 +17,7 @@ import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
 import { ThemedButton } from '../../components/themed/ThemedButton';
+import { ThemedFab } from '../../components/themed/ThemedFab';
 import { EmojiActionCard } from '../../components/settings/EmojiActionCard';
 import { EmojiActionEditModal } from '../../components/settings/EmojiActionEditModal';
 import { EntityEmojiActionService } from '../../services/EntityEmojiActionService';

@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Appbar, FAB } from 'react-native-paper';
+import { Appbar } from 'react-native-paper';
 import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -18,6 +18,7 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
+import { ThemedFab } from '../components/themed/ThemedFab';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
 import { createLogger } from '../utils/logger';
 
@@ -197,12 +198,7 @@ export const EntityConfigScreen: React.FC = () => {
         />
       )}
 
-      <FAB
-        icon="plus"
-        style={[styles.fab, { backgroundColor: theme.colors.accent.primary, bottom: 24 + safeBottom }]}
-        onPress={() => navigation.navigate('CreateAI', {})}
-        color="#fff"
-      />
+      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: 24 + safeBottom }} />
 
       <SettingsMenu
         visible={menuVisible}

@@ -99,7 +99,7 @@ export const SettingsScreen: React.FC = () => {
           onPress={() => navigation.navigate('ConnectionSetup')}
           activeOpacity={0.7}
         >
-          <ThemedCard elevated accentStripe accentTint style={styles.card}>
+          <ThemedCard elevated accentStripe style={styles.card}>
             <SectionHeader title={t('connection')} style={styles.sectionHeader} />
 
             <View style={styles.row}>
@@ -220,7 +220,7 @@ const SettingsLinkRow: React.FC<SettingsLinkRowProps> = ({
   badge,
 }) => (
   <TouchableOpacity
-    style={[styles.linkRow, { borderBottomColor: 'rgba(255,255,255,0.07)' }]}
+    style={styles.linkRow}
     onPress={onPress}
     activeOpacity={0.7}
   >
@@ -275,6 +275,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
+    paddingVertical: 6,
   },
   statusRow: {
     flexDirection: 'row',
@@ -289,9 +290,8 @@ const styles = StyleSheet.create({
   linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 14,
     paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   linkIcon: {
     marginRight: 14,

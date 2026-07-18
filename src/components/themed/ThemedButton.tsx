@@ -1,5 +1,5 @@
 import React from 'react';
-import { TouchableOpacity, Text, View, StyleSheet, ViewStyle } from 'react-native';
+import { TouchableOpacity, Text, View, StyleSheet, ViewStyle, Platform } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -19,12 +19,14 @@ interface ThemedButtonProps {
 }
 
 /**
- * Themed button.
+ * Themed button — global standard matching "Create First Profile" design.
  *
- * Primary:    gradient fill + glow shadow (brand CTA). Stretches full-width by default.
- * Secondary:  glass backdrop with 1dp hairline gradient border.
+ * Primary:    radiant gradient fill + ambient magenta glow shadow. Full-width, 16dp radius.
+ * Secondary:  Obsidian Glass with 1dp hairline gradient border.
  * Outline:    transparent with 1dp gradient border.
  * Ghost:      transparent, no border, subdued text.
+ *
+ * NO wrapped boxes, NO dark frames. Buttons sit freely on the page background.
  */
 export const ThemedButton: React.FC<ThemedButtonProps> = ({
     label,
@@ -42,6 +44,7 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
 
     const { borderGradientStart, borderGradientEnd } = theme.colors.glass;
     const glowColor = theme.colors.accent.primary;
+    const BUTTON_RADIUS = 16;
 
     const renderContent = (textColor: string, textLetterSpacing: number = 0.5) => (
         <View style={styles.contentRow}>
@@ -59,45 +62,50 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
         </View>
     );
 
-    // ── Primary: gradient fill + glow shadow ─────────────────────────────────
+    // ── Primary: radiant gradient fill + ambient magenta glow ─────────────
     if (variant === 'primary') {
         return (
             <TouchableOpacity
                 onPress={onPress}
                 disabled={disabled}
                 activeOpacity={0.8}
-                style={[styles.container, styles.glowShadow, { shadowColor: glowColor }, style]}
+                style={[
+                    styles.container,
+                    styles.glowShadow,
+                    { shadowColor: glowColor, borderRadius: BUTTON_RADIUS },
+                    style,
+                ]}
             >
-                <ThemedGradient gradient="primary" style={styles.gradientFill}>
+                <ThemedGradient gradient="primary" style={[styles.gradientFill, { borderRadius: BUTTON_RADIUS }]}>
                     {renderContent('#ffffff')}
                 </ThemedGradient>
             </TouchableOpacity>
         );
     }
 
-    // ── Secondary: glass with 1dp gradient border ────────────────────────────
+    // ── Secondary: Obsidian Glass with 1dp gradient border ────────────────
     if (variant === 'secondary') {
         return (
             <TouchableOpacity
                 onPress={onPress}
                 disabled={disabled}
                 activeOpacity={0.7}
-                style={[styles.container, style]}
+                style={[styles.container, { borderRadius: BUTTON_RADIUS }, style]}
             >
                 <LinearGradient
                     colors={[borderGradientStart, borderGradientEnd]}
-                    start={{ x: 0.2, y: 0 }}
+                    start={{ x: 0.15, y: 0 }}
                     end={{ x: 0.85, y: 1 }}
-                    style={styles.borderOuter}
+                    style={[styles.borderOuter, { borderRadius: BUTTON_RADIUS }]}
                 >
                     <LinearGradient
                         colors={[
                             hexToRgba(theme.colors.background.elevated, theme.colors.glass.cardOpacity),
-                            hexToRgba(theme.colors.background.surface, theme.colors.glass.cardOpacity * 0.55),
+                            hexToRgba(theme.colors.background.surface, theme.colors.glass.cardOpacity * 0.60),
                         ]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 1 }}
-                        style={styles.glassInnerBtn}
+                        style={[styles.glassInnerBtn, { borderRadius: BUTTON_RADIUS - 1 }]}
                     >
                         {renderContent(theme.colors.text.primary)}
                     </LinearGradient>
@@ -113,13 +121,13 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
                 onPress={onPress}
                 disabled={disabled}
                 activeOpacity={0.7}
-                style={[styles.container, style]}
+                style={[styles.container, { borderRadius: BUTTON_RADIUS }, style]}
             >
                 <LinearGradient
                     colors={[borderGradientStart, borderGradientEnd]}
-                    start={{ x: 0.2, y: 0 }}
+                    start={{ x: 0.15, y: 0 }}
                     end={{ x: 0.85, y: 1 }}
-                    style={styles.borderOuter}
+                    style={[styles.borderOuter, { borderRadius: BUTTON_RADIUS }]}
                 >
                     <LinearGradient
                         colors={[
@@ -128,7 +136,7 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
                         ]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 1 }}
-                        style={styles.glassInnerBtn}
+                        style={[styles.glassInnerBtn, { borderRadius: BUTTON_RADIUS - 1 }]}
                     >
                         {renderContent(theme.colors.accent.primary)}
                     </LinearGradient>
@@ -145,7 +153,7 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
             activeOpacity={0.7}
             style={[
                 styles.container,
-                { backgroundColor: 'transparent' },
+                { backgroundColor: 'transparent', borderRadius: BUTTON_RADIUS },
                 style,
             ]}
         >
@@ -156,8 +164,7 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
 
 const styles = StyleSheet.create({
     container: {
-        borderRadius: 14,
-        height: 48,
+        height: 52,
         justifyContent: 'center',
         alignItems: 'center',
         overflow: 'hidden',
@@ -165,13 +172,11 @@ const styles = StyleSheet.create({
         alignSelf: 'stretch',
     },
     borderOuter: {
-        borderRadius: 14,
         padding: StyleSheet.hairlineWidth,
         width: '100%',
         height: '100%',
     },
     glassInnerBtn: {
-        borderRadius: 13,
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
@@ -183,7 +188,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         paddingHorizontal: 24,
-        borderRadius: 14,
     },
     contentRow: {
         flexDirection: 'row',
@@ -191,14 +195,14 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     glowShadow: {
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 16,
-        elevation: 6,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.35,
+        shadowRadius: 22,
+        elevation: 10,
     },
     icon: {},
     label: {
-        fontSize: 15,
+        fontSize: 16,
         fontWeight: '600',
     },
 });

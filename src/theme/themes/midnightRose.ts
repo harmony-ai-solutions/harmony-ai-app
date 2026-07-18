@@ -46,7 +46,7 @@ export const midnightRose: Theme = {
             surface: 'linear-gradient(135deg, rgba(236, 72, 153, 0.05) 0%, rgba(167, 139, 250, 0.05) 100%)',
         },
         glass: {
-            cardOpacity: 0.35,
+            cardOpacity: 0.95,
             borderGradientStart: 'rgba(255, 255, 255, 0.12)',
             borderGradientEnd: 'rgba(236, 72, 153, 0.15)',
         },
