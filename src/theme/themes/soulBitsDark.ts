@@ -46,7 +46,7 @@ export const soulBitsDark: Theme = {
             surface: 'linear-gradient(135deg, rgba(143, 59, 167, 0.08) 0%, rgba(45, 35, 112, 0.08) 100%)',
         },
         glass: {
-            cardOpacity: 0.35,
+            cardOpacity: 0.95,
             borderGradientStart: 'rgba(255, 255, 255, 0.12)',
             borderGradientEnd: 'rgba(143, 59, 167, 0.15)',
         },

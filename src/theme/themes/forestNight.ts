@@ -46,7 +46,7 @@ export const forestNight: Theme = {
             surface: 'linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(20, 184, 166, 0.05) 100%)',
         },
         glass: {
-            cardOpacity: 0.35,
+            cardOpacity: 0.95,
             borderGradientStart: 'rgba(255, 255, 255, 0.12)',
             borderGradientEnd: 'rgba(16, 185, 129, 0.15)',
         },

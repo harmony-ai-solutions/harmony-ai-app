@@ -1,28 +1,28 @@
 import { Theme } from '../types';
 
 /**
- * Haute Goth — Dark Academia Glassmorphism
- * Extracted from SoulBits Portal design system.
- * Deep goth blue-black backgrounds with neon magenta/indigo accents,
- * layered glass surfaces, and soft accent glows.
+ * Haute Goth — Obsidian Glass Luminescence
+ * Deep goth blue-black canvas with radiant neon magenta and indigo accents,
+ * 50% opacity Obsidian Glass cards, vivid hairline gradient borders,
+ * and ambient magenta glow shadows.
  */
 export const hauteGoth: Theme = {
     id: 'haute-goth',
     name: 'Haute Goth',
     description: 'Dark academia glassmorphism — deep goth blue-black with neon magenta and indigo accents',
-    version: '1.0.0',
+    version: '1.1.0',
     colors: {
         background: {
             base: '#0b0f19',      // Deep goth blue-black — page canvas
             surface: '#0f1525',    // Secondary surface — panels
-            elevated: '#1a2236',   // Card backgrounds / elevated panels
-            hover: '#282f42',      // Elevated panels / hover state
+            elevated: '#151d30',   // Card backgrounds / elevated panels — slightly lighter for glow contrast
+            hover: '#1e2842',      // Elevated panels / hover state
         },
         accent: {
-            primary: '#8f3ba7',        // Neon magenta — primary CTA
-            primaryHover: '#b04fce',   // Lighter magenta hover
-            secondary: '#22318e',      // Deep indigo — secondary
-            secondaryHover: '#3a2d99', // Brighter indigo hover
+            primary: '#b84fd0',         // Radiant neon magenta — primary CTA
+            primaryHover: '#cf6be5',    // Brighter magenta hover
+            secondary: '#4a5fcf',       // Vivid indigo — secondary
+            secondaryHover: '#6b7de8',  // Brighter indigo hover
         },
         status: {
             success: '#4caf82',
@@ -35,26 +35,29 @@ export const hauteGoth: Theme = {
             infoBg: 'rgba(77, 155, 240, 0.12)',
         },
         text: {
-            primary: '#e8e6f0',      // Warm lavender-white
-            secondary: '#c8c3dc',    // Muted lavender
-            muted: '#8c87a8',        // Dim purple-grey
+            primary: '#f0edf6',      // Bright lavender-white
+            secondary: '#d2cde3',    // Soft lavender
+            muted: '#9692b0',        // Muted purple-grey
             disabled: '#6b6780',     // Disabled purple-grey
         },
         border: {
-            default: '#2a2147',      // Dark purple boundary
-            focus: '#8f3ba7',        // Neon magenta focus
-            hover: '#3a2159',        // Darker purple hover
-            accent: '#8f3ba7',       // Neon magenta accent border
+            default: '#2e2355',      // Dark purple boundary
+            focus: '#b84fd0',        // Radiant magenta focus
+            hover: '#3e2a6b',        // Darker purple hover
+            accent: '#b84fd0',       // Radiant magenta accent border
         },
         gradients: {
-            primary: 'linear-gradient(135deg, #8f3ba7 0%, #22318e 50%, #2d2370 100%)',
+            primary: 'linear-gradient(135deg, #b84fd0 0%, #4a5fcf 50%, #3a2d99 100%)',
             secondary: 'linear-gradient(135deg, #0b0f19 0%, #0f1525 100%)',
-            surface: 'linear-gradient(135deg, rgba(143, 59, 167, 0.08) 0%, rgba(34, 49, 142, 0.08) 100%)',
+            surface: 'linear-gradient(135deg, rgba(184, 79, 208, 0.10) 0%, rgba(74, 95, 207, 0.10) 100%)',
         },
         glass: {
-            cardOpacity: 0.35,
-            borderGradientStart: 'rgba(255, 255, 255, 0.12)',
-            borderGradientEnd: 'rgba(143, 59, 167, 0.15)',
+            /** Obsidian Glass: 48% opacity for rich, tangible glass presence */
+            cardOpacity: 0.95,
+            /** Hairline border — top-left light hit: bright white at 18% */
+            borderGradientStart: 'rgba(255, 255, 255, 0.18)',
+            /** Hairline border — fades to vivid magenta accent */
+            borderGradientEnd: 'rgba(184, 79, 208, 0.25)',
         },
         typography: {
             headerOpacity: 1.0,

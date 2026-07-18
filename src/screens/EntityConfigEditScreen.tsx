@@ -610,7 +610,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
             <SectionHeader title="Emoji Actions" accentPip={false} />
             <View style={styles.sectionContent}>
               <TouchableOpacity
-                style={[styles.menuRow, { borderBottomColor: theme.colors.border.default }]}
+                style={styles.menuRow}
                 onPress={() => navigation.navigate('EmojiActionEditor', {
                   entityId: entityId!,
                   entityName: alias || entityId!.substring(0, 8),
@@ -890,7 +890,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   menuRowLeft: {
     flexDirection: 'row',

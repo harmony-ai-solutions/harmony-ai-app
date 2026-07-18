@@ -41,7 +41,7 @@ export const EmojiActionCard: React.FC<EmojiActionCardProps> = ({
 
   return (
     <TouchableOpacity
-      style={[styles.row, { borderBottomColor: colors.border.default }]}
+      style={styles.row}
       onPress={onPress}
       activeOpacity={0.6}
     >
@@ -87,9 +87,8 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 14,
     paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   emojiCol: {
     width: 36,

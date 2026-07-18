@@ -13,7 +13,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import {
   Appbar,
   Avatar,
-  FAB,
+
   ActivityIndicator,
 } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -24,6 +24,7 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
+import { ThemedFab } from '../components/themed/ThemedFab';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
 import { getAllEntities } from '../database/repositories/entities';
 import {
@@ -645,12 +646,7 @@ export const ChatListScreen: React.FC = () => {
         />
       )}
 
-      <FAB
-        icon="plus"
-        style={[styles.fab, { backgroundColor: theme?.colors.accent.primary, bottom: 24 + safeBottom }]}
-        onPress={() => navigation.navigate('CreateAI', {})}
-        color="#fff"
-      />
+      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: 24 + safeBottom }} />
 
       <SettingsMenu
         visible={menuVisible}
