@@ -19,6 +19,24 @@ The Harmony AI App acts as a **mobile Events API client** for Harmony Link, impl
 - **Voice Messages**: Audio recording, transcription, and playback
 - **Multi-modal Communication**: Text, voice, and image messages
 
+### Connection Architecture
+
+The App supports two connection branches:
+
+| Branch | Transport | Authentication | Use Case |
+|--------|-----------|---------------|----------|
+| **Self-hosted** | `ws://`/`wss://` to user-configured HL address | Device JWT from handshake | User runs their own Harmony Link |
+| **Cloud** | `wss://connect.soulbits.app` via conduct proxy | Soulbits Cloud PASETO (`Sec-WebSocket-Protocol: Bearer.<paseto>`) | Soulbits Cloud-hosted HL |
+
+In cloud mode, the App uses a 4th connection mode (`cloud`) that authenticates via the `Sec-WebSocket-Protocol` header instead of the `Authorization` header. The existing N+1 connection model is preserved: 1 sync WebSocket at `/ws/sync` and N per-entity WebSockets at `/ws/worker`.
+
+Key differences from self-hosted:
+- **No device pairing handshake** — the cloud PASETO serves as both authentication and session identity
+- **No security mode prompt** — the conduct proxy uses a publicly trusted ACM certificate (standard TLS)
+- **Session lifecycle managed by CloudSessionService** — spawn via broker, suspend on background, reconnect on foreground
+
+**See also:** [Cloud Connection Guide](CLOUD-CONNECTION.md) for detailed cloud setup and login instructions.
+
 ## Core Components
 
 ### 1. Connection Management Layer

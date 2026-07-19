@@ -421,6 +421,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'provider_config_xai': 1,
         'provider_config_google': 1,
         'provider_config_anthropic': 1,
+        'provider_config_soulbitscloud': 1,
         'backend_configs': 2,
         'cognition_configs': 2,
         'movement_configs': 2,
@@ -629,6 +630,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'provider_config_xai',        // NEW
         'provider_config_google',     // NEW
         'provider_config_anthropic',  // NEW
+        'provider_config_soulbitscloud',
         // Module configs (reference provider configs)
         'backend_configs',
         'cognition_configs',
@@ -977,6 +979,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       'provider_config_xai',
       'provider_config_google',
       'provider_config_anthropic',
+      'provider_config_soulbitscloud',
       'backend_configs',
       'cognition_configs',
       'movement_configs',
@@ -1005,12 +1008,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   }
 
   private async getLastSyncTimestamp(): Promise<number> {
-    const stored = await AsyncStorage.getItem('last_sync_timestamp');
-    return stored ? parseInt(stored) : 0;
+    const source = await ConnectionStateManager.getCurrentSource();
+    return ConnectionStateManager.getLastSync(source);
   }
 
   private async updateLastSyncTimestamp(timestamp: number): Promise<void> {
-    await AsyncStorage.setItem('last_sync_timestamp', timestamp.toString());
+    const source = await ConnectionStateManager.getCurrentSource();
+    await ConnectionStateManager.setLastSync(source, timestamp);
     log.info(`Updated last sync timestamp: ${timestamp}`);
   }
 

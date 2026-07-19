@@ -20,6 +20,8 @@ import { ProfileSettingsScreen } from '../screens/settings/ProfileSettingsScreen
 import { DatabaseTestScreen } from '../screens/development/DatabaseTestScreen';
 import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
 import { ConnectionSetupScreen } from '../screens/setup/ConnectionSetupScreen';
+import { LoginScreen } from '../screens/auth/LoginScreen';
+import { RegisterScreen } from '../screens/auth/RegisterScreen';
 import { SyncSettingsScreen } from '../screens/settings/SyncSettingsScreen';
 import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen';
 
@@ -40,6 +42,8 @@ export type RootStackParamList = {
   EntityConfig: undefined;
   EntityConfigEdit: { entityId?: string };
   Settings: undefined;
+  Login: undefined;
+  Register: undefined;
   ConnectionSetup: undefined;
   SyncSettings: undefined;
   ThemeSettings: undefined;
@@ -51,7 +55,7 @@ export type RootStackParamList = {
   ProfileSettings: undefined;
   ModuleConfigEdit: {
     moduleType: string;
-    configId?: number;
+    configId?: string;
   };
   DatabaseTests?: undefined;
   DatabaseTableViewer?: undefined;
@@ -89,10 +93,9 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           component={EntityConfigEditScreen}
         />
         <Stack.Screen name="Settings" component={SettingsScreen} />
-        <Stack.Screen
-          name="ConnectionSetup"
-          component={ConnectionSetupScreen}
-        />
+        <Stack.Screen name="ConnectionSetup" component={ConnectionSetupScreen} />
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Register" component={RegisterScreen} />
         <Stack.Screen name="SyncSettings" component={SyncSettingsScreen} />
         <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
         <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />

@@ -319,14 +319,14 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
       // Update module mapping
       await createOrUpdateEntityModuleMapping({
         entity_id: entityId,
-        backend_config_id: backendId ? parseInt(backendId, 10) : null,
-        cognition_config_id: cognitionId ? parseInt(cognitionId, 10) : null,
-        tts_config_id: ttsId ? parseInt(ttsId, 10) : null,
-        stt_config_id: sttId ? parseInt(sttId, 10) : null,
-        vision_config_id: visionId ? parseInt(visionId, 10) : null,
-        rag_config_id: ragId ? parseInt(ragId, 10) : null,
-        imagination_config_id: imaginationId ? parseInt(imaginationId, 10) : null,
-        movement_config_id: movementId ? parseInt(movementId, 10) : null,
+        backend_config_id: backendId ?? null,
+        cognition_config_id: cognitionId ?? null,
+        tts_config_id: ttsId ?? null,
+        stt_config_id: sttId ?? null,
+        vision_config_id: visionId ?? null,
+        rag_config_id: ragId ?? null,
+        imagination_config_id: imaginationId ?? null,
+        movement_config_id: movementId ?? null,
       });
 
       navigation.goBack();

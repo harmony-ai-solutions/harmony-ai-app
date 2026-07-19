@@ -21,7 +21,7 @@ react {
     //   The list of variants to that are debuggable. For those we're going to
     //   skip the bundling of the JS bundle and the assets. By default is just 'debug'.
     //   If you add flavors like lite, prod, etc. you'll have to list your debuggableVariants.
-    // debuggableVariants = ["liteDebug", "prodDebug"]
+    debuggableVariants = ["devDebug"]
 
     /* Bundling */
     //   A list containing the node command and its flags. Default is just 'node'.
@@ -84,6 +84,23 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+
+        resValue "string", "build_config_package", "ai.soulbits.chat"
+    }
+    flavorDimensions "environment"
+    productFlavors {
+        dev {
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
+            buildConfigField "boolean", "IS_BETA", "true"
+            buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty('GOOGLE_WEB_CLIENT_ID') ?: ''}\""
+            buildConfigField "String", "APPLE_SERVICES_ID", "\"${project.findProperty('APPLE_SERVICES_ID') ?: ''}\""
+        }
+        prod {
+            buildConfigField "boolean", "IS_BETA", "false"
+            buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty('GOOGLE_WEB_CLIENT_ID') ?: ''}\""
+            buildConfigField "String", "APPLE_SERVICES_ID", "\"${project.findProperty('APPLE_SERVICES_ID') ?: ''}\""
+        }
     }
     signingConfigs {
         debug {
@@ -128,3 +145,6 @@ dependencies {
 
 // Copy react-native-vector-icons fonts to Android assets
 apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
+
+// Google services plugin (required for Google Sign-In)
+apply plugin: 'com.google.gms.google-services'

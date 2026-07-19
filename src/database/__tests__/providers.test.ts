@@ -3,7 +3,17 @@
  */
 
 import {initializeDatabase, clearDatabaseData} from '../connection';
-import * as providers from '../repositories/providers';
+import * as openai from '../repositories/providers/OpenAIProviderConfigRepository';
+import * as openrouter from '../repositories/providers/OpenRouterProviderConfigRepository';
+import * as openaicompatible from '../repositories/providers/OpenAICompatibleProviderConfigRepository';
+import * as harmonyspeech from '../repositories/providers/HarmonySpeechProviderConfigRepository';
+import * as elevenlabs from '../repositories/providers/ElevenLabsProviderConfigRepository';
+import * as kindroid from '../repositories/providers/KindroidProviderConfigRepository';
+import * as kajiwoto from '../repositories/providers/KajiwotoProviderConfigRepository';
+import * as characterai from '../repositories/providers/CharacterAIProviderConfigRepository';
+import * as localai from '../repositories/providers/LocalAIProviderConfigRepository';
+import * as mistral from '../repositories/providers/MistralProviderConfigRepository';
+import * as ollama from '../repositories/providers/OllamaProviderConfigRepository';
 import {runTestWithCleanup, TestResult} from './test-utils';
 
 /**
@@ -20,7 +30,7 @@ export async function runProviderTests(): Promise<TestResult[]> {
     // Test 1: OpenAI
     results.push(
       await runTestWithCleanup('OpenAI Provider CRUD', async () => {
-        const id = await providers.createOpenAIProviderConfig({
+        const id = await openai.createOpenAIProviderConfig({
           name: 'Test OpenAI',
           api_key: 'test-key',
           model: 'gpt-4',
@@ -33,16 +43,16 @@ export async function runProviderTests(): Promise<TestResult[]> {
           speed: null,
           format: null,
         });
-        const retrieved = await providers.getOpenAIProviderConfig(id);
+        const retrieved = await openai.getOpenAIProviderConfig(id);
         if (!retrieved || retrieved.name !== 'Test OpenAI') throw new Error('Mismatch');
-        await providers.deleteOpenAIProviderConfig(id);
+        await openai.deleteOpenAIProviderConfig(id);
       })
     );
 
     // Test 2: OpenRouter
     results.push(
       await runTestWithCleanup('OpenRouter Provider CRUD', async () => {
-        const id = await providers.createOpenRouterProviderConfig({
+        const id = await openrouter.createOpenRouterProviderConfig({
           name: 'Test OpenRouter',
           api_key: 'test-key',
           model: 'meta-llama/llama-3-70b',
@@ -52,16 +62,16 @@ export async function runProviderTests(): Promise<TestResult[]> {
           n: null,
           stop_tokens: null,
         });
-        const retrieved = await providers.getOpenRouterProviderConfig(id);
+        const retrieved = await openrouter.getOpenRouterProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
-        await providers.deleteOpenRouterProviderConfig(id);
+        await openrouter.deleteOpenRouterProviderConfig(id);
       })
     );
 
     // Test 3: OpenAI Compatible
     results.push(
       await runTestWithCleanup('OpenAI Compatible Provider CRUD', async () => {
-        const id = await providers.createOpenAICompatibleProviderConfig({
+        const id = await openaicompatible.createOpenAICompatibleProviderConfig({
           name: 'Test Compatible',
           base_url: 'http://localhost:8080',
           api_key: 'test-key',
@@ -72,16 +82,16 @@ export async function runProviderTests(): Promise<TestResult[]> {
           n: null,
           stop_tokens: null,
         });
-        const retrieved = await providers.getOpenAICompatibleProviderConfig(id);
+        const retrieved = await openaicompatible.getOpenAICompatibleProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
-        await providers.deleteOpenAICompatibleProviderConfig(id);
+        await openaicompatible.deleteOpenAICompatibleProviderConfig(id);
       })
     );
 
     // Test 4: Harmony Speech
     results.push(
       await runTestWithCleanup('Harmony Speech Provider CRUD', async () => {
-        const id = await providers.createHarmonySpeechProviderConfig({
+        const id = await harmonyspeech.createHarmonySpeechProviderConfig({
           name: 'Test Harmony',
           endpoint: 'http://localhost:5000',
           model: 'harmony-v1',
@@ -90,16 +100,16 @@ export async function runProviderTests(): Promise<TestResult[]> {
           sample_rate: null,
           stream: null,
         });
-        const retrieved = await providers.getHarmonySpeechProviderConfig(id);
+        const retrieved = await harmonyspeech.getHarmonySpeechProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
-        await providers.deleteHarmonySpeechProviderConfig(id);
+        await harmonyspeech.deleteHarmonySpeechProviderConfig(id);
       })
     );
 
     // Test 5: ElevenLabs
     results.push(
       await runTestWithCleanup('ElevenLabs Provider CRUD', async () => {
-        const id = await providers.createElevenLabsProviderConfig({
+        const id = await elevenlabs.createElevenLabsProviderConfig({
           name: 'Test ElevenLabs',
           api_key: 'test-key',
           voice_id: 'test-voice',
@@ -109,92 +119,92 @@ export async function runProviderTests(): Promise<TestResult[]> {
           style: null,
           speaker_boost: null,
         });
-        const retrieved = await providers.getElevenLabsProviderConfig(id);
+        const retrieved = await elevenlabs.getElevenLabsProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
-        await providers.deleteElevenLabsProviderConfig(id);
+        await elevenlabs.deleteElevenLabsProviderConfig(id);
       })
     );
 
     // Test 6: Kindroid
     results.push(
       await runTestWithCleanup('Kindroid Provider CRUD', async () => {
-        const id = await providers.createKindroidProviderConfig({
+        const id = await kindroid.createKindroidProviderConfig({
           name: 'Test Kindroid',
           api_key: 'test-key',
           kindroid_id: 'test-id',
         });
-        const retrieved = await providers.getKindroidProviderConfig(id);
+        const retrieved = await kindroid.getKindroidProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
-        await providers.deleteKindroidProviderConfig(id);
+        await kindroid.deleteKindroidProviderConfig(id);
       })
     );
 
     // Test 7: Kajiwoto
     results.push(
       await runTestWithCleanup('Kajiwoto Provider CRUD', async () => {
-        const id = await providers.createKajiwotoProviderConfig({
+        const id = await kajiwoto.createKajiwotoProviderConfig({
           name: 'Test Kaji',
           username: 'user',
           password: 'pass',
           room_url: 'http://kaji',
         });
-        const retrieved = await providers.getKajiwotoProviderConfig(id);
+        const retrieved = await kajiwoto.getKajiwotoProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
-        await providers.deleteKajiwotoProviderConfig(id);
+        await kajiwoto.deleteKajiwotoProviderConfig(id);
       })
     );
 
     // Test 8: CharacterAI
     results.push(
       await runTestWithCleanup('CharacterAI Provider CRUD', async () => {
-        const id = await providers.createCharacterAIProviderConfig({
+        const id = await characterai.createCharacterAIProviderConfig({
           name: 'Test CAI',
           api_token: 'token',
           chatroom_url: 'http://cai',
         });
-        const retrieved = await providers.getCharacterAIProviderConfig(id);
+        const retrieved = await characterai.getCharacterAIProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
-        await providers.deleteCharacterAIProviderConfig(id);
+        await characterai.deleteCharacterAIProviderConfig(id);
       })
     );
 
     // Test 9: LocalAI
     results.push(
       await runTestWithCleanup('LocalAI Provider CRUD', async () => {
-        const id = await providers.createLocalAIProviderConfig({
+        const id = await localai.createLocalAIProviderConfig({
           name: 'Test LocalAI',
           model: 'bert',
         });
-        const retrieved = await providers.getLocalAIProviderConfig(id);
+        const retrieved = await localai.getLocalAIProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
-        await providers.deleteLocalAIProviderConfig(id);
+        await localai.deleteLocalAIProviderConfig(id);
       })
     );
 
     // Test 10: Mistral
     results.push(
       await runTestWithCleanup('Mistral Provider CRUD', async () => {
-        const id = await providers.createMistralProviderConfig({
+        const id = await mistral.createMistralProviderConfig({
           name: 'Test Mistral',
           api_key: 'key',
         });
-        const retrieved = await providers.getMistralProviderConfig(id);
+        const retrieved = await mistral.getMistralProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
-        await providers.deleteMistralProviderConfig(id);
+        await mistral.deleteMistralProviderConfig(id);
       })
     );
 
     // Test 11: Ollama
     results.push(
       await runTestWithCleanup('Ollama Provider CRUD', async () => {
-        const id = await providers.createOllamaProviderConfig({
+        const id = await ollama.createOllamaProviderConfig({
           name: 'Test Ollama',
           base_url: 'http://ollama',
           model: null,
         });
-        const retrieved = await providers.getOllamaProviderConfig(id);
+        const retrieved = await ollama.getOllamaProviderConfig(id);
         if (!retrieved) throw new Error('Failed to retrieve');
-        await providers.deleteOllamaProviderConfig(id);
+        await ollama.deleteOllamaProviderConfig(id);
       })
     );
 

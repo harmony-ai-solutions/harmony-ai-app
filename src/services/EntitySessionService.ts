@@ -3,7 +3,9 @@ import DeviceInfo from 'react-native-device-info';
 import { Platform, AppState } from 'react-native';
 import ConnectionManager, { ConnectionMode } from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
+import { cloudSessionService } from './cloud/CloudSessionService';
 import { createLogger } from '../utils/logger';
+import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
 import { messageExists, createConversationMessage, updateConversationMessage, getConversationMessage } from '../database/repositories/conversation_messages';
 import {
   createInteraction,
@@ -144,6 +146,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       if (nextAppState === 'background') {
         log.info('App going to background, closing all entity sessions');
         this.closeAllSessions();
+        cloudSessionService.disconnect().catch(() => {});
       }
     });
   }
@@ -184,10 +187,18 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     connection.status = 'connecting';
 
     try {
-      const mode = await ConnectionStateManager.getSecurityMode() || 'secure';
-      const wsUrl = mode === 'unencrypted'
-        ? await ConnectionStateManager.getWSUrl()
-        : await ConnectionStateManager.getWSSUrl();
+      const source = await ConnectionStateManager.getCurrentSource();
+      let wsUrl: string;
+      let mode: string;
+      if (source === 'cloud') {
+        wsUrl = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`;
+        mode = 'cloud';
+      } else {
+        mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
+        wsUrl = mode === 'unencrypted'
+          ? (await ConnectionStateManager.getWSUrl()) ?? ''
+          : (await ConnectionStateManager.getWSSUrl()) ?? '';
+      }
 
       if (!wsUrl) {
         throw new Error('No connection URL available');
@@ -336,10 +347,18 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     log.info(`Starting interaction session: ownEntity=${ownEntityId}, participants=[${participantIds.join(', ')}]`);
 
     const deviceId = await DeviceInfo.getUniqueId();
-    const mode = await ConnectionStateManager.getSecurityMode() || 'secure';
-    const url = mode === 'unencrypted'
-      ? await ConnectionStateManager.getWSUrl()
-      : await ConnectionStateManager.getWSSUrl();
+    const source = await ConnectionStateManager.getCurrentSource();
+    let url: string;
+    let mode: string;
+    if (source === 'cloud') {
+      url = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`;
+      mode = 'cloud';
+    } else {
+      mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
+      url = mode === 'unencrypted'
+        ? (await ConnectionStateManager.getWSUrl()) ?? ''
+        : (await ConnectionStateManager.getWSSUrl()) ?? '';
+    }
 
     if (!url) {
       throw new Error('No connection URL available');

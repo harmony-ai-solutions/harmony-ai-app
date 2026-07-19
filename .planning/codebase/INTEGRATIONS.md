@@ -140,7 +140,7 @@
 - `provider_config_openaicompatible` - Custom OpenAI-compatible endpoints
 - `provider_config_openrouter` - OpenRouter aggregator
 - `provider_config_mistral` - Mistral AI
-- Repository: `src/database/repositories/providers.ts`
+- Repository: `src/database/repositories/providers/` (per-file repos after Phase 7-0a split, e.g., `MistralProviderConfigRepository.ts`)
 - UI: `src/screens/AIConfigScreen.tsx` (currently non-functional)
 - These are placeholders for Phase 2 "On-Device AI model integration"
 - Migration 020 added per-provider LLM params (frequency_penalty, presence_penalty, top_k, top_a, min_p, repetition_penalty, etc.)

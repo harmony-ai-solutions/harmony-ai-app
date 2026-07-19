@@ -5,6 +5,8 @@ import { createLogger } from '../utils/logger';
 
 const log = createLogger('[ConnectionStateManager]');
 
+export type SyncSource = 'selfhosted' | 'cloud';
+
 interface ConnectionStateEvents {
   'state:changed': (state: ConnectionState) => void;
   'credentials:saved': (info: { isPaired: boolean }) => void;
@@ -47,11 +49,14 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
     SECURITY_MODE: 'harmony_security_mode', // Per-device security preference
   };
   
+  public static readonly SYNC_SOURCES = ['selfhosted', 'cloud'] as const;
+
   // Security mode types
   public static readonly SECURITY_MODES = {
     SECURE: 'secure',
     INSECURE_SSL: 'insecure-ssl',
     UNENCRYPTED: 'unencrypted',
+    CLOUD: 'cloud',
   } as const;
 
   private isConnected = false;
@@ -305,6 +310,44 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
    */
   async getSecurityMode(): Promise<string | null> {
     return AsyncStorage.getItem(ConnectionStateManager.STORAGE_KEYS.SECURITY_MODE);
+  }
+
+  /**
+   * Get the current sync source based on persisted connection mode
+   */
+  async getCurrentSource(): Promise<SyncSource> {
+    const m = await AsyncStorage.getItem('connection_mode');
+    return m === 'cloud' ? 'cloud' : 'selfhosted';
+  }
+
+  /**
+   * Build the per-source AsyncStorage key for last_sync_timestamp
+   */
+  static lastSyncKey(source: SyncSource): string {
+    return `last_sync_timestamp:${source}`;
+  }
+
+  /**
+   * Get the last sync timestamp for a given source.
+   * Falls back to the legacy global key for backward-compat (migrated once).
+   */
+  async getLastSync(source: SyncSource): Promise<number> {
+    const stored = await AsyncStorage.getItem(ConnectionStateManager.lastSyncKey(source));
+    if (stored) return parseInt(stored, 10);
+    // backward-compat: fall back to the legacy global key, migrated once
+    const legacy = await AsyncStorage.getItem(ConnectionStateManager.STORAGE_KEYS.LAST_SYNC_TIMESTAMP);
+    return legacy ? parseInt(legacy, 10) : 0;
+  }
+
+  /**
+   * Set the last sync timestamp for a given source.
+   * Also writes the global alias for backward-compat so legacy readers still work.
+   */
+  async setLastSync(source: SyncSource, ts: number): Promise<void> {
+    await Promise.all([
+      AsyncStorage.setItem(ConnectionStateManager.lastSyncKey(source), String(ts)),
+      AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.LAST_SYNC_TIMESTAMP, String(ts)),
+    ]);
   }
 
   /**

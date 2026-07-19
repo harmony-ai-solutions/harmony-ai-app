@@ -16,11 +16,9 @@
 - Impact: Themes cannot be synced across devices via Harmony Link
 - Fix approach: Implement Harmony Link API client for theme sync when backend is ready
 
-**Large Monolithic Repository Files:**
-- Issue: Provider repository is 2279 lines (+243 since March), modules repository is 1324 lines (+50 since March) - both contain duplicated patterns
-- Files: `src/database/repositories/providers.ts`, `src/database/repositories/modules.ts`
-- Impact: Difficult to maintain, test, and extend; high risk of bugs when modifying
-- Fix approach: Extract common database operations into shared utility functions or create a generic repository base class
+**Large Monolithic Repository Files (RESOLVED):**
+- Issue: Provider repository was 2279 lines (+243 since March), modules repository is 1324 lines (+50 since March) - both contained duplicated patterns
+- Fix approach: Provider repo was split per-file in Phase 7-0a into per-provider files in `src/database/repositories/providers/` (e.g., `OpenAIProviderConfigRepository.ts`, `SoulbitsCloudProviderConfigRepository.ts`). Monolithic `providers.ts` deleted. Modules repo (`modules.ts`) remains as a single file — splitting deferred; patterns already extracted into `shared.ts`.
 
 **ChatDetailScreen Monolithic Component:**
 - Issue: Chat detail screen is 1414 lines with 30+ imports, mixing message handling, audio recording, emoji input, session management, and connection state
