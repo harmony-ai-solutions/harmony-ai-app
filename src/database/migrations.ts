@@ -352,14 +352,17 @@ async function applyMigration(
 
     // Execute the migration SQL
     // Note: SQLite doesn't support multiple statements in executeSql,
-    // so we need to split and execute individually
-    const statements = migration.sql
+    // so we need to split and execute individually.
+    // Strip SQL comments first so comment-only lines (e.g. documentation
+    // headers like "-- 2. AUDIO: Replace audio_file with text+mime_type")
+    // don't become standalone statements that confuse the SQLite driver.
+    const statements = stripSqlComments(migration.sql)
       .split(';')
       .map((s: string) => s.trim())
       .filter((s: string) => s.length > 0);
 
     for (const statement of statements) {
-      await db.executeSql(statement);
+        await db.executeSql(statement);
     }
 
     // Record the migration
