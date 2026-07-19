@@ -2,6 +2,7 @@ import React from 'react';
 import {
   NavigationContainer,
   NavigationContainerRef,
+  DefaultTheme,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { LandingScreen } from '../screens/LandingScreen';
@@ -63,6 +64,24 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+/**
+ * Transparent navigation theme — lets the atmospheric background
+ * aurora layer bleed through all screens. Only the screens'
+ * glass/translucent surfaces sit on top.
+ */
+const transparentNavTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    primary: '#8f3ba7',
+    background: 'transparent',
+    card: 'transparent',
+    text: '#e8e6f0',
+    border: 'transparent',
+    notification: '#8f3ba7',
+  },
+};
+
 interface AppNavigatorProps {
   navigationRef?: React.RefObject<NavigationContainerRef<RootStackParamList> | null>;
 }
@@ -71,11 +90,13 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
   navigationRef,
 }) => {
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer ref={navigationRef} theme={transparentNavTheme}>
       <Stack.Navigator
         initialRouteName="Landing"
         screenOptions={{
           headerShown: false,
+          contentStyle: { backgroundColor: 'transparent' },
+          animation: 'fade',
         }}
       >
         <Stack.Screen name="Landing" component={LandingScreen} />

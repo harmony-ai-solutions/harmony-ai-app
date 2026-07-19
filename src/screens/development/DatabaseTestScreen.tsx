@@ -18,6 +18,7 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { ThemedView } from '../../components/themed/ThemedView';
 import runAllTests from '../../database/test-runner';
 import { clearDatabaseData } from '../../database';
 import { createLogger } from '../../utils/logger';
@@ -234,7 +235,7 @@ export const DatabaseTestScreen: React.FC = () => {
     if (!theme) return null;
 
     return (
-        <View style={[styles.container, { backgroundColor: theme.colors.background.base }]}>
+        <ThemedView style={styles.container}>
             {/* Header */}
             <View style={[styles.header, { backgroundColor: theme.colors.background.surface }]}>
                 <View style={styles.headerContent}>
@@ -387,7 +388,7 @@ export const DatabaseTestScreen: React.FC = () => {
                     This screen is only visible in development builds
                 </Text>
             </View>
-        </View>
+        </ThemedView>
     );
 };
 

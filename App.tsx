@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { StatusBar } from 'react-native';
+import { StatusBar, View, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PaperProvider } from 'react-native-paper';
 import { NavigationContainerRef } from '@react-navigation/native';
@@ -21,6 +21,8 @@ import { I18nProvider } from './src/contexts/I18nContext';
 import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoadingScreen';
 import { InitialPairingModal } from './src/components/modals/InitialPairingModal';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { DynamicAtmosphericBackground } from './src/components/background/DynamicAtmosphericBackground';
+import { StardustParticles } from './src/components/background/StardustParticles';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
@@ -89,8 +91,17 @@ function AppContent() {
       <StatusBar
         barStyle="light-content"
         backgroundColor={theme?.colors.background.base || '#000000'}
+        translucent
       />
-      <AppNavigator navigationRef={navigationRef} />
+      {/* Persistent atmospheric background layer — sits behind everything */}
+      <View style={styles.backgroundLayer}>
+        <DynamicAtmosphericBackground />
+        <StardustParticles />
+      </View>
+      {/* Foreground app navigation — transparent backgrounds let the aurora show through */}
+      <View style={styles.foregroundLayer}>
+        <AppNavigator navigationRef={navigationRef} />
+      </View>
       {pairingModalChecked && (
         <InitialPairingModal
           visible={showPairingModal}
@@ -128,5 +139,17 @@ function App() {
     </ErrorBoundary>
   );
 }
+
+const styles = StyleSheet.create({
+  backgroundLayer: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 0,
+  },
+  foregroundLayer: {
+    flex: 1,
+    zIndex: 1,
+    // No backgroundColor — screens provide their own glass/transparent surfaces
+  },
+});
 
 export default App;

@@ -1,5 +1,6 @@
 # Harmony AI App System Patterns
 @Arch: Three-Tier Mobile (Presentation → Business Logic → Data)
+- Background Layer: Persistent animated atmospheric background (Aurora/Nebula + Stardust) rendered behind the navigation stack in App.tsx. Uses absolute positioning with zIndex layering. Navigation contentStyle is transparent to allow the background to show through. Components use translucent/semi-opaque surfaces for glassmorphism effect.
 - Screen Components: Full-page views, navigation, screen state
 - Presentational Components: Pure display, props-driven, reusable
 - Container Components: Data fetching, side effects, service connection
@@ -75,3 +76,7 @@
 - EntitySessionService checks resumed flag; if true, avoids re-creating connection and reconciles pending state
 - Dangling event sync: On reconnect, backend refires any events that were queued while disconnected
 - Reply mode: EntitySession passes `reply_mode` as capability during INIT_ENTITY; ChatPreferencesService stores per-partner preference
+@AtmosphericBackground:
+- DynamicAtmosphericBackground: 5 large radial-gradient-like animated blobs (LinearGradient circles) with independent Lissajous motion paths, prime-number cycle durations (31-53s), and oscillating opacity/scale. Theme-driven color extraction (accent.primary = Neon Magenta, accent.secondary = Indigo). Base overlay + vignette layers anchor edges in deep blue-black.
+- StardustParticles: 40 deterministic pseudo-random particles (mulberry32 seed=42) with unique drift directions, twinkle periods (2-8s), and gentle floating motion (~30px drift). Rendered above the aurora but below the app UI.
+- Layering: backgroundLayer (zIndex:0, absoluteFill) → foregroundLayer (zIndex:1, flex:1) in App.tsx. All native driver animations for 60fps performance.

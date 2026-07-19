@@ -1,13 +1,16 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { ThemedView } from '../../components/themed/ThemedView';
+import { ThemedText } from '../../components/themed/ThemedText';
 
 export const ProfileSettingsScreen: React.FC = () => {
     const { theme } = useAppTheme();
+    if (!theme) return null;
     return (
-        <View style={[styles.container, { backgroundColor: theme?.colors.background.base }]}>
-            <Text style={{ color: theme?.colors.text.primary }}>Profile Settings (Coming Soon)</Text>
-        </View>
+        <ThemedView style={styles.container}>
+            <ThemedText>Profile Settings (Coming Soon)</ThemedText>
+        </ThemedView>
     );
 };
 

@@ -55,6 +55,7 @@
 - Force Full DB Sync: Option in SyncSettingsScreen to trigger full re-synchronization.
 - Cleanup: Deprecated methods removed, review fixes applied, codebase map updated.
 - Provider Expansion + Model Unification (Complete): Full xAI/Google/Anthropic provider support, model field consolidation, dead code cleanup across app.
+- Dynamic Atmospheric Background (Complete): Aurora/Nebula animated background with 5 gradient blobs + 40 stardust particles. Uses theme accent colors (Neon Magenta/Indigo). Prime-number cycle durations prevent visible loops. Persistent layer behind entire navigation stack. Navigation contentStyle set to transparent for glassmorphism effect. Components: DynamicAtmosphericBackground.tsx, StardustParticles.tsx in src/components/background/.
   - Migration 000030: DB migration adds Google/xAI/Anthropic config tables; unifies model columns (`embedding_model`/`image_model`/`imagination_model` → `model`).
   - providers.ts: 21 provider CRUD functions (15 providers). Restored + fixed after garbled state. Fixed `module_` prefixed table bug for 8 providers. Added xAI/Google/Anthropic CRUD functions.
   - providerFieldSchemas.ts: 15 provider schemas. Module-specific fields merged into main provider schemas with tooltips. Dead module-specific schema keys removed.
