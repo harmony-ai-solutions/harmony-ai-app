@@ -29,7 +29,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  */
 function AppContent() {
   const paperTheme = usePaperTheme();
-  const { theme, loading: themeLoading } = useAppTheme();
+  const { theme, loading: themeLoading, dynamicBackgroundEnabled } = useAppTheme();
   const { isReady, isLoading } = useDatabase();
   const { isPaired } = useSyncConnection();
   const [showPairingModal, setShowPairingModal] = useState(false);
@@ -94,8 +94,8 @@ function AppContent() {
       />
       {/* Persistent atmospheric background layer — sits behind everything */}
       <View style={styles.backgroundLayer}>
-        <DynamicAtmosphericBackground />
-        <StardustParticles />
+        <DynamicAtmosphericBackground enabled={dynamicBackgroundEnabled} />
+        <StardustParticles enabled={dynamicBackgroundEnabled} />
       </View>
       {/* Foreground app navigation — transparent backgrounds let the aurora show through */}
       <View style={styles.foregroundLayer}>

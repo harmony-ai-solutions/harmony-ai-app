@@ -32,8 +32,10 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
         theme,
         availableThemes,
         themeMode,
+        dynamicBackgroundEnabled,
         switchTheme,
         setThemeMode,
+        setDynamicBackgroundEnabled,
         importTheme,
         deleteCustomTheme,
         syncWithHarmonyLink,
@@ -148,6 +150,14 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
         }
     };
 
+    const handleDynamicBackgroundToggle = async (value: boolean) => {
+        try {
+            await setDynamicBackgroundEnabled(value);
+        } catch (err) {
+            Alert.alert('Error', 'Failed to update background setting');
+        }
+    };
+
     return (
         <ThemedView style={styles.container}>
             <ThemedAppbar style={styles.header}>
@@ -161,6 +171,37 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 />
             </ThemedAppbar>
             <ScrollView>
+                {/* Dynamic Background Effects Toggle */}
+                <View
+                    style={[
+                        styles.section,
+                        { backgroundColor: theme.colors.background.surface },
+                    ]}
+                >
+                    <View style={styles.sectionHeader}>
+                        <Icon name="waves" size={20} color={theme.colors.accent.primary} />
+                        <Text style={[styles.sectionTitle, { color: theme.colors.text.primary }]}>
+                            Background Effects
+                        </Text>
+                    </View>
+
+                    <View style={styles.switchRow}>
+                        <View style={styles.switchLabel}>
+                            <Text style={[styles.switchText, { color: theme.colors.text.primary }]}>
+                                Dynamic Background Effects
+                            </Text>
+                            <Text style={[styles.switchDescription, { color: theme.colors.text.secondary }]}>
+                                Enable fluid motion and particle effects. Disable if you experience lag or wish to save battery.
+                            </Text>
+                        </View>
+                        <Switch
+                            value={dynamicBackgroundEnabled}
+                            onValueChange={handleDynamicBackgroundToggle}
+                            color={theme.colors.accent.primary}
+                        />
+                    </View>
+                </View>
+
                 {/* System Theme Toggle */}
                 <View
                     style={[
