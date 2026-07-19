@@ -12,6 +12,7 @@ const log = createLogger('[ThemeContext]');
 const STORAGE_KEY_CURRENT_THEME = '@harmony_current_theme';
 const STORAGE_KEY_THEME_MODE = '@harmony_theme_mode';
 const STORAGE_KEY_CUSTOM_THEMES = '@harmony_custom_themes';
+const STORAGE_KEY_DYNAMIC_BG = '@harmony_dynamic_background';
 
 // Create context
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -23,6 +24,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const [theme, setTheme] = useState<Theme | null>(null);
     const [availableThemes, setAvailableThemes] = useState<Theme[]>(defaultThemes);
     const [themeMode, setThemeModeState] = useState<ThemeMode>(DEFAULT_THEME_ID);
+    const [dynamicBackgroundEnabled, setDynamicBackgroundEnabledState] = useState(true);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
     const [syncStatus, setSyncStatus] = useState<ThemeSyncStatus>({
@@ -78,6 +80,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const savedMode = await AsyncStorage.getItem(STORAGE_KEY_THEME_MODE);
             const mode: ThemeMode = savedMode || DEFAULT_THEME_ID;
             setThemeModeState(mode);
+
+            // Load dynamic background preference (default true for first launch)
+            const savedDynamicBg = await AsyncStorage.getItem(STORAGE_KEY_DYNAMIC_BG);
+            if (savedDynamicBg !== null) {
+                setDynamicBackgroundEnabledState(savedDynamicBg === 'true');
+            }
 
             // Load custom themes
             const customThemes = await loadCustomThemes();
@@ -314,6 +322,20 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }, []);
 
     /**
+     * Toggle dynamic background effects (persisted to AsyncStorage)
+     */
+    const setDynamicBackgroundEnabled = useCallback(async (enabled: boolean) => {
+        try {
+            setDynamicBackgroundEnabledState(enabled);
+            await AsyncStorage.setItem(STORAGE_KEY_DYNAMIC_BG, String(enabled));
+        } catch (err) {
+            log.error('Failed to save dynamic background preference:', err);
+            setError(err as Error);
+            throw err;
+        }
+    }, []);
+
+    /**
      * Refresh themes (reload from storage and backend)
      */
     const refreshThemes = useCallback(async () => {
@@ -345,11 +367,13 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         theme,
         availableThemes,
         themeMode,
+        dynamicBackgroundEnabled,
         loading,
         error,
         syncStatus,
         switchTheme,
         setThemeMode,
+        setDynamicBackgroundEnabled,
         createCustomTheme,
         updateCustomTheme,
         deleteCustomTheme,

@@ -104,6 +104,32 @@ const DotWidget: React.FC<{ dot: Dot; color: string }> = ({ dot, color }) => {
   );
 };
 
+<<<<<<< HEAD
+interface StardustParticlesProps {
+  enabled?: boolean;
+}
+
+export const StardustParticles: React.FC<StardustParticlesProps> = React.memo(
+  ({ enabled = true }) => {
+    const { theme } = useAppTheme();
+    const color = theme?.colors.accent.primary || '#8f3ba7';
+    const dots = useMemo(() => buildDots(25), []);
+
+    // When disabled, render nothing — no particle animations at all
+    if (!enabled) {
+      return null;
+    }
+
+    return (
+      <Animated.View style={styles.root} pointerEvents="none">
+        {dots.map((d) => (
+          <DotWidget key={d.id} dot={d} color={color} />
+        ))}
+      </Animated.View>
+    );
+  },
+);
+=======
 export const StardustParticles: React.FC = React.memo(() => {
   const { theme } = useAppTheme();
   const color = theme?.colors.accent.primary || '#8f3ba7';
@@ -117,6 +143,7 @@ export const StardustParticles: React.FC = React.memo(() => {
     </Animated.View>
   );
 });
+>>>>>>> 89108f84f460425ac7ff9b682d305132b728be3a
 
 StardustParticles.displayName = 'StardustParticles';
 

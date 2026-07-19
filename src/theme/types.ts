@@ -159,9 +159,13 @@ export interface ThemeContextType {
   // Sync status
   syncStatus: ThemeSyncStatus;
   
+  // Dynamic background toggle
+  dynamicBackgroundEnabled: boolean;
+  
   // Actions
   switchTheme: (themeId: string) => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
+  setDynamicBackgroundEnabled: (enabled: boolean) => Promise<void>;
   createCustomTheme: (theme: Theme) => Promise<void>;
   updateCustomTheme: (themeId: string, theme: Theme) => Promise<void>;
   deleteCustomTheme: (themeId: string) => Promise<void>;

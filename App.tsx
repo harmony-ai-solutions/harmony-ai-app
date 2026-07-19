@@ -30,7 +30,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  */
 function AppContent() {
   const paperTheme = usePaperTheme();
+<<<<<<< HEAD
+  const { theme, loading: themeLoading, dynamicBackgroundEnabled } = useAppTheme();
+=======
   const { theme, loading: themeLoading } = useAppTheme();
+>>>>>>> 89108f84f460425ac7ff9b682d305132b728be3a
   const { isReady, isLoading } = useDatabase();
   const { isPaired } = useSyncConnection();
   const [showPairingModal, setShowPairingModal] = useState(false);
@@ -95,8 +99,13 @@ function AppContent() {
       />
       {/* Persistent atmospheric background layer — sits behind everything */}
       <View style={styles.backgroundLayer}>
+<<<<<<< HEAD
+        <DynamicAtmosphericBackground enabled={dynamicBackgroundEnabled} />
+        <StardustParticles enabled={dynamicBackgroundEnabled} />
+=======
         <DynamicAtmosphericBackground />
         <StardustParticles />
+>>>>>>> 89108f84f460425ac7ff9b682d305132b728be3a
       </View>
       {/* Foreground app navigation — transparent backgrounds let the aurora show through */}
       <View style={styles.foregroundLayer}>
@@ -123,6 +132,15 @@ function App() {
         <ThemeProvider>
           <I18nProvider>
             <DatabaseProvider>
+<<<<<<< HEAD
+              <SyncConnectionProvider>
+                  <EntitySessionProvider>
+                    <EmojiProvider>
+                      <AppContent />
+                    </EmojiProvider>
+                  </EntitySessionProvider>
+              </SyncConnectionProvider>
+=======
               <AuthProvider>
                 <SyncConnectionProvider>
                     <EntitySessionProvider>
@@ -132,6 +150,7 @@ function App() {
                     </EntitySessionProvider>
                 </SyncConnectionProvider>
               </AuthProvider>
+>>>>>>> 89108f84f460425ac7ff9b682d305132b728be3a
             </DatabaseProvider>
           </I18nProvider>
         </ThemeProvider>
