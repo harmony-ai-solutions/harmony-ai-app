@@ -147,7 +147,6 @@ const AuroraBlob: React.FC<{ cfg: BlobCfg }> = ({ cfg }) => {
   );
 };
 
-<<<<<<< HEAD
 // ── Static gradient background (rendered when dynamic effects are disabled) ──
 interface StaticGradientBackgroundProps {
   base: string;
@@ -246,45 +245,6 @@ export const DynamicAtmosphericBackground: React.FC<DynamicAtmosphericBackground
     );
   },
 );
-=======
-// ── Public component ───────────────────────────────────────────
-export const DynamicAtmosphericBackground: React.FC = React.memo(() => {
-  const { theme } = useAppTheme();
-  const primary = theme?.colors.accent.primary || '#8f3ba7';
-  const secondary = theme?.colors.accent.secondary || '#22318e';
-  const base = theme?.colors.background.base || '#0b0f19';
-
-  const configs = useMemo(() => buildConfigs(primary, secondary), [primary, secondary]);
-
-  return (
-    <View style={styles.root} pointerEvents="none">
-      {/* Solid base fill */}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: base }]} />
-
-      {/* Animated nebula orbs */}
-      {configs.map((c) => (
-        <AuroraBlob key={c.id} cfg={c} />
-      ))}
-
-      {/* Very light vignette — just enough to keep corners anchored but let light through */}
-      <LinearGradient
-        colors={[base + '00', base + '33', base + '77']}
-        start={{ x: 0.5, y: 0.5 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
-      <LinearGradient
-        colors={[base + '00', base + '33', base + '77']}
-        start={{ x: 0.5, y: 0.5 }}
-        end={{ x: 0, y: 0 }}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
-    </View>
-  );
-});
->>>>>>> 89108f84f460425ac7ff9b682d305132b728be3a
 
 DynamicAtmosphericBackground.displayName = 'DynamicAtmosphericBackground';
 

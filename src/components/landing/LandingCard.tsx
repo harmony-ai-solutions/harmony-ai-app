@@ -39,6 +39,8 @@ export const LandingCard: React.FC<LandingCardProps> = ({
         {
           backgroundColor: glassBg,
           shadowColor: theme.colors.accent.primary,
+          shadowOpacity: theme.colors.glass.glowOpacity,
+          shadowRadius: theme.colors.glass.glowRadius,
         },
         style,
       ]}

@@ -17,11 +17,14 @@ import { SectionHeader } from '../components/themed/SectionHeader';
 import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
 
+// Tab-screen navigation: routes are dispatched to the parent root stack.
+// Using 'any' here avoids CompositeNavigationProp boilerplate while
+// React Navigation v7 resolves routes across nested navigators at runtime.
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type ConnectionType = 'Harmony Link' | 'Cloud' | 'Not configured';
 
 export const SettingsScreen: React.FC = () => {
-  const navigation = useNavigation<Nav>();
+  const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { isConnected, isPaired, isReconnecting } = useSyncConnection();
@@ -75,10 +78,6 @@ export const SettingsScreen: React.FC = () => {
     <ThemedView style={styles.container}>
       {/* Header */}
       <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
         <Appbar.Content
           title={t('title')}
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
@@ -91,7 +90,7 @@ export const SettingsScreen: React.FC = () => {
       </ThemedAppbar>
 
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 32 + safeBottom }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 + safeBottom }]}
         showsVerticalScrollIndicator={false}
       >
         {/* ── Connection Card ── */}

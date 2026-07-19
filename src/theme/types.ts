@@ -71,11 +71,15 @@ export interface Gradients {
  * Controls the translucent "frosted glass" appearance of cards and panels.
  */
 export interface GlassTokens {
-  /** Card background opacity — 0.30–0.40 for the glass bleed-through effect */
+  /** Card background opacity — 0.45–0.55 for Obsidian Glass bleed-through */
   cardOpacity: number;
-  /** 1dp gradient border start (top-left light hit) — transparent white */
+  /** Ambient glow shadow opacity — 0.06–0.10 for radiant floating effect */
+  glowOpacity: number;
+  /** Ambient glow shadow blur radius in dp — 12–18 for soft radiant halo */
+  glowRadius: number;
+  /** 1dp gradient border start (top-left specular highlight) — transparent white/silver */
   borderGradientStart: string;
-  /** 1dp gradient border end — transparent accent color */
+  /** 1dp gradient border end — fading to muted neon purple/indigo accent */
   borderGradientEnd: string;
 }
 

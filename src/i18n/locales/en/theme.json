@@ -1,11 +1,8 @@
 {
   "title": "Appearance & Theme",
   "systemTheme": "System Theme",
-<<<<<<< HEAD
   "dynamicBackground": "Dynamic Background Effects",
   "dynamicBackgroundDesc": "Enable fluid motion and particle effects. Disable if you experience lag or wish to save battery.",
-=======
->>>>>>> 89108f84f460425ac7ff9b682d305132b728be3a
   "emojiStyle": "Emoji Style",
   "nativeLabel": "Native (System)",
   "nativeDesc": "Use your device's built-in emoji style",

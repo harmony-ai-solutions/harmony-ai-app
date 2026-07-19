@@ -53,11 +53,15 @@ export const hauteGoth: Theme = {
         },
         glass: {
             /** Obsidian Glass: 48% opacity for rich, tangible glass presence */
-            cardOpacity: 0.95,
-            /** Hairline border — top-left light hit: bright white at 18% */
-            borderGradientStart: 'rgba(255, 255, 255, 0.18)',
-            /** Hairline border — fades to vivid magenta accent */
-            borderGradientEnd: 'rgba(184, 79, 208, 0.25)',
+            cardOpacity: 0.48,
+            /** Ambient neon glow shadow opacity — 25% for dramatic radiant halo */
+            glowOpacity: 0.25,
+            /** Ambient glow shadow blur — 24dp wide radiant aura */
+            glowRadius: 24,
+            /** Thick polished edge — top-left specular hit: bright silver-white at 45% */
+            borderGradientStart: 'rgba(255, 255, 255, 0.45)',
+            /** Thick polished edge — fades to vivid neon magenta at 30% */
+            borderGradientEnd: 'rgba(184, 79, 208, 0.30)',
         },
         typography: {
             headerOpacity: 1.0,

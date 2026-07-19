@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, StyleSheet, ViewProps, Platform } from 'react-native';
+import { View, StyleSheet, ViewProps } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { hexToRgba } from '../../utils/colorUtils';
 
 interface ThemedCardProps extends ViewProps {
     elevated?: boolean;
@@ -12,13 +13,19 @@ interface ThemedCardProps extends ViewProps {
 }
 
 /**
- * Solid card — gradient hairline border with opaque fill.
+ * Obsidian Glass Card — Dark, High-Contrast, Premium Glassmorphism.
  *
- * Design rules:
- *  - 1dp hairline gradient border (white → accent tone).
- *  - Card body uses a solid opaque background (no transparency, no glass bleed).
- *  - Ambient colored glow shadow for depth.
- *  - Optional left accent stripe and prismatic accent-tint overlay.
+ * Anatomy (outside → in):
+ *   1. Ambient colored shadow — accent color at very low opacity,
+ *      soft halo that makes the card float above the aurora background.
+ *   2. Razor-thin 1dp gradient border — top-left white/silver at low
+ *      opacity catches the light; bottom-right fades into faint
+ *      translucent indigo/purple. No thick outlines, no solid magenta.
+ *   3. Deep dark glass body — rich gothic charcoal at ~45 % opacity,
+ *      dark enough for crisp white text contrast while still letting
+ *      the aurora/stardust background bleed through.
+ *   4. Specular sweep — diagonal white light refraction at ~10 %
+ *      opacity for the glass surface feel.
  */
 export const ThemedCard: React.FC<ThemedCardProps> = ({
     children,
@@ -32,41 +39,57 @@ export const ThemedCard: React.FC<ThemedCardProps> = ({
 
     if (!theme) return <View style={style} {...props}>{children}</View>;
 
-    // ── Solid card fill — raw hex, no alpha ──────────────────────────────
     const bgHex = elevated
         ? theme.colors.background.elevated
         : theme.colors.background.surface;
 
-    // ── Vivid hairline gradient border ────────────────────────────────────
-    const { borderGradientStart, borderGradientEnd } = theme.colors.glass;
+    // ── Deep dark glass body — 45 % opacity, rich charcoal base ──
+    const glassFill = hexToRgba(bgHex, 0.45);
 
-    // ── Ambient glow shadow colour ────────────────────────────────────────
+    // ── Ambient glow — accent color, very subtle ──
     const glowColor = theme.colors.accent.primary;
+
+    // ── Hairline gradient border: silver top-left → faint indigo bottom-right ──
+    const borderStart = 'rgba(255, 255, 255, 0.20)';
+    const borderEnd = hexToRgba(theme.colors.accent.secondary, 0.10);
 
     return (
         <View
             style={[
-                styles.ambientGlow,
-                { shadowColor: glowColor },
                 style,
+                {
+                    // Subtle ambient glow — low opacity, wide radius
+                    shadowColor: glowColor,
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.06,
+                    shadowRadius: 16,
+                    elevation: 6,
+                },
             ]}
             {...props}
         >
+            {/* ── 1dp hairline gradient border ── */}
             <LinearGradient
-                colors={[borderGradientStart, borderGradientEnd]}
+                colors={[borderStart, borderEnd]}
                 start={{ x: 0.15, y: 0 }}
                 end={{ x: 0.85, y: 1 }}
-                style={styles.borderOuter}
+                style={styles.border}
             >
-                {/* Solid card surface — opaque background, no glass transparency */}
-                <View style={[styles.cardInner, { backgroundColor: bgHex }]}>
-                    {/* Prismatic accent tint — top-left corner bleed */}
+                {/* ── Deep dark glass body ── */}
+                <View style={[styles.body, { backgroundColor: glassFill }]}>
+                    {/* Specular sweep — faint diagonal light across the glass surface */}
+                    <LinearGradient
+                        colors={['rgba(255, 255, 255, 0.10)', 'transparent']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 0.7, y: 1 }}
+                        style={StyleSheet.absoluteFillObject}
+                        pointerEvents="none"
+                    />
+
+                    {/* Prismatic accent tint (optional) */}
                     {accentTint && (
                         <LinearGradient
-                            colors={[
-                                theme.colors.accent.primary + '1A',
-                                'transparent',
-                            ]}
+                            colors={[theme.colors.accent.primary + '10', 'transparent']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
                             style={StyleSheet.absoluteFillObject}
@@ -76,13 +99,13 @@ export const ThemedCard: React.FC<ThemedCardProps> = ({
 
                     {children}
 
-                    {/* Left accent stripe — rendered after children so it stays on top */}
+                    {/* Accent stripe (optional) */}
                     {accentStripe && (
                         <LinearGradient
                             colors={[theme.colors.accent.primary, theme.colors.accent.secondary]}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 0, y: 1 }}
-                            style={styles.accentStripeBar}
+                            style={styles.stripe}
                             pointerEvents="none"
                         />
                     )}
@@ -93,24 +116,17 @@ export const ThemedCard: React.FC<ThemedCardProps> = ({
 };
 
 const styles = StyleSheet.create({
-    ambientGlow: {
-        // Magenta ambient drop shadow — card "levitates and radiates energy"
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.18,
-        shadowRadius: 20,
-        elevation: 8,
-    },
-    borderOuter: {
+    border: {
         borderRadius: 16,
-        // 1dp hairline = padding simulates the gradient border thickness
+        // Razor-thin 1dp hairline border
         padding: StyleSheet.hairlineWidth,
     },
-    cardInner: {
+    body: {
         borderRadius: 15,
         overflow: 'hidden',
         padding: 16,
     },
-    accentStripeBar: {
+    stripe: {
         position: 'absolute',
         left: 0,
         top: 0,

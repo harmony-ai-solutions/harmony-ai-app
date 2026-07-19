@@ -34,10 +34,13 @@ import {
 import { createDataURL } from '../database/base64';
 import { CharacterProfile } from '../database/models';
 
+// Tab-screen navigation: routes are dispatched to the parent root stack.
+// Using 'any' here avoids CompositeNavigationProp boilerplate while
+// React Navigation v7 resolves routes across nested navigators at runtime.
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export const CharactersScreen: React.FC = () => {
-  const navigation = useNavigation<Nav>();
+  const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('characters');
@@ -144,10 +147,6 @@ export const CharactersScreen: React.FC = () => {
     <ThemedView style={styles.container}>
       {/* Appbar */}
       <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
         <Appbar.Content
           title={t('title')}
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
@@ -225,7 +224,7 @@ export const CharactersScreen: React.FC = () => {
           keyExtractor={item => item.id}
           numColumns={2}
           columnWrapperStyle={styles.columnWrapper}
-          contentContainerStyle={[styles.listContent, { paddingBottom: 80 + safeBottom }]}
+          contentContainerStyle={[styles.listContent, { paddingBottom: 100 + safeBottom }]}
           renderItem={({ item }) => (
             <CharacterProfileCard
               profile={item}
@@ -240,7 +239,7 @@ export const CharactersScreen: React.FC = () => {
 
       {/* FAB */}
       {!isLoading && (
-        <ThemedFab icon="plus" onPress={handleCreateNew} style={{ bottom: 24 + safeBottom }} />
+        <ThemedFab icon="plus" onPress={handleCreateNew} style={{ bottom: 96 + safeBottom }} />
       )}
 
       <SettingsMenu

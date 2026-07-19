@@ -13,9 +13,21 @@ import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 
+/**
+ * Screen-name map for tab navigation.
+ * When the user taps a navigation item that corresponds to a primary tab,
+ * we route through the MainTabs navigator so the tab indicator also updates.
+ */
+const SCREEN_TO_TAB: Record<string, string> = {
+  ChatList: 'Chat',
+  Characters: 'Characters',
+  Settings: 'Settings',
+};
+
 interface SettingsMenuProps {
   visible: boolean;
   onClose: () => void;
+  /** Callback receiving the resolved screen name (mapped for tab targets) */
   onNavigate: (screen: string) => void;
 }
 
@@ -36,10 +48,11 @@ const getMenuSections = (t: ReturnType<typeof useTranslation<'navigation'>>['t']
   {
     title: t('nav.title'),
     items: [
-      { icon: 'chat-processing', label: t('nav.aiChat'), screen: 'ChatList', type: 'navigate' },
+      { icon: 'chat-processing', label: t('nav.aiChat'), screen: 'Chat', type: 'navigate' },
       { icon: 'account-group', label: t('nav.characters'), screen: 'Characters', type: 'navigate' },
       { icon: 'tune', label: t('nav.settings'), screen: 'Settings', type: 'navigate' },
-      { icon: 'home', label: t('nav.home'), screen: 'Landing', type: 'navigate' },
+      { icon: 'compass', label: t('nav.discover'), screen: 'Discover', type: 'navigate' },
+      { icon: 'magnify', label: t('nav.search'), screen: 'Search', type: 'navigate' },
     ],
   },
   {
@@ -83,9 +96,13 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   const accentPrimary = theme.colors.accent.primary;
   const accentSecondary = theme.colors.accent.secondary ?? theme.colors.accent.primaryHover;
 
-  const handleItemPress = (screen: string) => {
+  const handleItemPress = (item: MenuItem) => {
     onClose();
-    onNavigate(screen);
+    // Resolve tab-mapped screen name for navigation
+    const resolved = (item.type === 'navigate')
+      ? (SCREEN_TO_TAB[item.screen] ?? item.screen)
+      : item.screen;
+    onNavigate(resolved);
   };
 
   return (
@@ -143,17 +160,14 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                     </View>
 
                     {section.items.map((item, itemIndex) => {
-                      const isNavigate = item.type === 'navigate';
-                      const iconColor = isNavigate
-                        ? (accentSecondary ?? accentPrimary)
-                        : accentPrimary;
+                      const iconColor = accentSecondary ?? accentPrimary;
                       const isLastInSection = itemIndex === section.items.length - 1;
 
                       return (
                         <TouchableOpacity
                           key={itemIndex}
                           style={styles.menuItem}
-                          onPress={() => handleItemPress(item.screen)}
+                          onPress={() => handleItemPress(item)}
                           activeOpacity={0.65}
                         >
                           {/* Icon badge */}

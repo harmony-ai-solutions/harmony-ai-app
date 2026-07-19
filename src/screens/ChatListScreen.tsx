@@ -74,12 +74,15 @@ const getEntityDisplayName = (
   return entityId;
 };
 
+// Tab-screen navigation: routes are dispatched to the parent root stack.
+// Using 'any' here avoids CompositeNavigationProp boilerplate while
+// React Navigation v7 resolves routes across nested navigators at runtime.
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export const ChatListScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
-  const navigation = useNavigation<NavigationProp>();
+  const navigation = useNavigation<any>();
   const { isPaired } = useSyncConnection();
   const { t } = useTranslation('chatList');
   const [menuVisible, setMenuVisible] = useState(false);
@@ -527,10 +530,6 @@ export const ChatListScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       <ThemedAppbar style={{ zIndex: 10 }}>
-        <Appbar.BackAction
-          color={theme?.colors.text.primary}
-          onPress={() => navigation.navigate('Landing')}
-        />
         <Appbar.Content
           title={
             <View style={styles.titleContainer}>
@@ -625,6 +624,7 @@ export const ChatListScreen: React.FC = () => {
           data={chatList}
           renderItem={renderItem}
           keyExtractor={item => item.interactionId}
+          contentContainerStyle={{ paddingBottom: 100 }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
@@ -646,7 +646,7 @@ export const ChatListScreen: React.FC = () => {
         />
       )}
 
-      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: 24 + safeBottom }} />
+      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: 90 + safeBottom }} />
 
       <SettingsMenu
         visible={menuVisible}

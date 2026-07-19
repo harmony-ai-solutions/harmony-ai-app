@@ -5,15 +5,13 @@ import {
   DefaultTheme,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { MainTabNavigator } from './MainTabNavigator';
 import { LandingScreen } from '../screens/LandingScreen';
-import { ChatListScreen } from '../screens/ChatListScreen';
 import { ChatDetailScreen } from '../screens/ChatDetailScreen';
-import { CharactersScreen } from '../screens/CharactersScreen';
 import { CharacterProfileEditScreen } from '../screens/CharacterProfileEditScreen';
 import { CreateAIScreen } from '../screens/CreateAIScreen';
 import { EntityConfigScreen } from '../screens/EntityConfigScreen';
 import { EntityConfigEditScreen } from '../screens/EntityConfigEditScreen';
-import { SettingsScreen } from '../screens/SettingsScreen';
 import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
 import { EmojiActionEditorScreen } from '../screens/settings/EmojiActionEditorScreen';
@@ -27,22 +25,22 @@ import { SyncSettingsScreen } from '../screens/settings/SyncSettingsScreen';
 import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen';
 
 export type RootStackParamList = {
+  /** Tab container — the primary navigation surface (5-tab layout) */
+  MainTabs: undefined;
+  /** Legacy landing (kept for backward-compatible deep links) */
   Landing: undefined;
-  ChatList: undefined;
+  /** Full-screen chat detail pushed over tabs */
   ChatDetail: {
-    interactionId: string;           // existing interaction or temp UUIDv7
-    participantKey?: string;         // for temp UUIDv7 path
-    participantIds?: string[];       // ALL participants including own entity
-    entityId: string;                // impersonated entity (ownEntityId)
-    // Display info for header (derived from participants)
-    entityName?: string;             // display name for header (private: partner name; group: comma-joined names)
+    interactionId: string;
+    participantKey?: string;
+    participantIds?: string[];
+    entityId: string;
+    entityName?: string;
   };
-  Characters: undefined;
   CharacterProfileEdit: { profileId?: string };
   CreateAI: { prefillProfileId?: string };
   EntityConfig: undefined;
   EntityConfigEdit: { entityId?: string };
-  Settings: undefined;
   Login: undefined;
   Register: undefined;
   ConnectionSetup: undefined;
@@ -66,8 +64,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 /**
  * Transparent navigation theme — lets the atmospheric background
- * aurora layer bleed through all screens. Only the screens'
- * glass/translucent surfaces sit on top.
+ * aurora layer bleed through all screens.
  */
 const transparentNavTheme = {
   ...DefaultTheme,
@@ -92,17 +89,21 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
   return (
     <NavigationContainer ref={navigationRef} theme={transparentNavTheme}>
       <Stack.Navigator
-        initialRouteName="Landing"
+        initialRouteName="MainTabs"
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: 'transparent' },
           animation: 'fade',
         }}
       >
+        {/* ── Primary tab container (5-tab layout: Discover | Search | Chat | Characters | Settings) ── */}
+        <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+
+        {/* ── Legacy landing (kept for backward-compatible deep links) ── */}
         <Stack.Screen name="Landing" component={LandingScreen} />
-        <Stack.Screen name="ChatList" component={ChatListScreen} />
+
+        {/* ── Full-screen detail routes pushed over the tabs ─────────── */}
         <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
-        <Stack.Screen name="Characters" component={CharactersScreen} />
         <Stack.Screen
           name="CharacterProfileEdit"
           component={CharacterProfileEditScreen}
@@ -113,7 +114,8 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           name="EntityConfigEdit"
           component={EntityConfigEditScreen}
         />
-        <Stack.Screen name="Settings" component={SettingsScreen} />
+
+        {/* ── Settings sub-pages (pushed over tabs from Settings tab) ── */}
         <Stack.Screen name="ConnectionSetup" component={ConnectionSetupScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Register" component={RegisterScreen} />
@@ -132,6 +134,8 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           name="ModuleConfigEdit"
           component={ModuleConfigEditScreen}
         />
+
+        {/* ── DEV-only screens ──────────────────────────────────────── */}
         {__DEV__ && (
           <>
             <Stack.Screen

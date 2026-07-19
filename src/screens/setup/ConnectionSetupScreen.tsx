@@ -28,11 +28,8 @@ export const ConnectionSetupScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { showToast, isPaired, isConnected, isConnecting, reconnect } = useSyncConnection();
   const { t } = useTranslation('connection');
-<<<<<<< HEAD
-=======
   const { t: ta } = useTranslation('auth');
   const { status: authStatus } = useAuth();
->>>>>>> 89108f84f460425ac7ff9b682d305132b728be3a
   
   // ── Mode toggle state ─────────────────────────────────────────────────
   const [connectionMode, setConnectionMode] = useState<'selfhosted' | 'cloud'>('selfhosted');

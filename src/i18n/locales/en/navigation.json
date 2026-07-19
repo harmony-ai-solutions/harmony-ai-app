@@ -4,7 +4,10 @@
     "aiChat": "AI Chat",
     "characters": "Characters",
     "settings": "Settings",
-    "home": "Home"
+    "home": "Home",
+    "discover": "Discover",
+    "search": "Search",
+    "chat": "Chat"
   },
   "user": {
     "title": "User",
