@@ -21,6 +21,7 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
 import { hexToRgba } from '../utils/colorUtils';
+import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 
 export const SearchScreen: React.FC = () => {
   const { theme } = useAppTheme();
@@ -36,7 +37,10 @@ export const SearchScreen: React.FC = () => {
   return (
     <ThemedView variant="base" style={styles.container}>
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingTop: safeTop + 16 }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: safeTop + 16, paddingBottom: TAB_BAR_CONTENT_PAD },
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
@@ -113,8 +117,6 @@ export const SearchScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Bottom spacer for glass tab bar clearance */}
-        <View style={styles.bottomSpacer} />
       </ScrollView>
     </ThemedView>
   );
@@ -124,7 +126,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 140,
     flexGrow: 1,
   },
   accentStripe: {
@@ -188,9 +189,6 @@ const styles = StyleSheet.create({
   resultText: {
     flex: 1,
     gap: 2,
-  },
-  bottomSpacer: {
-    height: 60,
   },
 });
 

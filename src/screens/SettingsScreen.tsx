@@ -16,6 +16,7 @@ import { ThemedCard } from '../components/themed/ThemedCard';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
+import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
 // Using 'any' here avoids CompositeNavigationProp boilerplate while
@@ -90,7 +91,7 @@ export const SettingsScreen: React.FC = () => {
       </ThemedAppbar>
 
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 + safeBottom }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }]}
         showsVerticalScrollIndicator={false}
       >
         {/* ── Connection Card ── */}

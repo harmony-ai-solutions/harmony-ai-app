@@ -26,10 +26,14 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { hexToRgba } from '../../utils/colorUtils';
 
 // ── Layout constants ────────────────────────────────────────────────────────
-const TAB_BAR_MARGIN_H = 20;
-const TAB_BAR_MARGIN_BOTTOM = 32;
-const TAB_BAR_RADIUS = 28;
-const TAB_BAR_HEIGHT = 72;
+export const TAB_BAR_MARGIN_H = 20;
+export const TAB_BAR_MARGIN_BOTTOM = 32;
+export const TAB_BAR_RADIUS = 28;
+export const TAB_BAR_HEIGHT = 72;
+export const TAB_BAR_TOTAL_HEIGHT = TAB_BAR_HEIGHT + TAB_BAR_MARGIN_BOTTOM; // 104 — total vertical footprint
+export const TAB_BAR_CONTENT_PAD = TAB_BAR_TOTAL_HEIGHT + 16; // 120 — recommended content padding
+export const TAB_BAR_FAB_OFFSET = TAB_BAR_TOTAL_HEIGHT + 12; // 116 — recommended FAB bottom offset
+
 const INDICATOR_HEIGHT = 3;
 const INDICATOR_WIDTH = 28;
 const INDICATOR_RADIUS = 2;
@@ -83,8 +87,8 @@ export const GlassTabBar: React.FC<BottomTabBarProps> = ({
   const textPrimary = theme.colors.text.primary;
   const textMuted = theme.colors.text.muted;
 
-  /** Glass background: deep gothic charcoal at ~50% opacity */
-  const glassBg = hexToRgba(baseHex, 0.50);
+  /** Glass background: deep gothic charcoal at 82% opacity — prevents background bleed-through while preserving glass aesthetic */
+  const glassBg = hexToRgba(baseHex, 0.82);
 
   // ── Animate indicator on active-tab change ─────────────────────────────
   useEffect(() => {
@@ -147,17 +151,6 @@ export const GlassTabBar: React.FC<BottomTabBarProps> = ({
       ]}
       pointerEvents="box-none"
     >
-      {/* ── Ambient glow aura behind the pill ──────────────────────────── */}
-      <View
-        style={[
-          styles.glowAura,
-          {
-            backgroundColor: hexToRgba(accentPrimary, 0.06),
-            shadowColor: accentPrimary,
-          },
-        ]}
-      />
-
       {/* ── Main pill container ────────────────────────────────────────── */}
       <View
         style={[
@@ -290,19 +283,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     // Slight elevation for Android shadow
     elevation: 12,
-  },
-  /** Ambient glow aura — a blurred halo behind the pill for luminous depth */
-  glowAura: {
-    position: 'absolute',
-    top: -8,
-    left: 10,
-    right: 10,
-    bottom: -8,
-    borderRadius: TAB_BAR_RADIUS + 8,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 16,
-    elevation: 8,
   },
   /** The main pill container with glass background and border */
   pill: {

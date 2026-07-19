@@ -22,6 +22,7 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedFab } from '../components/themed/ThemedFab';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
+import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[CharactersScreen]');
@@ -224,7 +225,7 @@ export const CharactersScreen: React.FC = () => {
           keyExtractor={item => item.id}
           numColumns={2}
           columnWrapperStyle={styles.columnWrapper}
-          contentContainerStyle={[styles.listContent, { paddingBottom: 100 + safeBottom }]}
+          contentContainerStyle={[styles.listContent, { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }]}
           renderItem={({ item }) => (
             <CharacterProfileCard
               profile={item}
@@ -239,7 +240,7 @@ export const CharactersScreen: React.FC = () => {
 
       {/* FAB */}
       {!isLoading && (
-        <ThemedFab icon="plus" onPress={handleCreateNew} style={{ bottom: 96 + safeBottom }} />
+        <ThemedFab icon="plus" onPress={handleCreateNew} style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }} />
       )}
 
       <SettingsMenu

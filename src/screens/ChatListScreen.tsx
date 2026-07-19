@@ -26,6 +26,7 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedFab } from '../components/themed/ThemedFab';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
+import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { getAllEntities } from '../database/repositories/entities';
 import {
   getRecentPhoneInteractions,
@@ -624,7 +625,7 @@ export const ChatListScreen: React.FC = () => {
           data={chatList}
           renderItem={renderItem}
           keyExtractor={item => item.interactionId}
-          contentContainerStyle={{ paddingBottom: 100 }}
+          contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
@@ -646,7 +647,7 @@ export const ChatListScreen: React.FC = () => {
         />
       )}
 
-      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: 90 + safeBottom }} />
+      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }} />
 
       <SettingsMenu
         visible={menuVisible}
