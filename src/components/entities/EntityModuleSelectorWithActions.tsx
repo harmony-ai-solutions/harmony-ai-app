@@ -23,7 +23,7 @@ import { EntityModuleSelector, ModuleConfigOption } from './EntityModuleSelector
 type RootStackParamList = {
   ModuleConfigEdit: {
     moduleType: string;
-    configId?: number;
+    configId?: string;
   };
 };
 
@@ -55,7 +55,7 @@ export const EntityModuleSelectorWithActions: React.FC<
     if (selectedId && selectedId !== '') {
       navigation.navigate('ModuleConfigEdit', {
         moduleType,
-        configId: parseInt(selectedId, 10),
+        configId: selectedId,
       });
     }
   };

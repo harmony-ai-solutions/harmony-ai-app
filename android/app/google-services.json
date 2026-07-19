@@ -1,0 +1,60 @@
+{
+  "_README": "!!! PLACEHOLDER — Must be replaced by the owner with the real google-services.json from GCP !!!",
+  "_README_MORE": "See Phase 9-1 §2.3 in the backend repo for instructions. Both package names (ai.soulbits.chat + ai.soulbits.chat.dev) must each have a client entry with their debug + release SHA-1 certificate fingerprints registered.",
+  "project_info": {
+    "project_number": "000000000000",
+    "project_id": "soulbits-placeholder",
+    "storage_bucket": "soulbits-placeholder.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "android_client_info": {
+          "package_name": "ai.soulbits.chat"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "000000000000-00000000000000000000000000000000.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSy0000000000000000000000000000000000000"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000001",
+        "android_client_info": {
+          "package_name": "ai.soulbits.chat.dev"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "000000000000-00000000000000000000000000000001.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSy0000000000000000000000000000000000001"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

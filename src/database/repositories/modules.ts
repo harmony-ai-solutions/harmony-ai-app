@@ -19,6 +19,7 @@ import {
   VisionConfig,
   ImaginationConfig,
 } from '../models';
+import {generateId} from '../../utils/uuid';
 
 // ============================================================================
 // Backend Config Operations
@@ -26,18 +27,19 @@ import {
 
 export async function createBackendConfig(
   config: Omit<BackendConfig, 'id' | 'deleted_at'>
-): Promise<number> {
+): Promise<string> {
   const db = getDatabase();
+  const id = generateId();
   
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     db.transaction(
       (tx) => {
         tx.executeSql(
-          `INSERT INTO backend_configs (name, provider, provider_config_id)
-           VALUES (?, ?, ?)`,
-          [config.name, config.provider, config.provider_config_id],
-          (_, result) => {
-            resolve(result.insertId!);
+          `INSERT INTO backend_configs (id, name, provider, provider_config_id)
+           VALUES (?, ?, ?, ?)`,
+          [id, config.name, config.provider, config.provider_config_id],
+          () => {
+            resolve(id);
           },
           (_, error) => {
             reject(error);
@@ -50,7 +52,7 @@ export async function createBackendConfig(
   });
 }
 
-export async function getBackendConfig(id: number, includeDeleted = false): Promise<BackendConfig | null> {
+export async function getBackendConfig(id: string, includeDeleted = false): Promise<BackendConfig | null> {
   const db = getDatabase();
   
   const query = includeDeleted
@@ -140,7 +142,7 @@ export async function updateBackendConfig(config: BackendConfig): Promise<void> 
 /**
  * Check if a backend config is in use by any entities
  */
-export async function isBackendConfigInUse(id: number): Promise<boolean> {
+export async function isBackendConfigInUse(id: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT COUNT(*) as count FROM entity_module_mappings WHERE backend_config_id = ? AND deleted_at IS NULL',
@@ -149,7 +151,7 @@ export async function isBackendConfigInUse(id: number): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteBackendConfig(id: number, permanent = false): Promise<void> {
+export async function deleteBackendConfig(id: string, permanent = false): Promise<void> {
   const db = getDatabase();
   
   if (!permanent && await isBackendConfigInUse(id)) {
@@ -181,24 +183,26 @@ export async function deleteBackendConfig(id: number, permanent = false): Promis
 
 export async function createCognitionConfig(
   config: Omit<CognitionConfig, 'id' | 'deleted_at'>
-): Promise<number> {
+): Promise<string> {
   const db = getDatabase();
+  const id = generateId();
   
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     db.transaction(
       (tx) => {
         tx.executeSql(
-          `INSERT INTO cognition_configs (name, provider, provider_config_id, max_cognition_events, generate_expressions)
-           VALUES (?, ?, ?, ?, ?)`,
+          `INSERT INTO cognition_configs (id, name, provider, provider_config_id, max_cognition_events, generate_expressions)
+           VALUES (?, ?, ?, ?, ?, ?)`,
           [
+            id,
             config.name,
             config.provider,
             config.provider_config_id,
             config.max_cognition_events,
             config.generate_expressions,
           ],
-          (_, result) => {
-            resolve(result.insertId!);
+          () => {
+            resolve(id);
           },
           (_, error) => {
             reject(error);
@@ -211,7 +215,7 @@ export async function createCognitionConfig(
   });
 }
 
-export async function getCognitionConfig(id: number, includeDeleted = false): Promise<CognitionConfig | null> {
+export async function getCognitionConfig(id: string, includeDeleted = false): Promise<CognitionConfig | null> {
   const db = getDatabase();
   
   const query = includeDeleted
@@ -320,7 +324,7 @@ export async function updateCognitionConfig(config: CognitionConfig): Promise<vo
 /**
  * Check if a cognition config is in use by any entities
  */
-export async function isCognitionConfigInUse(id: number): Promise<boolean> {
+export async function isCognitionConfigInUse(id: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT COUNT(*) as count FROM entity_module_mappings WHERE cognition_config_id = ? AND deleted_at IS NULL',
@@ -329,7 +333,7 @@ export async function isCognitionConfigInUse(id: number): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteCognitionConfig(id: number, permanent = false): Promise<void> {
+export async function deleteCognitionConfig(id: string, permanent = false): Promise<void> {
   const db = getDatabase();
   
   if (!permanent && await isCognitionConfigInUse(id)) {
@@ -361,24 +365,26 @@ export async function deleteCognitionConfig(id: number, permanent = false): Prom
 
 export async function createMovementConfig(
   config: Omit<MovementConfig, 'id' | 'deleted_at'>
-): Promise<number> {
+): Promise<string> {
   const db = getDatabase();
+  const id = generateId();
   
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     db.transaction(
       (tx) => {
         tx.executeSql(
-          `INSERT INTO movement_configs (name, provider, provider_config_id, startup_sync_timeout, execution_threshold)
-           VALUES (?, ?, ?, ?, ?)`,
+          `INSERT INTO movement_configs (id, name, provider, provider_config_id, startup_sync_timeout, execution_threshold)
+           VALUES (?, ?, ?, ?, ?, ?)`,
           [
+            id,
             config.name,
             config.provider,
             config.provider_config_id,
             config.startup_sync_timeout,
             config.execution_threshold,
           ],
-          (_, result) => {
-            resolve(result.insertId!);
+          () => {
+            resolve(id);
           },
           (_, error) => {
             reject(error);
@@ -391,7 +397,7 @@ export async function createMovementConfig(
   });
 }
 
-export async function getMovementConfig(id: number, includeDeleted = false): Promise<MovementConfig | null> {
+export async function getMovementConfig(id: string, includeDeleted = false): Promise<MovementConfig | null> {
   const db = getDatabase();
   
   const query = includeDeleted
@@ -500,7 +506,7 @@ export async function updateMovementConfig(config: MovementConfig): Promise<void
 /**
  * Check if a movement config is in use by any entities
  */
-export async function isMovementConfigInUse(id: number): Promise<boolean> {
+export async function isMovementConfigInUse(id: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT COUNT(*) as count FROM entity_module_mappings WHERE movement_config_id = ? AND deleted_at IS NULL',
@@ -509,7 +515,7 @@ export async function isMovementConfigInUse(id: number): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteMovementConfig(id: number, permanent = false): Promise<void> {
+export async function deleteMovementConfig(id: string, permanent = false): Promise<void> {
   const db = getDatabase();
   
   if (!permanent && await isMovementConfigInUse(id)) {
@@ -541,23 +547,25 @@ export async function deleteMovementConfig(id: number, permanent = false): Promi
 
 export async function createRAGConfig(
   config: Omit<RAGConfig, 'id' | 'deleted_at'>
-): Promise<number> {
+): Promise<string> {
   const db = getDatabase();
+  const id = generateId();
   
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     db.transaction(
       (tx) => {
         tx.executeSql(
-          `INSERT INTO rag_configs (name, provider, provider_config_id, embedding_concurrency)
-           VALUES (?, ?, ?, ?)`,
+          `INSERT INTO rag_configs (id, name, provider, provider_config_id, embedding_concurrency)
+           VALUES (?, ?, ?, ?, ?)`,
           [
+            id,
             config.name,
             config.provider,
             config.provider_config_id,
             config.embedding_concurrency,
           ],
-          (_, result) => {
-            resolve(result.insertId!);
+          () => {
+            resolve(id);
           },
           (_, error) => {
             reject(error);
@@ -570,7 +578,7 @@ export async function createRAGConfig(
   });
 }
 
-export async function getRAGConfig(id: number, includeDeleted = false): Promise<RAGConfig | null> {
+export async function getRAGConfig(id: string, includeDeleted = false): Promise<RAGConfig | null> {
   const db = getDatabase();
   
   const query = includeDeleted
@@ -675,7 +683,7 @@ export async function updateRAGConfig(config: RAGConfig): Promise<void> {
 /**
  * Check if a RAG config is in use by any entities
  */
-export async function isRAGConfigInUse(id: number): Promise<boolean> {
+export async function isRAGConfigInUse(id: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT COUNT(*) as count FROM entity_module_mappings WHERE rag_config_id = ? AND deleted_at IS NULL',
@@ -684,7 +692,7 @@ export async function isRAGConfigInUse(id: number): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteRAGConfig(id: number, permanent = false): Promise<void> {
+export async function deleteRAGConfig(id: string, permanent = false): Promise<void> {
   const db = getDatabase();
   
   if (!permanent && await isRAGConfigInUse(id)) {
@@ -716,19 +724,21 @@ export async function deleteRAGConfig(id: number, permanent = false): Promise<vo
 
 export async function createSTTConfig(
   config: Omit<STTConfig, 'id' | 'deleted_at'>
-): Promise<number> {
+): Promise<string> {
   const db = getDatabase();
+  const id = generateId();
   
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     db.transaction(
       (tx) => {
         tx.executeSql(
           `INSERT INTO stt_configs (
-            name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
+            id, name, main_stream_time_millis, transition_stream_time_millis, max_buffer_count,
             transcription_provider, transcription_provider_config_id,
             vad_provider, vad_provider_config_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
+            id,
             config.name,
             config.main_stream_time_millis,
             config.transition_stream_time_millis,
@@ -738,8 +748,8 @@ export async function createSTTConfig(
             config.vad_provider,
             config.vad_provider_config_id,
           ],
-          (_, result) => {
-            resolve(result.insertId!);
+          () => {
+            resolve(id);
           },
           (_, error) => {
             reject(error);
@@ -752,7 +762,7 @@ export async function createSTTConfig(
   });
 }
 
-export async function getSTTConfig(id: number, includeDeleted = false): Promise<STTConfig | null> {
+export async function getSTTConfig(id: string, includeDeleted = false): Promise<STTConfig | null> {
   const db = getDatabase();
   
   const query = includeDeleted
@@ -887,7 +897,7 @@ export async function updateSTTConfig(config: STTConfig): Promise<void> {
 /**
  * Check if an STT config is in use by any entities
  */
-export async function isSTTConfigInUse(id: number): Promise<boolean> {
+export async function isSTTConfigInUse(id: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT COUNT(*) as count FROM entity_module_mappings WHERE stt_config_id = ? AND deleted_at IS NULL',
@@ -896,7 +906,7 @@ export async function isSTTConfigInUse(id: number): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteSTTConfig(id: number, permanent = false): Promise<void> {
+export async function deleteSTTConfig(id: string, permanent = false): Promise<void> {
   const db = getDatabase();
   
   if (!permanent && await isSTTConfigInUse(id)) {
@@ -928,16 +938,18 @@ export async function deleteSTTConfig(id: number, permanent = false): Promise<vo
 
 export async function createTTSConfig(
   config: Omit<TTSConfig, 'id' | 'deleted_at'>
-): Promise<number> {
+): Promise<string> {
   const db = getDatabase();
+  const id = generateId();
   
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     db.transaction(
       (tx) => {
         tx.executeSql(
-          `INSERT INTO tts_configs (name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO tts_configs (id, name, provider, provider_config_id, output_type, words_to_replace, vocalize_nonverbal)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
+            id,
             config.name,
             config.provider,
             config.provider_config_id,
@@ -945,8 +957,8 @@ export async function createTTSConfig(
             config.words_to_replace,
             config.vocalize_nonverbal,
           ],
-          (_, result) => {
-            resolve(result.insertId!);
+          () => {
+            resolve(id);
           },
           (_, error) => {
             reject(error);
@@ -959,7 +971,7 @@ export async function createTTSConfig(
   });
 }
 
-export async function getTTSConfig(id: number, includeDeleted = false): Promise<TTSConfig | null> {
+export async function getTTSConfig(id: string, includeDeleted = false): Promise<TTSConfig | null> {
   const db = getDatabase();
   
   const query = includeDeleted
@@ -1072,7 +1084,7 @@ export async function updateTTSConfig(config: TTSConfig): Promise<void> {
 /**
  * Check if a TTS config is in use by any entities
  */
-export async function isTTSConfigInUse(id: number): Promise<boolean> {
+export async function isTTSConfigInUse(id: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT COUNT(*) as count FROM entity_module_mappings WHERE tts_config_id = ? AND deleted_at IS NULL',
@@ -1081,7 +1093,7 @@ export async function isTTSConfigInUse(id: number): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteTTSConfig(id: number, permanent = false): Promise<void> {
+export async function deleteTTSConfig(id: string, permanent = false): Promise<void> {
   const db = getDatabase();
   
   if (!permanent && await isTTSConfigInUse(id)) {
@@ -1113,24 +1125,26 @@ export async function deleteTTSConfig(id: number, permanent = false): Promise<vo
 
 export async function createVisionConfig(
   config: Omit<VisionConfig, 'id' | 'deleted_at'>
-): Promise<number> {
+): Promise<string> {
   const db = getDatabase();
+  const id = generateId();
   
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     db.transaction(
       (tx) => {
         tx.executeSql(
-          `INSERT INTO vision_configs (name, provider, provider_config_id, resolution_width, resolution_height)
-           VALUES (?, ?, ?, ?, ?)`,
+          `INSERT INTO vision_configs (id, name, provider, provider_config_id, resolution_width, resolution_height)
+           VALUES (?, ?, ?, ?, ?, ?)`,
           [
+            id,
             config.name,
             config.provider,
             config.provider_config_id,
             config.resolution_width,
             config.resolution_height,
           ],
-          (_, result) => {
-            resolve(result.insertId!);
+          () => {
+            resolve(id);
           },
           (_, error) => {
             reject(error);
@@ -1143,7 +1157,7 @@ export async function createVisionConfig(
   });
 }
 
-export async function getVisionConfig(id: number, includeDeleted = false): Promise<VisionConfig | null> {
+export async function getVisionConfig(id: string, includeDeleted = false): Promise<VisionConfig | null> {
   const db = getDatabase();
   
   const query = includeDeleted
@@ -1239,7 +1253,7 @@ export async function updateVisionConfig(config: VisionConfig): Promise<void> {
 /**
  * Check if a vision config is in use by any entities
  */
-export async function isVisionConfigInUse(id: number): Promise<boolean> {
+export async function isVisionConfigInUse(id: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT COUNT(*) as count FROM entity_module_mappings WHERE vision_config_id = ? AND deleted_at IS NULL',
@@ -1248,7 +1262,7 @@ export async function isVisionConfigInUse(id: number): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteVisionConfig(id: number, permanent = false): Promise<void> {
+export async function deleteVisionConfig(id: string, permanent = false): Promise<void> {
   const db = getDatabase();
   
   if (!permanent && await isVisionConfigInUse(id)) {
@@ -1280,22 +1294,24 @@ export async function deleteVisionConfig(id: number, permanent = false): Promise
 
 export async function createImaginationConfig(
   config: Omit<ImaginationConfig, 'id' | 'deleted_at'>
-): Promise<number> {
+): Promise<string> {
   const db = getDatabase();
+  const id = generateId();
 
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     db.transaction(
       (tx) => {
         tx.executeSql(
-          `INSERT INTO imagination_configs (name, provider, provider_config_id)
-           VALUES (?, ?, ?)`,
+          `INSERT INTO imagination_configs (id, name, provider, provider_config_id)
+           VALUES (?, ?, ?, ?)`,
           [
+            id,
             config.name,
             config.provider,
             config.provider_config_id,
           ],
-          (_, result) => {
-            resolve(result.insertId!);
+          () => {
+            resolve(id);
           },
           (_, error) => {
             reject(error);
@@ -1308,7 +1324,7 @@ export async function createImaginationConfig(
   });
 }
 
-export async function getImaginationConfig(id: number, includeDeleted = false): Promise<ImaginationConfig | null> {
+export async function getImaginationConfig(id: string, includeDeleted = false): Promise<ImaginationConfig | null> {
   const db = getDatabase();
 
   const query = includeDeleted
@@ -1398,7 +1414,7 @@ export async function updateImaginationConfig(config: ImaginationConfig): Promis
 /**
  * Check if an imagination config is in use by any entities
  */
-export async function isImaginationConfigInUse(id: number): Promise<boolean> {
+export async function isImaginationConfigInUse(id: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT COUNT(*) as count FROM entity_module_mappings WHERE imagination_config_id = ? AND deleted_at IS NULL',
@@ -1407,7 +1423,7 @@ export async function isImaginationConfigInUse(id: number): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteImaginationConfig(id: number, permanent = false): Promise<void> {
+export async function deleteImaginationConfig(id: string, permanent = false): Promise<void> {
   const db = getDatabase();
 
   if (!permanent && await isImaginationConfigInUse(id)) {

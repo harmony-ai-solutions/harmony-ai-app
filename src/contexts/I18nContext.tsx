@@ -32,6 +32,10 @@ import navigation from '../i18n/locales/en/navigation.json';
 import database from '../i18n/locales/en/database.json';
 import config from '../i18n/locales/en/config.json';
 import development from '../i18n/locales/en/development.json';
+<<<<<<< HEAD
+=======
+import auth from '../i18n/locales/en/auth.json';
+>>>>>>> 89108f84f460425ac7ff9b682d305132b728be3a
 
 // ── Storage key ─────────────────────────────────────────────────────────────
 
@@ -79,6 +83,10 @@ const resources = {
     database,
     config,
     development,
+<<<<<<< HEAD
+=======
+    auth,
+>>>>>>> 89108f84f460425ac7ff9b682d305132b728be3a
   },
 };
 
@@ -106,6 +114,10 @@ const i18nConfig: InitOptions = {
     'database',
     'config',
     'development',
+<<<<<<< HEAD
+=======
+    'auth',
+>>>>>>> 89108f84f460425ac7ff9b682d305132b728be3a
   ],
   interpolation: {
     escapeValue: false, // React already escapes

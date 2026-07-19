@@ -23,7 +23,7 @@ export interface CharacterProfile {
   example_dialogues: string | null;
   typing_speed_wpm: number;
   audio_response_chance_percent: number;
-  vision_config_id: number | null;
+  vision_config_id: string | null;
   lifecycle_config: string | null; // Opaque JSON blob
   created_at: Date;
   updated_at: Date;
@@ -43,14 +43,14 @@ export interface Entity {
 
 export interface EntityModuleMapping {
   entity_id: string;
-  backend_config_id: number | null;
-  cognition_config_id: number | null;
-  imagination_config_id: number | null;
-  movement_config_id: number | null;
-  rag_config_id: number | null;
-  stt_config_id: number | null;
-  tts_config_id: number | null;
-  vision_config_id: number | null;
+  backend_config_id: string | null;
+  cognition_config_id: string | null;
+  imagination_config_id: string | null;
+  movement_config_id: string | null;
+  rag_config_id: string | null;
+  stt_config_id: string | null;
+  tts_config_id: string | null;
+  vision_config_id: string | null;
   deleted_at: Date | null;
 }
 
@@ -59,7 +59,7 @@ export interface EntityModuleMapping {
 // ============================================================================
 
 export interface OpenAIProviderConfig {
-  id: number;
+  id: string;
   name: string;
   api_key: string;
   model: string | null;
@@ -88,7 +88,7 @@ export interface OpenAIProviderConfig {
 }
 
 export interface OpenRouterProviderConfig {
-  id: number;
+  id: string;
   name: string;
   api_key: string;
   model: string | null;
@@ -119,7 +119,7 @@ export interface OpenRouterProviderConfig {
 }
 
 export interface OpenAICompatibleProviderConfig {
-  id: number;
+  id: string;
   name: string;
   base_url: string;
   api_key: string | null;
@@ -145,7 +145,7 @@ export interface OpenAICompatibleProviderConfig {
 }
 
 export interface HarmonySpeechProviderConfig {
-  id: number;
+  id: string;
   name: string;
   endpoint: string;
   model: string | null;
@@ -157,7 +157,7 @@ export interface HarmonySpeechProviderConfig {
 }
 
 export interface ElevenLabsProviderConfig {
-  id: number;
+  id: string;
   name: string;
   api_key: string;
   voice_id: string | null;
@@ -170,7 +170,7 @@ export interface ElevenLabsProviderConfig {
 }
 
 export interface KindroidProviderConfig {
-  id: number;
+  id: string;
   name: string;
   api_key: string;
   kindroid_id: string;
@@ -178,7 +178,7 @@ export interface KindroidProviderConfig {
 }
 
 export interface KajiwotoProviderConfig {
-  id: number;
+  id: string;
   name: string;
   username: string;
   password: string;
@@ -187,7 +187,7 @@ export interface KajiwotoProviderConfig {
 }
 
 export interface CharacterAIProviderConfig {
-  id: number;
+  id: string;
   name: string;
   api_token: string;
   chatroom_url: string;
@@ -195,21 +195,21 @@ export interface CharacterAIProviderConfig {
 }
 
 export interface LocalAIProviderConfig {
-  id: number;
+  id: string;
   name: string;
   model: string;
   deleted_at: Date | null;
 }
 
 export interface MistralProviderConfig {
-  id: number;
+  id: string;
   name: string;
   api_key: string;
   deleted_at: Date | null;
 }
 
 export interface OllamaProviderConfig {
-  id: number;
+  id: string;
   name: string;
   base_url: string;
   model: string | null;
@@ -217,7 +217,7 @@ export interface OllamaProviderConfig {
 }
 
 export interface ComfyUIProviderConfig {
-  id: number;
+  id: string;
   name: string;
   base_url: string;
   api_key: string;
@@ -226,7 +226,7 @@ export interface ComfyUIProviderConfig {
 }
 
 export interface XAIProviderConfig {
-  id: number;
+  id: string;
   name: string;
   api_key: string;
   model: string | null;
@@ -249,7 +249,7 @@ export interface XAIProviderConfig {
 }
 
 export interface GoogleProviderConfig {
-  id: number;
+  id: string;
   name: string;
   api_key: string;
   model: string | null;
@@ -268,7 +268,7 @@ export interface GoogleProviderConfig {
 }
 
 export interface AnthropicProviderConfig {
-  id: number;
+  id: string;
   name: string;
   api_key: string;
   model: string | null;
@@ -282,65 +282,91 @@ export interface AnthropicProviderConfig {
   deleted_at: Date | null;
 }
 
+export interface SoulbitsCloudProviderConfig {
+  id: string;
+  name: string;
+  base_url: string;
+  api_key: string;
+  model: string | null;
+  max_tokens: number | null;
+  max_completion_tokens: number | null;
+  temperature: number | null;
+  top_p: number | null;
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  n: number | null;
+  stop_tokens: string | null; // JSON array
+  seed: number | null;
+  response_format: string | null; // JSON string
+  sampling_preset_name: string;
+  extra_params: string; // JSON string
+  voice: string | null;
+  speed: number | null;
+  format: string | null;
+  image_aspect_ratio: string | null;
+  image_size: string | null;
+  deleted_at: Date | null;
+}
+
 // ============================================================================
 // Module Configuration Models
 // ============================================================================
 
 export interface BackendConfig {
-  id: number;
+  id: string;
   name: string;
   provider: string;
-  provider_config_id: number;
+  provider_config_id: string | null;
   deleted_at: Date | null;
 }
 
 export interface MovementConfig {
-  id: number;
+  id: string;
   name: string;
   provider: string;
-  provider_config_id: number;
+  provider_config_id: string | null;
   startup_sync_timeout: number | null;
   execution_threshold: number | null;
   deleted_at: Date | null;
 }
 
 export interface STTConfig {
-  id: number;
+  id: string;
   name: string;
   main_stream_time_millis: number | null;
   transition_stream_time_millis: number | null;
   max_buffer_count: number | null;
   transcription_provider: string;
-  transcription_provider_config_id: number;
+  transcription_provider_config_id: string | null;
   vad_provider: string;
-  vad_provider_config_id: number;
+  vad_provider_config_id: string | null;
   deleted_at: Date | null;
 }
 
 export interface CognitionConfig {
-  id: number;
+  id: string;
   name: string;
   provider: string;
-  provider_config_id: number;
+  provider_config_id: string | null;
   max_cognition_events: number | null;
   generate_expressions: number | null;
   deleted_at: Date | null;
 }
 
 export interface RAGConfig {
-  id: number;
+  id: string;
   name: string;
   provider: string;
-  provider_config_id: number;
+  provider_config_id: string | null;
   embedding_concurrency: number | null;
   deleted_at: Date | null;
 }
 
 export interface TTSConfig {
-  id: number;
+  id: string;
   name: string;
   provider: string;
-  provider_config_id: number;
+  provider_config_id: string | null;
   output_type: string | null;
   words_to_replace: string | null;
   vocalize_nonverbal: number | null;
@@ -348,20 +374,20 @@ export interface TTSConfig {
 }
 
 export interface VisionConfig {
-  id: number;
+  id: string;
   name: string;
   provider: string;
-  provider_config_id: number;
+  provider_config_id: string | null;
   resolution_width: number;
   resolution_height: number;
   deleted_at: Date | null;
 }
 
 export interface ImaginationConfig {
-  id: number;
+  id: string;
   name: string;
   provider: string;
-  provider_config_id: number;
+  provider_config_id: string | null;
   deleted_at: Date | null;
 }
 
@@ -500,7 +526,8 @@ export type ProviderConfig =
   | ComfyUIProviderConfig
   | XAIProviderConfig
   | GoogleProviderConfig
-  | AnthropicProviderConfig;
+  | AnthropicProviderConfig
+  | SoulbitsCloudProviderConfig;
 
 export type ModuleConfig =
   | BackendConfig

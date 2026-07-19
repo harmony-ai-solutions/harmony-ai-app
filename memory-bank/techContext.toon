@@ -4,6 +4,7 @@
 @Data: SQLite (messages/characters/interactions/emoji_actions, future), AsyncStorage (settings/preferences/reply mode), SQLCipher encryption, React Native Keychain (secure storage).
 @Network: Axios (REST), WebSocket (real-time), reconnection logic, retry with backoff, session resume on reconnect.
 @Build: Metro Bundler, Gradle 8.13 (NOT 9.0+), Android SDK API 24-33, JDK 17.
+@BuildFlavors: react-native-config@1.6.1 wired into src/config/cloud.ts; IS_BETA coercion (=== true || === 'true'). Android productFlavors dev/prod (buildConfigField, applicationIdSuffix ".dev"). iOS CI-driven (env regeneration + PRODUCT_BUNDLE_IDENTIFIER override). google-services plugin 4.4.2.
 @Dev Tools: TypeScript compiler, ESLint, Prettier, Jest, React Native Debugger, hot reload.
 @Future Integrations:
 - On-Device AI: React Native Executorch (PyTorch models, quantized up to 7B)
