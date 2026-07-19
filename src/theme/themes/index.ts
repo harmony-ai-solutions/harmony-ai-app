@@ -6,29 +6,42 @@ import { oceanBreeze } from './oceanBreeze';
 import { forestNight } from './forestNight';
 import { sunsetGlow } from './sunsetGlow';
 import { pureDark } from './pureDark';
-import { soulBitsDark } from './soulBitsDark';
 import { soulBitsLight } from './soulBitsLight';
 
 /**
- * All default themes — Haute Goth is the default.
- * Other themes remain available for user switching.
+ * SoulBits official themes — curated brand themes.
+ * SoulBits Official Dark is the default.
  */
-export const defaultThemes: Theme[] = [
-    hauteGoth,         // NEW DEFAULT — Dark Academia Glassmorphism
+export const soulBitsThemes: Theme[] = [
+    hauteGoth,       // DEFAULT — SoulBits Official Dark (Obsidian Glass Luminescence)
+    soulBitsLight,   // SoulBits Official Light
+];
+
+/**
+ * Other available themes for user switching.
+ */
+export const otherThemes: Theme[] = [
     midnightRose,
     classicHarmony,
     oceanBreeze,
     forestNight,
     sunsetGlow,
     pureDark,
-    soulBitsDark,
-    soulBitsLight,
+];
+
+/**
+ * All default themes (flat array for theme context initialization).
+ * SoulBits Official Dark is the default.
+ */
+export const defaultThemes: Theme[] = [
+    ...soulBitsThemes,
+    ...otherThemes,
 ];
 
 /**
  * Default theme ID
  */
-export const DEFAULT_THEME_ID = 'haute-goth';
+export const DEFAULT_THEME_ID = 'soulbits-official-dark';
 
 /**
  * Get theme by ID
@@ -52,6 +65,5 @@ export {
     forestNight,
     sunsetGlow,
     pureDark,
-    soulBitsDark,
     soulBitsLight,
 };

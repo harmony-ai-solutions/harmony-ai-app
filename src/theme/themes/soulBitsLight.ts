@@ -1,9 +1,9 @@
 import { Theme } from '../types';
 
 export const soulBitsLight: Theme = {
-    id: 'soulbits-light',
-    name: 'SoulBits Light',
-    description: 'Airy light theme with periwinkle lavender and electric blue accents — Where Soul Meets Code',
+    id: 'soulbits-official-light',
+    name: 'SoulBits Official Light',
+    description: 'The official SoulBits light theme — airy light with periwinkle lavender and electric blue accents',
     version: '1.0.0',
     colors: {
         background: {

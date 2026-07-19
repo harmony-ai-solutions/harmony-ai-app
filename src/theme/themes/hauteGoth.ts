@@ -1,15 +1,15 @@
 import { Theme } from '../types';
 
 /**
- * Haute Goth — Obsidian Glass Luminescence
+ * SoulBits Official Dark — Obsidian Glass Luminescence
  * Deep goth blue-black canvas with radiant neon magenta and indigo accents,
  * 50% opacity Obsidian Glass cards, vivid hairline gradient borders,
  * and ambient magenta glow shadows.
  */
 export const hauteGoth: Theme = {
-    id: 'haute-goth',
-    name: 'Haute Goth',
-    description: 'Dark academia glassmorphism — deep goth blue-black with neon magenta and indigo accents',
+    id: 'soulbits-official-dark',
+    name: 'SoulBits Official Dark',
+    description: 'The official SoulBits dark theme — deep goth blue-black with neon magenta and indigo accents',
     version: '1.1.0',
     colors: {
         background: {

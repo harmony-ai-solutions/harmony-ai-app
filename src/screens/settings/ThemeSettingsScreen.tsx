@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
     View,
     Text,
@@ -24,6 +24,7 @@ import { ThemeCard } from '../../components/settings/ThemeCard';
 import { EmojiStyleCard } from '../../components/settings/EmojiStyleCard';
 import { Theme } from '../../theme/types';
 import { EmojiSet } from '../../types/emoji';
+import { soulBitsThemes, otherThemes } from '../../theme/themes';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ThemeSettings'>;
 
@@ -51,6 +52,18 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
     ];
 
     const [systemThemeEnabled, setSystemThemeEnabled] = useState(themeMode === 'system');
+
+    // Separate custom themes from built-in ones
+    const customThemes = useMemo(
+        () => availableThemes.filter(t => t.isCustom),
+        [availableThemes],
+    );
+
+    // Merge otherThemes with custom themes for the second section
+    const otherAndCustomThemes = useMemo(
+        () => [...otherThemes, ...customThemes],
+        [customThemes],
+    );
 
     if (!theme) return null;
 
@@ -248,13 +261,31 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                     </View>
                 </View>
 
-                {/* Available Themes */}
+                {/* SoulBits Themes */}
                 <View style={styles.themesSection}>
                     <Text style={[styles.label, { color: theme.colors.text.muted }]}>
-                        AVAILABLE THEMES
+                        SOULBITS THEMES
                     </Text>
                     <View style={styles.themesGrid}>
-                        {availableThemes.map((t) => (
+                        {soulBitsThemes.map((t) => (
+                            <ThemeCard
+                                key={t.id}
+                                theme={t}
+                                isActive={t.id === theme.id}
+                                onPress={() => handleThemeSelect(t.id)}
+                                onEdit={() => handleEditTheme(t)}
+                            />
+                        ))}
+                    </View>
+                </View>
+
+                {/* Other Available Themes */}
+                <View style={styles.themesSection}>
+                    <Text style={[styles.label, { color: theme.colors.text.muted }]}>
+                        OTHER AVAILABLE THEMES
+                    </Text>
+                    <View style={styles.themesGrid}>
+                        {otherAndCustomThemes.map((t) => (
                             <ThemeCard
                                 key={t.id}
                                 theme={t}
