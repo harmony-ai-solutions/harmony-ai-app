@@ -252,6 +252,80 @@ async function getAppliedMigrations(db: SQLiteDatabase): Promise<Set<number>> {
   return appliedVersions;
 }
 
+// ---------------------------------------------------------------------------
+// Migration SQL safety guard
+// ---------------------------------------------------------------------------
+// SQLite shipped on many Android devices predates the versions that support
+// `ALTER TABLE ... DROP COLUMN` (SQLite 3.35.0+) and
+// `ALTER TABLE ... RENAME COLUMN` (SQLite 3.25.0+). A migration that uses
+// either will silently fail (or partially fail) on those devices, leaving the
+// schema in an inconsistent state.
+//
+// To remove or rename a column, use the `_new`-table rebuild pattern:
+//   CREATE TABLE <name>_new ( ...columns without the dropped one... );
+//   INSERT INTO <name>_new (...) SELECT ... FROM <name>;
+//   DROP TABLE <name>;
+//   ALTER TABLE <name>_new RENAME TO <name>;
+//
+// `assertMigrationSqlSupported` enforces this at apply time and fails the
+// migration with an actionable error. SQL comments (`--` line comments and
+// C-style block comments) are stripped first, so commented-out documentation
+// lines (e.g. the FIXME notes in migrations 7 and 21) are NOT flagged.
+const FORBIDDEN_SQLITE_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
+  // `\b` word boundaries ensure we match the keyword, not a substring:
+  // `DROP TABLE`, `DROP INDEX` and `ALTER TABLE ... RENAME TO` stay valid.
+  { pattern: /\bDROP\s+COLUMN\b/i, label: 'DROP COLUMN' },
+  { pattern: /\bRENAME\s+COLUMN\b/i, label: 'RENAME COLUMN' },
+];
+
+/**
+ * Strip SQL comments so commented-out statements are ignored by the guard.
+ * Removes C-style block comments (may span multiple lines) and `--` line
+ * comments. Best-effort: assumes `--` does not appear inside a string literal,
+ * which holds for every migration in this repo.
+ */
+function stripSqlComments(sql: string): string {
+  return sql
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((line) => {
+      const commentStart = line.indexOf('--');
+      return commentStart >= 0 ? line.substring(0, commentStart) : line;
+    })
+    .join('\n');
+}
+
+/**
+ * Fail fast if a migration's executable SQL relies on SQLite syntax that is
+ * unsupported on the SQLite versions shipped with older Android devices.
+ *
+ * Throws an Error naming the offending keyword and pointing at the rebuild
+ * pattern. Throwing here (before any statement is executed and before the
+ * migration is recorded as applied) keeps the schema_migrations table honest
+ * and lets the migration be fixed and retried.
+ */
+function assertMigrationSqlSupported(
+  sql: string,
+  version: number,
+  description: string,
+): void {
+  const executableSql = stripSqlComments(sql);
+  for (const { pattern, label } of FORBIDDEN_SQLITE_PATTERNS) {
+    if (pattern.exec(executableSql)) {
+      throw new Error(
+        `Migration ${version} (${description}) uses unsupported SQLite syntax: "${label}". ` +
+          `Older Android devices ship SQLite versions that do not support ` +
+          `ALTER TABLE ... DROP COLUMN (requires SQLite 3.35.0+) or ` +
+          `ALTER TABLE ... RENAME COLUMN (requires SQLite 3.25.0+). ` +
+          `Use the _new-table rebuild pattern instead: CREATE TABLE <name>_new, ` +
+          `INSERT INTO <name>_new (...) SELECT ... FROM <name>, DROP TABLE <name>, ` +
+          `ALTER TABLE <name>_new RENAME TO <name>. ` +
+          `If this statement was documentation only, keep it inside a SQL "--" comment.`,
+      );
+    }
+  }
+}
+
 /**
  * Apply a single migration within a transaction
  */
@@ -267,28 +341,25 @@ async function applyMigration(
   }
 
   try {
+    // Fail fast if the migration relies on SQLite syntax that is unsupported
+    // on older Android devices (DROP COLUMN / RENAME COLUMN). Throw before
+    // any statement runs so the migration is NOT recorded as applied.
+    assertMigrationSqlSupported(
+      migration.sql,
+      migration.version,
+      migration.description,
+    );
+
     // Execute the migration SQL
+    // Note: SQLite doesn't support multiple statements in executeSql,
+    // so we need to split and execute individually
     const statements = migration.sql
       .split(';')
       .map((s: string) => s.trim())
       .filter((s: string) => s.length > 0);
 
     for (const statement of statements) {
-      try {
-        await db.executeSql(statement);
-      } catch (stmtError: any) {
-        // react-native-sqlite-storage on some Android builds returns
-        // SQLITE_OK (code 0) as a rejected promise for ALTER TABLE ADD
-        // COLUMN ... DEFAULT statements. The operation actually succeeded;
-        // the JS layer falsely wraps it as an error.
-        if (stmtError?.code === 0) {
-          log.debug(
-            `Migration ${migration.version}: swallowed false SQLITE_OK error on: ${statement.substring(0, 80)}`,
-          );
-          continue;
-        }
-        throw stmtError;
-      }
+      await db.executeSql(statement);
     }
 
     // Record the migration
@@ -300,23 +371,7 @@ async function applyMigration(
     if (!silent) {
       log.info(`Successfully applied migration ${migration.version}`);
     }
-  } catch (error: any) {
-    // Also handle SQLITE_OK at the top level (some statements trigger it
-    // without per-statement error wrapping)
-    if (error?.code === 0) {
-      log.debug(`Migration ${migration.version}: swallowed false SQLITE_OK at top-level`);
-      // Record the migration anyway since the statements succeeded
-      try {
-        await db.executeSql(
-          'INSERT INTO schema_migrations (version, description) VALUES (?, ?)',
-          [migration.version, migration.description],
-        );
-      } catch { /* best effort */ }
-      if (!silent) {
-        log.info(`Successfully applied migration ${migration.version}`);
-      }
-      return;
-    }
+  } catch (error) {
     log.error(`Failed to apply migration ${migration.version}:`, error);
     throw error;
   }
