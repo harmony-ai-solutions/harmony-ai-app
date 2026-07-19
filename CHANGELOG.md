@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased - 0.1.0]
 
+### Cloud Integration
+#### Added
+- Soulbits Cloud login: email/password, Google Sign-In (Android), and Apple Sign-In (iOS).
+- Cloud connection via the Soulbits conduct proxy; switch between self-hosted Harmony Link and Soulbits Cloud.
+- Tier-1 roaming sync: per-source lastSync, standard upsert-by-PK across UUID-keyed config tables, switch-warning UX.
+- Proactive PASETO refresh using `TokenResponse.expires_at`; reactive refresh on WebSocket close (1008/4401).
+- Logout instantly invalidates the PASETO server-side via Valkey cutoff.
+- Build flavours: Android `dev`/`prod` productFlavors; iOS dev/prod via CI build-matrix (react-native-config `.env` + bundle-ID override).
+
 ### Chat & Messaging
 
 #### Added

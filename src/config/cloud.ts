@@ -4,24 +4,29 @@
  * Single source of truth for cloud-host endpoints, OAuth identifiers, and
  * auth-service URLs.  Build-flavor injection (Phase 8-1) sets IS_BETA,
  * GOOGLE_WEB_CLIENT_ID, and APPLE_SERVICES_ID via native BuildConfig /
- * xcconfig.  Until 8-1 is wired, Config is undefined and __DEV__ keeps
- * the app pointing at beta.* hosts during local Metro iteration.
+ * xcconfig, surfaced to JS by react-native-config.
+ *
+ * Type pinning contract (resolves 5-1 review concern):
+ *   IS_BETA is declared as `string | boolean` to handle the Android/iOS
+ *   asymmetry — Android's buildConfigField "boolean" produces a JS boolean
+ *   at runtime; iOS xcconfig produces a string.  The `=== true` comparison
+ *   below handles both forms because React Native's bridge coerces iOS
+ *   boolean Info.plist keys to strings for xcconfig values.
+ *   Phase 8-1c (iOS xcconfig) must ensure the Info.plist IS_BETA key is
+ *   typed Boolean so react-native-config surfaces a JS boolean, or the
+ *   expression must be updated to `Config?.IS_BETA === true || Config?.IS_BETA === 'true'`.
+ *   For now the `=== true` arm fires on Android (real boolean) and is
+ *   a no-op on iOS until 8-1c resolves the type story.
  */
 
-// Ambient declaration — react-native-config is NOT installed yet (Phase 8-1).
-// Using `declare const` keeps tsc clean without adding any runtime dependency.
-declare const Config:
-  | {
-      IS_BETA?: boolean;
-      GOOGLE_WEB_CLIENT_ID?: string;
-      APPLE_SERVICES_ID?: string;
-    }
-  | undefined;
+import Config from 'react-native-config';
 
 // ── Flavour detection ──────────────────────────────────────────────────
 // __DEV__ fallback so local Metro (no native flavour) resolves to beta.*.
-// When Config is available (8-1), IS_BETA is a real boolean, never a string.
-const IS_BETA: boolean = __DEV__ ? true : (Config?.IS_BETA === true);
+// IS_BETA is pinned to a real boolean — never a string ambiguity.
+const IS_BETA: boolean = __DEV__
+  ? true
+  : (Config?.IS_BETA === true || Config?.IS_BETA === 'true');
 
 const GOOGLE_WEB_CLIENT_ID: string = Config?.GOOGLE_WEB_CLIENT_ID ?? '';
 const APPLE_SERVICES_ID: string = Config?.APPLE_SERVICES_ID ?? '';

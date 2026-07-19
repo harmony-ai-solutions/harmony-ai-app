@@ -1,5 +1,30 @@
 # Installation Guide
 
+## Build Flavours
+
+The app ships with dev and prod build flavours to distinguish development/beta builds from production releases.
+
+### Android
+
+Android uses `productFlavors` (`dev`/`prod` in `android/app/build.gradle`):
+
+| Flavor | Application ID | Behaviour |
+|--------|---------------|-----------|
+| **dev** | `com.harmonyai.app.dev` | Co-installable alongside prod. Targets beta hosts. |
+| **prod** | `com.harmonyai.app` | Production release. Targets `*.soulbits.app`. |
+
+`react-native-config` surfaces `IS_BETA` (boolean), `GOOGLE_WEB_CLIENT_ID`, and `APPLE_SERVICES_ID` to JavaScript based on the active flavour.
+
+### iOS
+
+iOS uses a **single Xcode scheme** — dev/prod is distinguished by the CI build matrix in `.github/workflows/build-release.yml`:
+
+- The workflow regenerates `.env` (read by `react-native-config`) per matrix entry
+- `PRODUCT_BUNDLE_IDENTIFIER` is overridden: `ai.soulbits.chat.dev` for dev builds
+- No separate `.xcconfig` files or second Xcode scheme
+
+> Apple Sign-In (SIWA) requires a **signed build** with the SIWA entitlement. It does not apply to the current unsigned sideload IPAs — email/password and Google Sign-In are available on sideload builds instead.
+
 ## Android
 
 ### Requirements

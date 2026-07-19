@@ -8,6 +8,7 @@
   - Credential separation unchanged: cloud PASETO in Keychain `com.harmonyai.cloud.auth`; self-hosted `harmony_jwt` in AsyncStorage. `getTokenExpiresAt()` from backend `expires_at` (NOT PASETO decode — v4.local encrypted).
 - Login UIs: `screens/auth/{LoginScreen,RegisterScreen,VerifyPrompt}` + mode toggle in `ConnectionSetupScreen` (self-hosted/cloud, `harmony_mode` persisted). New `auth` i18n namespace registered in `I18nContext`.
 - Social Login: Google (`@react-native-google-signin/google-signin`, typed error discriminator, non-GMS fallback) + Apple (`@invertase/react-native-apple-authentication`, iOS-only AppleButton). Both handle 409 email-conflict messaging.
+- Phase 8 (build flavors + CI) Complete: react-native-config@1.6.1 wired into src/config/cloud.ts (replaced ambient stub); IS_BETA centralized coercion (=== true || === 'true') — Android bridge surfaces JS boolean via BuildConfig reflection; iOS surfaces NSString from .env so cloud.ts coerces. Android productFlavors dev/prod (android/app/build.gradle: buildConfigField "boolean" IS_BETA, dev applicationIdSuffix ".dev", resValue build_config_package, debuggableVariants=["devDebug"], google-services plugin 4.4.2 + placeholder google-services.json both package names). iOS dev/prod is CI-driven (.github/workflows/build-release.yml dev/prod matrix: regenerates .env per entry + PRODUCT_BUNDLE_IDENTIFIER override; single scheme, NO pbxproj/scheme surgery).
 - Circular-dep lesson: 401-refresh-retry logic lives on AuthService.fetch(); authFetch.ts is a thin one-way wrapper (authFetch→AuthService→tokenStorage) — NO dynamic import.
 - Credential separation: cloud PASETO in Keychain (`com.harmonyai.cloud.auth`); self-hosted `harmony_jwt` in AsyncStorage untouched.
 - Provider Expansion Complete: xAI/Google/Anthropic provider support added across all module types. Model field unification (migration 000030). Dead code cleanup. 15 provider schemas in providerFieldSchemas.ts. 21 provider CRUD functions in providers.ts. ModuleConfigEditScreen supports all 15 providers. Module defaults include Google/xAI/Anthropic (maxtokens: 200).
@@ -40,7 +41,6 @@
 - Chat Screens Adapted: ChatListScreen and ChatDetailScreen adapted to InteractionSession model; JOIN-based queries for chat list previews (conversation_messages JOIN interactions).
 - Force Full DB Sync: Option to force full database synchronization at the sync settings screen.
 @Next:
-- Phase 8 (build flavors + CI): Android productFlavors dev/prod + iOS xcconfig; react-native-config injects IS_BETA/GOOGLE_WEB_CLIENT_ID/APPLE_SERVICES_ID into cloud.ts; google-services.json; iOS SIWA entitlement. Deferred to next session.
 - Vision Module Integration: Complete integration with Harmony Link vision module for image understanding and multimodal interactions.
 - Imagination Module Integration: Complete integration with Harmony Link imagination module for autonomous entity actions and initiative behaviors.
 - Emoji Action Backend Pipeline: Complete send-pipeline integration of emoji action AdditionalEffects payload with Harmony Link backend.
@@ -49,6 +49,7 @@
 - Sync Protocol Testing: Validate SYNC_REQUEST → SYNC_DATA → SYNC_COMPLETE → FINALIZE flows.
 - Character Management: Enhanced profiles, avatar caching, character switching improvements.
 - On-Device AI: React Native Executorch integration for offline chat.
+- Phase 8 PENDING (owner): set GOOGLE_WEB_CLIENT_ID/APPLE_SERVICES_ID GitHub Variables + replace placeholder google-services.json (both package names + SHA-1s); first CI dispatch run; SIWA entitlement deferred to signed-build follow-up.
 @Decisions:
 - Chat Message Types: Support 'text', 'audio', 'combined' (image support in progress).
 - Audio Storage: Base64-encoded strings stored in TEXT columns (no BLOB/Uint8Array), transmitted directly via WebSocket.

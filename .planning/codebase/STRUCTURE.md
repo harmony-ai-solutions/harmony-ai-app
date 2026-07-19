@@ -83,7 +83,7 @@ harmony-ai-app/
   - `sync.ts`: Sync/replication utilities
   - `transaction.ts`: `withTransaction()` and `execInTransaction()` helpers
   - `base64.ts`: Base64 encoding utilities for images
-  - `repositories/`: `characters.ts`, `entities.ts`, `conversation_messages.ts`, `interactions.ts`, `emotion_state.ts`, `emoji_actions.ts`, `memories.ts`, `modules.ts`, `providers.ts`, `sync.ts`
+  - `repositories/`: `characters.ts`, `entities.ts`, `conversation_messages.ts`, `interactions.ts`, `emotion_state.ts`, `emoji_actions.ts`, `memories.ts`, `modules.ts`, `sync.ts`, plus per-provider files in `repositories/providers/` (`OpenAIProviderConfigRepository.ts`, `SoulbitsCloudProviderConfigRepository.ts`, etc. — split from monolithic `providers.ts` in Phase 7-0a)
   - `migrations/`: 000001 through 000028, covering initial schema, character cards, chat images, provider configs, emotion state, memories, emoji actions, interactions, presence type
   - `__tests__/`: Test files for characters, entities, memories, modules, providers
 

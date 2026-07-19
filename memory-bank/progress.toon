@@ -1,5 +1,5 @@
 # Harmony AI App Progress
-@Status: Bootstrap complete. Database layer complete with in-app test runner. Chat feature implementation complete. Connection resilience hardened. Session resume, emoji features, interactions data layer, and UI adaptation complete. Provider expansion (xAI/Google/Anthropic) and model field unification complete. Working on vision/imagination module integration.
+@Status: Bootstrap complete. Database layer complete with in-app test runner. Chat feature implementation complete. Connection resilience hardened. Session resume, emoji features, interactions data layer, and UI adaptation complete. Provider expansion (xAI/Google/Anthropic) and model field unification complete. Build flavors + CI (Phase 8) complete. Working on vision/imagination module integration.
 @Completed:
 - Foundation: RN 0.83.1 + TypeScript, organized src/ structure, hot reload, ESLint, Prettier.
 - Navigation: React Navigation Native Stack, type-safe routing.
@@ -79,3 +79,10 @@
 - Shared isProviderConfigInUse() helper replaces 8 separate existence checks
 - Movement module: Google/xAI/Anthropic provider options with maxtokens: 200 defaults
 - Full audit: build clean, all provider CRUD functions verified
+- Phase 8: Build Flavors + CI (Complete)
+  - react-native-config@1.6.1 wired into src/config/cloud.ts (replaced ambient stub)
+  - IS_BETA centralized coercion (=== true || === 'true') — Android bridge surfaces JS boolean via BuildConfig; iOS NSString from .env
+  - Android productFlavors dev/prod (buildConfigField "boolean" IS_BETA, applicationIdSuffix ".dev", resValue build_config_package, debuggableVariants=["devDebug"], google-services plugin 4.4.2)
+  - iOS dev/prod CI-driven: build-release.yml matrix regenerates .env per entry + PRODUCT_BUNDLE_IDENTIFIER override; single scheme, NO pbxproj surgery
+  - assembleDevDebug/assembleProdDebug BUILD SUCCESSFUL; tsc green
+  - PENDING (owner): GOOGLE_WEB_CLIENT_ID/APPLE_SERVICES_ID GitHub Variables, placeholder google-services.json replacement, first CI dispatch, SIWA entitlement deferred

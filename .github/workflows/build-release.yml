@@ -12,11 +12,15 @@ on:
 
 jobs:
   # ──────────────────────────────────────────────
-  # Job 1: Build Android APK
+  # Job 1: Build Android APK (matrix: dev, prod)
   # ──────────────────────────────────────────────
   build-android:
-    name: Build Android APK
+    name: Build Android APK (${{ matrix.environment }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, prod]
 
     steps:
       - name: Checkout code
@@ -53,17 +57,19 @@ jobs:
         run: |
           echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
 
-      - name: Build release APK
+      - name: Build ${{ matrix.environment }} release APK
         working-directory: android
         run: |
           # Update versionName in build.gradle
           sed -i "s/versionName \"[^\"]*\"/versionName \"${VERSION}\"/" app/build.gradle
           chmod +x gradlew
-          ./gradlew assembleRelease \
+          ./gradlew assemble${{ matrix.environment == 'dev' && 'Dev' || 'Prod' }}Release \
             -PRELEASE_KEYSTORE_FILE=release.keystore \
             -PRELEASE_KEYSTORE_PASSWORD="${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}" \
             -PRELEASE_KEY_ALIAS="${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}" \
-            -PRELEASE_KEY_PASSWORD="${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}"
+            -PRELEASE_KEY_PASSWORD="${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}" \
+            -PGOOGLE_WEB_CLIENT_ID="${{ vars.GOOGLE_WEB_CLIENT_ID }}" \
+            -PAPPLE_SERVICES_ID="${{ vars.APPLE_SERVICES_ID }}"
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -74,30 +80,34 @@ jobs:
 
       - name: Upload APK to S3 (versioned)
         run: |
-          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
-          S3_PATH="s3://soulbits-releases/app/${VERSION}/harmony-ai-app-${VERSION}-android.apk"
-          echo "Uploading ${APK_PATH} to ${S3_PATH}"
-          aws s3 cp "${APK_PATH}" "${S3_PATH}"
+          APK_PATH="android/app/build/outputs/apk/${{ matrix.environment }}/release/app-${{ matrix.environment }}-release.apk"
+          S3_VERSIONED="s3://soulbits-releases/app/${VERSION}/${{ matrix.environment }}/harmony-ai-app-${VERSION}-android.apk"
+          echo "Uploading ${APK_PATH} to ${S3_VERSIONED}"
+          aws s3 cp "${APK_PATH}" "${S3_VERSIONED}"
 
       - name: Update latest APK pointer
         run: |
-          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
-          LATEST_PATH="s3://soulbits-releases/app/latest/harmony-ai-app-android.apk"
-          echo "Updating latest pointer: ${LATEST_PATH}"
-          aws s3 cp "${APK_PATH}" "${LATEST_PATH}"
+          APK_PATH="android/app/build/outputs/apk/${{ matrix.environment }}/release/app-${{ matrix.environment }}-release.apk"
+          S3_LATEST="s3://soulbits-releases/app/latest/${{ matrix.environment }}/harmony-ai-app-android.apk"
+          echo "Updating latest pointer: ${S3_LATEST}"
+          aws s3 cp "${APK_PATH}" "${S3_LATEST}"
 
       - name: Print download URLs
         run: |
           echo "✅ APK uploaded successfully!"
-          echo "📥 Versioned: https://download.soulbits.app/app/${VERSION}/harmony-ai-app-${VERSION}-android.apk"
-          echo "📥 Latest:    https://download.soulbits.app/app/latest/harmony-ai-app-android.apk"
+          echo "📥 Versioned: https://download.soulbits.app/app/${VERSION}/${{ matrix.environment }}/harmony-ai-app-${VERSION}-android.apk"
+          echo "📥 Latest:    https://download.soulbits.app/app/latest/${{ matrix.environment }}/harmony-ai-app-android.apk"
 
   # ──────────────────────────────────────────────
-  # Job 2: Build iOS IPA (unsigned, for sideloading)
+  # Job 2: Build iOS IPA (matrix: dev, prod, unsigned for sideloading)
   # ──────────────────────────────────────────────
   build-ios:
-    name: Build iOS IPA
+    name: Build iOS IPA (${{ matrix.environment }})
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, prod]
 
     steps:
       - name: Checkout code
@@ -129,7 +139,15 @@ jobs:
           fi
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
-      - name: Build unsigned iOS app
+      - name: Generate .env for ${{ matrix.environment }}
+        run: |
+          printf 'IS_BETA=%s\nGOOGLE_WEB_CLIENT_ID=%s\nAPPLE_SERVICES_ID=%s\n' \
+            "${{ matrix.environment == 'dev' && 'true' || 'false' }}" \
+            "${{ vars.GOOGLE_WEB_CLIENT_ID }}" \
+            "${{ vars.APPLE_SERVICES_ID }}" > .env
+          echo "::notice::Generated .env for ${{ matrix.environment }} (IS_BETA=${{ matrix.environment == 'dev' && 'true' || 'false' }})"
+
+      - name: Build ${{ matrix.environment }} iOS app
         working-directory: ios
         run: |
           xcodebuild \
@@ -142,9 +160,10 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             -derivedDataPath build \
             clean archive \
-            -archivePath build/HarmonyAIChat.xcarchive
+            -archivePath build/HarmonyAIChat.xcarchive \
+            PRODUCT_BUNDLE_IDENTIFIER=ai.soulbits.chat${{ matrix.environment == 'dev' && '.dev' || '' }}
 
-      - name: Package unsigned IPA
+      - name: Package ${{ matrix.environment }} IPA
         run: |
           chmod +x scripts/package-ios-ipa.sh
           IPA_OUTPUT="${PWD}/harmony-ai-app-${VERSION}-ios.ipa"
@@ -162,21 +181,21 @@ jobs:
 
       - name: Upload IPA to S3 (versioned)
         run: |
-          S3_PATH="s3://soulbits-releases/app/${VERSION}/harmony-ai-app-${VERSION}-ios.ipa"
-          echo "Uploading IPA to ${S3_PATH}"
-          aws s3 cp "harmony-ai-app-${VERSION}-ios.ipa" "${S3_PATH}"
+          S3_VERSIONED="s3://soulbits-releases/app/${VERSION}/${{ matrix.environment }}/harmony-ai-app-${VERSION}-ios.ipa"
+          echo "Uploading IPA to ${S3_VERSIONED}"
+          aws s3 cp "harmony-ai-app-${VERSION}-ios.ipa" "${S3_VERSIONED}"
 
       - name: Update latest IPA pointer
         run: |
-          LATEST_PATH="s3://soulbits-releases/app/latest/harmony-ai-app-ios.ipa"
-          echo "Updating latest pointer: ${LATEST_PATH}"
-          aws s3 cp "harmony-ai-app-${VERSION}-ios.ipa" "${LATEST_PATH}"
+          S3_LATEST="s3://soulbits-releases/app/latest/${{ matrix.environment }}/harmony-ai-app-ios.ipa"
+          echo "Updating latest pointer: ${S3_LATEST}"
+          aws s3 cp "harmony-ai-app-${VERSION}-ios.ipa" "${S3_LATEST}"
 
       - name: Print download URLs
         run: |
           echo "✅ IPA uploaded successfully!"
-          echo "📥 Versioned: https://download.soulbits.app/app/${VERSION}/harmony-ai-app-${VERSION}-ios.ipa"
-          echo "📥 Latest:    https://download.soulbits.app/app/latest/harmony-ai-app-ios.ipa"
+          echo "📥 Versioned: https://download.soulbits.app/app/${VERSION}/${{ matrix.environment }}/harmony-ai-app-${VERSION}-ios.ipa"
+          echo "📥 Latest:    https://download.soulbits.app/app/latest/${{ matrix.environment }}/harmony-ai-app-ios.ipa"
 
   # ──────────────────────────────────────────────
   # Job 3: Create GitHub Release with download links
@@ -195,12 +214,16 @@ jobs:
           body: |
             ## Downloads
 
-            | Platform | Download |
-            |----------|----------|
-            | Android | [APK](https://download.soulbits.app/app/${{ github.ref_name }}/harmony-ai-app-${{ github.ref_name }}-android.apk) |
-            | iOS | [IPA](https://download.soulbits.app/app/${{ github.ref_name }}/harmony-ai-app-${{ github.ref_name }}-ios.ipa) |
+            | Environment | Platform | Download |
+            |-------------|----------|----------|
+            | dev | Android | [APK](https://download.soulbits.app/app/${{ github.ref_name }}/dev/harmony-ai-app-${{ github.ref_name }}-android.apk) |
+            | dev | iOS | [IPA](https://download.soulbits.app/app/${{ github.ref_name }}/dev/harmony-ai-app-${{ github.ref_name }}-ios.ipa) |
+            | prod | Android | [APK](https://download.soulbits.app/app/${{ github.ref_name }}/prod/harmony-ai-app-${{ github.ref_name }}-android.apk) |
+            | prod | iOS | [IPA](https://download.soulbits.app/app/${{ github.ref_name }}/prod/harmony-ai-app-${{ github.ref_name }}-ios.ipa) |
 
-            **Latest builds** (always up-to-date): [Android APK](https://download.soulbits.app/app/latest/harmony-ai-app-android.apk) · [iOS IPA](https://download.soulbits.app/app/latest/harmony-ai-app-ios.ipa)
+            **Latest builds** (always up-to-date):
+            - **dev**: [Android APK](https://download.soulbits.app/app/latest/dev/harmony-ai-app-android.apk) · [iOS IPA](https://download.soulbits.app/app/latest/dev/harmony-ai-app-ios.ipa)
+            - **prod**: [Android APK](https://download.soulbits.app/app/latest/prod/harmony-ai-app-android.apk) · [iOS IPA](https://download.soulbits.app/app/latest/prod/harmony-ai-app-ios.ipa)
 
             See [INSTALLATION.md](https://github.com/harmony-ai-solutions/harmony-ai-app/blob/main/docs/INSTALLATION.md) for installation instructions.
           draft: false

@@ -5,6 +5,7 @@
 - Container Components: Data fetching, side effects, service connection
 - State: Local (useState) → Context (theme/auth/emoji) → Redux/Zustand (future complex state)
 - Navigation: Stack (primary), Modal (future)
+- Build Flavors: Android productFlavors dev/prod via buildConfigField "boolean" IS_BETA; iOS dev/prod CI-driven (env regeneration + bundle ID override) — no scheme/xcconfig surgery
 @Components:
 - Screens: HomeScreen, ChatScreen, CharacterListScreen, EmojiActionEditorScreen
 - Services: HarmonyLinkService (REST), WebSocketService (real-time), EmojiService, EntityEmojiActionService
