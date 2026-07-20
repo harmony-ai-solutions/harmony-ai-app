@@ -8,7 +8,14 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "schema:dump": "ts-node --project scripts/tsconfig.json scripts/dump-schema.ts",
+    "build:ios:simulator": "cd ios && xcodebuild -workspace HarmonyAIChat.xcworkspace -scheme HarmonyAIChat -configuration Debug -sdk iphonesimulator -derivedDataPath build -destination 'generic/platform=iOS Simulator' && cd build/Build/Products/Debug-iphonesimulator && zip -r HarmonyAIChat.app.zip HarmonyAIChat.app",
+    "build:e2e:android": "ENVFILE=.env.e2e cd android && ./gradlew assembleDevDebug",
+    "build:e2e:ios": "ENVFILE=.env.e2e.ios npm run build:ios:simulator",
+    "e2e:android": "docker compose -f e2e/docker-compose.yml up --abort-on-container-exit",
+    "e2e:android:up": "docker compose -f e2e/docker-compose.yml up -d harmony-link android-emulator",
+    "e2e:android:run": "docker compose -f e2e/docker-compose.yml up maestro-runner"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
@@ -76,6 +83,7 @@
     "better-sqlite3": "^12.11.1",
     "eslint": "^8.19.0",
     "jest": "^30.4.2",
+    "jest-junit": "^17.0.0",
     "prettier": "2.8.8",
     "react-test-renderer": "^19.2.7",
     "ts-node": "^10.9.2",
