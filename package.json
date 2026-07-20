@@ -76,8 +76,6 @@
     "better-sqlite3": "^12.11.1",
     "eslint": "^8.19.0",
     "jest": "^30.4.2",
-    "jest-environment-jsdom": "^30.4.1",
-    "jest-websocket-mock": "^2.5.0",
     "prettier": "2.8.8",
     "react-test-renderer": "^19.2.7",
     "typescript": "^5.8.3"
