@@ -1,0 +1,138 @@
+# .github/workflows/e2e-android.yml
+# Android E2E — runs in Docker with KVM acceleration on ubuntu-latest
+#
+# Uses the published harmony-link image (harmonyai/harmony-link:latest)
+# pulled by docker-compose.yml at runtime. No Harmony Link build step.
+#
+# The same Maestro YAML flows from e2e/.maestro/ are reused for iOS.
+#
+# Cost: Included in GitHub Actions Linux minutes (free tier has ~2000 min/mo).
+# Nightly run + ~5 manual dispatches ≈ ~200 min/mo.
+#
+# See .current_work/test-framework-overhaul/6-1-DockerComposeStack.md
+
+name: E2E (Android, Docker)
+
+on:
+  schedule:
+    # Nightly at 03:00 UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'e2e/**'
+      - '.github/workflows/e2e-android.yml'
+    # Only run on PRs that touch E2E infrastructure; otherwise rely on nightly
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # Build the E2E debug APK
+  # ─────────────────────────────────────────────────────────────────
+  build-apk:
+    name: Build debug APK (E2E)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - run: npm ci
+      - name: Build E2E APK
+        env:
+          ENVFILE: .env.e2e
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDevDebug
+      - name: Copy APK to E2E dir
+        run: |
+          cp android/app/build/outputs/apk/dev/debug/app-dev-debug.apk e2e/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e-apk
+          path: e2e/app-debug.apk
+
+  # ─────────────────────────────────────────────────────────────────
+  # Run the E2E suite (Docker Compose + Maestro)
+  #
+  # NOTE: Harmony Link image is PULLED FROM DOCKER HUB, not built here.
+  # The docker-compose.yml references harmonyai/harmony-link:latest,
+  # which is the published production image. See e2e/README.md for
+  # rationale. No build-harmony-link job needed.
+  # ─────────────────────────────────────────────────────────────────
+  run-e2e:
+    name: Run E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [build-apk]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: e2e-apk
+          path: e2e/
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0777"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+
+      - name: Start Compose stack
+        working-directory: e2e
+        run: |
+          docker compose up -d harmony-link android-emulator
+
+      - name: Wait for emulator boot
+        run: |
+          for i in $(seq 1 60); do
+            STATUS=$(docker exec android-emulator cat /home/androidusr/device_status 2>/dev/null || echo "not ready")
+            echo "Attempt $i: $STATUS"
+            if echo "$STATUS" | grep -q "device_status=online\|booted"; then
+              echo "Emulator ready!"
+              break
+            fi
+            sleep 10
+          done
+
+      - name: Run Maestro
+        working-directory: e2e
+        run: docker compose up maestro-runner --abort-on-container-exit --exit-code-from maestro-runner
+
+      - name: Collect reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-android-reports
+          path: e2e/reports/
+
+      - name: Dump emulator logs on failure
+        if: failure()
+        run: |
+          docker compose logs android-emulator > emulator.log 2>&1 || true
+          docker compose logs harmony-link > harmony-link.log 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-android-logs
+          path: |
+            emulator.log
+            harmony-link.log
+
+      - name: Tear down
+        if: always()
+        working-directory: e2e
+        run: docker compose down -v

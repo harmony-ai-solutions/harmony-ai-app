@@ -1,0 +1,39 @@
+# e2e/.maestro/01-smoke-boot.yaml
+# Smoke test: app boots, renders the main Chat screen, and the connection
+# state is reflected in the UI.
+#
+# This flow verifies the MINIMUM viable app boot — no pairing required.
+# On cold launch with no stored credentials, ChatListScreen renders with
+# the "Not connected" placeholder until the user pairs.
+#
+# Selectors are based on actual i18n strings (verified against
+# src/i18n/locales/en/chatList.json) and testIDs added in Phase B-1.
+
+appId: ai.soulbits.chat.dev
+
+---
+- launchApp:
+    clearState: true         # start fresh — no leftover DB from previous runs
+
+# Wait for the Chat tab screen to render its title.
+# First launch runs ~32 SQLite migrations — this can take 15-30s on emulator.
+- extendedWaitUntil:
+    label: "Chat screen title renders"
+    visible:
+      text: "Chats"
+    timeout: 60000
+
+# Verify the not-paired state is reflected.
+# SyncConnectionContext.initialize() resolves isPaired=false on cold launch,
+# which causes ChatListScreen to render the "Not connected" placeholder.
+- assertVisible:
+    label: "Not-paired placeholder is shown"
+    text: "Not connected"
+
+# The "Connect Now" button should be tappable.
+- assertVisible:
+    label: "Connect Now CTA is visible"
+    text: "Connect Now"
+
+# Take a screenshot for test reports
+- takeScreenshot: smoke-boot-complete

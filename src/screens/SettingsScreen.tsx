@@ -98,6 +98,8 @@ export const SettingsScreen: React.FC = () => {
         <TouchableOpacity
           onPress={() => navigation.navigate('ConnectionSetup')}
           activeOpacity={0.7}
+          testID="settings-connection-card"
+          accessibilityLabel="Connection settings"
         >
           <ThemedCard elevated accentStripe style={styles.card}>
             <SectionHeader title={t('connection')} style={styles.sectionHeader} />
@@ -131,6 +133,8 @@ export const SettingsScreen: React.FC = () => {
         <TouchableOpacity
           onPress={() => navigation.navigate('SyncSettings')}
           activeOpacity={0.7}
+          testID="settings-sync-card"
+          accessibilityLabel="Sync settings"
         >
           <ThemedCard elevated accentStripe style={styles.card}>
             <SectionHeader title={t('sync')} style={styles.sectionHeader} />

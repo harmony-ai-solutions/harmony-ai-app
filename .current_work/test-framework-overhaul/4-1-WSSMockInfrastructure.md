@@ -1,5 +1,9 @@
 # Phase 4-1: WSS Mock Infrastructure
 
+> **STATUS: ✅ COMPLETE** (test factory shipped in initial pass; production
+> env-var override shipped in post-plan work — see "Production Override"
+> section at the bottom of this file).
+
 ## Objective
 
 Establish the test infrastructure for swapping the WebSocket transport in `SyncService` tests. The existing `__tests__/services/SyncService.test.ts` uses an inline `MockConnectionManager` that simulates the server via `setTimeout`. This phase replaces that hand-rolled simulation with the mature `jest-websocket-mock` library and introduces a factory pattern for swapping WSS implementations between production and test.
@@ -256,3 +260,97 @@ Per the research report, `jest-websocket-mock` v2.5.0 was last released in 2023.
 ## Estimated Effort
 
 Half a day to one day.
+
+---
+
+## Production Override (post-plan completion)
+
+> **STATUS: ✅ COMPLETE** (July 2026). The original Phase 4-1 work shipped the
+> *test-side* WebSocket factory but explicitly deferred the *production-side*
+> env-var override (documented in `tls-current-state.md` line 78). That gap is
+> now closed.
+
+### What was deferred
+
+`tls-current-state.md` originally said:
+
+> The E2E `.env.e2e` file defines `HARMONY_LINK_WSS_URL`, but the app does not
+> currently read this value. Phase 4-1 (WSS Mock Infrastructure) owns adding
+> the factory/configuration layer that:
+> 1. Reads `Config.HARMONY_LINK_WSS_URL` from react-native-config at build time
+> 2. Passes it through to `ConnectionManager.createConnection()` as the WSS URL
+> 3. Bypasses the normal WS→WSS handshake upgrade path in E2E mode
+
+### What was implemented
+
+**File**: `src/services/ConnectionStateManager.ts:applyE2EOverride()`
+
+**Strategy**: cloud-mode auto-pairing via expired-token repair path
+(documented in `harmony-link-private/eventserver/synchronization.go:260`).
+
+Rather than bypassing the handshake (option 3 above), we trigger it via the
+existing `requiresRepair` code path. `SyncConnectionContext.initializeConnection()`
+already has a branch for paired-but-token-expired devices that calls
+`connectWithRefresh()` — which runs the WS handshake first, then upgrades to WSS.
+
+Pre-seeded AsyncStorage state when `Config.HARMONY_LINK_WSS_URL` AND
+`Config.HARMONY_LINK_WS_URL` are both non-empty:
+
+| Key | Value | Purpose |
+|-----|-------|---------|
+| `harmony_paired` | `'true'` | Passes `isPaired` check (`pairedStr === 'true' && jwtToken !== null`) |
+| `harmony_jwt` | `'e2e-pending'` | Non-null satisfies check; replaced on first real handshake |
+| `harmony_token_expires_at` | `'0'` | Always expired → `requiresRepair=true` → triggers `connectWithRefresh()` |
+| `harmony_wss_url` | env var | WSS URL for post-handshake upgrade |
+| `harmony_ws_url` | env var (second env var) | Plain-WS URL for initial handshake (different port from WSS) |
+| `harmony_security_mode` | `'insecure-ssl'` | Accepts harmony-link's self-signed cert |
+
+### Why a second env var (`HARMONY_LINK_WS_URL`)?
+
+The harmony-link handshake protocol runs over **plain WS** (port 28080) first,
+then upgrades to **WSS** (port 28443). The two are independent ports in the
+harmony-link config — they can't be derived from each other. So we need both URLs.
+
+### Build mechanism
+
+react-native-config's `dotenv.gradle` reads the `ENVFILE` env var to pick a
+`.env` file. However, this interacts poorly with the gradle daemon (env vars
+get cached at daemon start). A more reliable mechanism is gradle `-P` flags,
+which are per-invocation. The build helper scripts use `-P` flags:
+
+```bash
+# Linux/macOS/WSL:
+./e2e/build-apk.sh
+
+# Windows PowerShell:
+.\e2e\build-apk.ps1
+```
+
+Both invoke:
+```
+./gradlew assembleDevDebug \
+  -PHARMONY_LINK_WSS_URL=wss://10.0.2.2:28443 \
+  -PHARMONY_LINK_WS_URL=ws://10.0.2.2:28080
+```
+
+The gradle `buildConfigField` declarations in `android/app/build.gradle`
+read these via `project.findProperty('HARMONY_LINK_WSS_URL')` (same pattern
+as the existing `GOOGLE_WEB_CLIENT_ID`). Verified empirically: after the
+build, `app/build/generated/source/buildConfig/dev/debug/.../BuildConfig.java`
+contains both URLs.
+
+### Production safety
+
+The `prod` flavor pins both fields to empty strings as a defensive measure:
+even if CI accidentally sets the `-P` flags on a production build, the values
+are overridden to `""`, and `applyE2EOverride()` no-ops on empty input.
+
+### Related files
+
+- `src/services/ConnectionStateManager.ts` — `applyE2EOverride()` method
+- `src/types/react-native-config.d.ts` — typed `HARMONY_LINK_WSS_URL` + `HARMONY_LINK_WS_URL`
+- `android/app/build.gradle` — `buildConfigField` declarations in both flavors
+- `e2e/.env.e2e` — reference values for Android
+- `e2e/.env.e2e.ios` — reference values for iOS Simulator (uses `localhost`)
+- `e2e/build-apk.sh` / `e2e/build-apk.ps1` — helper scripts
+- `tls-current-state.md` — updated with the "implemented" status

@@ -9,13 +9,113 @@ on:
       version:
         description: 'Version number for the build'
         default: 'v0.0.0-dev'
+      skip_build:
+        description: 'Run tests only, skip APK/IPA builds (dry-run)'
+        type: boolean
+        default: false
 
 jobs:
+  # ───────────────────────────────────────────────────────────────────
+  # NEW: Schema parity gate — checks RN schema matches Go schema
+  # ───────────────────────────────────────────────────────────────────
+  schema-parity:
+    name: Schema parity (RN ↔ Harmony Link)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: harmony-ai-solutions/harmony-link-private
+          token: ${{ secrets.HARMONY_LINK_REPO_PAT }}
+          path: harmony-link
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: npm ci
+      - name: Install Go dependencies
+        working-directory: harmony-link
+        run: go mod download
+      - name: Dump RN schema
+        run: npm run schema:dump -- --output rn-schema.current.json
+      - name: Dump Go schema
+        working-directory: harmony-link
+        run: go run . dump-schema | tail -n +4 > ../go-schema.current.json
+      - name: Compare schemas
+        run: python3 scripts/compare-schemas.py rn-schema.current.json go-schema.current.json
+      - name: Upload schemas on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-diff
+          path: |
+            rn-schema.current.json
+            go-schema.current.json
+
+  # ───────────────────────────────────────────────────────────────────
+  # NEW: Test gate — must pass before any artifact is built
+  # ───────────────────────────────────────────────────────────────────
+  test:
+    name: Tests (pre-release gate)
+    needs: schema-parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npx jest --selectProjects unit --reporters=default --reporters=jest-junit
+        env:
+          JEST_JUNIT_OUTPUT_DIR: ./reports
+          JEST_JUNIT_OUTPUT_NAME: unit-tests.xml
+
+      - name: Integration tests
+        run: npx jest --selectProjects integration --reporters=default --reporters=jest-junit
+        env:
+          JEST_JUNIT_OUTPUT_DIR: ./reports
+          JEST_JUNIT_OUTPUT_NAME: integration-tests.xml
+
+      - name: Migration tests
+        run: npx jest --selectProjects unit --testPathPatterns migrations
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-release-test-results
+          path: reports/
+
+  # ───────────────────────────────────────────────────────────────────
+  # NOTE: Pre-release E2E gate is intentionally NOT wired here yet.
+  # To add it: insert an `e2e-android-prerelease` job between `test`
+  # and `build-android`, with `needs: test` and add it to
+  # `build-android`'s needs: [test, e2e-android-prerelease].
+  # Recommended: wait until nightly E2E runs are stable for ~2 weeks,
+  # then add the gate. See Phase 7-3 step 5 in the plan docs.
+  # ───────────────────────────────────────────────────────────────────
+
   # ──────────────────────────────────────────────
   # Job 1: Build Android APK (matrix: dev, prod)
   # ──────────────────────────────────────────────
   build-android:
     name: Build Android APK (${{ matrix.environment }})
+    needs: test
+    if: ${{ !inputs.skip_build }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -103,6 +203,8 @@ jobs:
   # ──────────────────────────────────────────────
   build-ios:
     name: Build iOS IPA (${{ matrix.environment }})
+    needs: test
+    if: ${{ !inputs.skip_build }}
     runs-on: macos-15
     strategy:
       fail-fast: false

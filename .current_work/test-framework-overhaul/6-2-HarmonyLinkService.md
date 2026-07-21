@@ -1,5 +1,8 @@
 # Phase 6-2: Harmony Link Service
 
+> **STATUS: ✅ COMPLETE** (post-plan update: image name is `soulbits/harmony-link:latest`,
+> NOT `harmonyai/harmony-link` as originally written. See "Post-plan updates" below).
+
 ## Objective
 
 Configure the published Harmony Link Docker image for use in the E2E Compose stack (Phase 6-1). The image already runs headless by default (`CMD ["disable-gui"]`) and ships with everything E2E needs — `/health` endpoint, self-signed cert generation, cloud-mode env-var config. **No new Dockerfile, no new scripts, no Go-side code changes are required.** This phase is pure configuration: which env vars to pass, how to wire the healthcheck, and how to seed test data if needed.
@@ -440,3 +443,53 @@ The breakdown:
 4. **No separate E2E Dockerfile is needed.** The production image runs headless by default via `CMD ["disable-gui"]`. The same published image (`harmonyai/harmony-link:latest`) is used for desktop app distribution, community self-hosting, soulbits-cloud-backend E2E, and harmony-ai-app E2E. The Wails-related `apk` packages (`gtk+3.0`, `webkit2gtk-4.1`) bloat the image slightly but do not affect headless operation. Introducing a `Dockerfile.e2e` would diverge from the production image and create ongoing sync work — avoid it.
 
 5. **Database is always SQLite, with CGO required.** The production `Dockerfile.build` already uses `CGO_ENABLED=1`. The published image handles this correctly. No special handling needed for E2E.
+
+---
+
+## Post-plan updates (July 2026)
+
+### Image name resolution
+
+The "Cross-repo inconsistencies" note above speculated about `harmonyai/harmony-link`
+(Docker Hub) vs `soulbits/harmony-link` (local build). **Resolution: use
+`soulbits/harmony-link:latest`** — the developer's locally-built image from
+`harmony-link-private/Dockerfile.build`. It's more recent than the Docker Hub
+image and matches what the developer tests against.
+
+The `harmonyai/harmony-link:latest` image still exists on Docker Hub (last
+pushed Dec 2025) and is still pullable. But the E2E compose stack now uses
+the local build for parity with the developer's testing setup.
+
+Updated in `e2e/docker-compose.yml`:
+```yaml
+harmony-link:
+  image: soulbits/harmony-link:latest
+  pull_policy: never   # don't try to fetch from Docker Hub
+```
+
+### Cloud-mode auto-approval confirmed
+
+Reading `harmony-link-private/eventserver/synchronization.go:260` confirms
+the original plan's hope: when `CLOUD_MODE=true`, the server auto-approves
+new devices during the handshake protocol (`isApproved = 1`). This is what
+makes the `ConnectionStateManager.applyE2EOverride()` strategy work — see
+Phase 4-1's "Production Override" section for the full flow.
+
+### JWT in cloud-mode response is empty (by design)
+
+`harmony-link-private/eventserver/synchronization_cloudmode_test.go:82-85`
+verifies that the handshake response in cloud mode has empty JWT/cert/expiresAt
+fields. The server generates a real JWT internally but doesn't send it in the
+response (the conduct proxy handles user auth separately in production cloud
+deployments).
+
+For E2E this is fine — the client's `applyE2EOverride()` pre-seeds a placeholder
+JWT that gets overwritten by `saveConnectionCredentials()` on handshake response.
+Even though the response has empty JWT, the WSS connection succeeds because
+`request.go:131` skips JWT validation in cloud mode.
+
+### iOS exclusion (deferred)
+
+iOS E2E on GHA is explicitly excluded for now. The `e2e-ios.yml` workflow file
+exists but is not triggered. This is the final step once Android E2E is
+validated end-to-end.

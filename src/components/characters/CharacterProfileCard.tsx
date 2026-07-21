@@ -60,6 +60,8 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
         onPressOut={handlePressOut}
         activeOpacity={1}
         delayLongPress={400}
+        testID="character-profile-card"
+        accessibilityLabel={`Character profile: ${profile.name}`}
       >
         {/* Gradient card background */}
         <LinearGradient

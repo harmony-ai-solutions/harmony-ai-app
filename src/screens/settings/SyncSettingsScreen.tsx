@@ -269,6 +269,8 @@ export const SyncSettingsScreen: React.FC = () => {
           onPress={handleSyncNow}
           disabled={isSyncing || !isConnected}
           style={styles.syncButton}
+          testID="sync-now-button"
+          accessibilityLabel={isSyncing ? "Sync in progress" : "Sync now"}
         />
 
         <ThemedButton
@@ -277,6 +279,8 @@ export const SyncSettingsScreen: React.FC = () => {
           disabled={isSyncing || !isConnected}
           variant="outline"
           style={styles.dangerButton}
+          testID="force-resync-button"
+          accessibilityLabel="Force full re-sync"
         />
 
         {!isPaired && (

@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="132" failures="0" errors="0" time="12.227">
+  <testsuite name="NodeDatabase smoke" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="1.469" tests="3">
+    <testcase classname="NodeDatabase smoke executes a SELECT" name="NodeDatabase smoke executes a SELECT" time="0.011">
+    </testcase>
+    <testcase classname="NodeDatabase smoke runs a transaction" name="NodeDatabase smoke runs a transaction" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase smoke rolls back on error" name="NodeDatabase smoke rolls back on error" time="0.009">
+    </testcase>
+  </testsuite>
+  <testsuite name="NodeDatabase compatibility" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="1.507" tests="23">
+    <testcase classname="NodeDatabase compatibility Node: select integer literal" name="NodeDatabase compatibility Node: select integer literal" time="0.013">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: select float literal" name="NodeDatabase compatibility Node: select float literal" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: select string literal" name="NodeDatabase compatibility Node: select string literal" time="0">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: select null literal" name="NodeDatabase compatibility Node: select null literal" time="0">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: INSERT with integer param" name="NodeDatabase compatibility Node: INSERT with integer param" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: INSERT with float param" name="NodeDatabase compatibility Node: INSERT with float param" time="0">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: INSERT with null param" name="NodeDatabase compatibility Node: INSERT with null param" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: INSERT with string param" name="NodeDatabase compatibility Node: INSERT with string param" time="0">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: INSERT with boolean param (stored as 0/1)" name="NodeDatabase compatibility Node: INSERT with boolean param (stored as 0/1)" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: INSERT BLOB" name="NodeDatabase compatibility Node: INSERT BLOB" time="0">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: multi-row SELECT" name="NodeDatabase compatibility Node: multi-row SELECT" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: INNER JOIN" name="NodeDatabase compatibility Node: INNER JOIN" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: UPDATE matching rows (rowsAffected &gt; 0)" name="NodeDatabase compatibility Node: UPDATE matching rows (rowsAffected &gt; 0)" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: UPDATE no matching rows (rowsAffected = 0)" name="NodeDatabase compatibility Node: UPDATE no matching rows (rowsAffected = 0)" time="0">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: DELETE matching rows" name="NodeDatabase compatibility Node: DELETE matching rows" time="0">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: transaction commit persists changes" name="NodeDatabase compatibility Node: transaction commit persists changes" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: COUNT aggregate" name="NodeDatabase compatibility Node: COUNT aggregate" time="0">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: PRAGMA table_info" name="NodeDatabase compatibility Node: PRAGMA table_info" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: unicode string" name="NodeDatabase compatibility Node: unicode string" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: transaction commit persists changes" name="NodeDatabase compatibility Node: transaction commit persists changes" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: transaction rollback on error" name="NodeDatabase compatibility Node: transaction rollback on error" time="0.01">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: FK constraint violation rejects" name="NodeDatabase compatibility Node: FK constraint violation rejects" time="0.001">
+    </testcase>
+    <testcase classname="NodeDatabase compatibility Node: UNIQUE constraint violation rejects" name="NodeDatabase compatibility Node: UNIQUE constraint violation rejects" time="0.001">
+    </testcase>
+  </testsuite>
+  <testsuite name="migration schema snapshot" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="1.798" tests="3">
+    <testcase classname="migration schema snapshot all migrations produce the expected schema" name="migration schema snapshot all migrations produce the expected schema" time="0.132">
+    </testcase>
+    <testcase classname="migration schema snapshot schema has at least the core tables" name="migration schema snapshot schema has at least the core tables" time="0.095">
+    </testcase>
+    <testcase classname="migration schema snapshot migration is idempotent (running twice produces the same schema)" name="migration schema snapshot migration is idempotent (running twice produces the same schema)" time="0.098">
+    </testcase>
+  </testsuite>
+  <testsuite name="memory cleanup" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="2.047" tests="4">
+    <testcase classname="memory cleanup Delete orphaned memories" name="memory cleanup Delete orphaned memories" time="0.103">
+    </testcase>
+    <testcase classname="memory cleanup Keep memories with linked interactions" name="memory cleanup Keep memories with linked interactions" time="0.092">
+    </testcase>
+    <testcase classname="memory cleanup Mixed orphaned and linked memories" name="memory cleanup Mixed orphaned and linked memories" time="0.091">
+    </testcase>
+    <testcase classname="memory cleanup Empty database cleanup" name="memory cleanup Empty database cleanup" time="0.098">
+    </testcase>
+  </testsuite>
+  <testsuite name="cross-repository behavior" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="2.322" tests="8">
+    <testcase classname="cross-repository behavior FK CASCADE deleting an entity cascades to dependent entity_module_mappings" name="cross-repository behavior FK CASCADE deleting an entity cascades to dependent entity_module_mappings" time="0.11">
+    </testcase>
+    <testcase classname="cross-repository behavior FK CASCADE deleting a character profile cascades to character_image" name="cross-repository behavior FK CASCADE deleting a character profile cascades to character_image" time="0.104">
+    </testcase>
+    <testcase classname="cross-repository behavior FK CASCADE deleting an entity cascades to memories" name="cross-repository behavior FK CASCADE deleting an entity cascades to memories" time="0.08">
+    </testcase>
+    <testcase classname="cross-repository behavior FK RESTRICT cannot delete a character profile that is referenced by an entity" name="cross-repository behavior FK RESTRICT cannot delete a character profile that is referenced by an entity" time="0.094">
+    </testcase>
+    <testcase classname="cross-repository behavior FK RESTRICT cannot hard-delete a character profile that has an entity referencing it (FK RESTRICT)" name="cross-repository behavior FK RESTRICT cannot hard-delete a character profile that has an entity referencing it (FK RESTRICT)" time="0.085">
+    </testcase>
+    <testcase classname="cross-repository behavior FK RESTRICT can soft-delete a profile not in use" name="cross-repository behavior FK RESTRICT can soft-delete a profile not in use" time="0.063">
+    </testcase>
+    <testcase classname="cross-repository behavior entity alias uses unique aliases" name="cross-repository behavior entity alias uses unique aliases" time="0.068">
+    </testcase>
+    <testcase classname="cross-repository behavior cascade delete entity also removes memories FK CASCADE from entities to memories on permanent delete" name="cross-repository behavior cascade delete entity also removes memories FK CASCADE from entities to memories on permanent delete" time="0.065">
+    </testcase>
+  </testsuite>
+  <testsuite name="modules repository" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="2.468" tests="7">
+    <testcase classname="modules repository Backend Config CRUD Backend Config CRUD" name="modules repository Backend Config CRUD Backend Config CRUD" time="0.115">
+    </testcase>
+    <testcase classname="modules repository Movement Config CRUD Movement Config CRUD" name="modules repository Movement Config CRUD Movement Config CRUD" time="0.081">
+    </testcase>
+    <testcase classname="modules repository STT Config CRUD STT Config CRUD" name="modules repository STT Config CRUD STT Config CRUD" time="0.065">
+    </testcase>
+    <testcase classname="modules repository Cognition Config CRUD Cognition Config CRUD" name="modules repository Cognition Config CRUD Cognition Config CRUD" time="0.069">
+    </testcase>
+    <testcase classname="modules repository RAG Config CRUD RAG Config CRUD" name="modules repository RAG Config CRUD RAG Config CRUD" time="0.073">
+    </testcase>
+    <testcase classname="modules repository TTS Config CRUD TTS Config CRUD" name="modules repository TTS Config CRUD TTS Config CRUD" time="0.072">
+    </testcase>
+    <testcase classname="modules repository Vision Config CRUD Vision Config CRUD" name="modules repository Vision Config CRUD Vision Config CRUD" time="0.069">
+    </testcase>
+  </testsuite>
+  <testsuite name="entities repository" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="2.52" tests="11">
+    <testcase classname="entities repository createEntity Create Entity" name="entities repository createEntity Create Entity" time="0.108">
+    </testcase>
+    <testcase classname="entities repository createEntity Get Entity" name="entities repository createEntity Get Entity" time="0.098">
+    </testcase>
+    <testcase classname="entities repository getEntity Get Non-existent Entity" name="entities repository getEntity Get Non-existent Entity" time="0.089">
+    </testcase>
+    <testcase classname="entities repository getAllEntities Get All Entities (improved: asserts count)" name="entities repository getAllEntities Get All Entities (improved: asserts count)" time="0.099">
+    </testcase>
+    <testcase classname="entities repository updateEntity Update Entity" name="entities repository updateEntity Update Entity" time="0.09">
+    </testcase>
+    <testcase classname="entities repository updateEntity Update Non-existent Entity (Error Handling)" name="entities repository updateEntity Update Non-existent Entity (Error Handling)" time="0.083">
+    </testcase>
+    <testcase classname="entities repository deleteEntity Delete Non-existent Entity (Error Handling)" name="entities repository deleteEntity Delete Non-existent Entity (Error Handling)" time="0.076">
+    </testcase>
+    <testcase classname="entities repository entity module mappings Create Entity Module Mapping" name="entities repository entity module mappings Create Entity Module Mapping" time="0.067">
+    </testcase>
+    <testcase classname="entities repository entity module mappings Get Entity Module Mapping" name="entities repository entity module mappings Get Entity Module Mapping" time="0.072">
+    </testcase>
+    <testcase classname="entities repository entity module mappings Update Entity Module Mapping" name="entities repository entity module mappings Update Entity Module Mapping" time="0.073">
+    </testcase>
+    <testcase classname="entities repository entity module mappings CASCADE Delete Test" name="entities repository entity module mappings CASCADE Delete Test" time="0.068">
+    </testcase>
+  </testsuite>
+  <testsuite name="migration roll-forward" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="2.65" tests="42">
+    <testcase classname="migration roll-forward test harness discovers all migrations" name="migration roll-forward test harness discovers all migrations" time="0.015">
+    </testcase>
+    <testcase classname="migration roll-forward schema at version 1 matches snapshot" name="migration roll-forward schema at version 1 matches snapshot" time="0.004">
+    </testcase>
+    <testcase classname="migration roll-forward schema at version 5 matches snapshot" name="migration roll-forward schema at version 5 matches snapshot" time="0.012">
+    </testcase>
+    <testcase classname="migration roll-forward schema at version 10 matches snapshot" name="migration roll-forward schema at version 10 matches snapshot" time="0.025">
+    </testcase>
+    <testcase classname="migration roll-forward schema at version 15 matches snapshot" name="migration roll-forward schema at version 15 matches snapshot" time="0.03">
+    </testcase>
+    <testcase classname="migration roll-forward schema at version 20 matches snapshot" name="migration roll-forward schema at version 20 matches snapshot" time="0.048">
+    </testcase>
+    <testcase classname="migration roll-forward schema at version 25 matches snapshot" name="migration roll-forward schema at version 25 matches snapshot" time="0.044">
+    </testcase>
+    <testcase classname="migration roll-forward schema at version 30 matches snapshot" name="migration roll-forward schema at version 30 matches snapshot" time="0.054">
+    </testcase>
+    <testcase classname="migration roll-forward schema at version 32 matches snapshot" name="migration roll-forward schema at version 32 matches snapshot" time="0.095">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v1 succeeds" name="migration roll-forward incremental migration to v1 succeeds" time="0.001">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v2 succeeds" name="migration roll-forward incremental migration to v2 succeeds" time="0.002">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v3 succeeds" name="migration roll-forward incremental migration to v3 succeeds" time="0.002">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v4 succeeds" name="migration roll-forward incremental migration to v4 succeeds" time="0.004">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v5 succeeds" name="migration roll-forward incremental migration to v5 succeeds" time="0.005">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v6 succeeds" name="migration roll-forward incremental migration to v6 succeeds" time="0.011">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v7 succeeds" name="migration roll-forward incremental migration to v7 succeeds" time="0.011">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v8 succeeds" name="migration roll-forward incremental migration to v8 succeeds" time="0.026">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v9 succeeds" name="migration roll-forward incremental migration to v9 succeeds" time="0.02">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v10 succeeds" name="migration roll-forward incremental migration to v10 succeeds" time="0.018">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v11 succeeds" name="migration roll-forward incremental migration to v11 succeeds" time="0.017">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v12 succeeds" name="migration roll-forward incremental migration to v12 succeeds" time="0.024">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v13 succeeds" name="migration roll-forward incremental migration to v13 succeeds" time="0.024">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v14 succeeds" name="migration roll-forward incremental migration to v14 succeeds" time="0.027">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v15 succeeds" name="migration roll-forward incremental migration to v15 succeeds" time="0.027">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v16 succeeds" name="migration roll-forward incremental migration to v16 succeeds" time="0.025">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v17 succeeds" name="migration roll-forward incremental migration to v17 succeeds" time="0.027">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v18 succeeds" name="migration roll-forward incremental migration to v18 succeeds" time="0.026">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v19 succeeds" name="migration roll-forward incremental migration to v19 succeeds" time="0.024">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v20 succeeds" name="migration roll-forward incremental migration to v20 succeeds" time="0.028">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v21 succeeds" name="migration roll-forward incremental migration to v21 succeeds" time="0.027">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v22 succeeds" name="migration roll-forward incremental migration to v22 succeeds" time="0.026">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v23 succeeds" name="migration roll-forward incremental migration to v23 succeeds" time="0.032">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v24 succeeds" name="migration roll-forward incremental migration to v24 succeeds" time="0.033">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v25 succeeds" name="migration roll-forward incremental migration to v25 succeeds" time="0.028">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v26 succeeds" name="migration roll-forward incremental migration to v26 succeeds" time="0.03">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v27 succeeds" name="migration roll-forward incremental migration to v27 succeeds" time="0.031">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v28 succeeds" name="migration roll-forward incremental migration to v28 succeeds" time="0.036">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v29 succeeds" name="migration roll-forward incremental migration to v29 succeeds" time="0.034">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v30 succeeds" name="migration roll-forward incremental migration to v30 succeeds" time="0.041">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v31 succeeds" name="migration roll-forward incremental migration to v31 succeeds" time="0.064">
+    </testcase>
+    <testcase classname="migration roll-forward incremental migration to v32 succeeds" name="migration roll-forward incremental migration to v32 succeeds" time="0.062">
+    </testcase>
+    <testcase classname="migration roll-forward migrates from v1 to latest in one step" name="migration roll-forward migrates from v1 to latest in one step" time="0.06">
+    </testcase>
+  </testsuite>
+  <testsuite name="characters repository" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="2.738" tests="14">
+    <testcase classname="characters repository createCharacterProfile Create Character Profile" name="characters repository createCharacterProfile Create Character Profile" time="0.109">
+    </testcase>
+    <testcase classname="characters repository getCharacterProfile Get Character Profile" name="characters repository getCharacterProfile Get Character Profile" time="0.103">
+    </testcase>
+    <testcase classname="characters repository getAllCharacterProfiles Get All Character Profiles (improved: asserts count)" name="characters repository getAllCharacterProfiles Get All Character Profiles (improved: asserts count)" time="0.095">
+    </testcase>
+    <testcase classname="characters repository updateCharacterProfile Update Character Profile" name="characters repository updateCharacterProfile Update Character Profile" time="0.094">
+    </testcase>
+    <testcase classname="characters repository isCharacterProfileInUse Check Profile In Use" name="characters repository isCharacterProfileInUse Check Profile In Use" time="0.079">
+    </testcase>
+    <testcase classname="characters repository createCharacterImage Create Character Image" name="characters repository createCharacterImage Create Character Image" time="0.068">
+    </testcase>
+    <testcase classname="characters repository getCharacterImage Get Character Image" name="characters repository getCharacterImage Get Character Image" time="0.067">
+    </testcase>
+    <testcase classname="characters repository getCharacterImages Get Character Images for Profile" name="characters repository getCharacterImages Get Character Images for Profile" time="0.066">
+    </testcase>
+    <testcase classname="characters repository getPrimaryImage Get Primary Image" name="characters repository getPrimaryImage Get Primary Image" time="0.069">
+    </testcase>
+    <testcase classname="characters repository imageToDataURL Image to Data URL Conversion" name="characters repository imageToDataURL Image to Data URL Conversion" time="0.072">
+    </testcase>
+    <testcase classname="characters repository getCharacterImagesWithDataURLs Get Images with Data URLs" name="characters repository getCharacterImagesWithDataURLs Get Images with Data URLs" time="0.066">
+    </testcase>
+    <testcase classname="characters repository setPrimaryImage Set Primary Image" name="characters repository setPrimaryImage Set Primary Image" time="0.065">
+    </testcase>
+    <testcase classname="characters repository deleteCharacterImage Delete Character Image" name="characters repository deleteCharacterImage Delete Character Image" time="0.069">
+    </testcase>
+    <testcase classname="characters repository deleteCharacterProfile Delete Character Profile &amp; CASCADE" name="characters repository deleteCharacterProfile Delete Character Profile &amp; CASCADE" time="0.06">
+    </testcase>
+  </testsuite>
+  <testsuite name="providers repository" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="3.489" tests="16">
+    <testcase classname="providers repository OpenAI Provider CRUD OpenAI Provider CRUD" name="providers repository OpenAI Provider CRUD OpenAI Provider CRUD" time="0.076">
+    </testcase>
+    <testcase classname="providers repository OpenRouter Provider CRUD OpenRouter Provider CRUD" name="providers repository OpenRouter Provider CRUD OpenRouter Provider CRUD" time="0.069">
+    </testcase>
+    <testcase classname="providers repository OpenAI Compatible Provider CRUD OpenAI Compatible Provider CRUD" name="providers repository OpenAI Compatible Provider CRUD OpenAI Compatible Provider CRUD" time="0.075">
+    </testcase>
+    <testcase classname="providers repository Harmony Speech Provider CRUD Harmony Speech Provider CRUD" name="providers repository Harmony Speech Provider CRUD Harmony Speech Provider CRUD" time="0.066">
+    </testcase>
+    <testcase classname="providers repository ElevenLabs Provider CRUD ElevenLabs Provider CRUD" name="providers repository ElevenLabs Provider CRUD ElevenLabs Provider CRUD" time="0.063">
+    </testcase>
+    <testcase classname="providers repository Kindroid Provider CRUD Kindroid Provider CRUD" name="providers repository Kindroid Provider CRUD Kindroid Provider CRUD" time="0.066">
+    </testcase>
+    <testcase classname="providers repository Kajiwoto Provider CRUD Kajiwoto Provider CRUD" name="providers repository Kajiwoto Provider CRUD Kajiwoto Provider CRUD" time="0.063">
+    </testcase>
+    <testcase classname="providers repository CharacterAI Provider CRUD CharacterAI Provider CRUD" name="providers repository CharacterAI Provider CRUD CharacterAI Provider CRUD" time="0.066">
+    </testcase>
+    <testcase classname="providers repository LocalAI Provider CRUD LocalAI Provider CRUD" name="providers repository LocalAI Provider CRUD LocalAI Provider CRUD" time="0.083">
+    </testcase>
+    <testcase classname="providers repository Mistral Provider CRUD Mistral Provider CRUD" name="providers repository Mistral Provider CRUD Mistral Provider CRUD" time="0.093">
+    </testcase>
+    <testcase classname="providers repository Ollama Provider CRUD Ollama Provider CRUD" name="providers repository Ollama Provider CRUD Ollama Provider CRUD" time="0.093">
+    </testcase>
+    <testcase classname="providers repository ComfyUI Provider CRUD (NEW) ComfyUI Provider CRUD" name="providers repository ComfyUI Provider CRUD (NEW) ComfyUI Provider CRUD" time="0.1">
+    </testcase>
+    <testcase classname="providers repository XAI Provider CRUD (NEW) XAI Provider CRUD" name="providers repository XAI Provider CRUD (NEW) XAI Provider CRUD" time="0.092">
+    </testcase>
+    <testcase classname="providers repository Google Provider CRUD (NEW) Google Provider CRUD" name="providers repository Google Provider CRUD (NEW) Google Provider CRUD" time="0.092">
+    </testcase>
+    <testcase classname="providers repository Anthropic Provider CRUD (NEW) Anthropic Provider CRUD" name="providers repository Anthropic Provider CRUD (NEW) Anthropic Provider CRUD" time="0.093">
+    </testcase>
+    <testcase classname="providers repository SoulbitsCloud Provider CRUD (NEW) SoulbitsCloud Provider CRUD" name="providers repository SoulbitsCloud Provider CRUD (NEW) SoulbitsCloud Provider CRUD" time="0.096">
+    </testcase>
+  </testsuite>
+  <testsuite name="undefined" errors="0" failures="0" skipped="0" timestamp="2026-07-20T21:57:28" time="11.613" tests="1">
+    <testcase classname=" renders correctly" name=" renders correctly" time="0.014">
+    </testcase>
+  </testsuite>
+</testsuites>

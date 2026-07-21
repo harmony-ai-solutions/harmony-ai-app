@@ -1,5 +1,8 @@
 # Phase 6-1: Docker Compose Stack
 
+> **STATUS: ✅ COMPLETE** (post-plan updates: image swapped to `soulbits/harmony-link`,
+> healthcheck regex fixed). See "Post-plan updates" at the bottom of this file.
+
 ## Objective
 
 Define the top-level `docker-compose.yml` that orchestrates all E2E services: the Harmony Link Go backend, the Android emulator, and the Maestro test runner. This is the entry point that developers run locally with `docker compose up` and that CI runs in GitHub Actions.
@@ -290,3 +293,65 @@ and maestro-runner in Docker:
 ## Estimated Effort
 
 Half a day to write the compose file. The bulk of validation is waiting for the emulator to boot reliably.
+
+---
+
+## Post-plan updates (July 2026)
+
+The compose file shipped in the initial implementation but accumulated several
+fixes during the post-plan Docker validation work. The current state of
+`e2e/docker-compose.yml` reflects all of these.
+
+### Image name: `soulbits/harmony-link` (not `harmonyai/harmony-link`)
+
+Original compose file used `harmonyai/harmony-link:latest` (Docker Hub, Dec 2025).
+Updated to `soulbits/harmony-link:latest` — the locally-built image from
+`harmony-link-private/Dockerfile.build` that the developer maintains. Added
+`pull_policy: never` so compose doesn't try to fetch from Docker Hub.
+
+To rebuild locally:
+```
+cd harmony-link-private
+docker build -f Dockerfile.build -t soulbits/harmony-link:latest .
+```
+
+### Healthcheck bug fix: grep `READY`
+
+Original healthcheck:
+```yaml
+test: ["CMD", "bash", "-c", "[ -f /home/androidusr/device_status ] && (grep -q 'device_status=online' /home/androidusr/device_status 2>/dev/null || grep -q 'booted' /home/androidusr/device_status 2>/dev/null)"]
+```
+
+Empirically validated against `budtmo/docker-android:emulator_14.0`:
+the actual status string is just `READY` (no `device_status=` prefix).
+Fixed healthcheck:
+```yaml
+test: ["CMD", "bash", "-c", "[ -f /home/androidusr/device_status ] && grep -q 'READY' /home/androidusr/device_status"]
+```
+
+Without this fix, the healthcheck never passes and `maestro-runner` (which
+`depends_on: android-emulator: condition: service_healthy`) never starts.
+
+### Documented cloud-mode auto-approval
+
+Added a comment block above the `harmony-link` service explaining that
+`CLOUD_MODE=true` enables auto-approval of new devices during handshake
+(see `harmony-link-private/eventserver/synchronization.go:260`). This is
+what makes unattended E2E pairing possible.
+
+### Cross-container ADB gotcha (documented in `spike-results-6-3.md`)
+
+`budtmo/docker-android` uses `socat` to forward ports 5554/5555 from the
+container's hostname-resolved IP. This binds to whatever IP the container
+has **at startup**. If you attach a network AFTER boot (e.g., via
+`docker network connect`), ADB won't be reachable on the new network.
+
+**The fix**: ensure the emulator container is on the `harmony-e2e` network
+from creation (which is what `docker compose` does). Don't try to attach
+networks after the fact when debugging.
+
+### Still not validated end-to-end
+
+The full `docker compose up` smoke run is **deferred to a later session**.
+All prerequisites are in place (images pulled, KVM validated, APK buildable).
+See `summary.md` → "Post-Plan Work" → "E2E stack run" for the handoff note.

@@ -448,6 +448,8 @@ export const ChatListScreen: React.FC = () => {
       onPress={() => handleChatPress(item)}
       activeOpacity={0.65}
       style={styles.rowWrapper}
+      testID="chat-list-item"
+      accessibilityLabel={`Chat with ${item.characterName}`}
     >
       {/* Subtle prismatic tint from top-left */}
       <LinearGradient
@@ -608,7 +610,11 @@ export const ChatListScreen: React.FC = () => {
       </ThemedAppbar>
 
       {!isPaired ? (
-        <View style={styles.notPairedContainer}>
+        <View
+          style={styles.notPairedContainer}
+          testID="chat-list-not-paired"
+          accessibilityLabel="Not paired with Harmony Link"
+        >
           <Icon name="connection" size={64} color={theme?.colors.text.muted} />
           <ThemedText style={styles.notPairedText}>{t('notConnected')}</ThemedText>
           <ThemedText variant="muted" size={13} style={styles.notPairedSubText}>
@@ -618,6 +624,7 @@ export const ChatListScreen: React.FC = () => {
             label={t('connectNow')}
             onPress={() => navigation.navigate('ConnectionSetup')}
             style={styles.connectButton}
+            testID="connect-now-button"
           />
         </View>
       ) : (
@@ -630,7 +637,11 @@ export const ChatListScreen: React.FC = () => {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
+            <View
+              style={styles.emptyContainer}
+              testID="chat-list-empty"
+              accessibilityLabel="No conversations yet"
+            >
               <Icon
                 name="chat-outline"
                 size={64}

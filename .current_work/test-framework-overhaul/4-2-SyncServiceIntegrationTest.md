@@ -1,5 +1,9 @@
 # Phase 4-2: SyncService Integration Test
 
+> **STATUS: ✅ COMPLETE.** Initial implementation quarantined the old test to
+> `__tests__/services/__legacy__/`. **Post-plan cleanup deleted it entirely**
+> — see "Legacy test final disposition" at the bottom of this file.
+
 ## Objective
 
 Replace the existing mock-everything `__tests__/services/SyncService.test.ts` with a real integration test that exercises `SyncService` + `ConnectionManager` + `NodeDatabase` (running real SQL) end-to-end. The only mocked boundary is the WebSocket transport itself.
@@ -272,3 +276,38 @@ Investigate any failures. Most will be:
 ## Estimated Effort
 
 Two to three days. The protocol mock is the bulk of the work — designing a server that drives the state machine correctly without being too rigid takes iteration.
+
+---
+
+## Legacy test final disposition
+
+> **STATUS: ✅ DELETED** (post-plan cleanup, July 2026).
+
+The initial Phase 4-2 implementation chose the "Quarantine" option from
+section 1: the old `__tests__/services/SyncService.test.ts` was moved to
+`__tests__/services/__legacy__/SyncService.test.ts` with a `@deprecated QUARANTINED`
+header. It was excluded from Jest runs via `testPathIgnorePatterns` in
+`jest.config.js`.
+
+In a post-plan review pass, the file was **deleted entirely** along with the
+now-empty `__legacy__/` directory. Rationale:
+
+1. The protocol knowledge it preserved was fully extracted into
+   `__tests__/integration/helpers/HarmonyLinkMockServer.ts` (the living,
+   working replacement).
+2. The 8 happy-path tests in `__tests__/integration/syncService.integration.test.ts`
+   plus 14 edge-case tests across 5 files cover everything the legacy test
+   attempted to cover — and they actually pass.
+3. Git history preserves the file permanently if anyone needs to reference
+   the old inline `MockConnectionManager`.
+4. A 658-line `__legacy__/` test file with a deprecation header invites
+   "should I fix this?" questions from future contributors — confusing.
+
+The corresponding entry in `jest.config.js`'s `testPathIgnorePatterns`
+(`/__tests__/services/__legacy__/`) was also removed. The `docs/TESTING.md`
+"Legacy (Quarantined)" subsection was removed.
+
+**Affected files (post-plan cleanup)**:
+- ❌ Deleted: `__tests__/services/__legacy__/SyncService.test.ts`
+- ✏️ Edited: `jest.config.js` (removed legacy entry from `testPathIgnorePatterns`)
+- ✏️ Edited: `docs/TESTING.md` (removed "Legacy (Quarantined)" subsection)

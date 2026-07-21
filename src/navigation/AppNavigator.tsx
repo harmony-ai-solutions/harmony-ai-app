@@ -16,7 +16,6 @@ import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
 import { EmojiActionEditorScreen } from '../screens/settings/EmojiActionEditorScreen';
 import { ProfileSettingsScreen } from '../screens/settings/ProfileSettingsScreen';
-import { DatabaseTestScreen } from '../screens/development/DatabaseTestScreen';
 import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
 import { ConnectionSetupScreen } from '../screens/setup/ConnectionSetupScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
@@ -56,7 +55,6 @@ export type RootStackParamList = {
     moduleType: string;
     configId?: string;
   };
-  DatabaseTests?: undefined;
   DatabaseTableViewer?: undefined;
 };
 
@@ -138,11 +136,6 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         {/* ── DEV-only screens ──────────────────────────────────────── */}
         {__DEV__ && (
           <>
-            <Stack.Screen
-              name="DatabaseTests"
-              component={DatabaseTestScreen}
-              options={{ headerShown: false }}
-            />
             <Stack.Screen
               name="DatabaseTableViewer"
               component={DatabaseTableViewerScreen}

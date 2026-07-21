@@ -95,11 +95,23 @@ android {
             buildConfigField "boolean", "IS_BETA", "true"
             buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty('GOOGLE_WEB_CLIENT_ID') ?: ''}\""
             buildConfigField "String", "APPLE_SERVICES_ID", "\"${project.findProperty('APPLE_SERVICES_ID') ?: ''}\""
+            // E2E override — read from -P gradle properties (same pattern as
+            // GOOGLE_WEB_CLIENT_ID above). Pass via:
+            //   ./gradlew assembleDevDebug \
+            //     -PHARMONY_LINK_WSS_URL=wss://10.0.2.2:28443 \
+            //     -PHARMONY_LINK_WS_URL=ws://10.0.2.2:28080
+            // Or set in ~/.gradle/gradle.properties for local dev.
+            // When both are empty, ConnectionStateManager.applyE2EOverride() no-ops.
+            buildConfigField "String", "HARMONY_LINK_WSS_URL", "\"${project.findProperty('HARMONY_LINK_WSS_URL') ?: ''}\""
+            buildConfigField "String", "HARMONY_LINK_WS_URL", "\"${project.findProperty('HARMONY_LINK_WS_URL') ?: ''}\""
         }
         prod {
             buildConfigField "boolean", "IS_BETA", "false"
             buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty('GOOGLE_WEB_CLIENT_ID') ?: ''}\""
             buildConfigField "String", "APPLE_SERVICES_ID", "\"${project.findProperty('APPLE_SERVICES_ID') ?: ''}\""
+            // Production builds must NEVER carry the E2E override.
+            buildConfigField "String", "HARMONY_LINK_WSS_URL", "\"\""
+            buildConfigField "String", "HARMONY_LINK_WS_URL", "\"\""
         }
     }
     signingConfigs {

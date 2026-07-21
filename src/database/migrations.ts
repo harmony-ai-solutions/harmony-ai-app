@@ -5,7 +5,7 @@
  * Only supports forward migrations - no rollback functionality.
  */
 
-import { SQLiteDatabase } from 'react-native-sqlite-storage';
+import type {Database} from './types';
 import { createLogger } from '../utils/logger';
 
 import { migration001 } from './migrations/000001_initial_schema';
@@ -42,7 +42,7 @@ import { migration031 } from './migrations/000031_config_uuid_primary_keys';
 import { migration032 } from './migrations/000032_add_soulbitscloud_provider';
 
 // Migration definition
-interface Migration {
+export interface Migration {
   version: number;
   description: string;
   sql: string;
@@ -51,7 +51,7 @@ interface Migration {
 const log = createLogger('[Migrations]');
 
 // All migrations in order
-const MIGRATIONS: Migration[] = [
+export const MIGRATIONS: Migration[] = [
   {
     version: 1,
     description: 'initial_schema',
@@ -218,7 +218,7 @@ const MIGRATIONS: Migration[] = [
  * Create the schema_migrations table if it doesn't exist
  */
 async function createMigrationsTable(
-  db: SQLiteDatabase,
+  db: Database,
   silent: boolean = false,
 ): Promise<void> {
   const sql = `
@@ -238,7 +238,7 @@ async function createMigrationsTable(
 /**
  * Get list of applied migration versions
  */
-async function getAppliedMigrations(db: SQLiteDatabase): Promise<Set<number>> {
+async function getAppliedMigrations(db: Database): Promise<Set<number>> {
   const [results] = await db.executeSql(
     'SELECT version FROM schema_migrations',
   );
@@ -330,7 +330,7 @@ function assertMigrationSqlSupported(
  * Apply a single migration within a transaction
  */
 async function applyMigration(
-  db: SQLiteDatabase,
+  db: Database,
   migration: Migration,
   silent: boolean = false,
 ): Promise<void> {
@@ -385,7 +385,7 @@ async function applyMigration(
  * This is the main entry point called during database initialization
  */
 export async function runMigrations(
-  db: SQLiteDatabase,
+  db: Database,
   silent: boolean = false,
 ): Promise<void> {
   if (!silent) {
@@ -433,9 +433,63 @@ export async function runMigrations(
 }
 
 /**
+ * Run all migrations up to (and including) the specified version.
+ * This is identical to `runMigrations` except it filters pending migrations
+ * to only those with `version <= targetVersion`.
+ *
+ * Useful for testing a specific snapshot of the schema.
+ */
+export async function runMigrationsToVersion(
+  db: Database,
+  targetVersion: number,
+  silent: boolean = false,
+): Promise<void> {
+  if (!silent) {
+    log.info(`Running migrations up to version ${targetVersion}...`);
+  }
+
+  try {
+    // Ensure migrations table exists
+    await createMigrationsTable(db, silent);
+
+    // Get already applied migrations
+    const appliedVersions = await getAppliedMigrations(db);
+
+    // Find pending migrations that are within the target range
+    const pendingMigrations = MIGRATIONS.filter(
+      m => !appliedVersions.has(m.version) && m.version <= targetVersion,
+    );
+
+    if (pendingMigrations.length === 0) {
+      if (!silent) {
+        log.info('Database is up to date');
+      }
+      return;
+    }
+
+    if (!silent) {
+      log.info(
+        `Applying ${pendingMigrations.length} pending migrations (up to v${targetVersion})`,
+      );
+    }
+
+    for (const migration of pendingMigrations) {
+      await applyMigration(db, migration, silent);
+    }
+
+    if (!silent) {
+      log.info('Migrations completed successfully');
+    }
+  } catch (error) {
+    log.error('Migration process failed:', error);
+    throw error;
+  }
+}
+
+/**
  * Get current database schema version
  */
-export async function getCurrentVersion(db: SQLiteDatabase): Promise<number> {
+export async function getCurrentVersion(db: Database): Promise<number> {
   try {
     const [results] = await db.executeSql(
       'SELECT MAX(version) as version FROM schema_migrations',

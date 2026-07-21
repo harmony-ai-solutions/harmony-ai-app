@@ -62,40 +62,147 @@ Since the same developer owns both repos, the following Go-side work is part of 
 
 Track the completion of each phase as implementation progresses:
 
-- [ ] **Phase 1: Jest Modernization & Cleanup**
-  - [ ] [1-1-Jest30Upgrade.md](1-1-Jest30Upgrade.md) — Migrate Jest 29 → 30, switch to `@react-native/jest-preset`
-  - [ ] [1-2-DeleteBrokenTestRunner.md](1-2-DeleteBrokenTestRunner.md) — Remove `run-db-tests.js`, `run-all-tests.ts`, and the hand-rolled `runTest`/`runTestWithCleanup` helpers
-- [ ] **Phase 2: Database Abstraction Layer** *(keystone — blocks Phases 3, 4)*
-  - [ ] [2-1-DatabaseInterface.md](2-1-DatabaseInterface.md) — Define `Database` interface matching the subset of the `react-native-sqlite-storage` API in use
-  - [ ] [2-2-BetterSqlite3NodeAdapter.md](2-2-BetterSqlite3NodeAdapter.md) — Test-only adapter implementing `Database` on top of `better-sqlite3`
-  - [ ] [2-3-RepositoryMigrationToInterface.md](2-3-RepositoryMigrationToInterface.md) — Refactor `connection.ts` and the ~10 repository files to import the interface
-  - [ ] [2-4-AdapterCompatibilityTest.md](2-4-AdapterCompatibilityTest.md) — Smoke test running identical queries through both adapters
-- [ ] **Phase 3: Migration Testing**
-  - [ ] [3-1-SchemaSnapshotTest.md](3-1-SchemaSnapshotTest.md) — Run all 32 migrations, snapshot `sqlite_master`
-  - [ ] [3-2-RollForwardTest.md](3-2-RollForwardTest.md) — Verify every version boundary upgrades cleanly
-  - [ ] [3-3-ConvertHandRolledDbTests.md](3-3-ConvertHandRolledDbTests.md) — Port the 5 existing `*.test.ts` DB tests to real Jest tests using the Node adapter
-- [ ] **Phase 4: Sync Integration Testing**
-  - [ ] [4-1-WSSMockInfrastructure.md](4-1-WSSMockInfrastructure.md) — Add `jest-websocket-mock`, factory for swapping WSS impl in tests
-  - [ ] [4-2-SyncServiceIntegrationTest.md](4-2-SyncServiceIntegrationTest.md) — Rewrite `SyncService.test.ts` with real DB + mocked WSS, full protocol flow
-  - [ ] [4-3-EdgeCaseScenarios.md](4-3-EdgeCaseScenarios.md) — Conflict resolution, network drop + retry, clock drift
-- [ ] **Phase 5: Cross-Language Schema Parity**
-  - [ ] [5-1-RNSchemaDumpUtility.md](5-1-RNSchemaDumpUtility.md) — CLI that dumps normalized schema JSON from the RN migrations
-  - [ ] [5-2-GoSchemaDumpCommand.md](5-2-GoSchemaDumpCommand.md) — Counterpart command in `harmony-link-private` (cross-repo coordination)
-  - [ ] [5-3-ParityCIGate.md](5-3-ParityCIGate.md) — CI job that diffs both dumps and fails on drift
-- [ ] **Phase 6: E2E with Docker + Maestro**
-  - [ ] [6-1-DockerComposeStack.md](6-1-DockerComposeStack.md) — Top-level compose file orchestrating all services
-  - [ ] [6-2-HarmonyLinkService.md](6-2-HarmonyLinkService.md) — Go backend container with self-signed cert generation at startup
-  - [ ] [6-3-AndroidEmulatorService.md](6-3-AndroidEmulatorService.md) — `budtmo/docker-android` service with KVM acceleration
-  - [ ] [6-4-SelfSignedTLSBootstrap.md](6-4-SelfSignedTLSBootstrap.md) — App-side trust configuration (`network_security_config.xml`, env-var CA injection)
-  - [ ] [6-5-MaestroFlows.md](6-5-MaestroFlows.md) — YAML flows covering boot, handshake, sync, conflict, reconnect
-  - [ ] [6-6-IOSMacOSRunner.md](6-6-IOSMacOSRunner.md) — iOS E2E on macOS GitHub Actions runner (Android flows reused)
-- [ ] **Phase 7: CI Pipeline Integration**
-  - [ ] [7-1-PullRequestTestWorkflow.md](7-1-PullRequestTestWorkflow.md) — New `test.yml` workflow running unit + integration tests on every PR
-  - [ ] [7-2-PreReleaseTestGate.md](7-2-PreReleaseTestGate.md) — Modify `build-release.yml` to require passing tests before building APK/IPA
-  - [ ] [7-3-E2EAndParityJobs.md](7-3-E2EAndParityJobs.md) — E2E Android (Docker), E2E iOS (cloud), and schema-parity jobs
-- [ ] **Phase 8: Documentation & Future Work**
-  - [ ] [8-1-TestingStrategyDoc.md](8-1-TestingStrategyDoc.md) — Document the new testing strategy in `docs/`
-  - [ ] [8-2-FutureWorkBacklog.md](8-2-FutureWorkBacklog.md) — Atlas/vendored DDL, Pact contracts, Vitest re-evaluation, SQLCipher smoke test on device
+- [x] **Phase 1: Jest Modernization & Cleanup** ✅
+  - [x] [1-1-Jest30Upgrade.md](1-1-Jest30Upgrade.md) — Migrate Jest 29 → 30, switch to `@react-native/jest-preset`
+  - [x] [1-2-DeleteBrokenTestRunner.md](1-2-DeleteBrokenTestRunner.md) — Remove `run-db-tests.js`, `run-all-tests.ts`, and the hand-rolled `runTest`/`runTestWithCleanup` helpers
+- [x] **Phase 2: Database Abstraction Layer** ✅ *(keystone — blocks Phases 3, 4)*
+  - [x] [2-1-DatabaseInterface.md](2-1-DatabaseInterface.md) — Define `Database` interface matching the subset of the `react-native-sqlite-storage` API in use
+  - [x] [2-2-BetterSqlite3NodeAdapter.md](2-2-BetterSqlite3NodeAdapter.md) — Test-only adapter implementing `Database` on top of `better-sqlite3`
+  - [x] [2-3-RepositoryMigrationToInterface.md](2-3-RepositoryMigrationToInterface.md) — Refactor `connection.ts` and the ~10 repository files to import the interface
+  - [x] [2-4-AdapterCompatibilityTest.md](2-4-AdapterCompatibilityTest.md) — Smoke test running identical queries through both adapters
+- [x] **Phase 3: Migration Testing** ✅
+  - [x] [3-1-SchemaSnapshotTest.md](3-1-SchemaSnapshotTest.md) — Run all 32 migrations, snapshot `sqlite_master`
+  - [x] [3-2-RollForwardTest.md](3-2-RollForwardTest.md) — Verify every version boundary upgrades cleanly
+  - [x] [3-3-ConvertHandRolledDbTests.md](3-3-ConvertHandRolledDbTests.md) — Port the 5 existing `*.test.ts` DB tests to real Jest tests using the Node adapter
+- [x] **Phase 4: Sync Integration Testing** ✅
+  - [x] [4-1-WSSMockInfrastructure.md](4-1-WSSMockInfrastructure.md) — Add `jest-websocket-mock`, factory for swapping WSS impl in tests, **+ production env-var override** (completed in post-plan work, see file)
+  - [x] [4-2-SyncServiceIntegrationTest.md](4-2-SyncServiceIntegrationTest.md) — Rewrite `SyncService.test.ts` with real DB + mocked WSS, full protocol flow. Old test **deleted** in post-plan cleanup (was quarantined to `__legacy__/`, then removed).
+  - [x] [4-3-EdgeCaseScenarios.md](4-3-EdgeCaseScenarios.md) — Conflict resolution, network drop + retry, clock drift
+- [x] **Phase 5: Cross-Language Schema Parity** ✅
+  - [x] [5-1-RNSchemaDumpUtility.md](5-1-RNSchemaDumpUtility.md) — CLI that dumps normalized schema JSON from the RN migrations
+  - [x] [5-2-GoSchemaDumpCommand.md](5-2-GoSchemaDumpCommand.md) — Counterpart command in `harmony-link-private` (cross-repo coordination)
+  - [x] [5-3-ParityCIGate.md](5-3-ParityCIGate.md) — CI job that diffs both dumps and fails on drift. **9 divergences found (2 CRITICAL)** — see `schema-parity-findings.md` and `docs/future-work.md` #16.
+- [x] **Phase 6: E2E with Docker + Maestro** ✅ *(infrastructure complete; flows not yet validated against a live emulator — see "Post-Plan Work" below)*
+  - [x] [6-1-DockerComposeStack.md](6-1-DockerComposeStack.md) — Top-level compose file orchestrating all services. **Image updated to `soulbits/harmony-link:latest`** (locally-built) in post-plan work.
+  - [x] [6-2-HarmonyLinkService.md](6-2-HarmonyLinkService.md) — Go backend container with self-signed cert generation at startup
+  - [x] [6-3-AndroidEmulatorService.md](6-3-AndroidEmulatorService.md) — `budtmo/docker-android` service with KVM acceleration. **Validated working in WSL2+Docker Desktop** in post-plan work (see `spike-results-6-3.md`). Healthcheck fixed (greps `READY`, not `device_status=online`).
+  - [x] [6-4-SelfSignedTLSBootstrap.md](6-4-SelfSignedTLSBootstrap.md) — App-side trust configuration (`network_security_config.xml`, env-var CA injection)
+  - [x] [6-5-MaestroFlows.md](6-5-MaestroFlows.md) — YAML flows covering boot, handshake, sync, conflict, reconnect. **Selectors rewritten in post-plan work** — now use real i18n strings + state-derived testIDs (see file).
+  - [x] [6-6-IOSMacOSRunner.md](6-6-IOSMacOSRunner.md) — iOS E2E on macOS GitHub Actions runner (Android flows reused)
+- [x] **Phase 7: CI Pipeline Integration** ✅
+  - [x] [7-1-PullRequestTestWorkflow.md](7-1-PullRequestTestWorkflow.md) — New `test.yml` workflow running unit + integration tests on every PR
+  - [x] [7-2-PreReleaseTestGate.md](7-2-PreReleaseTestGate.md) — Modify `build-release.yml` to require passing tests before building APK/IPA
+  - [x] [7-3-E2EAndParityJobs.md](7-3-E2EAndParityJobs.md) — E2E Android (Docker), E2E iOS (cloud), and schema-parity jobs
+- [x] **Phase 8: Documentation & Future Work** ✅
+  - [x] [8-1-TestingStrategyDoc.md](8-1-TestingStrategyDoc.md) — Document the new testing strategy in `docs/`
+  - [x] [8-2-FutureWorkBacklog.md](8-2-FutureWorkBacklog.md) — Atlas/vendored DDL, Pact contracts, Vitest re-evaluation, SQLCipher smoke test on device
+
+---
+
+## Post-Plan Work (after initial 8 phases shipped)
+
+The following work was done after the initial implementation pass and is documented here so the next maintainer has an accurate picture.
+
+### ✅ Smoke test verified
+
+`npm test` passes consistently:
+```
+Test Suites: 18 passed, 18 total
+Tests:       1 skipped, 153 passed, 154 total
+Snapshots:   10 passed, 10 total
+```
+
+### ✅ Legacy `SyncService.test.ts` deleted
+
+Originally quarantined to `__tests__/services/__legacy__/`. Then deleted entirely
+in a follow-up cleanup — its protocol knowledge was fully extracted into
+`__tests__/integration/helpers/HarmonyLinkMockServer.ts` and the new integration
+test suite. The `jest.config.js` `testPathIgnorePatterns` entry that excluded
+`__legacy__/` was also removed.
+
+### ✅ Docker Compose image updated to `soulbits/harmony-link:latest`
+
+The compose file originally referenced `harmonyai/harmony-link:latest` (Docker Hub,
+Dec 2025). Replaced with the locally-built `soulbits/harmony-link:latest` image
+(fresh from `harmony-link-private/Dockerfile.build`) and added `pull_policy: never`
+so it doesn't try to fetch from Docker Hub.
+
+### ✅ Emulator boot healthcheck bug fixed
+
+`budtmo/docker-android:emulator_14.0` writes `READY` to
+`/home/androidusr/device_status` when booted. The original healthcheck grepped
+for `device_status=online` or `booted` (incorrect patterns from older docs).
+Fixed to grep for `READY`.
+
+### ✅ WSL2 + Docker Desktop KVM validated
+
+The original `spike-results-6-3.md` was DEFERRED based on assumption. Re-validated
+empirically: `/dev/kvm` is exposed inside containers on Windows 11 + WSL2 + Docker
+Desktop out of the box. Emulator cold-boot takes ~50 seconds with hardware accel.
+See `spike-results-6-3.md` for full evidence and CI gotchas.
+
+### ✅ Phase 4-1 production-side env-var override implemented
+
+The original Phase 4-1 shipped the test-side factory (`createWebSocket.ts`) but
+deferred the production-side `HARMONY_LINK_WSS_URL` override. That gap is now
+closed in `src/services/ConnectionStateManager.ts:applyE2EOverride()`. Strategy:
+pre-seed AsyncStorage with expired-token state so `SyncConnectionContext` takes
+the `connectWithRefresh()` path, which runs the WS handshake. In cloud mode
+(`CLOUD_MODE=true` on the harmony-link container), the server auto-approves new
+devices during handshake (see `harmony-link-private/eventserver/synchronization.go:260`).
+
+Build mechanism: pass `-PHARMONY_LINK_WSS_URL=...` and `-PHARMONY_LINK_WS_URL=...`
+to gradle. Helper scripts: `e2e/build-apk.sh` + `e2e/build-apk.ps1`. Verified
+that BuildConfig.java contains both URLs after the build.
+
+### ✅ Maestro flow selectors rewritten
+
+All 6 Maestro YAML files had placeholder selectors (`text: ".*"`,
+`text: "Connected"`, `text: "E2E Test Character"`). Rewritten based on
+investigation of the actual UI:
+
+- `01-smoke-boot.yaml` — uses real text `"Chats"`, `"Not connected"`, `"Connect Now"`.
+  Will pass on cold launch (unpaired).
+- `02-happy-path-pull.yaml` — uses state-derived testIDs.
+- `03-conflict-resolution.yaml` — uses testIDs for character edit + sync trigger.
+- `04-network-reconnect.yaml` — uses reconnecting/connected testIDs.
+- `_shared/navigate-to-sync-settings.yaml` — uses tab + card testIDs.
+
+### ✅ testIDs added to UI components (Phase B-1)
+
+For Maestro to use stable selectors that survive copy changes:
+- `ConnectionStatusBadge` → `connection-status-dot-{connected,reconnecting,disconnected,not-paired}` (state-dependent)
+- All 5 tab buttons (`tab-discover`, `tab-search`, `tab-chat`, `tab-characters`, `tab-settings`) via `tabBarButtonTestID`
+- `ChatListScreen` → `chat-list-item`, `chat-list-not-paired`, `chat-list-empty`, `connect-now-button`
+- `SettingsScreen` → `settings-connection-card`, `settings-sync-card`
+- `SyncSettingsScreen` → `sync-now-button`, `force-resync-button`
+- `CharacterProfileEditScreen` → `character-name-input`
+- `CharacterProfileCard` → `character-profile-card`
+- `ThemedButton` → accepts and forwards `testID` + `accessibilityLabel` to all 4 variants
+
+### ⏳ E2E stack run (next session)
+
+The full `docker compose -f e2e/docker-compose.yml up` end-to-end run is **not yet
+executed**. Prerequisites are all in place:
+- `soulbits/harmony-link:latest` image present locally
+- `budtmo/docker-android:emulator_14.0` image pulled
+- KVM acceleration validated
+- `BuildConfig.java` confirmed to contain both `HARMONY_LINK_WSS_URL` and `HARMONY_LINK_WS_URL` after `-P` flag build
+- `e2e/app-debug.apk` buildable via `e2e/build-apk.ps1` (PowerShell) or `e2e/build-apk.sh` (WSL)
+
+**Known risk**: even with auto-pairing, the cloud-mode handshake returns an empty
+JWT. The client's `connectWithRefresh()` flow expects a JWT in the response and
+calls `saveConnectionCredentials()` — with empty values. This *should* work
+(server doesn't validate JWT in cloud mode, and the empty string satisfies
+`jwtToken !== null`), but has not been verified end-to-end.
+
+### ⏳ Still-open items (in `docs/future-work.md`)
+
+- #15: `clock_drift_seconds` is still ignored by `SyncService`
+- #16: 9 schema divergences (2 CRITICAL: missing FKs on `conversation_messages` + `interactions`)
+- #17: `setTimeout` without `.unref()` in `SyncService.sendSyncDataWithConfirmation` (15-min fix)
+- #18: 5 repositories with zero test coverage (`EmotionState`, `EmojiAction`, `SyncDevice`, `ConversationMessage`, `Interaction`)
+- iOS E2E runner explicitly excluded from GHA for now
 
 ## Key Decisions
 

@@ -1,0 +1,1078 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`migration roll-forward migrates from v1 to latest in one step: v1-to-latest 1`] = `
+"-- index: idx_character_image_primary
+CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
+
+-- index: idx_character_image_profile
+CREATE INDEX idx_character_image_profile ON character_image(character_profile_id);
+
+-- index: idx_conversation_messages_entity
+CREATE INDEX idx_conversation_messages_entity ON conversation_messages(entity_id);
+
+-- index: idx_conversation_messages_interaction_id
+CREATE INDEX idx_conversation_messages_interaction_id ON conversation_messages(interaction_id);
+
+-- index: idx_emoji_actions_entity_id
+CREATE INDEX idx_emoji_actions_entity_id ON entity_emoji_actions(entity_id);
+
+-- index: idx_emotion_state_entity_id
+CREATE INDEX idx_emotion_state_entity_id ON emotion_state(entity_id);
+
+-- index: idx_entities_alias_unique
+CREATE UNIQUE INDEX idx_entities_alias_unique ON entities (alias) WHERE alias IS NOT NULL AND alias != '' AND deleted_at IS NULL;
+
+-- index: idx_interactions_active
+CREATE INDEX idx_interactions_active ON interactions(entity_id, status, last_activity_at DESC);
+
+-- index: idx_interactions_lookup
+CREATE INDEX idx_interactions_lookup ON interactions(entity_id, interaction_scope, participant_key);
+
+-- index: idx_memories_deleted_at
+CREATE INDEX idx_memories_deleted_at ON memories(entity_id, deleted_at);
+
+-- index: idx_memories_end_date
+CREATE INDEX idx_memories_end_date ON memories(entity_id, end_date);
+
+-- index: idx_memories_entity_id
+CREATE INDEX idx_memories_entity_id ON memories(entity_id);
+
+-- index: idx_memories_entity_level
+CREATE INDEX idx_memories_entity_level ON memories(entity_id, compaction_level);
+
+-- index: idx_provider_config_anthropic_name
+CREATE INDEX idx_provider_config_anthropic_name ON provider_config_anthropic(name);
+
+-- index: idx_provider_config_google_name
+CREATE INDEX idx_provider_config_google_name ON provider_config_google(name);
+
+-- index: idx_provider_config_soulbitscloud_name
+CREATE INDEX idx_provider_config_soulbitscloud_name ON provider_config_soulbitscloud(name);
+
+-- index: idx_provider_config_xai_name
+CREATE INDEX idx_provider_config_xai_name ON provider_config_xai(name);
+
+-- table: backend_configs
+CREATE TABLE "backend_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: character_image
+CREATE TABLE "character_image" ( id INTEGER PRIMARY KEY AUTOINCREMENT, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
+
+-- table: character_profiles
+CREATE TABLE "character_profiles" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', appearance TEXT NOT NULL DEFAULT '', backstory TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', base_prompt TEXT DEFAULT '', scenario TEXT DEFAULT '', example_dialogues TEXT DEFAULT '', typing_speed_wpm INTEGER DEFAULT 60, audio_response_chance_percent INTEGER DEFAULT 50, vision_config_id TEXT REFERENCES vision_configs(id) ON DELETE SET NULL, lifecycle_config TEXT NOT NULL DEFAULT '{}', deleted_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
+-- table: cognition_configs
+CREATE TABLE "cognition_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, max_cognition_events INTEGER NOT NULL DEFAULT 20, generate_expressions INTEGER NOT NULL DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: conversation_messages
+CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT );
+
+-- table: emotion_state
+CREATE TABLE emotion_state ( entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE, joy_intensity REAL NOT NULL DEFAULT 0.1, sadness_intensity REAL NOT NULL DEFAULT 0.1, trust_intensity REAL NOT NULL DEFAULT 0.1, disgust_intensity REAL NOT NULL DEFAULT 0.1, fear_intensity REAL NOT NULL DEFAULT 0.1, anger_intensity REAL NOT NULL DEFAULT 0.1, surprise_intensity REAL NOT NULL DEFAULT 0.1, anticipation_intensity REAL NOT NULL DEFAULT 0.1, joy_baseline REAL NOT NULL DEFAULT 0.1, sadness_baseline REAL NOT NULL DEFAULT 0.1, trust_baseline REAL NOT NULL DEFAULT 0.1, disgust_baseline REAL NOT NULL DEFAULT 0.1, fear_baseline REAL NOT NULL DEFAULT 0.1, anger_baseline REAL NOT NULL DEFAULT 0.1, surprise_baseline REAL NOT NULL DEFAULT 0.1, anticipation_baseline REAL NOT NULL DEFAULT 0.1, joy_crystallize_start TIMESTAMP NULL, sadness_crystallize_start TIMESTAMP NULL, trust_crystallize_start TIMESTAMP NULL, disgust_crystallize_start TIMESTAMP NULL, fear_crystallize_start TIMESTAMP NULL, anger_crystallize_start TIMESTAMP NULL, surprise_crystallize_start TIMESTAMP NULL, anticipation_crystallize_start TIMESTAMP NULL, last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, decay_tau REAL NOT NULL DEFAULT 3600.0, high_threshold REAL NOT NULL DEFAULT 6.0, low_threshold REAL NOT NULL DEFAULT 1.0, crystallize_intensity REAL NOT NULL DEFAULT 7.0, crystallize_min_hours REAL NOT NULL DEFAULT 2.0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP );
+
+-- table: entities
+CREATE TABLE "entities" ( id TEXT PRIMARY KEY, character_profile_id TEXT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, lifecycle_config TEXT NOT NULL DEFAULT '{}', alias TEXT NOT NULL, rag_reindex_required INTEGER NOT NULL DEFAULT 1, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE RESTRICT );
+
+-- table: entity_emoji_actions
+CREATE TABLE entity_emoji_actions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, emoji_native TEXT NOT NULL, emotion_effect TEXT, metabolism_vector TEXT, substitution_text TEXT, auto_generated INTEGER NOT NULL DEFAULT 0, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT DEFAULT NULL, FOREIGN KEY (entity_id) REFERENCES entities(id), UNIQUE(entity_id, emoji_native) );
+
+-- table: entity_module_mappings
+CREATE TABLE "entity_module_mappings" ( entity_id TEXT PRIMARY KEY, backend_config_id TEXT, cognition_config_id TEXT, imagination_config_id TEXT, movement_config_id TEXT, rag_config_id TEXT, stt_config_id TEXT, tts_config_id TEXT, vision_config_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (imagination_config_id) REFERENCES imagination_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL, FOREIGN KEY (vision_config_id) REFERENCES vision_configs(id) ON DELETE SET NULL );
+
+-- table: imagination_configs
+CREATE TABLE "imagination_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: interactions
+CREATE TABLE interactions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, interaction_scope TEXT NOT NULL, participant_key TEXT, participant_ids TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', started_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, ended_at TEXT, metadata TEXT, deleted_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP , summary TEXT DEFAULT '', memory_id TEXT, continued_interaction_id TEXT, presence_type TEXT NOT NULL DEFAULT 'unknown');
+
+-- table: memories
+CREATE TABLE memories ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE, compaction_level INTEGER NOT NULL DEFAULT 1, content TEXT NOT NULL, emotional_state_bits INTEGER NOT NULL DEFAULT 0, start_date TIMESTAMP NULL, end_date TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP , deleted_at TIMESTAMP NULL);
+
+-- table: movement_configs
+CREATE TABLE "movement_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_anthropic
+CREATE TABLE "provider_config_anthropic" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6', max_tokens INTEGER NOT NULL DEFAULT 4096, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, top_k INTEGER NOT NULL DEFAULT 0, stop_sequences TEXT NOT NULL DEFAULT '[]', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: provider_config_characterai
+CREATE TABLE "provider_config_characterai" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_token TEXT NOT NULL, chatroom_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_comfyui
+CREATE TABLE "provider_config_comfyui" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', workflow_profiles TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: provider_config_elevenlabs
+CREATE TABLE "provider_config_elevenlabs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL, voice_id TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL DEFAULT '', stability REAL NOT NULL DEFAULT 0, similarity_boost REAL NOT NULL DEFAULT 0, style REAL NOT NULL DEFAULT 0, speaker_boost INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_google
+CREATE TABLE "provider_config_google" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_output_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, top_k INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER, response_mime_type TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', number_of_images INTEGER NOT NULL DEFAULT 1, aspect_ratio TEXT NOT NULL DEFAULT '1:1', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: provider_config_harmonyspeech
+CREATE TABLE "provider_config_harmonyspeech" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kajiwoto
+CREATE TABLE "provider_config_kajiwoto" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL, password TEXT NOT NULL, room_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kindroid
+CREATE TABLE "provider_config_kindroid" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL, kindroid_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_localai
+CREATE TABLE "provider_config_localai" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, model TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_mistral
+CREATE TABLE "provider_config_mistral" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_ollama
+CREATE TABLE "provider_config_ollama" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openai
+CREATE TABLE "provider_config_openai" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT '', frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', reasoning_effort TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openaicompatible
+CREATE TABLE "provider_config_openaicompatible" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openrouter
+CREATE TABLE "provider_config_openrouter" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 1.0, format TEXT NOT NULL DEFAULT 'mp3', image_aspect_ratio TEXT NOT NULL DEFAULT '', image_size TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_soulbitscloud
+CREATE TABLE provider_config_soulbitscloud ( id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL DEFAULT 'https://api.soulbits.app', api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER, response_format TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 1.0, format TEXT NOT NULL DEFAULT 'mp3', image_aspect_ratio TEXT NOT NULL DEFAULT '1:1', image_size TEXT NOT NULL DEFAULT '1k', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: provider_config_xai
+CREATE TABLE "provider_config_xai" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT 'grok-4.3', max_tokens INTEGER NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER, response_format TEXT NOT NULL DEFAULT '', reasoning_effort TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', image_aspect_ratio TEXT NOT NULL DEFAULT '1:1', image_resolution TEXT NOT NULL DEFAULT '1k', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: rag_configs
+CREATE TABLE "rag_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, embedding_concurrency INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: schema_migrations
+CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, description TEXT );
+
+-- table: stt_configs
+CREATE TABLE "stt_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id TEXT NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: sync_devices
+CREATE TABLE "sync_devices" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, device_name TEXT NOT NULL, device_type TEXT NOT NULL, device_platform TEXT, is_approved INTEGER NOT NULL DEFAULT 0, approval_requested_at DATETIME, approved_by_user_at DATETIME, last_sync_timestamp INTEGER NOT NULL DEFAULT 0, last_sync_initiated_by TEXT NOT NULL DEFAULT 'local', jwt_token TEXT, jwt_expires_at INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, UNIQUE(device_id, deleted_at) );
+
+-- table: sync_history
+CREATE TABLE "sync_history" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sync_started_at DATETIME NOT NULL, sync_completed_at DATETIME, records_sent INTEGER NOT NULL DEFAULT 0, records_received INTEGER NOT NULL DEFAULT 0, sync_status TEXT NOT NULL, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: tts_configs
+CREATE TABLE "tts_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: vision_configs
+CREATE TABLE "vision_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+"
+`;
+
+exports[`migration roll-forward schema at version 1 matches snapshot: v1 1`] = `
+"-- table: backend_configs
+CREATE TABLE backend_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: character_profiles
+CREATE TABLE character_profiles ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', appearance TEXT NOT NULL DEFAULT '', backstory TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
+-- table: cognition_configs
+CREATE TABLE cognition_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: entities
+CREATE TABLE entities ( id TEXT PRIMARY KEY, character_profile_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE RESTRICT );
+
+-- table: entity_module_mappings
+CREATE TABLE entity_module_mappings ( entity_id TEXT PRIMARY KEY, backend_config_id INTEGER, cognition_config_id INTEGER, movement_config_id INTEGER, rag_config_id INTEGER, stt_config_id INTEGER, tts_config_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL );
+
+-- table: movement_configs
+CREATE TABLE movement_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_characterai
+CREATE TABLE provider_config_characterai ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_token TEXT NOT NULL, chatroom_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_elevenlabs
+CREATE TABLE provider_config_elevenlabs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL, voice_id TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL DEFAULT '', stability REAL NOT NULL DEFAULT 0, similarity_boost REAL NOT NULL DEFAULT 0, style REAL NOT NULL DEFAULT 0, speaker_boost INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_harmonyspeech
+CREATE TABLE provider_config_harmonyspeech ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_kajiwoto
+CREATE TABLE provider_config_kajiwoto ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, username TEXT NOT NULL, password TEXT NOT NULL, room_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_kindroid
+CREATE TABLE provider_config_kindroid ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL, kindroid_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_localai
+CREATE TABLE provider_config_localai ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, embedding_model TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_mistral
+CREATE TABLE provider_config_mistral ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_ollama
+CREATE TABLE provider_config_ollama ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, base_url TEXT NOT NULL, embedding_model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_openai
+CREATE TABLE provider_config_openai ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_openaicompatible
+CREATE TABLE provider_config_openaicompatible ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: provider_config_openrouter
+CREATE TABLE provider_config_openrouter ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: rag_configs
+CREATE TABLE rag_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, embedding_concurrency INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: schema_migrations
+CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, description TEXT );
+
+-- table: stt_configs
+CREATE TABLE stt_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id INTEGER NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+
+-- table: tts_configs
+CREATE TABLE tts_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP );
+"
+`;
+
+exports[`migration roll-forward schema at version 5 matches snapshot: v5 1`] = `
+"-- index: idx_character_image_primary
+CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
+
+-- index: idx_character_image_profile
+CREATE INDEX idx_character_image_profile ON character_image(character_profile_id);
+
+-- table: backend_configs
+CREATE TABLE backend_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: character_image
+CREATE TABLE character_image ( id INTEGER PRIMARY KEY AUTOINCREMENT, character_profile_id TEXT NOT NULL, image_data TEXT NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', vl_model_embedding TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
+
+-- table: character_profiles
+CREATE TABLE character_profiles ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', appearance TEXT NOT NULL DEFAULT '', backstory TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP , base_prompt TEXT DEFAULT '', scenario TEXT DEFAULT '', example_dialogues TEXT DEFAULT '', deleted_at DATETIME);
+
+-- table: chat_messages
+CREATE TABLE chat_messages ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, session_id TEXT, content TEXT NOT NULL, audio_file TEXT, audio_duration REAL, message_type TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (entity_id) REFERENCES entities(id), FOREIGN KEY (sender_entity_id) REFERENCES entities(id) );
+
+-- table: cognition_configs
+CREATE TABLE cognition_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , generate_expressions INTEGER NOT NULL DEFAULT 1, max_cognition_events INTEGER NOT NULL DEFAULT 20, deleted_at DATETIME);
+
+-- table: entities
+CREATE TABLE "entities" ( id TEXT PRIMARY KEY, character_profile_id TEXT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE RESTRICT );
+
+-- table: entity_module_mappings
+CREATE TABLE entity_module_mappings ( entity_id TEXT PRIMARY KEY, backend_config_id INTEGER, cognition_config_id INTEGER, movement_config_id INTEGER, rag_config_id INTEGER, stt_config_id INTEGER, tts_config_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL );
+
+-- table: movement_configs
+CREATE TABLE movement_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_characterai
+CREATE TABLE provider_config_characterai ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_token TEXT NOT NULL, chatroom_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_elevenlabs
+CREATE TABLE provider_config_elevenlabs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL, voice_id TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL DEFAULT '', stability REAL NOT NULL DEFAULT 0, similarity_boost REAL NOT NULL DEFAULT 0, style REAL NOT NULL DEFAULT 0, speaker_boost INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_harmonyspeech
+CREATE TABLE provider_config_harmonyspeech ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_kajiwoto
+CREATE TABLE provider_config_kajiwoto ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, username TEXT NOT NULL, password TEXT NOT NULL, room_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_kindroid
+CREATE TABLE provider_config_kindroid ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL, kindroid_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_localai
+CREATE TABLE provider_config_localai ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, embedding_model TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_mistral
+CREATE TABLE provider_config_mistral ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_ollama
+CREATE TABLE provider_config_ollama ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, base_url TEXT NOT NULL, embedding_model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_openai
+CREATE TABLE provider_config_openai ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_openaicompatible
+CREATE TABLE provider_config_openaicompatible ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_openrouter
+CREATE TABLE provider_config_openrouter ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: rag_configs
+CREATE TABLE rag_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, embedding_concurrency INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: schema_migrations
+CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, description TEXT );
+
+-- table: stt_configs
+CREATE TABLE stt_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id INTEGER NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: sync_devices
+CREATE TABLE sync_devices ( device_id TEXT PRIMARY KEY, device_name TEXT NOT NULL, device_type TEXT NOT NULL, device_platform TEXT, is_approved INTEGER NOT NULL DEFAULT 0, approval_requested_at DATETIME, approved_by_user_at DATETIME, last_sync_timestamp INTEGER NOT NULL DEFAULT 0, last_sync_initiated_by TEXT NOT NULL DEFAULT 'local', jwt_token TEXT, jwt_expires_at INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: sync_history
+CREATE TABLE sync_history ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sync_started_at DATETIME NOT NULL, sync_completed_at DATETIME, records_sent INTEGER NOT NULL DEFAULT 0, records_received INTEGER NOT NULL DEFAULT 0, sync_status TEXT NOT NULL, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (device_id) REFERENCES sync_devices(device_id) );
+
+-- table: tts_configs
+CREATE TABLE tts_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+"
+`;
+
+exports[`migration roll-forward schema at version 10 matches snapshot: v10 1`] = `
+"-- index: idx_character_image_primary
+CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
+
+-- index: idx_character_image_profile
+CREATE INDEX idx_character_image_profile ON character_image(character_profile_id);
+
+-- index: idx_chat_messages_conversation
+CREATE INDEX idx_chat_messages_conversation ON "conversation_messages"(entity_id, sender_entity_id, created_at);
+
+-- index: idx_chat_messages_id
+CREATE INDEX idx_chat_messages_id ON "conversation_messages"(id);
+
+-- table: backend_configs
+CREATE TABLE backend_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: character_image
+CREATE TABLE character_image ( id INTEGER PRIMARY KEY AUTOINCREMENT, character_profile_id TEXT NOT NULL, image_data TEXT NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', vl_model_embedding TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
+
+-- table: character_profiles
+CREATE TABLE character_profiles ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', appearance TEXT NOT NULL DEFAULT '', backstory TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP , base_prompt TEXT DEFAULT '', scenario TEXT DEFAULT '', example_dialogues TEXT DEFAULT '', deleted_at DATETIME, typing_speed_wpm INTEGER DEFAULT 60, audio_response_chance_percent INTEGER DEFAULT 50);
+
+-- table: cognition_configs
+CREATE TABLE cognition_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , generate_expressions INTEGER NOT NULL DEFAULT 1, max_cognition_events INTEGER NOT NULL DEFAULT 20, deleted_at DATETIME);
+
+-- table: conversation_messages
+CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, session_id TEXT, content TEXT NOT NULL, audio_file TEXT, audio_duration REAL, message_type TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, vl_model_embedding TEXT, audio_data TEXT, audio_mime_type TEXT, FOREIGN KEY (entity_id) REFERENCES entities(id), FOREIGN KEY (sender_entity_id) REFERENCES entities(id) );
+
+-- table: entities
+CREATE TABLE "entities" ( id TEXT PRIMARY KEY, character_profile_id TEXT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE RESTRICT );
+
+-- table: entity_module_mappings
+CREATE TABLE entity_module_mappings ( entity_id TEXT PRIMARY KEY, backend_config_id INTEGER, cognition_config_id INTEGER, movement_config_id INTEGER, rag_config_id INTEGER, stt_config_id INTEGER, tts_config_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL );
+
+-- table: movement_configs
+CREATE TABLE movement_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_characterai
+CREATE TABLE "provider_config_characterai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_token TEXT NOT NULL, chatroom_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_elevenlabs
+CREATE TABLE "provider_config_elevenlabs" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, voice_id TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL DEFAULT '', stability REAL NOT NULL DEFAULT 0, similarity_boost REAL NOT NULL DEFAULT 0, style REAL NOT NULL DEFAULT 0, speaker_boost INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_harmonyspeech
+CREATE TABLE "provider_config_harmonyspeech" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kajiwoto
+CREATE TABLE "provider_config_kajiwoto" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, username TEXT NOT NULL, password TEXT NOT NULL, room_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kindroid
+CREATE TABLE "provider_config_kindroid" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, kindroid_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_localai
+CREATE TABLE "provider_config_localai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, embedding_model TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_mistral
+CREATE TABLE "provider_config_mistral" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_ollama
+CREATE TABLE "provider_config_ollama" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, embedding_model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openai
+CREATE TABLE "provider_config_openai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openaicompatible
+CREATE TABLE "provider_config_openaicompatible" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openrouter
+CREATE TABLE "provider_config_openrouter" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: rag_configs
+CREATE TABLE rag_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, embedding_concurrency INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: schema_migrations
+CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, description TEXT );
+
+-- table: stt_configs
+CREATE TABLE stt_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id INTEGER NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: sync_devices
+CREATE TABLE "sync_devices" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, device_name TEXT NOT NULL, device_type TEXT NOT NULL, device_platform TEXT, is_approved INTEGER NOT NULL DEFAULT 0, approval_requested_at DATETIME, approved_by_user_at DATETIME, last_sync_timestamp INTEGER NOT NULL DEFAULT 0, last_sync_initiated_by TEXT NOT NULL DEFAULT 'local', jwt_token TEXT, jwt_expires_at INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, UNIQUE(device_id, deleted_at) );
+
+-- table: sync_history
+CREATE TABLE "sync_history" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sync_started_at DATETIME NOT NULL, sync_completed_at DATETIME, records_sent INTEGER NOT NULL DEFAULT 0, records_received INTEGER NOT NULL DEFAULT 0, sync_status TEXT NOT NULL, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: tts_configs
+CREATE TABLE tts_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+"
+`;
+
+exports[`migration roll-forward schema at version 15 matches snapshot: v15 1`] = `
+"-- index: idx_character_image_primary
+CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
+
+-- index: idx_character_image_profile
+CREATE INDEX idx_character_image_profile ON character_image(character_profile_id);
+
+-- index: idx_conversation_messages_entity
+CREATE INDEX idx_conversation_messages_entity ON conversation_messages(entity_id);
+
+-- index: idx_emotion_state_entity_id
+CREATE INDEX idx_emotion_state_entity_id ON emotion_state(entity_id);
+
+-- table: backend_configs
+CREATE TABLE backend_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: character_image
+CREATE TABLE "character_image" ( id INTEGER PRIMARY KEY AUTOINCREMENT, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
+
+-- table: character_profiles
+CREATE TABLE character_profiles ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', appearance TEXT NOT NULL DEFAULT '', backstory TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP , base_prompt TEXT DEFAULT '', scenario TEXT DEFAULT '', example_dialogues TEXT DEFAULT '', deleted_at DATETIME, typing_speed_wpm INTEGER DEFAULT 60, audio_response_chance_percent INTEGER DEFAULT 50, vision_config_id INTEGER REFERENCES vision_configs(id) ON DELETE SET NULL, lifecycle_config TEXT NOT NULL DEFAULT '{}');
+
+-- table: cognition_configs
+CREATE TABLE cognition_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , generate_expressions INTEGER NOT NULL DEFAULT 1, max_cognition_events INTEGER NOT NULL DEFAULT 20, deleted_at DATETIME);
+
+-- table: conversation_messages
+CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, session_id TEXT, content TEXT NOT NULL DEFAULT '', audio_duration REAL, message_type TEXT NOT NULL DEFAULT 'text', audio_data BLOB, audio_mime_type TEXT, image_data BLOB, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE );
+
+-- table: emotion_state
+CREATE TABLE emotion_state ( entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE, joy_intensity REAL NOT NULL DEFAULT 0.1, sadness_intensity REAL NOT NULL DEFAULT 0.1, trust_intensity REAL NOT NULL DEFAULT 0.1, disgust_intensity REAL NOT NULL DEFAULT 0.1, fear_intensity REAL NOT NULL DEFAULT 0.1, anger_intensity REAL NOT NULL DEFAULT 0.1, surprise_intensity REAL NOT NULL DEFAULT 0.1, anticipation_intensity REAL NOT NULL DEFAULT 0.1, joy_baseline REAL NOT NULL DEFAULT 0.1, sadness_baseline REAL NOT NULL DEFAULT 0.1, trust_baseline REAL NOT NULL DEFAULT 0.1, disgust_baseline REAL NOT NULL DEFAULT 0.1, fear_baseline REAL NOT NULL DEFAULT 0.1, anger_baseline REAL NOT NULL DEFAULT 0.1, surprise_baseline REAL NOT NULL DEFAULT 0.1, anticipation_baseline REAL NOT NULL DEFAULT 0.1, joy_crystallize_start TIMESTAMP NULL, sadness_crystallize_start TIMESTAMP NULL, trust_crystallize_start TIMESTAMP NULL, disgust_crystallize_start TIMESTAMP NULL, fear_crystallize_start TIMESTAMP NULL, anger_crystallize_start TIMESTAMP NULL, surprise_crystallize_start TIMESTAMP NULL, anticipation_crystallize_start TIMESTAMP NULL, last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, decay_tau REAL NOT NULL DEFAULT 3600.0, high_threshold REAL NOT NULL DEFAULT 6.0, low_threshold REAL NOT NULL DEFAULT 1.0, crystallize_intensity REAL NOT NULL DEFAULT 7.0, crystallize_min_hours REAL NOT NULL DEFAULT 2.0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP );
+
+-- table: entities
+CREATE TABLE "entities" ( id TEXT PRIMARY KEY, character_profile_id TEXT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, lifecycle_config TEXT NOT NULL DEFAULT '{}', FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE RESTRICT );
+
+-- table: entity_module_mappings
+CREATE TABLE "entity_module_mappings" ( entity_id TEXT PRIMARY KEY, backend_config_id INTEGER, cognition_config_id INTEGER, imagination_config_id INTEGER, movement_config_id INTEGER, rag_config_id INTEGER, stt_config_id INTEGER, tts_config_id INTEGER, vision_config_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (imagination_config_id) REFERENCES imagination_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL, FOREIGN KEY (vision_config_id) REFERENCES vision_configs(id) ON DELETE SET NULL );
+
+-- table: imagination_configs
+CREATE TABLE imagination_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: movement_configs
+CREATE TABLE movement_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_characterai
+CREATE TABLE "provider_config_characterai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_token TEXT NOT NULL, chatroom_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_comfyui
+CREATE TABLE provider_config_comfyui ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', workflow_profiles TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_elevenlabs
+CREATE TABLE "provider_config_elevenlabs" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, voice_id TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL DEFAULT '', stability REAL NOT NULL DEFAULT 0, similarity_boost REAL NOT NULL DEFAULT 0, style REAL NOT NULL DEFAULT 0, speaker_boost INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_harmonyspeech
+CREATE TABLE "provider_config_harmonyspeech" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kajiwoto
+CREATE TABLE "provider_config_kajiwoto" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, username TEXT NOT NULL, password TEXT NOT NULL, room_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kindroid
+CREATE TABLE "provider_config_kindroid" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, kindroid_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_localai
+CREATE TABLE "provider_config_localai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, embedding_model TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_mistral
+CREATE TABLE "provider_config_mistral" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_ollama
+CREATE TABLE "provider_config_ollama" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, embedding_model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openai
+CREATE TABLE "provider_config_openai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openaicompatible
+CREATE TABLE "provider_config_openaicompatible" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openrouter
+CREATE TABLE "provider_config_openrouter" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: rag_configs
+CREATE TABLE rag_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, embedding_concurrency INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: schema_migrations
+CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, description TEXT );
+
+-- table: stt_configs
+CREATE TABLE stt_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id INTEGER NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: sync_devices
+CREATE TABLE "sync_devices" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, device_name TEXT NOT NULL, device_type TEXT NOT NULL, device_platform TEXT, is_approved INTEGER NOT NULL DEFAULT 0, approval_requested_at DATETIME, approved_by_user_at DATETIME, last_sync_timestamp INTEGER NOT NULL DEFAULT 0, last_sync_initiated_by TEXT NOT NULL DEFAULT 'local', jwt_token TEXT, jwt_expires_at INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, UNIQUE(device_id, deleted_at) );
+
+-- table: sync_history
+CREATE TABLE "sync_history" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sync_started_at DATETIME NOT NULL, sync_completed_at DATETIME, records_sent INTEGER NOT NULL DEFAULT 0, records_received INTEGER NOT NULL DEFAULT 0, sync_status TEXT NOT NULL, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: tts_configs
+CREATE TABLE tts_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: vision_configs
+CREATE TABLE vision_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+"
+`;
+
+exports[`migration roll-forward schema at version 20 matches snapshot: v20 1`] = `
+"-- index: idx_character_image_primary
+CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
+
+-- index: idx_character_image_profile
+CREATE INDEX idx_character_image_profile ON character_image(character_profile_id);
+
+-- index: idx_conversation_messages_entity
+CREATE INDEX idx_conversation_messages_entity ON conversation_messages(entity_id);
+
+-- index: idx_conversation_messages_memory_id
+CREATE INDEX idx_conversation_messages_memory_id ON conversation_messages(memory_id);
+
+-- index: idx_emotion_state_entity_id
+CREATE INDEX idx_emotion_state_entity_id ON emotion_state(entity_id);
+
+-- index: idx_entities_alias_unique
+CREATE UNIQUE INDEX idx_entities_alias_unique ON entities (alias) WHERE alias IS NOT NULL AND alias != '' AND deleted_at IS NULL;
+
+-- index: idx_memories_deleted_at
+CREATE INDEX idx_memories_deleted_at ON memories(entity_id, deleted_at);
+
+-- index: idx_memories_end_date
+CREATE INDEX idx_memories_end_date ON memories(entity_id, end_date);
+
+-- index: idx_memories_entity_id
+CREATE INDEX idx_memories_entity_id ON memories(entity_id);
+
+-- index: idx_memories_entity_level
+CREATE INDEX idx_memories_entity_level ON memories(entity_id, compaction_level);
+
+-- table: backend_configs
+CREATE TABLE backend_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: character_image
+CREATE TABLE "character_image" ( id INTEGER PRIMARY KEY AUTOINCREMENT, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
+
+-- table: character_profiles
+CREATE TABLE character_profiles ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', appearance TEXT NOT NULL DEFAULT '', backstory TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP , base_prompt TEXT DEFAULT '', scenario TEXT DEFAULT '', example_dialogues TEXT DEFAULT '', deleted_at DATETIME, typing_speed_wpm INTEGER DEFAULT 60, audio_response_chance_percent INTEGER DEFAULT 50, vision_config_id INTEGER REFERENCES vision_configs(id) ON DELETE SET NULL, lifecycle_config TEXT NOT NULL DEFAULT '{}');
+
+-- table: cognition_configs
+CREATE TABLE cognition_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , generate_expressions INTEGER NOT NULL DEFAULT 1, max_cognition_events INTEGER NOT NULL DEFAULT 20, deleted_at DATETIME);
+
+-- table: conversation_messages
+CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, session_id TEXT, content TEXT NOT NULL DEFAULT '', audio_duration REAL, message_type TEXT NOT NULL DEFAULT 'text', audio_data BLOB, audio_mime_type TEXT, image_data BLOB, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, emotional_state_bits INTEGER NOT NULL DEFAULT 0, memory_id TEXT NULL REFERENCES memories(id) ON DELETE SET NULL, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE );
+
+-- table: emotion_state
+CREATE TABLE emotion_state ( entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE, joy_intensity REAL NOT NULL DEFAULT 0.1, sadness_intensity REAL NOT NULL DEFAULT 0.1, trust_intensity REAL NOT NULL DEFAULT 0.1, disgust_intensity REAL NOT NULL DEFAULT 0.1, fear_intensity REAL NOT NULL DEFAULT 0.1, anger_intensity REAL NOT NULL DEFAULT 0.1, surprise_intensity REAL NOT NULL DEFAULT 0.1, anticipation_intensity REAL NOT NULL DEFAULT 0.1, joy_baseline REAL NOT NULL DEFAULT 0.1, sadness_baseline REAL NOT NULL DEFAULT 0.1, trust_baseline REAL NOT NULL DEFAULT 0.1, disgust_baseline REAL NOT NULL DEFAULT 0.1, fear_baseline REAL NOT NULL DEFAULT 0.1, anger_baseline REAL NOT NULL DEFAULT 0.1, surprise_baseline REAL NOT NULL DEFAULT 0.1, anticipation_baseline REAL NOT NULL DEFAULT 0.1, joy_crystallize_start TIMESTAMP NULL, sadness_crystallize_start TIMESTAMP NULL, trust_crystallize_start TIMESTAMP NULL, disgust_crystallize_start TIMESTAMP NULL, fear_crystallize_start TIMESTAMP NULL, anger_crystallize_start TIMESTAMP NULL, surprise_crystallize_start TIMESTAMP NULL, anticipation_crystallize_start TIMESTAMP NULL, last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, decay_tau REAL NOT NULL DEFAULT 3600.0, high_threshold REAL NOT NULL DEFAULT 6.0, low_threshold REAL NOT NULL DEFAULT 1.0, crystallize_intensity REAL NOT NULL DEFAULT 7.0, crystallize_min_hours REAL NOT NULL DEFAULT 2.0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP );
+
+-- table: entities
+CREATE TABLE "entities" ( id TEXT PRIMARY KEY, character_profile_id TEXT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, lifecycle_config TEXT NOT NULL DEFAULT '{}', alias TEXT NOT NULL, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE RESTRICT );
+
+-- table: entity_module_mappings
+CREATE TABLE "entity_module_mappings" ( entity_id TEXT PRIMARY KEY, backend_config_id INTEGER, cognition_config_id INTEGER, imagination_config_id INTEGER, movement_config_id INTEGER, rag_config_id INTEGER, stt_config_id INTEGER, tts_config_id INTEGER, vision_config_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (imagination_config_id) REFERENCES imagination_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL, FOREIGN KEY (vision_config_id) REFERENCES vision_configs(id) ON DELETE SET NULL );
+
+-- table: imagination_configs
+CREATE TABLE imagination_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: memories
+CREATE TABLE memories ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE, compaction_level INTEGER NOT NULL DEFAULT 1, content TEXT NOT NULL, emotional_state_bits INTEGER NOT NULL DEFAULT 0, start_date TIMESTAMP NULL, end_date TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP , deleted_at TIMESTAMP NULL);
+
+-- table: movement_configs
+CREATE TABLE movement_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_characterai
+CREATE TABLE "provider_config_characterai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_token TEXT NOT NULL, chatroom_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_comfyui
+CREATE TABLE provider_config_comfyui ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', workflow_profiles TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_elevenlabs
+CREATE TABLE "provider_config_elevenlabs" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, voice_id TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL DEFAULT '', stability REAL NOT NULL DEFAULT 0, similarity_boost REAL NOT NULL DEFAULT 0, style REAL NOT NULL DEFAULT 0, speaker_boost INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_harmonyspeech
+CREATE TABLE "provider_config_harmonyspeech" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kajiwoto
+CREATE TABLE "provider_config_kajiwoto" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, username TEXT NOT NULL, password TEXT NOT NULL, room_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kindroid
+CREATE TABLE "provider_config_kindroid" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, kindroid_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_localai
+CREATE TABLE "provider_config_localai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, embedding_model TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_mistral
+CREATE TABLE "provider_config_mistral" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_ollama
+CREATE TABLE "provider_config_ollama" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, embedding_model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openai
+CREATE TABLE "provider_config_openai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME , frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', reasoning_effort TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, chat_template_kwargs TEXT NOT NULL DEFAULT '');
+
+-- table: provider_config_openaicompatible
+CREATE TABLE "provider_config_openaicompatible" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME , frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', chat_template_kwargs TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0);
+
+-- table: provider_config_openrouter
+CREATE TABLE "provider_config_openrouter" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME , frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, chat_template_kwargs TEXT NOT NULL DEFAULT '');
+
+-- table: rag_configs
+CREATE TABLE rag_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, embedding_concurrency INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: schema_migrations
+CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, description TEXT );
+
+-- table: stt_configs
+CREATE TABLE stt_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id INTEGER NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: sync_devices
+CREATE TABLE "sync_devices" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, device_name TEXT NOT NULL, device_type TEXT NOT NULL, device_platform TEXT, is_approved INTEGER NOT NULL DEFAULT 0, approval_requested_at DATETIME, approved_by_user_at DATETIME, last_sync_timestamp INTEGER NOT NULL DEFAULT 0, last_sync_initiated_by TEXT NOT NULL DEFAULT 'local', jwt_token TEXT, jwt_expires_at INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, UNIQUE(device_id, deleted_at) );
+
+-- table: sync_history
+CREATE TABLE "sync_history" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sync_started_at DATETIME NOT NULL, sync_completed_at DATETIME, records_sent INTEGER NOT NULL DEFAULT 0, records_received INTEGER NOT NULL DEFAULT 0, sync_status TEXT NOT NULL, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: tts_configs
+CREATE TABLE tts_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: vision_configs
+CREATE TABLE vision_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+"
+`;
+
+exports[`migration roll-forward schema at version 25 matches snapshot: v25 1`] = `
+"-- index: idx_character_image_primary
+CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
+
+-- index: idx_character_image_profile
+CREATE INDEX idx_character_image_profile ON character_image(character_profile_id);
+
+-- index: idx_conversation_messages_entity
+CREATE INDEX idx_conversation_messages_entity ON conversation_messages(entity_id);
+
+-- index: idx_conversation_messages_interaction_id
+CREATE INDEX idx_conversation_messages_interaction_id ON conversation_messages(interaction_id);
+
+-- index: idx_conversation_messages_memory_id
+CREATE INDEX idx_conversation_messages_memory_id ON conversation_messages(memory_id);
+
+-- index: idx_emoji_actions_entity_id
+CREATE INDEX idx_emoji_actions_entity_id ON entity_emoji_actions(entity_id);
+
+-- index: idx_emotion_state_entity_id
+CREATE INDEX idx_emotion_state_entity_id ON emotion_state(entity_id);
+
+-- index: idx_entities_alias_unique
+CREATE UNIQUE INDEX idx_entities_alias_unique ON entities (alias) WHERE alias IS NOT NULL AND alias != '' AND deleted_at IS NULL;
+
+-- index: idx_interactions_active
+CREATE INDEX idx_interactions_active ON interactions(entity_id, status, last_activity_at DESC);
+
+-- index: idx_interactions_lookup
+CREATE INDEX idx_interactions_lookup ON interactions(entity_id, interaction_scope, participant_key);
+
+-- index: idx_memories_deleted_at
+CREATE INDEX idx_memories_deleted_at ON memories(entity_id, deleted_at);
+
+-- index: idx_memories_end_date
+CREATE INDEX idx_memories_end_date ON memories(entity_id, end_date);
+
+-- index: idx_memories_entity_id
+CREATE INDEX idx_memories_entity_id ON memories(entity_id);
+
+-- index: idx_memories_entity_level
+CREATE INDEX idx_memories_entity_level ON memories(entity_id, compaction_level);
+
+-- table: backend_configs
+CREATE TABLE backend_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: character_image
+CREATE TABLE "character_image" ( id INTEGER PRIMARY KEY AUTOINCREMENT, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
+
+-- table: character_profiles
+CREATE TABLE character_profiles ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', appearance TEXT NOT NULL DEFAULT '', backstory TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP , base_prompt TEXT DEFAULT '', scenario TEXT DEFAULT '', example_dialogues TEXT DEFAULT '', deleted_at DATETIME, typing_speed_wpm INTEGER DEFAULT 60, audio_response_chance_percent INTEGER DEFAULT 50, vision_config_id INTEGER REFERENCES vision_configs(id) ON DELETE SET NULL, lifecycle_config TEXT NOT NULL DEFAULT '{}');
+
+-- table: cognition_configs
+CREATE TABLE cognition_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , generate_expressions INTEGER NOT NULL DEFAULT 1, max_cognition_events INTEGER NOT NULL DEFAULT 20, deleted_at DATETIME);
+
+-- table: conversation_messages
+CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, memory_id TEXT, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT );
+
+-- table: emotion_state
+CREATE TABLE emotion_state ( entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE, joy_intensity REAL NOT NULL DEFAULT 0.1, sadness_intensity REAL NOT NULL DEFAULT 0.1, trust_intensity REAL NOT NULL DEFAULT 0.1, disgust_intensity REAL NOT NULL DEFAULT 0.1, fear_intensity REAL NOT NULL DEFAULT 0.1, anger_intensity REAL NOT NULL DEFAULT 0.1, surprise_intensity REAL NOT NULL DEFAULT 0.1, anticipation_intensity REAL NOT NULL DEFAULT 0.1, joy_baseline REAL NOT NULL DEFAULT 0.1, sadness_baseline REAL NOT NULL DEFAULT 0.1, trust_baseline REAL NOT NULL DEFAULT 0.1, disgust_baseline REAL NOT NULL DEFAULT 0.1, fear_baseline REAL NOT NULL DEFAULT 0.1, anger_baseline REAL NOT NULL DEFAULT 0.1, surprise_baseline REAL NOT NULL DEFAULT 0.1, anticipation_baseline REAL NOT NULL DEFAULT 0.1, joy_crystallize_start TIMESTAMP NULL, sadness_crystallize_start TIMESTAMP NULL, trust_crystallize_start TIMESTAMP NULL, disgust_crystallize_start TIMESTAMP NULL, fear_crystallize_start TIMESTAMP NULL, anger_crystallize_start TIMESTAMP NULL, surprise_crystallize_start TIMESTAMP NULL, anticipation_crystallize_start TIMESTAMP NULL, last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, decay_tau REAL NOT NULL DEFAULT 3600.0, high_threshold REAL NOT NULL DEFAULT 6.0, low_threshold REAL NOT NULL DEFAULT 1.0, crystallize_intensity REAL NOT NULL DEFAULT 7.0, crystallize_min_hours REAL NOT NULL DEFAULT 2.0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP );
+
+-- table: entities
+CREATE TABLE "entities" ( id TEXT PRIMARY KEY, character_profile_id TEXT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, lifecycle_config TEXT NOT NULL DEFAULT '{}', alias TEXT NOT NULL, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE RESTRICT );
+
+-- table: entity_emoji_actions
+CREATE TABLE entity_emoji_actions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, emoji_native TEXT NOT NULL, emotion_effect TEXT, metabolism_vector TEXT, substitution_text TEXT, auto_generated INTEGER NOT NULL DEFAULT 0, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT DEFAULT NULL, FOREIGN KEY (entity_id) REFERENCES entities(id), UNIQUE(entity_id, emoji_native) );
+
+-- table: entity_module_mappings
+CREATE TABLE "entity_module_mappings" ( entity_id TEXT PRIMARY KEY, backend_config_id INTEGER, cognition_config_id INTEGER, imagination_config_id INTEGER, movement_config_id INTEGER, rag_config_id INTEGER, stt_config_id INTEGER, tts_config_id INTEGER, vision_config_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (imagination_config_id) REFERENCES imagination_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL, FOREIGN KEY (vision_config_id) REFERENCES vision_configs(id) ON DELETE SET NULL );
+
+-- table: imagination_configs
+CREATE TABLE imagination_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: interactions
+CREATE TABLE interactions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, interaction_scope TEXT NOT NULL, participant_key TEXT, participant_ids TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', started_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, ended_at TEXT, metadata TEXT, deleted_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP );
+
+-- table: memories
+CREATE TABLE memories ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE, compaction_level INTEGER NOT NULL DEFAULT 1, content TEXT NOT NULL, emotional_state_bits INTEGER NOT NULL DEFAULT 0, start_date TIMESTAMP NULL, end_date TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP , deleted_at TIMESTAMP NULL);
+
+-- table: movement_configs
+CREATE TABLE movement_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_characterai
+CREATE TABLE "provider_config_characterai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_token TEXT NOT NULL, chatroom_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_comfyui
+CREATE TABLE provider_config_comfyui ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', workflow_profiles TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_elevenlabs
+CREATE TABLE "provider_config_elevenlabs" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, voice_id TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL DEFAULT '', stability REAL NOT NULL DEFAULT 0, similarity_boost REAL NOT NULL DEFAULT 0, style REAL NOT NULL DEFAULT 0, speaker_boost INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_harmonyspeech
+CREATE TABLE "provider_config_harmonyspeech" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kajiwoto
+CREATE TABLE "provider_config_kajiwoto" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, username TEXT NOT NULL, password TEXT NOT NULL, room_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kindroid
+CREATE TABLE "provider_config_kindroid" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, kindroid_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_localai
+CREATE TABLE "provider_config_localai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, embedding_model TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_mistral
+CREATE TABLE "provider_config_mistral" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_ollama
+CREATE TABLE "provider_config_ollama" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, embedding_model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openai
+CREATE TABLE "provider_config_openai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME , frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', reasoning_effort TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, chat_template_kwargs TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}');
+
+-- table: provider_config_openaicompatible
+CREATE TABLE "provider_config_openaicompatible" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', embedding_model TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME , frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', chat_template_kwargs TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}');
+
+-- table: provider_config_openrouter
+CREATE TABLE "provider_config_openrouter" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME , frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, chat_template_kwargs TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}');
+
+-- table: rag_configs
+CREATE TABLE rag_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, embedding_concurrency INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: schema_migrations
+CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, description TEXT );
+
+-- table: stt_configs
+CREATE TABLE stt_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id INTEGER NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: sync_devices
+CREATE TABLE "sync_devices" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, device_name TEXT NOT NULL, device_type TEXT NOT NULL, device_platform TEXT, is_approved INTEGER NOT NULL DEFAULT 0, approval_requested_at DATETIME, approved_by_user_at DATETIME, last_sync_timestamp INTEGER NOT NULL DEFAULT 0, last_sync_initiated_by TEXT NOT NULL DEFAULT 'local', jwt_token TEXT, jwt_expires_at INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, UNIQUE(device_id, deleted_at) );
+
+-- table: sync_history
+CREATE TABLE "sync_history" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sync_started_at DATETIME NOT NULL, sync_completed_at DATETIME, records_sent INTEGER NOT NULL DEFAULT 0, records_received INTEGER NOT NULL DEFAULT 0, sync_status TEXT NOT NULL, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: tts_configs
+CREATE TABLE tts_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: vision_configs
+CREATE TABLE vision_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+"
+`;
+
+exports[`migration roll-forward schema at version 30 matches snapshot: v30 1`] = `
+"-- index: idx_character_image_primary
+CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
+
+-- index: idx_character_image_profile
+CREATE INDEX idx_character_image_profile ON character_image(character_profile_id);
+
+-- index: idx_conversation_messages_entity
+CREATE INDEX idx_conversation_messages_entity ON conversation_messages(entity_id);
+
+-- index: idx_conversation_messages_interaction_id
+CREATE INDEX idx_conversation_messages_interaction_id ON conversation_messages(interaction_id);
+
+-- index: idx_emoji_actions_entity_id
+CREATE INDEX idx_emoji_actions_entity_id ON entity_emoji_actions(entity_id);
+
+-- index: idx_emotion_state_entity_id
+CREATE INDEX idx_emotion_state_entity_id ON emotion_state(entity_id);
+
+-- index: idx_entities_alias_unique
+CREATE UNIQUE INDEX idx_entities_alias_unique ON entities (alias) WHERE alias IS NOT NULL AND alias != '' AND deleted_at IS NULL;
+
+-- index: idx_interactions_active
+CREATE INDEX idx_interactions_active ON interactions(entity_id, status, last_activity_at DESC);
+
+-- index: idx_interactions_lookup
+CREATE INDEX idx_interactions_lookup ON interactions(entity_id, interaction_scope, participant_key);
+
+-- index: idx_memories_deleted_at
+CREATE INDEX idx_memories_deleted_at ON memories(entity_id, deleted_at);
+
+-- index: idx_memories_end_date
+CREATE INDEX idx_memories_end_date ON memories(entity_id, end_date);
+
+-- index: idx_memories_entity_id
+CREATE INDEX idx_memories_entity_id ON memories(entity_id);
+
+-- index: idx_memories_entity_level
+CREATE INDEX idx_memories_entity_level ON memories(entity_id, compaction_level);
+
+-- table: backend_configs
+CREATE TABLE backend_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: character_image
+CREATE TABLE "character_image" ( id INTEGER PRIMARY KEY AUTOINCREMENT, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
+
+-- table: character_profiles
+CREATE TABLE character_profiles ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', appearance TEXT NOT NULL DEFAULT '', backstory TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP , base_prompt TEXT DEFAULT '', scenario TEXT DEFAULT '', example_dialogues TEXT DEFAULT '', deleted_at DATETIME, typing_speed_wpm INTEGER DEFAULT 60, audio_response_chance_percent INTEGER DEFAULT 50, vision_config_id INTEGER REFERENCES vision_configs(id) ON DELETE SET NULL, lifecycle_config TEXT NOT NULL DEFAULT '{}');
+
+-- table: cognition_configs
+CREATE TABLE cognition_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , generate_expressions INTEGER NOT NULL DEFAULT 1, max_cognition_events INTEGER NOT NULL DEFAULT 20, deleted_at DATETIME);
+
+-- table: conversation_messages
+CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT );
+
+-- table: emotion_state
+CREATE TABLE emotion_state ( entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE, joy_intensity REAL NOT NULL DEFAULT 0.1, sadness_intensity REAL NOT NULL DEFAULT 0.1, trust_intensity REAL NOT NULL DEFAULT 0.1, disgust_intensity REAL NOT NULL DEFAULT 0.1, fear_intensity REAL NOT NULL DEFAULT 0.1, anger_intensity REAL NOT NULL DEFAULT 0.1, surprise_intensity REAL NOT NULL DEFAULT 0.1, anticipation_intensity REAL NOT NULL DEFAULT 0.1, joy_baseline REAL NOT NULL DEFAULT 0.1, sadness_baseline REAL NOT NULL DEFAULT 0.1, trust_baseline REAL NOT NULL DEFAULT 0.1, disgust_baseline REAL NOT NULL DEFAULT 0.1, fear_baseline REAL NOT NULL DEFAULT 0.1, anger_baseline REAL NOT NULL DEFAULT 0.1, surprise_baseline REAL NOT NULL DEFAULT 0.1, anticipation_baseline REAL NOT NULL DEFAULT 0.1, joy_crystallize_start TIMESTAMP NULL, sadness_crystallize_start TIMESTAMP NULL, trust_crystallize_start TIMESTAMP NULL, disgust_crystallize_start TIMESTAMP NULL, fear_crystallize_start TIMESTAMP NULL, anger_crystallize_start TIMESTAMP NULL, surprise_crystallize_start TIMESTAMP NULL, anticipation_crystallize_start TIMESTAMP NULL, last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, decay_tau REAL NOT NULL DEFAULT 3600.0, high_threshold REAL NOT NULL DEFAULT 6.0, low_threshold REAL NOT NULL DEFAULT 1.0, crystallize_intensity REAL NOT NULL DEFAULT 7.0, crystallize_min_hours REAL NOT NULL DEFAULT 2.0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP );
+
+-- table: entities
+CREATE TABLE "entities" ( id TEXT PRIMARY KEY, character_profile_id TEXT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, lifecycle_config TEXT NOT NULL DEFAULT '{}', alias TEXT NOT NULL, rag_reindex_required INTEGER NOT NULL DEFAULT 1, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE RESTRICT );
+
+-- table: entity_emoji_actions
+CREATE TABLE entity_emoji_actions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, emoji_native TEXT NOT NULL, emotion_effect TEXT, metabolism_vector TEXT, substitution_text TEXT, auto_generated INTEGER NOT NULL DEFAULT 0, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT DEFAULT NULL, FOREIGN KEY (entity_id) REFERENCES entities(id), UNIQUE(entity_id, emoji_native) );
+
+-- table: entity_module_mappings
+CREATE TABLE "entity_module_mappings" ( entity_id TEXT PRIMARY KEY, backend_config_id INTEGER, cognition_config_id INTEGER, imagination_config_id INTEGER, movement_config_id INTEGER, rag_config_id INTEGER, stt_config_id INTEGER, tts_config_id INTEGER, vision_config_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (imagination_config_id) REFERENCES imagination_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL, FOREIGN KEY (vision_config_id) REFERENCES vision_configs(id) ON DELETE SET NULL );
+
+-- table: imagination_configs
+CREATE TABLE imagination_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: interactions
+CREATE TABLE interactions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, interaction_scope TEXT NOT NULL, participant_key TEXT, participant_ids TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', started_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, ended_at TEXT, metadata TEXT, deleted_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP , summary TEXT DEFAULT '', memory_id TEXT, continued_interaction_id TEXT, presence_type TEXT NOT NULL DEFAULT 'unknown');
+
+-- table: memories
+CREATE TABLE memories ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE, compaction_level INTEGER NOT NULL DEFAULT 1, content TEXT NOT NULL, emotional_state_bits INTEGER NOT NULL DEFAULT 0, start_date TIMESTAMP NULL, end_date TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP , deleted_at TIMESTAMP NULL);
+
+-- table: movement_configs
+CREATE TABLE movement_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: provider_config_anthropic
+CREATE TABLE provider_config_anthropic ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT DEFAULT '', max_tokens INTEGER DEFAULT 0, temperature REAL DEFAULT 0.7, top_p REAL DEFAULT 1.0, top_k INTEGER DEFAULT 0, stop_sequences TEXT DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_characterai
+CREATE TABLE "provider_config_characterai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_token TEXT NOT NULL, chatroom_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_comfyui
+CREATE TABLE provider_config_comfyui ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', workflow_profiles TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_elevenlabs
+CREATE TABLE "provider_config_elevenlabs" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, voice_id TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL DEFAULT '', stability REAL NOT NULL DEFAULT 0, similarity_boost REAL NOT NULL DEFAULT 0, style REAL NOT NULL DEFAULT 0, speaker_boost INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_google
+CREATE TABLE provider_config_google ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT DEFAULT '', max_output_tokens INTEGER DEFAULT 0, temperature REAL DEFAULT 0.7, top_p REAL DEFAULT 1.0, top_k INTEGER DEFAULT 0, stop_tokens TEXT DEFAULT '', seed INTEGER DEFAULT NULL, response_mime_type TEXT DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', number_of_images INTEGER DEFAULT 1, aspect_ratio TEXT DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_harmonyspeech
+CREATE TABLE "provider_config_harmonyspeech" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kajiwoto
+CREATE TABLE "provider_config_kajiwoto" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, username TEXT NOT NULL, password TEXT NOT NULL, room_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kindroid
+CREATE TABLE "provider_config_kindroid" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, kindroid_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_localai
+CREATE TABLE "provider_config_localai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, model TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_mistral
+CREATE TABLE "provider_config_mistral" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_ollama
+CREATE TABLE "provider_config_ollama" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openai
+CREATE TABLE "provider_config_openai" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', reasoning_effort TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}' );
+
+-- table: provider_config_openaicompatible
+CREATE TABLE "provider_config_openaicompatible" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}' );
+
+-- table: provider_config_openrouter
+CREATE TABLE "provider_config_openrouter" ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME , frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, chat_template_kwargs TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', voice TEXT DEFAULT '', speed REAL DEFAULT 1.0, format TEXT DEFAULT '', image_aspect_ratio TEXT DEFAULT '', image_size TEXT DEFAULT '');
+
+-- table: provider_config_xai
+CREATE TABLE provider_config_xai ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT DEFAULT '', max_tokens INTEGER DEFAULT 0, max_completion_tokens INTEGER DEFAULT 0, temperature REAL DEFAULT 0.7, top_p REAL DEFAULT 1.0, frequency_penalty REAL DEFAULT 0, presence_penalty REAL DEFAULT 0, n INTEGER DEFAULT 1, stop_tokens TEXT DEFAULT '', seed INTEGER DEFAULT NULL, response_format TEXT DEFAULT '', reasoning_effort TEXT DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', image_aspect_ratio TEXT DEFAULT '', image_resolution TEXT DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: rag_configs
+CREATE TABLE rag_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, embedding_concurrency INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: schema_migrations
+CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, description TEXT );
+
+-- table: stt_configs
+CREATE TABLE stt_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id INTEGER NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: sync_devices
+CREATE TABLE "sync_devices" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, device_name TEXT NOT NULL, device_type TEXT NOT NULL, device_platform TEXT, is_approved INTEGER NOT NULL DEFAULT 0, approval_requested_at DATETIME, approved_by_user_at DATETIME, last_sync_timestamp INTEGER NOT NULL DEFAULT 0, last_sync_initiated_by TEXT NOT NULL DEFAULT 'local', jwt_token TEXT, jwt_expires_at INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, UNIQUE(device_id, deleted_at) );
+
+-- table: sync_history
+CREATE TABLE "sync_history" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sync_started_at DATETIME NOT NULL, sync_completed_at DATETIME, records_sent INTEGER NOT NULL DEFAULT 0, records_received INTEGER NOT NULL DEFAULT 0, sync_status TEXT NOT NULL, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: tts_configs
+CREATE TABLE tts_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP , deleted_at DATETIME);
+
+-- table: vision_configs
+CREATE TABLE vision_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id INTEGER NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+"
+`;
+
+exports[`migration roll-forward schema at version 32 matches snapshot: v32 1`] = `
+"-- index: idx_character_image_primary
+CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
+
+-- index: idx_character_image_profile
+CREATE INDEX idx_character_image_profile ON character_image(character_profile_id);
+
+-- index: idx_conversation_messages_entity
+CREATE INDEX idx_conversation_messages_entity ON conversation_messages(entity_id);
+
+-- index: idx_conversation_messages_interaction_id
+CREATE INDEX idx_conversation_messages_interaction_id ON conversation_messages(interaction_id);
+
+-- index: idx_emoji_actions_entity_id
+CREATE INDEX idx_emoji_actions_entity_id ON entity_emoji_actions(entity_id);
+
+-- index: idx_emotion_state_entity_id
+CREATE INDEX idx_emotion_state_entity_id ON emotion_state(entity_id);
+
+-- index: idx_entities_alias_unique
+CREATE UNIQUE INDEX idx_entities_alias_unique ON entities (alias) WHERE alias IS NOT NULL AND alias != '' AND deleted_at IS NULL;
+
+-- index: idx_interactions_active
+CREATE INDEX idx_interactions_active ON interactions(entity_id, status, last_activity_at DESC);
+
+-- index: idx_interactions_lookup
+CREATE INDEX idx_interactions_lookup ON interactions(entity_id, interaction_scope, participant_key);
+
+-- index: idx_memories_deleted_at
+CREATE INDEX idx_memories_deleted_at ON memories(entity_id, deleted_at);
+
+-- index: idx_memories_end_date
+CREATE INDEX idx_memories_end_date ON memories(entity_id, end_date);
+
+-- index: idx_memories_entity_id
+CREATE INDEX idx_memories_entity_id ON memories(entity_id);
+
+-- index: idx_memories_entity_level
+CREATE INDEX idx_memories_entity_level ON memories(entity_id, compaction_level);
+
+-- index: idx_provider_config_anthropic_name
+CREATE INDEX idx_provider_config_anthropic_name ON provider_config_anthropic(name);
+
+-- index: idx_provider_config_google_name
+CREATE INDEX idx_provider_config_google_name ON provider_config_google(name);
+
+-- index: idx_provider_config_soulbitscloud_name
+CREATE INDEX idx_provider_config_soulbitscloud_name ON provider_config_soulbitscloud(name);
+
+-- index: idx_provider_config_xai_name
+CREATE INDEX idx_provider_config_xai_name ON provider_config_xai(name);
+
+-- table: backend_configs
+CREATE TABLE "backend_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: character_image
+CREATE TABLE "character_image" ( id INTEGER PRIMARY KEY AUTOINCREMENT, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
+
+-- table: character_profiles
+CREATE TABLE "character_profiles" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', appearance TEXT NOT NULL DEFAULT '', backstory TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', base_prompt TEXT DEFAULT '', scenario TEXT DEFAULT '', example_dialogues TEXT DEFAULT '', typing_speed_wpm INTEGER DEFAULT 60, audio_response_chance_percent INTEGER DEFAULT 50, vision_config_id TEXT REFERENCES vision_configs(id) ON DELETE SET NULL, lifecycle_config TEXT NOT NULL DEFAULT '{}', deleted_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
+-- table: cognition_configs
+CREATE TABLE "cognition_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, max_cognition_events INTEGER NOT NULL DEFAULT 20, generate_expressions INTEGER NOT NULL DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: conversation_messages
+CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT );
+
+-- table: emotion_state
+CREATE TABLE emotion_state ( entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE, joy_intensity REAL NOT NULL DEFAULT 0.1, sadness_intensity REAL NOT NULL DEFAULT 0.1, trust_intensity REAL NOT NULL DEFAULT 0.1, disgust_intensity REAL NOT NULL DEFAULT 0.1, fear_intensity REAL NOT NULL DEFAULT 0.1, anger_intensity REAL NOT NULL DEFAULT 0.1, surprise_intensity REAL NOT NULL DEFAULT 0.1, anticipation_intensity REAL NOT NULL DEFAULT 0.1, joy_baseline REAL NOT NULL DEFAULT 0.1, sadness_baseline REAL NOT NULL DEFAULT 0.1, trust_baseline REAL NOT NULL DEFAULT 0.1, disgust_baseline REAL NOT NULL DEFAULT 0.1, fear_baseline REAL NOT NULL DEFAULT 0.1, anger_baseline REAL NOT NULL DEFAULT 0.1, surprise_baseline REAL NOT NULL DEFAULT 0.1, anticipation_baseline REAL NOT NULL DEFAULT 0.1, joy_crystallize_start TIMESTAMP NULL, sadness_crystallize_start TIMESTAMP NULL, trust_crystallize_start TIMESTAMP NULL, disgust_crystallize_start TIMESTAMP NULL, fear_crystallize_start TIMESTAMP NULL, anger_crystallize_start TIMESTAMP NULL, surprise_crystallize_start TIMESTAMP NULL, anticipation_crystallize_start TIMESTAMP NULL, last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, decay_tau REAL NOT NULL DEFAULT 3600.0, high_threshold REAL NOT NULL DEFAULT 6.0, low_threshold REAL NOT NULL DEFAULT 1.0, crystallize_intensity REAL NOT NULL DEFAULT 7.0, crystallize_min_hours REAL NOT NULL DEFAULT 2.0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP );
+
+-- table: entities
+CREATE TABLE "entities" ( id TEXT PRIMARY KEY, character_profile_id TEXT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, lifecycle_config TEXT NOT NULL DEFAULT '{}', alias TEXT NOT NULL, rag_reindex_required INTEGER NOT NULL DEFAULT 1, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE RESTRICT );
+
+-- table: entity_emoji_actions
+CREATE TABLE entity_emoji_actions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, emoji_native TEXT NOT NULL, emotion_effect TEXT, metabolism_vector TEXT, substitution_text TEXT, auto_generated INTEGER NOT NULL DEFAULT 0, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT DEFAULT NULL, FOREIGN KEY (entity_id) REFERENCES entities(id), UNIQUE(entity_id, emoji_native) );
+
+-- table: entity_module_mappings
+CREATE TABLE "entity_module_mappings" ( entity_id TEXT PRIMARY KEY, backend_config_id TEXT, cognition_config_id TEXT, imagination_config_id TEXT, movement_config_id TEXT, rag_config_id TEXT, stt_config_id TEXT, tts_config_id TEXT, vision_config_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (imagination_config_id) REFERENCES imagination_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL, FOREIGN KEY (vision_config_id) REFERENCES vision_configs(id) ON DELETE SET NULL );
+
+-- table: imagination_configs
+CREATE TABLE "imagination_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: interactions
+CREATE TABLE interactions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, interaction_scope TEXT NOT NULL, participant_key TEXT, participant_ids TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', started_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, ended_at TEXT, metadata TEXT, deleted_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP , summary TEXT DEFAULT '', memory_id TEXT, continued_interaction_id TEXT, presence_type TEXT NOT NULL DEFAULT 'unknown');
+
+-- table: memories
+CREATE TABLE memories ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE, compaction_level INTEGER NOT NULL DEFAULT 1, content TEXT NOT NULL, emotional_state_bits INTEGER NOT NULL DEFAULT 0, start_date TIMESTAMP NULL, end_date TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP , deleted_at TIMESTAMP NULL);
+
+-- table: movement_configs
+CREATE TABLE "movement_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_anthropic
+CREATE TABLE "provider_config_anthropic" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6', max_tokens INTEGER NOT NULL DEFAULT 4096, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, top_k INTEGER NOT NULL DEFAULT 0, stop_sequences TEXT NOT NULL DEFAULT '[]', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: provider_config_characterai
+CREATE TABLE "provider_config_characterai" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_token TEXT NOT NULL, chatroom_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_comfyui
+CREATE TABLE "provider_config_comfyui" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', workflow_profiles TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: provider_config_elevenlabs
+CREATE TABLE "provider_config_elevenlabs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL, voice_id TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL DEFAULT '', stability REAL NOT NULL DEFAULT 0, similarity_boost REAL NOT NULL DEFAULT 0, style REAL NOT NULL DEFAULT 0, speaker_boost INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_google
+CREATE TABLE "provider_config_google" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_output_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, top_k INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER, response_mime_type TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', number_of_images INTEGER NOT NULL DEFAULT 1, aspect_ratio TEXT NOT NULL DEFAULT '1:1', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: provider_config_harmonyspeech
+CREATE TABLE "provider_config_harmonyspeech" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kajiwoto
+CREATE TABLE "provider_config_kajiwoto" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, username TEXT NOT NULL, password TEXT NOT NULL, room_url TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_kindroid
+CREATE TABLE "provider_config_kindroid" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL, kindroid_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_localai
+CREATE TABLE "provider_config_localai" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, model TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_mistral
+CREATE TABLE "provider_config_mistral" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_ollama
+CREATE TABLE "provider_config_ollama" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openai
+CREATE TABLE "provider_config_openai" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT '', frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', reasoning_effort TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openaicompatible
+CREATE TABLE "provider_config_openaicompatible" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_openrouter
+CREATE TABLE "provider_config_openrouter" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '', frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', top_k INTEGER NOT NULL DEFAULT 0, top_a REAL NOT NULL DEFAULT 0, min_p REAL NOT NULL DEFAULT 0, repetition_penalty REAL NOT NULL DEFAULT 0, sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 1.0, format TEXT NOT NULL DEFAULT 'mp3', image_aspect_ratio TEXT NOT NULL DEFAULT '', image_size TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: provider_config_soulbitscloud
+CREATE TABLE provider_config_soulbitscloud ( id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL DEFAULT 'https://api.soulbits.app', api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER, response_format TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 1.0, format TEXT NOT NULL DEFAULT 'mp3', image_aspect_ratio TEXT NOT NULL DEFAULT '1:1', image_size TEXT NOT NULL DEFAULT '1k', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: provider_config_xai
+CREATE TABLE "provider_config_xai" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT 'grok-4.3', max_tokens INTEGER NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER, response_format TEXT NOT NULL DEFAULT '', reasoning_effort TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', image_aspect_ratio TEXT NOT NULL DEFAULT '1:1', image_resolution TEXT NOT NULL DEFAULT '1k', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: rag_configs
+CREATE TABLE "rag_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, embedding_concurrency INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: schema_migrations
+CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, description TEXT );
+
+-- table: stt_configs
+CREATE TABLE "stt_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id TEXT NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: sync_devices
+CREATE TABLE "sync_devices" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, device_name TEXT NOT NULL, device_type TEXT NOT NULL, device_platform TEXT, is_approved INTEGER NOT NULL DEFAULT 0, approval_requested_at DATETIME, approved_by_user_at DATETIME, last_sync_timestamp INTEGER NOT NULL DEFAULT 0, last_sync_initiated_by TEXT NOT NULL DEFAULT 'local', jwt_token TEXT, jwt_expires_at INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, UNIQUE(device_id, deleted_at) );
+
+-- table: sync_history
+CREATE TABLE "sync_history" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sync_started_at DATETIME NOT NULL, sync_completed_at DATETIME, records_sent INTEGER NOT NULL DEFAULT 0, records_received INTEGER NOT NULL DEFAULT 0, sync_status TEXT NOT NULL, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: tts_configs
+CREATE TABLE "tts_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: vision_configs
+CREATE TABLE "vision_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+"
+`;

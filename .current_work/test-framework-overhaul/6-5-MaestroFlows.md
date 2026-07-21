@@ -1,5 +1,8 @@
 # Phase 6-5: Maestro Test Flows
 
+> **STATUS: ✅ COMPLETE** (post-plan update: all placeholder selectors replaced
+> with real i18n strings + state-derived testIDs. See "Post-plan updates" below.)
+
 ## Objective
 
 Write the actual Maestro YAML flows that exercise the app's sync functionality against the live Harmony Link backend in the Docker stack. These flows are the E2E test suite — what `maestro test` actually runs.
@@ -344,3 +347,60 @@ docker compose -f e2e/docker-compose.yml run --rm \
 ```
 
 If this launches the app and exits 0, the plumbing is good. If it fails, debug the ADB connection and APK installation first.
+
+---
+
+## Post-plan updates (July 2026)
+
+### Placeholder selectors replaced with real ones
+
+The initial implementation shipped all 6 Maestro YAML files with placeholder
+selectors (e.g., `text: ".*"`, `text: "Connected"`, `text: "E2E Test Character"`).
+Each file carried a `PLACEHOLDER WARNING` comment instructing the maintainer
+to validate against the real app via Maestro Studio.
+
+A post-plan UI investigation pass replaced all placeholders with real selectors
+grounded in the actual i18n strings and state-derived testIDs. Summary:
+
+| Flow | Old selector | New selector | Source |
+|------|--------------|--------------|--------|
+| `01-smoke-boot` | `text: ".*"` | `text: "Chats"` | `chatList.json:title` |
+| `01-smoke-boot` | `text: "Connected"` | `text: "Not connected"` (unpaired state) | `chatList.json:notConnected` |
+| `02-happy-path-pull` | `text: "Connected"` | `id: connection-status-dot-connected` | `ConnectionStatusBadge.tsx` testID |
+| `02-happy-path-pull` | `text: "E2E Test Character"` | `id: chat-list-item` | `ChatListScreen.tsx` testID |
+| `03-conflict-resolution` | `id: character-name-input` (placeholder) | `id: character-name-input` (real) | `CharacterProfileEditScreen.tsx` testID |
+| `03-conflict-resolution` | `text: "Sync Now"` | `id: sync-now-button` | `SyncSettingsScreen.tsx` testID |
+| `04-network-reconnect` | `text: "Disconnected"` | `id: connection-status-dot-reconnecting` | `ConnectionStatusBadge.tsx` testID |
+| `_shared/navigate-to-sync-settings` | `text: "Settings"` + `text: "Sync"` | `id: tab-settings` + `id: settings-sync-card` | tab + card testIDs |
+
+### testIDs added to source (Phase B-1)
+
+To make flows robust against copy changes, the following testIDs were added
+to production code:
+
+- `ConnectionStatusBadge` → state-dependent testID + `accessibilityLabel`
+- `MainTabNavigator` → `tabBarButtonTestID` on each of the 5 tabs
+- `ChatListScreen` → `chat-list-item`, `chat-list-not-paired`, `chat-list-empty`
+- `SettingsScreen` → `settings-connection-card`, `settings-sync-card`
+- `SyncSettingsScreen` → `sync-now-button`, `force-resync-button`
+- `CharacterProfileEditScreen` → `character-name-input`
+- `CharacterProfileCard` → `character-profile-card`
+- `ThemedButton` → accepts and forwards `testID` + `accessibilityLabel` to all 4 variants
+
+### Smoke flow expected to pass; others still blocked
+
+`01-smoke-boot.yaml` will actually pass on a cold launch — it asserts the
+app boots to the unpaired ChatListScreen state.
+
+Flows `02`, `03`, `04` require pairing + (in some cases) seeded data. They
+will work end-to-end once:
+- APK is built with `-PHARMONY_LINK_WSS_URL=...` + `-PHARMONY_LINK_WS_URL=...`
+  (see Phase 4-1 production override)
+- harmony-link container is running in cloud mode (auto-approves devices)
+- The actual smoke run is executed (currently deferred — see `summary.md`)
+
+### What's still not validated
+
+- The actual run against a real emulator (deferred)
+- Whether the cloud-mode empty-JWT response is handled correctly end-to-end
+  by `connectWithRefresh()` (theoretically sound but not yet empirically confirmed)

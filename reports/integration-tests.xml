@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="22" failures="0" errors="0" time="6.904">
+  <testsuite name="undefined" errors="0" failures="0" skipped="0" timestamp="2026-07-20T22:00:30" time="0.764" tests="1">
+    <testcase classname=" mock server receives events and auto-responds" name=" mock server receives events and auto-responds" time="0.061">
+    </testcase>
+  </testsuite>
+  <testsuite name="sync concurrent sessions" errors="0" failures="0" skipped="0" timestamp="2026-07-20T22:00:30" time="2.721" tests="2">
+    <testcase classname="sync concurrent sessions silently skips second sync while one is in progress" name="sync concurrent sessions silently skips second sync while one is in progress" time="0.284">
+    </testcase>
+    <testcase classname="sync concurrent sessions allows new sync after previous one completes" name="sync concurrent sessions allows new sync after previous one completes" time="0.495">
+    </testcase>
+  </testsuite>
+  <testsuite name="sync conflict resolution (LWW)" errors="0" failures="0" skipped="0" timestamp="2026-07-20T22:00:30" time="2.779" tests="3">
+    <testcase classname="sync conflict resolution (LWW) server overwrites client when server timestamp is newer (LWW)" name="sync conflict resolution (LWW) server overwrites client when server timestamp is newer (LWW)" time="0.281">
+    </testcase>
+    <testcase classname="sync conflict resolution (LWW) client version preserved when client timestamp is newer (LWW)" name="sync conflict resolution (LWW) client version preserved when client timestamp is newer (LWW)" time="0.278">
+    </testcase>
+    <testcase classname="sync conflict resolution (LWW) server soft-delete overrides local update (delete always wins)" name="sync conflict resolution (LWW) server soft-delete overrides local update (delete always wins)" time="0.278">
+    </testcase>
+  </testsuite>
+  <testsuite name="SyncService integration" errors="0" failures="0" skipped="0" timestamp="2026-07-20T22:00:30" time="3.52" tests="7">
+    <testcase classname="SyncService integration pulls all data from server when syncing for first time (new device, empty DB)" name="SyncService integration pulls all data from server when syncing for first time (new device, empty DB)" time="0.182">
+    </testcase>
+    <testcase classname="SyncService integration sends local data and receives server data on first sync" name="SyncService integration sends local data and receives server data on first sync" time="0.371">
+    </testcase>
+    <testcase classname="SyncService integration receives only updated records from server (incremental pull)" name="SyncService integration receives only updated records from server (incremental pull)" time="0.17">
+    </testcase>
+    <testcase classname="SyncService integration sends local updates to server (incremental push)" name="SyncService integration sends local updates to server (incremental push)" time="0.185">
+    </testcase>
+    <testcase classname="SyncService integration propagates soft-deleted records from server" name="SyncService integration propagates soft-deleted records from server" time="0.297">
+    </testcase>
+    <testcase classname="SyncService integration follows the correct sync protocol event ordering" name="SyncService integration follows the correct sync protocol event ordering" time="0.185">
+    </testcase>
+    <testcase classname="SyncService integration updates last sync timestamp on completion" name="SyncService integration updates last sync timestamp on completion" time="0.198">
+    </testcase>
+  </testsuite>
+  <testsuite name="sync network resilience" errors="0" failures="0" skipped="0" timestamp="2026-07-20T22:00:30" time="4.455" tests="3">
+    <testcase classname="sync network resilience recovers after connection drop and retry with fresh server" name="sync network resilience recovers after connection drop and retry with fresh server" time="0.999">
+    </testcase>
+    <testcase classname="sync network resilience times out handshake when server does not respond" name="sync network resilience times out handshake when server does not respond" time="0.597">
+    </testcase>
+    <testcase classname="sync network resilience rolls back buffered data if SYNC_COMPLETE never arrives" name="sync network resilience rolls back buffered data if SYNC_COMPLETE never arrives" time="0.915">
+    </testcase>
+  </testsuite>
+  <testsuite name="sync partial failures" errors="0" failures="0" skipped="1" timestamp="2026-07-20T22:00:30" time="4.585" tests="3">
+    <testcase classname="sync partial failures continues processing valid records when one record fails FK constraint" name="sync partial failures continues processing valid records when one record fails FK constraint" time="1.742">
+    </testcase>
+    <testcase classname="sync partial failures sends SYNC_DATA_CONFIRM with ERROR status when handleIncomingSyncData fails" name="sync partial failures sends SYNC_DATA_CONFIRM with ERROR status when handleIncomingSyncData fails" time="0">
+      <skipped/>
+    </testcase>
+    <testcase classname="sync partial failures rolls back buffered data if SYNC_COMPLETE never arrives" name="sync partial failures rolls back buffered data if SYNC_COMPLETE never arrives" time="0.911">
+    </testcase>
+  </testsuite>
+  <testsuite name="sync clock drift handling" errors="0" failures="0" skipped="0" timestamp="2026-07-20T22:00:30" time="5.948" tests="3">
+    <testcase classname="sync clock drift handling normalizes space-separated timestamps to ISO 8601 with T separator" name="sync clock drift handling normalizes space-separated timestamps to ISO 8601 with T separator" time="0.584">
+    </testcase>
+    <testcase classname="sync clock drift handling handles server reporting positive clock_drift_seconds without crashing" name="sync clock drift handling handles server reporting positive clock_drift_seconds without crashing" time="1.699">
+    </testcase>
+    <testcase classname="sync clock drift handling handles server reporting negative clock_drift_seconds without crashing" name="sync clock drift handling handles server reporting negative clock_drift_seconds without crashing" time="1.724">
+    </testcase>
+  </testsuite>
+</testsuites>
