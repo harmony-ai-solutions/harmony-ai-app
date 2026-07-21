@@ -17,9 +17,6 @@
 name: E2E (iOS, macOS runner)
 
 on:
-  schedule:
-    # Nightly at 04:00 UTC (after Android at 03:00 in the PR workflow)
-    - cron: '0 4 * * *'
   workflow_dispatch:
   pull_request:
     paths:
