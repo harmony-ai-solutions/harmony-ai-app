@@ -124,7 +124,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                 ]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 0, y: 1 }}
-                style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                style={[StyleSheet.absoluteFill, styles.menuGradientRadius]}
               />
 
               {/* Prismatic tint from top-left */}
@@ -132,7 +132,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                 colors={[accentPrimary + '12', 'transparent']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0.6 }}
-                style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                style={[StyleSheet.absoluteFill, styles.menuGradientRadius]}
                 pointerEvents="none"
               />
 

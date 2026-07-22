@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Appbar } from 'react-native-paper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
@@ -14,7 +13,7 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { SectionHeader } from '../components/themed/SectionHeader';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
@@ -76,12 +75,7 @@ export const SettingsScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* Header */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.Content
-          title={t('title')}
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-      </ThemedAppbar>
+      <ScreenHeader title={t('title')} />
 
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }]}
@@ -236,7 +230,6 @@ const SettingsLinkRow: React.FC<SettingsLinkRowProps> = ({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { elevation: 4 },
   scrollContent: {
     padding: 16,
     paddingBottom: 32,

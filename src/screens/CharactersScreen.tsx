@@ -9,8 +9,6 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Appbar } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -21,6 +19,7 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedFab } from '../components/themed/ThemedFab';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { createLogger } from '../utils/logger';
 
@@ -144,13 +143,8 @@ export const CharactersScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
-      {/* Appbar */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.Content
-          title={t('title')}
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-      </ThemedAppbar>
+      {/* Header */}
+      <ScreenHeader title={t('title')} />
 
       {/* Search bar */}
       <View
@@ -242,7 +236,6 @@ export const CharactersScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { elevation: 4 },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',

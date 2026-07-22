@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, ScrollView, TextInput, Alert, TouchableOpacity } from 'react-native';
-import { Appbar, ActivityIndicator } from 'react-native-paper';
+import { ActivityIndicator } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -8,7 +8,7 @@ import { createLogger } from '../../utils/logger';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
-import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedButton } from '../../components/themed/ThemedButton';
 import { CertificateVerificationModal } from '../../components/modals/CertificateVerificationModal';
 import { CertificateDetailsModal } from '../../components/modals/CertificateDetailsModal';
@@ -393,16 +393,10 @@ export const ConnectionSetupScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={t('title')}
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-      </ThemedAppbar>
+      <ScreenHeader
+        title={t('title')}
+        onBack={() => navigation.goBack()}
+      />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <ThemedText variant="secondary" style={styles.description}>
           {isPaired

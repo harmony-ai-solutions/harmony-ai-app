@@ -1,8 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Appbar } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +11,7 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { LandingCard } from '../components/landing/LandingCard';
 import { ConnectionStatusBadge } from '../components/settings/ConnectionStatusBadge';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { getAppVersion } from '../utils/version';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -28,24 +27,10 @@ export const LandingScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* Header */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.Content
-          title={t('title')}
-          titleStyle={{
-            color: theme.colors.text.primary,
-            fontWeight: 'bold',
-            fontSize: 20,
-          }}
-        />
-        {/* Connection status dot */}
-        <ConnectionStatusBadge />
-        {/* Settings shortcut */}
-        <Appbar.Action
-          icon="cog"
-          color={theme.colors.text.primary}
-          onPress={() => navigation.navigate('Settings')}
-        />
-      </ThemedAppbar>
+      <ScreenHeader
+        title={t('title')}
+        right={<ConnectionStatusBadge />}
+      />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}

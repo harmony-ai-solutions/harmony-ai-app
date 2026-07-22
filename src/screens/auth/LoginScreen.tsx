@@ -20,7 +20,6 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { Appbar } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -32,7 +31,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedButton } from '../../components/themed/ThemedButton';
-import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { VerifyPrompt } from './VerifyPrompt';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import {
@@ -226,19 +225,10 @@ export const LoginScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={t('login_title')}
-          titleStyle={{
-            color: theme.colors.text.primary,
-            fontWeight: 'bold',
-          }}
-        />
-      </ThemedAppbar>
+      <ScreenHeader
+        title={t('login_title')}
+        onBack={() => navigation.goBack()}
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}

@@ -7,7 +7,6 @@ import {
     StyleSheet,
     Alert,
 } from 'react-native';
-import { Appbar } from 'react-native-paper';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Switch } from 'react-native-paper';
@@ -17,7 +16,7 @@ import RNFS from 'react-native-fs';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useEmoji } from '../../contexts/EmojiContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
-import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedButton } from '../../components/themed/ThemedButton';
 import { ThemeCard } from '../../components/settings/ThemeCard';
@@ -173,16 +172,10 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
     return (
         <ThemedView style={styles.container}>
-            <ThemedAppbar style={styles.header}>
-                <Appbar.BackAction
-                    color={theme.colors.text.primary}
-                    onPress={() => navigation.goBack()}
-                />
-                <Appbar.Content
-                    title="Appearance & Theme"
-                    titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-                />
-            </ThemedAppbar>
+            <ScreenHeader
+              title="Appearance & Theme"
+              onBack={() => navigation.goBack()}
+            />
             <ScrollView>
                 {/* Dynamic Background Effects Toggle */}
                 <View

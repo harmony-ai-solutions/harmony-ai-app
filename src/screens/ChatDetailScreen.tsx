@@ -22,8 +22,8 @@ import {
   Keyboard,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { Appbar, Avatar } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
+import { Avatar } from 'react-native-paper';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -1136,96 +1136,85 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           <ActivityIndicator size="large" color={theme?.colors.accent.primary} />
         </ThemedView>
       )}
-      <ThemedAppbar>
-        <Appbar.BackAction
-          onPress={() => navigation.goBack()}
-          color={theme?.colors.text.primary}
-        />
-        {partnerAvatar ? (
-          <Avatar.Image
-            size={36}
-            source={{ uri: partnerAvatar }}
-            style={styles.headerAvatar}
-          />
-        ) : (
-          <LinearGradient
-            colors={[
-              (theme?.colors.accent.primary ?? '#7c3aed') + '33',
-              theme?.colors.background.elevated ?? '#1e1e2e',
-            ]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.headerAvatarFallback}
-          >
-            <ThemedText
-              size={14}
-              weight="bold"
-              style={{ color: theme?.colors.accent.primary }}
-            >
-              {headerName.substring(0, 2).toUpperCase()}
-            </ThemedText>
-          </LinearGradient>
-        )}
-        <Appbar.Content
-          title={headerName}
-          titleStyle={{ color: theme?.colors.text.primary }}
-        />
-        {isConnected ? (
-          isSessionActive(currentInteractionIdRef.current) ? (
-            <ThemedText
-              variant="success"
-              size={12}
-              style={styles.statusIndicator}
-            >
-              Connected
-            </ThemedText>
+      <ScreenHeader
+        title={headerName}
+        onBack={() => navigation.goBack()}
+        left={
+          partnerAvatar ? (
+            <Avatar.Image
+              size={36}
+              source={{ uri: partnerAvatar }}
+              style={styles.headerAvatar}
+            />
           ) : (
-            <ThemedText
-              variant="muted"
-              size={12}
-              style={styles.statusIndicator}
+            <LinearGradient
+              colors={[
+                (theme?.colors.accent.primary ?? '#7c3aed') + '33',
+                theme?.colors.background.elevated ?? '#1e1e2e',
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.headerAvatarFallback}
             >
-              Connecting...
-            </ThemedText>
+              <ThemedText
+                size={14}
+                weight="bold"
+                style={{ color: theme?.colors.accent.primary }}
+              >
+                {headerName.substring(0, 2).toUpperCase()}
+              </ThemedText>
+            </LinearGradient>
           )
-        ) : (
-          <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
-            Offline
-          </ThemedText>
-        )}
-        {/* Reply mode toggle */}
-        <TouchableOpacity
-          onPress={handleToggleReplyMode}
-          style={styles.replyModeButton}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          disabled={!isSessionActive(currentInteractionIdRef.current)}
-        >
-          <ThemedText
-            size={11}
-            weight="medium"
-            style={[
-              styles.replyModeText,
-              { color: replyMode === 'instant'
-                ? theme?.colors.accent.primary
-                : theme?.colors.text.muted },
-            ]}
-          >
-            {replyMode === 'instant' ? '⚡ Instant' : '💬 Realistic'}
-          </ThemedText>
-        </TouchableOpacity>
-        {/* Entity context menu */}
-        <TouchableOpacity
-          onPress={handleEntityContextMenu}
-          style={styles.headerMenuButton}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Icon
-            name="dots-vertical"
-            size={24}
-            color={theme?.colors.text.primary}
-          />
-        </TouchableOpacity>
-      </ThemedAppbar>
+        }
+        right={
+          <View style={styles.headerControlsRow}>
+            {isConnected ? (
+              isSessionActive(currentInteractionIdRef.current) ? (
+                <ThemedText variant="success" size={12} style={styles.statusIndicator}>
+                  Connected
+                </ThemedText>
+              ) : (
+                <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
+                  Connecting...
+                </ThemedText>
+              )
+            ) : (
+              <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
+                Offline
+              </ThemedText>
+            )}
+            <TouchableOpacity
+              onPress={handleToggleReplyMode}
+              style={styles.replyModeButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              disabled={!isSessionActive(currentInteractionIdRef.current)}
+            >
+              <ThemedText
+                size={11}
+                weight="medium"
+                style={[
+                  styles.replyModeText,
+                  { color: replyMode === 'instant'
+                    ? theme?.colors.accent.primary
+                    : theme?.colors.text.muted },
+                ]}
+              >
+                {replyMode === 'instant' ? '⚡ Instant' : '💬 Realistic'}
+              </ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleEntityContextMenu}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon
+                name="dots-vertical"
+                size={24}
+                color={theme?.colors.text.primary}
+              />
+            </TouchableOpacity>
+          </View>
+        }
+      />
 
       <Modal
         visible={menuVisible}
@@ -1469,11 +1458,12 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   statusIndicator: {
-    marginRight: 8,
+    marginRight: 6,
   },
-  headerMenuButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+  headerControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   replyModeButton: {
     paddingHorizontal: 6,

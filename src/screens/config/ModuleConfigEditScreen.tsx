@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
-import { Appbar } from 'react-native-paper';
 import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -20,7 +19,7 @@ import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[ModuleConfigEditScreen]');
 
-import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedCard } from '../../components/themed/ThemedCard';
 import { SectionHeader } from '../../components/themed/SectionHeader';
 import { ThemedView } from '../../components/themed/ThemedView';
@@ -648,16 +647,10 @@ export const ModuleConfigEditScreen: React.FC = () => {
   if (loading) {
     return (
       <ThemedView style={styles.container}>
-        <ThemedAppbar style={styles.header}>
-          <Appbar.BackAction
-            color={theme.colors.text.primary}
-            onPress={() => navigation.goBack()}
-          />
-          <Appbar.Content
-            title={`${moduleConfig?.name || moduleType} Config`}
-            titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-          />
-        </ThemedAppbar>
+        <ScreenHeader
+          title={`${moduleConfig?.name || moduleType} Config`}
+          onBack={() => navigation.goBack()}
+        />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={theme.colors.accent.primary} />
         </View>
@@ -770,29 +763,27 @@ export const ModuleConfigEditScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={isCreate ? `New ${moduleConfig?.name || moduleType} Config` : `Edit ${moduleConfig?.name || moduleType} Config`}
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-        {saving ? (
-          <ActivityIndicator
-            size="small"
-            color={theme.colors.accent.primary}
-            style={styles.savingIndicator}
-          />
-        ) : (
-          <Appbar.Action
-            icon="check"
-            color={theme.colors.accent.primary}
-            onPress={handleSave}
-          />
-        )}
-      </ThemedAppbar>
+      <ScreenHeader
+        title={isCreate ? `New ${moduleConfig?.name || moduleType} Config` : `Edit ${moduleConfig?.name || moduleType} Config`}
+        onBack={() => navigation.goBack()}
+        right={
+          saving ? (
+            <ActivityIndicator
+              size="small"
+              color={theme.colors.accent.primary}
+            />
+          ) : (
+            <TouchableOpacity
+              onPress={handleSave}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Save configuration"
+              accessibilityRole="button"
+            >
+              <Icon name="check" size={24} color={theme.colors.accent.primary} />
+            </TouchableOpacity>
+          )
+        }
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
@@ -850,7 +841,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
                     ]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
-                    style={StyleSheet.absoluteFillObject}
+                    style={StyleSheet.absoluteFill}
                   />
                   <View style={styles.deleteIconBadge}>
                     <Icon

@@ -26,9 +26,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
-import { Appbar } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { ThemedCard } from '../components/themed/ThemedCard';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -418,19 +417,10 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
   if (isLoading) {
     return (
       <ThemedView style={styles.container}>
-        <ThemedAppbar style={styles.header}>
-          <Appbar.BackAction
-            color={theme.colors.text.primary}
-            onPress={() => navigation.goBack()}
-          />
-          <Appbar.Content
-            title="Entity Settings"
-            titleStyle={{
-              color: theme.colors.text.primary,
-              fontWeight: 'bold',
-            }}
-          />
-        </ThemedAppbar>
+        <ScreenHeader
+          title="Entity Settings"
+          onBack={() => navigation.goBack()}
+        />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={theme.colors.accent.primary} />
         </View>
@@ -444,29 +434,27 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title="Entity Settings"
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-        {isSaving ? (
-          <ActivityIndicator
-            size="small"
-            color={theme.colors.accent.primary}
-            style={styles.savingIndicator}
-          />
-        ) : (
-          <Appbar.Action
-            icon="check"
-            color={theme.colors.accent.primary}
-            onPress={handleSave}
-          />
-        )}
-      </ThemedAppbar>
+      <ScreenHeader
+        title="Entity Settings"
+        onBack={() => navigation.goBack()}
+        right={
+          isSaving ? (
+            <ActivityIndicator
+              size="small"
+              color={theme.colors.accent.primary}
+            />
+          ) : (
+            <TouchableOpacity
+              onPress={handleSave}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Save entity settings"
+              accessibilityRole="button"
+            >
+              <Icon name="check" size={24} color={theme.colors.accent.primary} />
+            </TouchableOpacity>
+          )
+        }
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}

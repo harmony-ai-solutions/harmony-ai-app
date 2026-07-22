@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import {
   StyleSheet,
   View,
@@ -11,9 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import {
-  Appbar,
   Avatar,
-
   ActivityIndicator,
 } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -25,6 +22,7 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedFab } from '../components/themed/ThemedFab';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { getAllEntities } from '../database/repositories/entities';
 import {
@@ -530,76 +528,72 @@ export const ChatListScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
-      <ThemedAppbar style={{ zIndex: 10 }}>
-        <Appbar.Content
-          title={
-            <View style={styles.titleContainer}>
-              <ThemedText variant="primary" style={styles.titleText}>
-                {t('title')}
-              </ThemedText>
-              <TouchableOpacity
-                onPress={() => setInfoModalVisible(true)}
-                style={styles.infoButton}
-              >
-                <Icon
-                  name="information-outline"
-                  size={20}
-                  color={theme?.colors.text.muted}
-                />
-              </TouchableOpacity>
-            </View>
-          }
-        />
-        <TouchableOpacity
-          style={styles.impersonationHeaderAction}
-          onPress={() => setSelectorModalVisible(true)}
-        >
-          <View style={styles.impersonationBannerText}>
-            <ThemedText variant="muted" size={11}>
-              {t('chattingAs')}
-            </ThemedText>
-            <ThemedText
-              variant="primary"
-              size={14}
-              style={{ fontWeight: '600' }}
+      <ScreenHeader
+        title={t('title')}
+        right={
+          <View style={styles.headerRightRow}>
+            <TouchableOpacity
+              onPress={() => setInfoModalVisible(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              {impersonatedEntityDisplay.name}
-            </ThemedText>
-          </View>
-          <View
-            style={[
-              styles.impersonationAvatar,
-              { borderColor: (theme?.colors.accent.primary ?? '#7c3aed') + '66' },
-            ]}
-          >
-            {impersonatedEntityDisplay.avatarUri ? (
-              <Image
-                source={{ uri: impersonatedEntityDisplay.avatarUri }}
-                style={styles.impersonationAvatarImage}
-                resizeMode="cover"
+              <Icon
+                name="information-outline"
+                size={20}
+                color={theme?.colors.text.muted}
               />
-            ) : (
-              <LinearGradient
-                colors={[
-                  (theme?.colors.accent.primary ?? '#7c3aed') + '33',
-                  theme?.colors.background.elevated ?? '#1e1e2e',
-                ]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.impersonationAvatarFallback}
-              >
-                <ThemedText
-                  size={11}
-                  weight="bold"
-                  style={{ color: theme?.colors.accent.primary }}
-                >
-                  {impersonatedEntityDisplay.name.substring(0, 2).toUpperCase()}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.impersonationHeaderAction}
+              onPress={() => setSelectorModalVisible(true)}
+            >
+              <View style={styles.impersonationBannerText}>
+                <ThemedText variant="muted" size={11}>
+                  {t('chattingAs')}
                 </ThemedText>
-              </LinearGradient>
-            )}
+                <ThemedText
+                  variant="primary"
+                  size={14}
+                  style={{ fontWeight: '600' }}
+                >
+                  {impersonatedEntityDisplay.name}
+                </ThemedText>
+              </View>
+              <View
+                style={[
+                  styles.impersonationAvatar,
+                  { borderColor: (theme?.colors.accent.primary ?? '#7c3aed') + '66' },
+                ]}
+              >
+                {impersonatedEntityDisplay.avatarUri ? (
+                  <Image
+                    source={{ uri: impersonatedEntityDisplay.avatarUri }}
+                    style={styles.impersonationAvatarImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <LinearGradient
+                    colors={[
+                      (theme?.colors.accent.primary ?? '#7c3aed') + '33',
+                      theme?.colors.background.elevated ?? '#1e1e2e',
+                    ]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.impersonationAvatarFallback}
+                  >
+                    <ThemedText
+                      size={11}
+                      weight="bold"
+                      style={{ color: theme?.colors.accent.primary }}
+                    >
+                      {impersonatedEntityDisplay.name.substring(0, 2).toUpperCase()}
+                    </ThemedText>
+                  </LinearGradient>
+                )}
+              </View>
+            </TouchableOpacity>
           </View>
-        </TouchableOpacity>
-      </ThemedAppbar>
+        }
+      />
 
       {!isPaired ? (
         <View
@@ -750,11 +744,11 @@ const styles = StyleSheet.create({
     marginTop: 100,
   },
   emptyText: { marginTop: 16, marginBottom: 8 },
-  titleContainer: { flexDirection: 'row', alignItems: 'center' },
-  titleText: { fontWeight: 'bold', fontSize: 24 },
-  infoButton: { marginLeft: 8 },
-  descriptionContainer: { marginTop: 2 },
-  descriptionText: { fontSize: 12 },
+  headerRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   impersonationHeaderAction: {
     flexDirection: 'row',
     alignItems: 'center',

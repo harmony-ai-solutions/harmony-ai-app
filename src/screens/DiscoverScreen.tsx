@@ -13,6 +13,7 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 
 export const DiscoverScreen: React.FC = () => {
@@ -30,16 +31,12 @@ export const DiscoverScreen: React.FC = () => {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Gradient accent stripe */}
-        <ThemedGradient gradient="primary" style={styles.accentStripe} />
-
-        {/* Page title */}
-        <ThemedText variant="primary" size={24} weight="bold" hierarchy="header">
-          Discover
-        </ThemedText>
-        <ThemedText variant="muted" size={13} hierarchy="subtext" style={styles.subtitle}>
-          Explore AI personas, trending characters, and community showcases
-        </ThemedText>
+        {/* Page header — gradient stripe + title + subtitle */}
+        <ScreenHeader
+          title="Discover"
+          subtitle="Explore AI personas, trending characters, and community showcases"
+          style={{ paddingTop: 0 }}
+        />
 
         {/* Placeholder cards */}
         <View style={styles.grid}>
@@ -69,16 +66,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     flexGrow: 1,
-  },
-  accentStripe: {
-    height: 3,
-    borderRadius: 2,
-    marginBottom: 16,
-    width: 40,
-  },
-  subtitle: {
-    marginTop: 4,
-    marginBottom: 24,
   },
   grid: {
     flexDirection: 'row',

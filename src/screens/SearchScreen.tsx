@@ -19,7 +19,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
-import { ThemedGradient } from '../components/themed/ThemedGradient';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { hexToRgba } from '../utils/colorUtils';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 
@@ -44,19 +44,14 @@ export const SearchScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Gradient accent stripe */}
-        <ThemedGradient gradient="primary" style={styles.accentStripe} />
-
-        {/* Page title */}
-        <ThemedText variant="primary" size={24} weight="bold" hierarchy="header">
-          Search
-        </ThemedText>
-        <ThemedText variant="muted" size={13} hierarchy="subtext" style={styles.subtitle}>
-          Find characters, conversations, and configurations
-        </ThemedText>
-
-        {/* Search input */}
-        <View style={[styles.searchBar, { backgroundColor: inputBg, borderColor: hexToRgba(accent, 0.25) }]}>
+        {/* Page header — gradient stripe + title + subtitle */}
+        <ScreenHeader
+          title="Search"
+          subtitle="Find characters, conversations, and configurations"
+          style={{ paddingTop: 0 }}
+        >
+            {/* Search input */}
+            <View style={[styles.searchBar, { backgroundColor: inputBg, borderColor: hexToRgba(accent, 0.25) }]}>
           <MaterialCommunityIcons
             name="magnify"
             size={20}
@@ -80,7 +75,8 @@ export const SearchScreen: React.FC = () => {
               style={styles.clearIcon}
             />
           )}
-        </View>
+          </View>
+        </ScreenHeader>
 
         {/* Empty state */}
         {query.length === 0 && (
@@ -127,16 +123,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     flexGrow: 1,
-  },
-  accentStripe: {
-    height: 3,
-    borderRadius: 2,
-    marginBottom: 16,
-    width: 40,
-  },
-  subtitle: {
-    marginTop: 4,
-    marginBottom: 20,
   },
   searchBar: {
     flexDirection: 'row',
