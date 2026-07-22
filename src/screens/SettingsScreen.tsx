@@ -15,7 +15,6 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { ThemedAppbar } from '../components/themed/ThemedAppbar';
-import { SettingsMenu } from '../components/navigation/SettingsMenu';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
@@ -31,7 +30,6 @@ export const SettingsScreen: React.FC = () => {
   const { isConnected, isPaired, isReconnecting } = useSyncConnection();
   const { t } = useTranslation('settings');
 
-  const [menuVisible, setMenuVisible] = useState(false);
   const [connectionType, setConnectionType] =
     useState<ConnectionType>(t('common:notConfigured') as ConnectionType);
   const [lastSyncTime, setLastSyncTime] = useState<string>(t('never'));
@@ -82,11 +80,6 @@ export const SettingsScreen: React.FC = () => {
         <Appbar.Content
           title={t('title')}
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-        <Appbar.Action
-          icon="menu"
-          color={theme.colors.text.primary}
-          onPress={() => setMenuVisible(true)}
         />
       </ThemedAppbar>
 
@@ -193,11 +186,6 @@ export const SettingsScreen: React.FC = () => {
         )}
       </ScrollView>
 
-      <SettingsMenu
-        visible={menuVisible}
-        onClose={() => setMenuVisible(false)}
-        onNavigate={screen => navigation.navigate(screen as any)}
-      />
     </ThemedView>
   );
 };
