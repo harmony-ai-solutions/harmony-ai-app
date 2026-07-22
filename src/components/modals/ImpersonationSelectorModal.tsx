@@ -220,7 +220,7 @@ export const ImpersonationSelectorModal: React.FC<
             ]}
             start={{ x: 0, y: 0 }}
             end={{ x: 0, y: 1 }}
-            style={[StyleSheet.absoluteFillObject, styles.modalRadius]}
+            style={[StyleSheet.absoluteFill, styles.modalRadius]}
           />
 
           {/* Prismatic tint */}
@@ -228,7 +228,7 @@ export const ImpersonationSelectorModal: React.FC<
             colors={[accentPrimary + '10', 'transparent']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0.6 }}
-            style={[StyleSheet.absoluteFillObject, styles.modalRadius]}
+            style={[StyleSheet.absoluteFill, styles.modalRadius]}
             pointerEvents="none"
           />
 
@@ -324,10 +324,12 @@ const styles = StyleSheet.create({
     margin: 20,
     borderRadius: 16,
     maxHeight: '80%',
+    backgroundColor: '#151d30', // opaque fallback — prevents transparency
   },
   modalShell: {
     borderRadius: 16,
     overflow: 'hidden',
+    backgroundColor: '#151d30', // opaque fallback — prevents transparency
   },
   modalRadius: {
     borderRadius: 16,
