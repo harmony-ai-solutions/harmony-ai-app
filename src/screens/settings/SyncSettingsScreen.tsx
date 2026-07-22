@@ -1,34 +1,60 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  Alert,
+  TouchableOpacity,
+  Animated,
+  Easing,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import LinearGradient from 'react-native-linear-gradient';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedButton } from '../../components/themed/ThemedButton';
+import { ThemedCard } from '../../components/themed/ThemedCard';
+import { SyncProgressVisualizer } from '../../components/sync/SyncProgressVisualizer';
 import SyncService, { SyncSession } from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../../utils/logger';
+import { hexToRgba } from '../../utils/colorUtils';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 const log = createLogger('[SyncSettingsScreen]');
 
+/**
+ * Data Synchronization screen — premium animated redesign.
+ *
+ * Features:
+ *  - Large animated neon orb indicating live connection status
+ *  - Glassmorphism status card with security mode & last sync timestamp
+ *  - Animated SyncProgressVisualizer with data-flow particles and counters
+ *  - Themed primary/outline action buttons
+ *  - Preserves all existing SyncSettingsScreen functionality
+ */
 export const SyncSettingsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const { theme } = useAppTheme();
-  const { isConnected, isPaired, isReconnecting, reconnectAttempt, nextReconnectIn, showToast } = useSyncConnection();
+  const { isConnected, isPaired, isReconnecting, reconnectAttempt, nextReconnectIn, showToast } =
+    useSyncConnection();
+
+  // ── Existing state (preserved from original) ────────────────────────────────
   const [currentSession, setCurrentSession] = useState<SyncSession | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>('Never');
   const [securityMode, setSecurityMode] = useState<string>('');
   const [countdown, setCountdown] = useState<number>(0);
 
+  // ── Existing effects (preserved from original) ─────────────────────────────
   useEffect(() => {
-    // Load last sync time and security mode on mount
     const loadSettings = async () => {
       const timestamp = await AsyncStorage.getItem('last_sync_timestamp');
       if (timestamp) {
@@ -50,22 +76,20 @@ export const SyncSettingsScreen: React.FC = () => {
       setIsSyncing(session.status === 'in_progress' || session.status === 'pending');
     };
 
-    const completedListener = (session: SyncSession) => {
+    const completedListener = (_session: SyncSession) => {
       setCurrentSession(null);
       setIsSyncing(false);
       setLastSyncTime(new Date().toLocaleString());
-      // Toast is handled by SyncConnectionContext
     };
 
-    const errorListener = (error: string) => {
+    const errorListener = (_error: string) => {
       setIsSyncing(false);
-      // Error toast is handled by SyncConnectionContext
     };
 
     SyncService.on('sync:progress', progressListener);
     SyncService.on('sync:completed', completedListener);
     SyncService.on('sync:error', errorListener);
-    
+
     return () => {
       SyncService.removeListener('sync:progress', progressListener);
       SyncService.removeListener('sync:completed', completedListener);
@@ -80,10 +104,8 @@ export const SyncSettingsScreen: React.FC = () => {
       return;
     }
 
-    // Initialize countdown
     setCountdown(Math.ceil(nextReconnectIn / 1000));
 
-    // Update countdown every second
     const interval = setInterval(() => {
       setCountdown((prev) => {
         const next = prev - 1;
@@ -94,6 +116,7 @@ export const SyncSettingsScreen: React.FC = () => {
     return () => clearInterval(interval);
   }, [isReconnecting, nextReconnectIn]);
 
+  // ── Handlers (preserved from original) ─────────────────────────────────────
   const handleSyncNow = async () => {
     if (!isConnected) {
       Alert.alert('Not Connected', 'Please connect to Harmony Link first from the Connection Setup screen.');
@@ -109,15 +132,14 @@ export const SyncSettingsScreen: React.FC = () => {
       const errorMsg = err?.message || 'Unknown error';
       log.error('Sync initiation failed:', errorMsg);
 
-      // Check if error is due to lost connection
-      const isConnectionError = errorMsg.includes('not connected') || 
-                                errorMsg.includes('connection') ||
-                                err?.code === 'SEND_FAILED' ||
-                                err?.code === 'NOT_CONNECTED';
+      const isConnectionError =
+        errorMsg.includes('not connected') ||
+        errorMsg.includes('connection') ||
+        err?.code === 'SEND_FAILED' ||
+        err?.code === 'NOT_CONNECTED';
 
       if (isConnectionError) {
         showToast('Connection lost - reconnecting...');
-        // Reconnection will be handled automatically by SyncConnectionContext
       } else {
         showToast('Failed to start sync: ' + errorMsg);
         Alert.alert('Sync Error', 'Failed to start sync: ' + errorMsg);
@@ -155,35 +177,23 @@ export const SyncSettingsScreen: React.FC = () => {
     );
   };
 
+  // ── Helpers (preserved from original) ──────────────────────────────────────
   const getConnectionStatusText = () => {
-    if (!isPaired) {
-      return 'Not Paired';
-    }
-    if (isConnected) {
-      return 'Connected to Harmony Link';
-    }
+    if (!isPaired) return 'Not Paired';
+    if (isConnected) return 'Connected';
     if (isReconnecting) {
-      if (reconnectAttempt === 0) {
-        return 'Connection lost - Reconnecting...';
-      } else {
-        const retryText = countdown > 0 ? ` in ${countdown}s` : '...';
-        return `Reconnecting (${reconnectAttempt} failed retries)${retryText}`;
-      }
+      if (reconnectAttempt === 0) return 'Reconnecting...';
+      const retryText = countdown > 0 ? ` in ${countdown}s` : '...';
+      return `Reconnecting (${reconnectAttempt} retries)${retryText}`;
     }
     return 'Disconnected';
   };
 
-  const getConnectionStatusColor = () => {
-    if (!isPaired) {
-      return '#FF9800'; // Orange
-    }
-    if (isConnected) {
-      return '#4CAF50'; // Green
-    }
-    if (isReconnecting) {
-      return '#FFC107'; // Amber - attempting to reconnect
-    }
-    return '#F44336'; // Red
+  const getConnectionStatusColor = (): string => {
+    if (!isPaired) return theme?.colors.accent.primary ?? '#b84fd0';
+    if (isConnected) return theme?.colors.status.success ?? '#4CAF50';
+    if (isReconnecting) return theme?.colors.accent.secondary ?? '#4a5fcf';
+    return theme?.colors.text.muted ?? '#9692b0';
   };
 
   const getSecurityModeDisplay = () => {
@@ -199,168 +209,355 @@ export const SyncSettingsScreen: React.FC = () => {
     }
   };
 
+  // ── Animated values ─────────────────────────────────────────────────────────
+  const fadeIn = useRef(new Animated.Value(0)).current;
+  const slideUp = useRef(new Animated.Value(30)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeIn, {
+        toValue: 1,
+        duration: 500,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideUp, {
+        toValue: 0,
+        duration: 500,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeIn, slideUp]);
+
   if (!theme) return null;
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+  const statusColor = getConnectionStatusColor();
+  const accentPrimary = theme.colors.accent.primary;
+  const accentSecondary = theme.colors.accent.secondary;
 
   return (
     <ThemedView style={styles.container}>
-      <ScreenHeader
-        title="Data Synchronization"
-        onBack={() => navigation.goBack()}
-      />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        
-        <TouchableOpacity 
+      <ScreenHeader title="Data Synchronization" onBack={() => navigation.goBack()} />
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Hero Orb: Large animated connection status orb ─────────────── */}
+
+        <Animated.View
+          style={[
+            styles.heroOrbContainer,
+            {
+              opacity: fadeIn,
+              transform: [{ translateY: slideUp }],
+            },
+          ]}
+        >
+          {/* Outer glow ring */}
+          <View style={[styles.heroGlowRing, { borderColor: hexToRgba(statusColor, 0.25) }]}>
+            {/* Mid glow */}
+            <View style={[styles.heroGlowMid, { borderColor: hexToRgba(statusColor, 0.4) }]}>
+              {/* Solid orb */}
+              <LinearGradient
+                colors={[statusColor, hexToRgba(statusColor, 0.5)]}
+                style={styles.heroOrb}
+                start={{ x: 0.3, y: 0.1 }}
+                end={{ x: 0.7, y: 0.9 }}
+              >
+                {/* Specular highlight */}
+                <View style={styles.heroOrbHighlight} />
+                {/* Icon */}
+                <Icon
+                  name={isConnected ? 'cloud-check' : isReconnecting ? 'cloud-refresh' : 'cloud-off-outline'}
+                  size={36}
+                  color="#fff"
+                />
+              </LinearGradient>
+            </View>
+          </View>
+
+          {/* Status label under the orb */}
+          <ThemedText weight="bold" size={20} style={styles.heroStatusText}>
+            {getConnectionStatusText()}
+          </ThemedText>
+          <ThemedText variant="secondary" size={13} style={styles.heroSubtext}>
+            {isConnected
+              ? 'Your data is in sync with Harmony Link'
+              : isReconnecting
+              ? 'Attempting to restore connection...'
+              : isPaired
+              ? 'Tap to view connection details'
+              : 'Pair your device to get started'}
+          </ThemedText>
+        </Animated.View>
+
+        {/* ── Sync Progress Visualizer ──────────────────────────────────── */}
+
+        <SyncProgressVisualizer
+          phase={currentSession?.status === 'in_progress' ? 'CLIENT_SENDING' : 'IDLE'}
+          recordsSent={currentSession?.recordsSent ?? 0}
+          recordsReceived={currentSession?.recordsReceived ?? 0}
+          active={isSyncing && !!currentSession}
+          connected={isConnected}
+        />
+
+        {/* ── Status Card ───────────────────────────────────────────────── */}
+
+        <TouchableOpacity
           onPress={() => navigation.navigate('ConnectionSetup')}
           activeOpacity={0.7}
         >
-          <ThemedView style={styles.card}>
-            <ThemedText weight="medium" style={styles.cardTitle}>Sync Status</ThemedText>
-            <View style={styles.row}>
-              <ThemedText variant="secondary">Last Synchronized:</ThemedText>
-              <ThemedText>{lastSyncTime}</ThemedText>
+          <ThemedCard accentStripe style={styles.statusCard}>
+            <View style={styles.cardHeader}>
+              <Icon name="information-outline" size={18} color={accentPrimary} />
+              <ThemedText weight="medium" size={15} style={styles.cardTitle}>
+                Connection Details
+              </ThemedText>
             </View>
-            <View style={styles.row}>
-              <ThemedText variant="secondary">Connection:</ThemedText>
-              <ThemedText style={{ color: getConnectionStatusColor() }}>
+
+            <View style={styles.detailRow}>
+              <View style={styles.detailLabel}>
+                <Icon name="clock-outline" size={14} color={theme.colors.text.muted} />
+                <ThemedText variant="muted" size={13}>Last Sync</ThemedText>
+              </View>
+              <ThemedText size={13}>{lastSyncTime}</ThemedText>
+            </View>
+
+            <View style={styles.detailDivider} />
+
+            <View style={styles.detailRow}>
+              <View style={styles.detailLabel}>
+                <View style={[styles.dot, { backgroundColor: statusColor }]} />
+                <ThemedText variant="muted" size={13}>Status</ThemedText>
+              </View>
+              <ThemedText size={13} style={{ color: statusColor }}>
                 {getConnectionStatusText()}
               </ThemedText>
             </View>
+
             {isPaired && (
-              <View style={styles.row}>
-                <ThemedText variant="secondary">Security Mode:</ThemedText>
-                <ThemedText size={12}>{getSecurityModeDisplay()}</ThemedText>
-              </View>
+              <>
+                <View style={styles.detailDivider} />
+                <View style={styles.detailRow}>
+                  <View style={styles.detailLabel}>
+                    <Icon name="shield-key-outline" size={14} color={theme.colors.text.muted} />
+                    <ThemedText variant="muted" size={13}>Security</ThemedText>
+                  </View>
+                  <ThemedText size={12}>{getSecurityModeDisplay()}</ThemedText>
+                </View>
+              </>
             )}
-            <ThemedText variant="secondary" size={10} style={styles.tapHint}>
-              Tap to view connection details →
-            </ThemedText>
-          </ThemedView>
+
+            <View style={styles.tapHint}>
+              <ThemedText variant="muted" size={11}>
+                Tap to manage connection →
+              </ThemedText>
+            </View>
+          </ThemedCard>
         </TouchableOpacity>
 
-
-        {isSyncing && currentSession && (
-          <ThemedView style={styles.card}>
-            <ThemedText weight="medium" style={styles.cardTitle}>Syncing in Progress...</ThemedText>
-            <ThemedText variant="secondary" style={styles.progressText}>
-              Status: {currentSession.status}
-            </ThemedText>
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <ThemedText size={20} weight="bold">{currentSession.recordsSent}</ThemedText>
-                <ThemedText variant="secondary" size={12}>Records Sent</ThemedText>
-              </View>
-              <View style={styles.statItem}>
-                <ThemedText size={20} weight="bold">{currentSession.recordsReceived}</ThemedText>
-                <ThemedText variant="secondary" size={12}>Records Received</ThemedText>
-              </View>
-            </View>
-          </ThemedView>
-        )}
+        {/* ── Action Buttons ────────────────────────────────────────────── */}
 
         <ThemedButton
-          label={isSyncing ? "Syncing..." : "Sync Now"}
+          label={isSyncing ? 'Syncing...' : 'Sync Now'}
+          icon={isSyncing ? 'sync' : 'cloud-sync-outline'}
           onPress={handleSyncNow}
           disabled={isSyncing || !isConnected}
-          style={styles.syncButton}
+          variant="primary"
+          style={styles.actionButton}
           testID="sync-now-button"
-          accessibilityLabel={isSyncing ? "Sync in progress" : "Sync now"}
+          accessibilityLabel={isSyncing ? 'Sync in progress' : 'Sync now'}
         />
 
         <ThemedButton
           label="Force Full Re-Sync"
+          icon="database-sync-outline"
           onPress={handleForceFullSync}
           disabled={isSyncing || !isConnected}
           variant="outline"
-          style={styles.dangerButton}
+          style={styles.actionButton}
           testID="force-resync-button"
           accessibilityLabel="Force full re-sync"
         />
 
+        {/* ── Warning / Info messages ───────────────────────────────────── */}
+
         {!isPaired && (
-          <ThemedText variant="secondary" style={styles.warningText}>
-            ⚠️ Not paired with Harmony Link. Go to Connection Setup to pair your device.
-          </ThemedText>
+          <ThemedCard style={styles.warningCard}>
+            <View style={styles.warningRow}>
+              <Icon name="alert-circle-outline" size={18} color={accentPrimary} />
+              <ThemedText variant="secondary" size={13} style={styles.warningText}>
+                Not paired with Harmony Link. Go to Connection Setup to pair your device.
+              </ThemedText>
+            </View>
+          </ThemedCard>
         )}
 
         {isPaired && !isConnected && !isReconnecting && (
-          <ThemedText variant="secondary" style={styles.warningText}>
-            ⚠️ Not connected. Attempting to reconnect...
-          </ThemedText>
-        )}
-        
-        {isPaired && isReconnecting && (
-          <ThemedText variant="secondary" style={styles.infoText}>
-            🔄 Auto-reconnect in progress. The connection will be restored automatically.
-          </ThemedText>
+          <ThemedCard style={styles.warningCard}>
+            <View style={styles.warningRow}>
+              <Icon name="lan-disconnect" size={18} color={accentPrimary} />
+              <ThemedText variant="secondary" size={13} style={styles.warningText}>
+                Not connected. Attempting to reconnect...
+              </ThemedText>
+            </View>
+          </ThemedCard>
         )}
 
-        <ThemedText variant="secondary" style={styles.infoText}>
-          Synchronizing will update your characters, messages, and settings with the latest changes from Harmony Link.
+        {isPaired && isReconnecting && (
+          <ThemedCard style={styles.infoCard}>
+            <View style={styles.warningRow}>
+              <Icon name="cloud-refresh" size={18} color={accentSecondary} />
+              <ThemedText variant="secondary" size={13} style={styles.warningText}>
+                Auto-reconnect in progress. The connection will be restored automatically.
+              </ThemedText>
+            </View>
+          </ThemedCard>
+        )}
+
+        <ThemedText variant="muted" size={12} style={styles.footerText}>
+          Synchronization updates your characters, messages, and settings with the latest changes from Harmony Link.
         </ThemedText>
       </ScrollView>
     </ThemedView>
   );
 };
 
+// ── Styles ────────────────────────────────────────────────────────────────────
+
+const ORB_SIZE = 90;
+const GLOW_RING_1 = ORB_SIZE + 28;
+const GLOW_RING_2 = ORB_SIZE + 12;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    elevation: 4,
-  },
   scrollContent: {
     padding: 20,
+    paddingBottom: 40,
   },
-  card: {
-    backgroundColor: 'rgba(150, 150, 150, 0.1)',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
+
+  // ── Hero Orb ────────────────────────────────────────────────────────────────
+  heroOrbContainer: {
+    alignItems: 'center',
+    marginBottom: 24,
+    marginTop: 8,
   },
-  cardTitle: {
-    marginBottom: 12,
-    fontSize: 16,
+  heroGlowRing: {
+    width: GLOW_RING_1,
+    height: GLOW_RING_1,
+    borderRadius: GLOW_RING_1 / 2,
+    borderWidth: 3,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
   },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  progressText: {
-    marginBottom: 16,
-    textTransform: 'capitalize',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 10,
-  },
-  statItem: {
+  heroGlowMid: {
+    width: GLOW_RING_2,
+    height: GLOW_RING_2,
+    borderRadius: GLOW_RING_2 / 2,
+    borderWidth: 2,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  syncButton: {
-    marginTop: 10,
-    marginBottom: 10,
+  heroOrb: {
+    width: ORB_SIZE,
+    height: ORB_SIZE,
+    borderRadius: ORB_SIZE / 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    elevation: 12,
   },
-  dangerButton: {
-    marginBottom: 10,
+  heroOrbHighlight: {
+    position: 'absolute',
+    top: 16,
+    left: 19,
+    width: 28,
+    height: 18,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    transform: [{ rotate: '-30deg' }],
   },
-  infoText: {
+  heroStatusText: {
+    marginBottom: 4,
+  },
+  heroSubtext: {
     textAlign: 'center',
-    fontSize: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 30,
   },
-  warningText: {
-    textAlign: 'center',
-    fontSize: 14,
-    paddingHorizontal: 20,
-    marginTop: 10,
-    opacity: 0.8,
+
+  // ── Status Card ─────────────────────────────────────────────────────────────
+  statusCard: {
+    marginBottom: 20,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+    gap: 8,
+  },
+  cardTitle: {
+    flex: 1,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  detailLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  detailDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    marginVertical: 6,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   tapHint: {
     marginTop: 12,
-    textAlign: 'right',
-    opacity: 0.6,
+    alignItems: 'flex-end',
+  },
+
+  // ── Buttons ─────────────────────────────────────────────────────────────────
+  actionButton: {
+    marginBottom: 12,
+  },
+
+  // ── Warning / Info Cards ────────────────────────────────────────────────────
+  warningCard: {
+    marginBottom: 12,
+  },
+  infoCard: {
+    marginBottom: 12,
+  },
+  warningRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  warningText: {
+    flex: 1,
+    lineHeight: 18,
+  },
+
+  // ── Footer ──────────────────────────────────────────────────────────────────
+  footerText: {
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    marginTop: 6,
   },
 });
