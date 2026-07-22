@@ -15,10 +15,11 @@ import {
     ActivityIndicator,
     Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import runAllTests from '../../database/test-runner';
+import runAllTests from '../../database/__tests__/run-all-tests';
 
 interface ConsoleMessage {
     text: string;
@@ -27,6 +28,7 @@ interface ConsoleMessage {
 
 export const DatabaseTestScreen: React.FC = () => {
     const { theme } = useAppTheme();
+    const { top: safeTop } = useSafeAreaInsets();
     const [isRunning, setIsRunning] = useState(false);
     const [consoleOutput, setConsoleOutput] = useState<ConsoleMessage[]>([]);
     const [testsPassed, setTestsPassed] = useState<boolean | null>(null);
@@ -92,8 +94,9 @@ export const DatabaseTestScreen: React.FC = () => {
 
         try {
             addConsoleMessage('Starting database tests...', 'log');
-            const success = await runAllTests().catch((error) => {
-                addConsoleMessage(`\n❌ Unhandled promise rejection: ${error}`, 'error');
+            const success = await runAllTests().catch((error: unknown) => {
+                const msg = error instanceof Error ? error.message : String(error);
+                addConsoleMessage(`\n❌ Unhandled promise rejection: ${msg}`, 'error');
                 return false;
             });
             setTestsPassed(success);
@@ -146,7 +149,7 @@ export const DatabaseTestScreen: React.FC = () => {
     return (
         <View style={[styles.container, { backgroundColor: theme.colors.background.base }]}>
             {/* Header */}
-            <View style={[styles.header, { backgroundColor: theme.colors.background.surface }]}>
+            <View style={[styles.header, { backgroundColor: theme.colors.background.surface, paddingTop: safeTop + 12 }]}>
                 <View style={styles.headerContent}>
                     <Icon name="test-tube" size={28} color={theme.colors.accent.primary} />
                     <View style={styles.headerText}>
@@ -285,7 +288,6 @@ const styles = StyleSheet.create({
     },
     header: {
         padding: 20,
-        paddingTop: 60,
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     },

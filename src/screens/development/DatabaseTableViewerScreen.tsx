@@ -16,6 +16,7 @@ import {
     Dimensions,
     Modal,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedView } from '../../components/themed/ThemedView';
@@ -37,6 +38,7 @@ interface ColumnInfo {
 
 export const DatabaseTableViewerScreen: React.FC = () => {
     const { theme } = useAppTheme();
+    const { top: safeTop } = useSafeAreaInsets();
     const [tables, setTables] = useState<TableInfo[]>([]);
     const [selectedTable, setSelectedTable] = useState<string | null>(null);
     const [columns, setColumns] = useState<ColumnInfo[]>([]);
@@ -533,7 +535,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
     return (
         <ThemedView style={styles.container}>
             {/* Header */}
-            <View style={[styles.header, { backgroundColor: theme.colors.background.surface }]}>
+            <View style={[styles.header, { backgroundColor: theme.colors.background.surface, paddingTop: safeTop + 12 }]}>
                 <View style={styles.headerContent}>
                     <Icon name="database-eye" size={28} color={theme.colors.accent.primary} />
                     <View style={styles.headerText}>
@@ -668,7 +670,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: 10,
-        paddingTop: 30,
         borderBottomWidth: 0.5,
         borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     },

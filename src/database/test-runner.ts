@@ -5,4 +5,5 @@
  * This file exists outside __tests__ because Metro bundler excludes __tests__ directories by default.
  */
 
-export { default } from './__tests__/run-all-tests';
+import runAllTests from './__tests__/run-all-tests';
+export default runAllTests;
