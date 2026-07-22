@@ -42,6 +42,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import { hexToRgba } from '../utils/colorUtils';
 import { ImpersonationSelectorModal } from '../components/modals/ImpersonationSelectorModal';
 import { InfoModal } from '../components/modals/InfoModal';
 import { createLogger } from '../utils/logger';
@@ -545,50 +546,74 @@ export const ChatListScreen: React.FC = () => {
             <TouchableOpacity
               style={styles.impersonationHeaderAction}
               onPress={() => setSelectorModalVisible(true)}
+              activeOpacity={0.7}
             >
-              <View style={styles.impersonationBannerText}>
-                <ThemedText variant="muted" size={11}>
-                  {t('chattingAs')}
-                </ThemedText>
-                <ThemedText
-                  variant="primary"
-                  size={14}
-                  style={{ fontWeight: '600' }}
-                >
-                  {impersonatedEntityDisplay.name}
-                </ThemedText>
-              </View>
+              {/* ── Obsidian Glass pill chip ── */}
               <View
                 style={[
-                  styles.impersonationAvatar,
-                  { borderColor: (theme?.colors.accent.primary ?? '#7c3aed') + '66' },
+                  styles.impersonationPill,
+                  {
+                    backgroundColor: hexToRgba(theme?.colors.background.base ?? '#0f172a', 0.78),
+                    shadowColor: theme?.colors.accent.primary ?? '#ec4899',
+                  },
                 ]}
               >
-                {impersonatedEntityDisplay.avatarUri ? (
-                  <Image
-                    source={{ uri: impersonatedEntityDisplay.avatarUri }}
-                    style={styles.impersonationAvatarImage}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <LinearGradient
-                    colors={[
-                      (theme?.colors.accent.primary ?? '#7c3aed') + '33',
-                      theme?.colors.background.elevated ?? '#1e1e2e',
-                    ]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.impersonationAvatarFallback}
-                  >
-                    <ThemedText
-                      size={11}
-                      weight="bold"
-                      style={{ color: theme?.colors.accent.primary }}
-                    >
-                      {impersonatedEntityDisplay.name.substring(0, 2).toUpperCase()}
-                    </ThemedText>
-                  </LinearGradient>
-                )}
+                {/* Prismatic tint overlay */}
+                <LinearGradient
+                  colors={[
+                    (theme?.colors.accent.primary ?? '#ec4899') + '12',
+                    'transparent',
+                    (theme?.colors.accent.secondary ?? '#a78bfa') + '0A',
+                  ]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                  pointerEvents="none"
+                />
+                {/* ── Gradient ring avatar ── */}
+                <LinearGradient
+                  colors={[
+                    theme?.colors.accent.primary ?? '#ec4899',
+                    theme?.colors.accent.secondary ?? '#a78bfa',
+                  ]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.impersonationPillAvatarRing}
+                >
+                  <View style={[styles.impersonationPillAvatarInner, { backgroundColor: theme?.colors.background.elevated ?? '#334155' }]}>
+                    {impersonatedEntityDisplay.avatarUri ? (
+                      <Image
+                        source={{ uri: impersonatedEntityDisplay.avatarUri }}
+                        style={styles.impersonationPillAvatarImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <ThemedText
+                        size={11}
+                        weight="bold"
+                        style={{ color: theme?.colors.accent.primary }}
+                      >
+                        {impersonatedEntityDisplay.name.substring(0, 2).toUpperCase()}
+                      </ThemedText>
+                    )}
+                  </View>
+                </LinearGradient>
+                {/* ── Labels ── */}
+                <View style={styles.impersonationPillLabels}>
+                  <ThemedText variant="muted" size={10} hierarchy="caption">
+                    {t('chattingAs')}
+                  </ThemedText>
+                  <ThemedText size={13} weight="bold" numberOfLines={1} style={styles.impersonationPillName}>
+                    {impersonatedEntityDisplay.name}
+                  </ThemedText>
+                </View>
+                {/* ── Chevron indicator ── */}
+                <Icon
+                  name="chevron-down"
+                  size={14}
+                  color={theme?.colors.text.muted}
+                  style={styles.impersonationPillChevron}
+                />
               </View>
             </TouchableOpacity>
           </View>
@@ -750,31 +775,55 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   impersonationHeaderAction: {
+    // no-op — pill handles its own layout
+  },
+  // ── Obsidian Glass pill chip ──
+  impersonationPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 8,
-  },
-  impersonationBannerText: {
-    alignItems: 'flex-end',
-  },
-  impersonationAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1,
+    borderRadius: 20,
+    paddingLeft: 3,
+    paddingRight: 10,
+    paddingVertical: 4,
+    gap: 7,
     overflow: 'hidden',
-    flexShrink: 0,
+    // ambient glow
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 6,
   },
-  impersonationAvatarImage: {
-    width: 30,
-    height: 30,
-  },
-  impersonationAvatarFallback: {
-    width: 30,
-    height: 30,
+  impersonationPillAvatarRing: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    padding: 2,
     justifyContent: 'center',
     alignItems: 'center',
+    flexShrink: 0,
+  },
+  impersonationPillAvatarInner: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  impersonationPillAvatarImage: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  impersonationPillLabels: {
+    alignItems: 'flex-start',
+    gap: 1,
+  },
+  impersonationPillName: {
+    maxWidth: 90,
+  },
+  impersonationPillChevron: {
+    marginLeft: 1,
   },
   timeText: {
     alignSelf: 'center',
