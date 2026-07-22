@@ -25,7 +25,6 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedFab } from '../components/themed/ThemedFab';
-import { SettingsMenu } from '../components/navigation/SettingsMenu';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { getAllEntities } from '../database/repositories/entities';
 import {
@@ -86,7 +85,6 @@ export const ChatListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { isPaired } = useSyncConnection();
   const { t } = useTranslation('chatList');
-  const [menuVisible, setMenuVisible] = useState(false);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -601,12 +599,6 @@ export const ChatListScreen: React.FC = () => {
             )}
           </View>
         </TouchableOpacity>
-        <Appbar.Action
-          icon={() => (
-            <Icon name="menu" size={24} color={theme?.colors.text.primary} />
-          )}
-          onPress={() => setMenuVisible(true)}
-        />
       </ThemedAppbar>
 
       {!isPaired ? (
@@ -660,12 +652,6 @@ export const ChatListScreen: React.FC = () => {
 
 
       <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }} />
-
-      <SettingsMenu
-        visible={menuVisible}
-        onClose={() => setMenuVisible(false)}
-        onNavigate={screen => navigation.navigate(screen as any)}
-      />
 
       <ImpersonationSelectorModal
         visible={selectorModalVisible}

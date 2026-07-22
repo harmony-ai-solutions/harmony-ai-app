@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Appbar } from 'react-native-paper';
 import { ThemedAppbar } from '../components/themed/ThemedAppbar';
@@ -6,13 +6,10 @@ import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
-import { SettingsMenu } from '../components/navigation/SettingsMenu';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 export const AIConfigScreen: React.FC<any> = ({ navigation }) => {
     const { theme } = useAppTheme();
     const { t } = useTranslation('config');
-    const [menuVisible, setMenuVisible] = useState(false);
 
     if (!theme) return null;
 
@@ -22,10 +19,6 @@ export const AIConfigScreen: React.FC<any> = ({ navigation }) => {
                 <Appbar.Content
                     title={t('aiConfig')}
                     titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-                />
-                <Appbar.Action
-                    icon={() => <Icon name="menu" size={24} color={theme.colors.text.primary} />}
-                    onPress={() => setMenuVisible(true)}
                 />
             </ThemedAppbar>
 
@@ -38,11 +31,6 @@ export const AIConfigScreen: React.FC<any> = ({ navigation }) => {
                 </ThemedText>
             </View>
 
-            <SettingsMenu
-                visible={menuVisible}
-                onClose={() => setMenuVisible(false)}
-                onNavigate={(screen) => navigation.navigate(screen)}
-            />
         </ThemedView>
     );
 };

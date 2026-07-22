@@ -19,7 +19,6 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedFab } from '../components/themed/ThemedFab';
-import { SettingsMenu } from '../components/navigation/SettingsMenu';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[EntityConfigScreen]');
@@ -43,7 +42,6 @@ export const EntityConfigScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('entityConfig');
-  const [menuVisible, setMenuVisible] = useState(false);
   const [entityItems, setEntityItems] = useState<EntityListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -148,11 +146,6 @@ export const EntityConfigScreen: React.FC = () => {
           title={t('title')}
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
         />
-        <Appbar.Action
-          icon="menu"
-          color={theme.colors.text.primary}
-          onPress={() => setMenuVisible(true)}
-        />
       </ThemedAppbar>
 
       {isLoading ? (
@@ -200,11 +193,6 @@ export const EntityConfigScreen: React.FC = () => {
 
       <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: 24 + safeBottom }} />
 
-      <SettingsMenu
-        visible={menuVisible}
-        onClose={() => setMenuVisible(false)}
-        onNavigate={screen => navigation.navigate(screen as any)}
-      />
     </ThemedView>
   );
 };

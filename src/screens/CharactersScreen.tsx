@@ -21,7 +21,6 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedFab } from '../components/themed/ThemedFab';
-import { SettingsMenu } from '../components/navigation/SettingsMenu';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { createLogger } from '../utils/logger';
 
@@ -46,7 +45,6 @@ export const CharactersScreen: React.FC = () => {
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('characters');
 
-  const [menuVisible, setMenuVisible] = useState(false);
   const [profiles, setProfiles] = useState<CharacterProfile[]>([]);
   const [primaryImages, setPrimaryImages] = useState<
     Record<string, string | null>
@@ -152,11 +150,6 @@ export const CharactersScreen: React.FC = () => {
           title={t('title')}
           titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
         />
-        <Appbar.Action
-          icon="menu"
-          color={theme.colors.text.primary}
-          onPress={() => setMenuVisible(true)}
-        />
       </ThemedAppbar>
 
       {/* Search bar */}
@@ -243,11 +236,6 @@ export const CharactersScreen: React.FC = () => {
         <ThemedFab icon="plus" onPress={handleCreateNew} style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }} />
       )}
 
-      <SettingsMenu
-        visible={menuVisible}
-        onClose={() => setMenuVisible(false)}
-        onNavigate={screen => navigation.navigate(screen as any)}
-      />
     </ThemedView>
   );
 };
