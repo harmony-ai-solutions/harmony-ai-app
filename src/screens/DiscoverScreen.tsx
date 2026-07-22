@@ -1,14 +1,14 @@
 /**
- * DiscoverScreen — Explore public AI personas
+ * DiscoverScreen — Coming Soon
  *
- * Glass-immersive screen for browsing featured AI characters, trending
- * personas, and community-curated character showcases. Serves as the
- * "Explore" entry point for discovering new content within the Harmony ecosystem.
+ * Professional placeholder for the Explore / Discover feature.
+ * Renders a centered "Coming Soon" slate with themed gradient accents,
+ * iconography, and the app's glassmorphism aesthetic.
  */
-
 import React from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
@@ -24,70 +24,119 @@ export const DiscoverScreen: React.FC = () => {
 
   return (
     <ThemedView variant="base" style={styles.container}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingTop: safeTop + 12, paddingBottom: TAB_BAR_CONTENT_PAD },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Page header — gradient stripe + title + subtitle */}
+      {/* ── Header ── */}
+      <View style={{ paddingTop: safeTop + 12 }}>
         <ScreenHeader
           title="Discover"
           subtitle="Explore AI personas, trending characters, and community showcases"
           style={{ paddingTop: 0 }}
         />
+      </View>
 
-        {/* Placeholder cards */}
-        <View style={styles.grid}>
-          {[1, 2, 3, 4].map(i => (
-            <ThemedView key={i} variant="surface" style={styles.card}>
-              <ThemedGradient
-                gradient="primary"
-                style={styles.cardGradientPlaceholder}
+      {/* ── Coming Soon Body ── */}
+      <View style={styles.body}>
+        {/* Gradient-ringed icon circle */}
+        <View style={styles.iconWrapper}>
+          <ThemedGradient gradient="primary" style={styles.iconRing}>
+            <ThemedView variant="elevated" style={styles.iconInner}>
+              <Icon
+                name="compass-outline"
+                size={56}
+                color={theme.colors.accent.primary}
               />
-              <ThemedText variant="secondary" size={13} weight="medium" style={styles.cardLabel}>
-                Featured Persona {i}
-              </ThemedText>
-              <ThemedText variant="muted" size={11} style={styles.cardDesc}>
-                Coming soon — community-curated AI characters
-              </ThemedText>
             </ThemedView>
-          ))}
+          </ThemedGradient>
         </View>
 
-      </ScrollView>
+        {/* Pulse dot below the icon */}
+        <View style={styles.pulseRow}>
+          <ThemedGradient gradient="primary" style={styles.pulseDot} />
+        </View>
+
+        {/* Headline */}
+        <ThemedText
+          variant="primary"
+          size={26}
+          weight="bold"
+          hierarchy="header"
+          style={styles.headline}
+        >
+          Coming Soon
+        </ThemedText>
+
+        {/* Description */}
+        <ThemedText
+          variant="secondary"
+          size={14}
+          hierarchy="subtext"
+          style={styles.description}
+        >
+          We're curating an immersive discovery experience{'\n'}
+          filled with AI personas, trending characters,{'\n'}
+          and community showcases.
+        </ThemedText>
+
+        {/* Decorative bottom accent bar */}
+        <ThemedGradient gradient="primary" style={styles.bottomAccent} />
+      </View>
     </ThemedView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scrollContent: {
-    flexGrow: 1,
+  container: {
+    flex: 1,
+    paddingBottom: TAB_BAR_CONTENT_PAD,
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
+  body: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    // Shift center up slightly so tab bar doesn't crowd
+    marginTop: -40,
   },
-  card: {
-    width: '47%',
-    borderRadius: 16,
-    padding: 14,
-    gap: 8,
-    minHeight: 120,
+  iconWrapper: {
+    marginBottom: 24,
   },
-  cardGradientPlaceholder: {
-    height: 48,
-    borderRadius: 10,
-    opacity: 0.5,
+  iconRing: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  cardLabel: {
-    marginTop: 4,
+  iconInner: {
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  cardDesc: {
-    lineHeight: 15,
+  pulseRow: {
+    marginBottom: 32,
+  },
+  pulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    opacity: 0.7,
+  },
+  headline: {
+    textAlign: 'center',
+    letterSpacing: 0.5,
+    marginBottom: 12,
+  },
+  description: {
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 40,
+  },
+  bottomAccent: {
+    width: 48,
+    height: 3,
+    borderRadius: 2,
+    opacity: 0.6,
   },
 });
 
