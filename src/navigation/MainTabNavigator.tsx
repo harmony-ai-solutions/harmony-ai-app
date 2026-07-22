@@ -55,27 +55,42 @@ export const MainTabNavigator: React.FC = () => {
       <Tab.Screen
         name="Discover"
         component={DiscoverScreen}
-        options={{ tabBarLabel: 'Discover' }}
+        options={{
+          tabBarLabel: 'Discover',
+          tabBarButtonTestID: 'tab-discover',
+        }}
       />
       <Tab.Screen
         name="Search"
         component={SearchScreen}
-        options={{ tabBarLabel: 'Search' }}
+        options={{
+          tabBarLabel: 'Search',
+          tabBarButtonTestID: 'tab-search',
+        }}
       />
       <Tab.Screen
         name="Chat"
         component={ChatListScreen}
-        options={{ tabBarLabel: 'Chat' }}
+        options={{
+          tabBarLabel: 'Chat',
+          tabBarButtonTestID: 'tab-chat',
+        }}
       />
       <Tab.Screen
         name="Characters"
         component={CharactersScreen}
-        options={{ tabBarLabel: 'Characters' }}
+        options={{
+          tabBarLabel: 'Characters',
+          tabBarButtonTestID: 'tab-characters',
+        }}
       />
       <Tab.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ tabBarLabel: 'Settings' }}
+        options={{
+          tabBarLabel: 'Settings',
+          tabBarButtonTestID: 'tab-settings',
+        }}
       />
     </Tab.Navigator>
   );

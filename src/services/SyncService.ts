@@ -55,12 +55,23 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     timeoutId: ReturnType<typeof setTimeout>;
   } | null = null;
 
+  // Configurable timeout for sync operations (default 30s). Exposed as setter for tests.
+  private _syncTimeoutMs: number = 30_000;
+
   // Buffer for incoming server data (applied atomically when SYNC_COMPLETE received)
   private incomingDataBuffer: Array<{
     table: string;
     operation: 'insert' | 'update' | 'delete';
     record: any;
   }> = [];
+
+  /**
+   * Override the sync operation timeout (used by sendSyncDataWithConfirmation).
+   * Default is 30_000ms. Set to a lower value (e.g., 500) in tests to avoid waiting.
+   */
+  setSyncTimeoutMs(ms: number): void {
+    this._syncTimeoutMs = ms;
+  }
 
   // Track IDs of records received from server this session to exclude from local changes
   private serverRecordIds: Set<string> = new Set();
@@ -755,13 +766,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       log.info(`Sending sync data for ${table}:${record[pkField] || 'undefined'}, eventId: ${eventId}`);
       this.connectionManager.sendEvent('sync', event).catch(reject);
 
-      // Set timeout
+      // Set timeout (configurable via setSyncTimeoutMs, default 30s)
       setTimeout(() => {
         if (this.pendingSyncConfirmation?.eventId === eventId) {
           this.pendingSyncConfirmation = null;
           reject(new Error(`Timeout waiting for confirmation of ${eventId}`));
         }
-      }, 30000); // 30 second timeout
+      }, this._syncTimeoutMs);
     });
   }
 

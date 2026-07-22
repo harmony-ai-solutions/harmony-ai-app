@@ -277,6 +277,23 @@ Before you begin, ensure you have the following installed:
 - **Three-finger tap** (some devices) also opens developer menu
 - **Enable "Stay Awake"** in Developer Options to prevent screen timeout during development
 
+## 🧪 Testing
+
+See [docs/TESTING.md](docs/TESTING.md) for the full testing strategy, architecture decisions, and walkthroughs.
+
+Quick reference:
+
+```bash
+npm test                                    # All unit + integration tests
+npx jest --selectProjects unit              # Unit tests only
+npx jest --selectProjects integration       # Integration tests only
+npx jest --selectProjects unit --testPathPatterns migrations  # Migration tests
+npx tsc --noEmit                            # Type check
+docker compose -f e2e/docker-compose.yml up # Android E2E (Docker + KVM)
+```
+
+See also [docs/future-work.md](docs/future-work.md) for known gaps and the improvement roadmap.
+
 ## 🏗️ Project Structure (Outdated)
 
 ```

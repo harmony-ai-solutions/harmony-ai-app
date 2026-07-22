@@ -21,6 +21,14 @@ export {runMigrations, getCurrentVersion} from './migrations';
 // Transaction helpers
 export {withTransaction, execInTransaction} from './transaction';
 
+// Database interface types
+export type {
+  Database,
+  DatabaseTransaction,
+  DatabaseResultSet,
+  DatabaseOpenOptions,
+} from './types';
+
 // Type definitions
 export * from './models';
 

@@ -1,6 +1,6 @@
 import { getDatabase } from './connection';
 import { createLogger } from '../utils/logger';
-import { Transaction } from 'react-native-sqlite-storage';
+import type { DatabaseTransaction } from './types';
 
 const log = createLogger('[DatabaseSync]');
 
@@ -385,7 +385,7 @@ export const applySyncRecord = async (
   table: string,
   operation: 'insert' | 'update' | 'delete',
   record: any,
-  tx: Transaction
+  tx: DatabaseTransaction
 ) => {
   const pkField = getPrimaryKeyField(table);
   const pkValue = record[pkField];

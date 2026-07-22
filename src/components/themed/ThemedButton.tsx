@@ -16,6 +16,11 @@ interface ThemedButtonProps {
     iconColor?: string;
     style?: ViewStyle;
     disabled?: boolean;
+    /** Optional testID forwarded to the underlying TouchableOpacity.
+     *  Used by Maestro E2E flows to tap buttons by stable ID. */
+    testID?: string;
+    /** Optional accessibilityLabel forwarded for screen readers + Maestro. */
+    accessibilityLabel?: string;
 }
 
 /**
@@ -37,6 +42,8 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
     iconColor,
     style,
     disabled = false,
+    testID,
+    accessibilityLabel,
 }) => {
     const { theme } = useAppTheme();
 
@@ -69,6 +76,9 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
                 onPress={onPress}
                 disabled={disabled}
                 activeOpacity={0.8}
+                testID={testID}
+                accessibilityLabel={accessibilityLabel ?? label}
+                accessibilityRole="button"
                 style={[
                     styles.container,
                     styles.glowShadow,
@@ -90,6 +100,9 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
                 onPress={onPress}
                 disabled={disabled}
                 activeOpacity={0.7}
+                testID={testID}
+                accessibilityLabel={accessibilityLabel ?? label}
+                accessibilityRole="button"
                 style={[styles.container, { borderRadius: BUTTON_RADIUS }, style]}
             >
                 <LinearGradient
@@ -121,6 +134,9 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
                 onPress={onPress}
                 disabled={disabled}
                 activeOpacity={0.7}
+                testID={testID}
+                accessibilityLabel={accessibilityLabel ?? label}
+                accessibilityRole="button"
                 style={[styles.container, { borderRadius: BUTTON_RADIUS }, style]}
             >
                 <LinearGradient
@@ -151,6 +167,9 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
             onPress={onPress}
             disabled={disabled}
             activeOpacity={0.7}
+            testID={testID}
+            accessibilityLabel={accessibilityLabel ?? label}
+            accessibilityRole="button"
             style={[
                 styles.container,
                 { backgroundColor: 'transparent', borderRadius: BUTTON_RADIUS },

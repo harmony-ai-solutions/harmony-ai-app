@@ -172,9 +172,9 @@ harmony-ai-app/
 
 **Testing:**
 - `__tests__/`: Root test files
-- `src/database/__tests__/`: Database tests (characters, entities, memories, modules, providers)
-- `run-db-tests.js`: Database test runner script
+- `src/database/__tests__/`: Database tests (characters, entities, memories, modules, providers, cross-repo)
 - `jest.setup.js`: Jest global setup
+- See `docs/TESTING.md` for the full testing strategy
 
 ## Naming Conventions
 

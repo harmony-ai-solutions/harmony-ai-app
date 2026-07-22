@@ -1,6 +1,11 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-05-24
+**Analysis Date:** 2026-05-24 **(STALE — see `docs/TESTING.md` for current strategy)**
+
+> This file was written before the test framework overhaul (Phases 1–8). It contains
+> references to the deleted `run-db-tests.js` runner, `run-all-tests.ts`, `test-utils.ts`,
+> and the old hand-rolled test framework. The `e2e/` directory now exists with Maestro
+> flows. See `docs/TESTING.md` for the authoritative testing strategy document.
 
 ## Test Framework
 
@@ -18,9 +23,8 @@ npm test                    # Run all Jest tests
 npm test -- --watch         # Watch mode
 ```
 
-**Additional Test Runners:**
-- `run-db-tests.js`: Standalone Node.js script for database integration tests (runs via `node run-db-tests.js`)
-- Database tests execute against a REAL SQLite database (not mocked)
+**Database Tests:**
+- Database tests execute against a REAL SQLite database (via `better-sqlite3` in Node, see `docs/TESTING.md`)
 
 **E2E (scaffolded but not active):**
 - Appium MCP-based E2E test scaffolding was added (commit `23e8eb4`) with basic connection test

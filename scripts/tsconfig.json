@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "forceConsistentCasingInFileNames": false
+  },
+  "include": ["./**/*.ts", "../src/database/__test_utils__/**/*.ts", "../src/database/migrations.ts", "../src/database/migrations/**/*.ts"],
+  "exclude": ["../node_modules"]
+}

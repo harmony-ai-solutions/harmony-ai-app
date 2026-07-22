@@ -29,6 +29,15 @@ This project is indexed by GitNexus as **harmony-ai-app** (2795 symbols, 5599 re
 - NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
 - NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
 
+## Testing
+
+This project has a comprehensive test framework. See [`docs/TESTING.md`](docs/TESTING.md) for the full strategy, run commands, and architecture decisions.
+
+Quick start:
+- `npm test` — Run all unit + integration tests
+- `npx jest --selectProjects unit --testPathPatterns migrations` — Migration tests only
+- See [`docs/future-work.md`](docs/future-work.md) for known gaps
+
 ## Resources
 
 | Resource | Use for |

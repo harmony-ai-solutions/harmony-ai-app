@@ -375,6 +375,8 @@ export const CharacterProfileEditScreen: React.FC = () => {
                   placeholder={t('namePlaceholder')}
                   placeholderTextColor={theme.colors.text.muted}
                   returnKeyType="next"
+                  testID="character-name-input"
+                  accessibilityLabel="Character name"
                 />,
                 true,
               )}

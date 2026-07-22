@@ -18,6 +18,27 @@ declare module 'react-native-config' {
     IS_BETA?: string | boolean;
     GOOGLE_WEB_CLIENT_ID?: string;
     APPLE_SERVICES_ID?: string;
+    /**
+     * Optional WSS URL for E2E testing (build-time env var).
+     *
+     * When set via .env.e2e (see e2e/.env.e2e), ConnectionStateManager
+     * pre-seeds AsyncStorage so the app boots already paired against the
+     * harmony-link Docker container. Unset in production builds.
+     *
+     * Example: HARMONY_LINK_WSS_URL=wss://10.0.2.2:28443
+     * (10.0.2.2 is the Android emulator's alias for the host loopback.)
+     */
+    HARMONY_LINK_WSS_URL?: string;
+    /**
+     * Optional plain-WS URL for E2E testing (build-time env var).
+     *
+     * The harmony-link handshake protocol runs over plain WS first
+     * (different port from WSS), then upgrades. This URL points at the
+     * plain-WS port. Required when HARMONY_LINK_WSS_URL is set.
+     *
+     * Example: HARMONY_LINK_WS_URL=ws://10.0.2.2:28080
+     */
+    HARMONY_LINK_WS_URL?: string;
   }
 
   const Config: NativeConfig;
