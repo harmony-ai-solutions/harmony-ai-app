@@ -121,7 +121,6 @@ export const SearchScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: {
-    paddingHorizontal: 20,
     flexGrow: 1,
   },
   searchBar: {
