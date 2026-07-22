@@ -137,8 +137,23 @@ android {
         release {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.release
-            minifyEnabled enableProguardInReleaseBuilds
+            //
+            // Two paths through this buildType:
+            //  - Production/beta (prodRelease, devRelease without the flag): real
+            //    release keystore + ProGuard minification, exactly as before.
+            //  - E2E (devRelease with -PE2E_DEBUG_SIGNING=true): debug signing
+            //    (no release keystore / secrets needed) + ProGuard disabled.
+            //    "devRelease" is NOT in `debuggableVariants`, so the React Native
+            //    Gradle Plugin bundles JS into the APK — which is required for the
+            //    Docker E2E stack (no Metro dev server runs there). See
+            //    e2e/build-apk.sh.
+            if (project.hasProperty('E2E_DEBUG_SIGNING')) {
+                signingConfig signingConfigs.debug
+                minifyEnabled false
+            } else {
+                signingConfig signingConfigs.release
+                minifyEnabled enableProguardInReleaseBuilds
+            }
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }

@@ -2,9 +2,17 @@
 # Maestro configuration for the HarmonyAIChat E2E suite.
 # See https://maestro.mobile.dev/cli/configuration
 #
-# Output directory and format are shared by all flows.
-# Tags can be used to run subsets: maestro test --include-tags smoke
+# NOTE: `output` and `format` are CLI-only flags, NOT valid config.yaml keys.
+# Maestro silently ignores them here (see Maestro issue #1432:
+# https://github.com/mobile-dev-inc/Maestro/issues/1432). The maestro-runner
+# command in docker-compose.yml sets both explicitly:
+#   maestro test /app/.maestro --format junit --output /app/reports/junit-report.xml
+#
+# Tags (when flows are redesigned and ready) enable selective runs:
+#   maestro test --include-tags smoke /app/.maestro
 
-output: reports/
-format: junit
 # tags: [smoke, sync, conflict]
+
+# Maestro requires a non-null YAML document (a comments-only file parses as
+# null and throws "Failed to parse file"). An empty env map is inert.
+env: {}

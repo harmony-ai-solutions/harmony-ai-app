@@ -59,8 +59,17 @@ services:
       HL_DATABASE_ENCRYPTION: "false"
       HL_INFERENCE_TOKEN: "e2e-test-token"
       # HL_ADMIN_API_KEY: "e2e-admin"  # uncomment if admin API is exercised
-    volumes:
-      - harmony-link-data:/data
+    # /data must be writable by uid 1000 (the image's non-root user, see
+    # Dockerfile.build: `User=1000:0`). A named volume is created root-owned
+    # (mode 0755), so the uid-1000 process cannot create the SQLite DB file
+    # there → "unable to open database file: no such file or directory".
+    # tmpfs owned by uid 1000 fixes the write permission AND yields a fresh
+    # DB each run, which is desirable for deterministic E2E. If persistence
+    # is ever needed (e.g. seeded fixtures), either chown a named volume in
+    # an init step or rebuild the image with
+    # `RUN mkdir -p /data && chown 1000:0 /data`.
+    tmpfs:
+      - /data:uid=1000,gid=0,mode=0770
     healthcheck:
       # Plain HTTP — avoids TLS hostname mismatch on self-signed cert.
       # The HTTP server only starts after DB migrations complete, so this
@@ -86,6 +95,30 @@ services:
     privileged: true       # required for emulator device access
     devices:
       - /dev/kvm:/dev/kvm  # KVM acceleration — must exist on host
+    # ── Port-forward bridge: emulator (10.0.2.2) → harmony-link container ──
+    # The Android emulator is a QEMU VM. From inside it, the special address
+    # 10.0.2.2 maps to the QEMU host = THIS container's loopback — NOT to the
+    # Docker host and NOT to sibling containers. So the app's hardcoded
+    # wss://10.0.2.2:28443 / ws://10.0.2.2:28080 can never reach the
+    # harmony-link container (which lives on the harmony-e2e bridge at its own
+    # IP, e.g. 172.23.0.2) without help.
+    #
+    # socat listens on this container's loopback (where 10.0.2.2 lands) and
+    # forwards raw TCP to harmony-link by Docker DNS. TLS passes through
+    # transparently (bytes are untouched), so WSS works unchanged. socat ships
+    # in the budtmo image; `exec` then hands off to the original startup script
+    # (entrypoint is `sh -c`, so `command` is the script body — `$$APP_PATH`
+    # escapes the `$` from Compose so the shell expands it).
+    # NOTE: Compose splits a *string* `command` on whitespace into an array,
+    # which would make `sh -c` see only `socat` (→ "0 addresses"). So we use an
+    # explicit single-element flow sequence + reset entrypoint, guaranteeing
+    # Docker runs `sh -c "<whole snippet>"`. `$$APP_PATH` escapes the `$` from
+    # Compose so the shell expands APP_PATH at runtime.
+    entrypoint: []
+    command:
+      - sh
+      - -c
+      - socat TCP-LISTEN:28080,fork,reuseaddr TCP:harmony-link:28080 & socat TCP-LISTEN:28443,fork,reuseaddr TCP:harmony-link:28443 & exec $$APP_PATH/mixins/scripts/run.sh
     environment:
       EMULATOR_DEVICE: "Samsung Galaxy S10"
       WEB_VNC: "true"       # set "false" in CI to reduce overhead
@@ -142,12 +175,19 @@ services:
       - ADB_TARGET=android-emulator:5555  # override for host-emulator fallback
     volumes:
       # The APK must be built separately before running the stack:
-      #   cd android && ./gradlew assembleDevDebug
-      #   cp app/build/outputs/apk/dev/debug/app-dev-debug.apk e2e/app-debug.apk
+      #   ./e2e/build-apk.sh             (Linux/macOS/git-bash)   or
+      #   powershell ./e2e/build-apk.ps1  (Windows PowerShell)
+      # Produces e2e/app-debug.apk — a devRelease variant with the JS bundle
+      # baked in (devDebug skips bundling; see FIX #3 in the test-overhaul notes).
       - ./app-debug.apk:/app/app.apk:ro
       - ./.maestro:/app/.maestro:ro
       # - ./certs:/certs:ro              # uncomment if pushing CA cert
-      - ./reports:/app/reports           # JUnit XML test reports
+      - ./reports:/app/reports           # JUnit XML + screenshots (maestro-tests-N/)
+    # --output must be a FILE path (e.g. junit-report.xml), NOT a directory.
+    # Maestro's saveReport() opens a FileOutputStream on it; passing a
+    # directory throws FileNotFoundException. The parent dir (/app/reports,
+    # mounted to ./reports) still receives the maestro-tests-N/ screenshot
+    # subdirectories automatically.
     command: >
       sh -c "
         ADB_TARGET=\"$${ADB_TARGET:-android-emulator:5555}\" &&
@@ -157,7 +197,7 @@ services:
         echo 'Installing APK...' &&
         adb install -r /app/app.apk &&
         echo 'Running Maestro flows...' &&
-        maestro test /app/.maestro --format junit --output /app/reports
+        maestro test /app/.maestro --format junit --output /app/reports/junit-report.xml
       "
     networks:
       - harmony-e2e
@@ -167,5 +207,4 @@ networks:
     driver: bridge
 
 volumes:
-  harmony-link-data:
   emulator-data:

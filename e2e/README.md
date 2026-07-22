@@ -60,9 +60,11 @@ ls e2e/reports/
 |---------|-------------|
 | `docker compose -f e2e/docker-compose.yml up --abort-on-container-exit` | Start everything; exits when Maestro finishes |
 | `docker compose -f e2e/docker-compose.yml up -d harmony-link android-emulator` | Start backend + emulator in background |
-| `docker compose -f e2e/docker-compose.yml up maestro-runner` | Run just the Maestro tests (stack must already be up) |
-| `docker compose -f e2e/docker-compose.yml run --rm maestro-runner maestro test /app/.maestro --include-tags smoke` | Run only smoke-tagged flows |
-| `docker compose -f e2e/docker-compose.yml run --rm maestro-runner maestro studio` | Open Maestro Studio for interactive flow authoring |
+| `docker compose -f e2e/docker-compose.yml up maestro-runner` | Re-run the full test suite (uses the service's built-in `command:` — stack must already be running) |
+| `docker compose -f e2e/docker-compose.yml run --rm maestro-runner maestro test /app/.maestro --include-tags smoke` | Run only smoke-tagged flows (uses `run` to override the service command) |
+| `docker compose -f e2e/docker-compose.yml run --rm maestro-runner maestro studio` | Open Maestro Studio for interactive flow authoring (uses `run` to override the service command) |
+
+> **`up` vs `run`:** Use `docker compose up maestro-runner` for the standard re-run — it attaches to the existing deployment and honours `depends_on` conditions (waits for harmony-link and android-emulator to be healthy). Use `docker compose run --rm` only when you need to **override** the service's default command (e.g. different Maestro flags, interactive studio).
 
 ## CI Schedule
 

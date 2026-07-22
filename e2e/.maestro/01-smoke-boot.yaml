@@ -1,13 +1,18 @@
 # e2e/.maestro/01-smoke-boot.yaml
-# Smoke test: app boots, renders the main Chat screen, and the connection
-# state is reflected in the UI.
+# Smoke test: the E2E devRelease APK boots and renders the Chat screen.
 #
-# This flow verifies the MINIMUM viable app boot — no pairing required.
-# On cold launch with no stored credentials, ChatListScreen renders with
-# the "Not connected" placeholder until the user pairs.
+# This is the MINIMUM viable E2E assertion: the JS bundle (baked by the
+# devRelease build) loads, ~32 SQLite migrations run, and the main Chat
+# tab renders its title. That proves the whole boot path end-to-end.
 #
-# Selectors are based on actual i18n strings (verified against
-# src/i18n/locales/en/chatList.json) and testIDs added in Phase B-1.
+# Connection to harmony-link is NOT asserted here, for two reasons:
+#  1. The app is mid-redesign — the current start screen shows connection
+#     success only as a transient toast, with no stable assertable element.
+#  2. Connection is validated more reliably on the BACKEND: the CI job
+#     greps harmony-link's logs for "Emitting handshake accept" after this
+#     flow, which proves app → socat bridge → harmony-link → HANDSHAKE_ACCEPT.
+# (When the redesign lands a stable connection indicator on the start
+#  screen, move that assertion into 02-happy-path-pull.yaml.)
 
 appId: ai.soulbits.chat.dev
 
@@ -23,17 +28,15 @@ appId: ai.soulbits.chat.dev
       text: "Chats"
     timeout: 60000
 
-# Verify the not-paired state is reflected.
-# SyncConnectionContext.initialize() resolves isPaired=false on cold launch,
-# which causes ChatListScreen to render the "Not connected" placeholder.
-- assertVisible:
-    label: "Not-paired placeholder is shown"
-    text: "Not connected"
+# NOTE: the E2E app also attempts the WS handshake in the background here
+# (pre-paired via applyE2EOverride + the socat bridge). We don't assert on
+# it from the UI (see header comment); CI verifies it via harmony-link logs.
+# A short settle lets the handshake + toast land before the screenshot.
+- extendedWaitUntil:
+    label: "App is interactive (settled post-boot)"
+    visible:
+      text: "Chats"
+    timeout: 10000
 
-# The "Connect Now" button should be tappable.
-- assertVisible:
-    label: "Connect Now CTA is visible"
-    text: "Connect Now"
-
-# Take a screenshot for test reports
+# Take a screenshot for test reports.
 - takeScreenshot: smoke-boot-complete
