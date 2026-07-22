@@ -136,6 +136,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     marginTop: 4,
+    marginBottom: 12,
   },
   leftSlot: {
     marginRight: 10,
