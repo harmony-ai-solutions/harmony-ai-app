@@ -92,24 +92,17 @@ export const SearchScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Placeholder results */}
+        {/* No results */}
         {query.length > 0 && (
-          <View style={styles.results}>
-            {[1, 2, 3].map(i => (
-              <ThemedView key={i} variant="surface" style={styles.resultCard}>
-                <View style={[styles.resultIcon, { backgroundColor: hexToRgba(accent, 0.12) }]}>
-                  <MaterialCommunityIcons name="account-circle" size={24} color={accent} />
-                </View>
-                <View style={styles.resultText}>
-                  <ThemedText variant="primary" size={14} weight="medium">
-                    Result {i} — "{query}"
-                  </ThemedText>
-                  <ThemedText variant="muted" size={11}>
-                    Search results available in a future update
-                  </ThemedText>
-                </View>
-              </ThemedView>
-            ))}
+          <View style={styles.emptyState}>
+            <MaterialCommunityIcons
+              name="text-search"
+              size={48}
+              color={theme.colors.text.disabled}
+            />
+            <ThemedText variant="disabled" size={14} style={styles.emptyText}>
+              No results found for "{query}"
+            </ThemedText>
           </View>
         )}
 
