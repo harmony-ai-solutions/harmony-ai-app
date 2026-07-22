@@ -167,13 +167,6 @@ export const SettingsScreen: React.FC = () => {
           <ThemedCard elevated accentStripe style={styles.card}>
             <SectionHeader title={t('development')} style={styles.sectionHeader} />
             <SettingsLinkRow
-              icon="test-tube"
-              label={t('databaseTests')}
-              badge="DEV"
-              onPress={() => navigation.navigate('DatabaseTests')}
-              theme={theme}
-            />
-            <SettingsLinkRow
               icon="database-eye"
               label={t('databaseTableViewer')}
               badge="DEV"

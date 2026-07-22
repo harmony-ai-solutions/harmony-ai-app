@@ -24,7 +24,6 @@
   },
   "development": {
     "title": "Development",
-    "databaseTests": "Database Tests",
     "databaseTableViewer": "Database Table Viewer"
   }
 }

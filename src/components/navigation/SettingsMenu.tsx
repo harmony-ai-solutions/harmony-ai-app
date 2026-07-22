@@ -74,7 +74,6 @@ const getMenuSections = (t: ReturnType<typeof useTranslation<'navigation'>>['t']
     ? [{
         title: t('development.title'),
         items: [
-          { icon: 'test-tube', label: t('development.databaseTests'), screen: 'DatabaseTests', badge: 'DEV' },
           { icon: 'database-eye', label: t('development.databaseTableViewer'), screen: 'DatabaseTableViewer', badge: 'DEV' },
         ],
       }]
