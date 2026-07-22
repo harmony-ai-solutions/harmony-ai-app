@@ -531,18 +531,34 @@ export const ChatListScreen: React.FC = () => {
     <ThemedView style={styles.container}>
       <ScreenHeader
         title={t('title')}
+        titleRight={
+          <TouchableOpacity
+            onPress={() => setInfoModalVisible(true)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={[
+              styles.infoGlassIcon,
+              { backgroundColor: hexToRgba(theme?.colors.background.base ?? '#0f172a', 0.75) },
+            ]}
+            activeOpacity={0.7}
+          >
+            <LinearGradient
+              colors={[
+                (theme?.colors.accent.primary ?? '#ec4899') + '18',
+                'transparent',
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+            <Icon
+              name="information-outline"
+              size={18}
+              color={theme?.colors.text.muted}
+            />
+          </TouchableOpacity>
+        }
         right={
-          <View style={styles.headerRightRow}>
-            <TouchableOpacity
-              onPress={() => setInfoModalVisible(true)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Icon
-                name="information-outline"
-                size={20}
-                color={theme?.colors.text.muted}
-              />
-            </TouchableOpacity>
             <TouchableOpacity
               style={styles.impersonationHeaderAction}
               onPress={() => setSelectorModalVisible(true)}
@@ -616,7 +632,6 @@ export const ChatListScreen: React.FC = () => {
                 />
               </View>
             </TouchableOpacity>
-          </View>
         }
       />
 
@@ -773,6 +788,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  infoGlassIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
   impersonationHeaderAction: {
     // no-op — pill handles its own layout

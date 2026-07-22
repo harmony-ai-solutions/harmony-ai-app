@@ -15,6 +15,8 @@ interface ScreenHeaderProps {
   onBack?: () => void;
   /** Optional element(s) rendered left of the title (e.g. avatar) */
   left?: React.ReactNode;
+  /** Optional element(s) rendered inline immediately after the title text */
+  titleRight?: React.ReactNode;
   /** Optional element(s) rendered to the right of the title row */
   right?: React.ReactNode;
   /** Optional element(s) rendered between the subtitle and content (e.g. search bar) */
@@ -41,6 +43,7 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
   subtitle,
   onBack,
   left,
+  titleRight,
   right,
   children,
   style,
@@ -77,15 +80,19 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
 
           {left && <View style={styles.leftSlot}>{left}</View>}
 
-          <ThemedText
-            variant="primary"
-            size={24}
-            weight="bold"
-            hierarchy="header"
-            style={styles.title}
-          >
-            {title}
-          </ThemedText>
+          <View style={styles.titleGroup}>
+            <ThemedText
+              variant="primary"
+              size={24}
+              weight="bold"
+              hierarchy="header"
+            >
+              {title}
+            </ThemedText>
+            {titleRight && <View style={styles.titleRightSlot}>{titleRight}</View>}
+          </View>
+
+          <View style={styles.spacer} />
 
           {right && <View style={styles.rightSlot}>{right}</View>}
         </View>
@@ -131,8 +138,17 @@ const styles = StyleSheet.create({
     marginRight: 12,
     paddingVertical: 2,
   },
-  title: {
+  titleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+  },
+  spacer: {
     flex: 1,
+  },
+  titleRightSlot: {
+    flexShrink: 0,
   },
   subtitle: {
     marginTop: 4,
