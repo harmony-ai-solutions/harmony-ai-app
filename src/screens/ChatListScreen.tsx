@@ -24,9 +24,8 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
-import { ThemedFab } from '../components/themed/ThemedFab';
 import { SettingsMenu } from '../components/navigation/SettingsMenu';
-import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
+import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { getAllEntities } from '../database/repositories/entities';
 import {
   getRecentPhoneInteractions,
@@ -457,7 +456,7 @@ export const ChatListScreen: React.FC = () => {
         ]}
         start={{ x: 0, y: 0 }}
         end={{ x: 0.6, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
 
@@ -647,7 +646,6 @@ export const ChatListScreen: React.FC = () => {
         />
       )}
 
-      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }} />
 
       <SettingsMenu
         visible={menuVisible}
@@ -787,10 +785,5 @@ const styles = StyleSheet.create({
   timeText: {
     alignSelf: 'center',
     marginRight: 8,
-  },
-  fab: {
-    position: 'absolute',
-    bottom: 24,
-    right: 24,
   },
 });
