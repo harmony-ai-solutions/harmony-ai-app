@@ -3,13 +3,12 @@ import {
   StyleSheet,
   View,
   FlatList,
-  TouchableOpacity,
   TextInput,
   Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -21,6 +20,7 @@ import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedFab } from '../components/themed/ThemedFab';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
+import { hexToRgba } from '../utils/colorUtils';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[CharactersScreen]');
@@ -141,41 +141,45 @@ export const CharactersScreen: React.FC = () => {
 
   if (!theme) return null;
 
+  const accent = theme.colors.accent.primary;
+  const baseHex = theme.colors.background.base;
+  const inputBg = hexToRgba(baseHex, 0.55);
+
   return (
     <ThemedView style={styles.container}>
-      {/* Header */}
-      <ScreenHeader title={t('title')} />
-
-      {/* Search bar */}
-      <View
-        style={[
-          styles.searchContainer,
-          { backgroundColor: theme.colors.background.surface },
-        ]}
-      >
-        <Icon
-          name="magnify"
-          size={20}
-          color={theme.colors.text.muted}
-          style={styles.searchIcon}
-        />
-        <TextInput
-          style={[styles.searchInput, { color: theme.colors.text.primary }]}
-          placeholder={t('searchPlaceholder')}
-          placeholderTextColor={theme.colors.text.muted}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <Icon
+      {/* Header + search bar (child, like SearchScreen) */}
+      <ScreenHeader title={t('title')}>
+        <View
+          style={[
+            styles.searchContainer,
+            { backgroundColor: inputBg, borderColor: hexToRgba(accent, 0.25) },
+          ]}
+        >
+          <MaterialCommunityIcons
+            name="magnify"
+            size={20}
+            color={theme.colors.text.muted}
+            style={styles.searchIcon}
+          />
+          <TextInput
+            style={[styles.searchInput, { color: theme.colors.text.primary }]}
+            placeholder={t('searchPlaceholder')}
+            placeholderTextColor={theme.colors.text.disabled}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && (
+            <MaterialCommunityIcons
               name="close-circle"
               size={18}
               color={theme.colors.text.muted}
+              onPress={() => setSearchQuery('')}
+              style={styles.clearIcon}
             />
-          </TouchableOpacity>
-        )}
-      </View>
+          )}
+        </View>
+      </ScreenHeader>
 
       {/* Content */}
       {isLoading ? (
@@ -184,7 +188,7 @@ export const CharactersScreen: React.FC = () => {
         </View>
       ) : filteredProfiles.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Icon
+          <MaterialCommunityIcons
             name="account-outline"
             size={72}
             color={theme.colors.text.muted}
@@ -239,14 +243,16 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    margin: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    gap: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    height: 48,
+    marginTop: 12,
+    marginBottom: 24,
   },
-  searchIcon: { marginRight: 4 },
-  searchInput: { flex: 1, fontSize: 15 },
+  searchIcon: { marginRight: 8 },
+  searchInput: { flex: 1, fontSize: 15, paddingVertical: 0 },
+  clearIcon: { marginLeft: 6 },
   listContent: { padding: 12, paddingBottom: 80 },
   columnWrapper: { gap: 12, marginBottom: 12 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },

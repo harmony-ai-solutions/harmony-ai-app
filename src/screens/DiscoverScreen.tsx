@@ -27,7 +27,7 @@ export const DiscoverScreen: React.FC = () => {
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: safeTop + 16, paddingBottom: TAB_BAR_CONTENT_PAD },
+          { paddingTop: safeTop + 12, paddingBottom: TAB_BAR_CONTENT_PAD },
         ]}
         showsVerticalScrollIndicator={false}
       >
