@@ -3,11 +3,9 @@ import {
     View,
     Text,
     ScrollView,
-    TouchableOpacity,
     StyleSheet,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Switch } from 'react-native-paper';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { isErrorWithCode, errorCodes } from '@react-native-documents/picker';
@@ -18,7 +16,9 @@ import { useEmoji } from '../../contexts/EmojiContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedView } from '../../components/themed/ThemedView';
+import { ThemedCard } from '../../components/themed/ThemedCard';
 import { ThemedButton } from '../../components/themed/ThemedButton';
+import { SectionHeader } from '../../components/themed/SectionHeader';
 import { ThemeCard } from '../../components/settings/ThemeCard';
 import { EmojiStyleCard } from '../../components/settings/EmojiStyleCard';
 import { Theme } from '../../theme/types';
@@ -179,65 +179,49 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
             />
             <ScrollView>
                 {/* Dynamic Background Effects Toggle */}
-                <View
-                    style={[
-                        styles.section,
-                        { backgroundColor: theme.colors.background.surface },
-                    ]}
-                >
-                    <View style={styles.sectionHeader}>
-                        <Icon name="waves" size={20} color={theme.colors.accent.primary} />
-                        <Text style={[styles.sectionTitle, { color: theme.colors.text.primary }]}>
-                            Background Effects
-                        </Text>
-                    </View>
+                <View style={styles.sectionWrapper}>
+                    <ThemedCard elevated accentStripe>
+                        <SectionHeader title="Background Effects" />
 
-                    <View style={styles.switchRow}>
-                        <View style={styles.switchLabel}>
-                            <Text style={[styles.switchText, { color: theme.colors.text.primary }]}>
-                                Dynamic Background Effects
-                            </Text>
-                            <Text style={[styles.switchDescription, { color: theme.colors.text.secondary }]}>
-                                Enable fluid motion and particle effects. Disable if you experience lag or wish to save battery.
-                            </Text>
+                        <View style={styles.switchRow}>
+                            <View style={styles.switchLabel}>
+                                <Text style={[styles.switchText, { color: theme.colors.text.primary }]}>
+                                    Dynamic Background Effects
+                                </Text>
+                                <Text style={[styles.switchDescription, { color: theme.colors.text.secondary }]}>
+                                    Enable fluid motion and particle effects. Disable if you experience lag or wish to save battery.
+                                </Text>
+                            </View>
+                            <Switch
+                                value={dynamicBackgroundEnabled}
+                                onValueChange={handleDynamicBackgroundToggle}
+                                color={theme.colors.accent.primary}
+                            />
                         </View>
-                        <Switch
-                            value={dynamicBackgroundEnabled}
-                            onValueChange={handleDynamicBackgroundToggle}
-                            color={theme.colors.accent.primary}
-                        />
-                    </View>
+                    </ThemedCard>
                 </View>
 
                 {/* System Theme Toggle */}
-                <View
-                    style={[
-                        styles.section,
-                        { backgroundColor: theme.colors.background.surface },
-                    ]}
-                >
-                    <View style={styles.sectionHeader}>
-                        <Icon name="theme-light-dark" size={20} color={theme.colors.accent.primary} />
-                        <Text style={[styles.sectionTitle, { color: theme.colors.text.primary }]}>
-                            Theme Mode
-                        </Text>
-                    </View>
+                <View style={styles.sectionWrapper}>
+                    <ThemedCard elevated accentStripe>
+                        <SectionHeader title="Theme Mode" />
 
-                    <View style={styles.switchRow}>
-                        <View style={styles.switchLabel}>
-                            <Text style={[styles.switchText, { color: theme.colors.text.primary }]}>
-                                Follow System Theme
-                            </Text>
-                            <Text style={[styles.switchDescription, { color: theme.colors.text.secondary }]}>
-                                Automatically switch theme based on system settings
-                            </Text>
+                        <View style={styles.switchRow}>
+                            <View style={styles.switchLabel}>
+                                <Text style={[styles.switchText, { color: theme.colors.text.primary }]}>
+                                    Follow System Theme
+                                </Text>
+                                <Text style={[styles.switchDescription, { color: theme.colors.text.secondary }]}>
+                                    Automatically switch theme based on system settings
+                                </Text>
+                            </View>
+                            <Switch
+                                value={systemThemeEnabled}
+                                onValueChange={handleSystemThemeToggle}
+                                color={theme.colors.accent.primary}
+                            />
                         </View>
-                        <Switch
-                            value={systemThemeEnabled}
-                            onValueChange={handleSystemThemeToggle}
-                            color={theme.colors.accent.primary}
-                        />
-                    </View>
+                    </ThemedCard>
                 </View>
 
                 {/* Current Theme Preview */}
@@ -293,66 +277,65 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 </View>
 
                 {/* Actions */}
-                <View style={styles.actionsSection}>
-                    <ThemedButton
-                        label="Create Custom Theme"
-                        icon="plus-circle"
-                        iconSize={20}
-                        onPress={handleCreateCustom}
-                    />
+                <View style={styles.sectionWrapper}>
+                    <ThemedCard elevated accentStripe>
+                        <SectionHeader title="Actions" />
 
-                    <TouchableOpacity
-                        style={[
-                            styles.actionButton,
-                            { backgroundColor: theme.colors.background.elevated },
-                        ]}
-                        onPress={handleImportTheme}
-                    >
-                        <Icon name="import" size={20} color={theme.colors.text.primary} />
-                        <Text style={[styles.actionButtonText, { color: theme.colors.text.primary }]}>
-                            Import Theme
-                        </Text>
-                    </TouchableOpacity>
+                        <View style={styles.actionsContainer}>
+                            <ThemedButton
+                                label="Create Custom Theme"
+                                icon="plus-circle"
+                                iconSize={20}
+                                onPress={handleCreateCustom}
+                            />
 
-                    {syncStatus.syncEnabled && (
-                        <TouchableOpacity
-                            style={[
-                                styles.actionButton,
-                                { backgroundColor: theme.colors.background.elevated },
-                            ]}
-                            onPress={handleSyncThemes}
-                        >
-                            <Icon name="cloud-sync" size={20} color={theme.colors.accent.primary} />
-                            <Text style={[styles.actionButtonText, { color: theme.colors.text.primary }]}>
-                                Sync with Harmony Link
-                            </Text>
-                            {syncStatus.pendingChanges && (
-                                <View style={[styles.badge, { backgroundColor: theme.colors.status.warning }]} />
+                            <ThemedButton
+                                label="Import Theme"
+                                icon="import"
+                                variant="outline"
+                                onPress={handleImportTheme}
+                            />
+
+                            {syncStatus.syncEnabled && (
+                                <ThemedButton
+                                    label="Sync with Harmony Link"
+                                    icon="cloud-sync"
+                                    variant="outline"
+                                    onPress={handleSyncThemes}
+                                    testID="sync-themes-button"
+                                />
                             )}
-                        </TouchableOpacity>
-                    )}
+                        </View>
+                    </ThemedCard>
                 </View>
 
                 {/* Emoji Style Section */}
-                <View style={styles.emojiSection}>
-                    <Text style={[styles.label, { color: theme.colors.text.muted }]}>
-                        EMOJI STYLE
-                    </Text>
-                    <Text style={[styles.sectionDescription, { color: theme.colors.text.secondary }]}>
-                        Choose how emojis look in chat messages
-                    </Text>
-                    {EMOJI_STYLES.map((style) => (
-                        <EmojiStyleCard
-                            key={style.set}
-                            emojiSet={style.set}
-                            label={style.label}
-                            description={style.description}
-                            sampleEmojis={style.sampleEmojis}
-                            isActive={emojiSet === style.set}
-                            onPress={() => setEmojiSet(style.set)}
-                            theme={theme}
-                        />
-                    ))}
+                <View style={styles.sectionWrapper}>
+                    <ThemedCard elevated accentStripe>
+                        <SectionHeader title="Emoji Style" />
+                        <Text
+                            style={[
+                                styles.sectionDescription,
+                                { color: theme.colors.text.secondary },
+                            ]}
+                        >
+                            Choose how emojis look in chat messages
+                        </Text>
+                        <View style={styles.emojiCardsContainer}>
+                            {EMOJI_STYLES.map((style) => (
+                                <EmojiStyleCard
+                                    key={style.set}
+                                    emojiSet={style.set}
+                                    label={style.label}
+                                    description={style.description}
+                                    sampleEmojis={style.sampleEmojis}
+                                    isActive={emojiSet === style.set}
+                                    onPress={() => setEmojiSet(style.set)}
+                                    theme={theme}
+                                />
+                            ))}
+                        </View>
+                    </ThemedCard>
                 </View>
             </ScrollView>
         </ThemedView>
@@ -366,22 +349,13 @@ const styles = StyleSheet.create({
     header: {
         elevation: 4,
     },
-    section: {
-        margin: 16,
-        padding: 16,
-        borderRadius: 12,
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
+    sectionWrapper: {
+        paddingHorizontal: 16,
         marginBottom: 16,
     },
-    sectionTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        marginLeft: 8,
-    },
     switchRow: {
+        paddingHorizontal: 16,
+        paddingBottom: 16,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -418,36 +392,18 @@ const styles = StyleSheet.create({
     themesGrid: {
         gap: 12,
     },
-    actionsSection: {
-        padding: 16,
+    actionsContainer: {
+        paddingHorizontal: 16,
+        paddingBottom: 16,
         gap: 12,
     },
-    actionButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
-        borderRadius: 12,
-        gap: 8,
-    },
-    actionButtonText: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#ffffff',
-    },
-    badge: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        marginLeft: 8,
-    },
-    emojiSection: {
+    emojiCardsContainer: {
         paddingHorizontal: 16,
-        paddingBottom: 24,
+        paddingBottom: 16,
     },
     sectionDescription: {
         fontSize: 14,
         marginBottom: 16,
-        marginTop: -8,
+        paddingHorizontal: 16,
     },
 });

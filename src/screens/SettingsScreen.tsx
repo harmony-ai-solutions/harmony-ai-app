@@ -15,6 +15,7 @@ import { ThemedCard } from '../components/themed/ThemedCard';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
+import { hexToRgba } from '../utils/colorUtils';
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
 // Using 'any' here avoids CompositeNavigationProp boilerplate while
@@ -91,27 +92,27 @@ export const SettingsScreen: React.FC = () => {
           <ThemedCard elevated accentStripe style={styles.card}>
             <SectionHeader title={t('connection')} style={styles.sectionHeader} />
 
-            <View style={styles.row}>
-              <ThemedText variant="secondary">{t('type')}</ThemedText>
-              <ThemedText weight="bold">{connectionType}</ThemedText>
-            </View>
+            <SettingsDetailRow
+              icon="lan-connect"
+              label={t('type')}
+              value={connectionType}
+              theme={theme}
+            />
+            <SettingsDetailRow
+              icon="pulse"
+              label={t('status')}
+              theme={theme}
+              valueComponent={
+                <View style={styles.statusRow}>
+                  <View style={[styles.statusDot, { backgroundColor: connectionStatusColor }]} />
+                  <ThemedText weight="medium" size={14}>{connectionStatusText}</ThemedText>
+                </View>
+              }
+            />
 
-            <View style={styles.row}>
-              <ThemedText variant="secondary">{t('status')}</ThemedText>
-              <View style={styles.statusRow}>
-                <View
-                  style={[
-                    styles.statusDot,
-                    { backgroundColor: connectionStatusColor },
-                  ]}
-                />
-                <ThemedText weight="bold">{connectionStatusText}</ThemedText>
-              </View>
-            </View>
-
-            <View style={[styles.row, styles.tapHintRow]}>
+            <View style={styles.tapHintRow}>
+              <Icon name="chevron-right" size={16} color={theme.colors.text.muted} />
               <ThemedText variant="muted" size={11}>{t('configureConnection')}</ThemedText>
-              <Icon name="chevron-right" size={18} color={theme.colors.text.muted} />
             </View>
           </ThemedCard>
         </TouchableOpacity>
@@ -126,19 +127,22 @@ export const SettingsScreen: React.FC = () => {
           <ThemedCard elevated accentStripe style={styles.card}>
             <SectionHeader title={t('sync')} style={styles.sectionHeader} />
 
-            <View style={styles.row}>
-              <ThemedText variant="secondary">{t('lastSync')}</ThemedText>
-              <ThemedText weight="bold">{lastSyncTime}</ThemedText>
-            </View>
+            <SettingsDetailRow
+              icon="clock-outline"
+              label={t('lastSync')}
+              value={lastSyncTime}
+              theme={theme}
+            />
+            <SettingsDetailRow
+              icon="cloud-check-outline"
+              label={t('status')}
+              value={syncStatusText}
+              theme={theme}
+            />
 
-            <View style={styles.row}>
-              <ThemedText variant="secondary">{t('status')}</ThemedText>
-              <ThemedText weight="bold">{syncStatusText}</ThemedText>
-            </View>
-
-            <View style={[styles.row, styles.tapHintRow]}>
+            <View style={styles.tapHintRow}>
+              <Icon name="chevron-right" size={16} color={theme.colors.text.muted} />
               <ThemedText variant="muted" size={11}>{t('syncSettings')}</ThemedText>
-              <Icon name="chevron-right" size={18} color={theme.colors.text.muted} />
             </View>
           </ThemedCard>
         </TouchableOpacity>
@@ -152,6 +156,7 @@ export const SettingsScreen: React.FC = () => {
             label={t('userProfile')}
             onPress={() => navigation.navigate('ProfileSettings')}
             theme={theme}
+            showSeparator
           />
           <SettingsLinkRow
             icon="palette"
@@ -181,7 +186,46 @@ export const SettingsScreen: React.FC = () => {
   );
 };
 
-// ─── Local helper component ──────────────────────────────────────────────────
+// ─── Local helper components ─────────────────────────────────────────────────
+
+/** Shared icon pill — used by both SettingsDetailRow and SettingsLinkRow for visual consistency. */
+const SettingsIconPill: React.FC<{ name: string; color: string; size?: number }> = ({
+  name,
+  color,
+  size = 18,
+}) => (
+  <View style={[styles.iconPill, { backgroundColor: hexToRgba(color, 0.12) }]}>
+    <Icon name={name} size={size} color={color} />
+  </View>
+);
+
+interface SettingsDetailRowProps {
+  icon: string;
+  label: string;
+  value?: string;
+  valueComponent?: React.ReactNode;
+  theme: any;
+}
+
+const SettingsDetailRow: React.FC<SettingsDetailRowProps> = ({
+  icon,
+  label,
+  value,
+  valueComponent,
+  theme,
+}) => (
+  <View style={styles.detailRow}>
+    <View style={styles.detailLabel}>
+      <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={16} />
+      <ThemedText variant="secondary" size={13}>{label}</ThemedText>
+    </View>
+    {valueComponent ? (
+      valueComponent
+    ) : (
+      <ThemedText weight="medium" size={14}>{value ?? '—'}</ThemedText>
+    )}
+  </View>
+);
 
 interface SettingsLinkRowProps {
   icon: string;
@@ -189,6 +233,7 @@ interface SettingsLinkRowProps {
   onPress: () => void;
   theme: any;
   badge?: string;
+  showSeparator?: boolean;
 }
 
 const SettingsLinkRow: React.FC<SettingsLinkRowProps> = ({
@@ -197,26 +242,29 @@ const SettingsLinkRow: React.FC<SettingsLinkRowProps> = ({
   onPress,
   theme,
   badge,
+  showSeparator,
 }) => (
-  <TouchableOpacity
-    style={styles.linkRow}
-    onPress={onPress}
-    activeOpacity={0.7}
-  >
-    <Icon
-      name={icon}
-      size={22}
-      color={theme.colors.accent.primary}
-      style={styles.linkIcon}
-    />
-    <ThemedText style={styles.linkLabel}>{label}</ThemedText>
-    {badge && (
-      <ThemedText variant="muted" size={12} style={styles.badge}>
-        {badge}
-      </ThemedText>
+  <View>
+    {showSeparator && (
+      <View style={[styles.linkSeparator, { backgroundColor: hexToRgba(theme.colors.border.default, 0.3) }]} />
     )}
-    <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
-  </TouchableOpacity>
+    <TouchableOpacity
+      style={styles.linkRow}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={20} />
+      <ThemedText style={styles.linkLabel}>{label}</ThemedText>
+      {badge && (
+        <View style={[styles.badgeChip, { backgroundColor: hexToRgba(theme.colors.accent.primary, 0.15) }]}>
+          <ThemedText variant="accent" size={11} weight="medium">
+            {badge}
+          </ThemedText>
+        </View>
+      )}
+      <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
+    </TouchableOpacity>
+  </View>
 );
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
@@ -234,26 +282,38 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sectionHeader: {
-    // Remove default padding from ThemedCard since SectionHeader has its own
     marginTop: 0,
   },
-  cardContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    gap: 12,
+  /* Icon pill — shared container for all settings icons */
+  iconPill: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
-  tapHintRow: {
-    paddingTop: 4,
-    paddingBottom: 12,
-    justifyContent: 'flex-end',
-    gap: 4,
-  },
-  row: {
+  detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingVertical: 10,
+  },
+  detailLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flex: 1,
+  },
+  tapHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 4,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    paddingTop: 4,
   },
   statusRow: {
     flexDirection: 'row',
@@ -271,14 +331,18 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
   },
-  linkIcon: {
-    marginRight: 14,
+  linkSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
   },
   linkLabel: {
     flex: 1,
     fontSize: 15,
   },
-  badge: {
+  badgeChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
     marginRight: 8,
   },
 });
