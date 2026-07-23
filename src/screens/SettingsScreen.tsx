@@ -163,7 +163,6 @@ export const SettingsScreen: React.FC = () => {
             label={t('appearanceTheme')}
             onPress={() => navigation.navigate('ThemeSettings')}
             theme={theme}
-            badge="⭐"
           />
         </ThemedCard>
 
