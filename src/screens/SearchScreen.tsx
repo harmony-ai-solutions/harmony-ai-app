@@ -123,7 +123,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 14,
     height: 48,
-    marginBottom: 24,
+    marginBottom: 8,
   },
   searchIcon: {
     marginRight: 8,

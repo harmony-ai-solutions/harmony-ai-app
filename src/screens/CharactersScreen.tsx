@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     height: 48,
     marginTop: 12,
-    marginBottom: 24,
+    marginBottom: 8,
   },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15, paddingVertical: 0 },
