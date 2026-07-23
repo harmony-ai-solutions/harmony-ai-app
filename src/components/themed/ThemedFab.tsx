@@ -3,6 +3,7 @@ import { TouchableOpacity, StyleSheet, ViewStyle, Platform } from 'react-native'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedGradient } from './ThemedGradient';
+import { hapticLightPress } from '../../utils/haptics';
 
 interface ThemedFabProps {
     icon: string;
@@ -31,7 +32,12 @@ export const ThemedFab: React.FC<ThemedFabProps> = ({
 
     return (
         <TouchableOpacity
-            onPress={onPress}
+            onPress={() => {
+                if (!disabled) {
+                    hapticLightPress();
+                }
+                onPress();
+            }}
             disabled={disabled}
             activeOpacity={0.8}
             style={[

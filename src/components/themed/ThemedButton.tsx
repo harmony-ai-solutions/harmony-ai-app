@@ -5,6 +5,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedGradient } from './ThemedGradient';
 import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 
 interface ThemedButtonProps {
     label: string;
@@ -73,7 +74,12 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
     if (variant === 'primary') {
         return (
             <TouchableOpacity
-                onPress={onPress}
+                onPress={() => {
+                    if (!disabled) {
+                        hapticLightPress();
+                    }
+                    onPress();
+                }}
                 disabled={disabled}
                 activeOpacity={0.8}
                 testID={testID}
