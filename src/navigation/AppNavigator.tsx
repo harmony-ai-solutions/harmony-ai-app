@@ -16,6 +16,7 @@ import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
 import { EmojiActionEditorScreen } from '../screens/settings/EmojiActionEditorScreen';
 import { ProfileSettingsScreen } from '../screens/settings/ProfileSettingsScreen';
+import { ComingSoonScreen } from '../screens/settings/ComingSoonScreen';
 import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
 import { ConnectionSetupScreen } from '../screens/setup/ConnectionSetupScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
@@ -51,6 +52,11 @@ export type RootStackParamList = {
     entityName: string;
   };
   ProfileSettings: undefined;
+  ComingSoon: {
+    titleKey: string;
+    icon: string;
+    descriptionKey: string;
+  };
   ModuleConfigEdit: {
     moduleType: string;
     configId?: string;
@@ -127,6 +133,10 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen
           name="ProfileSettings"
           component={ProfileSettingsScreen}
+        />
+        <Stack.Screen
+          name="ComingSoon"
+          component={ComingSoonScreen}
         />
         <Stack.Screen
           name="ModuleConfigEdit"
