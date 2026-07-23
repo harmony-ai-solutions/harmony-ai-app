@@ -9,7 +9,6 @@ import {
   Easing,
 } from 'react-native';
 import { ActivityIndicator } from 'react-native-paper';
-import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -55,331 +54,47 @@ function classifyStatus(statusText: string): RadarState {
   return 'idle';
 }
 
-// ─── ConnectionRadar ──────────────────────────────────────────────────
-interface ConnectionRadarProps {
-  radarState: RadarState;
-  accentColor: string;
-}
-
-const RING_BASE_SIZE = 180;
-
-const RadarRing: React.FC<{
-  delay: number;
-  radarState: RadarState;
-  accentColor: string;
-  ringSize: number;
-}> = ({ delay, radarState, accentColor, ringSize }) => {
-  const scale = useRef(new Animated.Value(1)).current;
-  const opacity = useRef(new Animated.Value(0.5)).current;
-
-  useEffect(() => {
-    // Determine animation params based on radar state
-    let cycleMs: number;
-    let maxScale: number;
-    const minOpacity = 0.08;
-    const maxOpacity = 0.75;
-
-    switch (radarState) {
-      case 'connecting':
-        cycleMs = 1100;
-        maxScale = 2.0;
-        break;
-      case 'waiting':
-        cycleMs = 1800;
-        maxScale = 1.6;
-        break;
-      case 'connected':
-        cycleMs = 3500;
-        maxScale = 1.3;
-        break;
-      case 'error':
-        cycleMs = 0; // static
-        maxScale = 1.15;
-        break;
-      case 'idle':
-      default:
-        cycleMs = 2500;
-        maxScale = 1.55;
-        break;
-    }
-
-    if (cycleMs === 0) {
-      // Static ring for error state
-      scale.setValue(1.15);
-      opacity.setValue(0.4);
-      return;
-    }
-
-    const halfCycle = cycleMs / 2;
-
-    const anim = Animated.loop(
-      Animated.parallel([
-        Animated.sequence([
-          Animated.timing(scale, {
-            toValue: maxScale,
-            duration: halfCycle,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(scale, {
-            toValue: 1,
-            duration: halfCycle,
-            easing: Easing.in(Easing.cubic),
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.sequence([
-          Animated.timing(opacity, {
-            toValue: minOpacity,
-            duration: halfCycle,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(opacity, {
-            toValue: maxOpacity,
-            duration: halfCycle,
-            easing: Easing.in(Easing.cubic),
-            useNativeDriver: true,
-          }),
-        ]),
-      ]),
-    );
-
-    // Staggered start
-    const timer = setTimeout(() => anim.start(), delay);
-
-    return () => {
-      clearTimeout(timer);
-      anim.stop();
-    };
-  }, [radarState, delay, scale, opacity]);
-
-  const halfRing = ringSize / 2;
-
-  return (
-    <Animated.View
-      style={[
-        styles.radarRing,
-        {
-          width: ringSize,
-          height: ringSize,
-          borderRadius: halfRing,
-          borderColor: accentColor + 'CC',
-          borderWidth: 2.5,
-          opacity,
-          transform: [{ scale }],
-        },
-      ]}
-      pointerEvents="none"
-    />
-  );
-};
-
-const ConnectionRadar: React.FC<ConnectionRadarProps> = ({ radarState, accentColor }) => {
-  // Center dot pulse animation
-  const dotPulse = useRef(new Animated.Value(1)).current;
-  const dotOpacity = useRef(new Animated.Value(0.95)).current;
-
-  useEffect(() => {
-    let cycleMs: number;
-    switch (radarState) {
-      case 'connecting':
-        cycleMs = 600;
-        break;
-      case 'waiting':
-        cycleMs = 900;
-        break;
-      case 'connected':
-        cycleMs = 2000;
-        break;
-      case 'error':
-        cycleMs = 0;
-        break;
-      case 'idle':
-      default:
-        cycleMs = 1500;
-        break;
-    }
-
-    if (cycleMs === 0) {
-      dotPulse.setValue(1);
-      dotOpacity.setValue(0.9);
-      return;
-    }
-
-    const halfCycle = cycleMs / 2;
-
-    const anim = Animated.loop(
-      Animated.parallel([
-        Animated.sequence([
-          Animated.timing(dotPulse, {
-            toValue: 1.12,
-            duration: halfCycle,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(dotPulse, {
-            toValue: 1,
-            duration: halfCycle,
-            easing: Easing.in(Easing.cubic),
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.sequence([
-          Animated.timing(dotOpacity, {
-            toValue: 0.6,
-            duration: halfCycle * 0.8,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(dotOpacity, {
-            toValue: 0.95,
-            duration: halfCycle * 1.2,
-            easing: Easing.in(Easing.cubic),
-            useNativeDriver: true,
-          }),
-        ]),
-      ]),
-    );
-
-    anim.start();
-    return () => anim.stop();
-  }, [radarState, dotPulse, dotOpacity]);
-
-  // Dot color by state
-  const dotColor = useMemo(() => {
-    switch (radarState) {
-      case 'connected':
-        return '#4CAF50';
-      case 'error':
-        return '#F44336';
-      case 'waiting':
-        return '#F0A23B';
-      case 'connecting':
-        return accentColor;
-      default:
-        return accentColor;
-    }
-  }, [radarState, accentColor]);
-
-  return (
-    <View style={styles.radarContainer}>
-      {/* Outer glow ring */}
-      <View
-        style={[
-          styles.radarGlow,
-          {
-            width: RING_BASE_SIZE + 48,
-            height: RING_BASE_SIZE + 48,
-            borderRadius: (RING_BASE_SIZE + 48) / 2,
-            backgroundColor: accentColor + '15',
-          },
-        ]}
-        pointerEvents="none"
-      />
-
-      {/* Animated rings — staggered */}
-      <RadarRing delay={0} radarState={radarState} accentColor={accentColor} ringSize={RING_BASE_SIZE} />
-      <RadarRing delay={300} radarState={radarState} accentColor={accentColor} ringSize={RING_BASE_SIZE - 40} />
-      <RadarRing delay={600} radarState={radarState} accentColor={accentColor} ringSize={RING_BASE_SIZE - 80} />
-
-      {/* Center dot — a concentric set of circles for a soft radial glow */}
-      <View style={styles.centerDotWrapper} pointerEvents="none">
-        {/* Outer halo */}
-        <View
-          style={[
-            styles.centerDotHalo,
-            {
-              backgroundColor: dotColor + '28',
-              shadowColor: dotColor,
-              shadowOpacity: 0.5,
-              shadowRadius: 18,
-            },
-          ]}
-        />
-        {/* Mid glow */}
-        <View
-          style={[
-            styles.centerDotMid,
-            {
-              backgroundColor: dotColor + '44',
-            },
-          ]}
-        />
-        {/* Core dot */}
-        <Animated.View
-          style={[
-            styles.centerDotCore,
-            {
-              backgroundColor: dotColor,
-              opacity: dotOpacity,
-              transform: [{ scale: dotPulse }],
-            },
-          ]}
-        />
-      </View>
-    </View>
-  );
-};
-
-// ─── GlassFormField ────────────────────────────────────────────────────
-interface GlassFormFieldProps {
+// ─── FormField ─────────────────────────────────────────────────────────
+interface FormFieldProps {
   label: string;
   value: string;
   onChangeText: (text: string) => void;
   placeholder?: string;
   keyboardType?: 'default' | 'url' | 'numeric';
   editable?: boolean;
-  accentColor: string;
-  borderGradientStart: string;
-  borderGradientEnd: string;
   backgroundColor: string;
+  inputTextColor: string;
+  inputPlaceholderColor: string;
 }
 
-const GlassFormField: React.FC<GlassFormFieldProps> = ({
+const FormField: React.FC<FormFieldProps> = ({
   label,
   value,
   onChangeText,
   placeholder,
   keyboardType = 'default',
   editable = true,
-  accentColor,
-  borderGradientStart,
-  borderGradientEnd,
   backgroundColor,
+  inputTextColor,
+  inputPlaceholderColor,
 }) => (
-  <View style={styles.glassFieldWrapper}>
-    <ThemedText weight="medium" size={13} style={styles.glassFieldLabel}>
+  <View style={styles.fieldWrapper}>
+    <ThemedText weight="medium" size={13} style={styles.fieldLabel}>
       {label}
     </ThemedText>
-    <LinearGradient
-      colors={[borderGradientStart, borderGradientEnd]}
-      start={{ x: 0.15, y: 0 }}
-      end={{ x: 0.85, y: 1 }}
-      style={styles.glassFieldBorder}
-    >
-      <View style={[styles.glassFieldBody, { backgroundColor }]}>
-        <TextInput
-          style={[styles.glassFieldInput, { opacity: editable ? 1 : 0.55 }]}
-          value={value}
-          onChangeText={onChangeText}
-          placeholder={placeholder}
-          placeholderTextColor="#6b6780"
-          keyboardType={keyboardType}
-          autoCapitalize="none"
-          autoCorrect={false}
-          editable={editable}
-        />
-        {/* Subtle inner shimmer at top-left */}
-        <LinearGradient
-          colors={['rgba(255,255,255,0.06)', 'transparent']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0.6, y: 0.4 }}
-          style={StyleSheet.absoluteFill}
-          pointerEvents="none"
-        />
-      </View>
-    </LinearGradient>
+    <View style={[styles.fieldBody, { backgroundColor }]}>
+      <TextInput
+        style={[styles.fieldInput, { color: inputTextColor, opacity: editable ? 1 : 0.55 }]}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={inputPlaceholderColor}
+        keyboardType={keyboardType}
+        autoCapitalize="none"
+        autoCorrect={false}
+        editable={editable}
+      />
+    </View>
   </View>
 );
 
@@ -391,11 +106,8 @@ interface ModeSelectorCardProps {
   title: string;
   description: string;
   accentColor: string;
-  borderStart: string;
-  borderEnd: string;
   bgColor: string;
   selectedBgColor: string;
-  borderDefault: string;
 }
 
 const ModeSelectorCard: React.FC<ModeSelectorCardProps> = ({
@@ -405,61 +117,33 @@ const ModeSelectorCard: React.FC<ModeSelectorCardProps> = ({
   title,
   description,
   accentColor,
-  borderStart,
-  borderEnd,
   bgColor,
   selectedBgColor,
-  borderDefault,
 }) => (
   <TouchableOpacity
     style={[styles.modeCard, { flex: 1 }]}
     onPress={onPress}
     activeOpacity={0.7}
   >
-    <LinearGradient
-      colors={
-        selected ? [borderStart, borderEnd] : [borderDefault + '44', borderDefault + '22']
-      }
-      start={{ x: 0.15, y: 0 }}
-      end={{ x: 0.85, y: 1 }}
-      style={[styles.modeCardBorder, { flex: 1 }]}
-    >
-      <View style={[styles.modeCardBody, { flex: 1, backgroundColor: selected ? selectedBgColor : bgColor }]}>
-        {/* Selected accent highlight at top */}
-        {selected && (
-          <LinearGradient
-            colors={[accentColor + '30', 'transparent']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 0.6 }}
-            style={StyleSheet.absoluteFill}
-            pointerEvents="none"
-          />
-        )}
-
-        <View style={[styles.modeCardIconWrap, { backgroundColor: accentColor + (selected ? '22' : '10') }]}>
-          <Icon name={icon} size={24} color={selected ? accentColor : '#6b6780'} />
-        </View>
-
-        <ThemedText
-          weight="bold"
-          size={14}
-          variant="primary"
-          style={styles.modeCardTitle}
-        >
-          {title}
-        </ThemedText>
-        <ThemedText size={12} variant={selected ? 'secondary' : 'muted'} style={styles.modeCardDesc}>
-          {description}
-        </ThemedText>
-
-        {/* Selected checkmark */}
-        {selected && (
-          <View style={[styles.modeCardCheck, { backgroundColor: accentColor }]}>
-            <Icon name="check" size={10} color="#fff" />
-          </View>
-        )}
+    <View style={[styles.modeCardBody, { flex: 1, backgroundColor: selected ? selectedBgColor : bgColor }]}>
+      {selected && (
+        <View style={[styles.modeCardAccentBar, { backgroundColor: accentColor }]} />
+      )}
+      <View style={[styles.modeCardIconWrap, { backgroundColor: accentColor + (selected ? '22' : '10') }]}>
+        <Icon name={icon} size={24} color={selected ? accentColor : '#6b6780'} />
       </View>
-    </LinearGradient>
+      <ThemedText weight="bold" size={14} variant="primary" style={styles.modeCardTitle}>
+        {title}
+      </ThemedText>
+      <ThemedText size={12} variant={selected ? 'secondary' : 'muted'} style={styles.modeCardDesc}>
+        {description}
+      </ThemedText>
+      {selected && (
+        <View style={[styles.modeCardCheck, { backgroundColor: accentColor }]}>
+          <Icon name="check" size={10} color="#fff" />
+        </View>
+      )}
+    </View>
   </TouchableOpacity>
 );
 
@@ -945,12 +629,12 @@ export const ConnectionSetupScreen: React.FC = () => {
   if (!theme) return null;
 
   // ── Extract theme tokens ──────────────────────────────────────────────
-  const { borderGradientStart, borderGradientEnd } = theme.colors.glass;
-  const elevatedBg = hexToRgba(theme.colors.background.elevated, theme.colors.glass.cardOpacity);
-  const surfaceBg = hexToRgba(theme.colors.background.surface, theme.colors.glass.cardOpacity * 0.65);
-  const inputBg = hexToRgba(theme.colors.background.surface, 0.35);
+  const cardBg = theme.colors.background.base;
+  const inputBg = theme.colors.background.surface;
   const accentColor = theme.colors.accent.primary;
-  const borderDefault = theme.colors.border.default;
+  const textPrimary = theme.colors.text.primary;
+  const textMuted = theme.colors.text.muted;
+  const selectedCardBg = hexToRgba(accentColor, 0.08);
   const statusColor =
     radarState === 'connected'
       ? '#4CAF50'
@@ -958,61 +642,10 @@ export const ConnectionSetupScreen: React.FC = () => {
       ? '#F44336'
       : accentColor;
 
-  // Shared glass card wrapper
-  const GlassCard: React.FC<{ children: React.ReactNode; style?: any }> = ({ children, style }) => (
-    <View
-      style={[
-        {
-          shadowColor: theme.colors.accent.primary,
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: theme.colors.glass.glowOpacity,
-          shadowRadius: theme.colors.glass.glowRadius,
-          elevation: 6,
-        },
-        style,
-      ]}
-    >
-      <LinearGradient
-        colors={[borderGradientStart, borderGradientEnd]}
-        start={{ x: 0.15, y: 0 }}
-        end={{ x: 0.85, y: 1 }}
-        style={styles.glassCardBorder}
-      >
-        <View style={[styles.glassCardBody, { backgroundColor: elevatedBg }]}>
-          {/* Specular sweep */}
-          <LinearGradient
-            colors={['rgba(255,255,255,0.08)', 'transparent']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0.7, y: 1 }}
-            style={StyleSheet.absoluteFill}
-            pointerEvents="none"
-          />
-          {children}
-        </View>
-      </LinearGradient>
-    </View>
-  );
-
   return (
     <ThemedView style={styles.container}>
       <ScreenHeader title={t('title')} onBack={() => navigation.goBack()} />
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* ── Hero: Connection Radar ── */}
-        <GlassCard style={styles.radarCard}>
-          <ConnectionRadar radarState={radarState} accentColor={accentColor} />
-          <View style={styles.radarLabelRow}>
-            <StatusPulseDot radarState={radarState} accentColor={accentColor} size={8} glowSize={14} />
-            <ThemedText variant="secondary" size={13} style={styles.radarLabel}>
-              {status}
-            </ThemedText>
-          </View>
-          <ThemedText variant="secondary" size={12} style={styles.radarHint}>
-            {isPaired
-              ? t('descriptionPaired')
-              : t('descriptionUnpaired')}
-          </ThemedText>
-        </GlassCard>
-
         {/* ── Mode Toggle ── */}
         <View style={styles.section}>
           <ThemedText weight="bold" size={15} style={styles.sectionTitle}>
@@ -1030,11 +663,8 @@ export const ConnectionSetupScreen: React.FC = () => {
               title={ta('mode_selfhosted')}
               description={ta('mode_selfhosted_desc')}
               accentColor={accentColor}
-              borderStart={borderGradientStart}
-              borderEnd={borderGradientEnd}
-              bgColor={surfaceBg}
-              selectedBgColor={hexToRgba(accentColor, 0.1)}
-              borderDefault={borderDefault}
+              bgColor={cardBg}
+              selectedBgColor={selectedCardBg}
             />
             <ModeSelectorCard
               selected={connectionMode === 'cloud'}
@@ -1043,11 +673,8 @@ export const ConnectionSetupScreen: React.FC = () => {
               title={ta('mode_cloud')}
               description={ta('mode_cloud_desc')}
               accentColor={accentColor}
-              borderStart={borderGradientStart}
-              borderEnd={borderGradientEnd}
-              bgColor={surfaceBg}
-              selectedBgColor={hexToRgba(accentColor, 0.1)}
-              borderDefault={borderDefault}
+              bgColor={cardBg}
+              selectedBgColor={selectedCardBg}
             />
           </View>
 
@@ -1095,31 +722,29 @@ export const ConnectionSetupScreen: React.FC = () => {
 
         {/* ── Self-hosted form ── */}
         {connectionMode === 'selfhosted' && (
-          <GlassCard style={styles.formCard}>
-            <GlassFormField
+          <View style={styles.formCard}>
+            <FormField
               label={t('addressLabel')}
               value={url}
               onChangeText={setUrl}
               placeholder={t('addressPlaceholder')}
               keyboardType="url"
               editable={!isPaired}
-              accentColor={accentColor}
-              borderGradientStart={borderGradientStart}
-              borderGradientEnd={borderGradientEnd}
               backgroundColor={inputBg}
+              inputTextColor={textPrimary}
+              inputPlaceholderColor={textMuted}
             />
 
-            <GlassFormField
+            <FormField
               label={t('portLabel')}
               value={port}
               onChangeText={setPort}
               placeholder="8080"
               keyboardType="numeric"
               editable={!isPaired}
-              accentColor={accentColor}
-              borderGradientStart={borderGradientStart}
-              borderGradientEnd={borderGradientEnd}
               backgroundColor={inputBg}
+              inputTextColor={textPrimary}
+              inputPlaceholderColor={textMuted}
             />
 
             {/* Security mode display */}
@@ -1239,11 +864,11 @@ export const ConnectionSetupScreen: React.FC = () => {
                 </>
               )}
             </View>
-          </GlassCard>
+          </View>
         )}
       </ScrollView>
 
-      {/* ── Certificate modals (unchanged) ── */}
+      {/* ── Certificate modals ── */}
       <CertificateVerificationModal
         visible={showCertModal}
         onSelectMode={handleCertModalChoice}
@@ -1276,86 +901,6 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
 
-  // ── Glass card shared ──
-  glassCardBorder: {
-    borderRadius: 16,
-    padding: StyleSheet.hairlineWidth,
-  },
-  glassCardBody: {
-    borderRadius: 15,
-    overflow: 'hidden',
-    padding: 20,
-  },
-
-  // ── Radar section ──
-  radarCard: {
-    width: '100%',
-    maxWidth: 400,
-    marginBottom: 24,
-    alignItems: 'center',
-  },
-  radarContainer: {
-    width: RING_BASE_SIZE + 48,
-    height: RING_BASE_SIZE + 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  radarGlow: {
-    position: 'absolute',
-  },
-  radarRing: {
-    position: 'absolute',
-    borderWidth: 1.5,
-    backgroundColor: 'transparent',
-  },
-  centerDotWrapper: {
-    width: 48,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  centerDotHalo: {
-    position: 'absolute',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 8,
-  },
-  centerDotMid: {
-    position: 'absolute',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-  },
-  centerDotCore: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    shadowColor: '#fff',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  radarLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  radarLabel: {
-    textTransform: 'capitalize',
-  },
-  radarHint: {
-    textAlign: 'center',
-    marginTop: 4,
-    lineHeight: 17,
-    maxWidth: '90%',
-    alignSelf: 'center',
-  },
-
   // ── Section ──
   section: {
     width: '100%',
@@ -1376,17 +921,20 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   modeCard: {},
-  modeCardBorder: {
-    borderRadius: 14,
-    padding: StyleSheet.hairlineWidth,
-    width: '100%',
-    height: '100%',
-  },
   modeCardBody: {
-    borderRadius: 13,
+    borderRadius: 14,
     overflow: 'hidden',
     padding: 16,
     position: 'relative',
+  },
+  modeCardAccentBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
   },
   modeCardIconWrap: {
     width: 40,
@@ -1395,6 +943,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
+    marginTop: 4,
   },
   modeCardTitle: {
     marginBottom: 4,
@@ -1432,29 +981,25 @@ const styles = StyleSheet.create({
   formCard: {
     width: '100%',
     maxWidth: 400,
+    backgroundColor: 'transparent',
   },
 
-  // ── Glass form fields ──
-  glassFieldWrapper: {
+  // ── Form fields ──
+  fieldWrapper: {
     marginBottom: 18,
   },
-  glassFieldLabel: {
+  fieldLabel: {
     marginBottom: 6,
     marginLeft: 2,
   },
-  glassFieldBorder: {
+  fieldBody: {
     borderRadius: 12,
-    padding: StyleSheet.hairlineWidth,
-  },
-  glassFieldBody: {
-    borderRadius: 11,
     overflow: 'hidden',
   },
-  glassFieldInput: {
+  fieldInput: {
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
-    color: '#f0edf6',
     fontWeight: '500',
   },
 
