@@ -514,7 +514,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         log.error(`Session error for ${currentInteractionIdRef.current}:`, error);
 
         if (Platform.OS === 'android') {
-          ToastAndroid.show(`Chat session error: ${error}`, ToastAndroid.LONG);
+          ToastAndroid.show(t('chatSessionError', { error }), ToastAndroid.LONG);
         } else {
           showAlert(t('common:error'), error, [{ text: t('common:ok') }]);
         }
@@ -693,7 +693,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         log.error('Failed to send message:', error);
         if (Platform.OS === 'android') {
           ToastAndroid.show(
-            `Failed to send: ${error.message}`,
+            t('failedToSend', { message: error.message }),
             ToastAndroid.LONG,
           );
         } else {
@@ -739,12 +739,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleDeleteMessage = useCallback(
     async (messageId: string) => {
       showAlert(
-        'Delete Message',
-        'Are you sure you want to delete this message?',
+        t('deleteMessageTitle'),
+        t('deleteMessageBody'),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common:cancel'), style: 'cancel' },
           {
-            text: 'Delete',
+            text: t('common:delete'),
             style: 'destructive',
             onPress: async () => {
               try {
@@ -759,7 +759,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 }
 
                 if (Platform.OS === 'android') {
-                  ToastAndroid.show('Message deleted', ToastAndroid.SHORT);
+                  ToastAndroid.show(t('toastMessageDeleted'), ToastAndroid.SHORT);
                 }
               } catch (error) {
                 log.error('Failed to delete message:', error);
@@ -776,12 +776,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleRegenerateMessage = useCallback(
     async (messageId: string) => {
       showAlert(
-        'Regenerate Response',
-        'Delete this response and regenerate a new one?',
+        t('regenerateTitle'),
+        t('regenerateBody'),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common:cancel'), style: 'cancel' },
           {
-            text: 'Regenerate',
+            text: t('regenerateButton'),
             onPress: async () => {
               try {
                 await deleteConversationMessage(messageId);
@@ -814,7 +814,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
                 if (Platform.OS === 'android') {
                   ToastAndroid.show(
-                    'Regenerating response...',
+                    t('toastRegenerating'),
                     ToastAndroid.SHORT,
                   );
                 }
@@ -822,11 +822,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 log.error('Failed to regenerate:', error);
                 if (Platform.OS === 'android') {
                   ToastAndroid.show(
-                    `Failed: ${error.message}`,
+                    t('toastFailed', { message: error.message }),
                     ToastAndroid.LONG,
                   );
                 } else {
-                  showAlert('Error', error.message);
+                  showAlert(t('errorTitle'), error.message);
                 }
               }
             },
@@ -841,12 +841,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleEditMessage = useCallback(
     async (messageId: string, newText: string) => {
       showAlert(
-        'Edit and Resend',
-        'Edit and resend this message? This will trigger a new AI response.',
+        t('editResendTitle'),
+        t('editResendBody'),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common:cancel'), style: 'cancel' },
           {
-            text: 'Edit & Resend',
+            text: t('edit'),
             onPress: async () => {
               try {
                 // Soft-delete the original so only the replacement appears
@@ -868,7 +868,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
                 if (Platform.OS === 'android') {
                   ToastAndroid.show(
-                    'Message updated and sent',
+                    t('toastMessageUpdated'),
                     ToastAndroid.SHORT,
                   );
                 }
@@ -876,11 +876,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 log.error('Failed to edit message:', error);
                 if (Platform.OS === 'android') {
                   ToastAndroid.show(
-                    `Failed: ${error.message}`,
+                    t('toastFailed', { message: error.message }),
                     ToastAndroid.LONG,
                   );
                 } else {
-                  showAlert('Error', error.message);
+                  showAlert(t('errorTitle'), error.message);
                 }
               }
             },
@@ -906,7 +906,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         );
 
         if (Platform.OS === 'android') {
-          ToastAndroid.show('Retrying transcription...', ToastAndroid.SHORT);
+          ToastAndroid.show(t('toastRetryingTranscription'), ToastAndroid.SHORT);
         }
       } catch (error: any) {
         log.error('Failed to retry transcription:', error);
@@ -914,11 +914,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         if (Platform.OS === 'android') {
           ToastAndroid.show(
-            `Retry failed: ${error.message}`,
+            t('toastRetryFailed', { message: error.message }),
             ToastAndroid.LONG,
           );
         } else {
-          showAlert('Retry Failed', error.message);
+          showAlert(t('retryFailedTitle'), error.message);
         }
       }
     },
@@ -936,17 +936,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const otherIds = participantIds.filter(id => id !== ownEntityId);
     const partnerEntityId = otherIds[0] || '';
     showAlert(
-      'Delete Entity',
-      `Delete "${headerName}"? Chat history will be preserved but this entity will no longer be accessible.`,
+      t('deleteEntityTitle'),
+      t('deleteEntityBody', { name: headerName }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common:cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common:delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteEntity(partnerEntityId);
-              navigation.navigate('ChatList');
+              navigation.navigate('MainTabs');
             } catch (err: any) {
               showAlert(
                 t('common:error'),
@@ -1234,13 +1234,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   ]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 0, y: 1 }}
-                  style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                  style={[StyleSheet.absoluteFill, styles.menuGradientRadius]}
                 />
                 <LinearGradient
                   colors={[theme!.colors.accent.primary + '12', 'transparent']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0.6 }}
-                  style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                  style={[StyleSheet.absoluteFill, styles.menuGradientRadius]}
                   pointerEvents="none"
                 />
                 <LinearGradient
@@ -1441,7 +1441,7 @@ const styles = StyleSheet.create({
     opacity: 0,
   },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 10,
   },
   messageList: {

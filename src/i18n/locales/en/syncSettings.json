@@ -1,0 +1,16 @@
+{
+  "notConnectedTitle": "Not Connected",
+  "notConnectedMessage": "Please connect to Harmony Link first from the Connection Setup screen.",
+  "syncError": "Sync Error",
+  "syncFailed": "Failed to start sync: {{message}}",
+  "forceFullResync": "Force Full Re-Sync",
+  "forceFullResyncMessage": "This will re-sync ALL data between this device and Harmony Link. This can take a while and may use significant bandwidth.\n\nUse this only if you suspect data is out of sync.",
+  "resyncEverything": "Re-Sync Everything",
+  "connectionLostReconnecting": "Connection lost - reconnecting...",
+  "failedToStartFullResync": "Failed to start full re-sync: {{message}}",
+  "notPaired": "Not Paired",
+  "connected": "Connected",
+  "reconnecting": "Reconnecting...",
+  "reconnectingRetries": "Reconnecting ({{attempts}} retries){{countdown}}",
+  "disconnected": "Disconnected"
+}

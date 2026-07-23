@@ -8,6 +8,7 @@ import {
   Easing,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useTranslation } from 'react-i18next';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -41,6 +42,7 @@ const log = createLogger('[SyncSettingsScreen]');
  */
 export const SyncSettingsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { t } = useTranslation('syncSettings');
 
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
@@ -120,7 +122,7 @@ export const SyncSettingsScreen: React.FC = () => {
   // ── Handlers (preserved from original) ─────────────────────────────────────
   const handleSyncNow = async () => {
     if (!isConnected) {
-      showAlert('Not Connected', 'Please connect to Harmony Link first from the Connection Setup screen.');
+      showAlert(t('notConnectedTitle'), t('notConnectedMessage'));
       return;
     }
 
@@ -140,27 +142,27 @@ export const SyncSettingsScreen: React.FC = () => {
         err?.code === 'NOT_CONNECTED';
 
       if (isConnectionError) {
-        showToast('Connection lost - reconnecting...');
+        showToast(t('connectionLostReconnecting'));
       } else {
-        showToast('Failed to start sync: ' + errorMsg);
-        showAlert('Sync Error', 'Failed to start sync: ' + errorMsg);
+        showToast(t('syncFailed', { message: errorMsg }));
+        showAlert(t('syncError'), t('syncFailed', { message: errorMsg }));
       }
     }
   };
 
   const handleForceFullSync = () => {
     if (!isConnected) {
-      showAlert('Not Connected', 'Please connect to Harmony Link first from the Connection Setup screen.');
+      showAlert(t('notConnectedTitle'), t('notConnectedMessage'));
       return;
     }
 
     showAlert(
-      'Force Full Re-Sync',
-      'This will re-sync ALL data between this device and Harmony Link. This can take a while and may use significant bandwidth.\n\nUse this only if you suspect data is out of sync.',
+      t('forceFullResync'),
+      t('forceFullResyncMessage'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common:cancel'), style: 'cancel' },
         {
-          text: 'Re-Sync Everything',
+          text: t('resyncEverything'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -170,7 +172,7 @@ export const SyncSettingsScreen: React.FC = () => {
               setIsSyncing(false);
               const errorMsg = err?.message || 'Unknown error';
               log.error('Force full sync initiation failed:', errorMsg);
-              showToast('Failed to start full re-sync: ' + errorMsg);
+              showToast(t('failedToStartFullResync', { message: errorMsg }));
             }
           },
         },
@@ -180,14 +182,14 @@ export const SyncSettingsScreen: React.FC = () => {
 
   // ── Helpers (preserved from original) ──────────────────────────────────────
   const getConnectionStatusText = () => {
-    if (!isPaired) return 'Not Paired';
-    if (isConnected) return 'Connected';
+    if (!isPaired) return t('notPaired');
+    if (isConnected) return t('connected');
     if (isReconnecting) {
-      if (reconnectAttempt === 0) return 'Reconnecting...';
+      if (reconnectAttempt === 0) return t('reconnecting');
       const retryText = countdown > 0 ? ` in ${countdown}s` : '...';
-      return `Reconnecting (${reconnectAttempt} retries)${retryText}`;
+      return t('reconnectingRetries', { attempts: reconnectAttempt, countdown: retryText });
     }
-    return 'Disconnected';
+    return t('disconnected');
   };
 
   const getConnectionStatusColor = (): string => {
@@ -374,7 +376,7 @@ export const SyncSettingsScreen: React.FC = () => {
         />
 
         <ThemedButton
-          label="Force Full Re-Sync"
+          label={t('forceFullResync')}
           icon="database-sync-outline"
           onPress={handleForceFullSync}
           disabled={isSyncing || !isConnected}

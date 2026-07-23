@@ -1,0 +1,7 @@
+{
+  "title": "Search",
+  "subtitle": "Find characters, conversations, and configurations",
+  "placeholder": "Search Harmony...",
+  "emptyPrompt": "Start typing to explore personas, chats, and settings",
+  "noResults": "No results found for \"{{query}}\""
+}

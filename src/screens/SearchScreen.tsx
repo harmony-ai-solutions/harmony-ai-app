@@ -15,6 +15,7 @@ import {
   TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
@@ -25,6 +26,7 @@ import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 
 export const SearchScreen: React.FC = () => {
   const { theme } = useAppTheme();
+  const { t } = useTranslation('search');
   const { top: safeTop } = useSafeAreaInsets();
   const [query, setQuery] = useState('');
 
@@ -46,8 +48,8 @@ export const SearchScreen: React.FC = () => {
       >
         {/* Page header — gradient stripe + title + subtitle */}
         <ScreenHeader
-          title="Search"
-          subtitle="Find characters, conversations, and configurations"
+          title={t('title')}
+          subtitle={t('subtitle')}
           style={{ paddingTop: 0 }}
         >
             {/* Search input */}
@@ -60,7 +62,7 @@ export const SearchScreen: React.FC = () => {
           />
           <TextInput
             style={[styles.searchInput, { color: theme.colors.text.primary }]}
-            placeholder="Search Harmony..."
+            placeholder={t('placeholder')}
             placeholderTextColor={theme.colors.text.disabled}
             value={query}
             onChangeText={setQuery}
@@ -87,7 +89,7 @@ export const SearchScreen: React.FC = () => {
               color={theme.colors.text.disabled}
             />
             <ThemedText variant="disabled" size={14} style={styles.emptyText}>
-              Start typing to explore personas, chats, and settings
+              {t('emptyPrompt')}
             </ThemedText>
           </View>
         )}
@@ -101,7 +103,7 @@ export const SearchScreen: React.FC = () => {
               color={theme.colors.text.disabled}
             />
             <ThemedText variant="disabled" size={14} style={styles.emptyText}>
-              No results found for "{query}"
+              {t('noResults', { query })}
             </ThemedText>
           </View>
         )}

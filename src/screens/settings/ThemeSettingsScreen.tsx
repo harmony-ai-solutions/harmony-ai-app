@@ -6,6 +6,7 @@ import {
     StyleSheet,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useTranslation } from 'react-i18next';
 import { Switch } from 'react-native-paper';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { isErrorWithCode, errorCodes } from '@react-native-documents/picker';
@@ -28,6 +29,7 @@ import { soulBitsThemes, otherThemes } from '../../theme/themes';
 type Props = NativeStackScreenProps<RootStackParamList, 'ThemeSettings'>;
 
 export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
+    const { t } = useTranslation('themeSettings');
     const {
         theme,
         availableThemes,
@@ -46,9 +48,9 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
     const { showAlert } = useAppAlert();
 
     const EMOJI_STYLES = [
-        { set: 'native' as EmojiSet, label: 'Native (System)', description: 'Use your device\'s built-in emoji style', sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
-        { set: 'noto' as EmojiSet, label: 'Google Noto', description: 'Colorful, modern emoji by Google (Apache 2.0)', sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
-        { set: 'twemoji' as EmojiSet, label: 'Twemoji', description: 'Clean, flat emoji originally by Twitter/X (CC-BY 4.0)', sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
+        { set: 'native' as EmojiSet, label: t('nativeLabel'), description: t('nativeDesc'), sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
+        { set: 'noto' as EmojiSet, label: t('notoLabel'), description: t('notoDesc'), sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
+        { set: 'twemoji' as EmojiSet, label: t('twemojiLabel'), description: t('twemojiDesc'), sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
     ];
 
     const [systemThemeEnabled, setSystemThemeEnabled] = useState(themeMode === 'system');
@@ -83,7 +85,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 setSystemThemeEnabled(false);
             }
         } catch (err) {
-            showAlert('Error', 'Failed to switch theme');
+            showAlert(t('error'), t('switchThemeFailed'));
         }
     };
 
@@ -94,12 +96,12 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
     const handleEditTheme = (themeToEdit: Theme) => {
         if (!themeToEdit.isCustom) {
             showAlert(
-                'Built-in Theme',
-                'Built-in themes cannot be edited. Create a custom theme based on this one?',
+                t('builtInThemeTitle'),
+                t('builtInThemeMessage'),
                 [
-                    { text: 'Cancel', style: 'cancel' },
+                    { text: t('common:cancel'), style: 'cancel' },
                     {
-                        text: 'Create Copy',
+                        text: t('createCopy'),
                         onPress: () => {
                             navigation.navigate('ThemeEditor', { themeId: themeToEdit.id });
                         },
@@ -113,18 +115,18 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
     const handleDeleteTheme = (themeToDelete: Theme) => {
         showAlert(
-            'Delete Theme',
-            `Are you sure you want to delete "${themeToDelete.name}"?`,
+            t('deleteThemeTitle'),
+            t('deleteThemeConfirm', { name: themeToDelete.name }),
             [
-                { text: 'Cancel', style: 'cancel' },
+                { text: t('common:cancel'), style: 'cancel' },
                 {
-                    text: 'Delete',
+                    text: t('common:delete'),
                     style: 'destructive',
                     onPress: async () => {
                         try {
                             await deleteCustomTheme(themeToDelete.id);
                         } catch (e) {
-                            showAlert('Error', 'Failed to delete theme');
+                            showAlert(t('error'), t('deleteThemeFailed'));
                         }
                     },
                 },
@@ -141,15 +143,15 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
             if (result) {
                 const fileContent = await RNFS.readFile(result.uri, 'utf8');
                 await importTheme(fileContent);
-                showAlert('Success', 'Theme imported successfully');
+                showAlert(t('success'), t('importSuccess'));
             }
         } catch (err) {
             if (isErrorWithCode(err)) {
                 if (err.code !== errorCodes.OPERATION_CANCELED) {
-                    showAlert('Error', 'Failed to import theme');
+                    showAlert(t('error'), t('importFailed'));
                 }
             } else {
-                showAlert('Error', 'An unexpected error occurred');
+                showAlert(t('error'), t('importUnexpectedError'));
             }
         }
     };
@@ -157,9 +159,9 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
     const handleSyncThemes = async () => {
         try {
             await syncWithHarmonyLink();
-            showAlert('Success', 'Themes synced with Harmony Link');
+            showAlert(t('success'), t('syncSuccess'));
         } catch (err) {
-            showAlert('Error', 'Failed to sync themes');
+            showAlert(t('error'), t('syncFailed'));
         }
     };
 
@@ -167,29 +169,29 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
         try {
             await setDynamicBackgroundEnabled(value);
         } catch (err) {
-            showAlert('Error', 'Failed to update background setting');
+            showAlert(t('error'), t('backgroundUpdateFailed'));
         }
     };
 
     return (
         <ThemedView style={styles.container}>
             <ScreenHeader
-              title="Appearance & Theme"
+              title={t('title')}
               onBack={() => navigation.goBack()}
             />
-            <ScrollView>
+            <ScrollView contentContainerStyle={styles.scrollContent}>
                 {/* Dynamic Background Effects Toggle */}
                 <View style={styles.sectionWrapper}>
                     <ThemedCard elevated accentStripe>
-                        <SectionHeader title="Background Effects" />
+                        <SectionHeader title={t('backgroundEffects')} />
 
                         <View style={styles.switchRow}>
                             <View style={styles.switchLabel}>
                                 <Text style={[styles.switchText, { color: theme.colors.text.primary }]}>
-                                    Dynamic Background Effects
+                                    {t('dynamicBackgroundEffects')}
                                 </Text>
                                 <Text style={[styles.switchDescription, { color: theme.colors.text.secondary }]}>
-                                    Enable fluid motion and particle effects. Disable if you experience lag or wish to save battery.
+                                    {t('dynamicBackgroundDesc')}
                                 </Text>
                             </View>
                             <Switch
@@ -204,15 +206,15 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 {/* System Theme Toggle */}
                 <View style={styles.sectionWrapper}>
                     <ThemedCard elevated accentStripe>
-                        <SectionHeader title="Theme Mode" />
+                        <SectionHeader title={t('themeMode')} />
 
                         <View style={styles.switchRow}>
                             <View style={styles.switchLabel}>
                                 <Text style={[styles.switchText, { color: theme.colors.text.primary }]}>
-                                    Follow System Theme
+                                    {t('followSystemTheme')}
                                 </Text>
                                 <Text style={[styles.switchDescription, { color: theme.colors.text.secondary }]}>
-                                    Automatically switch theme based on system settings
+                                    {t('followSystemThemeDesc')}
                                 </Text>
                             </View>
                             <Switch
@@ -227,7 +229,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 {/* Current Theme Preview */}
                 <View style={styles.currentThemeSection}>
                     <Text style={[styles.label, { color: theme.colors.text.muted }]}>
-                        CURRENT THEME
+                        {t('currentTheme')}
                     </Text>
                     <View style={styles.currentThemeCard}>
                         <ThemeCard
@@ -242,7 +244,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 {/* SoulBits Themes */}
                 <View style={styles.themesSection}>
                     <Text style={[styles.label, { color: theme.colors.text.muted }]}>
-                        SOULBITS THEMES
+                        {t('soulbitsThemes')}
                     </Text>
                     <View style={styles.themesGrid}>
                         {soulBitsThemes.map((t) => (
@@ -260,7 +262,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 {/* Other Available Themes */}
                 <View style={styles.themesSection}>
                     <Text style={[styles.label, { color: theme.colors.text.muted }]}>
-                        OTHER AVAILABLE THEMES
+                        {t('otherThemes')}
                     </Text>
                     <View style={styles.themesGrid}>
                         {otherAndCustomThemes.map((t) => (
@@ -279,18 +281,18 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 {/* Actions */}
                 <View style={styles.sectionWrapper}>
                     <ThemedCard elevated accentStripe>
-                        <SectionHeader title="Actions" />
+                        <SectionHeader title={t('actions')} />
 
                         <View style={styles.actionsContainer}>
                             <ThemedButton
-                                label="Create Custom Theme"
+                                label={t('createCustomTheme')}
                                 icon="plus-circle"
                                 iconSize={20}
                                 onPress={handleCreateCustom}
                             />
 
                             <ThemedButton
-                                label="Import Theme"
+                                label={t('importTheme')}
                                 icon="import"
                                 variant="outline"
                                 onPress={handleImportTheme}
@@ -298,7 +300,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
                             {syncStatus.syncEnabled && (
                                 <ThemedButton
-                                    label="Sync with Harmony Link"
+                                    label={t('syncWithHarmonyLink')}
                                     icon="cloud-sync"
                                     variant="outline"
                                     onPress={handleSyncThemes}
@@ -312,14 +314,14 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 {/* Emoji Style Section */}
                 <View style={styles.sectionWrapper}>
                     <ThemedCard elevated accentStripe>
-                        <SectionHeader title="Emoji Style" />
+                        <SectionHeader title={t('emojiStyle')} />
                         <Text
                             style={[
                                 styles.sectionDescription,
                                 { color: theme.colors.text.secondary },
                             ]}
                         >
-                            Choose how emojis look in chat messages
+                            {t('emojiStyleDesc')}
                         </Text>
                         <View style={styles.emojiCardsContainer}>
                             {EMOJI_STYLES.map((style) => (
@@ -345,6 +347,9 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
+    },
+    scrollContent: {
+        paddingTop: 16,
     },
     header: {
         elevation: 4,

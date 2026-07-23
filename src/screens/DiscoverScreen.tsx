@@ -8,6 +8,7 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
@@ -18,6 +19,7 @@ import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 
 export const DiscoverScreen: React.FC = () => {
   const { theme } = useAppTheme();
+  const { t } = useTranslation('discover');
   const { top: safeTop } = useSafeAreaInsets();
 
   if (!theme) return null;
@@ -27,8 +29,8 @@ export const DiscoverScreen: React.FC = () => {
       {/* ── Header ── */}
       <View style={{ paddingTop: safeTop + 12 }}>
         <ScreenHeader
-          title="Discover"
-          subtitle="Explore AI personas, trending characters, and community showcases"
+          title={t('title')}
+          subtitle={t('subtitle')}
           style={{ paddingTop: 0 }}
         />
       </View>
@@ -61,7 +63,7 @@ export const DiscoverScreen: React.FC = () => {
           hierarchy="header"
           style={styles.headline}
         >
-          Coming Soon
+          {t('comingSoon')}
         </ThemedText>
 
         {/* Description */}
@@ -71,9 +73,7 @@ export const DiscoverScreen: React.FC = () => {
           hierarchy="subtext"
           style={styles.description}
         >
-          We're curating an immersive discovery experience{'\n'}
-          filled with AI personas, trending characters,{'\n'}
-          and community showcases.
+          {t('description')}
         </ThemedText>
 
         {/* Decorative bottom accent bar */}

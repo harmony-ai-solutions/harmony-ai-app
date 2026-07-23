@@ -1,0 +1,9 @@
+{
+  "connectedToast": "Connected to Harmony Link",
+  "connectionError": "Connection error: {{message}}",
+  "syncComplete": "Sync complete! Sent: {{sent}}, Received: {{received}}",
+  "syncFailed": "Sync failed: {{error}}",
+  "failedToConnect": "Failed to connect to Harmony Link",
+  "handshakeTimeout": "Handshake connection timeout",
+  "alertTitle": "Harmony Link"
+}

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { useTranslation } from 'react-i18next';
 import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -146,6 +147,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const navigation = useNavigation<ModuleConfigEditNavigationProp>();
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
+  const { t } = useTranslation('moduleConfig');
   const { bottom: safeBottom } = useSafeAreaInsets();
   
   const { moduleType, configId } = route.params;
@@ -376,7 +378,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
   const handleSave = async () => {
     if (!formValues.name) {
-      showAlert('Error', 'Config name is required');
+      showAlert(t('common:error'), t('configNameRequired'));
       return;
     }
 
@@ -384,7 +386,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
     try {
       const repo = MODULE_REPOSITORIES[moduleType];
       if (!repo) {
-        showAlert('Error', 'Unknown module type');
+        showAlert(t('common:error'), t('unknownModuleType'));
         return;
       }
 
@@ -393,11 +395,11 @@ export const ModuleConfigEditScreen: React.FC = () => {
         const txProvider = formValues.transcription_provider;
         const vadProvider = formValues.vad_provider;
         if (!txProvider) {
-          showAlert('Error', 'Transcription provider is required');
+          showAlert(t('common:error'), t('transcriptionProviderRequired'));
           return;
         }
         if (!vadProvider) {
-          showAlert('Error', 'VAD provider is required');
+          showAlert(t('common:error'), t('vadProviderRequired'));
           return;
         }
 
@@ -426,7 +428,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
         // Standard module
         const providerType = formValues.provider;
         if (!providerType) {
-          showAlert('Error', 'Provider is required');
+          showAlert(t('common:error'), t('providerRequired'));
           return;
         }
 
@@ -460,7 +462,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
       navigation.goBack();
     } catch (error) {
       log.error('Failed to save:', error);
-      showAlert('Error', 'Failed to save configuration');
+      showAlert(t('common:error'), t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -471,12 +473,12 @@ export const ModuleConfigEditScreen: React.FC = () => {
     if (!repo || !configId) return;
 
     showAlert(
-      'Delete Configuration',
-      'Are you sure you want to delete this configuration?',
+      t('deleteTitle'),
+      t('deleteConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common:cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common:delete'),
           style: 'destructive',
           onPress: async () => {
             await repo.delete(configId);
@@ -683,21 +685,21 @@ export const ModuleConfigEditScreen: React.FC = () => {
             <SectionHeader title="STT Settings" />
             <View style={styles.sectionContent}>
               {renderThemedInput(
-                'Main Stream Time (ms)',
+                t('mainStreamTime'),
                 formValues.main_stream_time_millis,
                 (text) => handleModuleFieldChange('main_stream_time_millis', text ? parseInt(text, 10) : null),
                 '2000',
                 'number-pad',
               )}
               {renderThemedInput(
-                'Transition Stream Time (ms)',
+                t('transitionStreamTime'),
                 formValues.transition_stream_time_millis,
                 (text) => handleModuleFieldChange('transition_stream_time_millis', text ? parseInt(text, 10) : null),
                 '1000',
                 'number-pad',
               )}
               {renderThemedInput(
-                'Max Buffer Count',
+                t('maxBufferCount'),
                 formValues.max_buffer_count,
                 (text) => handleModuleFieldChange('max_buffer_count', text ? parseInt(text, 10) : null),
                 '5',
@@ -800,7 +802,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
             <SectionHeader title="General" />
             <View style={styles.sectionContent}>
               {renderThemedInput(
-                'Config Name *',
+                t('configName'),
                 formValues.name,
                 (text) => handleModuleFieldChange('name', text),
                 'Enter config name',
