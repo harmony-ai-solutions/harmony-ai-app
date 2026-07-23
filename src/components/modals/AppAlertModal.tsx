@@ -142,7 +142,7 @@ export const AppAlertModal: React.FC<AppAlertModalProps> = ({
                 <LinearGradient
                   colors={
                     isDestructive
-                      ? [theme.colors.status.error, theme.colors.status.warning ?? theme.colors.status.error]
+                      ? [theme.colors.status.error, theme.colors.status.error]
                       : [accent, accentSecondary]
                   }
                   start={{ x: 0, y: 0 }}
@@ -173,7 +173,7 @@ export const AppAlertModal: React.FC<AppAlertModalProps> = ({
                         isDestructive
                           ? [
                               theme.colors.status.error + '22',
-                              (theme.colors.status.warning ?? theme.colors.status.error) + '10',
+                              theme.colors.status.error + '10',
                             ]
                           : [accent + '22', accentSecondary + '10']
                       }
@@ -227,17 +227,21 @@ export const AppAlertModal: React.FC<AppAlertModalProps> = ({
                       style={styles.cancelBtnWrapper}
                     >
                       <LinearGradient
-                        colors={[borderGradientStart, borderGradientEnd]}
+                        colors={
+                          isDestructive
+                            ? [theme.colors.status.error + '35', theme.colors.status.error + '18']
+                            : [borderGradientStart, borderGradientEnd]
+                        }
                         start={{ x: 0.15, y: 0 }}
                         end={{ x: 0.85, y: 1 }}
                         style={styles.cancelBtnBorder}
                       >
-                        <View style={styles.cancelBtnInner}>
+                        <View style={[styles.cancelBtnInner, isDestructive && { backgroundColor: theme.colors.status.error + '10' }]}>
                           <ThemedText
                             variant="secondary"
                             size={14}
                             weight="medium"
-                            style={styles.cancelBtnText}
+                            style={[styles.cancelBtnText, isDestructive && { color: theme.colors.status.error }]}
                           >
                             {cancelBtn.text}
                           </ThemedText>
@@ -268,7 +272,7 @@ export const AppAlertModal: React.FC<AppAlertModalProps> = ({
                             isDestructiveBtn
                               ? [
                                   theme.colors.status.error,
-                                  theme.colors.status.warning ?? theme.colors.status.error,
+                                  theme.colors.status.error,
                                 ]
                               : [accent, accentSecondary]
                           }
