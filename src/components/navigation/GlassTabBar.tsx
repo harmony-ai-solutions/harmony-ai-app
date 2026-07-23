@@ -8,9 +8,11 @@
  *  - Dimmed silver-grey inactive icons
  *  - Spring-animated indicator slide between tabs
  *  - Floating detachment from screen edges
+ *  - Content-fade gradient overlay to gracefully dissolve scrolled content
+ *    before it reaches the pill
  */
 
-import React, { useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import {
   View,
   TouchableOpacity,
@@ -39,6 +41,9 @@ const INDICATOR_WIDTH = 28;
 const INDICATOR_RADIUS = 2;
 const ICON_SIZE = 24;
 const LABEL_SIZE = 10;
+
+/** Height of the gradient band that fades scrolled content before the pill */
+const FADE_OVERLAY_HEIGHT = 56;
 
 // ── Tab icon mapping (Material Community Icons) ─────────────────────────────
 const TAB_ICONS: Record<string, { default: string; focused: string }> = {
@@ -138,150 +143,193 @@ export const GlassTabBar: React.FC<BottomTabBarProps> = ({
   /** Distance from bottom screen edge including safe-area inset */
   const bottom = TAB_BAR_MARGIN_BOTTOM + insets.bottom;
 
+  /**
+   * Fade overlay height: covers from screen bottom up past the top of the pill,
+   * so scrolled content starts fading well before it reaches the nav bar.
+   */
+  const fadeOverlayHeight = bottom + TAB_BAR_HEIGHT + 70;
+
   return (
-    <View
-      style={[
-        styles.wrapper,
-        {
-          bottom,
-          left: TAB_BAR_MARGIN_H,
-          right: TAB_BAR_MARGIN_H,
-          height: TAB_BAR_HEIGHT,
-        },
-      ]}
-      pointerEvents="box-none"
-    >
-      {/* ── Main pill container ────────────────────────────────────────── */}
+    <>
+      {/* ── Content fade gradient ──────────────────────────────────────── */}
       <View
         style={[
-          styles.pill,
+          styles.fadeOverlay,
           {
-            backgroundColor: glassBg,
-            borderRadius: TAB_BAR_RADIUS,
-            borderColor: hexToRgba(accentSecondary, 0.15),
+            bottom: 0,
+            height: fadeOverlayHeight,
           },
         ]}
+        pointerEvents="none"
       >
-        {/* ── Active indicator glow layer (wide, soft) ───────────────── */}
-        <Animated.View
+        <LinearGradient
+          colors={[
+            'transparent',
+            hexToRgba(baseHex, 0.35),
+            baseHex,
+            baseHex,
+          ]}
+          locations={[0, 0.20, 0.9, 2.5]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </View>
+
+      {/* ── Pill wrapper ────────────────────────────────────────────────── */}
+      <View
+        style={[
+          styles.wrapper,
+          {
+            bottom,
+            left: TAB_BAR_MARGIN_H,
+            right: TAB_BAR_MARGIN_H,
+            height: TAB_BAR_HEIGHT,
+          },
+        ]}
+        pointerEvents="box-none"
+      >
+        {/* ── Main pill container ────────────────────────────────────────── */}
+        <View
           style={[
-            styles.indicatorGlow,
+            styles.pill,
             {
-              left: 0,
-              width: INDICATOR_WIDTH,
-              transform: [{ translateX }],
+              backgroundColor: glassBg,
+              borderRadius: TAB_BAR_RADIUS,
+              borderColor: hexToRgba(accentSecondary, 0.15),
             },
           ]}
         >
-          <LinearGradient
-            colors={[
-              hexToRgba(accentPrimary, 0.35),
-              hexToRgba(accentSecondary, 0.15),
-              'transparent',
+          {/* ── Active indicator glow layer (wide, soft) ───────────────── */}
+          <Animated.View
+            style={[
+              styles.indicatorGlow,
+              {
+                left: 0,
+                width: INDICATOR_WIDTH,
+                transform: [{ translateX }],
+              },
             ]}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </Animated.View>
+          >
+            <LinearGradient
+              colors={[
+                hexToRgba(accentPrimary, 0.35),
+                hexToRgba(accentSecondary, 0.15),
+                'transparent',
+              ]}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
 
-        {/* ── Active indicator line (crisp, neon gradient) ────────────── */}
-        <Animated.View
-          style={[
-            styles.indicatorLine,
-            {
-              left: 0,
-              width: INDICATOR_WIDTH,
-              transform: [{ translateX }, { scaleX: scalePulse }],
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={[accentPrimary, accentSecondary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </Animated.View>
+          {/* ── Active indicator line (crisp, neon gradient) ────────────── */}
+          <Animated.View
+            style={[
+              styles.indicatorLine,
+              {
+                left: 0,
+                width: INDICATOR_WIDTH,
+                transform: [{ translateX }, { scaleX: scalePulse }],
+              },
+            ]}
+          >
+            <LinearGradient
+              colors={[accentPrimary, accentSecondary]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
 
-        {/* ── Tab buttons row ─────────────────────────────────────────── */}
-        <View style={styles.tabsRow}>
-          {state.routes.map((route, index) => {
-            const { options } = descriptors[route.key];
-            const isFocused = state.index === index;
+          {/* ── Tab buttons row ─────────────────────────────────────────── */}
+          <View style={styles.tabsRow}>
+            {state.routes.map((route, index) => {
+              const { options } = descriptors[route.key];
+              const isFocused = state.index === index;
 
-            const iconSet = TAB_ICONS[route.name] ?? TAB_ICONS.Discover;
-            const iconName = isFocused ? iconSet.focused : iconSet.default;
-            const iconColor = isFocused ? textPrimary : textMuted;
+              const iconSet = TAB_ICONS[route.name] ?? TAB_ICONS.Discover;
+              const iconName = isFocused ? iconSet.focused : iconSet.default;
+              const iconColor = isFocused ? textPrimary : textMuted;
 
-            const label =
-              (typeof options.tabBarLabel === 'string'
-                ? options.tabBarLabel
-                : undefined) ??
-              options.title ??
-              FALLBACK_LABELS[route.name] ??
-              route.name;
+              const label =
+                (typeof options.tabBarLabel === 'string'
+                  ? options.tabBarLabel
+                  : undefined) ??
+                options.title ??
+                FALLBACK_LABELS[route.name] ??
+                route.name;
 
-            return (
-              <TouchableOpacity
-                key={route.key}
-                accessibilityRole="button"
-                accessibilityState={isFocused ? { selected: true } : {}}
-                accessibilityLabel={options.tabBarAccessibilityLabel}
-                testID={options.tabBarButtonTestID}
-                onPress={() => handlePress(route.key, route.name, isFocused)}
-                activeOpacity={0.7}
-                style={styles.tabItem}
-              >
-                {/* Ambient glow dot behind active icon */}
-                {isFocused && (
-                  <View
+              return (
+                <TouchableOpacity
+                  key={route.key}
+                  accessibilityRole="button"
+                  accessibilityState={isFocused ? { selected: true } : {}}
+                  accessibilityLabel={options.tabBarAccessibilityLabel}
+                  testID={options.tabBarButtonTestID}
+                  onPress={() => handlePress(route.key, route.name, isFocused)}
+                  activeOpacity={0.7}
+                  style={styles.tabItem}
+                >
+                  {/* Ambient glow dot behind active icon */}
+                  {isFocused && (
+                    <View
+                      style={[
+                        styles.activeIconGlow,
+                        {
+                          backgroundColor: hexToRgba(accentPrimary, 0.22),
+                        },
+                      ]}
+                    />
+                  )}
+
+                  <MaterialCommunityIcons
+                    name={iconName}
+                    size={ICON_SIZE}
+                    color={iconColor}
+                    style={styles.icon}
+                  />
+
+                  {/* Label — always visible, dimmed when inactive */}
+                  <Animated.Text
                     style={[
-                      styles.activeIconGlow,
+                      styles.label,
                       {
-                        backgroundColor: hexToRgba(accentPrimary, 0.22),
+                        color: isFocused ? textPrimary : textMuted,
+                        opacity: isFocused ? 1 : 0.5,
                       },
                     ]}
-                  />
-                )}
-
-                <MaterialCommunityIcons
-                  name={iconName}
-                  size={ICON_SIZE}
-                  color={iconColor}
-                  style={styles.icon}
-                />
-
-                {/* Label — always visible, dimmed when inactive */}
-                <Animated.Text
-                  style={[
-                    styles.label,
-                    {
-                      color: isFocused ? textPrimary : textMuted,
-                      opacity: isFocused ? 1 : 0.5,
-                    },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {label}
-                </Animated.Text>
-              </TouchableOpacity>
-            );
-          })}
+                    numberOfLines={1}
+                  >
+                    {label}
+                  </Animated.Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
       </View>
-    </View>
+    </>
   );
 };
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
+  /** Gradient overlay that fades scrolled content before it bleeds into the pill */
+  fadeOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: FADE_OVERLAY_HEIGHT,
+    zIndex: 1,
+  },
   /** Absolutely-positioned wrapper that floats the pill above the bottom edge */
   wrapper: {
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    // Slight elevation for Android shadow
+    // Slight elevation for Android shadow; pill is above the fade overlay
+    zIndex: 2,
     elevation: 12,
   },
   /** The main pill container with glass background and border */
