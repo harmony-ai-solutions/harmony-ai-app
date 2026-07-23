@@ -4,7 +4,6 @@ import {
   View,
   FlatList,
   TextInput,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,6 +13,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -41,6 +41,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export const CharactersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('characters');
 
@@ -104,7 +105,7 @@ export const CharactersScreen: React.FC = () => {
   };
 
   const handleLongPress = (profile: CharacterProfile) => {
-    Alert.alert(
+    showAlert(
       t('deleteConfirmTitle'),
       t('deleteConfirmMessage', { name: profile.name }),
       [
@@ -127,7 +128,7 @@ export const CharactersScreen: React.FC = () => {
                 return next;
               });
             } catch {
-              Alert.alert(t('common:error'), t('deleteFailed'));
+              showAlert(t('common:error'), t('deleteFailed'));
             }
           },
         },

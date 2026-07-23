@@ -15,7 +15,6 @@ import {
   View,
   ScrollView,
   TextInput,
-  Alert,
   ActivityIndicator,
   TouchableOpacity,
   Image,
@@ -38,6 +37,7 @@ const log = createLogger('[EntityConfigEditScreen]');
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
@@ -74,6 +74,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
   navigation,
 }) => {
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { entityId } = route.params ?? {};
 
@@ -173,7 +174,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
       // Load entity
       const entity = await getEntity(id);
       if (!entity) {
-        Alert.alert('Error', 'Entity not found.');
+        showAlert('Error', 'Entity not found.');
         navigation.goBack();
         return;
       }
@@ -304,12 +305,12 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
           err?.message?.includes('UNIQUE') ||
           err?.message?.includes('alias')
         ) {
-          Alert.alert(
+          showAlert(
             'Alias Conflict',
             'That alias is already taken by another entity.',
           );
         } else {
-          Alert.alert('Error', err?.message ?? 'Failed to save entity.');
+          showAlert('Error', err?.message ?? 'Failed to save entity.');
         }
         setIsSaving(false);
         return;
@@ -330,7 +331,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
 
       navigation.goBack();
     } catch (err) {
-      Alert.alert('Error', 'Failed to save entity settings.');
+      showAlert('Error', 'Failed to save entity settings.');
     } finally {
       setIsSaving(false);
     }
@@ -338,7 +339,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
 
   // ── Delete entity ─────────────────────────────────────────────────────────
   const handleDelete = () => {
-    Alert.alert(
+    showAlert(
       'Delete Entity',
       'This will permanently remove the entity configuration. Chat history will be preserved but the entity will no longer be accessible.',
       [
@@ -351,7 +352,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
               await deleteEntity(entityId!);
               navigation.navigate('EntityConfig');
             } catch {
-              Alert.alert('Error', 'Failed to delete entity.');
+              showAlert('Error', 'Failed to delete entity.');
             }
           },
         },

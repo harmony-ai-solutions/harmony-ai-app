@@ -16,11 +16,11 @@ import {
   Image,
   StyleSheet,
   Modal,
-  Alert,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useAppAlert } from '../../contexts/AppAlertContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ImageViewerModal } from '../modals/ImageViewerModal';
 import { CharacterImage } from '../../database/models';
@@ -41,6 +41,7 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
   onDeleteImage,
 }) => {
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
 
   // Image viewer state
   const [viewerVisible, setViewerVisible] = useState(false);
@@ -75,7 +76,7 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
     setActionSheetVisible(false);
     if (actionTargetId === null) return;
     const id = actionTargetId;
-    Alert.alert('Delete Image', 'Remove this image from the profile?', [
+    showAlert('Delete Image', 'Remove this image from the profile?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',

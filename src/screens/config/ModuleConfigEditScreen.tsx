@@ -4,7 +4,6 @@ import {
   View,
   ScrollView,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   TextInput,
   Platform,
@@ -24,6 +23,7 @@ import { ThemedCard } from '../../components/themed/ThemedCard';
 import { SectionHeader } from '../../components/themed/SectionHeader';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
+import { useAppAlert } from '../../contexts/AppAlertContext';
 import { FormField } from '../../components/config/FormField';
 import { AdvancedSamplingParams } from '../../components/config/AdvancedSamplingParams';
 import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
@@ -145,6 +145,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const route = useRoute<ModuleConfigEditRouteProp>();
   const navigation = useNavigation<ModuleConfigEditNavigationProp>();
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { bottom: safeBottom } = useSafeAreaInsets();
   
   const { moduleType, configId } = route.params;
@@ -375,7 +376,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
   const handleSave = async () => {
     if (!formValues.name) {
-      Alert.alert('Error', 'Config name is required');
+      showAlert('Error', 'Config name is required');
       return;
     }
 
@@ -383,7 +384,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
     try {
       const repo = MODULE_REPOSITORIES[moduleType];
       if (!repo) {
-        Alert.alert('Error', 'Unknown module type');
+        showAlert('Error', 'Unknown module type');
         return;
       }
 
@@ -392,11 +393,11 @@ export const ModuleConfigEditScreen: React.FC = () => {
         const txProvider = formValues.transcription_provider;
         const vadProvider = formValues.vad_provider;
         if (!txProvider) {
-          Alert.alert('Error', 'Transcription provider is required');
+          showAlert('Error', 'Transcription provider is required');
           return;
         }
         if (!vadProvider) {
-          Alert.alert('Error', 'VAD provider is required');
+          showAlert('Error', 'VAD provider is required');
           return;
         }
 
@@ -425,7 +426,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
         // Standard module
         const providerType = formValues.provider;
         if (!providerType) {
-          Alert.alert('Error', 'Provider is required');
+          showAlert('Error', 'Provider is required');
           return;
         }
 
@@ -459,7 +460,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
       navigation.goBack();
     } catch (error) {
       log.error('Failed to save:', error);
-      Alert.alert('Error', 'Failed to save configuration');
+      showAlert('Error', 'Failed to save configuration');
     } finally {
       setSaving(false);
     }
@@ -469,7 +470,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
     const repo = MODULE_REPOSITORIES[moduleType];
     if (!repo || !configId) return;
 
-    Alert.alert(
+    showAlert(
       'Delete Configuration',
       'Are you sure you want to delete this configuration?',
       [

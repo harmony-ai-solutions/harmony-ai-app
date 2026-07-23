@@ -3,7 +3,6 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Alert,
   TouchableOpacity,
   Animated,
   Easing,
@@ -13,6 +12,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useAppAlert } from '../../contexts/AppAlertContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
@@ -43,6 +43,7 @@ export const SyncSettingsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { isConnected, isPaired, isReconnecting, reconnectAttempt, nextReconnectIn, showToast } =
     useSyncConnection();
 
@@ -119,7 +120,7 @@ export const SyncSettingsScreen: React.FC = () => {
   // ── Handlers (preserved from original) ─────────────────────────────────────
   const handleSyncNow = async () => {
     if (!isConnected) {
-      Alert.alert('Not Connected', 'Please connect to Harmony Link first from the Connection Setup screen.');
+      showAlert('Not Connected', 'Please connect to Harmony Link first from the Connection Setup screen.');
       return;
     }
 
@@ -142,18 +143,18 @@ export const SyncSettingsScreen: React.FC = () => {
         showToast('Connection lost - reconnecting...');
       } else {
         showToast('Failed to start sync: ' + errorMsg);
-        Alert.alert('Sync Error', 'Failed to start sync: ' + errorMsg);
+        showAlert('Sync Error', 'Failed to start sync: ' + errorMsg);
       }
     }
   };
 
   const handleForceFullSync = () => {
     if (!isConnected) {
-      Alert.alert('Not Connected', 'Please connect to Harmony Link first from the Connection Setup screen.');
+      showAlert('Not Connected', 'Please connect to Harmony Link first from the Connection Setup screen.');
       return;
     }
 
-    Alert.alert(
+    showAlert(
       'Force Full Re-Sync',
       'This will re-sync ALL data between this device and Harmony Link. This can take a while and may use significant bandwidth.\n\nUse this only if you suspect data is out of sync.',
       [

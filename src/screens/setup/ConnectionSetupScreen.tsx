@@ -4,7 +4,6 @@ import {
   StyleSheet,
   ScrollView,
   TextInput,
-  Alert,
   TouchableOpacity,
   Animated,
   Easing,
@@ -17,6 +16,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { createLogger } from '../../utils/logger';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useAppAlert } from '../../contexts/AppAlertContext';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
@@ -590,6 +590,7 @@ const StatusPulseDot: React.FC<StatusPulseDotProps> = ({
 
 export const ConnectionSetupScreen: React.FC = () => {
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { showToast, isPaired, isConnected, isConnecting, reconnect } = useSyncConnection();
   const { t } = useTranslation('connection');
@@ -639,7 +640,7 @@ export const ConnectionSetupScreen: React.FC = () => {
     (mode: 'selfhosted' | 'cloud') => {
       if (mode === connectionMode) return;
 
-      Alert.alert(
+      showAlert(
         ta('switch_warning_title'),
         mode === 'cloud'
           ? ta('switch_warning_message_cloud')
@@ -819,7 +820,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       setStatus('Connection failed');
       setIsManuallyConnecting(false);
       showToast('Failed to connect with selected security mode');
-      Alert.alert('Connection Failed', 'Failed to connect: ' + (err.message || 'Unknown error'));
+      showAlert('Connection Failed', 'Failed to connect: ' + (err.message || 'Unknown error'));
     }
   };
 
@@ -862,7 +863,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       setStatus('Connection rejected');
       setIsManuallyConnecting(false);
       showToast('Harmony Link rejected the connection request');
-      Alert.alert(
+      showAlert(
         'Connection Rejected',
         'Harmony Link rejected the connection request. Please try again or check device approval settings on Harmony Link.',
       );
@@ -914,7 +915,7 @@ export const ConnectionSetupScreen: React.FC = () => {
 
   const handleConnect = async () => {
     if (!url || !port) {
-      Alert.alert('Error', 'Please enter both URL and Port');
+      showAlert('Error', 'Please enter both URL and Port');
       return;
     }
 
@@ -933,7 +934,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       setStatus('Connection failed');
       setIsManuallyConnecting(false);
       showToast('Failed to connect to Harmony Link');
-      Alert.alert(
+      showAlert(
         'Connection Failed',
         'Failed to connect to Harmony Link. Please check the IP address and port, and ensure Harmony Link is running.',
       );
@@ -1190,7 +1191,7 @@ export const ConnectionSetupScreen: React.FC = () => {
                   <ThemedButton
                     label={t('unpairDevice')}
                     onPress={async () => {
-                      Alert.alert(t('unpairTitle'), t('unpairMessage'), [
+                      showAlert(t('unpairTitle'), t('unpairMessage'), [
                         { text: t('common:cancel'), style: 'cancel' },
                         {
                           text: t('unpair'),
@@ -1217,7 +1218,7 @@ export const ConnectionSetupScreen: React.FC = () => {
                     <ThemedButton
                       label={t('resetSecurityMode')}
                       onPress={async () => {
-                        Alert.alert(t('resetSecurityTitle'), t('resetSecurityMessage'), [
+                        showAlert(t('resetSecurityTitle'), t('resetSecurityMessage'), [
                           { text: t('common:cancel'), style: 'cancel' },
                           {
                             text: t('reset'),

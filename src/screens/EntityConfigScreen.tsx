@@ -3,7 +3,6 @@ import {
   StyleSheet,
   View,
   FlatList,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +12,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -39,6 +39,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export const EntityConfigScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('entityConfig');
   const [entityItems, setEntityItems] = useState<EntityListItem[]>([]);
@@ -109,7 +110,7 @@ export const EntityConfigScreen: React.FC = () => {
 
   const handleDelete = (item: EntityListItem) => {
     const entityName = item.characterProfileName || item.entity.alias || item.entity.id.substring(0, 8);
-    Alert.alert(
+    showAlert(
       t('deleteEntity'),
       t('deleteConfirm', { name: entityName }),
       [
@@ -124,7 +125,7 @@ export const EntityConfigScreen: React.FC = () => {
                 prev.filter(e => e.entity.id !== item.entity.id),
               );
             } catch {
-              Alert.alert(t('common:error'), t('deleteFailed') || 'Failed to delete entity.');
+              showAlert(t('common:error'), t('deleteFailed') || 'Failed to delete entity.');
             }
           },
         },

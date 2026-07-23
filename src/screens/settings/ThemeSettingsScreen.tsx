@@ -5,7 +5,6 @@ import {
     ScrollView,
     TouchableOpacity,
     StyleSheet,
-    Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -14,6 +13,7 @@ import * as DocumentPicker from '@react-native-documents/picker';
 import { isErrorWithCode, errorCodes } from '@react-native-documents/picker';
 import RNFS from 'react-native-fs';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useAppAlert } from '../../contexts/AppAlertContext';
 import { useEmoji } from '../../contexts/EmojiContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
@@ -43,6 +43,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
     } = useAppTheme();
 
     const { emojiSet, setEmojiSet } = useEmoji();
+    const { showAlert } = useAppAlert();
 
     const EMOJI_STYLES = [
         { set: 'native' as EmojiSet, label: 'Native (System)', description: 'Use your device\'s built-in emoji style', sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
@@ -82,7 +83,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 setSystemThemeEnabled(false);
             }
         } catch (err) {
-            Alert.alert('Error', 'Failed to switch theme');
+            showAlert('Error', 'Failed to switch theme');
         }
     };
 
@@ -92,7 +93,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
     const handleEditTheme = (themeToEdit: Theme) => {
         if (!themeToEdit.isCustom) {
-            Alert.alert(
+            showAlert(
                 'Built-in Theme',
                 'Built-in themes cannot be edited. Create a custom theme based on this one?',
                 [
@@ -111,7 +112,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
     };
 
     const handleDeleteTheme = (themeToDelete: Theme) => {
-        Alert.alert(
+        showAlert(
             'Delete Theme',
             `Are you sure you want to delete "${themeToDelete.name}"?`,
             [
@@ -123,7 +124,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                         try {
                             await deleteCustomTheme(themeToDelete.id);
                         } catch (e) {
-                            Alert.alert('Error', 'Failed to delete theme');
+                            showAlert('Error', 'Failed to delete theme');
                         }
                     },
                 },
@@ -140,15 +141,15 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
             if (result) {
                 const fileContent = await RNFS.readFile(result.uri, 'utf8');
                 await importTheme(fileContent);
-                Alert.alert('Success', 'Theme imported successfully');
+                showAlert('Success', 'Theme imported successfully');
             }
         } catch (err) {
             if (isErrorWithCode(err)) {
                 if (err.code !== errorCodes.OPERATION_CANCELED) {
-                    Alert.alert('Error', 'Failed to import theme');
+                    showAlert('Error', 'Failed to import theme');
                 }
             } else {
-                Alert.alert('Error', 'An unexpected error occurred');
+                showAlert('Error', 'An unexpected error occurred');
             }
         }
     };
@@ -156,9 +157,9 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
     const handleSyncThemes = async () => {
         try {
             await syncWithHarmonyLink();
-            Alert.alert('Success', 'Themes synced with Harmony Link');
+            showAlert('Success', 'Themes synced with Harmony Link');
         } catch (err) {
-            Alert.alert('Error', 'Failed to sync themes');
+            showAlert('Error', 'Failed to sync themes');
         }
     };
 
@@ -166,7 +167,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
         try {
             await setDynamicBackgroundEnabled(value);
         } catch (err) {
-            Alert.alert('Error', 'Failed to update background setting');
+            showAlert('Error', 'Failed to update background setting');
         }
     };
 

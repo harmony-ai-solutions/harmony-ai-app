@@ -18,6 +18,7 @@ import { SyncConnectionProvider, useSyncConnection } from './src/contexts/SyncCo
 import { EntitySessionProvider } from './src/contexts/EntitySessionContext';
 import { EmojiProvider } from './src/contexts/EmojiContext';
 import { I18nProvider } from './src/contexts/I18nContext';
+import { AppAlertProvider } from './src/contexts/AppAlertContext';
 import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoadingScreen';
 import { InitialPairingModal } from './src/components/modals/InitialPairingModal';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
@@ -127,7 +128,9 @@ function App() {
                 <SyncConnectionProvider>
                     <EntitySessionProvider>
                       <EmojiProvider>
-                        <AppContent />
+                        <AppAlertProvider>
+                          <AppContent />
+                        </AppAlertProvider>
                       </EmojiProvider>
                     </EntitySessionProvider>
                 </SyncConnectionProvider>

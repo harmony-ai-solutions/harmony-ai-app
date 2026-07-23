@@ -5,11 +5,12 @@
  */
 
 import React, {useState} from 'react';
-import {View, StyleSheet, ActivityIndicator, Alert} from 'react-native';
+import {View, StyleSheet, ActivityIndicator} from 'react-native';
 import {Text, Button} from 'react-native-paper';
 import {useTranslation} from 'react-i18next';
 import {useDatabase} from '../../contexts/DatabaseContext';
 import {useAppTheme} from '../../contexts/ThemeContext';
+import {useAppAlert} from '../../contexts/AppAlertContext';
 import {wipeDatabaseCompletely} from '../../database';
 
 /**
@@ -19,10 +20,11 @@ export function DatabaseLoadingScreen() {
   const {isLoading, error, retryInitialization} = useDatabase();
   const {theme} = useAppTheme();
   const {t} = useTranslation('database');
+  const {showAlert} = useAppAlert();
   const [isWiping, setIsWiping] = useState(false);
 
   const handleWipeDatabase = () => {
-    Alert.alert(
+    showAlert(
       t('wipeConfirmTitle'),
       t('wipeConfirmMessage'),
       [
@@ -37,7 +39,7 @@ export function DatabaseLoadingScreen() {
             setIsWiping(true);
             try {
               await wipeDatabaseCompletely();
-              Alert.alert(
+              showAlert(
                 t('wipeSuccess'),
                 t('wipeSuccessMessage'),
                 [
@@ -52,7 +54,7 @@ export function DatabaseLoadingScreen() {
               );
             } catch (err) {
               const errorMessage = err instanceof Error ? err.message : String(err);
-              Alert.alert(
+              showAlert(
                 t('common:error'),
                 t('wipeFailed', { message: errorMessage }),
                 [

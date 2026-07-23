@@ -12,7 +12,6 @@ import {
   Platform,
   ActivityIndicator,
   ToastAndroid,
-  Alert,
   NativeScrollEvent,
   NativeSyntheticEvent,
   TouchableOpacity,
@@ -29,6 +28,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ChatBubble } from '../components/chat/ChatBubble';
@@ -86,6 +86,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     entityName: routeEntityName,
   } = route.params;
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { isConnected } = useSyncConnection();
   const { isSessionActive, startInteractionSession, stopInteractionSession } =
     useEntitySession();
@@ -361,7 +362,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             ToastAndroid.LONG,
           );
         } else {
-          Alert.alert(
+          showAlert(
             t('common:error'),
             `${t('common:error')}: ${errorMessage}`,
             [{ text: t('common:ok') }],
@@ -515,7 +516,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         if (Platform.OS === 'android') {
           ToastAndroid.show(`Chat session error: ${error}`, ToastAndroid.LONG);
         } else {
-          Alert.alert(t('common:error'), error, [{ text: t('common:ok') }]);
+          showAlert(t('common:error'), error, [{ text: t('common:ok') }]);
         }
       }
     };
@@ -696,7 +697,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             ToastAndroid.LONG,
           );
         } else {
-          Alert.alert(t('common:error'), t('common:error') + `: ${error.message}`);
+          showAlert(t('common:error'), t('common:error') + `: ${error.message}`);
         }
       }
     },
@@ -737,7 +738,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Delete message handler
   const handleDeleteMessage = useCallback(
     async (messageId: string) => {
-      Alert.alert(
+      showAlert(
         'Delete Message',
         'Are you sure you want to delete this message?',
         [
@@ -774,7 +775,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Regenerate message handler
   const handleRegenerateMessage = useCallback(
     async (messageId: string) => {
-      Alert.alert(
+      showAlert(
         'Regenerate Response',
         'Delete this response and regenerate a new one?',
         [
@@ -825,7 +826,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                     ToastAndroid.LONG,
                   );
                 } else {
-                  Alert.alert('Error', error.message);
+                  showAlert('Error', error.message);
                 }
               }
             },
@@ -839,7 +840,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Edit message handler
   const handleEditMessage = useCallback(
     async (messageId: string, newText: string) => {
-      Alert.alert(
+      showAlert(
         'Edit and Resend',
         'Edit and resend this message? This will trigger a new AI response.',
         [
@@ -879,7 +880,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                     ToastAndroid.LONG,
                   );
                 } else {
-                  Alert.alert('Error', error.message);
+                  showAlert('Error', error.message);
                 }
               }
             },
@@ -917,7 +918,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             ToastAndroid.LONG,
           );
         } else {
-          Alert.alert('Retry Failed', error.message);
+          showAlert('Retry Failed', error.message);
         }
       }
     },
@@ -934,7 +935,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // For the delete entity flow, we need the partner entity ID from participantIds
     const otherIds = participantIds.filter(id => id !== ownEntityId);
     const partnerEntityId = otherIds[0] || '';
-    Alert.alert(
+    showAlert(
       'Delete Entity',
       `Delete "${headerName}"? Chat history will be preserved but this entity will no longer be accessible.`,
       [
@@ -947,7 +948,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               await deleteEntity(partnerEntityId);
               navigation.navigate('ChatList');
             } catch (err: any) {
-              Alert.alert(
+              showAlert(
                 t('common:error'),
                 err?.message ?? t('common:error'),
               );

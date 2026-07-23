@@ -15,7 +15,6 @@ import {
   View,
   ScrollView,
   TextInput,
-  Alert,
   ActivityIndicator,
   TouchableOpacity,
   Image,
@@ -41,6 +40,7 @@ const log = createLogger('[CreateAIScreen]');
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -356,6 +356,7 @@ const pickerStyles = StyleSheet.create({
 
 export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('createAI');
 
@@ -460,7 +461,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // ── Save & Create ────────────────────────────────────────────────────────────
   const handleCreate = async () => {
     if (!name.trim()) {
-      Alert.alert(t('nameRequired'), t('nameRequiredMessage'));
+      showAlert(t('nameRequired'), t('nameRequiredMessage'));
       return;
     }
 
@@ -556,7 +557,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         entityName: name,
       });
     } catch (err: any) {
-      Alert.alert(
+      showAlert(
         t('common:error'),
         t('createFailed', { message: err?.message ?? 'Unknown error' }),
       );

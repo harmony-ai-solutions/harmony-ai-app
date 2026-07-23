@@ -4,7 +4,6 @@ import {
   View,
   ScrollView,
   TextInput,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -22,6 +21,7 @@ import { v4 as uuidv4 } from 'uuid';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -47,6 +47,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { t } = useTranslation('characters');
   const { bottom: safeBottom } = useSafeAreaInsets();
 
@@ -108,7 +109,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       setPrimaryImageId(primary?.id ?? null);
     } catch (err) {
       log.error('Failed to load profile:', err);
-      Alert.alert(t('common:error'), t('loadFailed'));
+      showAlert(t('common:error'), t('loadFailed'));
     } finally {
       setIsLoadingProfile(false);
     }
@@ -117,19 +118,19 @@ export const CharacterProfileEditScreen: React.FC = () => {
   // ── Save ────────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!name.trim()) {
-      Alert.alert('Validation', 'Name is required.');
+      showAlert('Validation', 'Name is required.');
       return;
     }
 
     const typingWpm = parseInt(typingSpeedWpm, 10);
     if (isNaN(typingWpm) || typingWpm < 1 || typingWpm > 200) {
-      Alert.alert('Validation', 'Typing speed must be between 1 and 200 WPM.');
+      showAlert('Validation', 'Typing speed must be between 1 and 200 WPM.');
       return;
     }
 
     const audioChance = parseInt(audioResponseChance, 10);
     if (isNaN(audioChance) || audioChance < 0 || audioChance > 100) {
-      Alert.alert(
+      showAlert(
         'Validation',
         'Audio response chance must be between 0 and 100.',
       );
@@ -182,7 +183,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       navigation.goBack();
     } catch (err) {
       log.error('Failed to save profile:', err);
-      Alert.alert(t('common:error'), t('saveFailed'));
+      showAlert(t('common:error'), t('saveFailed'));
     } finally {
       setIsSaving(false);
     }
@@ -191,7 +192,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
   // ── Image operations ────────────────────────────────────────────────────────
   const handleAddImage = async () => {
     if (!profileId) {
-      Alert.alert(
+      showAlert(
         t('saveFirst'),
         t('saveFirstMessage'),
       );
@@ -211,7 +212,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
         const base64Data = asset.base64;
 
         if (!base64Data) {
-          Alert.alert(t('common:error'), t('imageError'));
+          showAlert(t('common:error'), t('imageError'));
           return;
         }
 
@@ -240,7 +241,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       }
     } catch (err) {
       log.error('Failed to add image:', err);
-      Alert.alert(t('common:error'), t('addImageFailed'));
+      showAlert(t('common:error'), t('addImageFailed'));
     }
   };
 
@@ -255,7 +256,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       );
     } catch (err) {
       log.error('Failed to set primary image:', err);
-      Alert.alert(t('common:error'), t('setPrimaryFailed'));
+      showAlert(t('common:error'), t('setPrimaryFailed'));
     }
   };
 
@@ -275,7 +276,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       }
     } catch (err) {
       log.error('Failed to delete image:', err);
-      Alert.alert(t('common:error'), t('deleteImageFailed'));
+      showAlert(t('common:error'), t('deleteImageFailed'));
     }
   };
 

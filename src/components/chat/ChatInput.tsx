@@ -15,6 +15,7 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import { useTranslation } from 'react-i18next';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
+import { useAppAlert } from '../../contexts/AppAlertContext';
 import AudioRecorder from '../../services/AudioRecorder';
 import { Theme } from '../../theme/types';
 import { createLogger } from '../../utils/logger';
@@ -54,6 +55,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
 }, ref) => {
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('chatDetail');
+  const { showAlert } = useAppAlert();
   const [text, setText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -200,7 +202,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
         // Check if it's a permission error
         if (error.message?.includes('permission')) {
           setHasRecordPermission(false);
-          Alert.alert(
+          showAlert(
             t('permissionRequired'),
             t('permissionMessage'),
             [
@@ -215,7 +217,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
             ]
           );
         } else {
-          Alert.alert(t('common:error'), t('recordingFailed'));
+          showAlert(t('common:error'), t('recordingFailed'));
         }
       }
     } else {
@@ -237,7 +239,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
         }
       } catch (error) {
         log.error('Failed to stop recording:', error);
-        Alert.alert(t('common:error'), t('recordingStopFailed'));
+        showAlert(t('common:error'), t('recordingStopFailed'));
       } finally {
         setIsProcessing(false);
       }
@@ -270,7 +272,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
       }
     } catch (error) {
       log.error('Failed to pick image:', error);
-      Alert.alert(t('common:error'), t('imagePickFailed'));
+      showAlert(t('common:error'), t('imagePickFailed'));
     }
   }, [disabled, onSendImage]);
 
