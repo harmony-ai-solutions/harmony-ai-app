@@ -37,11 +37,32 @@ export class CloudWebSocketConnection extends BaseWebSocketConnection implements
         const protocols = [`Bearer.${paseto}`];
         const ws = new WebSocket(url, protocols);
 
+        // Lifecycle tracking so the promise settles exactly once and the
+        // 'disconnected' event (+ reactive auth-refresh chain) only fires for
+        // connections that actually reached 'connected'.
+        //
+        // Connect-time failures (upgrade rejected with HTTP 401/404/500/503 —
+        // which RN surfaces as a generic onerror with no close code) settle the
+        // promise via onerror/timeout and let onclose perform ws cleanup WITHOUT
+        // emitting 'disconnected'. This is important because:
+        //   - the promise rejection already drives the caller's reconnect, and
+        //   - a spurious 'disconnected' would also trigger handleSyncDisconnected
+        //     → scheduleReconnect, racing the rejection path.
+        // (scheduleReconnect is idempotent, so a double-fire is merely wasteful,
+        //  but avoiding it keeps the logs and state clean.)
+        let settled = false;
+        let opened = false;
+
         // Set a timeout for the connection attempt (longer for cloud warm-pool init)
         const connectionTimeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
           log.error('Cloud WS connection timeout');
-          ws.close();
-          this.ws = null;
+          try { ws.close(); } catch (e) { log.warn('Error closing ws on timeout:', e); }
+          // NOTE: do NOT null this.ws here. onclose owns cleanup and needs
+          // this.ws === ws to recognise this as the current connection so it can
+          // null it. Nulling here would defeat the onclose guard.
+          this.emit('error', new Error('Cloud WS connection timeout'));
           reject(new Error('Cloud WS connection timeout'));
         }, 15000);
 
@@ -51,6 +72,9 @@ export class CloudWebSocketConnection extends BaseWebSocketConnection implements
         };
 
         ws.onopen = () => {
+          if (settled) return;
+          opened = true;
+          settled = true;
           clearTimeout(connectionTimeout);
           log.info('Cloud WS connected');
           this.emit('connected');
@@ -58,21 +82,18 @@ export class CloudWebSocketConnection extends BaseWebSocketConnection implements
         };
 
         ws.onerror = (error: any) => {
-          clearTimeout(connectionTimeout);
           log.error('Cloud WS error:', error);
-
-          // Do NOT null onclose here — onclose must remain set so the
-          // auth-refresh chain (close code 1008/4401 → AuthService.refresh())
-          // can fire.  The onclose handler already guards with
-          // `if (this.ws === ws)` so it won't act on stale connections.
-          ws.onopen = null;
-          ws.onmessage = null;
-          ws.onerror = null;
-          // ws.onclose intentionally kept — see above.
-          this.ws = null;
-
-          this.emit('error', error);
-          reject(error);
+          // Connect-time failure (never opened): settle the promise now. We
+          // intentionally do NOT null this.ws or detach onclose — onclose will
+          // fire next (RN guarantees error→close ordering) and perform the ws
+          // cleanup. For an already-opened connection, the error merely precedes
+          // onclose, which runs the auth-refresh + 'disconnected' path below.
+          if (!opened && !settled) {
+            clearTimeout(connectionTimeout);
+            settled = true;
+            this.emit('error', error);
+            reject(error);
+          }
         };
 
         ws.onclose = async (event) => {
@@ -80,29 +101,34 @@ export class CloudWebSocketConnection extends BaseWebSocketConnection implements
           log.info(`Cloud WS closed, code: ${event.code} reason: ${event.reason}`);
           this.stopHeartbeat();
 
-          // Only emit disconnected if this is still our current connection
-          if (this.ws === ws) {
-            this.ws = null;
+          // Only act if this is still the current connection — a subsequent
+          // connect() may have already replaced this.ws with a fresh socket.
+          if (this.ws !== ws) return;
+          this.ws = null;
 
-            // Auth-failure close (1008 policy / 4401 app-defined): refresh before
-            // signaling disconnect so the caller's reconnect upgrade uses a fresh PASETO.
-            const AUTH_CLOSE_CODES = [1008, 4401] as const;
-            if (event.code && (AUTH_CLOSE_CODES as readonly number[]).includes(event.code)) {
-              try {
-                const ok = await AuthService.refresh();
-                if (!ok) {
-                  // Refresh failed (revoked/refresh-token dead) → force re-login.
-                  // invalidate() emits 'auth:expired' → AuthContext → login screen.
-                  await AuthService.invalidate();
-                }
-              } catch (e) {
-                log.warn('Reactive refresh threw; invalidating', e);
-                await AuthService.invalidate().catch(() => {});
+          // Only run the disconnect path for connections that were established.
+          // Connect-time failures are already handled via the promise rejection
+          // (onerror/timeout) and must not emit 'disconnected'.
+          if (!opened) return;
+
+          // Auth-failure close (1008 policy / 4401 app-defined): refresh before
+          // signaling disconnect so the caller's reconnect upgrade uses a fresh PASETO.
+          const AUTH_CLOSE_CODES = [1008, 4401] as const;
+          if (event.code && (AUTH_CLOSE_CODES as readonly number[]).includes(event.code)) {
+            try {
+              const ok = await AuthService.refresh();
+              if (!ok) {
+                // Refresh failed (revoked/refresh-token dead) → force re-login.
+                // invalidate() emits 'auth:expired' → AuthContext → login screen.
+                await AuthService.invalidate();
               }
+            } catch (e) {
+              log.warn('Reactive refresh threw; invalidating', e);
+              await AuthService.invalidate().catch(() => {});
             }
-
-            this.emit('disconnected');
           }
+
+          this.emit('disconnected');
         };
 
         // Only assign to this.ws after all handlers are set up

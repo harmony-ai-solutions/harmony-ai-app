@@ -36,6 +36,12 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
   private status: CloudSessionStatus = 'idle';
   private sessionId: string | null = null;
   private proxyEndpoint: string | null = null;
+  // Wall-clock ms (Date.now()) at the moment status last transitioned to 'ready'.
+  // Used by callers to detect a session that has outlived the broker's 30s
+  // connect-timeout (ScheduleConnectTimeout) and is therefore likely torn down,
+  // even though this service still reports status === 'ready' (the broker does
+  // not push a termination notification).
+  private readyAt: number | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   private constructor() {
@@ -59,6 +65,15 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
 
   getSessionId(): string | null {
     return this.sessionId;
+  }
+
+  /**
+   * Wall-clock ms when the session last became 'ready', or null if not ready.
+   * Callers compare against the broker's connect-timeout window to decide
+   * whether a 'ready' session is still live or must be re-spawned.
+   */
+  getReadyAt(): number | null {
+    return this.readyAt;
   }
 
   // ── Connect (spawn / claim) ─────────────────────────────────────────────
@@ -113,6 +128,7 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
       // one from the broker.  Existing services will retry the WS upgrade with
       // backoff until success (~30-35s for warm pool; longer for cold start).
       this.status = 'ready';
+      this.readyAt = Date.now();
       this.emit('status', this.status);
       this.scheduleProactiveRefresh();
       log.info(`Cloud session ready: ${this.sessionId}`);
@@ -121,6 +137,7 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
       // Only flip to 'error' if we haven't already in the !res.ok branch.
       if (this.status === 'spawning') {
         this.status = 'error';
+        this.readyAt = null;
         this.emit('status', this.status);
       }
       this._connectPromise = null;
@@ -192,6 +209,7 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
       this.stopProactiveRefresh();
       this.sessionId = null;
       this.proxyEndpoint = null;
+      this.readyAt = null;
       this.status = 'idle';
       this.emit('status', this.status);
     }

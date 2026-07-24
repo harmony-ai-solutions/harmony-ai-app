@@ -38,10 +38,22 @@ export class NodeDatabase implements IDatabase {
     this.opts = opts;
     this.db = new Database(opts.path);
     if (!opts.skipPragmas) {
-      // Match production PRAGMAs (see connection.ts configureDatabase)
-      this.db.pragma('journal_mode = WAL');
+      // Match production PRAGMAs where they are meaningful (see connection.ts
+      // configureDatabase). foreign_keys + synchronous apply to both in-memory
+      // and file-backed databases.
       this.db.pragma('foreign_keys = ON');
       this.db.pragma('synchronous = NORMAL');
+      // WAL only for file-backed databases. SQLite cannot use WAL with an
+      // in-memory database (it silently keeps the MEMORY journal), but asking
+      // better-sqlite3 to switch an in-memory DB into WAL mode is a known
+      // source of cross-connection state corruption under serial (single-worker)
+      // Jest execution — it manifests as flaky "constraint violation did not
+      // throw" failures when several DB test files share one worker
+      // (e.g. under --detectOpenHandles). Skipping WAL for :memory: is safe and
+      // matches SQLite's own behaviour for in-memory databases.
+      if (opts.path !== ':memory:') {
+        this.db.pragma('journal_mode = WAL');
+      }
     }
   }
 

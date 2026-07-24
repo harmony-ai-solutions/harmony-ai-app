@@ -10,6 +10,16 @@ import i18n from './I18nContext';
 
 const log = createLogger('[SyncConnectionContext]');
 
+/**
+ * Broker connect-timeout window. The session broker (soulbits-cloud-backend
+ * ScheduleConnectTimeout) auto-transitions a session to grace_period if no
+ * WebSocket connects within this many ms. The conduct proxy cancels the timer
+ * via POST /v1/session/connected once a WS upgrade succeeds. Used to detect a
+ * "ready" session that has outlived its window and is therefore likely torn
+ * down (the broker pushes no termination notification to the app).
+ */
+const BROKER_CONNECT_TIMEOUT_MS = 30_000;
+
 interface SyncConnectionContextType {
   // Pairing state
   isPaired: boolean;
@@ -272,15 +282,33 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       let mode: string;
       if (source === 'cloud') {
         // Ensure the cloud session is ready before attempting a WS connection.
-        // The session broker spawns a Harmony Link container (30-35s warm pool,
-        // longer for cold start).  The WS upgrade will be rejected until the
-        // container is live.
+        // The session broker spawns a Soulbits Engine container (30-35s warm
+        // pool, longer for cold start).  The WS upgrade will be rejected until
+        // the container is live.
         const sessionStatus = cloudSessionService.getStatus();
+        const readyAt = cloudSessionService.getReadyAt();
+        const sessionAgeMs = readyAt != null ? Date.now() - readyAt : 0;
+
         if (sessionStatus !== 'ready') {
           log.info(`Cloud session status: ${sessionStatus}, waiting for ready...`);
           await cloudSessionService.connect();
           // connect() is idempotent — returns immediately if already ready,
           // otherwise waits for the broker to respond and emits 'ready'.
+        } else if (sessionAgeMs > BROKER_CONNECT_TIMEOUT_MS) {
+          // The broker tears down a session if no WebSocket connects within
+          // its connect-timeout window (ScheduleConnectTimeout, 30s). If our
+          // session is older than that window it has almost certainly been
+          // terminated → every WS upgrade will 404 and we would loop forever
+          // (status stays 'ready' because the broker pushes no termination
+          // notification). Force a fresh broker session to open a new window.
+          // The broker Connect handler is idempotent: it recovers a
+          // grace_period session or spawns a fresh one, so this is safe.
+          log.info(
+            `Cloud session is ${Math.round(sessionAgeMs / 1000)}s old (past the ` +
+            `${BROKER_CONNECT_TIMEOUT_MS / 1000}s broker deadline) — forcing fresh session`
+          );
+          await cloudSessionService.disconnect();
+          await cloudSessionService.connect();
         }
 
         url = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.sync}`;

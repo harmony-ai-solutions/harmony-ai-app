@@ -757,10 +757,18 @@ export const ConnectionSetupScreen: React.FC = () => {
                     label={ta('cloud_reconnect')}
                     onPress={async () => {
                       try {
-                        // Force a fresh session: disconnect + reconnect
+                        // Force a fresh broker session, then rebuild the sync
+                        // WebSocket so it re-dials through the refreshed
+                        // conduct-proxy route. The existing socket is pinned to
+                        // the old container's private IP (the proxy dials the
+                        // backend once at WS upgrade time), so without this
+                        // rebuild the app would keep talking to a dead backend
+                        // while the toast claimed success.
                         await cloudSessionService.disconnect();
                         // Re-connect creates a new session via POST /v1/session/connect
                         await cloudSessionService.connect();
+                        // Tear down + re-establish the sync WS against the new session.
+                        await reconnect();
                         showToast(ta('cloud_reconnect_success'));
                       } catch (e: any) {
                         log.warn('Cloud reconnect failed:', e);
