@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -97,9 +97,19 @@ export const ChatListScreen: React.FC = () => {
   }>({ name: 'User', avatarUri: null });
   const [selectorModalVisible, setSelectorModalVisible] = useState(false);
 
-  const loadChatList = useCallback(async (activeEntityId: string) => {
+  // Stable ref so onRefresh ([] deps) always reads the latest entity ID
+  const impersonatedEntityIdRef = useRef(impersonatedEntityId);
+  impersonatedEntityIdRef.current = impersonatedEntityId;
+
+  const loadChatList = async (activeEntityId: string, source: string = 'unknown') => {
     try {
-      setLoading(true);
+      log.info(`[LOAD] loadChatList called by source="${source}", entityId="${activeEntityId}"`);
+      if (source !== 'onRefresh') {
+        setLoading(true);
+      } else {
+        // Only set loading=true for initial load, not for refresh
+        // loading is managed separately from refreshing
+      }
 
       // Get all entities for display info lookups
       const entities = await getAllEntities();
@@ -325,10 +335,11 @@ export const ChatListScreen: React.FC = () => {
     } catch (error) {
       log.error('Failed to load chat list:', error);
     } finally {
+      log.info(`[LOAD] loadChatList finishing, source="${source}", setting loading=false, refreshing=false`);
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  };
 
   // Load global impersonated entity on mount
   const loadImpersonatedEntity = useCallback(async () => {
@@ -367,6 +378,7 @@ export const ChatListScreen: React.FC = () => {
 
   useFocusEffect(
     useCallback(() => {
+      log.info('[FOCUS] useFocusEffect fired, reloading chat list');
       loadImpersonatedEntity();
       // Reload chat list when screen gains focus (e.g., returning from
       // ChatDetailScreen) so the last-message preview reflects any messages
@@ -374,22 +386,25 @@ export const ChatListScreen: React.FC = () => {
       // stale because impersonatedEntityId hasn't changed, so the useEffect
       // below won't re-trigger loadChatList.
       if (impersonatedEntityId) {
-        loadChatList(impersonatedEntityId);
+        loadChatList(impersonatedEntityId, 'useFocusEffect');
       }
-    }, [loadImpersonatedEntity, loadChatList, impersonatedEntityId]),
+    }, [impersonatedEntityId]),
   );
 
   // Re-run loadChatList when impersonatedEntityId changes
   useEffect(() => {
     if (impersonatedEntityId) {
-      loadChatList(impersonatedEntityId);
+      log.info(`[USE_EFFECT] impersonatedEntityId changed to "${impersonatedEntityId}", loading chat list`);
+      loadChatList(impersonatedEntityId, 'useEffect');
     }
-  }, [impersonatedEntityId, loadChatList]);
+  }, [impersonatedEntityId]);
 
-  const onRefresh = () => {
+  const onRefresh = useCallback(async () => {
+    log.info('[REFRESH] Pull-to-refresh gesture triggered');
     setRefreshing(true);
-    loadChatList(impersonatedEntityId);
-  };
+    await loadChatList(impersonatedEntityIdRef.current, 'onRefresh');
+    setRefreshing(false);
+  }, []);
 
   const handleChatPress = (item: ChatListItem) => {
     if (item.isGroup) {
@@ -519,14 +534,6 @@ export const ChatListScreen: React.FC = () => {
     </TouchableOpacity>
   );
 
-  if (loading) {
-    return (
-      <ThemedView style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" />
-      </ThemedView>
-    );
-  }
-
   return (
     <ThemedView style={styles.container}>
       <ScreenHeader
@@ -655,12 +662,21 @@ export const ChatListScreen: React.FC = () => {
         </View>
       ) : (
         <FlatList
+          style={{ flex: 1 }}
           data={chatList}
           renderItem={renderItem}
           keyExtractor={item => item.interactionId}
           contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }}
+          alwaysBounceVertical
+          overScrollMode="always"
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme!.colors.accent.primary]}
+              tintColor={theme!.colors.accent.primary}
+              progressBackgroundColor={theme!.colors.background.surface}
+            />
           }
           ListEmptyComponent={
             <View

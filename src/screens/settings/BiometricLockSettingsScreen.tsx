@@ -5,7 +5,7 @@
  * Provides: enable/disable toggle, PIN setup/change, biometric info.
  */
 import React, { useState, useCallback } from 'react';
-import { View, ScrollView, StyleSheet } from 'react-native';
+import { View, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Switch } from 'react-native-paper';
@@ -34,6 +34,7 @@ export const BiometricLockSettingsScreen: React.FC = () => {
   } = useBiometricLock();
 
   const [showPinSetup, setShowPinSetup] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const handleToggle = useCallback(async (value: boolean) => {
     if (value) {
@@ -45,6 +46,11 @@ export const BiometricLockSettingsScreen: React.FC = () => {
       await setEnabled(false);
     }
   }, [setEnabled]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 800);
+  }, []);
 
   const handlePinSet = useCallback(async (pin: string) => {
     await setupPin(pin);
@@ -82,6 +88,15 @@ export const BiometricLockSettingsScreen: React.FC = () => {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme!.colors.accent.primary]}
+            tintColor={theme!.colors.accent.primary}
+            progressBackgroundColor={theme!.colors.background.surface}
+          />
+        }
       >
         {/* ── Toggle Card ── */}
         <ThemedCard elevated accentStripe style={styles.card}>

@@ -22,6 +22,7 @@ import {
   Platform,
   Modal,
   FlatList,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -116,12 +117,20 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
   // ── UI state ──────────────────────────────────────────────────────────────
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // ── Load on mount ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (entityId) {
       loadEntityData(entityId);
     }
+  }, [entityId]);
+
+  const onRefresh = useCallback(async () => {
+    if (!entityId) return;
+    setRefreshing(true);
+    await loadEntityData(entityId);
+    setRefreshing(false);
   }, [entityId]);
 
   // ── Refresh module configs when returning from ModuleConfigEdit ──────────
@@ -467,6 +476,15 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 48 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme.colors.accent.primary]}
+              tintColor={theme.colors.accent.primary}
+              progressBackgroundColor={theme.colors.background.surface}
+            />
+          }
         >
           {/* ── Identity Section ── */}
           <ThemedCard elevated accentStripe style={styles.section}>

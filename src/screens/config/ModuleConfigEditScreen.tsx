@@ -8,6 +8,7 @@ import {
   TextInput,
   Platform,
   KeyboardAvoidingView,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -170,12 +171,19 @@ export const ModuleConfigEditScreen: React.FC = () => {
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       loadConfig();
     }, [configId, moduleType])
   );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadConfig();
+    setRefreshing(false);
+  }, [configId, moduleType]);
 
   if (!theme) return null;
 
@@ -796,6 +804,15 @@ export const ModuleConfigEditScreen: React.FC = () => {
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 48 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme!.colors.accent.primary]}
+              tintColor={theme!.colors.accent.primary}
+              progressBackgroundColor={theme!.colors.background.surface}
+            />
+          }
         >
           {/* ── General Section ── */}
           <ThemedCard elevated accentStripe style={styles.section}>

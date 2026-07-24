@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedCard } from '../components/themed/ThemedCard';
@@ -74,6 +75,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
   // ── UI state ────────────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(isEditMode);
+  const [refreshing, setRefreshing] = useState(false);
 
   // ── Load existing profile ───────────────────────────────────────────────────
   useEffect(() => {
@@ -114,6 +116,13 @@ export const CharacterProfileEditScreen: React.FC = () => {
       setIsLoadingProfile(false);
     }
   };
+
+  const onRefresh = useCallback(async () => {
+    if (!isEditMode || !profileId) return;
+    setRefreshing(true);
+    await loadProfile(profileId);
+    setRefreshing(false);
+  }, [isEditMode, profileId]);
 
   // ── Save ────────────────────────────────────────────────────────────────────
   const handleSave = async () => {
@@ -361,6 +370,15 @@ export const CharacterProfileEditScreen: React.FC = () => {
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme!.colors.accent.primary]}
+              tintColor={theme!.colors.accent.primary}
+              progressBackgroundColor={theme!.colors.background.surface}
+            />
+          }
         >
           {/* ── BASIC INFORMATION ── */}
           {renderSection(

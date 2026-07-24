@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  RefreshControl,
   ToastAndroid,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -93,6 +94,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [partnerName, setPartnerName] = useState<string>('Chat');
@@ -242,56 +244,64 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   }, [participantKey]);
 
   // Load messages and last-read timestamp
-  useEffect(() => {
-    const loadMessagesAndTimestamp = async () => {
-      try {
-        setLoading(true);
-
-        if (!participantKey) {
-          setLoading(false);
-          return;
-        }
-
-        const existingMessages = await getRecentConversationMessages(
-          ownEntityId,
-          participantKey,
-          MESSAGES_PAGE_SIZE,
-        );
-        setMessages(existingMessages);
-        loadedMessagesRef.current = existingMessages;
-
-        // Detect stuck transcriptions (messages with audio but no text that aren't actively transcribing)
-        const stuckTranscriptions = existingMessages
-          .filter(
-            msg =>
-              msg.audio_data &&
-              msg.audio_data.length > 0 &&
-              (!msg.content || msg.content.trim().length === 0) &&
-              msg.sender_entity_id === ownEntityId,
-          )
-          .map(msg => msg.id);
-
-        if (stuckTranscriptions.length > 0) {
-          log.info(
-            `Found ${stuckTranscriptions.length} stuck transcriptions on load`,
-          );
-          setFailedTranscriptions(new Set(stuckTranscriptions));
-        }
-
-        const timestamp =
-          await ChatPreferencesService.getLastReadTimestamp(routeInteractionId);
-        setLastReadTimestamp(timestamp);
-        lastReadTimestampRef.current = timestamp;
-        sessionDividerTimestamp.current = timestamp;
-      } catch (error) {
-        log.error('Failed to load messages:', error);
-      } finally {
-        setLoading(false);
+  const loadMessagesAndTimestamp = useCallback(async () => {
+    try {
+      if (!participantKey) {
+        return;
       }
-    };
 
-    loadMessagesAndTimestamp();
+      const existingMessages = await getRecentConversationMessages(
+        ownEntityId,
+        participantKey,
+        MESSAGES_PAGE_SIZE,
+      );
+      setMessages(existingMessages);
+      loadedMessagesRef.current = existingMessages;
+
+      // Detect stuck transcriptions (messages with audio but no text that aren't actively transcribing)
+      const stuckTranscriptions = existingMessages
+        .filter(
+          msg =>
+            msg.audio_data &&
+            msg.audio_data.length > 0 &&
+            (!msg.content || msg.content.trim().length === 0) &&
+            msg.sender_entity_id === ownEntityId,
+        )
+        .map(msg => msg.id);
+
+      if (stuckTranscriptions.length > 0) {
+        log.info(
+          `Found ${stuckTranscriptions.length} stuck transcriptions on load`,
+        );
+        setFailedTranscriptions(new Set(stuckTranscriptions));
+      }
+
+      const timestamp =
+        await ChatPreferencesService.getLastReadTimestamp(routeInteractionId);
+      setLastReadTimestamp(timestamp);
+      lastReadTimestampRef.current = timestamp;
+      sessionDividerTimestamp.current = timestamp;
+    } catch (error) {
+      log.error('Failed to load messages:', error);
+    }
   }, [routeInteractionId, participantKey, ownEntityId]);
+
+  // Load messages and last-read timestamp on mount
+  useEffect(() => {
+    const init = async () => {
+      setLoading(true);
+      await loadMessagesAndTimestamp();
+      setLoading(false);
+    };
+    init();
+  }, [loadMessagesAndTimestamp]);
+
+  // Pull-to-refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadMessagesAndTimestamp();
+    setRefreshing(false);
+  }, [loadMessagesAndTimestamp]);
 
   // Keep stable refs in sync with state
   useEffect(() => {
@@ -1122,13 +1132,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     ],
   );
 
-  if (loading) {
-    return (
-      <ThemedView style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color={theme?.colors.accent.primary} />
-      </ThemedView>
-    );
-  }
 
   return (
     <ThemedView style={styles.container}>
@@ -1307,15 +1310,25 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <FlatList
-          ref={flatListRef}
+        style={{ flex: 1 }}
+        ref={flatListRef}
           data={messagesWithDivider}
           renderItem={renderMessage}
           keyExtractor={item => item.id}
-          contentContainerStyle={styles.messageList}
+          contentContainerStyle={[styles.messageList, { flexGrow: 1 }]}
           onScroll={handleScroll}
           scrollEventThrottle={100}
           onMomentumScrollEnd={handleScrollEnd}
           onScrollEndDrag={handleScrollEnd}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme!.colors.accent.primary]}
+              tintColor={theme!.colors.accent.primary}
+              progressBackgroundColor={theme!.colors.background.surface}
+            />
+          }
           initialNumToRender={MESSAGES_PAGE_SIZE}
           maxToRenderPerBatch={MESSAGES_PAGE_SIZE}
           windowSize={21}

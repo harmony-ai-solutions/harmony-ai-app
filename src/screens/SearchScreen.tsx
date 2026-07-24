@@ -7,12 +7,13 @@
  * reactive result-filtering interface.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
   TextInput,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -29,8 +30,14 @@ export const SearchScreen: React.FC = () => {
   const { t } = useTranslation('search');
   const { top: safeTop } = useSafeAreaInsets();
   const [query, setQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
   if (!theme) return null;
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 800);
+  }, []);
 
   const accent = theme.colors.accent.primary;
   const baseHex = theme.colors.background.base;
@@ -38,48 +45,59 @@ export const SearchScreen: React.FC = () => {
 
   return (
     <ThemedView variant="base" style={styles.container}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingTop: safeTop + 12, paddingBottom: TAB_BAR_CONTENT_PAD },
-        ]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Page header — gradient stripe + title + subtitle */}
+      {/* Header OUTSIDE ScrollView with safe-area padding — so RefreshControl doesn't appear above it */}
+      <View style={{ paddingTop: safeTop + 12 }}>
         <ScreenHeader
           title={t('title')}
           subtitle={t('subtitle')}
           style={{ paddingTop: 0 }}
         >
-            {/* Search input */}
-            <View style={[styles.searchBar, { backgroundColor: inputBg, borderColor: hexToRgba(accent, 0.25) }]}>
-          <MaterialCommunityIcons
-            name="magnify"
-            size={20}
-            color={theme.colors.text.muted}
-            style={styles.searchIcon}
-          />
-          <TextInput
-            style={[styles.searchInput, { color: theme.colors.text.primary }]}
-            placeholder={t('placeholder')}
-            placeholderTextColor={theme.colors.text.disabled}
-            value={query}
-            onChangeText={setQuery}
-            returnKeyType="search"
-          />
-          {query.length > 0 && (
+          {/* Search input */}
+          <View style={[styles.searchBar, { backgroundColor: inputBg, borderColor: hexToRgba(accent, 0.25) }]}>
             <MaterialCommunityIcons
-              name="close-circle"
-              size={18}
+              name="magnify"
+              size={20}
               color={theme.colors.text.muted}
-              onPress={() => setQuery('')}
-              style={styles.clearIcon}
+              style={styles.searchIcon}
             />
-          )}
+            <TextInput
+              style={[styles.searchInput, { color: theme.colors.text.primary }]}
+              placeholder={t('placeholder')}
+              placeholderTextColor={theme.colors.text.disabled}
+              value={query}
+              onChangeText={setQuery}
+              returnKeyType="search"
+            />
+            {query.length > 0 && (
+              <MaterialCommunityIcons
+                name="close-circle"
+                size={18}
+                color={theme.colors.text.muted}
+                onPress={() => setQuery('')}
+                style={styles.clearIcon}
+              />
+            )}
           </View>
         </ScreenHeader>
+      </View>
 
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: TAB_BAR_CONTENT_PAD },
+        ]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme!.colors.accent.primary]}
+            tintColor={theme!.colors.accent.primary}
+            progressBackgroundColor={theme!.colors.background.surface}
+          />
+        }
+      >
         {/* Empty state */}
         {query.length === 0 && (
           <View style={styles.emptyState}>
@@ -107,7 +125,6 @@ export const SearchScreen: React.FC = () => {
             </ThemedText>
           </View>
         )}
-
       </ScrollView>
     </ThemedView>
   );

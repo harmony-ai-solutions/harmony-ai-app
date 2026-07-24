@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
     View,
     Text,
     ScrollView,
     StyleSheet,
+    RefreshControl,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -54,6 +55,11 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
     ];
 
     const [systemThemeEnabled, setSystemThemeEnabled] = useState(themeMode === 'system');
+    const [refreshing, setRefreshing] = useState(false);
+    const onRefresh = useCallback(async () => {
+      setRefreshing(true);
+      setTimeout(() => setRefreshing(false), 800);
+    }, []);
 
     // Separate custom themes from built-in ones
     const customThemes = useMemo(
@@ -179,7 +185,18 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
               title={t('title')}
               onBack={() => navigation.goBack()}
             />
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView
+              contentContainerStyle={styles.scrollContent}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={[theme.colors.accent.primary]}
+                  tintColor={theme.colors.accent.primary}
+                  progressBackgroundColor={theme.colors.background.surface}
+                />
+              }
+            >
                 {/* Dynamic Background Effects Toggle */}
                 <View style={styles.sectionWrapper}>
                     <ThemedCard elevated accentStripe>

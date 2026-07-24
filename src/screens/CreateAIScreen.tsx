@@ -9,7 +9,7 @@
  * Route params: { prefillProfileId?: string }
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -22,6 +22,7 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -396,6 +397,12 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 800);
+  }, []);
 
   // ── Load module configs when advanced panel first opens ──────────────────────
   useEffect(() => {
@@ -626,6 +633,15 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme.colors.accent.primary]}
+              tintColor={theme.colors.accent.primary}
+              progressBackgroundColor={theme.colors.background.surface}
+            />
+          }
         >
           {/* ── Avatar Picker ── */}
           <View style={styles.avatarSection}>

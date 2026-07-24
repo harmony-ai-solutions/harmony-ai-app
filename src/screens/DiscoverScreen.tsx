@@ -5,8 +5,8 @@
  * Renders a centered "Coming Soon" slate with themed gradient accents,
  * iconography, and the app's glassmorphism aesthetic.
  */
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -21,8 +21,14 @@ export const DiscoverScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { t } = useTranslation('discover');
   const { top: safeTop } = useSafeAreaInsets();
+  const [refreshing, setRefreshing] = useState(false);
 
   if (!theme) return null;
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 800);
+  }, []);
 
   return (
     <ThemedView variant="base" style={styles.container}>
@@ -35,6 +41,18 @@ export const DiscoverScreen: React.FC = () => {
         />
       </View>
 
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme!.colors.accent.primary]}
+            tintColor={theme!.colors.accent.primary}
+            progressBackgroundColor={theme!.colors.background.surface}
+          />
+        }
+      >
       {/* ── Coming Soon Body ── */}
       <View style={styles.body}>
         {/* Gradient-ringed icon circle */}
@@ -79,6 +97,7 @@ export const DiscoverScreen: React.FC = () => {
         {/* Decorative bottom accent bar */}
         <ThemedGradient gradient="primary" style={styles.bottomAccent} />
       </View>
+      </ScrollView>
     </ThemedView>
   );
 };
@@ -86,6 +105,9 @@ export const DiscoverScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
     paddingBottom: TAB_BAR_CONTENT_PAD,
   },
   body: {

@@ -4,6 +4,7 @@ import {
   View,
   FlatList,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -44,9 +45,9 @@ export const EntityConfigScreen: React.FC = () => {
   const { t } = useTranslation('entityConfig');
   const [entityItems, setEntityItems] = useState<EntityListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadEntities = async () => {
-    setIsLoading(true);
     try {
       const entities = await getAllEntities();
       const items: EntityListItem[] = await Promise.all(
@@ -98,8 +99,14 @@ export const EntityConfigScreen: React.FC = () => {
       log.error('Failed to load entities:', err);
     } finally {
       setIsLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadEntities();
+  }, []);
 
   // Reload on focus (handles return from EntityConfigEdit)
   useFocusEffect(
@@ -142,51 +149,68 @@ export const EntityConfigScreen: React.FC = () => {
         onBack={() => navigation.goBack()}
       />
 
-      {isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={theme.colors.accent.primary} />
-        </View>
-      ) : entityItems.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Icon
-            name="robot-outline"
-            size={72}
-            color={theme.colors.text.muted}
+      {/* FlatList ALWAYS renders so RefreshControl is always reachable */}
+      <FlatList style={{ flex: 1 }}
+        data={entityItems}
+        keyExtractor={item => item.entity.id}
+        contentContainerStyle={[
+          styles.listContent,
+          { flexGrow: 1, paddingBottom: 80 + safeBottom },
+          entityItems.length === 0 && styles.emptyListContent,
+        ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme.colors.accent.primary]}
+            tintColor={theme.colors.accent.primary}
+            progressBackgroundColor={theme.colors.background.surface}
           />
-          <ThemedText weight="bold" size={18} style={styles.emptyTitle}>
-            No AI entities configured
-          </ThemedText>
-          <ThemedText variant="muted" size={14} style={styles.emptySubtext}>
-            Tap + to create your first AI chat partner.
-          </ThemedText>
-          <ThemedButton
-            variant="primary"
-            label="+ Create First AI"
-            onPress={() => navigation.navigate('CreateAI', {})}
-            style={styles.emptyButton}
+        }
+        ListEmptyComponent={
+          isLoading ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color={theme.colors.accent.primary} />
+            </View>
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Icon
+                name="robot-outline"
+                size={72}
+                color={theme.colors.text.muted}
+              />
+              <ThemedText weight="bold" size={18} style={styles.emptyTitle}>
+                No AI entities configured
+              </ThemedText>
+              <ThemedText variant="muted" size={14} style={styles.emptySubtext}>
+                Tap + to create your first AI chat partner.
+              </ThemedText>
+              <ThemedButton
+                variant="primary"
+                label="+ Create First AI"
+                onPress={() => navigation.navigate('CreateAI', {})}
+                style={styles.emptyButton}
+              />
+            </View>
+          )
+        }
+        renderItem={({ item }) => (
+          <EntityCard
+            item={item}
+            onPress={() =>
+              navigation.navigate('EntityConfigEdit', {
+                entityId: item.entity.id,
+              })
+            }
+            onDelete={() => handleDelete(item)}
           />
-        </View>
-      ) : (
-        <FlatList
-          data={entityItems}
-          keyExtractor={item => item.entity.id}
-          contentContainerStyle={[styles.listContent, { paddingBottom: 80 + safeBottom }]}
-          renderItem={({ item }) => (
-            <EntityCard
-              item={item}
-              onPress={() =>
-                navigation.navigate('EntityConfigEdit', {
-                  entityId: item.entity.id,
-                })
-              }
-              onDelete={() => handleDelete(item)}
-            />
-          )}
-        />
+        )}
+      />
+
+      {/* FAB — hide during initial load */}
+      {!isLoading && (
+        <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: 24 + safeBottom }} />
       )}
-
-      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: 24 + safeBottom }} />
-
     </ThemedView>
   );
 };
@@ -194,10 +218,10 @@ export const EntityConfigScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { elevation: 4 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  centered: { paddingTop: 100, justifyContent: 'center', alignItems: 'center' },
   listContent: { padding: 12, paddingBottom: 80 },
+  emptyListContent: { flex: 1, justifyContent: 'center' },
   emptyContainer: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 32,

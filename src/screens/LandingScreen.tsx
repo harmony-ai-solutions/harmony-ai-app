@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -21,8 +21,14 @@ export const LandingScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('landing');
+  const [refreshing, setRefreshing] = useState(false);
 
   if (!theme) return null;
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 800);
+  }, []);
 
   return (
     <ThemedView style={styles.container}>
@@ -35,6 +41,15 @@ export const LandingScreen: React.FC = () => {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme!.colors.accent.primary]}
+            tintColor={theme!.colors.accent.primary}
+            progressBackgroundColor={theme!.colors.background.surface}
+          />
+        }
       >
         {/* SoulBits hero gradient accent stripe */}
         <ThemedGradient gradient="primary" style={styles.gradientAccent} />

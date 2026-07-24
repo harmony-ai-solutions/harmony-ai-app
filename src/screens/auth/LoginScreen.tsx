@@ -19,6 +19,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -64,6 +65,12 @@ export const LoginScreen: React.FC = () => {
   // ── Error state ────────────────────────────────────────────────────────
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showVerify, setShowVerify] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 800);
+  }, []);
 
   // ── Password field ref for "next" focus ────────────────────────────────
   const passwordRef = useRef<TextInput>(null);
@@ -241,6 +248,15 @@ export const LoginScreen: React.FC = () => {
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme!.colors.accent.primary]}
+              tintColor={theme!.colors.accent.primary}
+              progressBackgroundColor={theme!.colors.background.surface}
+            />
+          }
         >
           {/* ── Title / Subtitle ── */}
           <View style={styles.headerSection}>

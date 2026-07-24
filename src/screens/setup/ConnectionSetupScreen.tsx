@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Animated,
   Easing,
+  RefreshControl,
 } from 'react-native';
 import { ActivityIndicator } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -342,6 +343,7 @@ export const ConnectionSetupScreen: React.FC = () => {
   const [port, setPort] = useState('8080');
   const [status, setStatus] = useState(t('idle'));
   const [isManuallyConnecting, setIsManuallyConnecting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [showCertModal, setShowCertModal] = useState(false);
   const [showCertDetailsModal, setShowCertDetailsModal] = useState(false);
   const [serverCertificate, setServerCertificate] = useState<string>('');
@@ -401,6 +403,12 @@ export const ConnectionSetupScreen: React.FC = () => {
       }
     }
   }, [isPaired, isConnected, isManuallyConnecting]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadConnectionData();
+    setRefreshing(false);
+  }, [loadConnectionData]);
 
   /**
    * Reload connection data when screen comes into focus
@@ -645,7 +653,19 @@ export const ConnectionSetupScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       <ScreenHeader title={t('title')} onBack={() => navigation.goBack()} />
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme!.colors.accent.primary]}
+            tintColor={theme!.colors.accent.primary}
+            progressBackgroundColor={theme!.colors.background.surface}
+          />
+        }
+      >
         {/* ── Mode Toggle ── */}
         <View style={styles.section}>
           <ThemedText weight="bold" size={15} style={styles.sectionTitle}>

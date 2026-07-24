@@ -5,8 +5,8 @@
  * maintaining the glassmorphism "Coming Soon" aesthetic consistent with
  * ProfileSettingsScreen and DiscoverScreen.
  */
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -24,10 +24,16 @@ export const ComingSoonScreen: React.FC = () => {
   const navigation = useNavigation();
   const route = useRoute<ComingSoonRouteProp>();
   const { t } = useTranslation('settings');
+  const [refreshing, setRefreshing] = useState(false);
 
   const { titleKey, icon, descriptionKey } = route.params;
 
   if (!theme) return null;
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 800);
+  }, []);
 
   return (
     <ThemedView variant="base" style={styles.container}>
@@ -36,6 +42,18 @@ export const ComingSoonScreen: React.FC = () => {
         onBack={() => navigation.goBack()}
       />
 
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme!.colors.accent.primary]}
+            tintColor={theme!.colors.accent.primary}
+            progressBackgroundColor={theme!.colors.background.surface}
+          />
+        }
+      >
       {/* ── Coming Soon Body ── */}
       <View style={styles.body}>
         {/* Gradient-ringed icon circle */}
@@ -80,6 +98,7 @@ export const ComingSoonScreen: React.FC = () => {
         {/* Decorative bottom accent bar */}
         <ThemedGradient gradient="primary" style={styles.bottomAccent} />
       </View>
+      </ScrollView>
     </ThemedView>
   );
 };
@@ -87,6 +106,9 @@ export const ComingSoonScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   body: {
     flex: 1,

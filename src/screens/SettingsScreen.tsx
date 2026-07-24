@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -44,29 +44,37 @@ export const SettingsScreen: React.FC = () => {
   const [soundEffects, setSoundEffects] = useState(true);
   const [hapticFeedback, setHapticFeedback] = useState(true);
   const [contentFilter, setContentFilter] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
+  const loadData = useCallback(async () => {
+    // Connection type
+    const wsUrl = await AsyncStorage.getItem('harmony_ws_url');
+    const wssUrl = await AsyncStorage.getItem('harmony_wss_url');
+    if (wsUrl || wssUrl) {
+      setConnectionType('Harmony Link' as ConnectionType);
+    } else {
+      setConnectionType(t('common:notConfigured') as ConnectionType);
+    }
+
+    // Last sync time
+    const ts = await AsyncStorage.getItem('last_sync_timestamp');
+    if (ts) {
+      const date = new Date(parseInt(ts) * 1000);
+      setLastSyncTime(date.toLocaleString());
+    }
+  }, [t]);
 
   useEffect(() => {
-    const loadData = async () => {
-      // Connection type
-      const wsUrl = await AsyncStorage.getItem('harmony_ws_url');
-      const wssUrl = await AsyncStorage.getItem('harmony_wss_url');
-      if (wsUrl || wssUrl) {
-        setConnectionType('Harmony Link' as ConnectionType);
-      } else {
-        setConnectionType(t('common:notConfigured') as ConnectionType);
-      }
-
-      // Last sync time
-      const ts = await AsyncStorage.getItem('last_sync_timestamp');
-      if (ts) {
-        const date = new Date(parseInt(ts) * 1000);
-        setLastSyncTime(date.toLocaleString());
-      }
-    };
     loadData();
     loadToggleStates();
-  }, []);
+  }, [loadData]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadData();
+    await loadToggleStates();
+    setRefreshing(false);
+  }, [loadData]);
 
   const loadToggleStates = async () => {
     try {
@@ -128,6 +136,15 @@ export const SettingsScreen: React.FC = () => {
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme.colors.accent.primary]}
+            tintColor={theme.colors.accent.primary}
+            progressBackgroundColor={theme.colors.background.surface}
+          />
+        }
       >
         {/* ── Connection Card ── */}
         <TouchableOpacity

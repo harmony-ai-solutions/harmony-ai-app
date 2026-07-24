@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Animated,
   Easing,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
@@ -55,23 +56,31 @@ export const SyncSettingsScreen: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<string>('Never');
   const [securityMode, setSecurityMode] = useState<string>('');
   const [countdown, setCountdown] = useState<number>(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadSettings = useCallback(async () => {
+    const timestamp = await AsyncStorage.getItem('last_sync_timestamp');
+    if (timestamp) {
+      const date = new Date(parseInt(timestamp) * 1000);
+      setLastSyncTime(date.toLocaleString());
+    }
+
+    const mode = await ConnectionStateManager.getSecurityMode();
+    if (mode) {
+      setSecurityMode(mode);
+    } else {
+      setSecurityMode('secure');
+    }
+  }, []);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadSettings();
+    setRefreshing(false);
+  }, [loadSettings]);
 
   // ── Existing effects (preserved from original) ─────────────────────────────
   useEffect(() => {
-    const loadSettings = async () => {
-      const timestamp = await AsyncStorage.getItem('last_sync_timestamp');
-      if (timestamp) {
-        const date = new Date(parseInt(timestamp) * 1000);
-        setLastSyncTime(date.toLocaleString());
-      }
-
-      const mode = await ConnectionStateManager.getSecurityMode();
-      if (mode) {
-        setSecurityMode(mode);
-      } else {
-        setSecurityMode('secure');
-      }
-    };
     loadSettings();
 
     const progressListener = (session: SyncSession) => {
@@ -98,7 +107,7 @@ export const SyncSettingsScreen: React.FC = () => {
       SyncService.removeListener('sync:completed', completedListener);
       SyncService.removeListener('sync:error', errorListener);
     };
-  }, []);
+  }, [loadSettings]);
 
   // Dynamic countdown timer for reconnection
   useEffect(() => {
@@ -247,6 +256,15 @@ export const SyncSettingsScreen: React.FC = () => {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme!.colors.accent.primary]}
+            tintColor={theme!.colors.accent.primary}
+            progressBackgroundColor={theme!.colors.background.surface}
+          />
+        }
       >
         {/* ── Hero Orb: Large animated connection status orb ─────────────── */}
 

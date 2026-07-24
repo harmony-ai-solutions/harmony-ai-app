@@ -5,6 +5,7 @@ import {
   FlatList,
   TextInput,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -52,6 +53,7 @@ export const CharactersScreen: React.FC = () => {
   const [imageCounts, setImageCounts] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Reload on focus (handles return from edit screen)
   useFocusEffect(
@@ -61,7 +63,6 @@ export const CharactersScreen: React.FC = () => {
   );
 
   const loadProfiles = async () => {
-    setIsLoading(true);
     try {
       const data = await getAllCharacterProfiles();
       setProfiles(data);
@@ -90,8 +91,15 @@ export const CharactersScreen: React.FC = () => {
       log.error('Failed to load profiles:', err);
     } finally {
       setIsLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadProfiles();
+    setRefreshing(false);
+  }, []);
 
   const filteredProfiles = profiles.filter(
     p =>
@@ -182,55 +190,70 @@ export const CharactersScreen: React.FC = () => {
         </View>
       </ScreenHeader>
 
-      {/* Content */}
-      {isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={theme.colors.accent.primary} />
-        </View>
-      ) : filteredProfiles.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <MaterialCommunityIcons
-            name="account-outline"
-            size={72}
-            color={theme.colors.text.muted}
+      {/* FlatList ALWAYS renders so RefreshControl is always reachable.
+          Use ListEmptyComponent for empty state, loading overlay for initial load. */}
+      <FlatList style={{ flex: 1 }}
+        data={filteredProfiles}
+        keyExtractor={item => item.id}
+        numColumns={2}
+        columnWrapperStyle={filteredProfiles.length > 0 ? styles.columnWrapper : undefined}
+        contentContainerStyle={[
+          styles.listContent,
+          { flexGrow: 1, paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom },
+          filteredProfiles.length === 0 && styles.emptyListContent,
+        ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme.colors.accent.primary]}
+            tintColor={theme.colors.accent.primary}
+            progressBackgroundColor={theme.colors.background.surface}
           />
-          <ThemedText weight="bold" size={18} style={styles.emptyTitle}>
-            {searchQuery ? t('noResults') : t('noProfiles')}
-          </ThemedText>
-          <ThemedText variant="muted" size={14} style={styles.emptySubtext}>
-            {searchQuery
-              ? t('noResultsHint')
-              : t('noProfilesHint')}
-          </ThemedText>
-          {!searchQuery && (
-            <ThemedButton
-              variant="primary"
-              label={t('createFirst')}
-              onPress={handleCreateNew}
-              style={styles.emptyButton}
-            />
-          )}
-        </View>
-      ) : (
-        <FlatList
-          data={filteredProfiles}
-          keyExtractor={item => item.id}
-          numColumns={2}
-          columnWrapperStyle={styles.columnWrapper}
-          contentContainerStyle={[styles.listContent, { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }]}
-          renderItem={({ item }) => (
-            <CharacterProfileCard
-              profile={item}
-              imageUri={primaryImages[item.id] ?? null}
-              imageCount={imageCounts[item.id] ?? 0}
-              onPress={() => handleEdit(item)}
-              onLongPress={() => handleLongPress(item)}
-            />
-          )}
-        />
-      )}
+        }
+        ListEmptyComponent={
+          isLoading ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color={theme.colors.accent.primary} />
+            </View>
+          ) : (
+            <View style={styles.emptyContainer}>
+              <MaterialCommunityIcons
+                name={searchQuery ? 'file-search-outline' : 'account-outline'}
+                size={72}
+                color={theme.colors.text.muted}
+              />
+              <ThemedText weight="bold" size={18} style={styles.emptyTitle}>
+                {searchQuery ? t('noResults') : t('noProfiles')}
+              </ThemedText>
+              <ThemedText variant="muted" size={14} style={styles.emptySubtext}>
+                {searchQuery
+                  ? t('noResultsHint')
+                  : t('noProfilesHint')}
+              </ThemedText>
+              {!searchQuery && (
+                <ThemedButton
+                  variant="primary"
+                  label={t('createFirst')}
+                  onPress={handleCreateNew}
+                  style={styles.emptyButton}
+                />
+              )}
+            </View>
+          )
+        }
+        renderItem={({ item }) => (
+          <CharacterProfileCard
+            profile={item}
+            imageUri={primaryImages[item.id] ?? null}
+            imageCount={imageCounts[item.id] ?? 0}
+            onPress={() => handleEdit(item)}
+            onLongPress={() => handleLongPress(item)}
+          />
+        )}
+      />
 
-      {/* FAB */}
+      {/* FAB — hide during initial load */}
       {!isLoading && (
         <ThemedFab icon="plus" onPress={handleCreateNew} style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }} />
       )}
@@ -255,10 +278,10 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 15, paddingVertical: 0 },
   clearIcon: { marginLeft: 6 },
   listContent: { padding: 12, paddingBottom: 80 },
+  emptyListContent: { flex: 1, justifyContent: 'center' },
   columnWrapper: { gap: 12, marginBottom: 12 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  centered: { paddingTop: 100, justifyContent: 'center', alignItems: 'center' },
   emptyContainer: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 32,

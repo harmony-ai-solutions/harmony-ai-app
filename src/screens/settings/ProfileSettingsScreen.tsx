@@ -6,8 +6,8 @@
  * iconography, and the app's glassmorphism aesthetic.
  * Consistent with the DiscoverScreen placeholder.
  */
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -21,8 +21,14 @@ export const ProfileSettingsScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const navigation = useNavigation();
   const { t } = useTranslation('profile');
+  const [refreshing, setRefreshing] = useState(false);
 
   if (!theme) return null;
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 800);
+  }, []);
 
   return (
     <ThemedView variant="base" style={styles.container}>
@@ -31,6 +37,18 @@ export const ProfileSettingsScreen: React.FC = () => {
         onBack={() => navigation.goBack()}
       />
 
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme!.colors.accent.primary]}
+            tintColor={theme!.colors.accent.primary}
+            progressBackgroundColor={theme!.colors.background.surface}
+          />
+        }
+      >
       {/* ── Coming Soon Body ── */}
       <View style={styles.body}>
         {/* Gradient-ringed icon circle */}
@@ -77,6 +95,7 @@ export const ProfileSettingsScreen: React.FC = () => {
         {/* Decorative bottom accent bar */}
         <ThemedGradient gradient="primary" style={styles.bottomAccent} />
       </View>
+      </ScrollView>
     </ThemedView>
   );
 };
@@ -84,6 +103,9 @@ export const ProfileSettingsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   body: {
     flex: 1,

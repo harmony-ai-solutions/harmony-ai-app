@@ -14,6 +14,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -48,6 +49,12 @@ export const RegisterScreen: React.FC = () => {
   // ── Feedback state ─────────────────────────────────────────────────────
   const [error, setError] = useState<string | null>(null);
   const [registered, setRegistered] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 800);
+  }, []);
 
   // ── Field refs for "next" focus ────────────────────────────────────────
   const emailRef = useRef<TextInput>(null);
@@ -140,6 +147,15 @@ export const RegisterScreen: React.FC = () => {
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme!.colors.accent.primary]}
+              tintColor={theme!.colors.accent.primary}
+              progressBackgroundColor={theme!.colors.background.surface}
+            />
+          }
         >
           {/* ── Title / Subtitle ── */}
           <View style={styles.headerSection}>
