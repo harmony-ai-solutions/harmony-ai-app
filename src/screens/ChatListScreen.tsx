@@ -101,15 +101,9 @@ export const ChatListScreen: React.FC = () => {
   const impersonatedEntityIdRef = useRef(impersonatedEntityId);
   impersonatedEntityIdRef.current = impersonatedEntityId;
 
-  const loadChatList = async (activeEntityId: string, source: string = 'unknown') => {
+  const loadChatList = async (activeEntityId: string) => {
     try {
-      log.info(`[LOAD] loadChatList called by source="${source}", entityId="${activeEntityId}"`);
-      if (source !== 'onRefresh') {
-        setLoading(true);
-      } else {
-        // Only set loading=true for initial load, not for refresh
-        // loading is managed separately from refreshing
-      }
+      setLoading(true);
 
       // Get all entities for display info lookups
       const entities = await getAllEntities();
@@ -335,7 +329,6 @@ export const ChatListScreen: React.FC = () => {
     } catch (error) {
       log.error('Failed to load chat list:', error);
     } finally {
-      log.info(`[LOAD] loadChatList finishing, source="${source}", setting loading=false, refreshing=false`);
       setLoading(false);
       setRefreshing(false);
     }
@@ -378,7 +371,6 @@ export const ChatListScreen: React.FC = () => {
 
   useFocusEffect(
     useCallback(() => {
-      log.info('[FOCUS] useFocusEffect fired, reloading chat list');
       loadImpersonatedEntity();
       // Reload chat list when screen gains focus (e.g., returning from
       // ChatDetailScreen) so the last-message preview reflects any messages
@@ -386,7 +378,7 @@ export const ChatListScreen: React.FC = () => {
       // stale because impersonatedEntityId hasn't changed, so the useEffect
       // below won't re-trigger loadChatList.
       if (impersonatedEntityId) {
-        loadChatList(impersonatedEntityId, 'useFocusEffect');
+        loadChatList(impersonatedEntityId);
       }
     }, [impersonatedEntityId]),
   );
@@ -394,15 +386,13 @@ export const ChatListScreen: React.FC = () => {
   // Re-run loadChatList when impersonatedEntityId changes
   useEffect(() => {
     if (impersonatedEntityId) {
-      log.info(`[USE_EFFECT] impersonatedEntityId changed to "${impersonatedEntityId}", loading chat list`);
-      loadChatList(impersonatedEntityId, 'useEffect');
+      loadChatList(impersonatedEntityId);
     }
   }, [impersonatedEntityId]);
 
   const onRefresh = useCallback(async () => {
-    log.info('[REFRESH] Pull-to-refresh gesture triggered');
     setRefreshing(true);
-    await loadChatList(impersonatedEntityIdRef.current, 'onRefresh');
+    await loadChatList(impersonatedEntityIdRef.current);
     setRefreshing(false);
   }, []);
 
