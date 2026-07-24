@@ -26,7 +26,6 @@ const STORAGE_KEYS = {
   SOUND_EFFECTS: '@harmony_setting_sound_effects',
   HAPTIC_FEEDBACK: '@harmony_setting_haptic_feedback',
   CONTENT_FILTER: '@harmony_setting_content_filter',
-  BIOMETRIC_LOCK: '@harmony_setting_biometric_lock',
 } as const;
 
 export const SettingsScreen: React.FC = () => {
@@ -45,7 +44,7 @@ export const SettingsScreen: React.FC = () => {
   const [soundEffects, setSoundEffects] = useState(true);
   const [hapticFeedback, setHapticFeedback] = useState(true);
   const [contentFilter, setContentFilter] = useState(true);
-  const [biometricLock, setBiometricLock] = useState(false);
+
 
   useEffect(() => {
     const loadData = async () => {
@@ -71,18 +70,16 @@ export const SettingsScreen: React.FC = () => {
 
   const loadToggleStates = async () => {
     try {
-      const [push, sound, haptic, filter, biometric] = await Promise.all([
+      const [push, sound, haptic, filter] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.PUSH_NOTIFICATIONS),
         AsyncStorage.getItem(STORAGE_KEYS.SOUND_EFFECTS),
         AsyncStorage.getItem(STORAGE_KEYS.HAPTIC_FEEDBACK),
         AsyncStorage.getItem(STORAGE_KEYS.CONTENT_FILTER),
-        AsyncStorage.getItem(STORAGE_KEYS.BIOMETRIC_LOCK),
       ]);
       if (push !== null) setPushNotifications(push === 'true');
       if (sound !== null) setSoundEffects(sound === 'true');
       if (haptic !== null) setHapticFeedback(haptic === 'true');
       if (filter !== null) setContentFilter(filter === 'true');
-      if (biometric !== null) setBiometricLock(biometric === 'true');
     } catch (e) {
       // ignore — defaults are fine
     }
@@ -207,11 +204,10 @@ export const SettingsScreen: React.FC = () => {
             theme={theme}
             showSeparator
           />
-          <SettingsToggleRow
+          <SettingsLinkRow
             icon="fingerprint"
             label={t('biometricLock')}
-            value={biometricLock}
-            onValueChange={(v) => toggleAndStore(STORAGE_KEYS.BIOMETRIC_LOCK, v, setBiometricLock)}
+            onPress={() => navigation.navigate('BiometricLockSettings')}
             theme={theme}
             showSeparator
           />

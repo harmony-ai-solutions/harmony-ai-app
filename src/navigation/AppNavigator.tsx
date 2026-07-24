@@ -16,6 +16,7 @@ import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
 import { EmojiActionEditorScreen } from '../screens/settings/EmojiActionEditorScreen';
 import { ProfileSettingsScreen } from '../screens/settings/ProfileSettingsScreen';
+import { BiometricLockSettingsScreen } from '../screens/settings/BiometricLockSettingsScreen';
 import { ComingSoonScreen } from '../screens/settings/ComingSoonScreen';
 import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
 import { ConnectionSetupScreen } from '../screens/setup/ConnectionSetupScreen';
@@ -51,6 +52,7 @@ export type RootStackParamList = {
     entityId: string;
     entityName: string;
   };
+  BiometricLockSettings: undefined;
   ProfileSettings: undefined;
   ComingSoon: {
     titleKey: string;
@@ -129,6 +131,10 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen
           name="EmojiActionEditor"
           component={EmojiActionEditorScreen}
+        />
+        <Stack.Screen
+          name="BiometricLockSettings"
+          component={BiometricLockSettingsScreen}
         />
         <Stack.Screen
           name="ProfileSettings"

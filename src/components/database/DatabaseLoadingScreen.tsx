@@ -1,201 +1,260 @@
 /**
  * Database Loading Screen
- * 
- * Displays during database initialization with error handling
+ *
+ * Glassmorphism-themed loading / error screen displayed during database
+ * initialization. Matches the app's design language used in ComingSoonScreen,
+ * ProfileSettingsScreen, and other full-screen placeholders.
  */
+import React, { useState } from 'react';
+import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useTranslation } from 'react-i18next';
+import { useDatabase } from '../../contexts/DatabaseContext';
+import { useAppTheme } from '../../contexts/ThemeContext';
+import { useAppAlert } from '../../contexts/AppAlertContext';
+import { ThemedView } from '../themed/ThemedView';
+import { ThemedText } from '../themed/ThemedText';
+import { ThemedGradient } from '../themed/ThemedGradient';
+import { ThemedCard } from '../themed/ThemedCard';
+import { ThemedButton } from '../themed/ThemedButton';
+import { wipeDatabaseCompletely } from '../../database';
 
-import React, {useState} from 'react';
-import {View, StyleSheet, ActivityIndicator} from 'react-native';
-import {Text, Button} from 'react-native-paper';
-import {useTranslation} from 'react-i18next';
-import {useDatabase} from '../../contexts/DatabaseContext';
-import {useAppTheme} from '../../contexts/ThemeContext';
-import {useAppAlert} from '../../contexts/AppAlertContext';
-import {wipeDatabaseCompletely} from '../../database';
-
-/**
- * Database Loading Screen Component
- */
 export function DatabaseLoadingScreen() {
-  const {isLoading, error, retryInitialization} = useDatabase();
-  const {theme} = useAppTheme();
-  const {t} = useTranslation('database');
-  const {showAlert} = useAppAlert();
+  const { isLoading, error, retryInitialization } = useDatabase();
+  const { theme } = useAppTheme();
+  const { t } = useTranslation('database');
+  const { showAlert } = useAppAlert();
   const [isWiping, setIsWiping] = useState(false);
 
   const handleWipeDatabase = () => {
-    showAlert(
-      t('wipeConfirmTitle'),
-      t('wipeConfirmMessage'),
-      [
-        {
-          text: t('common:cancel'),
-          style: 'cancel',
+    showAlert(t('wipeConfirmTitle'), t('wipeConfirmMessage'), [
+      { text: t('common:cancel'), style: 'cancel' },
+      {
+        text: t('wipeReinit'),
+        style: 'destructive',
+        onPress: async () => {
+          setIsWiping(true);
+          try {
+            await wipeDatabaseCompletely();
+            showAlert(t('wipeSuccess'), t('wipeSuccessMessage'), [
+              {
+                text: t('common:ok'),
+                onPress: () => {
+                  setIsWiping(false);
+                  retryInitialization();
+                },
+              },
+            ]);
+          } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            showAlert(t('common:error'), t('wipeFailed', { message: errorMessage }), [
+              {
+                text: t('common:ok'),
+                onPress: () => setIsWiping(false),
+              },
+            ]);
+          }
         },
-        {
-          text: t('wipeReinit'),
-          style: 'destructive',
-          onPress: async () => {
-            setIsWiping(true);
-            try {
-              await wipeDatabaseCompletely();
-              showAlert(
-                t('wipeSuccess'),
-                t('wipeSuccessMessage'),
-                [
-                  {
-                    text: t('common:ok'),
-                    onPress: () => {
-                      setIsWiping(false);
-                      retryInitialization();
-                    },
-                  },
-                ]
-              );
-            } catch (err) {
-              const errorMessage = err instanceof Error ? err.message : String(err);
-              showAlert(
-                t('common:error'),
-                t('wipeFailed', { message: errorMessage }),
-                [
-                  {
-                    text: t('common:ok'),
-                    onPress: () => setIsWiping(false),
-                  },
-                ]
-              );
-            }
-          },
-        },
-      ]
-    );
+      },
+    ]);
   };
 
-  // Error state
+  if (!theme) return null;
+
+  /* ── Error state ────────────────────────────────────────────────────────── */
   if (error) {
     return (
-      <View style={[styles.container, {backgroundColor: theme?.colors.background.base || '#000'}]}>
-        <View style={styles.content}>
-          <Text style={[styles.title, {color: theme?.colors.status.error || '#ff5252'}]}>
-            {t('errorTitle')}
-          </Text>
-          <Text style={[styles.message, {color: theme?.colors.text.primary || '#fff'}]}>
-            {t('errorDescription')}
-          </Text>
-          <View style={styles.errorList}>
-            <Text style={[styles.errorItem, {color: theme?.colors.text.secondary || '#ccc'}]}>
-              {t('errorStorage')}
-            </Text>
-            <Text style={[styles.errorItem, {color: theme?.colors.text.secondary || '#ccc'}]}>
-              {t('errorCorruption')}
-            </Text>
-            <Text style={[styles.errorItem, {color: theme?.colors.text.secondary || '#ccc'}]}>
-              {t('errorPermissions')}
-            </Text>
+      <ThemedView variant="base" style={styles.container}>
+        <View style={styles.body}>
+          {/* Gradient-ringed icon circle */}
+          <View style={styles.iconWrapper}>
+            <ThemedGradient gradient="primary" style={styles.iconRing}>
+              <ThemedView variant="elevated" style={styles.iconInner}>
+                <Icon name="database-off" size={48} color={theme.colors.status?.error ?? '#ff5252'} />
+              </ThemedView>
+            </ThemedGradient>
           </View>
-          <Text style={[styles.errorDetails, {color: theme?.colors.text.secondary || '#ccc'}]}>
-            {t('errorPrefix')}{error}
-          </Text>
-          
-          <View style={styles.buttonContainer}>
-            <Button
-              mode="contained"
+
+          <ThemedText
+            variant="primary"
+            size={24}
+            weight="bold"
+            hierarchy="header"
+            style={styles.headline}
+          >
+            {t('errorTitle')}
+          </ThemedText>
+
+          <ThemedText
+            variant="secondary"
+            size={14}
+            hierarchy="subtext"
+            style={styles.description}
+          >
+            {t('errorDescription')}
+          </ThemedText>
+
+          <ThemedCard elevated accentStripe accentTint style={styles.errorCard}>
+            <View style={styles.errorList}>
+              {[t('errorStorage'), t('errorCorruption'), t('errorPermissions')].map((item, i) => (
+                <View key={i} style={styles.errorItem}>
+                  <Icon name="alert-circle-outline" size={14} color={theme.colors.status?.error ?? '#ff5252'} />
+                  <ThemedText variant="secondary" size={13}>{item}</ThemedText>
+                </View>
+              ))}
+            </View>
+            <ThemedText
+              variant="muted"
+              size={11}
+              style={styles.errorDetails}
+            >
+              {t('errorPrefix')}{error}
+            </ThemedText>
+          </ThemedCard>
+
+          <View style={styles.buttonGroup}>
+            <ThemedButton
+              label={t('retryInit')}
+              variant="primary"
+              icon="refresh"
               onPress={retryInitialization}
-              style={styles.retryButton}
               disabled={isWiping}
-              buttonColor={theme?.colors.accent.primary || '#8e24aa'}>
-              {t('retryInit')}
-            </Button>
-            
-            <Button
-              mode="outlined"
+              style={styles.button}
+            />
+            <ThemedButton
+              label={isWiping ? t('wiping') : t('wipeReinit')}
+              variant="outline"
+              icon="delete-sweep"
               onPress={handleWipeDatabase}
-              style={styles.wipeButton}
               disabled={isWiping}
-              loading={isWiping}
-              textColor={theme?.colors.status.warning || '#ff9800'}
-              buttonColor="transparent">
-              {isWiping ? t('wiping') : t('wipeReinit')}
-            </Button>
+              style={styles.button}
+            />
           </View>
         </View>
-      </View>
+      </ThemedView>
     );
   }
 
-  // Loading state
+  /* ── Loading state ──────────────────────────────────────────────────────── */
   return (
-    <View style={[styles.container, {backgroundColor: theme?.colors.background.base || '#000'}]}>
-      <View style={styles.content}>
-        <ActivityIndicator
-          size="large"
-          color={theme?.colors.accent.primary || '#8e24aa'}
-          style={styles.spinner}
-        />
-        <Text style={[styles.title, {color: theme?.colors.text.primary || '#fff'}]}>
+    <ThemedView variant="base" style={styles.container}>
+      <View style={styles.body}>
+        {/* Gradient-ringed icon circle */}
+        <View style={styles.iconWrapper}>
+          <ThemedGradient gradient="primary" style={styles.iconRing}>
+            <ThemedView variant="elevated" style={styles.iconInner}>
+              <ActivityIndicator size="large" color={theme.colors.accent.primary} />
+            </ThemedView>
+          </ThemedGradient>
+        </View>
+
+        {/* Pulse dot */}
+        <View style={styles.pulseRow}>
+          <ThemedGradient gradient="primary" style={styles.pulseDot} />
+        </View>
+
+        <ThemedText
+          variant="primary"
+          size={24}
+          weight="bold"
+          hierarchy="header"
+          style={styles.headline}
+        >
           {t('initializing')}
-        </Text>
-        <Text style={[styles.message, {color: theme?.colors.text.secondary || '#ccc'}]}>
+        </ThemedText>
+
+        <ThemedText
+          variant="secondary"
+          size={14}
+          hierarchy="subtext"
+          style={styles.description}
+        >
           {t('settingUp')}
-        </Text>
+        </ThemedText>
+
+        {/* Decorative bottom accent bar */}
+        <ThemedGradient gradient="primary" style={styles.bottomAccent} />
       </View>
-    </View>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  body: {
+    flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  iconWrapper: {
+    marginBottom: 24,
+  },
+  iconRing: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     alignItems: 'center',
-    padding: 20,
+    justifyContent: 'center',
   },
-  content: {
+  iconInner: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     alignItems: 'center',
-    maxWidth: 400,
+    justifyContent: 'center',
   },
-  spinner: {
-    marginBottom: 20,
+  pulseRow: {
+    marginBottom: 28,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 12,
+  pulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    opacity: 0.7,
+  },
+  headline: {
     textAlign: 'center',
+    letterSpacing: 0.5,
+    marginBottom: 10,
   },
-  message: {
-    fontSize: 16,
+  description: {
     textAlign: 'center',
-    marginBottom: 20,
+    lineHeight: 22,
+    marginBottom: 32,
+  },
+  errorCard: {
+    width: '100%',
+    padding: 16,
+    gap: 12,
+    marginBottom: 24,
   },
   errorList: {
-    marginVertical: 16,
-    alignSelf: 'stretch',
+    gap: 8,
   },
   errorItem: {
-    fontSize: 14,
-    marginVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   errorDetails: {
-    fontSize: 12,
     fontFamily: 'monospace',
-    marginVertical: 16,
-    padding: 12,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    alignSelf: 'stretch',
+    lineHeight: 16,
   },
-  buttonContainer: {
+  buttonGroup: {
     width: '100%',
-    alignItems: 'stretch',
+    gap: 12,
   },
-  retryButton: {
-    marginTop: 20,
-    minWidth: 200,
+  button: {
+    width: '100%',
   },
-  wipeButton: {
-    marginTop: 12,
-    minWidth: 200,
-    borderColor: 'rgba(255, 152, 0, 0.5)',
+  bottomAccent: {
+    width: 48,
+    height: 3,
+    borderRadius: 2,
+    opacity: 0.6,
+    marginTop: 32,
   },
 });
