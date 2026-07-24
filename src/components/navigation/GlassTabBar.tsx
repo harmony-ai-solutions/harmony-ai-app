@@ -26,6 +26,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import LinearGradient from 'react-native-linear-gradient';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 
 // ── Layout constants ────────────────────────────────────────────────────────
 export const TAB_BAR_MARGIN_H = 20;
@@ -134,6 +135,7 @@ export const GlassTabBar: React.FC<BottomTabBarProps> = ({
       });
 
       if (!isFocused && !event.defaultPrevented) {
+        hapticLightPress();
         navigation.navigate(routeName);
       }
     },
