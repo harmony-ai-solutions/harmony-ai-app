@@ -219,35 +219,30 @@ export const SettingsScreen: React.FC = () => {
             label={t('userProfile')}
             onPress={() => navigation.navigate('ProfileSettings')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="fingerprint"
             label={t('biometricLock')}
             onPress={() => navigation.navigate('BiometricLockSettings')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="lock-reset"
             label={t('resetPassword')}
             onPress={() => navigateToComingSoon('resetPassword', 'lock-reset', 'comingSoonResetPassword')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="devices"
             label={t('activeSessions')}
             onPress={() => navigateToComingSoon('activeSessions', 'devices', 'comingSoonActiveSessions')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="delete-forever"
             label={t('deleteAccount')}
             onPress={() => navigateToComingSoon('deleteAccount', 'delete-forever', 'comingSoonDeleteAccount')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="account-cancel"
@@ -266,7 +261,6 @@ export const SettingsScreen: React.FC = () => {
             value={pushNotifications}
             onValueChange={(v) => toggleAndStore(STORAGE_KEYS.PUSH_NOTIFICATIONS, v, setPushNotifications)}
             theme={theme}
-            showSeparator
           />
           <SettingsToggleRow
             icon="bell-ring"
@@ -274,7 +268,6 @@ export const SettingsScreen: React.FC = () => {
             value={soundEffects}
             onValueChange={(v) => toggleAndStore(STORAGE_KEYS.SOUND_EFFECTS, v, setSoundEffects)}
             theme={theme}
-            showSeparator
           />
           <SettingsToggleRow
             icon="vibrate"
@@ -293,21 +286,18 @@ export const SettingsScreen: React.FC = () => {
             label={t('appearanceTheme')}
             onPress={() => navigation.navigate('ThemeSettings')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="translate"
             label={t('switchLanguage')}
             onPress={() => navigateToComingSoon('switchLanguage', 'translate', 'comingSoonSwitchLanguage')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="format-size"
             label={t('fontSize')}
             onPress={() => navigateToComingSoon('fontSize', 'format-size', 'comingSoonFontSize')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="cellphone"
@@ -326,7 +316,6 @@ export const SettingsScreen: React.FC = () => {
             value={contentFilter}
             onValueChange={(v) => toggleAndStore(STORAGE_KEYS.CONTENT_FILTER, v, setContentFilter)}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="swap-horizontal-bold"
@@ -344,7 +333,6 @@ export const SettingsScreen: React.FC = () => {
             label={t('manageSubscription')}
             onPress={() => navigateToComingSoon('manageSubscription', 'credit-card', 'comingSoonManageSubscription')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="restore"
@@ -362,31 +350,26 @@ export const SettingsScreen: React.FC = () => {
             label={t('helpCenter')}
             onPress={() => navigateToComingSoon('helpCenter', 'help-circle', 'comingSoonHelpCenter')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="bug"
             label={t('reportBug')}
             onPress={() => navigateToComingSoon('reportBug', 'bug', 'comingSoonReportBug')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="file-document"
             label={t('termsOfService')}
             onPress={() => navigateToComingSoon('termsOfService', 'file-document', 'comingSoonTermsOfService')}
             theme={theme}
-            showSeparator
           />
           <SettingsLinkRow
             icon="shield-account"
             label={t('privacyPolicy')}
             onPress={() => navigateToComingSoon('privacyPolicy', 'shield-account', 'comingSoonPrivacyPolicy')}
             theme={theme}
-            showSeparator
           />
           <View>
-            <View style={[styles.linkSeparator, { backgroundColor: hexToRgba(theme.colors.border.default, 0.3) }]} />
             <View style={styles.toggleRow}>
               <SettingsIconPill name="information" color={theme.colors.accent.primary} size={20} />
               <ThemedText style={styles.linkLabel}>{t('appVersion')}</ThemedText>
