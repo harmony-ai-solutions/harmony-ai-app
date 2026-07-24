@@ -9,13 +9,14 @@ import {
   RefreshControl,
   StyleSheet,
 } from 'react-native';
-import { Appbar } from 'react-native-paper';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { createLogger } from '../../utils/logger';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
-import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
+import { ThemedButton } from '../../components/themed/ThemedButton';
+import { ThemedFab } from '../../components/themed/ThemedFab';
 import { EmojiActionCard } from '../../components/settings/EmojiActionCard';
 import { EmojiActionEditModal } from '../../components/settings/EmojiActionEditModal';
 import { EntityEmojiActionService } from '../../services/EntityEmojiActionService';
@@ -162,39 +163,30 @@ export const EmojiActionEditorScreen: React.FC = () => {
         <ThemedText variant="secondary" size={14}>
           {actions.length} action{actions.length !== 1 ? 's' : ''}
         </ThemedText>
-        <TouchableOpacity
-          style={[styles.addButton, { backgroundColor: colors.accent.primary }]}
+        <ThemedButton
+          label="Add Action"
+          icon="plus"
+          iconSize={18}
           onPress={handleAddNew}
-        >
-          <Icon name="plus" size={18} color={colors.background.base} />
-          <ThemedText size={13} style={{ color: colors.background.base, fontWeight: '600' }}>
-            Add Action
-          </ThemedText>
-        </TouchableOpacity>
+          style={styles.addButton}
+        />
       </View>
     </View>
   );
 
   return (
     <ThemedView variant="base" style={styles.container}>
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={`${entityName}'s Actions`}
-          titleStyle={{ color: colors.text.primary, fontWeight: 'bold' }}
-        />
-        <TouchableOpacity
-          onPress={handleResetToDefaults}
-          style={styles.headerButton}
-        >
-          <ThemedText size={14} style={{ color: colors.accent.primary }}>
-            Reset
-          </ThemedText>
-        </TouchableOpacity>
-      </ThemedAppbar>
+      <ScreenHeader
+        title={`${entityName}'s Actions`}
+        onBack={() => navigation.goBack()}
+        right={
+          <TouchableOpacity onPress={handleResetToDefaults}>
+            <ThemedText size={14} style={{ color: colors.accent.primary }}>
+              Reset
+            </ThemedText>
+          </TouchableOpacity>
+        }
+      />
 
       {/* Actions list */}
       <FlatList

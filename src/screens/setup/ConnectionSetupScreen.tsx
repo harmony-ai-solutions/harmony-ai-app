@@ -1,14 +1,24 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, ScrollView, TextInput, Alert, TouchableOpacity } from 'react-native';
-import { Appbar, ActivityIndicator } from 'react-native-paper';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  Animated,
+  Easing,
+} from 'react-native';
+import { ActivityIndicator } from 'react-native-paper';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { createLogger } from '../../utils/logger';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useAppAlert } from '../../contexts/AppAlertContext';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
-import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedButton } from '../../components/themed/ThemedButton';
 import { CertificateVerificationModal } from '../../components/modals/CertificateVerificationModal';
 import { CertificateDetailsModal } from '../../components/modals/CertificateDetailsModal';
@@ -19,18 +29,258 @@ import ConnectionStateManager from '../../services/ConnectionStateManager';
 import { cloudSessionService, type CloudSessionStatus } from '../../services/cloud/CloudSessionService';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { hexToRgba } from '../../utils/colorUtils';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 const log = createLogger('ConnectionSetupScreen');
 
+// ─── Status category derived from status text ─────────────────────────
+type RadarState = 'idle' | 'connecting' | 'waiting' | 'connected' | 'error';
+
+function classifyStatus(statusText: string): RadarState {
+  const s = statusText.toLowerCase();
+  if (s.includes('connected') || s.includes('success')) return 'connected';
+  if (s.includes('reconnecting')) return 'connecting';
+  if (s.includes('connecting') || s.includes('saving') || s.includes('switching')) return 'connecting';
+  if (s.includes('waiting') || s.includes('approval') || s.includes('pending')) return 'waiting';
+  if (
+    s.includes('failed') ||
+    s.includes('rejected') ||
+    s.includes('error') ||
+    s.includes('aborted') ||
+    s.includes('cancelled')
+  )
+    return 'error';
+  return 'idle';
+}
+
+// ─── FormField ─────────────────────────────────────────────────────────
+interface FormFieldProps {
+  label: string;
+  value: string;
+  onChangeText: (text: string) => void;
+  placeholder?: string;
+  keyboardType?: 'default' | 'url' | 'numeric';
+  editable?: boolean;
+  backgroundColor: string;
+  inputTextColor: string;
+  inputPlaceholderColor: string;
+}
+
+const FormField: React.FC<FormFieldProps> = ({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  keyboardType = 'default',
+  editable = true,
+  backgroundColor,
+  inputTextColor,
+  inputPlaceholderColor,
+}) => (
+  <View style={styles.fieldWrapper}>
+    <ThemedText weight="medium" size={13} style={styles.fieldLabel}>
+      {label}
+    </ThemedText>
+    <View style={[styles.fieldBody, { backgroundColor }]}>
+      <TextInput
+        style={[styles.fieldInput, { color: inputTextColor, opacity: editable ? 1 : 0.55 }]}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={inputPlaceholderColor}
+        keyboardType={keyboardType}
+        autoCapitalize="none"
+        autoCorrect={false}
+        editable={editable}
+      />
+    </View>
+  </View>
+);
+
+// ─── ModeSelectorCard ──────────────────────────────────────────────────
+interface ModeSelectorCardProps {
+  selected: boolean;
+  onPress: () => void;
+  icon: string;
+  title: string;
+  description: string;
+  accentColor: string;
+  bgColor: string;
+  selectedBgColor: string;
+}
+
+const ModeSelectorCard: React.FC<ModeSelectorCardProps> = ({
+  selected,
+  onPress,
+  icon,
+  title,
+  description,
+  accentColor,
+  bgColor,
+  selectedBgColor,
+}) => (
+  <TouchableOpacity
+    style={[styles.modeCard, { flex: 1 }]}
+    onPress={onPress}
+    activeOpacity={0.7}
+  >
+    <View style={[styles.modeCardBody, { flex: 1, backgroundColor: selected ? selectedBgColor : bgColor }]}>
+      {selected && (
+        <View style={[styles.modeCardAccentBar, { backgroundColor: accentColor }]} />
+      )}
+      <View style={[styles.modeCardIconWrap, { backgroundColor: accentColor + (selected ? '22' : '10') }]}>
+        <Icon name={icon} size={24} color={selected ? accentColor : '#6b6780'} />
+      </View>
+      <ThemedText weight="bold" size={14} variant="primary" style={styles.modeCardTitle}>
+        {title}
+      </ThemedText>
+      <ThemedText size={12} variant={selected ? 'secondary' : 'muted'} style={styles.modeCardDesc}>
+        {description}
+      </ThemedText>
+      {selected && (
+        <View style={[styles.modeCardCheck, { backgroundColor: accentColor }]}>
+          <Icon name="check" size={10} color="#fff" />
+        </View>
+      )}
+    </View>
+  </TouchableOpacity>
+);
+
+// ─── StatusPulseDot ────────────────────────────────────────────────────
+interface StatusPulseDotProps {
+  radarState: RadarState;
+  accentColor: string;
+  size?: number;
+  glowSize?: number;
+}
+
+const StatusPulseDot: React.FC<StatusPulseDotProps> = ({
+  radarState,
+  accentColor,
+  size = 10,
+  glowSize = 16,
+}) => {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const glowOpacity = useRef(new Animated.Value(0.35)).current;
+
+  useEffect(() => {
+    if (radarState === 'error') {
+      pulseAnim.setValue(1);
+      glowOpacity.setValue(0.45);
+      return;
+    }
+
+    let cycleMs: number;
+    switch (radarState) {
+      case 'connecting':
+        cycleMs = 600;
+        break;
+      case 'connected':
+        cycleMs = 2000;
+        break;
+      default:
+        cycleMs = 1500;
+        break;
+    }
+
+    const half = cycleMs / 2;
+
+    const anim = Animated.loop(
+      Animated.parallel([
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.3,
+            duration: half,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: half,
+            easing: Easing.in(Easing.cubic),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.sequence([
+          Animated.timing(glowOpacity, {
+            toValue: 0.15,
+            duration: half,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowOpacity, {
+            toValue: 0.35,
+            duration: half,
+            easing: Easing.in(Easing.cubic),
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+    );
+
+    anim.start();
+    return () => anim.stop();
+  }, [radarState, pulseAnim, glowOpacity]);
+
+  const dotColor = useMemo(() => {
+    switch (radarState) {
+      case 'connected':
+        return '#4CAF50';
+      case 'error':
+        return '#F44336';
+      case 'waiting':
+        return '#F0A23B';
+      case 'connecting':
+        return accentColor;
+      default:
+        return accentColor;
+    }
+  }, [radarState, accentColor]);
+
+  const halfGlow = glowSize / 2;
+
+  return (
+    <View style={[styles.statusDotOuter, { width: glowSize, height: glowSize }]}>
+      <Animated.View
+        style={[
+          styles.statusDotGlow,
+          {
+            width: glowSize,
+            height: glowSize,
+            borderRadius: halfGlow,
+            backgroundColor: dotColor,
+            opacity: glowOpacity,
+          },
+        ]}
+      />
+      <Animated.View
+        style={[
+          styles.statusDotCore,
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: dotColor,
+            transform: [{ scale: pulseAnim }],
+          },
+        ]}
+      />
+    </View>
+  );
+};
+
+// ─── Main Screen ───────────────────────────────────────────────────────
+
 export const ConnectionSetupScreen: React.FC = () => {
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { showToast, isPaired, isConnected, isConnecting, reconnect } = useSyncConnection();
   const { t } = useTranslation('connection');
   const { t: ta } = useTranslation('auth');
   const { status: authStatus } = useAuth();
-  
+
   // ── Mode toggle state ─────────────────────────────────────────────────
   const [connectionMode, setConnectionMode] = useState<'selfhosted' | 'cloud'>('selfhosted');
 
@@ -43,36 +293,38 @@ export const ConnectionSetupScreen: React.FC = () => {
     });
   }, []);
 
-  // ── Cloud session status (spawning/ready/error) drives the hint + spinner ──
+  // ── Cloud session status ──────────────────────────────────────────────
   const [cloudStatus, setCloudStatus] = useState<CloudSessionStatus>(cloudSessionService.getStatus());
 
   useEffect(() => {
     const onStatus = (s: CloudSessionStatus) => setCloudStatus(s);
     cloudSessionService.on('status', onStatus);
-    return () => { cloudSessionService.off('status', onStatus); };
+    return () => {
+      cloudSessionService.off('status', onStatus);
+    };
   }, []);
 
-  // Apply the mode change (mutation) — extracted so the confirm dialog can call it.
-  const applyModeChange = useCallback((mode: 'selfhosted' | 'cloud') => {
-    setConnectionMode(mode);
-    AsyncStorage.setItem('connection_mode', mode).catch(() => {}); // canonical key (6-3A)
-    if (mode === 'cloud') {
-      if (authStatus === 'authenticated') {
-        // Explicitly spawn the cloud session — AuthContext's listener only fires on auth:changed,
-        // not on mode change, so an already-authenticated user switching to cloud needs this.
-        cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on mode switch:', e));
-      } else if (authStatus === 'unauthenticated') {
-        navigation.navigate('Login');
+  // Apply mode change (mutation)
+  const applyModeChange = useCallback(
+    (mode: 'selfhosted' | 'cloud') => {
+      setConnectionMode(mode);
+      AsyncStorage.setItem('connection_mode', mode).catch(() => {});
+      if (mode === 'cloud') {
+        if (authStatus === 'authenticated') {
+          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on mode switch:', e));
+        } else if (authStatus === 'unauthenticated') {
+          navigation.navigate('Login');
+        }
       }
-      // authStatus === 'loading' → do nothing; AuthContext resolves.
-    }
-  }, [authStatus, navigation]);
+    },
+    [authStatus, navigation],
+  );
 
   const handleModeChange = useCallback(
     (mode: 'selfhosted' | 'cloud') => {
-      if (mode === connectionMode) return; // no-op when re-selecting current source
+      if (mode === connectionMode) return;
 
-      Alert.alert(
+      showAlert(
         ta('switch_warning_title'),
         mode === 'cloud'
           ? ta('switch_warning_message_cloud')
@@ -95,25 +347,25 @@ export const ConnectionSetupScreen: React.FC = () => {
   const [serverCertificate, setServerCertificate] = useState<string>('');
   const [pendingCredentials, setPendingCredentials] = useState<any>(null);
   const [securityMode, setSecurityMode] = useState<string>('');
-  
+
   const connectionManager = ConnectionManager;
-  
-  // Use ref to track security mode selection without causing re-renders
+
   const hasSelectedSecurityModeRef = useRef(false);
+
+  // ── Derived radar state ───────────────────────────────────────────────
+  const radarState = useMemo(() => classifyStatus(status), [status]);
 
   /**
    * Load connection data from storage
    */
   const loadConnectionData = useCallback(async () => {
     log.info('Loading connection data, isPaired:', isPaired, 'isManuallyConnecting:', isManuallyConnecting);
-    
+
     if (isPaired) {
       const mode = await ConnectionStateManager.getSecurityMode();
       setSecurityMode(mode || 'secure');
-      
-      // Load URL and port based on security mode
+
       if (mode === 'unencrypted') {
-        // For unencrypted, use WS URL
         const wsUrl = await ConnectionStateManager.getWSUrl();
         if (wsUrl) {
           const match = wsUrl.match(/ws:\/\/([^:]+):(\d+)/);
@@ -123,7 +375,6 @@ export const ConnectionSetupScreen: React.FC = () => {
           }
         }
       } else {
-        // For secure/insecure-ssl, use WSS URL
         const wssUrl = await ConnectionStateManager.getWSSUrl();
         if (wssUrl) {
           const match = wssUrl.match(/wss:\/\/([^:]+):(\d+)/);
@@ -133,15 +384,14 @@ export const ConnectionSetupScreen: React.FC = () => {
           }
         }
       }
-      
+
       const cert = await ConnectionStateManager.getServerCert();
       if (cert) {
         setServerCertificate(cert);
       }
-      
+
       setStatus(isConnected ? 'Connected' : 'Disconnected');
     } else {
-      // Not paired - only reset to defaults if we're not in the middle of connecting
       if (!isManuallyConnecting) {
         setUrl('192.168.1.');
         setPort('8080');
@@ -149,7 +399,6 @@ export const ConnectionSetupScreen: React.FC = () => {
         setServerCertificate('');
         setStatus('Idle');
       }
-      // If we're connecting, keep the current status (e.g., "Waiting for approval...")
     }
   }, [isPaired, isConnected, isManuallyConnecting]);
 
@@ -160,13 +409,13 @@ export const ConnectionSetupScreen: React.FC = () => {
     useCallback(() => {
       log.info('Screen focused, reloading connection data');
       loadConnectionData();
-    }, [loadConnectionData])
+    }, [loadConnectionData]),
   );
 
   const attemptSecureConnection = async () => {
     try {
       const savedMode = await ConnectionStateManager.getSecurityMode();
-      
+
       if (savedMode === 'insecure-ssl' || savedMode === 'secure') {
         setStatus('Connecting with trusted certificate...');
         const wssUrl = await ConnectionStateManager.getWSSUrl();
@@ -177,23 +426,20 @@ export const ConnectionSetupScreen: React.FC = () => {
         }
       } else {
         setStatus('Connecting unencrypted...');
-        // Already connected via ws:// during handshake, just verify
       }
-      
+
       setStatus('Connected successfully!');
       setIsManuallyConnecting(false);
       showToast('Successfully connected to Harmony Link!');
-      
-      // Navigate back after a short delay
+
       setTimeout(() => {
         navigation.navigate('SyncSettings');
       }, 1000);
     } catch (err: any) {
       log.error('Secure connection failed:', err);
-      
-      // Check if this is a certificate error
+
       const errorString = (err?.message || err?.toString?.() || JSON.stringify(err) || '').toLowerCase();
-      const isCertError = 
+      const isCertError =
         errorString.includes('certificate') ||
         errorString.includes('ssl') ||
         errorString.includes('tls') ||
@@ -201,37 +447,32 @@ export const ConnectionSetupScreen: React.FC = () => {
         errorString.includes('trust anchor') ||
         errorString.includes('self signed') ||
         errorString.includes('unable to verify');
-      
+
       if (isCertError) {
         log.info('Detected cert error in catch block - showing modal');
         setStatus('Certificate verification failed');
         setShowCertModal(true);
-        // Don't re-throw - we're handling it with the modal
       } else {
-        // For non-cert errors, re-throw to be handled by outer catch
         setIsManuallyConnecting(false);
         throw err;
       }
     }
   };
 
-
   const handleCertModalChoice = async (mode: 'insecure-ssl' | 'unencrypted' | 'abort') => {
-    // Mark that user has made a security choice to prevent modal from reopening
     hasSelectedSecurityModeRef.current = true;
     setShowCertModal(false);
-    
+
     if (mode === 'abort') {
       setStatus('Connection aborted by user');
       setIsManuallyConnecting(false);
       showToast('Connection cancelled');
       return;
     }
-    
+
     try {
-      // Save the security mode preference
       await ConnectionStateManager.saveSecurityMode(mode);
-      
+
       if (mode === 'insecure-ssl') {
         setStatus('Connecting with trusted certificate...');
         const wssUrl = await ConnectionStateManager.getWSSUrl();
@@ -243,9 +484,7 @@ export const ConnectionSetupScreen: React.FC = () => {
         setStatus('Connected with trusted certificate!');
       } else if (mode === 'unencrypted') {
         setStatus('Switching to unencrypted connection...');
-        // Disconnect secure and reconnect unencrypted
         connectionManager.disconnectConnection('sync');
-        // Use the original WS URL (different port than WSS)
         const wsUrl = await ConnectionStateManager.getWSUrl();
         if (!wsUrl) {
           throw new Error('No WS URL available for unencrypted connection');
@@ -253,11 +492,10 @@ export const ConnectionSetupScreen: React.FC = () => {
         await connectionManager.createConnection('sync', 'sync', wsUrl, 'unencrypted');
         setStatus('Connected unencrypted!');
       }
-      
+
       setIsManuallyConnecting(false);
       showToast('Successfully connected to Harmony Link!');
-      
-      // Navigate back after a short delay
+
       setTimeout(() => {
         navigation.navigate('SyncSettings');
       }, 1000);
@@ -266,12 +504,11 @@ export const ConnectionSetupScreen: React.FC = () => {
       setStatus('Connection failed');
       setIsManuallyConnecting(false);
       showToast('Failed to connect with selected security mode');
-      Alert.alert('Connection Failed', 'Failed to connect: ' + (err.message || 'Unknown error'));
+      showAlert('Connection Failed', 'Failed to connect: ' + (err.message || 'Unknown error'));
     }
   };
 
   useEffect(() => {
-    // Load connection data on mount and when isPaired/isConnected changes
     loadConnectionData();
 
     const handleHandshakePending = (payload: any) => {
@@ -282,22 +519,20 @@ export const ConnectionSetupScreen: React.FC = () => {
     const handleHandshakeAccepted = async (payload: any) => {
       log.info('Handshake accepted');
       setStatus('Handshake accepted! Saving credentials...');
-      
+
       try {
-        // Save credentials using ConnectionStateManager
         await ConnectionStateManager.saveConnectionCredentials(
           payload.jwt_token,
           payload.wss_url,
           payload.server_cert,
-          payload.token_expires_at
+          payload.token_expires_at,
         );
-        
+
         setServerCertificate(payload.server_cert || '');
         setPendingCredentials(payload);
-        
+
         setStatus('Credentials saved! Connecting securely...');
-        
-        // Try to connect with saved security mode, or default to secure
+
         await attemptSecureConnection();
       } catch (err: any) {
         log.error('Connection setup failed:', err);
@@ -312,7 +547,10 @@ export const ConnectionSetupScreen: React.FC = () => {
       setStatus('Connection rejected');
       setIsManuallyConnecting(false);
       showToast('Harmony Link rejected the connection request');
-      Alert.alert('Connection Rejected', 'Harmony Link rejected the connection request. Please try again or check device approval settings on Harmony Link.');
+      showAlert(
+        'Connection Rejected',
+        'Harmony Link rejected the connection request. Please try again or check device approval settings on Harmony Link.',
+      );
     };
 
     const handleConnectionError = (id: string, error: any) => {
@@ -325,7 +563,6 @@ export const ConnectionSetupScreen: React.FC = () => {
 
     const handleCertVerificationFailed = (error: any) => {
       log.info('Certificate verification failed:', error);
-      // Only show modal if user hasn't already made a security choice
       if (!hasSelectedSecurityModeRef.current) {
         setStatus('Certificate verification failed');
         setShowCertModal(true);
@@ -336,7 +573,6 @@ export const ConnectionSetupScreen: React.FC = () => {
 
     const handleCredentialsCleared = () => {
       log.info('Credentials cleared, resetting state');
-      // Reset local state immediately
       setUrl('192.168.1.');
       setPort('8080');
       setSecurityMode('');
@@ -344,7 +580,6 @@ export const ConnectionSetupScreen: React.FC = () => {
       setStatus('Idle');
     };
 
-    // Subscribe to events
     SyncService.on('handshake:pending', handleHandshakePending);
     SyncService.on('handshake:accepted', handleHandshakeAccepted);
     SyncService.on('handshake:rejected', handleHandshakeRejected);
@@ -353,7 +588,6 @@ export const ConnectionSetupScreen: React.FC = () => {
     ConnectionStateManager.on('credentials:cleared', handleCredentialsCleared);
 
     return () => {
-      // Cleanup
       SyncService.off('handshake:pending', handleHandshakePending);
       SyncService.off('handshake:accepted', handleHandshakeAccepted);
       SyncService.off('handshake:rejected', handleHandshakeRejected);
@@ -363,10 +597,9 @@ export const ConnectionSetupScreen: React.FC = () => {
     };
   }, [isPaired, isConnected, loadConnectionData]);
 
-
   const handleConnect = async () => {
     if (!url || !port) {
-      Alert.alert('Error', 'Please enter both URL and Port');
+      showAlert('Error', 'Please enter both URL and Port');
       return;
     }
 
@@ -385,267 +618,257 @@ export const ConnectionSetupScreen: React.FC = () => {
       setStatus('Connection failed');
       setIsManuallyConnecting(false);
       showToast('Failed to connect to Harmony Link');
-      Alert.alert('Connection Failed', 'Failed to connect to Harmony Link. Please check the IP address and port, and ensure Harmony Link is running.');
+      showAlert(
+        'Connection Failed',
+        'Failed to connect to Harmony Link. Please check the IP address and port, and ensure Harmony Link is running.',
+      );
     }
   };
 
+  // ── Early return if theme not ready ───────────────────────────────────
   if (!theme) return null;
+
+  // ── Extract theme tokens ──────────────────────────────────────────────
+  const cardBg = theme.colors.background.base;
+  const inputBg = theme.colors.background.surface;
+  const accentColor = theme.colors.accent.primary;
+  const textPrimary = theme.colors.text.primary;
+  const textMuted = theme.colors.text.muted;
+  const selectedCardBg = hexToRgba(accentColor, 0.08);
+  const statusColor =
+    radarState === 'connected'
+      ? '#4CAF50'
+      : radarState === 'error'
+      ? '#F44336'
+      : accentColor;
 
   return (
     <ThemedView style={styles.container}>
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={t('title')}
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-      </ThemedAppbar>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <ThemedText variant="secondary" style={styles.description}>
-          {isPaired
-            ? t('descriptionPaired')
-            : t('descriptionUnpaired')}
-        </ThemedText>
-
-        {/* ── Mode toggle ── */}
-        <View style={styles.modeSection}>
-          <ThemedText weight="bold" style={styles.modeTitle}>
+      <ScreenHeader title={t('title')} onBack={() => navigation.goBack()} />
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* ── Mode Toggle ── */}
+        <View style={styles.section}>
+          <ThemedText weight="bold" size={15} style={styles.sectionTitle}>
             {ta('mode_title')}
           </ThemedText>
-          <ThemedText variant="secondary" style={styles.modeDescription}>
+          <ThemedText variant="muted" size={12} style={styles.sectionDesc}>
             {ta('mode_description')}
           </ThemedText>
 
           <View style={styles.modeToggleRow}>
-            <TouchableOpacity
-              style={[
-                styles.modeOption,
-                {
-                  borderColor:
-                    connectionMode === 'selfhosted'
-                      ? theme.colors.accent.primary
-                      : theme.colors.border.default,
-                  backgroundColor:
-                    connectionMode === 'selfhosted'
-                      ? theme.colors.accent.primary + '18'
-                      : theme.colors.background.elevated,
-                },
-              ]}
+            <ModeSelectorCard
+              selected={connectionMode === 'selfhosted'}
               onPress={() => handleModeChange('selfhosted')}
-              activeOpacity={0.7}
-            >
-              <ThemedText
-                weight="medium"
-                variant={connectionMode === 'selfhosted' ? 'accent' : 'primary'}
-              >
-                {ta('mode_selfhosted')}
-              </ThemedText>
-              <ThemedText
-                size={12}
-                variant={connectionMode === 'selfhosted' ? 'secondary' : 'muted'}
-                style={styles.modeOptionDesc}
-              >
-                {ta('mode_selfhosted_desc')}
-              </ThemedText>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.modeOption,
-                {
-                  borderColor:
-                    connectionMode === 'cloud'
-                      ? theme.colors.accent.primary
-                      : theme.colors.border.default,
-                  backgroundColor:
-                    connectionMode === 'cloud'
-                      ? theme.colors.accent.primary + '18'
-                      : theme.colors.background.elevated,
-                },
-              ]}
+              icon="home-outline"
+              title={ta('mode_selfhosted')}
+              description={ta('mode_selfhosted_desc')}
+              accentColor={accentColor}
+              bgColor={cardBg}
+              selectedBgColor={selectedCardBg}
+            />
+            <ModeSelectorCard
+              selected={connectionMode === 'cloud'}
               onPress={() => handleModeChange('cloud')}
-              activeOpacity={0.7}
-            >
-              <ThemedText
-                weight="medium"
-                variant={connectionMode === 'cloud' ? 'accent' : 'primary'}
-              >
-                {ta('mode_cloud')}
-              </ThemedText>
-              <ThemedText
-                size={12}
-                variant={connectionMode === 'cloud' ? 'secondary' : 'muted'}
-                style={styles.modeOptionDesc}
-              >
-                {ta('mode_cloud_desc')}
-              </ThemedText>
-            </TouchableOpacity>
+              icon="cloud-outline"
+              title={ta('mode_cloud')}
+              description={ta('mode_cloud_desc')}
+              accentColor={accentColor}
+              bgColor={cardBg}
+              selectedBgColor={selectedCardBg}
+            />
           </View>
 
+          {/* Cloud hint */}
           {connectionMode === 'cloud' && (
-            <View style={styles.modeHintBlock}>
+            <View style={styles.cloudHintRow}>
               {authStatus === 'loading' ? (
-                <ThemedText variant="secondary" size={12} style={styles.modeHint}>{ta('mode_cloudCheckingAuth')}</ThemedText>
+                <ThemedText variant="muted" size={12} style={styles.cloudHint}>
+                  {ta('mode_cloudCheckingAuth')}
+                </ThemedText>
               ) : authStatus === 'authenticated' ? (
                 cloudStatus === 'spawning' ? (
                   <View style={styles.cloudSpawningRow}>
-                    <ActivityIndicator size="small" color={theme.colors.accent.primary} />
-                    <ThemedText variant="secondary" size={12} style={styles.modeHint}>{ta('cloud_spawning')}</ThemedText>
+                    <ActivityIndicator size="small" color={accentColor} />
+                    <ThemedText variant="secondary" size={12} style={styles.cloudHint}>
+                      {ta('cloud_spawning')}
+                    </ThemedText>
                   </View>
                 ) : cloudStatus === 'ready' ? (
-                  <ThemedText variant="secondary" size={12} style={styles.modeHint}>{ta('cloud_ready')}</ThemedText>
+                  <View style={styles.cloudSpawningRow}>
+                    <StatusPulseDot radarState="connected" accentColor={accentColor} size={8} glowSize={12} />
+                    <ThemedText size={12} variant="success" style={styles.cloudHint}>
+                      {ta('cloud_ready')}
+                    </ThemedText>
+                  </View>
                 ) : cloudStatus === 'error' ? (
-                  <ThemedText variant="secondary" size={12} style={[styles.modeHint, { color: '#F44336' }]}>{ta('cloud_error')}</ThemedText>
+                  <ThemedText size={12} style={[styles.cloudHint, { color: '#F44336' }]}>
+                    {ta('cloud_error')}
+                  </ThemedText>
                 ) : (
-                  <ThemedText variant="secondary" size={12} style={styles.modeHint}>{ta('mode_cloudReady')}</ThemedText>
+                  <ThemedText variant="secondary" size={12} style={styles.cloudHint}>
+                    {ta('mode_cloudReady')}
+                  </ThemedText>
                 )
               ) : (
-                <ThemedText variant="secondary" size={12} style={styles.modeHint}>{ta('mode_cloudSignInRequired')}</ThemedText>
+                <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+                  <ThemedText variant="accent" size={12} style={styles.cloudHint}>
+                    {ta('mode_cloudSignInRequired')}
+                  </ThemedText>
+                </TouchableOpacity>
               )}
             </View>
           )}
         </View>
 
+        {/* ── Self-hosted form ── */}
         {connectionMode === 'selfhosted' && (
-        <View style={styles.form}>
-          <ThemedText weight="medium">{t('addressLabel')}</ThemedText>
-          <TextInput
-            style={[styles.input, { color: theme.colors.text.primary }]}
-            value={url}
-            onChangeText={setUrl}
-            placeholder={t('addressPlaceholder')}
-            placeholderTextColor={theme.colors.text.muted}
-            keyboardType="url"
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!isPaired}
-          />
-
-          <ThemedText weight="medium">{t('portLabel')}</ThemedText>
-          <TextInput
-            style={[styles.input, { color: theme.colors.text.primary }]}
-            value={port}
-            onChangeText={setPort}
-            placeholder="8080"
-            placeholderTextColor={theme.colors.text.muted}
-            keyboardType="numeric"
-            editable={!isPaired}
-          />
-
-          {isPaired && securityMode && (
-            <>
-              <ThemedText weight="medium">{t('securityMode')}</ThemedText>
-              <View style={[styles.input, { justifyContent: 'center' }]}>
-                <ThemedText>
-                  {securityMode === 'secure' && t('secureMode')}
-                  {securityMode === 'insecure-ssl' && t('insecureSSlMode')}
-                  {securityMode === 'unencrypted' && t('unencryptedMode')}
-                </ThemedText>
-              </View>
-            </>
-          )}
-
-          <View style={styles.statusContainer}>
-            <ThemedText>{t('statusLabel')}</ThemedText>
-            <ThemedText weight="medium" style={[styles.statusText, { 
-              color: isPaired ? (isConnected ? '#4CAF50' : '#F44336') : theme.colors.accent.primary 
-            }]}>
-              {status}
-            </ThemedText>
-          </View>
-
-          {!isPaired ? (
-            <ThemedButton
-              label={isManuallyConnecting ? t('connecting') : t('connectPair')}
-              onPress={handleConnect}
-              disabled={isManuallyConnecting || isConnecting}
+          <View style={styles.formCard}>
+            <FormField
+              label={t('addressLabel')}
+              value={url}
+              onChangeText={setUrl}
+              placeholder={t('addressPlaceholder')}
+              keyboardType="url"
+              editable={!isPaired}
+              backgroundColor={inputBg}
+              inputTextColor={textPrimary}
+              inputPlaceholderColor={textMuted}
             />
-          ) : (
-            <View style={styles.pairedActions}>
-              {!isConnected && (
-                <ThemedButton
-                  label={isConnecting ? t('reconnecting') : t('reconnect')}
-                  onPress={async () => {
-                    try {
-                      setStatus('Reconnecting...');
-                      await reconnect();
-                      setStatus('Connected!');
-                      showToast('Reconnected successfully');
-                    } catch (error: any) {
-                      log.error('Manual reconnect failed:', error);
-                      setStatus('Reconnection failed');
-                      showToast('Failed to reconnect');
+
+            <FormField
+              label={t('portLabel')}
+              value={port}
+              onChangeText={setPort}
+              placeholder="8080"
+              keyboardType="numeric"
+              editable={!isPaired}
+              backgroundColor={inputBg}
+              inputTextColor={textPrimary}
+              inputPlaceholderColor={textMuted}
+            />
+
+            {/* Security mode display */}
+            {isPaired && securityMode && (
+              <View style={styles.securityRow}>
+                <ThemedText weight="medium" size={13} style={styles.securityLabel}>
+                  {t('securityMode')}
+                </ThemedText>
+                <View style={styles.securityBadge}>
+                  <Icon
+                    name={
+                      securityMode === 'secure'
+                        ? 'shield-check'
+                        : securityMode === 'insecure-ssl'
+                        ? 'shield-alert'
+                        : 'shield-off'
                     }
-                  }}
-                  disabled={isConnecting}
-                  style={styles.reconnectButton}
+                    size={14}
+                    color={securityMode === 'secure' ? '#4CAF50' : securityMode === 'insecure-ssl' ? '#F0A23B' : '#F44336'}
+                  />
+                  <ThemedText size={12} variant="secondary" style={styles.securityBadgeText}>
+                    {securityMode === 'secure' && t('secureMode')}
+                    {securityMode === 'insecure-ssl' && t('insecureSSlMode')}
+                    {securityMode === 'unencrypted' && t('unencryptedMode')}
+                  </ThemedText>
+                </View>
+              </View>
+            )}
+
+            {/* Status display */}
+            <View style={styles.statusRow}>
+              <StatusPulseDot radarState={radarState} accentColor={accentColor} size={9} glowSize={15} />
+              <ThemedText weight="medium" size={13} style={{ color: statusColor, marginLeft: 8 }}>
+                {status}
+              </ThemedText>
+            </View>
+
+            {/* Action buttons */}
+            <View style={styles.buttonGroup}>
+              {!isPaired ? (
+                <ThemedButton
+                  label={isManuallyConnecting ? t('connecting') : t('connectPair')}
+                  onPress={handleConnect}
+                  disabled={isManuallyConnecting || isConnecting}
+                  icon="link-variant"
                 />
-              )}
-              <ThemedButton
-                label={t('unpairDevice')}
-                onPress={async () => {
-                Alert.alert(
-                  t('unpairTitle'),
-                  t('unpairMessage'),
-                  [
-                    { text: t('common:cancel'), style: 'cancel' },
-                    {
-                      text: t('unpair'),
-                      style: 'destructive',
-                      onPress: async () => {
-                        await ConnectionStateManager.clearAllCredentials();
-                        await ConnectionStateManager.clearSecurityMode();
-                        connectionManager.disconnectConnection('sync');
-                        setUrl('192.168.1.');
-                        setPort('8080');
-                        setStatus('Idle');
-                        setSecurityMode('');
-                        setServerCertificate('');
-                        showToast('Device unpaired');
-                      }
-                    }
-                  ]
-                );
-                }}
-                variant="secondary"
-              />
-              {securityMode && (
-                <ThemedButton
-                  label={t('resetSecurityMode')}
-                  onPress={async () => {
-                    Alert.alert(
-                      t('resetSecurityTitle'),
-                      t('resetSecurityMessage'),
-                      [
+              ) : (
+                <>
+                  {!isConnected && (
+                    <ThemedButton
+                      label={isConnecting ? t('reconnecting') : t('reconnect')}
+                      onPress={async () => {
+                        try {
+                          setStatus('Reconnecting...');
+                          await reconnect();
+                          setStatus('Connected!');
+                          showToast('Reconnected successfully');
+                        } catch (error: any) {
+                          log.error('Manual reconnect failed:', error);
+                          setStatus('Reconnection failed');
+                          showToast('Failed to reconnect');
+                        }
+                      }}
+                      disabled={isConnecting}
+                      icon="refresh"
+                      style={styles.actionButton}
+                    />
+                  )}
+                  <ThemedButton
+                    label={t('unpairDevice')}
+                    onPress={async () => {
+                      showAlert(t('unpairTitle'), t('unpairMessage'), [
                         { text: t('common:cancel'), style: 'cancel' },
                         {
-                          text: t('reset'),
+                          text: t('unpair'),
                           style: 'destructive',
                           onPress: async () => {
+                            await ConnectionStateManager.clearAllCredentials();
                             await ConnectionStateManager.clearSecurityMode();
-                            setSecurityMode('secure');
-                            showToast('Security mode reset');
+                            connectionManager.disconnectConnection('sync');
+                            setUrl('192.168.1.');
+                            setPort('8080');
+                            setStatus('Idle');
+                            setSecurityMode('');
+                            setServerCertificate('');
+                            showToast('Device unpaired');
                           },
                         },
-                      ],
-                    );
-                  }}
-                  variant="outline"
-                  style={styles.reconnectButton}
-                />
+                      ]);
+                    }}
+                    variant="secondary"
+                    icon="link-off"
+                    style={styles.actionButton}
+                  />
+                  {securityMode && (
+                    <ThemedButton
+                      label={t('resetSecurityMode')}
+                      onPress={async () => {
+                        showAlert(t('resetSecurityTitle'), t('resetSecurityMessage'), [
+                          { text: t('common:cancel'), style: 'cancel' },
+                          {
+                            text: t('reset'),
+                            style: 'destructive',
+                            onPress: async () => {
+                              await ConnectionStateManager.clearSecurityMode();
+                              setSecurityMode('secure');
+                              showToast('Security mode reset');
+                            },
+                          },
+                        ]);
+                      }}
+                      variant="outline"
+                      icon="shield-refresh"
+                      style={styles.actionButton}
+                    />
+                  )}
+                </>
               )}
             </View>
-          )}
-
-        </View>
+          </View>
         )}
-
-
       </ScrollView>
 
+      {/* ── Certificate modals ── */}
       <CertificateVerificationModal
         visible={showCertModal}
         onSelectMode={handleCertModalChoice}
@@ -654,7 +877,6 @@ export const ConnectionSetupScreen: React.FC = () => {
           setShowCertDetailsModal(true);
         }}
       />
-
       <CertificateDetailsModal
         visible={showCertDetailsModal}
         onClose={() => {
@@ -667,90 +889,168 @@ export const ConnectionSetupScreen: React.FC = () => {
   );
 };
 
+// ─── Styles ────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    elevation: 4,
-  },
   scrollContent: {
-    padding: 20,
+    padding: 16,
     alignItems: 'center',
+    paddingBottom: 40,
   },
-  description: {
-    textAlign: 'center',
-    marginBottom: 30,
-    opacity: 0.8,
-  },
-  form: {
-    width: '100%',
-    maxWidth: 400,
-  },
-  input: {
-    backgroundColor: 'rgba(150, 150, 150, 0.1)',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 8,
-    marginBottom: 20,
-    fontSize: 16,
-  },
-  statusContainer: {
-    flexDirection: 'row',
-    marginBottom: 20,
-    justifyContent: 'center',
-  },
-  statusText: {
-    // Color applied dynamically via theme
-  },
-  pairedActions: {
-    gap: 10,
-  },
-  // ── Mode toggle ──
-  modeSection: {
+
+  // ── Section ──
+  section: {
     width: '100%',
     maxWidth: 400,
     marginBottom: 24,
   },
-  modeTitle: {
-    fontSize: 15,
-    marginBottom: 4,
+  sectionTitle: {
+    marginBottom: 2,
   },
-  modeDescription: {
-    fontSize: 13,
+  sectionDesc: {
     marginBottom: 16,
-    opacity: 0.8,
+    opacity: 0.7,
   },
+
+  // ── Mode toggle ──
   modeToggleRow: {
     flexDirection: 'row',
     gap: 12,
   },
-  modeOption: {
-    flex: 1,
+  modeCard: {},
+  modeCardBody: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    padding: 16,
+    position: 'relative',
+  },
+  modeCardAccentBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+  },
+  modeCardIconWrap: {
+    width: 40,
+    height: 40,
     borderRadius: 12,
-    borderWidth: 1.5,
-    padding: 14,
-    gap: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+    marginTop: 4,
   },
-  modeOptionDesc: {
-    lineHeight: 16,
+  modeCardTitle: {
+    marginBottom: 4,
   },
-  modeHint: {
-    marginTop: 8,
+  modeCardDesc: {
+    lineHeight: 15,
+  },
+  modeCardCheck: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Cloud hint ──
+  cloudHintRow: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  cloudHint: {
     textAlign: 'center',
-    opacity: 0.7,
-  },
-  modeHintBlock: {
-    marginTop: 8,
+    opacity: 0.75,
   },
   cloudSpawningRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 8,
+  },
+
+  // ── Form card ──
+  formCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: 'transparent',
+  },
+
+  // ── Form fields ──
+  fieldWrapper: {
+    marginBottom: 18,
+  },
+  fieldLabel: {
+    marginBottom: 6,
+    marginLeft: 2,
+  },
+  fieldBody: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  fieldInput: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+
+  // ── Security row ──
+  securityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  securityLabel: {},
+  securityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  securityBadgeText: {},
+
+  // ── Status row ──
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
     justifyContent: 'center',
   },
-  reconnectButton: {
-    marginBottom: 10,
+
+  // ── Status dot (pulse) ──
+  statusDotOuter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusDotGlow: {
+    position: 'absolute',
+  },
+  statusDotCore: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+
+  // ── Buttons ──
+  buttonGroup: {
+    gap: 10,
+  },
+  actionButton: {
+    width: '100%',
   },
 });

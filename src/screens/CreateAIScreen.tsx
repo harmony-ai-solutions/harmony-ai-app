@@ -15,7 +15,6 @@ import {
   View,
   ScrollView,
   TextInput,
-  Alert,
   ActivityIndicator,
   TouchableOpacity,
   Image,
@@ -26,9 +25,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
-import { Appbar } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { ThemedCard } from '../components/themed/ThemedCard';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -42,6 +40,7 @@ const log = createLogger('[CreateAIScreen]');
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -357,6 +356,7 @@ const pickerStyles = StyleSheet.create({
 
 export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('createAI');
 
@@ -461,7 +461,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // ── Save & Create ────────────────────────────────────────────────────────────
   const handleCreate = async () => {
     if (!name.trim()) {
-      Alert.alert(t('nameRequired'), t('nameRequiredMessage'));
+      showAlert(t('nameRequired'), t('nameRequiredMessage'));
       return;
     }
 
@@ -557,7 +557,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         entityName: name,
       });
     } catch (err: any) {
-      Alert.alert(
+      showAlert(
         t('common:error'),
         t('createFailed', { message: err?.message ?? 'Unknown error' }),
       );
@@ -613,16 +613,10 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={t('title')}
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-      </ThemedAppbar>
+      <ScreenHeader
+        title={t('title')}
+        onBack={() => navigation.goBack()}
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}

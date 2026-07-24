@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { StatusBar } from 'react-native';
+import { StatusBar, View, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PaperProvider } from 'react-native-paper';
 import { NavigationContainerRef } from '@react-navigation/native';
@@ -14,36 +14,39 @@ import { AppNavigator, RootStackParamList } from './src/navigation/AppNavigator'
 import { ThemeProvider, usePaperTheme, useAppTheme } from './src/contexts/ThemeContext';
 import { DatabaseProvider, useDatabase } from './src/contexts/DatabaseContext';
 import { AuthProvider } from './src/contexts/AuthContext';
+import { BiometricLockProvider, useBiometricLock } from './src/contexts/BiometricLockContext';
 import { SyncConnectionProvider, useSyncConnection } from './src/contexts/SyncConnectionContext';
 import { EntitySessionProvider } from './src/contexts/EntitySessionContext';
 import { EmojiProvider } from './src/contexts/EmojiContext';
 import { I18nProvider } from './src/contexts/I18nContext';
+import { AppAlertProvider } from './src/contexts/AppAlertContext';
 import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoadingScreen';
 import { InitialPairingModal } from './src/components/modals/InitialPairingModal';
+import { LockScreen } from './src/components/lock/LockScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { DynamicAtmosphericBackground } from './src/components/background/DynamicAtmosphericBackground';
+import { StardustParticles } from './src/components/background/StardustParticles';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
- * App content with theme, database, and connection
+ * Inner app shell — has access to BiometricLockContext for lock screen overlay.
  */
-function AppContent() {
+function AppShell() {
   const paperTheme = usePaperTheme();
-  const { theme, loading: themeLoading } = useAppTheme();
+  const { theme, loading: themeLoading, dynamicBackgroundEnabled } = useAppTheme();
   const { isReady, isLoading } = useDatabase();
   const { isPaired } = useSyncConnection();
+  const { isLocked } = useBiometricLock();
   const [showPairingModal, setShowPairingModal] = useState(false);
   const [pairingModalChecked, setPairingModalChecked] = useState(false);
-  
-  // Create a ref that can be used for navigation
-  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+
+  const navigationRef = useRef<NavigationContainerRef<RootStackParamList> | null>(null);
 
   useEffect(() => {
-    // Check if we should show the initial pairing modal
     const checkFirstLaunch = async () => {
       const hasSeenPairingPrompt = await AsyncStorage.getItem('has_seen_pairing_prompt');
-      
+
       if (!hasSeenPairingPrompt && !isPaired && isReady) {
-        // First launch and not paired - show modal after a short delay
         setTimeout(() => {
           setShowPairingModal(true);
           setPairingModalChecked(true);
@@ -61,8 +64,7 @@ function AppContent() {
   const handlePairNow = async () => {
     await AsyncStorage.setItem('has_seen_pairing_prompt', 'true');
     setShowPairingModal(false);
-    
-    // Navigate to ConnectionSetupScreen using the navigation ref
+
     setTimeout(() => {
       if (navigationRef.current?.isReady()) {
         navigationRef.current.navigate('ConnectionSetup');
@@ -75,29 +77,32 @@ function AppContent() {
     setShowPairingModal(false);
   };
 
-  // Show loading screen while database OR theme initializes.
-  // themeLoading guards against the race where DB finishes init before
-  // ThemeContext.loadTheme() resolves — without it, every screen in the
-  // navigator returns null (if (!theme) return null) → blank white page.
   if (isLoading || !isReady || themeLoading) {
     return <DatabaseLoadingScreen />;
   }
 
-  // Database is ready, show main app
   return (
     <PaperProvider theme={paperTheme}>
       <StatusBar
         barStyle="light-content"
         backgroundColor={theme?.colors.background.base || '#000000'}
+        translucent
       />
-      <AppNavigator navigationRef={navigationRef} />
-      {pairingModalChecked && (
-        <InitialPairingModal
-          visible={showPairingModal}
-          onPair={handlePairNow}
-          onMaybeLater={handleMaybeLater}
-        />
-      )}
+      <View style={styles.backgroundLayer}>
+        <DynamicAtmosphericBackground enabled={dynamicBackgroundEnabled} />
+        <StardustParticles enabled={dynamicBackgroundEnabled} />
+      </View>
+      <View style={styles.foregroundLayer}>
+        <AppNavigator navigationRef={navigationRef} />
+        {pairingModalChecked && (
+          <InitialPairingModal
+            visible={showPairingModal}
+            onPair={handlePairNow}
+            onMaybeLater={handleMaybeLater}
+          />
+        )}
+        {isLocked && <LockScreen />}
+      </View>
     </PaperProvider>
   );
 }
@@ -114,11 +119,15 @@ function App() {
             <DatabaseProvider>
               <AuthProvider>
                 <SyncConnectionProvider>
-                    <EntitySessionProvider>
-                      <EmojiProvider>
-                        <AppContent />
-                      </EmojiProvider>
-                    </EntitySessionProvider>
+                  <EntitySessionProvider>
+                    <EmojiProvider>
+                      <AppAlertProvider>
+                        <BiometricLockProvider>
+                          <AppShell />
+                        </BiometricLockProvider>
+                      </AppAlertProvider>
+                    </EmojiProvider>
+                  </EntitySessionProvider>
                 </SyncConnectionProvider>
               </AuthProvider>
             </DatabaseProvider>
@@ -128,5 +137,16 @@ function App() {
     </ErrorBoundary>
   );
 }
+
+const styles = StyleSheet.create({
+  backgroundLayer: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 0,
+  },
+  foregroundLayer: {
+    flex: 1,
+    zIndex: 1,
+  },
+});
 
 export default App;

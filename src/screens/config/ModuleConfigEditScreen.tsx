@@ -4,7 +4,6 @@ import {
   View,
   ScrollView,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   TextInput,
   Platform,
@@ -12,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
-import { Appbar } from 'react-native-paper';
+import { useTranslation } from 'react-i18next';
 import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -20,11 +19,12 @@ import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[ModuleConfigEditScreen]');
 
-import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedCard } from '../../components/themed/ThemedCard';
 import { SectionHeader } from '../../components/themed/SectionHeader';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
+import { useAppAlert } from '../../contexts/AppAlertContext';
 import { FormField } from '../../components/config/FormField';
 import { AdvancedSamplingParams } from '../../components/config/AdvancedSamplingParams';
 import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
@@ -146,6 +146,8 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const route = useRoute<ModuleConfigEditRouteProp>();
   const navigation = useNavigation<ModuleConfigEditNavigationProp>();
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
+  const { t } = useTranslation('moduleConfig');
   const { bottom: safeBottom } = useSafeAreaInsets();
   
   const { moduleType, configId } = route.params;
@@ -376,7 +378,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
   const handleSave = async () => {
     if (!formValues.name) {
-      Alert.alert('Error', 'Config name is required');
+      showAlert(t('common:error'), t('configNameRequired'));
       return;
     }
 
@@ -384,7 +386,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
     try {
       const repo = MODULE_REPOSITORIES[moduleType];
       if (!repo) {
-        Alert.alert('Error', 'Unknown module type');
+        showAlert(t('common:error'), t('unknownModuleType'));
         return;
       }
 
@@ -393,11 +395,11 @@ export const ModuleConfigEditScreen: React.FC = () => {
         const txProvider = formValues.transcription_provider;
         const vadProvider = formValues.vad_provider;
         if (!txProvider) {
-          Alert.alert('Error', 'Transcription provider is required');
+          showAlert(t('common:error'), t('transcriptionProviderRequired'));
           return;
         }
         if (!vadProvider) {
-          Alert.alert('Error', 'VAD provider is required');
+          showAlert(t('common:error'), t('vadProviderRequired'));
           return;
         }
 
@@ -426,7 +428,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
         // Standard module
         const providerType = formValues.provider;
         if (!providerType) {
-          Alert.alert('Error', 'Provider is required');
+          showAlert(t('common:error'), t('providerRequired'));
           return;
         }
 
@@ -460,7 +462,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
       navigation.goBack();
     } catch (error) {
       log.error('Failed to save:', error);
-      Alert.alert('Error', 'Failed to save configuration');
+      showAlert(t('common:error'), t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -470,13 +472,13 @@ export const ModuleConfigEditScreen: React.FC = () => {
     const repo = MODULE_REPOSITORIES[moduleType];
     if (!repo || !configId) return;
 
-    Alert.alert(
-      'Delete Configuration',
-      'Are you sure you want to delete this configuration?',
+    showAlert(
+      t('deleteTitle'),
+      t('deleteConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common:cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common:delete'),
           style: 'destructive',
           onPress: async () => {
             await repo.delete(configId);
@@ -648,16 +650,10 @@ export const ModuleConfigEditScreen: React.FC = () => {
   if (loading) {
     return (
       <ThemedView style={styles.container}>
-        <ThemedAppbar style={styles.header}>
-          <Appbar.BackAction
-            color={theme.colors.text.primary}
-            onPress={() => navigation.goBack()}
-          />
-          <Appbar.Content
-            title={`${moduleConfig?.name || moduleType} Config`}
-            titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-          />
-        </ThemedAppbar>
+        <ScreenHeader
+          title={`${moduleConfig?.name || moduleType} Config`}
+          onBack={() => navigation.goBack()}
+        />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={theme.colors.accent.primary} />
         </View>
@@ -689,21 +685,21 @@ export const ModuleConfigEditScreen: React.FC = () => {
             <SectionHeader title="STT Settings" />
             <View style={styles.sectionContent}>
               {renderThemedInput(
-                'Main Stream Time (ms)',
+                t('mainStreamTime'),
                 formValues.main_stream_time_millis,
                 (text) => handleModuleFieldChange('main_stream_time_millis', text ? parseInt(text, 10) : null),
                 '2000',
                 'number-pad',
               )}
               {renderThemedInput(
-                'Transition Stream Time (ms)',
+                t('transitionStreamTime'),
                 formValues.transition_stream_time_millis,
                 (text) => handleModuleFieldChange('transition_stream_time_millis', text ? parseInt(text, 10) : null),
                 '1000',
                 'number-pad',
               )}
               {renderThemedInput(
-                'Max Buffer Count',
+                t('maxBufferCount'),
                 formValues.max_buffer_count,
                 (text) => handleModuleFieldChange('max_buffer_count', text ? parseInt(text, 10) : null),
                 '5',
@@ -770,29 +766,27 @@ export const ModuleConfigEditScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={isCreate ? `New ${moduleConfig?.name || moduleType} Config` : `Edit ${moduleConfig?.name || moduleType} Config`}
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-        {saving ? (
-          <ActivityIndicator
-            size="small"
-            color={theme.colors.accent.primary}
-            style={styles.savingIndicator}
-          />
-        ) : (
-          <Appbar.Action
-            icon="check"
-            color={theme.colors.accent.primary}
-            onPress={handleSave}
-          />
-        )}
-      </ThemedAppbar>
+      <ScreenHeader
+        title={isCreate ? `New ${moduleConfig?.name || moduleType} Config` : `Edit ${moduleConfig?.name || moduleType} Config`}
+        onBack={() => navigation.goBack()}
+        right={
+          saving ? (
+            <ActivityIndicator
+              size="small"
+              color={theme.colors.accent.primary}
+            />
+          ) : (
+            <TouchableOpacity
+              onPress={handleSave}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Save configuration"
+              accessibilityRole="button"
+            >
+              <Icon name="check" size={24} color={theme.colors.accent.primary} />
+            </TouchableOpacity>
+          )
+        }
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
@@ -808,7 +802,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
             <SectionHeader title="General" />
             <View style={styles.sectionContent}>
               {renderThemedInput(
-                'Config Name *',
+                t('configName'),
                 formValues.name,
                 (text) => handleModuleFieldChange('name', text),
                 'Enter config name',
@@ -850,7 +844,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
                     ]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
-                    style={StyleSheet.absoluteFillObject}
+                    style={StyleSheet.absoluteFill}
                   />
                   <View style={styles.deleteIconBadge}>
                     <Icon

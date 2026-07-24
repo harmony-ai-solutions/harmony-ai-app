@@ -3,22 +3,21 @@ import {
   StyleSheet,
   View,
   FlatList,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Appbar, FAB } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
-import { SettingsMenu } from '../components/navigation/SettingsMenu';
+import { ThemedFab } from '../components/themed/ThemedFab';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[EntityConfigScreen]');
@@ -40,9 +39,9 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export const EntityConfigScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('entityConfig');
-  const [menuVisible, setMenuVisible] = useState(false);
   const [entityItems, setEntityItems] = useState<EntityListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -111,7 +110,7 @@ export const EntityConfigScreen: React.FC = () => {
 
   const handleDelete = (item: EntityListItem) => {
     const entityName = item.characterProfileName || item.entity.alias || item.entity.id.substring(0, 8);
-    Alert.alert(
+    showAlert(
       t('deleteEntity'),
       t('deleteConfirm', { name: entityName }),
       [
@@ -126,7 +125,7 @@ export const EntityConfigScreen: React.FC = () => {
                 prev.filter(e => e.entity.id !== item.entity.id),
               );
             } catch {
-              Alert.alert(t('common:error'), t('deleteFailed') || 'Failed to delete entity.');
+              showAlert(t('common:error'), t('deleteFailed') || 'Failed to delete entity.');
             }
           },
         },
@@ -138,21 +137,10 @@ export const EntityConfigScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={t('title')}
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-        <Appbar.Action
-          icon="menu"
-          color={theme.colors.text.primary}
-          onPress={() => setMenuVisible(true)}
-        />
-      </ThemedAppbar>
+      <ScreenHeader
+        title={t('title')}
+        onBack={() => navigation.goBack()}
+      />
 
       {isLoading ? (
         <View style={styles.centered}>
@@ -197,18 +185,8 @@ export const EntityConfigScreen: React.FC = () => {
         />
       )}
 
-      <FAB
-        icon="plus"
-        style={[styles.fab, { backgroundColor: theme.colors.accent.primary, bottom: 24 + safeBottom }]}
-        onPress={() => navigation.navigate('CreateAI', {})}
-        color="#fff"
-      />
+      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: 24 + safeBottom }} />
 
-      <SettingsMenu
-        visible={menuVisible}
-        onClose={() => setMenuVisible(false)}
-        onNavigate={screen => navigation.navigate(screen as any)}
-      />
     </ThemedView>
   );
 };

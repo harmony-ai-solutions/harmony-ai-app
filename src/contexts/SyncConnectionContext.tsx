@@ -5,6 +5,7 @@ import SyncService, { SyncService as SyncServiceClass } from '../services/SyncSe
 import { ToastAndroid, Platform, Alert } from 'react-native';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
+import i18n from './I18nContext';
 
 const log = createLogger('[SyncConnectionContext]');
 
@@ -142,7 +143,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setReconnectAttempts(0);
       setNextReconnectIn(0);
       setLastConnectionError('');
-      showToast('Connected to Harmony Link');
+      showToast(i18n.t('syncConnection:connectedToast'));
 
       // Trigger background sync to pick up any messages generated while disconnected
       SyncServiceClass.getInstance().initiateSync().catch((err: any) => {
@@ -187,7 +188,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
         }
       } else {
         if (reconnectAttemptsRef.current === 0 && !isReconnectingRef.current) {
-          showToast(`Connection error: ${errorMessage}`);
+          showToast(i18n.t('syncConnection:connectionError', { message: errorMessage }));
         }
         
         if (isConnectedRef.current && isPairedRef.current && !isReconnectingRef.current && !isConnectingRef.current) {
@@ -214,12 +215,12 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
 
     const handleSyncCompleted = (session: any) => {
       log.info('Sync completed:', session);
-      showToast(`Sync complete! Sent: ${session.recordsSent}, Received: ${session.recordsReceived}`);
+      showToast(i18n.t('syncConnection:syncComplete', { sent: session.recordsSent, received: session.recordsReceived }));
     };
 
     const handleSyncErrorEvent = (error: string) => {
       log.error('Sync service error:', error);
-      showToast(`Sync failed: ${error}`);
+      showToast(i18n.t('syncConnection:syncFailed', { error }));
     };
 
     connectionManager.on('connected:sync',            handleSyncConnected);
@@ -287,7 +288,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setIsConnectedSync(false);
       
       if (reconnectAttemptsRef.current === 0) {
-        showToast('Failed to connect to Harmony Link');
+        showToast(i18n.t('syncConnection:failedToConnect'));
       }
       
       throw error;
@@ -306,7 +307,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       
       const connectionPromise = connectionManager.createConnection('sync', 'sync', wsUrl, 'unencrypted');
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Handshake connection timeout')), 10000)
+        setTimeout(() => reject(new Error(i18n.t('syncConnection:handshakeTimeout'))), 10000)
       );
       
       await Promise.race([connectionPromise, timeoutPromise]);
@@ -404,7 +405,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     if (Platform.OS === 'android') {
       ToastAndroid.show(message, ToastAndroid.SHORT);
     } else {
-      Alert.alert('Harmony Link', message);
+      Alert.alert(i18n.t('syncConnection:alertTitle'), message);
     }
   };
 

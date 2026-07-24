@@ -1,5 +1,5 @@
 # Harmony AI App Tech Context
-@Core: React Native 0.83.1, TypeScript, React Navigation (Native Stack), React Native Paper (MD3).
+@Core: React Native 0.86.0, TypeScript, React Navigation (Native Stack), React Native Paper (MD3).
 @State: React Hooks (current), Context API (theme/auth/emoji), Redux/Zustand (future complex state).
 @Data: SQLite (messages/characters/interactions/emoji_actions, future), AsyncStorage (settings/preferences/reply mode), SQLCipher encryption, React Native Keychain (secure storage).
 @Network: Axios (REST), WebSocket (real-time), reconnection logic, retry with backoff, session resume on reconnect.

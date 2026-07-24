@@ -1,0 +1,19 @@
+# e2e/.maestro/_shared/navigate-to-sync-settings.yaml
+# Reusable flow: navigate from any tab screen to the SyncSettings screen.
+#
+# Path: tap the Settings tab → tap the Sync card on the Settings screen.
+# Selectors verified against src/screens/SettingsScreen.tsx and
+# src/i18n/locales/en/settings.json.
+
+appId: ai.soulbits.chat.dev
+
+---
+# Tap the Settings tab in the bottom GlassTabBar.
+# Uses the testID set via tabBarButtonTestID in MainTabNavigator.tsx.
+- tapOn:
+    id: "tab-settings"
+
+# Settings screen renders two tappable cards: Connection + Sync.
+# Tap the Sync card (the ThemedCard containing the "Sync" section header).
+- tapOn:
+    id: "settings-sync-card"

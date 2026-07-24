@@ -1,0 +1,210 @@
+# e2e/docker-compose.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# E2E Test Stack — HarmonyAIChat
+#
+# Orchestrates three services for Android E2E testing:
+#   1. harmony-link     — Go backend (published production image, headless mode)
+#   2. android-emulator — Android 14 emulator via budtmo/docker-android
+#   3. maestro-runner   — Test runner that installs the APK and executes Maestro flows
+#
+# Usage:
+#   docker compose -f e2e/docker-compose.yml up -d harmony-link android-emulator
+#   # Wait for emulator to boot (check http://localhost:6080 for noVNC view),
+#   # then run the test runner:
+#   docker compose -f e2e/docker-compose.yml up maestro-runner
+#
+# All-in-one (aborts when maestro-runner exits):
+#   docker compose -f e2e/docker-compose.yml up --abort-on-container-exit
+#
+# See e2e/README.md for architecture, debugging, and Windows fallback guidance.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Harmony Link Go Backend
+  # Uses the locally-built soulbits/harmony-link image (built fresh from
+  # harmony-link-private). To rebuild:
+  #   cd harmony-link-private && docker build -f Dockerfile.build -t soulbits/harmony-link:latest .
+  #
+  # CLOUD_MODE=true enables auto-approval of new devices (no manual desktop
+  # UI confirmation needed). The E2E app connects, sends a handshake request,
+  # and the server auto-registers the device in sync_devices. See
+  # harmony-link-private/eventserver/synchronization.go:260.
+  #
+  # The image runs headless via CMD ["disable-gui"] and ships with:
+  #   - /health endpoint (plain HTTP, port 28080)
+  #   - Self-signed TLS cert generation (Go code, no shell scripts)
+  #   - Cloud-mode env var configuration (CLOUD_MODE + HL_* pattern)
+  # See .current_work/test-framework-overhaul/6-2-HarmonyLinkService.md for the
+  # full rationale from the soulbits-cloud-backend reference pattern.
+  # ──────────────────────────────────────────────────────────────────────────
+  harmony-link:
+    # Locally-built image — do NOT set pull_policy: always (not on Docker Hub).
+    # Built from harmony-link-private/Dockerfile.build, tagged soulbits/harmony-link:latest.
+    image: soulbits/harmony-link:latest
+    pull_policy: never
+    container_name: harmony-link
+    hostname: harmony-link
+    ports:
+      - "28080:28080"   # HTTP/WS — healthcheck uses plain HTTP here
+      - "28443:28443"   # WSS/TLS — app sync traffic
+      # - "28081:28081" # Admin API (uncomment if E2E exercises it)
+    environment:
+      CLOUD_MODE: "true"
+      HL_GENERAL_PORT: "28080"
+      HL_WSS_PORT: "28443"
+      HL_ADMIN_PORT: "28081"
+      HL_DATA_DIR: "/data"
+      HL_DATABASE_FILENAME: "data.sqlite"
+      HL_DATABASE_ENCRYPTION: "false"
+      HL_INFERENCE_TOKEN: "e2e-test-token"
+      # HL_ADMIN_API_KEY: "e2e-admin"  # uncomment if admin API is exercised
+    # /data must be writable by uid 1000 (the image's non-root user, see
+    # Dockerfile.build: `User=1000:0`). A named volume is created root-owned
+    # (mode 0755), so the uid-1000 process cannot create the SQLite DB file
+    # there → "unable to open database file: no such file or directory".
+    # tmpfs owned by uid 1000 fixes the write permission AND yields a fresh
+    # DB each run, which is desirable for deterministic E2E. If persistence
+    # is ever needed (e.g. seeded fixtures), either chown a named volume in
+    # an init step or rebuild the image with
+    # `RUN mkdir -p /data && chown 1000:0 /data`.
+    tmpfs:
+      - /data:uid=1000,gid=0,mode=0770
+    healthcheck:
+      # Plain HTTP — avoids TLS hostname mismatch on self-signed cert.
+      # The HTTP server only starts after DB migrations complete, so this
+      # implicitly confirms readiness (migrations + WSS listener bound).
+      test: ["CMD", "curl", "-f", "http://localhost:28080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12          # up to 60s startup grace
+      start_period: 10s
+    networks:
+      - harmony-e2e
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Android Emulator (Docker-in-Docker via budtmo/docker-android)
+  # Requires /dev/kvm on the host (Linux bare-metal or WSL2 with nested KVM).
+  # Full configuration documented in .current_work/test-framework-overhaul/
+  # 6-3-AndroidEmulatorService.md.
+  # ──────────────────────────────────────────────────────────────────────────
+  android-emulator:
+    image: budtmo/docker-android:emulator_14.0
+    container_name: android-emulator
+    privileged: true       # required for emulator device access
+    devices:
+      - /dev/kvm:/dev/kvm  # KVM acceleration — must exist on host
+    # ── Port-forward bridge: emulator (10.0.2.2) → harmony-link container ──
+    # The Android emulator is a QEMU VM. From inside it, the special address
+    # 10.0.2.2 maps to the QEMU host = THIS container's loopback — NOT to the
+    # Docker host and NOT to sibling containers. So the app's hardcoded
+    # wss://10.0.2.2:28443 / ws://10.0.2.2:28080 can never reach the
+    # harmony-link container (which lives on the harmony-e2e bridge at its own
+    # IP, e.g. 172.23.0.2) without help.
+    #
+    # socat listens on this container's loopback (where 10.0.2.2 lands) and
+    # forwards raw TCP to harmony-link by Docker DNS. TLS passes through
+    # transparently (bytes are untouched), so WSS works unchanged. socat ships
+    # in the budtmo image; `exec` then hands off to the original startup script
+    # (entrypoint is `sh -c`, so `command` is the script body — `$$APP_PATH`
+    # escapes the `$` from Compose so the shell expands it).
+    # NOTE: Compose splits a *string* `command` on whitespace into an array,
+    # which would make `sh -c` see only `socat` (→ "0 addresses"). So we use an
+    # explicit single-element flow sequence + reset entrypoint, guaranteeing
+    # Docker runs `sh -c "<whole snippet>"`. `$$APP_PATH` escapes the `$` from
+    # Compose so the shell expands APP_PATH at runtime.
+    entrypoint: []
+    command:
+      - sh
+      - -c
+      - socat TCP-LISTEN:28080,fork,reuseaddr TCP:harmony-link:28080 & socat TCP-LISTEN:28443,fork,reuseaddr TCP:harmony-link:28443 & exec $$APP_PATH/mixins/scripts/run.sh
+    environment:
+      EMULATOR_DEVICE: "Samsung Galaxy S10"
+      WEB_VNC: "true"       # set "false" in CI to reduce overhead
+      APPIUM: "false"       # not using Appium — disable to speed up boot
+      AUTO_RECORD: "false"  # video recording can be enabled per-flow in Maestro
+    ports:
+      - "6080:6080"         # noVNC — view emulator screen in browser
+      - "5555:5555"         # ADB
+    volumes:
+      - emulator-data:/home/androidusr   # persist dalvik cache across restarts
+      # - ./certs:/certs:ro              # uncomment if pushing CA cert to emulator
+    healthcheck:
+      # budtmo writes /home/androidusr/device_status with content "BOOTING"
+      # during startup, then "READY" once the emulator is fully booted.
+      # Verified empirically against budtmo/docker-android:emulator_14.0
+      # in July 2026 — the older "device_status=online" / "booted" patterns
+      # were wrong and would never pass.
+      test: ["CMD", "bash", "-c", "[ -f /home/androidusr/device_status ] && grep -q 'READY' /home/androidusr/device_status"]
+      interval: 10s
+      timeout: 5s
+      retries: 30          # up to 5 minutes for first boot
+      start_period: 30s
+    networks:
+      - harmony-e2e
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Maestro Test Runner (custom image built from e2e/Dockerfile.maestro)
+  #
+  # Depends on both harmony-link and android-emulator being healthy before
+  # it starts. The command:
+  #   1. Connects ADB to the emulator
+  #   2. Waits for the device to be ready
+  #   3. Installs the debug APK
+  #   4. Runs all Maestro flows in /app/.maestro
+  #
+  # For the Windows fallback path (emulator-on-host + Maestro-in-Docker),
+  # override ADB_TARGET:
+  #   docker compose run -e ADB_TARGET=host.docker.internal:5555 maestro-runner
+  # ──────────────────────────────────────────────────────────────────────────
+  maestro-runner:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.maestro
+    container_name: maestro-runner
+    depends_on:
+      harmony-link:
+        condition: service_healthy
+      android-emulator:
+        condition: service_healthy
+    environment:
+      - HARMONY_LINK_URL=wss://harmony-link:28443
+      - HARMONY_LINK_HEALTH_URL=http://harmony-link:28080/health
+      - ADB_TARGET=android-emulator:5555  # override for host-emulator fallback
+    volumes:
+      # The APK must be built separately before running the stack:
+      #   ./e2e/build-apk.sh             (Linux/macOS/git-bash)   or
+      #   powershell ./e2e/build-apk.ps1  (Windows PowerShell)
+      # Produces e2e/app-debug.apk — a devRelease variant with the JS bundle
+      # baked in (devDebug skips bundling; see FIX #3 in the test-overhaul notes).
+      - ./app-debug.apk:/app/app.apk:ro
+      - ./.maestro:/app/.maestro:ro
+      # - ./certs:/certs:ro              # uncomment if pushing CA cert
+      - ./reports:/app/reports           # JUnit XML + screenshots (maestro-tests-N/)
+    # --output must be a FILE path (e.g. junit-report.xml), NOT a directory.
+    # Maestro's saveReport() opens a FileOutputStream on it; passing a
+    # directory throws FileNotFoundException. The parent dir (/app/reports,
+    # mounted to ./reports) still receives the maestro-tests-N/ screenshot
+    # subdirectories automatically.
+    command: >
+      sh -c "
+        ADB_TARGET=\"$${ADB_TARGET:-android-emulator:5555}\" &&
+        echo \"Connecting ADB to \$$ADB_TARGET...\" &&
+        adb connect \"\$$ADB_TARGET\" &&
+        adb wait-for-device &&
+        echo 'Installing APK...' &&
+        adb install -r /app/app.apk &&
+        echo 'Running Maestro flows...' &&
+        maestro test /app/.maestro --format junit --output /app/reports/junit-report.xml
+      "
+    networks:
+      - harmony-e2e
+
+networks:
+  harmony-e2e:
+    driver: bridge
+
+volumes:
+  emulator-data:

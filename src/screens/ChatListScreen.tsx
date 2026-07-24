@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import {
   StyleSheet,
   View,
@@ -11,9 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import {
-  Appbar,
   Avatar,
-  FAB,
   ActivityIndicator,
 } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -23,7 +20,10 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
-import { SettingsMenu } from '../components/navigation/SettingsMenu';
+import { ThemedButton } from '../components/themed/ThemedButton';
+import { ThemedFab } from '../components/themed/ThemedFab';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
+import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { getAllEntities } from '../database/repositories/entities';
 import {
   getRecentPhoneInteractions,
@@ -42,6 +42,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import { hexToRgba } from '../utils/colorUtils';
 import { ImpersonationSelectorModal } from '../components/modals/ImpersonationSelectorModal';
 import { InfoModal } from '../components/modals/InfoModal';
 import { createLogger } from '../utils/logger';
@@ -72,15 +73,17 @@ const getEntityDisplayName = (
   return entityId;
 };
 
+// Tab-screen navigation: routes are dispatched to the parent root stack.
+// Using 'any' here avoids CompositeNavigationProp boilerplate while
+// React Navigation v7 resolves routes across nested navigators at runtime.
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export const ChatListScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
-  const navigation = useNavigation<NavigationProp>();
+  const navigation = useNavigation<any>();
   const { isPaired } = useSyncConnection();
   const { t } = useTranslation('chatList');
-  const [menuVisible, setMenuVisible] = useState(false);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -442,6 +445,8 @@ export const ChatListScreen: React.FC = () => {
       onPress={() => handleChatPress(item)}
       activeOpacity={0.65}
       style={styles.rowWrapper}
+      testID="chat-list-item"
+      accessibilityLabel={`Chat with ${item.characterName}`}
     >
       {/* Subtle prismatic tint from top-left */}
       <LinearGradient
@@ -451,7 +456,7 @@ export const ChatListScreen: React.FC = () => {
         ]}
         start={{ x: 0, y: 0 }}
         end={{ x: 0.6, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
 
@@ -524,114 +529,145 @@ export const ChatListScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
-      <ThemedAppbar style={{ zIndex: 10 }}>
-        <Appbar.BackAction
-          color={theme?.colors.text.primary}
-          onPress={() => navigation.navigate('Landing')}
-        />
-        <Appbar.Content
-          title={
-            <View style={styles.titleContainer}>
-              <ThemedText variant="primary" style={styles.titleText}>
-                {t('title')}
-              </ThemedText>
-              <TouchableOpacity
-                onPress={() => setInfoModalVisible(true)}
-                style={styles.infoButton}
-              >
-                <Icon
-                  name="information-outline"
-                  size={20}
-                  color={theme?.colors.text.muted}
-                />
-              </TouchableOpacity>
-            </View>
-          }
-        />
-        <TouchableOpacity
-          style={styles.impersonationHeaderAction}
-          onPress={() => setSelectorModalVisible(true)}
-        >
-          <View style={styles.impersonationBannerText}>
-            <ThemedText variant="muted" size={11}>
-              {t('chattingAs')}
-            </ThemedText>
-            <ThemedText
-              variant="primary"
-              size={14}
-              style={{ fontWeight: '600' }}
-            >
-              {impersonatedEntityDisplay.name}
-            </ThemedText>
-          </View>
-          <View
+      <ScreenHeader
+        title={t('title')}
+        titleRight={
+          <TouchableOpacity
+            onPress={() => setInfoModalVisible(true)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={[
-              styles.impersonationAvatar,
-              { borderColor: (theme?.colors.accent.primary ?? '#7c3aed') + '66' },
+              styles.infoGlassIcon,
+              { backgroundColor: hexToRgba(theme?.colors.background.base ?? '#0f172a', 0.75) },
             ]}
+            activeOpacity={0.7}
           >
-            {impersonatedEntityDisplay.avatarUri ? (
-              <Image
-                source={{ uri: impersonatedEntityDisplay.avatarUri }}
-                style={styles.impersonationAvatarImage}
-                resizeMode="cover"
-              />
-            ) : (
-              <LinearGradient
-                colors={[
-                  (theme?.colors.accent.primary ?? '#7c3aed') + '33',
-                  theme?.colors.background.elevated ?? '#1e1e2e',
+            <LinearGradient
+              colors={[
+                (theme?.colors.accent.primary ?? '#ec4899') + '18',
+                'transparent',
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+            <Icon
+              name="information-outline"
+              size={18}
+              color={theme?.colors.text.muted}
+            />
+          </TouchableOpacity>
+        }
+        right={
+            <TouchableOpacity
+              style={styles.impersonationHeaderAction}
+              onPress={() => setSelectorModalVisible(true)}
+              activeOpacity={0.7}
+            >
+              {/* ── Obsidian Glass pill chip ── */}
+              <View
+                style={[
+                  styles.impersonationPill,
+                  {
+                    backgroundColor: hexToRgba(theme?.colors.background.base ?? '#0f172a', 0.78),
+                    shadowColor: theme?.colors.accent.primary ?? '#ec4899',
+                  },
                 ]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.impersonationAvatarFallback}
               >
-                <ThemedText
-                  size={11}
-                  weight="bold"
-                  style={{ color: theme?.colors.accent.primary }}
+                {/* Prismatic tint overlay */}
+                <LinearGradient
+                  colors={[
+                    (theme?.colors.accent.primary ?? '#ec4899') + '12',
+                    'transparent',
+                    (theme?.colors.accent.secondary ?? '#a78bfa') + '0A',
+                  ]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                  pointerEvents="none"
+                />
+                {/* ── Gradient ring avatar ── */}
+                <LinearGradient
+                  colors={[
+                    theme?.colors.accent.primary ?? '#ec4899',
+                    theme?.colors.accent.secondary ?? '#a78bfa',
+                  ]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.impersonationPillAvatarRing}
                 >
-                  {impersonatedEntityDisplay.name.substring(0, 2).toUpperCase()}
-                </ThemedText>
-              </LinearGradient>
-            )}
-          </View>
-        </TouchableOpacity>
-        <Appbar.Action
-          icon={() => (
-            <Icon name="menu" size={24} color={theme?.colors.text.primary} />
-          )}
-          onPress={() => setMenuVisible(true)}
-        />
-      </ThemedAppbar>
+                  <View style={[styles.impersonationPillAvatarInner, { backgroundColor: theme?.colors.background.elevated ?? '#334155' }]}>
+                    {impersonatedEntityDisplay.avatarUri ? (
+                      <Image
+                        source={{ uri: impersonatedEntityDisplay.avatarUri }}
+                        style={styles.impersonationPillAvatarImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <ThemedText
+                        size={11}
+                        weight="bold"
+                        style={{ color: theme?.colors.accent.primary }}
+                      >
+                        {impersonatedEntityDisplay.name.substring(0, 2).toUpperCase()}
+                      </ThemedText>
+                    )}
+                  </View>
+                </LinearGradient>
+                {/* ── Labels ── */}
+                <View style={styles.impersonationPillLabels}>
+                  <ThemedText variant="muted" size={10} hierarchy="caption">
+                    {t('chattingAs')}
+                  </ThemedText>
+                  <ThemedText size={13} weight="bold" numberOfLines={1} style={styles.impersonationPillName}>
+                    {impersonatedEntityDisplay.name}
+                  </ThemedText>
+                </View>
+                {/* ── Chevron indicator ── */}
+                <Icon
+                  name="chevron-down"
+                  size={14}
+                  color={theme?.colors.text.muted}
+                  style={styles.impersonationPillChevron}
+                />
+              </View>
+            </TouchableOpacity>
+        }
+      />
 
       {!isPaired ? (
-        <View style={styles.notPairedContainer}>
+        <View
+          style={styles.notPairedContainer}
+          testID="chat-list-not-paired"
+          accessibilityLabel="Not paired with Harmony Link"
+        >
           <Icon name="connection" size={64} color={theme?.colors.text.muted} />
           <ThemedText style={styles.notPairedText}>{t('notConnected')}</ThemedText>
           <ThemedText variant="muted" size={13} style={styles.notPairedSubText}>
             {t('notConnectedHint')}
           </ThemedText>
-          <TouchableOpacity
-            style={[
-              styles.connectButton,
-              { backgroundColor: theme?.colors.accent.primary },
-            ]}
+          <ThemedButton
+            label={t('connectNow')}
             onPress={() => navigation.navigate('ConnectionSetup')}
-          >
-            <ThemedText variant="primary">{t('connectNow')}</ThemedText>
-          </TouchableOpacity>
+            style={styles.connectButton}
+            testID="connect-now-button"
+          />
         </View>
       ) : (
         <FlatList
           data={chatList}
           renderItem={renderItem}
           keyExtractor={item => item.interactionId}
+          contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
+            <View
+              style={styles.emptyContainer}
+              testID="chat-list-empty"
+              accessibilityLabel="No conversations yet"
+            >
               <Icon
                 name="chat-outline"
                 size={64}
@@ -648,18 +684,8 @@ export const ChatListScreen: React.FC = () => {
         />
       )}
 
-      <FAB
-        icon="plus"
-        style={[styles.fab, { backgroundColor: theme?.colors.accent.primary, bottom: 24 + safeBottom }]}
-        onPress={() => navigation.navigate('CreateAI', {})}
-        color="#fff"
-      />
 
-      <SettingsMenu
-        visible={menuVisible}
-        onClose={() => setMenuVisible(false)}
-        onNavigate={screen => navigation.navigate(screen as any)}
-      />
+      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }} />
 
       <ImpersonationSelectorModal
         visible={selectorModalVisible}
@@ -748,9 +774,7 @@ const styles = StyleSheet.create({
   notPairedText: { marginTop: 16, marginBottom: 8 },
   notPairedSubText: { marginBottom: 24, textAlign: 'center' },
   connectButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
+    width: '100%',
   },
   emptyContainer: {
     flex: 1,
@@ -760,37 +784,73 @@ const styles = StyleSheet.create({
     marginTop: 100,
   },
   emptyText: { marginTop: 16, marginBottom: 8 },
-  titleContainer: { flexDirection: 'row', alignItems: 'center' },
-  titleText: { fontWeight: 'bold', fontSize: 24 },
-  infoButton: { marginLeft: 8 },
-  descriptionContainer: { marginTop: 2 },
-  descriptionText: { fontSize: 12 },
-  impersonationHeaderAction: {
+  headerRightRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 8,
   },
-  impersonationBannerText: {
-    alignItems: 'flex-end',
-  },
-  impersonationAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1,
-    overflow: 'hidden',
-    flexShrink: 0,
-  },
-  impersonationAvatarImage: {
-    width: 30,
-    height: 30,
-  },
-  impersonationAvatarFallback: {
-    width: 30,
-    height: 30,
+  infoGlassIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  impersonationHeaderAction: {
+    // no-op — pill handles its own layout
+  },
+  // ── Obsidian Glass pill chip ──
+  impersonationPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 20,
+    paddingLeft: 3,
+    paddingRight: 10,
+    paddingVertical: 4,
+    gap: 7,
+    overflow: 'hidden',
+    // ambient glow
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  impersonationPillAvatarRing: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    padding: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  impersonationPillAvatarInner: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  impersonationPillAvatarImage: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  impersonationPillLabels: {
+    alignItems: 'flex-start',
+    gap: 1,
+  },
+  impersonationPillName: {
+    maxWidth: 90,
+  },
+  impersonationPillChevron: {
+    marginLeft: 1,
   },
   timeText: {
     alignSelf: 'center',

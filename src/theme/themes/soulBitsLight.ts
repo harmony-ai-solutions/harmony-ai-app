@@ -1,9 +1,9 @@
 import { Theme } from '../types';
 
 export const soulBitsLight: Theme = {
-    id: 'soulbits-light',
-    name: 'SoulBits Light',
-    description: 'Airy light theme with periwinkle lavender and electric blue accents — Where Soul Meets Code',
+    id: 'soulbits-official-light',
+    name: 'SoulBits Official Light',
+    description: 'The official SoulBits light theme — airy light with periwinkle lavender and electric blue accents',
     version: '1.0.0',
     colors: {
         background: {
@@ -44,6 +44,18 @@ export const soulBitsLight: Theme = {
             primary: 'linear-gradient(135deg, #558af2 0%, #796ce4 100%)',
             secondary: 'linear-gradient(135deg, #dee0ef 0%, #f0f2ff 100%)',
             surface: 'linear-gradient(135deg, rgba(85, 138, 242, 0.07) 0%, rgba(121, 108, 228, 0.07) 100%)',
+        },
+        glass: {
+            cardOpacity: 0.85,
+            glowOpacity: 0.16,
+            glowRadius: 16,
+            borderGradientStart: 'rgba(255, 255, 255, 0.40)',
+            borderGradientEnd: 'rgba(85, 138, 242, 0.22)',
+        },
+        typography: {
+            headerOpacity: 1.0,
+            subtextOpacity: 0.70,
+            captionOpacity: 0.50,
         },
     },
 };

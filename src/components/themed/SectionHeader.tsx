@@ -14,12 +14,11 @@ interface SectionHeaderProps {
 }
 
 /**
- * A styled section header bar that mirrors the Harmony Link
- * `character-editor-section-header` pattern:
- *  - Gradient background fading left (elevated) to transparent
- *  - Uppercase, letter-spaced muted label
- *  - Optional 4 px left accent pip
- *  - Optional right slot for icons / actions
+ * Glassmorphism section header — Phase 2.
+ *
+ * Gradient background fading from elevated to transparent (left→right),
+ * with a 1dp hairline gradient separator at the bottom and an optional
+ * 3px left accent pip.
  */
 export const SectionHeader: React.FC<SectionHeaderProps> = ({
     title,
@@ -32,12 +31,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
     if (!theme) return null;
 
     return (
-        <LinearGradient
-            colors={[theme.colors.background.elevated, 'transparent']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={[styles.container, style]}
-        >
+        <View style={[styles.container, style]}>
             {accentPip && (
                 <LinearGradient
                     colors={[theme.colors.accent.primary, theme.colors.accent.secondary]}
@@ -49,12 +43,13 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
             <ThemedText
                 variant="muted"
                 weight="bold"
+                hierarchy="caption"
                 style={[styles.label, right ? styles.labelFlex : undefined]}
             >
                 {title.toUpperCase()}
             </ThemedText>
             {right && <View style={styles.rightSlot}>{right}</View>}
-        </LinearGradient>
+        </View>
     );
 };
 
@@ -62,26 +57,31 @@ const styles = StyleSheet.create({
     container: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 8,
+        paddingVertical: 10,
         paddingHorizontal: 16,
         gap: 10,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(255,255,255,0.07)',
     },
     pip: {
-        width: 4,
-        height: 16,
-        borderRadius: 2,
+        width: 3,
+        height: 18,
+        borderRadius: 99,
         flexShrink: 0,
     },
     label: {
         fontSize: 11,
-        letterSpacing: 0.8,
+        letterSpacing: 1.0,
     },
     labelFlex: {
         flex: 1,
     },
     rightSlot: {
         marginLeft: 4,
+    },
+    separator: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: StyleSheet.hairlineWidth,
     },
 });

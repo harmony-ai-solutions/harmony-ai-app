@@ -15,7 +15,6 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { Appbar } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -26,7 +25,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedButton } from '../../components/themed/ThemedButton';
-import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { AuthError } from '../../services/auth/AuthService';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
@@ -97,19 +96,10 @@ export const RegisterScreen: React.FC = () => {
   if (registered) {
     return (
       <ThemedView style={styles.container}>
-        <ThemedAppbar style={styles.header}>
-          <Appbar.BackAction
-            color={theme.colors.text.primary}
-            onPress={() => navigation.goBack()}
-          />
-          <Appbar.Content
-            title={t('register_title')}
-            titleStyle={{
-              color: theme.colors.text.primary,
-              fontWeight: 'bold',
-            }}
-          />
-        </ThemedAppbar>
+        <ScreenHeader
+          title={t('register_title')}
+          onBack={() => navigation.goBack()}
+        />
 
         <View style={styles.confirmationContainer}>
           <ThemedText weight="bold" variant="accent" style={styles.confirmationTitle}>
@@ -134,19 +124,10 @@ export const RegisterScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={t('register_title')}
-          titleStyle={{
-            color: theme.colors.text.primary,
-            fontWeight: 'bold',
-          }}
-        />
-      </ThemedAppbar>
+      <ScreenHeader
+        title={t('register_title')}
+        onBack={() => navigation.goBack()}
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}

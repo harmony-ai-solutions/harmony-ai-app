@@ -1,8 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Appbar } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +11,7 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { LandingCard } from '../components/landing/LandingCard';
 import { ConnectionStatusBadge } from '../components/settings/ConnectionStatusBadge';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { getAppVersion } from '../utils/version';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -28,31 +27,22 @@ export const LandingScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* Header */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.Content
-          title={t('title')}
-          titleStyle={{
-            color: theme.colors.text.primary,
-            fontWeight: 'bold',
-            fontSize: 20,
-          }}
-        />
-        {/* Connection status dot */}
-        <ConnectionStatusBadge />
-        {/* Settings shortcut */}
-        <Appbar.Action
-          icon="cog"
-          color={theme.colors.text.primary}
-          onPress={() => navigation.navigate('Settings')}
-        />
-      </ThemedAppbar>
+      <ScreenHeader
+        title={t('title')}
+        right={<ConnectionStatusBadge />}
+      />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Branded gradient stripe at the top */}
+        {/* SoulBits hero gradient accent stripe */}
         <ThemedGradient gradient="primary" style={styles.gradientAccent} />
+
+        {/* Hero subtitle / eyebrow */}
+        <ThemedText variant="muted" size={11} style={styles.sectionEyebrow}>
+          {t('welcomeEyebrow')}
+        </ThemedText>
 
         {/* Hero: AI Chat card */}
         <LandingCard
@@ -82,8 +72,9 @@ export const LandingScreen: React.FC = () => {
           />
         </View>
 
-        {/* Footer */}
-        <View style={[styles.footer, { paddingBottom: 16 + safeBottom }]}>
+        {/* Footer — glass separator + version */}
+        <View style={[styles.footer, { paddingBottom: 24 + safeBottom }]}>
+          <View style={[styles.footerSeparator, { backgroundColor: theme.colors.accent.primary + '1F' }]} />
           <ThemedText variant="muted" size={11}>
             {t('common:version', { version: getAppVersion() })}
           </ThemedText>
@@ -108,7 +99,12 @@ const styles = StyleSheet.create({
   gradientAccent: {
     height: 4,
     borderRadius: 2,
-    marginBottom: 8,
+    marginBottom: 0,
+  },
+  sectionEyebrow: {
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: -4,
   },
   heroCard: {
     marginBottom: 4,
@@ -122,5 +118,11 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 16,
     alignItems: 'center',
+  },
+  footerSeparator: {
+    width: 40,
+    height: 2,
+    borderRadius: 1,
+    marginBottom: 12,
   },
 });

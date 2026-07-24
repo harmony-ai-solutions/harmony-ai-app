@@ -67,6 +67,37 @@ export interface Gradients {
 }
 
 /**
+ * Glassmorphism design tokens.
+ * Controls the translucent "frosted glass" appearance of cards and panels.
+ */
+export interface GlassTokens {
+  /** Card background opacity — 0.45–0.55 for Obsidian Glass bleed-through */
+  cardOpacity: number;
+  /** Ambient glow shadow opacity — 0.06–0.10 for radiant floating effect */
+  glowOpacity: number;
+  /** Ambient glow shadow blur radius in dp — 12–18 for soft radiant halo */
+  glowRadius: number;
+  /** 1dp gradient border start (top-left specular highlight) — transparent white/silver */
+  borderGradientStart: string;
+  /** 1dp gradient border end — fading to muted neon purple/indigo accent */
+  borderGradientEnd: string;
+}
+
+/**
+ * Typography hierarchy tokens.
+ * Defines opacity levels for the visual text hierarchy
+ * (headers at full contrast, sub-text at reduced opacity for depth).
+ */
+export interface TypographyTokens {
+  /** Header text opacity — 1.0 for full white contrast */
+  headerOpacity: number;
+  /** Sub-text / detail text opacity — ~0.70 for visual depth */
+  subtextOpacity: number;
+  /** Caption / muted text opacity — ~0.50 for lowest emphasis */
+  captionOpacity: number;
+}
+
+/**
  * Complete color palette for a theme
  */
 export interface ThemeColors {
@@ -76,6 +107,8 @@ export interface ThemeColors {
   text: TextColors;
   border: BorderColors;
   gradients: Gradients;
+  glass: GlassTokens;
+  typography: TypographyTokens;
 }
 
 /**
@@ -130,9 +163,13 @@ export interface ThemeContextType {
   // Sync status
   syncStatus: ThemeSyncStatus;
   
+  // Dynamic background toggle
+  dynamicBackgroundEnabled: boolean;
+  
   // Actions
   switchTheme: (themeId: string) => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
+  setDynamicBackgroundEnabled: (enabled: boolean) => Promise<void>;
   createCustomTheme: (theme: Theme) => Promise<void>;
   updateCustomTheme: (themeId: string, theme: Theme) => Promise<void>;
   deleteCustomTheme: (themeId: string) => Promise<void>;

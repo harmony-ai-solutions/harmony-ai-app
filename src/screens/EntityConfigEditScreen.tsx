@@ -15,7 +15,6 @@ import {
   View,
   ScrollView,
   TextInput,
-  Alert,
   ActivityIndicator,
   TouchableOpacity,
   Image,
@@ -25,10 +24,10 @@ import {
   FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import LinearGradient from 'react-native-linear-gradient';
-import { Appbar } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
 import { ThemedCard } from '../components/themed/ThemedCard';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -39,6 +38,7 @@ const log = createLogger('[EntityConfigEditScreen]');
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
@@ -75,6 +75,8 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
   navigation,
 }) => {
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
+  const { t } = useTranslation('entityConfig');
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { entityId } = route.params ?? {};
 
@@ -174,7 +176,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
       // Load entity
       const entity = await getEntity(id);
       if (!entity) {
-        Alert.alert('Error', 'Entity not found.');
+        showAlert(t('common:error'), t('entityNotFound'));
         navigation.goBack();
         return;
       }
@@ -305,12 +307,12 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
           err?.message?.includes('UNIQUE') ||
           err?.message?.includes('alias')
         ) {
-          Alert.alert(
-            'Alias Conflict',
-            'That alias is already taken by another entity.',
+          showAlert(
+            t('aliasConflictTitle'),
+            t('aliasConflictMessage'),
           );
         } else {
-          Alert.alert('Error', err?.message ?? 'Failed to save entity.');
+          showAlert(t('common:error'), err?.message ?? t('failedToSaveEntitySettings'));
         }
         setIsSaving(false);
         return;
@@ -331,7 +333,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
 
       navigation.goBack();
     } catch (err) {
-      Alert.alert('Error', 'Failed to save entity settings.');
+      showAlert(t('common:error'), t('failedToSaveEntitySettings'));
     } finally {
       setIsSaving(false);
     }
@@ -339,20 +341,20 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
 
   // ── Delete entity ─────────────────────────────────────────────────────────
   const handleDelete = () => {
-    Alert.alert(
-      'Delete Entity',
-      'This will permanently remove the entity configuration. Chat history will be preserved but the entity will no longer be accessible.',
+    showAlert(
+      t('deleteEntityTitle'),
+      t('deleteEntityMessage'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common:cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common:delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteEntity(entityId!);
               navigation.navigate('EntityConfig');
             } catch {
-              Alert.alert('Error', 'Failed to delete entity.');
+              showAlert(t('common:error'), t('failedToDeleteEntity'));
             }
           },
         },
@@ -394,7 +396,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
             {selectedProfile.name}
           </ThemedText>
           <ThemedText variant="muted" size={12} numberOfLines={1}>
-            {selectedProfile.description ?? 'No description'}
+            {selectedProfile.description ?? t('noDescription')}
           </ThemedText>
         </View>
         <TouchableOpacity
@@ -418,19 +420,10 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
   if (isLoading) {
     return (
       <ThemedView style={styles.container}>
-        <ThemedAppbar style={styles.header}>
-          <Appbar.BackAction
-            color={theme.colors.text.primary}
-            onPress={() => navigation.goBack()}
-          />
-          <Appbar.Content
-            title="Entity Settings"
-            titleStyle={{
-              color: theme.colors.text.primary,
-              fontWeight: 'bold',
-            }}
-          />
-        </ThemedAppbar>
+        <ScreenHeader
+          title={t('entitySettings')}
+          onBack={() => navigation.goBack()}
+        />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={theme.colors.accent.primary} />
         </View>
@@ -439,34 +432,32 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
   }
 
   const profileSelectorLabel =
-    selectedProfile?.name ?? 'Select a character profile…';
+    selectedProfile?.name ?? t('selectProfile');
 
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title="Entity Settings"
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-        {isSaving ? (
-          <ActivityIndicator
-            size="small"
-            color={theme.colors.accent.primary}
-            style={styles.savingIndicator}
-          />
-        ) : (
-          <Appbar.Action
-            icon="check"
-            color={theme.colors.accent.primary}
-            onPress={handleSave}
-          />
-        )}
-      </ThemedAppbar>
+      <ScreenHeader
+        title={t('entitySettings')}
+        onBack={() => navigation.goBack()}
+        right={
+          isSaving ? (
+            <ActivityIndicator
+              size="small"
+              color={theme.colors.accent.primary}
+            />
+          ) : (
+            <TouchableOpacity
+              onPress={handleSave}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Save entity settings"
+              accessibilityRole="button"
+            >
+              <Icon name="check" size={24} color={theme.colors.accent.primary} />
+            </TouchableOpacity>
+          )
+        }
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
@@ -479,11 +470,11 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
         >
           {/* ── Identity Section ── */}
           <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title="Identity" />
+            <SectionHeader title={t('identity')} />
             <View style={styles.sectionContent}>
 
             <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-              Name / Alias
+              {t('nameAlias')}
             </ThemedText>
             <TextInput
               style={[
@@ -496,20 +487,20 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
               ]}
               value={alias}
               onChangeText={setAlias}
-              placeholder="Entity alias (must be unique)"
+              placeholder={t('aliasPlaceholderInput')}
               placeholderTextColor={theme.colors.text.muted}
               autoCorrect={false}
               autoCapitalize="none"
             />
             <ThemedText variant="muted" size={11} style={styles.fieldHint}>
-              Must be unique. Defaults to profile name if left blank.
+              {t('aliasHint')}
             </ThemedText>
             </View>
           </ThemedCard>
 
           {/* ── Character Profile Section ── */}
           <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title="Character Profile" />
+            <SectionHeader title={t('characterProfile')} />
             <View style={styles.sectionContent}>
 
             {/* Profile selector */}
@@ -543,60 +534,60 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
 
           {/* ── Module Configuration Section ── */}
           <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title="Module Configuration" />
+            <SectionHeader title={t('moduleConfiguration')} />
             <View style={styles.sectionContent}>
 
             <EntityModuleSelectorWithActions
-              label="Backend"
+              label={t('moduleBackend')}
               moduleType="backend"
               configs={backendConfigs}
               selectedId={backendId}
               onChange={setBackendId}
             />
             <EntityModuleSelectorWithActions
-              label="Cognition"
+              label={t('moduleCognition')}
               moduleType="cognition"
               configs={cognitionConfigs}
               selectedId={cognitionId}
               onChange={setCognitionId}
             />
             <EntityModuleSelectorWithActions
-              label="Text-to-Speech (TTS)"
+              label={t('moduleTTS')}
               moduleType="tts"
               configs={ttsConfigs}
               selectedId={ttsId}
               onChange={setTtsId}
             />
             <EntityModuleSelectorWithActions
-              label="Speech-to-Text (STT)"
+              label={t('moduleSTT')}
               moduleType="stt"
               configs={sttConfigs}
               selectedId={sttId}
               onChange={setSttId}
             />
             <EntityModuleSelectorWithActions
-              label="Memory / RAG"
+              label={t('moduleRAG')}
               moduleType="rag"
               configs={ragConfigs}
               selectedId={ragId}
               onChange={setRagId}
             />
             <EntityModuleSelectorWithActions
-              label="Movement"
+              label={t('moduleMovement')}
               moduleType="movement"
               configs={movementConfigs}
               selectedId={movementId}
               onChange={setMovementId}
             />
             <EntityModuleSelectorWithActions
-              label="Vision"
+              label={t('moduleVision')}
               moduleType="vision"
               configs={visionConfigs}
               selectedId={visionId}
               onChange={setVisionId}
             />            
             <EntityModuleSelectorWithActions
-              label="Imagination"
+              label={t('moduleImagination')}
               moduleType="imagination"
               configs={imaginationConfigs}
               selectedId={imaginationId}
@@ -607,10 +598,10 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
 
           {/* ── Emoji Actions ── */}
           <ThemedCard elevated style={styles.section}>
-            <SectionHeader title="Emoji Actions" accentPip={false} />
+            <SectionHeader title={t('emojiActions')} accentPip={false} />
             <View style={styles.sectionContent}>
               <TouchableOpacity
-                style={[styles.menuRow, { borderBottomColor: theme.colors.border.default }]}
+                style={styles.menuRow}
                 onPress={() => navigation.navigate('EmojiActionEditor', {
                   entityId: entityId!,
                   entityName: alias || entityId!.substring(0, 8),
@@ -619,12 +610,12 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
                 <View style={styles.menuRowLeft}>
                   <Icon name="emoticon-outline" size={24} color={theme.colors.accent.primary} />
                   <ThemedText variant="primary" style={styles.menuRowText}>
-                    Emoji Actions
+                    {t('emojiActions')}
                   </ThemedText>
                 </View>
                 <View style={styles.menuRowRight}>
                   <ThemedText variant="secondary" style={styles.menuRowHint}>
-                    Customize emoji behaviors
+                    {t('emojiActionsHint')}
                   </ThemedText>
                   <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
                 </View>
@@ -642,7 +633,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
             ]}
           >
             <SectionHeader
-              title="Danger Zone"
+              title={t('dangerZone')}
               accentPip={false}
               style={{ borderBottomColor: theme.colors.status.error + '44' }}
             />
@@ -663,7 +654,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
                 ]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
-                style={StyleSheet.absoluteFillObject}
+                style={StyleSheet.absoluteFill}
               />
               <View style={styles.deleteIconBadge}>
                 <Icon
@@ -677,7 +668,7 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
                 weight="medium"
                 style={{ color: theme.colors.status.error }}
               >
-                Delete Entity
+                {t('deleteEntityButton')}
               </ThemedText>
             </TouchableOpacity>
             </View>
@@ -704,13 +695,13 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
             ]}
           >
             <ThemedText weight="bold" size={15} style={styles.modalTitle}>
-              Select Character Profile
+              {t('selectCharacterProfile')}
             </ThemedText>
 
             <FlatList
               data={
                 [
-                  { id: '', name: 'None (unlinked)' } as Pick<
+                  { id: '', name: t('noneUnlinked') } as Pick<
                     CharacterProfile,
                     'id' | 'name'
                   >,
@@ -890,7 +881,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   menuRowLeft: {
     flexDirection: 'row',

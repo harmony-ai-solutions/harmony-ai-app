@@ -33,6 +33,12 @@ import database from '../i18n/locales/en/database.json';
 import config from '../i18n/locales/en/config.json';
 import development from '../i18n/locales/en/development.json';
 import auth from '../i18n/locales/en/auth.json';
+import themeSettings from '../i18n/locales/en/themeSettings.json';
+import syncSettings from '../i18n/locales/en/syncSettings.json';
+import discover from '../i18n/locales/en/discover.json';
+import search from '../i18n/locales/en/search.json';
+import moduleConfig from '../i18n/locales/en/moduleConfig.json';
+import syncConnection from '../i18n/locales/en/syncConnection.json';
 
 // ── Storage key ─────────────────────────────────────────────────────────────
 
@@ -81,6 +87,12 @@ const resources = {
     config,
     development,
     auth,
+    themeSettings,
+    syncSettings,
+    discover,
+    search,
+    moduleConfig,
+    syncConnection,
   },
 };
 
@@ -109,6 +121,12 @@ const i18nConfig: InitOptions = {
     'config',
     'development',
     'auth',
+    'themeSettings',
+    'syncSettings',
+    'discover',
+    'search',
+    'moduleConfig',
+    'syncConnection',
   ],
   interpolation: {
     escapeValue: false, // React already escapes

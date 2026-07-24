@@ -111,7 +111,7 @@ export const ThemeEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         return (
             <TouchableOpacity
                 key={`${category}-${key}`}
-                style={[styles.colorItem, { borderBottomColor: currentAppTheme.colors.border.default }]}
+                style={styles.colorItem}
                 onPress={() => openColorPicker(category, key)}
             >
                 <View style={[styles.colorPreview, { backgroundColor: color, borderColor: currentAppTheme.colors.border.default }]} />
@@ -294,8 +294,7 @@ const styles = StyleSheet.create({
     colorItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 12,
-        borderBottomWidth: 1,
+        paddingVertical: 14,
     },
     colorPreview: {
         width: 40,

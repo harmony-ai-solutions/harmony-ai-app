@@ -1,0 +1,179 @@
+# .github/workflows/e2e-ios.yml
+# iOS E2E — runs on macOS GitHub Actions runner (macos-15)
+#
+# The iOS Simulator cannot run in Docker (Apple EULA + technical reasons).
+# This workflow runs Maestro directly against the iOS Simulator on a macOS
+# runner, with Harmony Link running as a native Go binary.
+#
+# The same Maestro YAML flows from e2e/.maestro/ are reused for both
+# Android (Docker Compose) and iOS (macOS runner). Prefer text: selectors
+# over id: for cross-platform compatibility.
+#
+# Cost: ~$0.08/min for macos-latest runner (8× Linux rate).
+# 30 nightly runs + ~5 manual dispatches ≈ $25-35/mo.
+#
+# See .current_work/test-framework-overhaul/6-6-IOSMacOSRunner.md
+
+name: E2E (iOS, macOS runner)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'e2e/.maestro/**'
+      - '.github/workflows/e2e-ios.yml'
+      - 'ios/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-ios:
+    name: iOS E2E (Maestro on macOS runner)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout harmony-ai-app
+        uses: actions/checkout@v4
+
+      - name: Checkout harmony-link-private (Go backend)
+        uses: actions/checkout@v4
+        with:
+          repository: harmony-ai-solutions/harmony-link-private
+          token: ${{ secrets.HARMONY_LINK_REPO_PAT }}
+          path: harmony-link
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install RN dependencies
+        run: npm ci
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install
+
+      - name: Build iOS Simulator app (with E2E env)
+        env:
+          ENVFILE: .env.e2e.ios
+        run: npm run build:ios:simulator
+
+      - name: Build Harmony Link binary (macOS native)
+        working-directory: harmony-link
+        run: |
+          # Build a native macOS binary — no Docker needed on macOS runner.
+          go build -o /tmp/harmony-link .
+
+      - name: Generate self-signed CA + server cert
+        run: |
+          mkdir -p /tmp/certs
+          # Generate CA key and certificate
+          openssl genrsa -out /tmp/certs/ca-key.pem 2048
+          openssl req -new -x509 -key /tmp/certs/ca-key.pem \
+            -out /tmp/certs/ca.pem -days 1 \
+            -subj "/CN=Harmony Link E2E CA"
+          # Generate server key and CSR
+          openssl genrsa -out /tmp/certs/server-key.pem 2048
+          openssl req -new -key /tmp/certs/server-key.pem \
+            -out /tmp/certs/server.csr -subj "/CN=localhost"
+          # Create SAN extension config
+          cat > /tmp/certs/server.ext <<EOF
+          subjectAltName = DNS:localhost, IP:127.0.0.1
+          extendedKeyUsage = serverAuth
+          EOF
+          # Sign the server cert with the CA
+          openssl x509 -req -in /tmp/certs/server.csr \
+            -CA /tmp/certs/ca.pem -CAkey /tmp/certs/ca-key.pem \
+            -CAcreateserial -out /tmp/certs/server.pem -days 1 \
+            -extfile /tmp/certs/server.ext
+
+      - name: Start Harmony Link
+        env:
+          CLOUD_MODE: "true"
+          HL_GENERAL_PORT: "28080"
+          HL_WSS_PORT: "28443"
+          HL_DATA_DIR: "/tmp/harmony-link-data"
+          HL_DATABASE_FILENAME: "data.sqlite"
+          HL_DATABASE_ENCRYPTION: "false"
+          HL_INFERENCE_TOKEN: "e2e-test-token"
+          HL_CERT_DIR: "/tmp/certs"
+          SERVER_CERT_PATH: "/tmp/certs/server.pem"
+          SERVER_KEY_PATH: "/tmp/certs/server-key.pem"
+        run: |
+          mkdir -p /tmp/harmony-link-data
+          # Start Harmony Link in the background
+          /tmp/harmony-link disable-gui &
+          HL_PID=$!
+          echo "Harmony Link PID: $HL_PID"
+          
+          # Wait for healthcheck (plain HTTP)
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:28080/health > /dev/null 2>&1; then
+              echo "Harmony Link is healthy (attempt $i)"
+              curl -s http://localhost:28080/health
+              break
+            fi
+            echo "Waiting for Harmony Link (attempt $i/30)..."
+            sleep 2
+          done
+          
+          # Verify WSS port is up
+          if curl -sk https://localhost:28443/health > /dev/null 2>&1; then
+            echo "WSS endpoint is ready"
+          else
+            echo "WARNING: WSS endpoint may not be ready yet"
+          fi
+
+      - name: Install Maestro CLI
+        run: curl -Ls "https://get.maestro.mobile.dev" | bash
+
+      - name: Boot iOS Simulator and install app
+        run: |
+          # Boot a simulator (iPhone 15 on iOS 17 — adjust if different on runner)
+          # List available simulators: xcrun simctl list devices available
+          xcrun simctl boot "iPhone 15" || true
+          xcrun simctl bootstatus "iPhone 15"
+          # Extract and install the .app bundle
+          unzip -o ios/build/Build/Products/Debug-iphonesimulator/HarmonyAIChat.app.zip -d /tmp/
+          xcrun simctl install booted /tmp/HarmonyAIChat.app
+
+      - name: Prepare Maestro reports directory
+        run: mkdir -p e2e/reports/ios
+
+      - name: Run Maestro flows
+        env:
+          PATH: ${{ env.PATH }}:${{ runner.home }}/.maestro/bin
+        run: |
+          maestro test e2e/.maestro --format junit --output e2e/reports/ios
+
+      - name: Upload test reports (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-ios-reports
+          path: e2e/reports/ios/
+
+      - name: Capture simulator logs on failure
+        if: failure()
+        run: |
+          xcrun simctl spawn booted log show --last 5m > simulator.log 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-ios-logs
+          path: simulator.log
+
+      - name: Shutdown simulator
+        if: always()
+        run: xcrun simctl shutdown all || true

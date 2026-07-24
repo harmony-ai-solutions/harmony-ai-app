@@ -12,7 +12,6 @@ import {
   Platform,
   ActivityIndicator,
   ToastAndroid,
-  Alert,
   NativeScrollEvent,
   NativeSyntheticEvent,
   TouchableOpacity,
@@ -22,13 +21,14 @@ import {
   Keyboard,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { Appbar, Avatar } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
+import { Avatar } from 'react-native-paper';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ChatBubble } from '../components/chat/ChatBubble';
@@ -86,6 +86,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     entityName: routeEntityName,
   } = route.params;
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const { isConnected } = useSyncConnection();
   const { isSessionActive, startInteractionSession, stopInteractionSession } =
     useEntitySession();
@@ -361,7 +362,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             ToastAndroid.LONG,
           );
         } else {
-          Alert.alert(
+          showAlert(
             t('common:error'),
             `${t('common:error')}: ${errorMessage}`,
             [{ text: t('common:ok') }],
@@ -513,9 +514,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         log.error(`Session error for ${currentInteractionIdRef.current}:`, error);
 
         if (Platform.OS === 'android') {
-          ToastAndroid.show(`Chat session error: ${error}`, ToastAndroid.LONG);
+          ToastAndroid.show(t('chatSessionError', { error }), ToastAndroid.LONG);
         } else {
-          Alert.alert(t('common:error'), error, [{ text: t('common:ok') }]);
+          showAlert(t('common:error'), error, [{ text: t('common:ok') }]);
         }
       }
     };
@@ -692,11 +693,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         log.error('Failed to send message:', error);
         if (Platform.OS === 'android') {
           ToastAndroid.show(
-            `Failed to send: ${error.message}`,
+            t('failedToSend', { message: error.message }),
             ToastAndroid.LONG,
           );
         } else {
-          Alert.alert(t('common:error'), t('common:error') + `: ${error.message}`);
+          showAlert(t('common:error'), t('common:error') + `: ${error.message}`);
         }
       }
     },
@@ -737,13 +738,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Delete message handler
   const handleDeleteMessage = useCallback(
     async (messageId: string) => {
-      Alert.alert(
-        'Delete Message',
-        'Are you sure you want to delete this message?',
+      showAlert(
+        t('deleteMessageTitle'),
+        t('deleteMessageBody'),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common:cancel'), style: 'cancel' },
           {
-            text: 'Delete',
+            text: t('common:delete'),
             style: 'destructive',
             onPress: async () => {
               try {
@@ -758,7 +759,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 }
 
                 if (Platform.OS === 'android') {
-                  ToastAndroid.show('Message deleted', ToastAndroid.SHORT);
+                  ToastAndroid.show(t('toastMessageDeleted'), ToastAndroid.SHORT);
                 }
               } catch (error) {
                 log.error('Failed to delete message:', error);
@@ -774,13 +775,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Regenerate message handler
   const handleRegenerateMessage = useCallback(
     async (messageId: string) => {
-      Alert.alert(
-        'Regenerate Response',
-        'Delete this response and regenerate a new one?',
+      showAlert(
+        t('regenerateTitle'),
+        t('regenerateBody'),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common:cancel'), style: 'cancel' },
           {
-            text: 'Regenerate',
+            text: t('regenerateButton'),
             onPress: async () => {
               try {
                 await deleteConversationMessage(messageId);
@@ -813,7 +814,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
                 if (Platform.OS === 'android') {
                   ToastAndroid.show(
-                    'Regenerating response...',
+                    t('toastRegenerating'),
                     ToastAndroid.SHORT,
                   );
                 }
@@ -821,11 +822,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 log.error('Failed to regenerate:', error);
                 if (Platform.OS === 'android') {
                   ToastAndroid.show(
-                    `Failed: ${error.message}`,
+                    t('toastFailed', { message: error.message }),
                     ToastAndroid.LONG,
                   );
                 } else {
-                  Alert.alert('Error', error.message);
+                  showAlert(t('errorTitle'), error.message);
                 }
               }
             },
@@ -839,13 +840,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Edit message handler
   const handleEditMessage = useCallback(
     async (messageId: string, newText: string) => {
-      Alert.alert(
-        'Edit and Resend',
-        'Edit and resend this message? This will trigger a new AI response.',
+      showAlert(
+        t('editResendTitle'),
+        t('editResendBody'),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common:cancel'), style: 'cancel' },
           {
-            text: 'Edit & Resend',
+            text: t('edit'),
             onPress: async () => {
               try {
                 // Soft-delete the original so only the replacement appears
@@ -867,7 +868,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
                 if (Platform.OS === 'android') {
                   ToastAndroid.show(
-                    'Message updated and sent',
+                    t('toastMessageUpdated'),
                     ToastAndroid.SHORT,
                   );
                 }
@@ -875,11 +876,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 log.error('Failed to edit message:', error);
                 if (Platform.OS === 'android') {
                   ToastAndroid.show(
-                    `Failed: ${error.message}`,
+                    t('toastFailed', { message: error.message }),
                     ToastAndroid.LONG,
                   );
                 } else {
-                  Alert.alert('Error', error.message);
+                  showAlert(t('errorTitle'), error.message);
                 }
               }
             },
@@ -905,7 +906,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         );
 
         if (Platform.OS === 'android') {
-          ToastAndroid.show('Retrying transcription...', ToastAndroid.SHORT);
+          ToastAndroid.show(t('toastRetryingTranscription'), ToastAndroid.SHORT);
         }
       } catch (error: any) {
         log.error('Failed to retry transcription:', error);
@@ -913,11 +914,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         if (Platform.OS === 'android') {
           ToastAndroid.show(
-            `Retry failed: ${error.message}`,
+            t('toastRetryFailed', { message: error.message }),
             ToastAndroid.LONG,
           );
         } else {
-          Alert.alert('Retry Failed', error.message);
+          showAlert(t('retryFailedTitle'), error.message);
         }
       }
     },
@@ -934,20 +935,20 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // For the delete entity flow, we need the partner entity ID from participantIds
     const otherIds = participantIds.filter(id => id !== ownEntityId);
     const partnerEntityId = otherIds[0] || '';
-    Alert.alert(
-      'Delete Entity',
-      `Delete "${headerName}"? Chat history will be preserved but this entity will no longer be accessible.`,
+    showAlert(
+      t('deleteEntityTitle'),
+      t('deleteEntityBody', { name: headerName }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common:cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common:delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteEntity(partnerEntityId);
-              navigation.navigate('ChatList');
+              navigation.navigate('MainTabs');
             } catch (err: any) {
-              Alert.alert(
+              showAlert(
                 t('common:error'),
                 err?.message ?? t('common:error'),
               );
@@ -1136,96 +1137,85 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           <ActivityIndicator size="large" color={theme?.colors.accent.primary} />
         </ThemedView>
       )}
-      <ThemedAppbar>
-        <Appbar.BackAction
-          onPress={() => navigation.goBack()}
-          color={theme?.colors.text.primary}
-        />
-        {partnerAvatar ? (
-          <Avatar.Image
-            size={36}
-            source={{ uri: partnerAvatar }}
-            style={styles.headerAvatar}
-          />
-        ) : (
-          <LinearGradient
-            colors={[
-              (theme?.colors.accent.primary ?? '#7c3aed') + '33',
-              theme?.colors.background.elevated ?? '#1e1e2e',
-            ]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.headerAvatarFallback}
-          >
-            <ThemedText
-              size={14}
-              weight="bold"
-              style={{ color: theme?.colors.accent.primary }}
-            >
-              {headerName.substring(0, 2).toUpperCase()}
-            </ThemedText>
-          </LinearGradient>
-        )}
-        <Appbar.Content
-          title={headerName}
-          titleStyle={{ color: theme?.colors.text.primary }}
-        />
-        {isConnected ? (
-          isSessionActive(currentInteractionIdRef.current) ? (
-            <ThemedText
-              variant="success"
-              size={12}
-              style={styles.statusIndicator}
-            >
-              Connected
-            </ThemedText>
+      <ScreenHeader
+        title={headerName}
+        onBack={() => navigation.goBack()}
+        left={
+          partnerAvatar ? (
+            <Avatar.Image
+              size={36}
+              source={{ uri: partnerAvatar }}
+              style={styles.headerAvatar}
+            />
           ) : (
-            <ThemedText
-              variant="muted"
-              size={12}
-              style={styles.statusIndicator}
+            <LinearGradient
+              colors={[
+                (theme?.colors.accent.primary ?? '#7c3aed') + '33',
+                theme?.colors.background.elevated ?? '#1e1e2e',
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.headerAvatarFallback}
             >
-              Connecting...
-            </ThemedText>
+              <ThemedText
+                size={14}
+                weight="bold"
+                style={{ color: theme?.colors.accent.primary }}
+              >
+                {headerName.substring(0, 2).toUpperCase()}
+              </ThemedText>
+            </LinearGradient>
           )
-        ) : (
-          <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
-            Offline
-          </ThemedText>
-        )}
-        {/* Reply mode toggle */}
-        <TouchableOpacity
-          onPress={handleToggleReplyMode}
-          style={styles.replyModeButton}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          disabled={!isSessionActive(currentInteractionIdRef.current)}
-        >
-          <ThemedText
-            size={11}
-            weight="medium"
-            style={[
-              styles.replyModeText,
-              { color: replyMode === 'instant'
-                ? theme?.colors.accent.primary
-                : theme?.colors.text.muted },
-            ]}
-          >
-            {replyMode === 'instant' ? '⚡ Instant' : '💬 Realistic'}
-          </ThemedText>
-        </TouchableOpacity>
-        {/* Entity context menu */}
-        <TouchableOpacity
-          onPress={handleEntityContextMenu}
-          style={styles.headerMenuButton}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Icon
-            name="dots-vertical"
-            size={24}
-            color={theme?.colors.text.primary}
-          />
-        </TouchableOpacity>
-      </ThemedAppbar>
+        }
+        right={
+          <View style={styles.headerControlsRow}>
+            {isConnected ? (
+              isSessionActive(currentInteractionIdRef.current) ? (
+                <ThemedText variant="success" size={12} style={styles.statusIndicator}>
+                  Connected
+                </ThemedText>
+              ) : (
+                <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
+                  Connecting...
+                </ThemedText>
+              )
+            ) : (
+              <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
+                Offline
+              </ThemedText>
+            )}
+            <TouchableOpacity
+              onPress={handleToggleReplyMode}
+              style={styles.replyModeButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              disabled={!isSessionActive(currentInteractionIdRef.current)}
+            >
+              <ThemedText
+                size={11}
+                weight="medium"
+                style={[
+                  styles.replyModeText,
+                  { color: replyMode === 'instant'
+                    ? theme?.colors.accent.primary
+                    : theme?.colors.text.muted },
+                ]}
+              >
+                {replyMode === 'instant' ? '⚡ Instant' : '💬 Realistic'}
+              </ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleEntityContextMenu}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon
+                name="dots-vertical"
+                size={24}
+                color={theme?.colors.text.primary}
+              />
+            </TouchableOpacity>
+          </View>
+        }
+      />
 
       <Modal
         visible={menuVisible}
@@ -1244,13 +1234,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   ]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 0, y: 1 }}
-                  style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                  style={[StyleSheet.absoluteFill, styles.menuGradientRadius]}
                 />
                 <LinearGradient
                   colors={[theme!.colors.accent.primary + '12', 'transparent']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0.6 }}
-                  style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                  style={[StyleSheet.absoluteFill, styles.menuGradientRadius]}
                   pointerEvents="none"
                 />
                 <LinearGradient
@@ -1451,7 +1441,7 @@ const styles = StyleSheet.create({
     opacity: 0,
   },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 10,
   },
   messageList: {
@@ -1469,11 +1459,12 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   statusIndicator: {
-    marginRight: 8,
+    marginRight: 6,
   },
-  headerMenuButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+  headerControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   replyModeButton: {
     paddingHorizontal: 6,

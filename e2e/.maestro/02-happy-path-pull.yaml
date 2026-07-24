@@ -1,0 +1,56 @@
+# e2e/.maestro/02-happy-path-pull.yaml
+# Happy path: app boots already paired, syncs, and the paired device's
+# pre-existing data appears in the chat list.
+#
+# ⚠️  PREREQUISITES (not selector issues — real infrastructure requirements):
+#   1. APK must be built with ENVFILE=.env.e2e so HARMONY_LINK_WSS_URL is
+#      baked in (see e2e/.env.e2e and src/services/E2EInit.ts).
+#   2. harmony-link container must be healthy and reachable from the
+#      emulator at wss://10.0.2.2:28443 (Android emulator's host alias).
+#   3. harmony-link DB must contain at least one entity the test can look
+#      for. The default "Claire" bootstrap is fine — adjust the selector
+#      below to match the actual character name.
+#
+# Selectors verified against src/screens/ChatListScreen.tsx,
+# src/screens/ChatDetailScreen.tsx, and src/i18n/locales/en/chatList.json.
+
+appId: ai.soulbits.chat.dev
+
+---
+- launchApp:
+    clearState: true
+
+# After boot, E2EInit.ts pre-seeds AsyncStorage with the WSS URL from the
+# build-time env var. SyncConnectionContext then auto-connects and runs
+# the initial sync. Wait for the connection to land.
+- extendedWaitUntil:
+    label: "Connection to Harmony Link established"
+    visible:
+      id: "connection-status-dot-connected"
+    timeout: 60000
+
+# Wait for initial sync to populate the chat list.
+# The ListEmptyComponent disappears once at least one item renders.
+- extendedWaitUntil:
+    label: "Chat list has at least one conversation"
+    visible:
+      id: "chat-list-item"
+    timeout: 60000
+
+# Tap the first chat row to enter the conversation
+- tapOn:
+    id: "chat-list-item"
+    index: 0
+
+# Verify the ChatDetailScreen rendered by checking the partner status
+# indicator. When connected and the session is active, "Connected" text
+# appears in the appbar (ChatDetailScreen.tsx:1180).
+- assertVisible:
+    label: "Chat detail screen shows active connection"
+    text: "Connected"
+
+# Navigate back using the system back gesture (Appbar.BackAction is an icon
+# with no text — Maestro's back gesture works reliably).
+- pressKey: back
+
+- takeScreenshot: happy-path-pull-complete
