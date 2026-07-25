@@ -753,7 +753,7 @@ export const ConnectionSetupScreen: React.FC = () => {
                 )
               ) : (
                 <View>
-                  <ThemedText variant="accent" size={12} style={styles.modeHint}>{ta('mode_cloudSignInRequired')}</ThemedText>
+                  <ThemedText variant="accent" size={12} style={styles.cloudHint}>{ta('mode_cloudSignInRequired')}</ThemedText>
                   <ThemedButton
                     label={ta('mode_cloudSignIn')}
                     onPress={() => navigation.navigate('Login')}
@@ -1137,7 +1137,6 @@ const styles = StyleSheet.create({
   cloudActionButton: {
     flex: 1,
   },
-  reconnectButton: {
 
   // ── Status dot (pulse) ──
   statusDotOuter: {
