@@ -148,7 +148,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(profile);
         setStatus('authenticated');
         if (await isCloudMode()) {
-          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e));
+          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e)));
         }
       } catch {
         // Profile fetch failed, but the token pair is valid (just stored /
@@ -157,7 +157,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // unauthenticated, never a transient profile-read failure.
         setStatus('authenticated');
         if (await isCloudMode()) {
-          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e));
+          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e)));
         }
       }
     };

@@ -29,7 +29,14 @@ const formatFunc = (level: string, extension?: string | null, ...msg: any[]): st
     parts.push(extension);
   }
   parts.push(level.toUpperCase());
-  parts.push(msg.map(m => (typeof m === 'string' ? m : JSON.stringify(m))).join(' '));
+  parts.push(msg.map(m => {
+    if (typeof m === 'string') return m;
+    // Error objects have non-enumerable properties — JSON.stringify
+    // produces "{}".  Extract message + stack explicitly so ADB logs
+    // are actually useful for debugging.
+    if (m instanceof Error) return m.stack || m.message;
+    try { return JSON.stringify(m); } catch { return String(m); }
+  }).join(' '));
   return parts.join(' | ');
 };
 

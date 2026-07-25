@@ -280,8 +280,8 @@ export const ConnectionSetupScreen: React.FC = () => {
   const { showToast, isPaired, isConnected, isConnecting, reconnect } = useSyncConnection();
   const { t } = useTranslation('connection');
   const { t: ta } = useTranslation('auth');
-  const { status: authStatus } = useAuth();
-
+  const { status: authStatus, logout } = useAuth();
+  
   // ── Mode toggle state ─────────────────────────────────────────────────
   const [connectionMode, setConnectionMode] = useState<'selfhosted' | 'cloud'>('selfhosted');
 
@@ -298,7 +298,16 @@ export const ConnectionSetupScreen: React.FC = () => {
   const [cloudStatus, setCloudStatus] = useState<CloudSessionStatus>(cloudSessionService.getStatus());
 
   useEffect(() => {
-    const onStatus = (s: CloudSessionStatus) => setCloudStatus(s);
+    const onStatus = (s: CloudSessionStatus) => {
+      setCloudStatus(s);
+      // Show a toast when the cloud session fails so the user is
+      // informed even if they're not looking at the ConnectionSetup
+      // screen. showToast + ta are stable (Toast.show wrapper + i18next),
+      // so capturing them at mount time is safe.
+      if (s === 'error') {
+        showToast(ta('cloud_error'));
+      }
+    };
     cloudSessionService.on('status', onStatus);
     return () => {
       cloudSessionService.off('status', onStatus);
@@ -322,7 +331,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       if (authStatus === 'authenticated') {
         // Explicitly spawn the cloud session — AuthContext's listener only fires on auth:changed,
         // not on mode change, so an already-authenticated user switching to cloud needs this.
-        cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on mode switch:', e));
+        cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on mode switch:', e instanceof Error ? `${e.name}: ${e.message}` : String(e)));
       } else if (authStatus === 'unauthenticated') {
         navigation.navigate('Login');
       }
@@ -743,11 +752,14 @@ export const ConnectionSetupScreen: React.FC = () => {
                   </ThemedText>
                 )
               ) : (
-                <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-                  <ThemedText variant="accent" size={12} style={styles.cloudHint}>
-                    {ta('mode_cloudSignInRequired')}
-                  </ThemedText>
-                </TouchableOpacity>
+                <View>
+                  <ThemedText variant="accent" size={12} style={styles.modeHint}>{ta('mode_cloudSignInRequired')}</ThemedText>
+                  <ThemedButton
+                    label={ta('mode_cloudSignIn')}
+                    onPress={() => navigation.navigate('Login')}
+                    style={{ marginTop: 8, alignSelf: 'flex-start' }}
+                  />
+                </View>
               )}
 
               {/* ── Cloud action buttons ── */}
@@ -771,7 +783,7 @@ export const ConnectionSetupScreen: React.FC = () => {
                         await reconnect();
                         showToast(ta('cloud_reconnect_success'));
                       } catch (e: any) {
-                        log.warn('Cloud reconnect failed:', e);
+                        log.warn('Cloud reconnect failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
                         showToast(ta('cloud_reconnect_failed'));
                       }
                     }}
@@ -782,10 +794,19 @@ export const ConnectionSetupScreen: React.FC = () => {
                     label={ta('cloud_disconnect')}
                     onPress={async () => {
                       try {
+                        // Full cloud teardown: kill the ECS session,
+                        // tear down the sync WebSocket, and sign out so
+                        // the user returns to the login screen and can
+                        // re-enter credentials.  Without the sign-out,
+                        // authStatus stays 'authenticated' and the UI
+                        // keeps showing reconnect/disconnect buttons
+                        // with no path back to credential entry.
                         await cloudSessionService.disconnect();
+                        connectionManager.disconnectConnection('sync');
+                        await logout();
                         showToast(ta('cloud_disconnect_success'));
                       } catch (e: any) {
-                        log.warn('Cloud disconnect failed:', e);
+                        log.warn('Cloud disconnect failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
                         showToast(ta('cloud_disconnect_failed'));
                       }
                     }}

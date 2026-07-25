@@ -115,7 +115,9 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
       });
 
       if (!res.ok) {
+        log.warn(`session/connect returned HTTP ${res.status}`);
         this.status = 'error';
+        this.readyAt = null;
         this.emit('status', this.status);
         throw new Error(`session/connect ${res.status}`);
       }
@@ -140,6 +142,12 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
         this.readyAt = null;
         this.emit('status', this.status);
       }
+      // Extract the error detail as a string — react-native-logs
+      // serialises non-string args with JSON.stringify, which turns Error
+      // objects into "{}" (non-enumerable props).  Passing the .message
+      // directly ensures the actual error text reaches ADB logcat.
+      const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      log.warn(`Cloud session connect failed: ${detail}`);
       this._connectPromise = null;
       throw e;
     }

@@ -10,7 +10,7 @@
  *  - Navigation link to RegisterScreen
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -74,6 +74,19 @@ export const LoginScreen: React.FC = () => {
 
   // ── Password field ref for "next" focus ────────────────────────────────
   const passwordRef = useRef<TextInput>(null);
+
+  // ── Navigate back when auth succeeds ──────────────────────────────────
+  // Covers all sign-in methods (email, Google, Apple). AuthService.login()
+  // emits 'auth:changed'; AuthContext processes that asynchronously
+  // (getProfile + cloudSessionService.connect), eventually setting status
+  // to 'authenticated'. This effect fires on that transition and pops the
+  // Login screen back to the screen that pushed it (typically
+  // ConnectionSetupScreen, where the cloud session status is visible).
+  useEffect(() => {
+    if (status === 'authenticated') {
+      navigation.goBack();
+    }
+  }, [status, navigation]);
 
   // ── Login handler ──────────────────────────────────────────────────────
   const handleLogin = useCallback(async () => {
