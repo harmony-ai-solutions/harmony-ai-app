@@ -85,7 +85,7 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
           }
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
         {/* Left accent pip for active selection */}
         {!isDisabled && (
@@ -137,7 +137,7 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
               ]}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
-              style={[StyleSheet.absoluteFillObject, styles.sheetGradientRadius]}
+              style={[StyleSheet.absoluteFill, styles.sheetGradientRadius]}
             />
 
             {/* Drag handle */}

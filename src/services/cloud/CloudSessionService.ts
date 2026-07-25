@@ -76,9 +76,23 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
       return; // already connected
     }
 
+    // Re-entrancy guard: if we're already spawning, don't POST /session/connect
+    // again.  Return the existing promise so callers can await readiness.
+    if (this.status === 'spawning' && this._connectPromise) {
+      return this._connectPromise;
+    }
+
     this.status = 'spawning';
     this.emit('status', this.status);
     log.info('Requesting cloud session from broker');
+    this._connectPromise = this._doConnect();
+    return this._connectPromise;
+  }
+
+  /** Internal connect implementation — single execution via _connectPromise. */
+  private _connectPromise: Promise<void> | null = null;
+
+  private async _doConnect(): Promise<void> {
 
     try {
       const res = await authFetch(AUTH_ENDPOINTS.sessionConnect, {
@@ -102,12 +116,14 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
       this.emit('status', this.status);
       this.scheduleProactiveRefresh();
       log.info(`Cloud session ready: ${this.sessionId}`);
+      this._connectPromise = null;
     } catch (e) {
       // Only flip to 'error' if we haven't already in the !res.ok branch.
       if (this.status === 'spawning') {
         this.status = 'error';
         this.emit('status', this.status);
       }
+      this._connectPromise = null;
       throw e;
     }
   }

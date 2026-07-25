@@ -5,13 +5,15 @@
  * Use `overrides` to customize specific fields for your test scenario.
  */
 
+import type { ServerRecord } from './HarmonyLinkMockServer';
+
 function randomId(prefix: string = ''): string {
   return `${prefix}${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function sampleCharacter(
   overrides: Partial<Record<string, any>> = {},
-): Record<string, any> {
+): ServerRecord {
   const now = new Date();
   return {
     id: randomId('char-'),

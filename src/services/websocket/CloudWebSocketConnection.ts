@@ -61,11 +61,14 @@ export class CloudWebSocketConnection extends BaseWebSocketConnection implements
           clearTimeout(connectionTimeout);
           log.error('Cloud WS error:', error);
 
-          // Clean up failed connection
+          // Do NOT null onclose here — onclose must remain set so the
+          // auth-refresh chain (close code 1008/4401 → AuthService.refresh())
+          // can fire.  The onclose handler already guards with
+          // `if (this.ws === ws)` so it won't act on stale connections.
           ws.onopen = null;
           ws.onmessage = null;
           ws.onerror = null;
-          ws.onclose = null;
+          // ws.onclose intentionally kept — see above.
           this.ws = null;
 
           this.emit('error', error);

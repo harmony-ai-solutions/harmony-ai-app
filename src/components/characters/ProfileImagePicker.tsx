@@ -172,7 +172,7 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
               ]}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
-              style={[StyleSheet.absoluteFillObject, styles.sheetGradientRadius]}
+              style={[StyleSheet.absoluteFill, styles.sheetGradientRadius]}
             />
 
             {/* Drag handle */}

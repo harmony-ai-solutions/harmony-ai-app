@@ -102,7 +102,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [currentPosition, setCurrentPosition] = useState<number>(0);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [showTranscription, setShowTranscription] = useState(false);
-  const progressIntervalRef = useRef<number | null>(null);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     setEditedText(message.content || '');

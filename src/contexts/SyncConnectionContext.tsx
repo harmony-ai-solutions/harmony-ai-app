@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, ReactNod
 import ConnectionStateManager from '../services/ConnectionStateManager';
 import ConnectionManager from '../services/connection/ConnectionManager';
 import SyncService, { SyncService as SyncServiceClass } from '../services/SyncService';
+import { cloudSessionService, type CloudSessionStatus } from '../services/cloud/CloudSessionService';
 import { ToastAndroid, Platform, Alert } from 'react-native';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
@@ -156,8 +157,12 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       ConnectionStateManager.markDisconnected();
       setIsConnectedSync(false);
       
-      // read from refs – closures always see the current value
-      if (isPairedRef.current && !isReconnectingRef.current && !isConnectingRef.current) {
+      // Use ConnectionStateManager.getIsPaired() instead of isPairedRef.current
+      // to avoid stale-value races when clearSelfHostedCredentials() +
+      // disconnectConnection() are called in sequence (mode switch).
+      // ConnectionStateManager sets isPaired=false synchronously before its
+      // await barrier, so it is always current when this fires.
+      if (ConnectionStateManager.getIsPaired() && !isReconnectingRef.current && !isConnectingRef.current) {
         log.info('Connection lost. Scheduling auto-reconnect...');
         scheduleReconnect();
       } else if (isConnectingRef.current) {
@@ -172,7 +177,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       const errorMessage = error?.message || error?.toString?.() || 'Connection error';
       setLastConnectionError(errorMessage);
 
-      const isHeartbeatTimeout = error?.code === 'HEARTBEAT_TIMEOUT' || 
+      const isHeartbeatTimeout = error?.code === 'HEARTBEAT_TIMEOUT' ||
                                  errorMessage?.includes('heartbeat timeout');
 
       if (isHeartbeatTimeout) {
@@ -182,7 +187,8 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
         setIsConnectedSync(false);
         setIsConnectingSync(false);
         
-        if (isPairedRef.current && !isReconnectingRef.current) {
+        // Use ConnectionStateManager.getIsPaired() for race safety
+        if (ConnectionStateManager.getIsPaired() && !isReconnectingRef.current) {
           log.info('Scheduling reconnect after heartbeat timeout');
           scheduleReconnect();
         }
@@ -191,8 +197,9 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
           showToast(i18n.t('syncConnection:connectionError', { message: errorMessage }));
         }
         
-        if (isConnectedRef.current && isPairedRef.current && !isReconnectingRef.current && !isConnectingRef.current) {
-          log.info('Connection error detected while connected, scheduling reconnect...');
+        // Use ConnectionStateManager for race-safe paired/connected checks
+        if (ConnectionStateManager.getIsPaired() && !isReconnectingRef.current && !isConnectingRef.current) {
+          log.info('Connection error detected, scheduling reconnect...');
           ConnectionStateManager.markDisconnected();
           setIsConnectedSync(false);
           scheduleReconnect();
@@ -264,6 +271,18 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       let url: string;
       let mode: string;
       if (source === 'cloud') {
+        // Ensure the cloud session is ready before attempting a WS connection.
+        // The session broker spawns a Harmony Link container (30-35s warm pool,
+        // longer for cold start).  The WS upgrade will be rejected until the
+        // container is live.
+        const sessionStatus = cloudSessionService.getStatus();
+        if (sessionStatus !== 'ready') {
+          log.info(`Cloud session status: ${sessionStatus}, waiting for ready...`);
+          await cloudSessionService.connect();
+          // connect() is idempotent — returns immediately if already ready,
+          // otherwise waits for the broker to respond and emits 'ready'.
+        }
+
         url = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.sync}`;
         mode = 'cloud';
       } else {
@@ -298,9 +317,25 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   const connectWithRefresh = async (): Promise<void> => {
     if (isConnectingRef.current) return;
 
+    // Check if we're in cloud mode — cloud connections don't use self-hosted
+    // handshake-refresh; they use PASETO refresh via AuthService.refresh() instead.
+    const source = await ConnectionStateManager.getCurrentSource();
+    if (source === 'cloud') {
+      log.info('Cloud mode — skipping self-hosted handshake refresh, calling connect()');
+      try {
+        await connect();
+      } catch (e) {
+        log.error('Cloud connect after refresh check failed:', e);
+        setIsConnectingSync(false);
+        setIsConnectedSync(false);
+        scheduleReconnect();
+      }
+      return;
+    }
+
     try {
       setIsConnectingSync(true);
-      log.info('Attempting to refresh token...');
+      log.info('Attempting to refresh self-hosted token...');
       
       const wsUrl = await ConnectionStateManager.getWSUrl();
       if (!wsUrl) throw new Error('No WS URL available');
@@ -352,6 +387,10 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       
       log.info('Initialized:', summary);
       
+      // Check the current mode first — cloud mode should never attempt a
+      // self-hosted handshake even when stale pairing credentials exist.
+      const source = await ConnectionStateManager.getCurrentSource();
+
       if (summary.isPaired && !summary.isTokenExpired) {
         log.info('Auto-connecting...');
         try {
@@ -361,8 +400,21 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
           scheduleReconnect();
         }
       } else if (summary.isPaired && summary.requiresRepair) {
-        log.info('Token expired, attempting re-handshake...');
-        await connectWithRefresh();
+        if (source === 'cloud') {
+          // Cloud mode with expired PASETO — just call connect() which will
+          // trigger CloudWebSocketConnection → onclose 1008/4401 → auth refresh
+          // inline. No self-hosted handshake needed.
+          log.info('Cloud mode with expired token — connecting (inline refresh will fire)');
+          try {
+            await connect();
+          } catch (connectError: any) {
+            log.info('Cloud connect with expired token failed, scheduling reconnect');
+            scheduleReconnect();
+          }
+        } else {
+          log.info('Self-hosted token expired, attempting re-handshake...');
+          await connectWithRefresh();
+        }
       }
     } catch (error) {
       log.error('Initialization error:', error);

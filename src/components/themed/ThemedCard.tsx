@@ -82,7 +82,7 @@ export const ThemedCard: React.FC<ThemedCardProps> = ({
                         colors={['rgba(255, 255, 255, 0.10)', 'transparent']}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 0.7, y: 1 }}
-                        style={StyleSheet.absoluteFillObject}
+                        style={StyleSheet.absoluteFill}
                         pointerEvents="none"
                     />
 
@@ -92,7 +92,7 @@ export const ThemedCard: React.FC<ThemedCardProps> = ({
                             colors={[theme.colors.accent.primary + '10', 'transparent']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
-                            style={StyleSheet.absoluteFillObject}
+                            style={StyleSheet.absoluteFill}
                             pointerEvents="none"
                         />
                     )}

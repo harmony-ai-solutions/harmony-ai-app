@@ -61,7 +61,7 @@ export const EntityCard: React.FC<EntityCardProps> = ({
           colors={[theme.colors.accent.primary + '14', 'transparent']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           pointerEvents="none"
         />
 

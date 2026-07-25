@@ -144,7 +144,7 @@ const ModuleConfigPicker: React.FC<ModuleConfigPickerProps> = ({
           }
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
         {!isDisabled && (
           <LinearGradient
@@ -189,7 +189,7 @@ const ModuleConfigPicker: React.FC<ModuleConfigPickerProps> = ({
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
               style={[
-                StyleSheet.absoluteFillObject,
+                StyleSheet.absoluteFill,
                 pickerStyles.sheetGradientRadius,
               ]}
             />

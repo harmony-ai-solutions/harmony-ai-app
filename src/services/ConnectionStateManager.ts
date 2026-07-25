@@ -314,6 +314,40 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
   }
 
   /**
+   * Clear only self-hosted pairing credentials — does NOT affect cloud auth,
+   * connection_mode, or cloud session state.
+   * Called when the user switches from self-hosted to cloud mode.
+   */
+  async clearSelfHostedCredentials(): Promise<void> {
+    try {
+      log.info('Clearing self-hosted credentials');
+      this.jwtToken = null;
+      this.isConnected = false;
+      this.isPaired = false;
+      this.tokenExpiresAt = 0;
+
+      await Promise.all([
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.JWT_TOKEN),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.WS_URL),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.WSS_URL),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.SERVER_CERT),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.TOKEN_EXPIRES_AT),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.PAIRED),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.SECURITY_MODE),
+      ]);
+
+      this.emit('credentials:cleared', { isPaired: false });
+      this.emit('state:changed', {
+        isPaired: false,
+        isConnected: false,
+        jwtValid: false,
+      });
+    } catch (error) {
+      log.error('Error clearing self-hosted credentials:', error);
+    }
+  }
+
+  /**
    * Check if device is currently connected to Harmony Link (WSS active)
    */
   getIsConnected(): boolean {

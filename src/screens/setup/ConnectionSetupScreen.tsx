@@ -305,21 +305,34 @@ export const ConnectionSetupScreen: React.FC = () => {
     };
   }, []);
 
-  // Apply mode change (mutation)
-  const applyModeChange = useCallback(
-    (mode: 'selfhosted' | 'cloud') => {
-      setConnectionMode(mode);
-      AsyncStorage.setItem('connection_mode', mode).catch(() => {});
-      if (mode === 'cloud') {
-        if (authStatus === 'authenticated') {
-          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on mode switch:', e));
-        } else if (authStatus === 'unauthenticated') {
-          navigation.navigate('Login');
-        }
+  // Apply the mode change (mutation) — extracted so the confirm dialog can call it.
+  const applyModeChange = useCallback((mode: 'selfhosted' | 'cloud') => {
+    setConnectionMode(mode);
+    AsyncStorage.setItem('connection_mode', mode).catch(() => {}); // canonical key (6-3A)
+
+    // Clean up stale state from the OTHER mode so one does not interfere
+    // with the other (e.g. stale self-hosted harmony_paired keeps
+    // SyncConnectionContext in an infinite reconnect loop).
+    if (mode === 'cloud') {
+      // Clear self-hosted credentials so SyncConnectionContext doesn't
+      // try to re-establish a stale WS:// connection on next init.
+      ConnectionStateManager.clearSelfHostedCredentials().catch(() => {});
+      connectionManager.disconnectConnection('sync');
+
+      if (authStatus === 'authenticated') {
+        // Explicitly spawn the cloud session — AuthContext's listener only fires on auth:changed,
+        // not on mode change, so an already-authenticated user switching to cloud needs this.
+        cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on mode switch:', e));
+      } else if (authStatus === 'unauthenticated') {
+        navigation.navigate('Login');
       }
-    },
-    [authStatus, navigation],
-  );
+      // authStatus === 'loading' → do nothing; AuthContext resolves.
+    } else {
+      // Switching to self-hosted — disconnect cloud session so it doesn't
+      // hold the HL container open (avoiding unnecessary ECS costs).
+      cloudSessionService.disconnect().catch(() => {});
+    }
+  }, [authStatus, navigation]);
 
   const handleModeChange = useCallback(
     (mode: 'selfhosted' | 'cloud') => {
@@ -736,6 +749,43 @@ export const ConnectionSetupScreen: React.FC = () => {
                   </ThemedText>
                 </TouchableOpacity>
               )}
+
+              {/* ── Cloud action buttons ── */}
+              {authStatus === 'authenticated' && (
+                <View style={styles.cloudActionRow}>
+                  <ThemedButton
+                    label={ta('cloud_reconnect')}
+                    onPress={async () => {
+                      try {
+                        // Force a fresh session: disconnect + reconnect
+                        await cloudSessionService.disconnect();
+                        // Re-connect creates a new session via POST /v1/session/connect
+                        await cloudSessionService.connect();
+                        showToast(ta('cloud_reconnect_success'));
+                      } catch (e: any) {
+                        log.warn('Cloud reconnect failed:', e);
+                        showToast(ta('cloud_reconnect_failed'));
+                      }
+                    }}
+                    variant="outline"
+                    style={styles.cloudActionButton}
+                  />
+                  <ThemedButton
+                    label={ta('cloud_disconnect')}
+                    onPress={async () => {
+                      try {
+                        await cloudSessionService.disconnect();
+                        showToast(ta('cloud_disconnect_success'));
+                      } catch (e: any) {
+                        log.warn('Cloud disconnect failed:', e);
+                        showToast(ta('cloud_disconnect_failed'));
+                      }
+                    }}
+                    variant="secondary"
+                    style={styles.cloudActionButton}
+                  />
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -1049,6 +1099,16 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     justifyContent: 'center',
   },
+  cloudActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    justifyContent: 'center',
+  },
+  cloudActionButton: {
+    flex: 1,
+  },
+  reconnectButton: {
 
   // ── Status dot (pulse) ──
   statusDotOuter: {
