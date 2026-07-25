@@ -20,6 +20,25 @@ const log = createLogger('[SyncConnectionContext]');
  */
 const BROKER_CONNECT_TIMEOUT_MS = 30_000;
 
+/**
+ * Whether the app should maintain a sync WebSocket connection.
+ *
+ * Cloud mode has no device-pairing handshake, so ConnectionStateManager's
+ * `isPaired` flag is always false there (it tracks the self-hosted ws://
+ * handshake + JWT pair). Cloud connections are maintained whenever the broker
+ * session is 'ready'. Self-hosted mode continues to use `isPaired` as before.
+ *
+ * Used in place of `ConnectionStateManager.getIsPaired()` by the disconnect /
+ * error handlers so cloud-mode connections auto-reconnect instead of dying
+ * silently on the first WS drop.
+ */
+const shouldMaintainConnection = (): boolean => {
+  if (cloudSessionService.getStatus() === 'ready') {
+    return true;
+  }
+  return ConnectionStateManager.getIsPaired();
+};
+
 interface SyncConnectionContextType {
   // Pairing state
   isPaired: boolean;
@@ -172,7 +191,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       // disconnectConnection() are called in sequence (mode switch).
       // ConnectionStateManager sets isPaired=false synchronously before its
       // await barrier, so it is always current when this fires.
-      if (ConnectionStateManager.getIsPaired() && !isReconnectingRef.current && !isConnectingRef.current) {
+      if (shouldMaintainConnection() && !isReconnectingRef.current && !isConnectingRef.current) {
         log.info('Connection lost. Scheduling auto-reconnect...');
         scheduleReconnect();
       } else if (isConnectingRef.current) {
@@ -197,8 +216,9 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
         setIsConnectedSync(false);
         setIsConnectingSync(false);
         
-        // Use ConnectionStateManager.getIsPaired() for race safety
-        if (ConnectionStateManager.getIsPaired() && !isReconnectingRef.current) {
+        // shouldMaintainConnection() covers both cloud (session ready) and
+        // self-hosted (isPaired) — getIsPaired() alone is false in cloud mode.
+        if (shouldMaintainConnection() && !isReconnectingRef.current) {
           log.info('Scheduling reconnect after heartbeat timeout');
           scheduleReconnect();
         }
@@ -207,8 +227,9 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
           showToast(i18n.t('syncConnection:connectionError', { message: errorMessage }));
         }
         
-        // Use ConnectionStateManager for race-safe paired/connected checks
-        if (ConnectionStateManager.getIsPaired() && !isReconnectingRef.current && !isConnectingRef.current) {
+        // shouldMaintainConnection() covers both cloud (session ready) and
+        // self-hosted (isPaired) — getIsPaired() alone is false in cloud mode.
+        if (shouldMaintainConnection() && !isReconnectingRef.current && !isConnectingRef.current) {
           log.info('Connection error detected, scheduling reconnect...');
           ConnectionStateManager.markDisconnected();
           setIsConnectedSync(false);
@@ -262,6 +283,40 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       SyncService.off('sync:completed',                  handleSyncCompleted);
       SyncService.off('sync:error',                      handleSyncErrorEvent);
     };
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Cloud-mode auto-connect
+  // ---------------------------------------------------------------------------
+  // Self-hosted mode connects on app boot via initializeConnection() (gated on
+  // isPaired). Cloud mode has no pairing handshake, so isPaired is always false
+  // and initializeConnection() never calls connect(). The broker session
+  // becoming 'ready' is the cloud equivalent of "paired + ready to dial" — this
+  // listener bridges that gap: when the session transitions to 'ready' in cloud
+  // mode and no WS is already up/pending, open one. Without it the UI shows
+  // "Cloud Session ready" but the conduct-proxy never receives a WS upgrade.
+  useEffect(() => {
+    const onCloudStatus = async (s: CloudSessionStatus) => {
+      if (s !== 'ready') return;
+      const source = await ConnectionStateManager.getCurrentSource();
+      if (source !== 'cloud') return;
+      // Re-entrancy guard: connect() itself can drive a ready transition
+      // (it awaits cloudSessionService.connect() which emits 'ready'); skip
+      // if a WS is already up or a connect is already in flight.
+      if (isConnectedRef.current || isConnectingRef.current) {
+        log.info('Cloud session ready but WS already up/pending — skipping auto-connect');
+        return;
+      }
+      log.info('Cloud session ready — opening sync WebSocket to conduct proxy');
+      try {
+        await connect();
+      } catch (e) {
+        log.warn('Auto-connect after cloud ready failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+        scheduleReconnect();
+      }
+    };
+    cloudSessionService.on('status', onCloudStatus);
+    return () => { cloudSessionService.off('status', onCloudStatus); };
   }, []);
 
   // ---------------------------------------------------------------------------
