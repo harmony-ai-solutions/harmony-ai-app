@@ -1,24 +1,20 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
-import ConnectionStateManager from '../services/ConnectionStateManager';
+import ConnectionStateManager, { type SyncSource } from '../services/ConnectionStateManager';
 import ConnectionManager from '../services/connection/ConnectionManager';
 import SyncService, { SyncService as SyncServiceClass } from '../services/SyncService';
-import { cloudSessionService, type CloudSessionStatus } from '../services/cloud/CloudSessionService';
+import { cloudSessionService, type CloudSessionStatus, type CloudSessionInfo } from '../services/cloud/CloudSessionService';
+import AuthService from '../services/auth/AuthService';
 import { ToastAndroid, Platform, Alert } from 'react-native';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
 import i18n from './I18nContext';
+import {
+  computeConnectionStatus,
+  canUseChatForMode,
+  type ConnectionStatusInfo,
+} from './connectionStatusHelper';
 
 const log = createLogger('[SyncConnectionContext]');
-
-/**
- * Broker connect-timeout window. The session broker (soulbits-cloud-backend
- * ScheduleConnectTimeout) auto-transitions a session to grace_period if no
- * WebSocket connects within this many ms. The conduct proxy cancels the timer
- * via POST /v1/session/connected once a WS upgrade succeeds. Used to detect a
- * "ready" session that has outlived its window and is therefore likely torn
- * down (the broker pushes no termination notification to the app).
- */
-const BROKER_CONNECT_TIMEOUT_MS = 30_000;
 
 /**
  * Whether the app should maintain a sync WebSocket connection.
@@ -57,6 +53,15 @@ interface SyncConnectionContextType {
   
   // UI helpers
   showToast: (message: string) => void;
+
+  // ── Phase 10: mode-aware chat usability & connection status ────────────
+  /** True when the app can show/send chat in the current mode.
+   *  - cloud:  cloudSessionService.getStatus() === 'ready'
+   *  - self-hosted: isPaired */
+  canUseChat: boolean;
+  /** Human-readable connection status derived from current mode + state.
+   *  Includes textKey for i18n, colour, semantic variant, and mode. */
+  connectionStatus: ConnectionStatusInfo;
 }
 
 const SyncConnectionContext = createContext<SyncConnectionContextType | undefined>(undefined);
@@ -72,7 +77,10 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [nextReconnectIn, setNextReconnectIn] = useState(0);
-  const [lastConnectionError, setLastConnectionError] = useState<string>('');
+  
+  // ── Phase 10: cloud status + source tracking ───────────────────────────
+  const [cloudStatus, setCloudStatus] = useState<CloudSessionStatus>(cloudSessionService.getStatus());
+  const [currentSource, setCurrentSource] = useState<SyncSource>('selfhosted');
   
   const hasInitialized = useRef(false);
   const reconnectAttemptsRef = useRef(0);
@@ -108,6 +116,14 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
 
   const RECONNECT_INTERVALS = [1000, 2000, 4000, 8000, 16000, 30000];
 
+  // ── WS consecutive-failure counter (Phase 8) ────────────────────────────
+  // When RN WebSocket dials fail repeatedly (connect-time rejections), the
+  // HTTP status code is lost (RN surfaces all upgrade failures as generic
+  // `onerror`).  After `MAX_WS_FAILURES_BEFORE_REPROVISION` consecutive
+  // failures in cloud mode we re-provision the broker session.
+  const MAX_WS_FAILURES_BEFORE_REPROVISION = 5;
+  const wsFailureCountRef = useRef(0);
+
   // ---------------------------------------------------------------------------
   // Reconnect scheduling (uses refs – never stale)
   // ---------------------------------------------------------------------------
@@ -135,14 +151,46 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       reconnectTimeoutRef.current = null;
       
       try {
-        const isTokenExpired = ConnectionStateManager.getIsTokenExpired();
-        
-        if (isTokenExpired) {
-          log.info('Token expired, performing handshake to refresh...');
-          await connectWithRefresh();
-        } else {
-          log.info('Token valid, connecting normally...');
+        const source = await ConnectionStateManager.getCurrentSource();
+
+        if (source === 'cloud') {
+          // ── Cloud: token-expiry pre-check before WS dial ──────────────
+          if (AuthService.isTokenExpired()) {
+            log.info('Cloud token expired, refreshing before reconnect');
+            const ok = await AuthService.refresh();
+            if (!ok) {
+              log.warn('Cloud token refresh failed — auth expired, cannot reconnect');
+              setIsConnectingSync(false);
+              return;
+            }
+          }
+
+          // ── Cloud: consecutive WS failure → re-provision broker session ─
+          const { shouldReprovision, nextCount } = shouldReprovisionAfterWsFailure(
+            wsFailureCountRef.current,
+            MAX_WS_FAILURES_BEFORE_REPROVISION,
+          );
+          wsFailureCountRef.current = nextCount;
+          if (shouldReprovision) {
+            log.info('Max cloud WS failures reached — re-provisioning broker session');
+            // force: true bypasses CloudSessionService's cached `ready` state.
+            // Without this, the call would no-op on the stale cached status and
+            // the app would keep dialing WS against the same broken session.
+            // Forcing a fresh broker round-trip lets the server reconcile state
+            // (grace recovery, fresh session, etc.) and return a routable endpoint.
+            await cloudSessionService.connect({ force: true });
+          }
+
           await connect();
+        } else {
+          // ── Self-hosted ───────────────────────────────────────────────
+          if (ConnectionStateManager.getIsTokenExpired()) {
+            log.info('Token expired, performing handshake to refresh...');
+            await connectWithRefresh();
+          } else {
+            log.info('Token valid, connecting normally...');
+            await connect();
+          }
         }
       } catch (error) {
         log.error('Auto-reconnect failed:', error);
@@ -170,9 +218,9 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setIsConnectingSync(false);
       setIsReconnectingSync(false);
       reconnectAttemptsRef.current = 0;
+      wsFailureCountRef.current = 0; // reset WS failure counter on successful connection
       setReconnectAttempts(0);
       setNextReconnectIn(0);
-      setLastConnectionError('');
       showToast(i18n.t('syncConnection:connectedToast'));
 
       // Trigger background sync to pick up any messages generated while disconnected
@@ -204,7 +252,6 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     const handleSyncError = (error: any) => {
       log.error('Sync connection error:', error);
       const errorMessage = error?.message || error?.toString?.() || 'Connection error';
-      setLastConnectionError(errorMessage);
 
       const isHeartbeatTimeout = error?.code === 'HEARTBEAT_TIMEOUT' ||
                                  errorMessage?.includes('heartbeat timeout');
@@ -238,7 +285,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       }
     };
 
-    const handleCertVerificationFailed = (error: any) => {
+    const handleCertVerificationFailed = (_error: any) => {
       log.info('Certificate verification failed');
       cancelReconnect();
       setIsReconnectingSync(false);
@@ -295,24 +342,54 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   // listener bridges that gap: when the session transitions to 'ready' in cloud
   // mode and no WS is already up/pending, open one. Without it the UI shows
   // "Cloud Session ready" but the conduct-proxy never receives a WS upgrade.
+  // ── Track current source ─────────────────────────────────────────────────
   useEffect(() => {
-    const onCloudStatus = async (s: CloudSessionStatus) => {
-      if (s !== 'ready') return;
+    ConnectionStateManager.getCurrentSource().then(setCurrentSource);
+    const handler = (_state: any) => {
+      ConnectionStateManager.getCurrentSource().then(setCurrentSource);
+    };
+    ConnectionStateManager.on('state:changed', handler);
+    return () => { ConnectionStateManager.off('state:changed', handler); };
+  }, []);
+
+  // ── Phase 10: cloud-status tracking re-render ──────────────────────────
+  // Separate from the auto-connect effect below so status-driven re-renders
+  // (canUseChat / connectionStatus) are not coupled to WS dial logic.
+  useEffect(() => {
+    const onStatus = (s: CloudSessionStatus) => { setCloudStatus(s); };
+    cloudSessionService.on('status', onStatus);
+    return () => { cloudSessionService.off('status', onStatus); };
+  }, []);
+
+  useEffect(() => {
+    const onCloudStatus = async (s: CloudSessionStatus, info?: CloudSessionInfo) => {
       const source = await ConnectionStateManager.getCurrentSource();
       if (source !== 'cloud') return;
-      // Re-entrancy guard: connect() itself can drive a ready transition
-      // (it awaits cloudSessionService.connect() which emits 'ready'); skip
-      // if a WS is already up or a connect is already in flight.
-      if (isConnectedRef.current || isConnectingRef.current) {
-        log.info('Cloud session ready but WS already up/pending — skipping auto-connect');
-        return;
-      }
-      log.info('Cloud session ready — opening sync WebSocket to conduct proxy');
-      try {
-        await connect();
-      } catch (e) {
-        log.warn('Auto-connect after cloud ready failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
-        scheduleReconnect();
+
+      if (s === 'ready') {
+        // Re-entrancy guard: connect() itself can drive a ready transition
+        // (it awaits cloudSessionService.connect() which emits 'ready'); skip
+        // if a WS is already up or a connect is already in flight.
+        if (isConnectedRef.current || isConnectingRef.current) {
+          log.info('Cloud session ready but WS already up/pending — skipping auto-connect');
+          return;
+        }
+        log.info('Cloud session ready — opening sync WebSocket to conduct proxy');
+        try {
+          await connect();
+        } catch (e) {
+          log.warn('Auto-connect after cloud ready failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+          scheduleReconnect();
+        }
+      } else if (s === 'failed') {
+        log.warn(`Cloud session failed: ${info?.failureReason ?? 'unknown'}`);
+        cancelReconnect();
+        setIsReconnectingSync(false);
+        setIsConnectingSync(false);
+        setNextReconnectIn(0);
+        // Do NOT auto-reconnect in a tight loop — the broker already failed.
+        // Phase 9 offers a manual retry via cloudSessionService.disconnect()
+        // then connect().
       }
     };
     cloudSessionService.on('status', onCloudStatus);
@@ -336,34 +413,25 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       let url: string;
       let mode: string;
       if (source === 'cloud') {
-        // Ensure the cloud session is ready before attempting a WS connection.
-        // The session broker spawns a Soulbits Engine container (30-35s warm
-        // pool, longer for cold start).  The WS upgrade will be rejected until
-        // the container is live.
-        const sessionStatus = cloudSessionService.getStatus();
-        const readyAt = cloudSessionService.getReadyAt();
-        const sessionAgeMs = readyAt != null ? Date.now() - readyAt : 0;
+        // Phase 7/8: async provisioning → poll until ready, no stale-session
+        // heuristic (the broker owns readiness via its connect-timeout).
+        const st = cloudSessionService.getStatus();
+        if (st !== 'ready') {
+          log.info(`Cloud session status: ${st}, waiting for ready...`);
+          await cloudSessionService.connect();
+        }
 
-        if (sessionStatus !== 'ready') {
-          log.info(`Cloud session status: ${sessionStatus}, waiting for ready...`);
-          await cloudSessionService.connect();
-          // connect() is idempotent — returns immediately if already ready,
-          // otherwise waits for the broker to respond and emits 'ready'.
-        } else if (sessionAgeMs > BROKER_CONNECT_TIMEOUT_MS) {
-          // The broker tears down a session if no WebSocket connects within
-          // its connect-timeout window (ScheduleConnectTimeout, 30s). If our
-          // session is older than that window it has almost certainly been
-          // terminated → every WS upgrade will 404 and we would loop forever
-          // (status stays 'ready' because the broker pushes no termination
-          // notification). Force a fresh broker session to open a new window.
-          // The broker Connect handler is idempotent: it recovers a
-          // grace_period session or spawns a fresh one, so this is safe.
-          log.info(
-            `Cloud session is ${Math.round(sessionAgeMs / 1000)}s old (past the ` +
-            `${BROKER_CONNECT_TIMEOUT_MS / 1000}s broker deadline) — forcing fresh session`
-          );
-          await cloudSessionService.disconnect();
-          await cloudSessionService.connect();
+        // Token-expiry pre-check before WS dial — prevents expired-PASETO
+        // reconnect loop (RN's WebSocket surfaces 401 upgrade rejections as
+        // generic onerror with no status code).
+        if (AuthService.isTokenExpired()) {
+          log.info('Cloud token expired, refreshing before WS dial');
+          const ok = await AuthService.refresh();
+          if (!ok) {
+            log.warn('Token refresh failed — auth expired, cannot open WS');
+            setIsConnectingSync(false);
+            return;
+          }
         }
 
         url = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.sync}`;
@@ -384,8 +452,6 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       log.info('Sync connection established');
     } catch (error: any) {
       log.error('Connect failed:', error);
-      const errorMessage = error?.message || 'Unknown error';
-      setLastConnectionError(errorMessage);
       setIsConnectingSync(false);
       setIsConnectedSync(false);
       
@@ -446,10 +512,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       connectionManager.disconnectConnection('sync');
       setIsConnectingSync(false);
       setIsConnectedSync(false);
-      
-      const errorMessage = error?.message || 'Unknown error';
-      setLastConnectionError(errorMessage);
-      
+
       const currentSummary = ConnectionStateManager.getConnectionSummary();
       log.info('Handshake failed, isPaired:', currentSummary.isPaired);
       
@@ -478,7 +541,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
         log.info('Auto-connecting...');
         try {
           await connect();
-        } catch (connectError: any) {
+        } catch {
           log.info('Scheduling reconnect after initialization failure');
           scheduleReconnect();
         }
@@ -490,7 +553,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
           log.info('Cloud mode with expired token — connecting (inline refresh will fire)');
           try {
             await connect();
-          } catch (connectError: any) {
+          } catch {
             log.info('Cloud connect with expired token failed, scheduling reconnect');
             scheduleReconnect();
           }
@@ -544,6 +607,12 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     }
   };
 
+  // ── Phase 10: derived values ───────────────────────────────────────────
+  const canUseChat = canUseChatForMode(currentSource, cloudStatus, isPaired);
+  const connectionStatus = computeConnectionStatus(
+    currentSource, cloudStatus, isPaired, isConnected, isReconnecting,
+  );
+
   const value: SyncConnectionContextType = {
     isPaired,
     isConnected,
@@ -555,6 +624,8 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     disconnect,
     reconnect,
     showToast,
+    canUseChat,
+    connectionStatus,
   };
 
   return (
@@ -571,3 +642,26 @@ export const useSyncConnection = (): SyncConnectionContextType => {
   }
   return context;
 };
+
+// ── Pure helper extracted for testability ──────────────────────────────
+
+/**
+ * Increment the WS failure counter and check whether the broker session
+ * should be re-provisioned.
+ *
+ * Pure function — no side effects.  Returns the decision + next count
+ * so callers can apply them atomically.
+ *
+ * @param currentCount  The current failure count before this increment.
+ * @param maxFailures   Threshold at which re-provision triggers (default 5).
+ */
+export function shouldReprovisionAfterWsFailure(
+  currentCount: number,
+  maxFailures: number = 5,
+): { shouldReprovision: boolean; nextCount: number } {
+  const nextCount = currentCount + 1;
+  if (nextCount >= maxFailures) {
+    return { shouldReprovision: true, nextCount: 0 };
+  }
+  return { shouldReprovision: false, nextCount };
+}

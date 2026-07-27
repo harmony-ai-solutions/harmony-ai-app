@@ -91,8 +91,13 @@ const INFERENCE_HOST = useLocal
   : `https://${SUFFIX}api.soulbits.app`;
 
 // ── External hosts (backward-compatible export) ────────────────────────
+// `session` is the session-broker host — used as the Soulbits client's
+// `cloudURL` base for the `session.*` sub-API (POST /v1/session/connect &
+// /disconnect). In cloud mode it equals `auth` (API gateway routes by path);
+// in local dev the broker runs on its own port (see LOCAL_PORTS).
 export const CLOUD_HOSTS = {
   auth: AUTH_HOST,
+  session: SESSION_HOST,
   inference: INFERENCE_HOST,
   conductProxyWs: WS_HOST,
 };
@@ -117,6 +122,14 @@ export const IS_DEV = IS_BETA;
 // Auth routes → auth-service; Session routes → session-broker.
 // In cloud both share the same hostname (API gateway routes by path).
 // In local dev they use separate ports.
+// ── Cloud session polling constants ────────────────────────────────────
+export const DEFAULT_CLOUD_RETRY_MS = 2000;
+export const MAX_PROVISIONING_ATTEMPTS = 95;
+
+// NOTE: Session-broker routes (/v1/session/connect, /disconnect) are no longer
+// listed here — they are reached via the first-party Soulbits API client
+// (createClient({ cloudURL: CLOUD_HOSTS.session })), which builds the URL from
+// its baseUrl. See src/services/cloud/CloudSessionService.ts.
 export const AUTH_ENDPOINTS = {
   login: `${AUTH_HOST}/v1/auth/login`,
   register: `${AUTH_HOST}/v1/auth/register`,
@@ -125,7 +138,5 @@ export const AUTH_ENDPOINTS = {
   google: `${AUTH_HOST}/v1/auth/google`,
   apple: `${AUTH_HOST}/v1/auth/apple`,
   me: `${AUTH_HOST}/v1/auth/me`,
-  sessionConnect: `${SESSION_HOST}/v1/session/connect`,
-  sessionDisconnect: `${SESSION_HOST}/v1/session/disconnect`,
   resendVerification: `${AUTH_HOST}/v1/auth/resend-verification`,
 };

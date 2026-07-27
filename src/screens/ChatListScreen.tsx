@@ -9,14 +9,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
-import {
-  Avatar,
-  ActivityIndicator,
-} from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
-import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
@@ -76,16 +70,15 @@ const getEntityDisplayName = (
 // Tab-screen navigation: routes are dispatched to the parent root stack.
 // Using 'any' here avoids CompositeNavigationProp boilerplate while
 // React Navigation v7 resolves routes across nested navigators at runtime.
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export const ChatListScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const navigation = useNavigation<any>();
-  const { isPaired } = useSyncConnection();
+  const { canUseChat, connectionStatus } = useSyncConnection();
   const { t } = useTranslation('chatList');
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [infoModalVisible, setInfoModalVisible] = useState(false);
 
@@ -632,24 +625,46 @@ export const ChatListScreen: React.FC = () => {
         }
       />
 
-      {!isPaired ? (
-        <View
-          style={styles.notPairedContainer}
-          testID="chat-list-not-paired"
-          accessibilityLabel="Not paired with Harmony Link"
-        >
-          <Icon name="connection" size={64} color={theme?.colors.text.muted} />
-          <ThemedText style={styles.notPairedText}>{t('notConnected')}</ThemedText>
-          <ThemedText variant="muted" size={13} style={styles.notPairedSubText}>
-            {t('notConnectedHint')}
-          </ThemedText>
-          <ThemedButton
-            label={t('connectNow')}
-            onPress={() => navigation.navigate('ConnectionSetup')}
-            style={styles.connectButton}
-            testID="connect-now-button"
-          />
-        </View>
+      {!canUseChat ? (
+        connectionStatus.mode === 'cloud' ? (
+          /* ── Cloud mode: session not yet ready ── */
+          <View
+            style={styles.notPairedContainer}
+            testID="chat-list-cloud-preparing"
+            accessibilityLabel="Preparing cloud session"
+          >
+            <Icon name="cloud-sync-outline" size={64} color={theme?.colors.text.muted} />
+            <ThemedText style={styles.notPairedText}>{t('preparingCloudTitle')}</ThemedText>
+            <ThemedText variant="muted" size={13} style={styles.notPairedSubText}>
+              {t('preparingCloudHint')}
+            </ThemedText>
+            <ThemedButton
+              label={t('openConnectionManager')}
+              onPress={() => navigation.navigate('ConnectionSetup')}
+              style={styles.connectButton}
+              testID="open-connection-manager-button"
+            />
+          </View>
+        ) : (
+          /* ── Self-hosted: not paired ── */
+          <View
+            style={styles.notPairedContainer}
+            testID="chat-list-not-paired"
+            accessibilityLabel="Not paired with Harmony Link"
+          >
+            <Icon name="connection" size={64} color={theme?.colors.text.muted} />
+            <ThemedText style={styles.notPairedText}>{t('notConnected')}</ThemedText>
+            <ThemedText variant="muted" size={13} style={styles.notPairedSubText}>
+              {t('notConnectedHint')}
+            </ThemedText>
+            <ThemedButton
+              label={t('connectNow')}
+              onPress={() => navigation.navigate('ConnectionSetup')}
+              style={styles.connectButton}
+              testID="connect-now-button"
+            />
+          </View>
+        )
       ) : (
         <FlatList
           style={{ flex: 1 }}

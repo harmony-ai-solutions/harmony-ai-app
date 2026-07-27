@@ -67,6 +67,7 @@
   - moduleConfiguration.ts: Movement providerOptions includes Google/xAI/Anthropic.
   - moduleDefaults.ts: PROVIDER_DEFAULTS has all provider entries. Movement defaults for Google/xAI/Anthropic (maxtokens: 200).
   - Unified `isInUse` to shared `isProviderConfigInUse()` helper — single UNION ALL query.
+- Soulbits API Client Adoption (Complete): `CloudSessionService` (session broker connect/disconnect + poll loop) refactored to use the first-party `@harmony-ai-solutions/soulbits-api-client` via new `src/services/cloud/soulbitsClient.ts` factory `buildSoulbitsClient({paseto})` — PASETO-only (no refreshToken) so 401 refresh stays in `AuthService` (one persisted credential for REST + WS). App keeps its own poll loop on the client's `session.connect()` primitive (not `connectPoll`) to preserve the state machine + UI + cancel contract; `session.disconnect(sid)` for grace-period RPC. Public API of CloudSessionService unchanged → no consumer edits. `config/cloud.ts`: added `CLOUD_HOSTS.session`, removed dead `AUTH_ENDPOINTS.sessionConnect/sessionDisconnect`; `authFetch.ts` now orphaned (left in place). 14/14 unit tests pass.
 @Building: Vision module integration, Imagination module integration, Emoji action backend pipeline.
 @Todo:
 - Vision Module: Complete integration with Harmony Link vision module for image understanding.

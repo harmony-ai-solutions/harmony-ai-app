@@ -5,11 +5,8 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Animated,
-  Easing,
   RefreshControl,
 } from 'react-native';
-import { ActivityIndicator } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -27,7 +24,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ConnectionManager from '../../services/connection/ConnectionManager';
 import SyncService from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
-import { cloudSessionService, type CloudSessionStatus } from '../../services/cloud/CloudSessionService';
+import { cloudSessionService, type CloudSessionStatus, type CloudSessionInfo } from '../../services/cloud/CloudSessionService';
+import { StatusPulseDot, type RadarState } from '../../components/cloud/StatusPulseDot';
+import { CloudProvisioningCard } from '../../components/cloud/CloudProvisioningCard';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { hexToRgba } from '../../utils/colorUtils';
@@ -36,7 +35,6 @@ import type { RootStackParamList } from '../../navigation/AppNavigator';
 const log = createLogger('ConnectionSetupScreen');
 
 // ─── Status category derived from status text ─────────────────────────
-type RadarState = 'idle' | 'connecting' | 'waiting' | 'connected' | 'error';
 
 function classifyStatus(statusText: string): RadarState {
   const s = statusText.toLowerCase();
@@ -148,128 +146,7 @@ const ModeSelectorCard: React.FC<ModeSelectorCardProps> = ({
   </TouchableOpacity>
 );
 
-// ─── StatusPulseDot ────────────────────────────────────────────────────
-interface StatusPulseDotProps {
-  radarState: RadarState;
-  accentColor: string;
-  size?: number;
-  glowSize?: number;
-}
 
-const StatusPulseDot: React.FC<StatusPulseDotProps> = ({
-  radarState,
-  accentColor,
-  size = 10,
-  glowSize = 16,
-}) => {
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const glowOpacity = useRef(new Animated.Value(0.35)).current;
-
-  useEffect(() => {
-    if (radarState === 'error') {
-      pulseAnim.setValue(1);
-      glowOpacity.setValue(0.45);
-      return;
-    }
-
-    let cycleMs: number;
-    switch (radarState) {
-      case 'connecting':
-        cycleMs = 600;
-        break;
-      case 'connected':
-        cycleMs = 2000;
-        break;
-      default:
-        cycleMs = 1500;
-        break;
-    }
-
-    const half = cycleMs / 2;
-
-    const anim = Animated.loop(
-      Animated.parallel([
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.3,
-            duration: half,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: half,
-            easing: Easing.in(Easing.cubic),
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.sequence([
-          Animated.timing(glowOpacity, {
-            toValue: 0.15,
-            duration: half,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(glowOpacity, {
-            toValue: 0.35,
-            duration: half,
-            easing: Easing.in(Easing.cubic),
-            useNativeDriver: true,
-          }),
-        ]),
-      ]),
-    );
-
-    anim.start();
-    return () => anim.stop();
-  }, [radarState, pulseAnim, glowOpacity]);
-
-  const dotColor = useMemo(() => {
-    switch (radarState) {
-      case 'connected':
-        return '#4CAF50';
-      case 'error':
-        return '#F44336';
-      case 'waiting':
-        return '#F0A23B';
-      case 'connecting':
-        return accentColor;
-      default:
-        return accentColor;
-    }
-  }, [radarState, accentColor]);
-
-  const halfGlow = glowSize / 2;
-
-  return (
-    <View style={[styles.statusDotOuter, { width: glowSize, height: glowSize }]}>
-      <Animated.View
-        style={[
-          styles.statusDotGlow,
-          {
-            width: glowSize,
-            height: glowSize,
-            borderRadius: halfGlow,
-            backgroundColor: dotColor,
-            opacity: glowOpacity,
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.statusDotCore,
-          {
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-            backgroundColor: dotColor,
-            transform: [{ scale: pulseAnim }],
-          },
-        ]}
-      />
-    </View>
-  );
-};
 
 // ─── Main Screen ───────────────────────────────────────────────────────
 
@@ -294,18 +171,26 @@ export const ConnectionSetupScreen: React.FC = () => {
     });
   }, []);
 
-  // ── Cloud session status ──────────────────────────────────────────────
-  const [cloudStatus, setCloudStatus] = useState<CloudSessionStatus>(cloudSessionService.getStatus());
+  // ── Cloud session status (rich payload) ───────────────────────────────
+  const [cloudSession, setCloudSession] = useState<{
+    status: CloudSessionStatus;
+    info?: CloudSessionInfo;
+  }>({ status: cloudSessionService.getStatus() });
+  const [isRetrying, setIsRetrying] = useState(false);
 
   useEffect(() => {
-    const onStatus = (s: CloudSessionStatus) => {
-      setCloudStatus(s);
+    const onStatus = (s: CloudSessionStatus, info?: CloudSessionInfo) => {
+      setCloudSession({ status: s, info });
+      // Clear retrying flag on terminal status
+      if (s === 'ready' || s === 'failed') {
+        setIsRetrying(false);
+      }
       // Show a toast when the cloud session fails so the user is
       // informed even if they're not looking at the ConnectionSetup
       // screen. showToast + ta are stable (Toast.show wrapper + i18next),
       // so capturing them at mount time is safe.
-      if (s === 'error') {
-        showToast(ta('cloud_error'));
+      if (s === 'failed') {
+        showToast(`${ta('cloud_failed_prefix')}${info?.failureReason ?? ''}`);
       }
     };
     cloudSessionService.on('status', onStatus);
@@ -369,7 +254,7 @@ export const ConnectionSetupScreen: React.FC = () => {
   const [showCertModal, setShowCertModal] = useState(false);
   const [showCertDetailsModal, setShowCertDetailsModal] = useState(false);
   const [serverCertificate, setServerCertificate] = useState<string>('');
-  const [pendingCredentials, setPendingCredentials] = useState<any>(null);
+  const [_pendingCredentials, setPendingCredentials] = useState<any>(null);
   const [securityMode, setSecurityMode] = useState<string>('');
 
   const connectionManager = ConnectionManager;
@@ -378,6 +263,56 @@ export const ConnectionSetupScreen: React.FC = () => {
 
   // ── Derived radar state ───────────────────────────────────────────────
   const radarState = useMemo(() => classifyStatus(status), [status]);
+
+  // ── Cloud action handlers ────────────────────────────────────────────
+
+  /**
+   * Retry a failed cloud session: disconnect then reconnect.
+   * isRetrying is set to true on press and cleared on next terminal status
+   * event (ready or failed) via the status listener.
+   */
+  const handleRetry = useCallback(async () => {
+    setIsRetrying(true);
+    try {
+      await cloudSessionService.disconnect();
+      await cloudSessionService.connect();
+      showToast(ta('cloud_reconnect_success'));
+    } catch (e: any) {
+      log.warn('Cloud retry failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+      setIsRetrying(false);
+      showToast(ta('cloud_reconnect_failed'));
+    }
+  }, [showToast, ta]);
+
+  /**
+   * Restart session (full disconnect → connect).
+   * Distinct from a transient WS reconnect, which is automatic (Phase 8).
+   */
+  const handleRestart = useCallback(async () => {
+    try {
+      await cloudSessionService.disconnect();
+      await cloudSessionService.connect();
+      showToast(ta('cloud_reconnect_success'));
+    } catch (e: any) {
+      log.warn('Cloud restart failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+      showToast(ta('cloud_reconnect_failed'));
+    }
+  }, [showToast, ta]);
+
+  /**
+   * Disconnect cloud session + tear down sync + sign out.
+   */
+  const handleDisconnectCloud = useCallback(async () => {
+    try {
+      await cloudSessionService.disconnect();
+      connectionManager.disconnectConnection('sync');
+      await logout();
+      showToast(ta('cloud_disconnect_success'));
+    } catch (e: any) {
+      log.warn('Cloud disconnect failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+      showToast(ta('cloud_disconnect_failed'));
+    }
+  }, [logout]);
 
   /**
    * Load connection data from storage
@@ -541,7 +476,7 @@ export const ConnectionSetupScreen: React.FC = () => {
   useEffect(() => {
     loadConnectionData();
 
-    const handleHandshakePending = (payload: any) => {
+    const handleHandshakePending = (_payload: any) => {
       log.info('Handshake pending approval');
       setStatus('Waiting for approval on Harmony Link...');
     };
@@ -572,7 +507,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       }
     };
 
-    const handleHandshakeRejected = (payload: any) => {
+    const handleHandshakeRejected = (_payload: any) => {
       log.info('Handshake rejected');
       setStatus('Connection rejected');
       setIsManuallyConnecting(false);
@@ -728,29 +663,32 @@ export const ConnectionSetupScreen: React.FC = () => {
                   {ta('mode_cloudCheckingAuth')}
                 </ThemedText>
               ) : authStatus === 'authenticated' ? (
-                cloudStatus === 'spawning' ? (
-                  <View style={styles.cloudSpawningRow}>
-                    <ActivityIndicator size="small" color={accentColor} />
-                    <ThemedText variant="secondary" size={12} style={styles.cloudHint}>
-                      {ta('cloud_spawning')}
-                    </ThemedText>
+                <>
+                  <CloudProvisioningCard
+                    status={cloudSession.status}
+                    info={cloudSession.info}
+                    isConnected={isConnected}
+                    onRetry={handleRetry}
+                    isRetrying={isRetrying}
+                    accentColor={accentColor}
+                  />
+
+                  {/* ── Cloud action buttons ── */}
+                  <View style={styles.cloudActionRow}>
+                    <ThemedButton
+                      label={ta('cloud_restart')}
+                      onPress={handleRestart}
+                      variant="outline"
+                      style={styles.cloudActionButton}
+                    />
+                    <ThemedButton
+                      label={ta('cloud_disconnect')}
+                      onPress={handleDisconnectCloud}
+                      variant="secondary"
+                      style={styles.cloudActionButton}
+                    />
                   </View>
-                ) : cloudStatus === 'ready' ? (
-                  <View style={styles.cloudSpawningRow}>
-                    <StatusPulseDot radarState="connected" accentColor={accentColor} size={8} glowSize={12} />
-                    <ThemedText size={12} variant="success" style={styles.cloudHint}>
-                      {ta('cloud_ready')}
-                    </ThemedText>
-                  </View>
-                ) : cloudStatus === 'error' ? (
-                  <ThemedText size={12} style={[styles.cloudHint, { color: '#F44336' }]}>
-                    {ta('cloud_error')}
-                  </ThemedText>
-                ) : (
-                  <ThemedText variant="secondary" size={12} style={styles.cloudHint}>
-                    {ta('mode_cloudReady')}
-                  </ThemedText>
-                )
+                </>
               ) : (
                 <View>
                   <ThemedText variant="accent" size={12} style={styles.cloudHint}>{ta('mode_cloudSignInRequired')}</ThemedText>
@@ -758,60 +696,6 @@ export const ConnectionSetupScreen: React.FC = () => {
                     label={ta('mode_cloudSignIn')}
                     onPress={() => navigation.navigate('Login')}
                     style={{ marginTop: 8, alignSelf: 'flex-start' }}
-                  />
-                </View>
-              )}
-
-              {/* ── Cloud action buttons ── */}
-              {authStatus === 'authenticated' && (
-                <View style={styles.cloudActionRow}>
-                  <ThemedButton
-                    label={ta('cloud_reconnect')}
-                    onPress={async () => {
-                      try {
-                        // Force a fresh broker session, then rebuild the sync
-                        // WebSocket so it re-dials through the refreshed
-                        // conduct-proxy route. The existing socket is pinned to
-                        // the old container's private IP (the proxy dials the
-                        // backend once at WS upgrade time), so without this
-                        // rebuild the app would keep talking to a dead backend
-                        // while the toast claimed success.
-                        await cloudSessionService.disconnect();
-                        // Re-connect creates a new session via POST /v1/session/connect
-                        await cloudSessionService.connect();
-                        // Tear down + re-establish the sync WS against the new session.
-                        await reconnect();
-                        showToast(ta('cloud_reconnect_success'));
-                      } catch (e: any) {
-                        log.warn('Cloud reconnect failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
-                        showToast(ta('cloud_reconnect_failed'));
-                      }
-                    }}
-                    variant="outline"
-                    style={styles.cloudActionButton}
-                  />
-                  <ThemedButton
-                    label={ta('cloud_disconnect')}
-                    onPress={async () => {
-                      try {
-                        // Full cloud teardown: kill the ECS session,
-                        // tear down the sync WebSocket, and sign out so
-                        // the user returns to the login screen and can
-                        // re-enter credentials.  Without the sign-out,
-                        // authStatus stays 'authenticated' and the UI
-                        // keeps showing reconnect/disconnect buttons
-                        // with no path back to credential entry.
-                        await cloudSessionService.disconnect();
-                        connectionManager.disconnectConnection('sync');
-                        await logout();
-                        showToast(ta('cloud_disconnect_success'));
-                      } catch (e: any) {
-                        log.warn('Cloud disconnect failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
-                        showToast(ta('cloud_disconnect_failed'));
-                      }
-                    }}
-                    variant="secondary"
-                    style={styles.cloudActionButton}
                   />
                 </View>
               )}
@@ -1070,11 +954,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     opacity: 0.75,
   },
-  cloudSpawningRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
 
   // ── Form card ──
   formCard: {
@@ -1136,22 +1015,6 @@ const styles = StyleSheet.create({
   },
   cloudActionButton: {
     flex: 1,
-  },
-
-  // ── Status dot (pulse) ──
-  statusDotOuter: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statusDotGlow: {
-    position: 'absolute',
-  },
-  statusDotCore: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-    elevation: 3,
   },
 
   // ── Buttons ──
