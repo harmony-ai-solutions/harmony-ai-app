@@ -41,12 +41,12 @@ function buildConfigs(primary: string, secondary: string): BlobCfg[] {
   return [
     {
       id: 1, size: DIAG * 2.1, left: -W * 0.5, top: -H * 0.6,
-      colorA: primary + 'DD', colorB: 'transparent',
+      colorA: primary + 'DD', colorB: primary + '00',
       opacity: 0.35, cycleMs: 18000, moveX: W * 0.35, moveY: H * 0.25,
     },
     {
       id: 2, size: DIAG * 1.8, left: W * 0.3, top: -H * 0.4,
-      colorA: secondary + 'DD', colorB: 'transparent',
+      colorA: secondary + 'DD', colorB: secondary + '00',
       opacity: 0.30, cycleMs: 22000, moveX: -W * 0.30, moveY: H * 0.30,
     },
     {
@@ -61,12 +61,12 @@ function buildConfigs(primary: string, secondary: string): BlobCfg[] {
     },
     {
       id: 5, size: DIAG * 2.0, left: -W * 0.35, top: H * 0.45,
-      colorA: primary + 'BB', colorB: 'transparent',
+      colorA: primary + 'BB', colorB: primary + '00',
       opacity: 0.22, cycleMs: 20000, moveX: W * 0.25, moveY: -H * 0.15,
     },
     {
       id: 6, size: DIAG * 1.4, left: W * 0.5, top: -H * 0.5,
-      colorA: secondary + 'CC', colorB: 'transparent',
+      colorA: secondary + 'CC', colorB: secondary + '00',
       opacity: 0.26, cycleMs: 14000, moveX: -W * 0.20, moveY: H * 0.20,
     },
     {

@@ -3,14 +3,16 @@
  *
  * Reads the active background style from ThemeContext and renders
  * the matching animated background along with the StardustParticles
- * overlay. The user can switch between 5 distinct background designs
+ * overlay. The user can switch between 7 distinct background designs
  * from the Theme Settings screen:
  *
  *   - 'aurora'        → DynamicAtmosphericBackground (drifting nebula orbs)
- *   - 'geodesic'      → GeodesicBackground (rotating diamond crystals)
- *   - 'lightPillars'  → LightPillarsBackground (rising light beams)
- *   - 'constellation' → ConstellationBackground (star cluster groups)
- *   - 'gradientFlow'  → GradientFlowBackground (flowing gradient ribbons)
+ *   - 'geodesic'      → GeodesicBackground (rotating geodesic dome wireframes)
+ *   - 'lightPillars'  → LightPillarsBackground (volumetric light beams)
+ *   - 'constellation' → ConstellationBackground (rich cosmic starfields)
+ *   - 'gradientFlow'  → GradientFlowBackground (multi-layer flowing ribbons)
+ *   - 'neuralPulse'   → NeuralPulseBackground (synaptic network with action potentials)
+ *   - 'soulEchoes'    → SoulEchoesBackground (ethereal concentric ripple echoes)
  *
  * When dynamic effects are disabled (dynamicBackgroundEnabled=false),
  * each background component renders its own static fallback.
@@ -24,6 +26,8 @@ import { GeodesicBackground } from './GeodesicBackground';
 import { LightPillarsBackground } from './LightPillarsBackground';
 import { ConstellationBackground } from './ConstellationBackground';
 import { GradientFlowBackground } from './GradientFlowBackground';
+import { NeuralPulseBackground } from './NeuralPulseBackground';
+import { SoulEchoesBackground } from './SoulEchoesBackground';
 import { StardustParticles } from './StardustParticles';
 
 interface DynamicBackgroundProps {
@@ -49,6 +53,10 @@ export const DynamicBackground: React.FC<DynamicBackgroundProps> = React.memo(
           return <ConstellationBackground enabled={enabled} />;
         case 'gradientFlow':
           return <GradientFlowBackground enabled={enabled} />;
+        case 'neuralPulse':
+          return <NeuralPulseBackground enabled={enabled} />;
+        case 'soulEchoes':
+          return <SoulEchoesBackground enabled={enabled} />;
         default:
           return <DynamicAtmosphericBackground enabled={enabled} />;
       }

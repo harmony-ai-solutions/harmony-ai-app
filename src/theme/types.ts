@@ -139,10 +139,12 @@ export type ThemeMode =
  */
 export type BackgroundStyle =
   | 'aurora'           // Default: 7 large drifting gradient orbs (nebula/aurora)
-  | 'geodesic'         // Floating rotating crystalline diamond shapes
-  | 'lightPillars'     // Vertical light beams rising from the bottom
-  | 'constellation'    // Clustered star groups with nebula glows
-  | 'gradientFlow';    // Slowly flowing diagonal gradient ribbons
+  | 'geodesic'         // Rotating geodesic dome wireframes (triangular lattice)
+  | 'lightPillars'     // Volumetric light beams rising from below
+  | 'constellation'    // Rich cosmic starfields with nebula glows & shooting stars
+  | 'gradientFlow'     // Multi-layered flowing gradient ribbons
+  | 'neuralPulse'      // Living synaptic network with traveling action potentials
+  | 'soulEchoes';      // Ethereal concentric ripple echoes from soul sources
 
 /**
  * Sync status for themes
