@@ -13,6 +13,7 @@ const STORAGE_KEY_CURRENT_THEME = '@harmony_current_theme';
 const STORAGE_KEY_THEME_MODE = '@harmony_theme_mode';
 const STORAGE_KEY_CUSTOM_THEMES = '@harmony_custom_themes';
 const STORAGE_KEY_DYNAMIC_BG = '@harmony_dynamic_background';
+const STORAGE_KEY_DARK_MODE = '@harmony_dark_mode';
 
 // Create context
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -24,6 +25,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const [theme, setTheme] = useState<Theme | null>(null);
     const [availableThemes, setAvailableThemes] = useState<Theme[]>(defaultThemes);
     const [themeMode, setThemeModeState] = useState<ThemeMode>(DEFAULT_THEME_ID);
+    const [darkModeEnabled, setDarkModeEnabledState] = useState(true); // default dark = true
     const [dynamicBackgroundEnabled, setDynamicBackgroundEnabledState] = useState(true);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
@@ -81,6 +83,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const mode: ThemeMode = savedMode || DEFAULT_THEME_ID;
             setThemeModeState(mode);
 
+            // Load dark mode preference (default true for first launch)
+            const savedDarkMode = await AsyncStorage.getItem(STORAGE_KEY_DARK_MODE);
+            if (savedDarkMode !== null) {
+                setDarkModeEnabledState(savedDarkMode === 'true');
+            }
+
             // Load dynamic background preference (default true for first launch)
             const savedDynamicBg = await AsyncStorage.getItem(STORAGE_KEY_DYNAMIC_BG);
             if (savedDynamicBg !== null) {
@@ -96,10 +104,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             let selectedTheme: Theme;
 
             if (mode === 'system') {
-                // Follow system appearance
+                // Follow system appearance — choose dark or light default based on system scheme
                 const systemScheme = getSystemColorScheme();
-                // For now, just use default theme (can be enhanced to detect light/dark)
-                selectedTheme = getDefaultTheme();
+                const isDark = systemScheme === 'dark';
+                // Keep dark mode state in sync with system
+                setDarkModeEnabledState(isDark);
+                selectedTheme = isDark ? getThemeById('soulbits-official-dark')! : getThemeById('soulbits-official-light')!;
             } else {
                 // Use specific theme
                 selectedTheme = allThemes.find(t => t.id === mode) || getDefaultTheme();
@@ -322,6 +332,25 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }, []);
 
     /**
+     * Toggle dark mode — quick switch between official dark and light themes.
+     * Exits system mode if active (explicit user choice takes precedence).
+     */
+    const setDarkMode = useCallback(async (enabled: boolean) => {
+        try {
+            setDarkModeEnabledState(enabled);
+            await AsyncStorage.setItem(STORAGE_KEY_DARK_MODE, String(enabled));
+
+            // Switch to the matching official theme (always overrides system mode)
+            const newThemeId = enabled ? 'soulbits-official-dark' : 'soulbits-official-light';
+            await switchTheme(newThemeId);
+        } catch (err) {
+            log.error('Failed to toggle dark mode:', err);
+            setError(err as Error);
+            throw err;
+        }
+    }, [switchTheme]);
+
+    /**
      * Toggle dynamic background effects (persisted to AsyncStorage)
      */
     const setDynamicBackgroundEnabled = useCallback(async (enabled: boolean) => {
@@ -367,12 +396,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         theme,
         availableThemes,
         themeMode,
+        darkModeEnabled,
         dynamicBackgroundEnabled,
         loading,
         error,
         syncStatus,
         switchTheme,
         setThemeMode,
+        setDarkMode,
         setDynamicBackgroundEnabled,
         createCustomTheme,
         updateCustomTheme,

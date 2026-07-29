@@ -35,9 +35,11 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
         theme,
         availableThemes,
         themeMode,
+        darkModeEnabled,
         dynamicBackgroundEnabled,
         switchTheme,
         setThemeMode,
+        setDarkMode,
         setDynamicBackgroundEnabled,
         importTheme,
         deleteCustomTheme,
@@ -81,6 +83,14 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
             await setThemeMode('system');
         } else {
             await setThemeMode(theme.id);
+        }
+    };
+
+    const handleDarkModeToggle = async (value: boolean) => {
+        try {
+            await setDarkMode(value);
+        } catch (err) {
+            showAlert(t('error'), t('switchThemeFailed'));
         }
     };
 
@@ -214,6 +224,29 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                             <Switch
                                 value={dynamicBackgroundEnabled}
                                 onValueChange={handleDynamicBackgroundToggle}
+                                color={theme.colors.accent.primary}
+                            />
+                        </View>
+                    </ThemedCard>
+                </View>
+
+                {/* Dark Mode Toggle */}
+                <View style={styles.sectionWrapper}>
+                    <ThemedCard elevated accentStripe>
+                        <SectionHeader title={t('darkMode')} />
+
+                        <View style={styles.switchRow}>
+                            <View style={styles.switchLabel}>
+                                <Text style={[styles.switchText, { color: theme.colors.text.primary }]}>
+                                    {t('darkMode')}
+                                </Text>
+                                <Text style={[styles.switchDescription, { color: theme.colors.text.secondary }]}>
+                                    {t('darkModeDesc')}
+                                </Text>
+                            </View>
+                            <Switch
+                                value={darkModeEnabled}
+                                onValueChange={handleDarkModeToggle}
                                 color={theme.colors.accent.primary}
                             />
                         </View>

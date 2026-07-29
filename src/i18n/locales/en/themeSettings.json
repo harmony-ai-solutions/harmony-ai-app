@@ -3,6 +3,8 @@
   "backgroundEffects": "Background Effects",
   "dynamicBackgroundEffects": "Dynamic Background Effects",
   "dynamicBackgroundDesc": "Enable fluid motion and particle effects. Disable if you experience lag or wish to save battery.",
+  "darkMode": "Dark Mode",
+  "darkModeDesc": "Toggle between dark and light appearance. Uses the official SoulBits themes.",
   "themeMode": "Theme Mode",
   "followSystemTheme": "Follow System Theme",
   "followSystemThemeDesc": "Automatically switch theme based on system settings",

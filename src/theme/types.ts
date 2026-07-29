@@ -163,12 +163,16 @@ export interface ThemeContextType {
   // Sync status
   syncStatus: ThemeSyncStatus;
   
+  // Dark mode toggle (quick switch between dark/light default themes)
+  darkModeEnabled: boolean;
+
   // Dynamic background toggle
   dynamicBackgroundEnabled: boolean;
   
   // Actions
   switchTheme: (themeId: string) => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
+  setDarkMode: (enabled: boolean) => Promise<void>;
   setDynamicBackgroundEnabled: (enabled: boolean) => Promise<void>;
   createCustomTheme: (theme: Theme) => Promise<void>;
   updateCustomTheme: (themeId: string, theme: Theme) => Promise<void>;
