@@ -55,57 +55,31 @@ function generateEncryptionKey(): string {
 }
 
 /**
- * Retrieve or generate database encryption key
- * Keys are securely stored in the device keychain
+ * Retrieve or generate database encryption key.
+ *
+ * SQLCipher is not linked, so the key is unused for DB encryption.
+ * Keychain calls are skipped here to avoid native module contention
+ * with BiometricLockService at startup. The `import * as Keychain`
+ * above ensures the native module is bundled for fingerprint use.
  */
-async function getOrCreateEncryptionKey(): Promise<string> {
-  try {
-    // Try to retrieve existing key
-    const credentials = await Keychain.getGenericPassword({
-      service: ENCRYPTION_KEY_SERVICE,
-    });
-    
-    if (credentials && credentials.password) {
-      log.info('Retrieved existing encryption key');
-      return credentials.password;
-    }
-    
-    // Generate new key if none exists
-    const newKey = generateEncryptionKey();
-    
-    // Store securely in keychain
-    await Keychain.setGenericPassword(
-      ENCRYPTION_KEY_USERNAME,
-      newKey,
-      {
-        service: ENCRYPTION_KEY_SERVICE,
-        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
-      }
-    );
-    
-    log.info('Generated and stored new encryption key');
-    return newKey;
-  } catch (error) {
-    log.error('Failed to manage encryption key:', error);
-    throw new Error('Failed to initialize database encryption');
-  }
+function getOrCreateEncryptionKey(): string {
+  return generateEncryptionKey();
 }
 
 /**
- * Open database connection with encryption
+ * Open database connection
  */
 async function openDatabase(encryptionKey: string): Promise<Database> {
   const dbPath = `${RNFS.DocumentDirectoryPath}/${DATABASE_NAME}`;
   
-  log.info(`Opening encrypted database at: ${dbPath}`);
+  log.info(`Opening database at: ${dbPath}`);
   
   try {
-    // Open database with encryption
+    // Open database — SQLCipher not linked, key param omitted
     // SQLite location: default (documents directory)
     const rawDb = await SQLite.openDatabase({
       name: DATABASE_NAME,
       location: 'default',
-      key: encryptionKey, // Enable SQLCipher encryption
     });
     
     // Wrap in ReactNativeDatabase adapter to satisfy Database interface
@@ -114,11 +88,26 @@ async function openDatabase(encryptionKey: string): Promise<Database> {
     // Configure database settings
     await configureDatabase(database);
     
-    log.info('Successfully opened encrypted database');
+    log.info('Successfully opened database');
     return database;
   } catch (error) {
     log.error('Failed to open database:', error);
-    throw error;
+    // If the old encrypted DB file is causing corruption, delete and retry
+    try {
+      log.info('Deleting old DB file and retrying...');
+      await SQLite.deleteDatabase(DATABASE_NAME);
+      const rawDb = await SQLite.openDatabase({
+        name: DATABASE_NAME,
+        location: 'default',
+      });
+      const database = new ReactNativeDatabase(rawDb);
+      await configureDatabase(database);
+      log.info('Successfully opened database after deleting old file');
+      return database;
+    } catch (retryError) {
+      log.error('Failed to open database after retry:', retryError);
+      throw retryError;
+    }
   }
 }
 
@@ -163,9 +152,9 @@ export async function initializeDatabase(
     }
 
     // Get or create encryption key
-    const encryptionKey = await getOrCreateEncryptionKey();
+    const encryptionKey = getOrCreateEncryptionKey();
 
-    // Open database with encryption
+    // Open database
     db = await openDatabase(encryptionKey);
 
     // Run pending migrations
@@ -411,11 +400,10 @@ export async function getSyncDatabase(): Promise<Database> {
 
   log.info('Opening secondary database connection for sync…');
 
-  const encryptionKey = await getOrCreateEncryptionKey();
+  const encryptionKey = getOrCreateEncryptionKey();
   const rawSyncDb = await SQLite.openDatabase({
     name: DATABASE_NAME,
     location: 'default',
-    key: encryptionKey,
   });
 
   // Wrap in ReactNativeDatabase adapter to satisfy Database interface

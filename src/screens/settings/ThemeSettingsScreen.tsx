@@ -5,6 +5,7 @@ import {
     ScrollView,
     StyleSheet,
     RefreshControl,
+    TouchableOpacity,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -12,7 +13,9 @@ import { Switch } from 'react-native-paper';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { isErrorWithCode, errorCodes } from '@react-native-documents/picker';
 import RNFS from 'react-native-fs';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { hexToRgba } from '../../utils/colorUtils';
 import { useAppAlert } from '../../contexts/AppAlertContext';
 import { useEmoji } from '../../contexts/EmojiContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
@@ -36,11 +39,9 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
         availableThemes,
         themeMode,
         darkModeEnabled,
-        dynamicBackgroundEnabled,
         switchTheme,
         setThemeMode,
         setDarkMode,
-        setDynamicBackgroundEnabled,
         importTheme,
         deleteCustomTheme,
         syncWithHarmonyLink,
@@ -181,14 +182,6 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
         }
     };
 
-    const handleDynamicBackgroundToggle = async (value: boolean) => {
-        try {
-            await setDynamicBackgroundEnabled(value);
-        } catch (err) {
-            showAlert(t('error'), t('backgroundUpdateFailed'));
-        }
-    };
-
     return (
         <ThemedView style={styles.container}>
             <ScreenHeader
@@ -207,26 +200,19 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
                 />
               }
             >
-                {/* Dynamic Background Effects Toggle */}
+
+                {/* Dynamic Background — navigates to dedicated settings screen */}
                 <View style={styles.sectionWrapper}>
                     <ThemedCard elevated accentStripe>
                         <SectionHeader title={t('backgroundEffects')} />
-
-                        <View style={styles.switchRow}>
-                            <View style={styles.switchLabel}>
-                                <Text style={[styles.switchText, { color: theme.colors.text.primary }]}>
-                                    {t('dynamicBackgroundEffects')}
-                                </Text>
-                                <Text style={[styles.switchDescription, { color: theme.colors.text.secondary }]}>
-                                    {t('dynamicBackgroundDesc')}
-                                </Text>
-                            </View>
-                            <Switch
-                                value={dynamicBackgroundEnabled}
-                                onValueChange={handleDynamicBackgroundToggle}
-                                color={theme.colors.accent.primary}
-                            />
-                        </View>
+                        <TouchableOpacity
+                            style={styles.linkRow}
+                            onPress={() => navigation.navigate('BackgroundSettings')}
+                            activeOpacity={0.7}
+                        >
+                            <Text style={[styles.linkLabel, { color: theme.colors.text.primary }]}>{t('dynamicBackgroundEffects')}</Text>
+                            <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
+                        </TouchableOpacity>
                     </ThemedCard>
                 </View>
 
@@ -460,5 +446,54 @@ const styles = StyleSheet.create({
         fontSize: 14,
         marginBottom: 16,
         paddingHorizontal: 16,
+    },
+    /* Background style picker */
+    bgDivider: {
+        height: StyleSheet.hairlineWidth,
+        marginHorizontal: 16,
+        marginTop: 4,
+        marginBottom: 14,
+    },
+    bgStyleContainer: {
+        paddingHorizontal: 16,
+        paddingBottom: 16,
+        gap: 12,
+    },
+    bgStyleCard: {
+        borderWidth: 1.5,
+        borderRadius: 12,
+        padding: 14,
+        gap: 8,
+    },
+    bgStyleHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    iconPill: {
+        width: 34,
+        height: 34,
+        borderRadius: 8,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    bgStyleLabel: {
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    bgStyleDesc: {
+        fontSize: 13,
+        lineHeight: 18,
+    },
+    linkRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+    },
+    linkLabel: {
+        flex: 1,
+        fontSize: 15,
+        fontWeight: '500',
     },
 });

@@ -67,7 +67,7 @@ const DotWidget: React.FC<{ dot: Dot; color: string }> = ({ dot, color }) => {
   useEffect(() => {
     const half = dot.cycleMs / 2;
 
-    Animated.parallel([
+    const composite = Animated.parallel([
       Animated.loop(Animated.sequence([
         Animated.timing(op, { toValue: dot.baseOpacity * 1.6, duration: half * 0.7, useNativeDriver: true }),
         Animated.timing(op, { toValue: dot.baseOpacity * 0.4, duration: half * 1.3, useNativeDriver: true }),
@@ -80,8 +80,13 @@ const DotWidget: React.FC<{ dot: Dot; color: string }> = ({ dot, color }) => {
         Animated.timing(ty, { toValue: dot.driftY, duration: half * 0.85, useNativeDriver: true }),
         Animated.timing(ty, { toValue: -dot.driftY, duration: half * 1.15, useNativeDriver: true }),
       ])),
-    ]).start();
-  }, [dot, op, tx, ty]);
+    ]);
+
+    composite.start();
+
+    return () => composite.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Animated.View

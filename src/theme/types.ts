@@ -128,9 +128,21 @@ export interface Theme {
 /**
  * Theme mode options
  */
-export type ThemeMode = 
+export type ThemeMode =
   | 'system'           // Follow system appearance
   | string;            // Specific theme ID
+
+/**
+ * Background visual style options.
+ * Users can select from 5 distinct animated background designs
+ * in the Theme Settings screen.
+ */
+export type BackgroundStyle =
+  | 'aurora'           // Default: 7 large drifting gradient orbs (nebula/aurora)
+  | 'geodesic'         // Floating rotating crystalline diamond shapes
+  | 'lightPillars'     // Vertical light beams rising from the bottom
+  | 'constellation'    // Clustered star groups with nebula glows
+  | 'gradientFlow';    // Slowly flowing diagonal gradient ribbons
 
 /**
  * Sync status for themes
@@ -168,12 +180,16 @@ export interface ThemeContextType {
 
   // Dynamic background toggle
   dynamicBackgroundEnabled: boolean;
+
+  // Active background visual style
+  backgroundStyle: BackgroundStyle;
   
   // Actions
   switchTheme: (themeId: string) => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   setDarkMode: (enabled: boolean) => Promise<void>;
   setDynamicBackgroundEnabled: (enabled: boolean) => Promise<void>;
+  setBackgroundStyle: (style: BackgroundStyle) => Promise<void>;
   createCustomTheme: (theme: Theme) => Promise<void>;
   updateCustomTheme: (themeId: string, theme: Theme) => Promise<void>;
   deleteCustomTheme: (themeId: string) => Promise<void>;

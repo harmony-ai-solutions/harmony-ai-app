@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { Appearance, ColorSchemeName } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MD3DarkTheme } from 'react-native-paper';
-import { Theme, ThemeContextType, ThemeMode, ThemeSyncStatus, PaperThemeColors } from '../theme/types';
+import { Theme, ThemeContextType, ThemeMode, ThemeSyncStatus, PaperThemeColors, BackgroundStyle } from '../theme/types';
 import { defaultThemes, DEFAULT_THEME_ID, getThemeById, getDefaultTheme } from '../theme/themes';
 import { createLogger } from '../utils/logger';
 
@@ -13,6 +13,7 @@ const STORAGE_KEY_CURRENT_THEME = '@harmony_current_theme';
 const STORAGE_KEY_THEME_MODE = '@harmony_theme_mode';
 const STORAGE_KEY_CUSTOM_THEMES = '@harmony_custom_themes';
 const STORAGE_KEY_DYNAMIC_BG = '@harmony_dynamic_background';
+const STORAGE_KEY_BG_STYLE = '@harmony_background_style';
 const STORAGE_KEY_DARK_MODE = '@harmony_dark_mode';
 
 // Create context
@@ -27,6 +28,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const [themeMode, setThemeModeState] = useState<ThemeMode>(DEFAULT_THEME_ID);
     const [darkModeEnabled, setDarkModeEnabledState] = useState(true); // default dark = true
     const [dynamicBackgroundEnabled, setDynamicBackgroundEnabledState] = useState(true);
+    const [backgroundStyle, setBackgroundStyleState] = useState<BackgroundStyle>('aurora');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
     const [syncStatus, setSyncStatus] = useState<ThemeSyncStatus>({
@@ -93,6 +95,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const savedDynamicBg = await AsyncStorage.getItem(STORAGE_KEY_DYNAMIC_BG);
             if (savedDynamicBg !== null) {
                 setDynamicBackgroundEnabledState(savedDynamicBg === 'true');
+            }
+
+            // Load background style preference (default 'aurora' for first launch)
+            const savedBgStyle = await AsyncStorage.getItem(STORAGE_KEY_BG_STYLE);
+            if (savedBgStyle !== null) {
+                setBackgroundStyleState(savedBgStyle as BackgroundStyle);
             }
 
             // Load custom themes
@@ -365,6 +373,20 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }, []);
 
     /**
+     * Set the active background visual style (persisted to AsyncStorage)
+     */
+    const setBackgroundStyle = useCallback(async (style: BackgroundStyle) => {
+        try {
+            setBackgroundStyleState(style);
+            await AsyncStorage.setItem(STORAGE_KEY_BG_STYLE, style);
+        } catch (err) {
+            log.error('Failed to save background style preference:', err);
+            setError(err as Error);
+            throw err;
+        }
+    }, []);
+
+    /**
      * Refresh themes (reload from storage and backend)
      */
     const refreshThemes = useCallback(async () => {
@@ -398,6 +420,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         themeMode,
         darkModeEnabled,
         dynamicBackgroundEnabled,
+        backgroundStyle,
         loading,
         error,
         syncStatus,
@@ -405,6 +428,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setThemeMode,
         setDarkMode,
         setDynamicBackgroundEnabled,
+        setBackgroundStyle,
         createCustomTheme,
         updateCustomTheme,
         deleteCustomTheme,

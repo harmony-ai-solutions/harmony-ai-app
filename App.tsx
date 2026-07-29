@@ -24,8 +24,7 @@ import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoading
 import { InitialPairingModal } from './src/components/modals/InitialPairingModal';
 import { LockScreen } from './src/components/lock/LockScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
-import { DynamicAtmosphericBackground } from './src/components/background/DynamicAtmosphericBackground';
-import { StardustParticles } from './src/components/background/StardustParticles';
+import { DynamicBackground } from './src/components/background/DynamicBackground';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
@@ -33,7 +32,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  */
 function AppShell() {
   const paperTheme = usePaperTheme();
-  const { theme, loading: themeLoading, dynamicBackgroundEnabled } = useAppTheme();
+  const { theme, loading: themeLoading } = useAppTheme();
   const { isReady, isLoading } = useDatabase();
   const { isPaired } = useSyncConnection();
   const { isLocked } = useBiometricLock();
@@ -89,8 +88,7 @@ function AppShell() {
         translucent
       />
       <View style={styles.backgroundLayer}>
-        <DynamicAtmosphericBackground enabled={dynamicBackgroundEnabled} />
-        <StardustParticles enabled={dynamicBackgroundEnabled} />
+        <DynamicBackground />
       </View>
       <View style={styles.foregroundLayer}>
         <AppNavigator navigationRef={navigationRef} />

@@ -85,39 +85,40 @@ const AuroraBlob: React.FC<{ cfg: BlobCfg }> = ({ cfg }) => {
   const sc = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Each blob oscillates in a smooth back-and-forth with scale pulsing
     const halfC = cfg.cycleMs / 2;
 
-    // Translation — sinusoidal drift
-    const loopX = Animated.loop(
-      Animated.sequence([
-        Animated.timing(tx, { toValue: cfg.moveX, duration: halfC, useNativeDriver: true }),
-        Animated.timing(tx, { toValue: -cfg.moveX, duration: halfC, useNativeDriver: true }),
-      ]),
-    );
-    const loopY = Animated.loop(
-      Animated.sequence([
-        Animated.timing(ty, { toValue: cfg.moveY, duration: halfC * 0.8, useNativeDriver: true }),
-        Animated.timing(ty, { toValue: -cfg.moveY, duration: halfC * 1.2, useNativeDriver: true }),
-      ]),
-    );
-    // Opacity breathing
-    const loopOp = Animated.loop(
-      Animated.sequence([
-        Animated.timing(op, { toValue: cfg.opacity * 0.6, duration: halfC * 0.6, useNativeDriver: true }),
-        Animated.timing(op, { toValue: cfg.opacity * 1.2, duration: halfC * 1.4, useNativeDriver: true }),
-      ]),
-    );
-    // Scale pulsing
-    const loopSc = Animated.loop(
-      Animated.sequence([
-        Animated.timing(sc, { toValue: 1.08, duration: halfC * 0.7, useNativeDriver: true }),
-        Animated.timing(sc, { toValue: 0.94, duration: halfC * 1.3, useNativeDriver: true }),
-      ]),
-    );
+    const composite = Animated.parallel([
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(tx, { toValue: cfg.moveX, duration: halfC, useNativeDriver: true }),
+          Animated.timing(tx, { toValue: -cfg.moveX, duration: halfC, useNativeDriver: true }),
+        ]),
+      ),
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(ty, { toValue: cfg.moveY, duration: halfC * 0.8, useNativeDriver: true }),
+          Animated.timing(ty, { toValue: -cfg.moveY, duration: halfC * 1.2, useNativeDriver: true }),
+        ]),
+      ),
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(op, { toValue: cfg.opacity * 0.6, duration: halfC * 0.6, useNativeDriver: true }),
+          Animated.timing(op, { toValue: cfg.opacity * 1.2, duration: halfC * 1.4, useNativeDriver: true }),
+        ]),
+      ),
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(sc, { toValue: 1.08, duration: halfC * 0.7, useNativeDriver: true }),
+          Animated.timing(sc, { toValue: 0.94, duration: halfC * 1.3, useNativeDriver: true }),
+        ]),
+      ),
+    ]);
 
-    Animated.parallel([loopX, loopY, loopOp, loopSc]).start();
-  }, [cfg, tx, ty, op, sc]);
+    composite.start();
+
+    return () => composite.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const r = cfg.size / 2;
 

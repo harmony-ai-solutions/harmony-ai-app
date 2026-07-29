@@ -36,6 +36,18 @@
   "syncSuccess": "Themes synced with Harmony Link",
   "syncFailed": "Failed to sync themes",
   "backgroundUpdateFailed": "Failed to update background setting",
+  "backgroundStyle": "Background Style",
+  "backgroundStyleDesc": "Choose an animated background design for the app. Each style responds to the current theme's accent colors.",
+  "bgStyleAurora": "Aurora Nebula",
+  "bgStyleAuroraDesc": "Luminous drifting gradient orbs — the signature atmospheric aurora effect.",
+  "bgStyleGeodesic": "Crystalline Geodesic",
+  "bgStyleGeodesicDesc": "Floating faceted diamond shapes slowly rotating across the screen.",
+  "bgStyleLightPillars": "Light Pillars",
+  "bgStyleLightPillarsDesc": "Soft vertical beams of colored light rising from below with a gentle sway.",
+  "bgStyleConstellation": "Constellation Clusters",
+  "bgStyleConstellationDesc": "Delicate star groups connected by gossamer lines, drifting with soft nebula glows.",
+  "bgStyleGradientFlow": "Gradient Flow",
+  "bgStyleGradientFlowDesc": "Sweeping diagonal ribbons of flowing color, like silk aurora bands in motion.",
   "error": "Error",
   "success": "Success"
 }

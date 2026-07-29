@@ -39,13 +39,6 @@ export const LockScreen: React.FC = () => {
   const [biometricAttempted, setBiometricAttempted] = useState(false);
 
   // Auto-trigger biometric on mount (when biometric mode)
-  useEffect(() => {
-    if (lockMode === 'biometric' && !biometricAttempted && !showPinEntry) {
-      setBiometricAttempted(true);
-      handleBiometricUnlock();
-    }
-  }, [lockMode, biometricAttempted, showPinEntry]);
-
   const handleBiometricUnlock = useCallback(async () => {
     setIsAuthenticating(true);
     const success = await unlock();
@@ -54,6 +47,14 @@ export const LockScreen: React.FC = () => {
     }
     setIsAuthenticating(false);
   }, [unlock]);
+
+  // Auto-trigger biometric on mount (when biometric mode)
+  useEffect(() => {
+    if (lockMode === 'biometric' && !biometricAttempted && !showPinEntry) {
+      setBiometricAttempted(true);
+      handleBiometricUnlock();
+    }
+  }, [lockMode, biometricAttempted, showPinEntry, handleBiometricUnlock]);
 
   const handleUsePinFallback = useCallback(() => {
     setShowPinEntry(true);

@@ -23,6 +23,7 @@ import { ConnectionSetupScreen } from '../screens/setup/ConnectionSetupScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { RegisterScreen } from '../screens/auth/RegisterScreen';
 import { SyncSettingsScreen } from '../screens/settings/SyncSettingsScreen';
+import { BackgroundSettingsScreen } from '../screens/settings/BackgroundSettingsScreen';
 import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen';
 
 export type RootStackParamList = {
@@ -46,6 +47,7 @@ export type RootStackParamList = {
   Register: undefined;
   ConnectionSetup: undefined;
   SyncSettings: undefined;
+  BackgroundSettings: undefined;
   ThemeSettings: undefined;
   ThemeEditor: { themeId?: string } | undefined;
   EmojiActionEditor: {
@@ -126,6 +128,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Register" component={RegisterScreen} />
         <Stack.Screen name="SyncSettings" component={SyncSettingsScreen} />
+        <Stack.Screen name="BackgroundSettings" component={BackgroundSettingsScreen} />
         <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
         <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />
         <Stack.Screen
