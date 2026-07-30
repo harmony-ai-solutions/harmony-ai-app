@@ -98,14 +98,29 @@ export const SyncSettingsScreen: React.FC = () => {
       setIsSyncing(false);
     };
 
+    // SYNC_REJECT from Harmony Link (e.g. device_unauthorized,
+    // clock_drift_exceeded). Without this listener, initiateSync() resolves
+    // immediately after the WS send and isSyncing never resets (no
+    // SYNC_ACCEPT / sync:error arrives after a reject), leaving the spinner
+    // stuck with no feedback. Mirrors sync:rejected handling in
+    // SyncConnectionContext (defense-in-depth).
+    const rejectedListener = (payload: any) => {
+      setIsSyncing(false);
+      setCurrentSession(null);
+      const message = payload?.message || payload?.reason || t('syncError');
+      showToast(t('syncRejected', { message }));
+    };
+
     SyncService.on('sync:progress', progressListener);
     SyncService.on('sync:completed', completedListener);
     SyncService.on('sync:error', errorListener);
+    SyncService.on('sync:rejected', rejectedListener);
 
     return () => {
       SyncService.removeListener('sync:progress', progressListener);
       SyncService.removeListener('sync:completed', completedListener);
       SyncService.removeListener('sync:error', errorListener);
+      SyncService.removeListener('sync:rejected', rejectedListener);
     };
   }, [loadSettings]);
 

@@ -308,6 +308,14 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       showToast(i18n.t('syncConnection:syncFailed', { error }));
     };
 
+    // Defense-in-depth: ensure a SYNC_REJECT resets state + notifies the user
+    // from any screen (e.g. auto-sync on connect), not just SyncSettingsScreen.
+    const handleSyncRejected = (payload: any) => {
+      log.warn('Sync rejected:', payload);
+      const message = payload?.message || payload?.reason || '';
+      showToast(i18n.t('syncConnection:syncRejected', { message }));
+    };
+
     connectionManager.on('connected:sync',            handleSyncConnected);
     connectionManager.on('disconnected:sync',         handleSyncDisconnected);
     connectionManager.on('error:sync',                handleSyncError);
@@ -315,6 +323,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     ConnectionStateManager.on('state:changed',        handleStateChange);
     SyncService.on('sync:completed',                  handleSyncCompleted);
     SyncService.on('sync:error',                      handleSyncErrorEvent);
+    SyncService.on('sync:rejected',                   handleSyncRejected);
 
     if (!hasInitialized.current) {
       hasInitialized.current = true;
@@ -329,6 +338,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       ConnectionStateManager.off('state:changed',        handleStateChange);
       SyncService.off('sync:completed',                  handleSyncCompleted);
       SyncService.off('sync:error',                      handleSyncErrorEvent);
+      SyncService.off('sync:rejected',                   handleSyncRejected);
     };
   }, []);
 
