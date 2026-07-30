@@ -23,6 +23,22 @@ const STORAGE_KEY_PIN = '@harmony_setting_lock_pin';
 const KEYCHAIN_SERVICE = 'HarmonyAIChat_BiometricLock';
 const KEYCHAIN_BIOMETRIC_USER = 'biometric_check';
 
+/**
+ * Access control applied to the biometric credential, BOTH when storing AND when
+ * reading. Passing the same value to getGenericPassword forces the OS biometric
+ * prompt at read time — without it the keychain can resolve the cached secret
+ * without prompting (unprompted / instant unlock, i.e. the "flaky dismiss").
+ */
+const BIOMETRIC_ACCESS_CONTROL =
+  Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE;
+
+/**
+ * Hard upper bound for a biometric prompt. If the OS tears the prompt down
+ * (screen-off, app backgrounded, system cancel) without settling the promise,
+ * we give up after this window so the UI is never stranded on "Authenticating".
+ */
+const BIOMETRIC_PROMPT_TIMEOUT_MS = 20000;
+
 export type LockMode = 'biometric' | 'pin' | 'none';
 
 // ── Biometric detection ──────────────────────────────────────────────────────
@@ -56,7 +72,7 @@ async function storeBiometricCredential(pin: string): Promise<void> {
   try {
     await Keychain.setGenericPassword(KEYCHAIN_BIOMETRIC_USER, pin, {
       service: KEYCHAIN_SERVICE,
-      accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE,
+      accessControl: BIOMETRIC_ACCESS_CONTROL,
       accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
     });
     log.info('Biometric credential stored');
@@ -69,12 +85,29 @@ async function storeBiometricCredential(pin: string): Promise<void> {
 /**
  * Trigger the OS biometric prompt. Returns true if the user successfully
  * authenticated via fingerprint/face, false otherwise.
+ *
+ * The credential is read WITH `accessControl` matching how it was stored so the
+ * biometric prompt is always enforced at read time, and the call is bounded by a
+ * timeout so an interrupted prompt (screen-off / background / system cancel) can
+ * never leave the UI stuck on "Authenticating".
  */
 async function authenticateBiometric(): Promise<boolean> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
-    const result = await Keychain.getGenericPassword({
-      service: KEYCHAIN_SERVICE,
-    });
+    const result = await Promise.race([
+      Keychain.getGenericPassword({
+        service: KEYCHAIN_SERVICE,
+        accessControl: BIOMETRIC_ACCESS_CONTROL,
+      }),
+      new Promise<null>((_, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error('biometric_prompt_timeout')),
+          BIOMETRIC_PROMPT_TIMEOUT_MS,
+        );
+      }),
+    ]);
+
+    if (timeoutHandle) clearTimeout(timeoutHandle);
 
     // If we got a result, biometric passed (the OS dialog confirmed identity)
     if (result) {
@@ -85,7 +118,12 @@ async function authenticateBiometric(): Promise<boolean> {
     log.warn('Biometric auth: no credential found');
     return false;
   } catch (err: any) {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
     const msg = err?.message ?? '';
+    if (msg === 'biometric_prompt_timeout') {
+      log.warn('Biometric prompt timed out / was interrupted');
+      return false;
+    }
     if (msg.includes('cancel') || msg.includes('user fallback') || msg.includes('Cancel')) {
       log.info('Biometric cancelled by user');
       return false;

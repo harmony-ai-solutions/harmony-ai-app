@@ -64,6 +64,13 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
   const [isPinSet, setIsPinSet] = useState(false);
 
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  // Mirror isEnabled in a ref so the AppState listener can read the latest value
+  // without re-subscribing. Re-subscribing on every enable toggle risks dropping a
+  // foreground→background transition mid-flight (race). The listener is created once.
+  const isEnabledRef = useRef(isEnabled);
+  useEffect(() => {
+    isEnabledRef.current = isEnabled;
+  }, [isEnabled]);
 
   // Load initial state
   useEffect(() => {
@@ -79,17 +86,21 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
     loadState();
   }, []);
 
-  // Listen to app state changes — lock when going to background
+  // Listen to app state changes — lock when leaving the foreground.
+  // Subscribe exactly once; read the current `isEnabled` via the ref above.
   useEffect(() => {
     const handleAppStateChange = (nextState: AppStateStatus) => {
       const prevState = appStateRef.current;
 
-      if (
-        prevState.match(/active/) &&
-        nextState.match(/inactive|background/)
-      ) {
-        // App going to background — lock it
-        if (isEnabled) {
+      // Exact equality checks: `prevState.match(/active/)` also matches
+      // 'inactive' (it contains the substring "active"), causing redundant lock
+      // churn. Use strict state comparisons instead.
+      const wasActive = prevState === 'active';
+      const leavingForeground = nextState === 'inactive' || nextState === 'background';
+
+      if (wasActive && leavingForeground) {
+        // App leaving the foreground — lock it
+        if (isEnabledRef.current) {
           log.info('App entering background — locking');
           setIsLocked(true);
         }
@@ -103,7 +114,7 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
     return () => {
       subscription.remove();
     };
-  }, [isEnabled]);
+  }, []);
 
   const handleSetEnabled = useCallback(async (enabled: boolean) => {
     await BiometricLockService.setEnabled(enabled);

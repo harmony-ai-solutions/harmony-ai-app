@@ -27,10 +27,26 @@ jest.mock('react-native-fs', () => ({
 jest.mock('react-native-keychain', () => ({
   ACCESSIBLE: {
     WHEN_UNLOCKED: 'WhenUnlocked',
+    WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'WhenUnlockedThisDeviceOnly',
+  },
+  // Full enum surface — BiometricLockService reads ACCESS_CONTROL at module load
+  // to build its shared access-control constant, so the mock must provide it.
+  ACCESS_CONTROL: {
+    USER_PRESENCE: 'UserPresence',
+    BIOMETRY_ANY: 'BiometryAny',
+    BIOMETRY_CURRENT_SET: 'BiometryCurrentSet',
+    BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE: 'BiometryCurrentSetOrDevicePasscode',
+    DEVICE_PASSCODE: 'DevicePasscode',
+    APPLICATION_PASSWORD: 'ApplicationPassword',
+  },
+  AUTHENTICATION_TYPE: {
+    DEVICE_PASSCODE_OR_BIOMETRICS: 'DevicePasscodeOrBiometrics',
   },
   getGenericPassword: jest.fn(() => Promise.resolve(false)),
   setGenericPassword: jest.fn(() => Promise.resolve()),
   resetGenericPassword: jest.fn(() => Promise.resolve()),
+  getSupportedBiometryType: jest.fn(() => Promise.resolve(null)),
+  hasGenericPassword: jest.fn(() => Promise.resolve(false)),
 }));
 
 // Mock AsyncStorage

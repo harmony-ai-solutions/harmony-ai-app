@@ -4,7 +4,7 @@
  * Full-screen overlay displayed when the app is locked via biometric/PIN.
  * Shows a branded unlock prompt with biometric button or PIN entry.
  */
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -12,6 +12,8 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -38,23 +40,93 @@ export const LockScreen: React.FC = () => {
   const [showPinEntry, setShowPinEntry] = useState(false);
   const [biometricAttempted, setBiometricAttempted] = useState(false);
 
-  // Auto-trigger biometric on mount (when biometric mode)
+  // Guards against setState-after-unmount and concurrent prompt invocations.
+  const isMountedRef = useRef(true);
+  const authInProgressRef = useRef(false);
+  // Tracks whether the app was TRULY backgrounded, so we only re-arm the biometric
+  // auto-prompt on a real resume — NOT during the active→inactive→active blip that
+  // the OS biometric prompt itself causes (which would double-prompt the user).
+  const wasBackgroundRef = useRef(false);
+  // Mirror showPinEntry for use inside the AppState listener.
+  const showPinEntryRef = useRef(showPinEntry);
+  useEffect(() => {
+    showPinEntryRef.current = showPinEntry;
+  }, [showPinEntry]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Biometric unlock — resilient to interruptions (screen-off / background).
+  // `unlock()` is bounded by a timeout in the service; here we additionally
+  // guarantee `isAuthenticating` always resets via `finally` and guard against
+  // re-entrancy so two prompts can never stack (which was the flaky behavior).
   const handleBiometricUnlock = useCallback(async () => {
+    if (authInProgressRef.current) return;
+    authInProgressRef.current = true;
     setIsAuthenticating(true);
-    const success = await unlock();
-    if (!success) {
-      // User cancelled or biometric failed — they can use PIN fallback
+    try {
+      await unlock();
+      // On success the context flips `isLocked=false` and this screen unmounts.
+      // On cancel/failure we simply stay locked; the button below lets the user
+      // retry, and the resume listener re-arms the auto-prompt on real resume.
+    } finally {
+      authInProgressRef.current = false;
+      if (isMountedRef.current) {
+        setIsAuthenticating(false);
+      }
     }
-    setIsAuthenticating(false);
   }, [unlock]);
 
-  // Auto-trigger biometric on mount (when biometric mode)
+  // Auto-trigger biometric on mount — but only once the app is actually `active`
+  // (foregrounded) and after a short debounce so we don't fire the OS prompt
+  // mid navigation/activity transition (Android dismisses an out-of-state prompt).
   useEffect(() => {
-    if (lockMode === 'biometric' && !biometricAttempted && !showPinEntry) {
+    if (lockMode !== 'biometric' || showPinEntry || biometricAttempted) return;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      if (AppState.currentState !== 'active') return; // not foregrounded yet
       setBiometricAttempted(true);
       handleBiometricUnlock();
-    }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [lockMode, biometricAttempted, showPinEntry, handleBiometricUnlock]);
+
+  // Re-arm the biometric auto-prompt on a TRUE resume (background → active).
+  // The OS biometric prompt only ever causes active→inactive→active, never a
+  // 'background' state, so this never double-prompts during a normal unlock.
+  useEffect(() => {
+    const handleChange = (next: AppStateStatus) => {
+      if (next === 'background') {
+        wasBackgroundRef.current = true;
+        return;
+      }
+      if (next === 'active' && wasBackgroundRef.current) {
+        wasBackgroundRef.current = false;
+        if (
+          lockMode === 'biometric' &&
+          !showPinEntryRef.current &&
+          !authInProgressRef.current
+        ) {
+          // Reset so the auto-trigger effect above fires again.
+          setBiometricAttempted(false);
+        }
+      }
+    };
+    const subscription = AppState.addEventListener('change', handleChange);
+    return () => {
+      subscription.remove();
+    };
+  }, [lockMode]);
 
   const handleUsePinFallback = useCallback(() => {
     setShowPinEntry(true);
@@ -62,13 +134,21 @@ export const LockScreen: React.FC = () => {
 
   const handlePinSubmit = useCallback(async () => {
     if (pin.length < 4) return;
+    if (authInProgressRef.current) return;
+    authInProgressRef.current = true;
     setIsAuthenticating(true);
-    const success = await unlock(pin);
-    if (!success) {
-      setPinError(true);
-      setPin('');
+    try {
+      const success = await unlock(pin);
+      if (!success && isMountedRef.current) {
+        setPinError(true);
+        setPin('');
+      }
+    } finally {
+      authInProgressRef.current = false;
+      if (isMountedRef.current) {
+        setIsAuthenticating(false);
+      }
     }
-    setIsAuthenticating(false);
   }, [pin, unlock]);
 
   const handlePinChange = useCallback((value: string) => {
