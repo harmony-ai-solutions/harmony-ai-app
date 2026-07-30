@@ -306,7 +306,7 @@ export async function wipeDatabaseCompletely(
     // Step 4: Use SQLite's own deleteDatabase API to properly remove the database
     // This handles SQLite's internal caching and ensures a clean deletion
     try {
-      await SQLite.deleteDatabase({ name: DATABASE_NAME });
+      await SQLite.deleteDatabase(DATABASE_NAME);
       if (!silent) {
         log.info('Deleted database using SQLite API');
       }
