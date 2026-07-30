@@ -25,7 +25,6 @@ const STORAGE_KEYS = {
   PUSH_NOTIFICATIONS: '@harmony_setting_push_notifications',
   SOUND_EFFECTS: '@harmony_setting_sound_effects',
   HAPTIC_FEEDBACK: '@harmony_setting_haptic_feedback',
-  CONTENT_FILTER: '@harmony_setting_content_filter',
 } as const;
 
 export const SettingsScreen: React.FC = () => {
@@ -43,7 +42,6 @@ export const SettingsScreen: React.FC = () => {
   const [pushNotifications, setPushNotifications] = useState(false);
   const [soundEffects, setSoundEffects] = useState(true);
   const [hapticFeedback, setHapticFeedback] = useState(true);
-  const [contentFilter, setContentFilter] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -78,16 +76,14 @@ export const SettingsScreen: React.FC = () => {
 
   const loadToggleStates = async () => {
     try {
-      const [push, sound, haptic, filter] = await Promise.all([
+      const [push, sound, haptic] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.PUSH_NOTIFICATIONS),
         AsyncStorage.getItem(STORAGE_KEYS.SOUND_EFFECTS),
         AsyncStorage.getItem(STORAGE_KEYS.HAPTIC_FEEDBACK),
-        AsyncStorage.getItem(STORAGE_KEYS.CONTENT_FILTER),
       ]);
       if (push !== null) setPushNotifications(push === 'true');
       if (sound !== null) setSoundEffects(sound === 'true');
       if (haptic !== null) setHapticFeedback(haptic === 'true');
-      if (filter !== null) setContentFilter(filter === 'true');
     } catch {
       // ignore — defaults are fine
     }
@@ -298,13 +294,6 @@ export const SettingsScreen: React.FC = () => {
         {/* ── AI & Conversation ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('aiConversation')} style={styles.sectionHeader} />
-          <SettingsToggleRow
-            icon="shield-check"
-            label={t('contentFilter')}
-            value={contentFilter}
-            onValueChange={(v) => toggleAndStore(STORAGE_KEYS.CONTENT_FILTER, v, setContentFilter)}
-            theme={theme}
-          />
           <SettingsLinkRow
             icon="swap-horizontal-bold"
             label={t('streamingResponses')}

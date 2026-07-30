@@ -120,7 +120,8 @@ export const BackgroundSettingsScreen: React.FC<Props> = ({ navigation }) => {
                                         },
                                     ]}
                                     onPress={() => handleBackgroundStyleChange(bgItem.style)}
-                                    activeOpacity={0.7}
+                                    activeOpacity={dynamicBackgroundEnabled ? 0.7 : 1}
+                                    disabled={!dynamicBackgroundEnabled}
                                 >
                                     <View style={styles.bgStyleHeader}>
                                         <View style={[styles.iconPill, { backgroundColor: hexToRgba(theme.colors.accent.primary, 0.12) }]}>
