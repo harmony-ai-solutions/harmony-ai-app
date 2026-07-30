@@ -49,6 +49,26 @@ jest.mock('react-native-keychain', () => ({
   hasGenericPassword: jest.fn(() => Promise.resolve(false)),
 }));
 
+// Mock react-native-biometrics (default export is a constructor; return a shared
+// instance so tests drive the same jest.fn instances the service holds).
+jest.mock('react-native-biometrics', () => {
+  const shared = {
+    allowDeviceCredentials: false,
+    isSensorAvailable: jest.fn(() => Promise.resolve({ available: false })),
+    simplePrompt: jest.fn(() => Promise.resolve({ success: false })),
+    createKeys: jest.fn(() => Promise.resolve({ publicKey: 'pk' })),
+    biometricKeysExist: jest.fn(() => Promise.resolve({ keysExist: false })),
+    deleteKeys: jest.fn(() => Promise.resolve({ keysDeleted: true })),
+    createSignature: jest.fn(() => Promise.resolve({ success: false })),
+  };
+  return {
+    __esModule: true,
+    default: function MockReactNativeBiometrics() {
+      return shared;
+    },
+  };
+});
+
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn(() => Promise.resolve(null)),

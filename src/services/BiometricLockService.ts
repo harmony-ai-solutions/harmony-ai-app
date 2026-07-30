@@ -4,15 +4,19 @@
  * Manages app-lock authentication.
  *
  * Architecture:
- *   - PIN is stored in AsyncStorage (simple comparison, no OS prompt)
- *   - A separate "dummy" biometric credential is stored in the keychain with
- *     biometric access control. Calling getGenericPassword on it triggers the
- *     OS biometric prompt — the result doesn't matter, only that it succeeded.
+ *   - PIN is stored in AsyncStorage (simple comparison, no OS prompt).
+ *   - Biometric unlock uses react-native-biometrics `simplePrompt`, which invokes
+ *     the OS BiometricPrompt WITHOUT a CryptoObject. This is deliberate: a
+ *     CryptoObject-bound prompt (e.g. react-native-keychain's getGenericPassword
+ *     on a biometric-protected secret) is subject to Android's auth-validity
+ *     window — the keychain native code hardcodes a 5s reuse window, so a second
+ *     unlock within 5s would decrypt and return WITHOUT showing a prompt. A
+ *     CryptoObject-free simplePrompt ALWAYS shows the prompt on every call.
  *
  * This separation means PIN verification never triggers a biometric prompt,
  * and biometric unlock never requires typing a PIN.
  */
-import * as Keychain from 'react-native-keychain';
+import ReactNativeBiometrics from 'react-native-biometrics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../utils/logger';
 
@@ -20,17 +24,9 @@ const log = createLogger('[BiometricLockService]');
 
 const STORAGE_KEY_ENABLED = '@harmony_setting_biometric_lock';
 const STORAGE_KEY_PIN = '@harmony_setting_lock_pin';
-const KEYCHAIN_SERVICE = 'HarmonyAIChat_BiometricLock';
-const KEYCHAIN_BIOMETRIC_USER = 'biometric_check';
 
-/**
- * Access control applied to the biometric credential, BOTH when storing AND when
- * reading. Passing the same value to getGenericPassword forces the OS biometric
- * prompt at read time — without it the keychain can resolve the cached secret
- * without prompting (unprompted / instant unlock, i.e. the "flaky dismiss").
- */
-const BIOMETRIC_ACCESS_CONTROL =
-  Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE;
+/** Fallback prompt message when none is supplied by the caller. */
+const DEFAULT_PROMPT_MESSAGE = 'Confirm your identity to unlock';
 
 /**
  * Hard upper bound for a biometric prompt. If the OS tears the prompt down
@@ -39,67 +35,65 @@ const BIOMETRIC_ACCESS_CONTROL =
  */
 const BIOMETRIC_PROMPT_TIMEOUT_MS = 20000;
 
+// Single shared instance; constructed once (the native bridge is cheap to hold).
+const rnBiometrics = new ReactNativeBiometrics();
+
 export type LockMode = 'biometric' | 'pin' | 'none';
+
+/** Localized strings for the OS biometric prompt (supplied by the UI layer). */
+export interface BiometricPromptStrings {
+  promptMessage: string;
+  cancelButtonText?: string;
+  fallbackPromptMessage?: string;
+}
+
+/** Options for an unlock attempt. Either verify a PIN or prompt biometrics. */
+export interface UnlockOptions {
+  /** If provided, verify this PIN instead of prompting biometrics. */
+  pin?: string;
+  /** Localized strings for the OS biometric prompt (biometric path only). */
+  prompt?: BiometricPromptStrings;
+}
 
 // ── Biometric detection ──────────────────────────────────────────────────────
 
 async function isBiometricAvailable(): Promise<boolean> {
   try {
-    const biometryType = await Keychain.getSupportedBiometryType();
-    return biometryType !== null;
+    const { available } = await rnBiometrics.isSensorAvailable();
+    return available === true;
   } catch (err) {
-    log.warn('Biometric check failed:', err);
+    log.warn('Biometric sensor check failed:', err);
     return false;
   }
 }
 
 async function getBiometryType(): Promise<string | null> {
   try {
-    return await Keychain.getSupportedBiometryType();
+    const { biometryType } = await rnBiometrics.isSensorAvailable();
+    return biometryType ?? null;
   } catch {
     return null;
   }
 }
 
-// ── Biometric credential (dummy — just triggers OS prompt) ───────────────────
+// ── Biometric prompt (CryptoObject-free → always prompts) ────────────────────
 
 /**
- * Store a dummy biometric credential in the keychain.
- * Its sole purpose is to allow getGenericPassword to trigger the OS
- * biometric prompt. The actual password value is meaningless.
+ * Show the OS biometric prompt. Returns true only if the user successfully
+ * authenticated. Uses a CryptoObject-free prompt so it is shown on EVERY call
+ * (no auth-validity reuse window). Bounded by a timeout so an interrupted prompt
+ * (screen-off / background / system cancel) can never leave the UI stuck.
  */
-async function storeBiometricCredential(pin: string): Promise<void> {
-  try {
-    await Keychain.setGenericPassword(KEYCHAIN_BIOMETRIC_USER, pin, {
-      service: KEYCHAIN_SERVICE,
-      accessControl: BIOMETRIC_ACCESS_CONTROL,
-      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-    });
-    log.info('Biometric credential stored');
-  } catch (err) {
-    log.error('Failed to store biometric credential:', err);
-    throw err;
-  }
-}
-
-/**
- * Trigger the OS biometric prompt. Returns true if the user successfully
- * authenticated via fingerprint/face, false otherwise.
- *
- * The credential is read WITH `accessControl` matching how it was stored so the
- * biometric prompt is always enforced at read time, and the call is bounded by a
- * timeout so an interrupted prompt (screen-off / background / system cancel) can
- * never leave the UI stuck on "Authenticating".
- */
-async function authenticateBiometric(): Promise<boolean> {
+async function authenticateBiometric(prompt?: BiometricPromptStrings): Promise<boolean> {
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
     const result = await Promise.race([
-      Keychain.getGenericPassword({
-        service: KEYCHAIN_SERVICE,
-        accessControl: BIOMETRIC_ACCESS_CONTROL,
+      rnBiometrics.simplePrompt({
+        promptMessage: prompt?.promptMessage ?? DEFAULT_PROMPT_MESSAGE,
+        cancelButtonText: prompt?.cancelButtonText,
+        fallbackPromptMessage: prompt?.fallbackPromptMessage,
       }),
-      new Promise<null>((_, reject) => {
+      new Promise<{ success: false }>((_, reject) => {
         timeoutHandle = setTimeout(
           () => reject(new Error('biometric_prompt_timeout')),
           BIOMETRIC_PROMPT_TIMEOUT_MS,
@@ -109,14 +103,13 @@ async function authenticateBiometric(): Promise<boolean> {
 
     if (timeoutHandle) clearTimeout(timeoutHandle);
 
-    // If we got a result, biometric passed (the OS dialog confirmed identity)
-    if (result) {
+    const success = result?.success === true;
+    if (success) {
       log.info('Biometric authentication succeeded');
-      return true;
+    } else {
+      log.info('Biometric cancelled by user');
     }
-
-    log.warn('Biometric auth: no credential found');
-    return false;
+    return success;
   } catch (err: any) {
     if (timeoutHandle) clearTimeout(timeoutHandle);
     const msg = err?.message ?? '';
@@ -124,24 +117,8 @@ async function authenticateBiometric(): Promise<boolean> {
       log.warn('Biometric prompt timed out / was interrupted');
       return false;
     }
-    if (msg.includes('cancel') || msg.includes('user fallback') || msg.includes('Cancel')) {
-      log.info('Biometric cancelled by user');
-      return false;
-    }
     log.error('Biometric auth error:', msg);
     return false;
-  }
-}
-
-/**
- * Remove the dummy biometric credential.
- */
-async function clearBiometricCredential(): Promise<void> {
-  try {
-    await Keychain.resetGenericPassword({ service: KEYCHAIN_SERVICE });
-    log.info('Biometric credential cleared');
-  } catch (err) {
-    log.error('Failed to clear biometric credential:', err);
   }
 }
 
@@ -163,8 +140,7 @@ async function getStoredPin(): Promise<string | null> {
 async function clearPin(): Promise<void> {
   try {
     await AsyncStorage.removeItem(STORAGE_KEY_PIN);
-    await clearBiometricCredential();
-    log.info('PIN and biometric credential cleared');
+    log.info('PIN cleared');
   } catch (err) {
     log.error('Failed to clear PIN:', err);
   }
@@ -181,16 +157,11 @@ async function isPinSet(): Promise<boolean> {
 // ── Setup ────────────────────────────────────────────────────────────────────
 
 /**
- * Set up the lock: store the PIN and, if biometric is available, also store
- * a biometric-protected credential so fingerprint unlock works.
+ * Set up the lock: store the PIN. Biometric availability is detected at unlock
+ * time, so no native biometric credential needs to be pre-stored.
  */
 async function setupLock(pin: string): Promise<void> {
   await storePin(pin);
-
-  const biometric = await isBiometricAvailable();
-  if (biometric) {
-    await storeBiometricCredential(pin);
-  }
 }
 
 // ── Unlock ───────────────────────────────────────────────────────────────────
@@ -199,9 +170,13 @@ async function setupLock(pin: string): Promise<void> {
  * Attempt to unlock.
  *
  * - If a PIN is provided: compare against stored PIN (no biometric prompt).
- * - If no PIN is provided: try biometric (if available & credential exists).
+ * - If no PIN is provided: show the biometric prompt (if available & a PIN is set).
+ *
+ * `promptMessage` customises the OS biometric dialog text (biometric path only).
  */
-async function unlock(pin?: string): Promise<boolean> {
+async function unlock(options?: UnlockOptions): Promise<boolean> {
+  const pin = options?.pin;
+
   // PIN provided — direct comparison, no biometric
   if (pin !== undefined && pin.length >= 4) {
     const stored = await getStoredPin();
@@ -226,7 +201,7 @@ async function unlock(pin?: string): Promise<boolean> {
     return false;
   }
 
-  return authenticateBiometric();
+  return authenticateBiometric(options?.prompt);
 }
 
 // ── Mode detection ───────────────────────────────────────────────────────────

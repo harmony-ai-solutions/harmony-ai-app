@@ -2,66 +2,65 @@
  * Unit tests for BiometricLockService.
  *
  * Focus: the race-condition / deadlock fixes.
- *  - `accessControl` is enforced at READ time (so the prompt always shows).
+ *  - Biometric unlock uses react-native-biometrics `simplePrompt` (CryptoObject-free
+ *    → ALWAYS prompts; no auth-validity reuse window like react-native-keychain had).
  *  - `authenticateBiometric` is bounded by a timeout so an interrupted prompt
  *    (screen-off / background / system cancel) can never hang the UI forever.
  */
 import BiometricLockService from '../BiometricLockService';
 
-// The react-native-keychain mock lives in jest.setup.js; grab the mocked fns.
-// jest's module registry returns the SAME mock instance the service uses.
-const Keychain = require('react-native-keychain');
+// Mocks live in jest.setup.js. The react-native-biometrics mock returns the SAME
+// shared instance for every `new` call, so this handle drives the service's fns.
+const AsyncStorage = require('@react-native-async-storage/async-storage');
+const rnb = new (require('react-native-biometrics').default)();
 
 describe('BiometricLockService', () => {
   beforeEach(() => {
-    // Reset implementations and re-establish safe defaults per test.
-    Keychain.getGenericPassword.mockReset();
-    Keychain.getGenericPassword.mockResolvedValue(false);
-    Keychain.setGenericPassword.mockReset();
-    Keychain.setGenericPassword.mockResolvedValue(undefined);
-    Keychain.getSupportedBiometryType.mockReset();
-    Keychain.getSupportedBiometryType.mockResolvedValue(null);
+    rnb.isSensorAvailable.mockReset();
+    rnb.isSensorAvailable.mockResolvedValue({ available: false });
+    rnb.simplePrompt.mockReset();
+    rnb.simplePrompt.mockResolvedValue({ success: false });
+    AsyncStorage.getItem.mockReset();
+    AsyncStorage.getItem.mockResolvedValue(null);
+    AsyncStorage.setItem.mockReset();
+    AsyncStorage.setItem.mockResolvedValue();
+    AsyncStorage.removeItem.mockReset();
+    AsyncStorage.removeItem.mockResolvedValue();
   });
 
   describe('authenticateBiometric', () => {
-    it('enforces the OS prompt by passing accessControl at read time', async () => {
-      // Resolves with stored credentials => biometric succeeded.
-      Keychain.getGenericPassword.mockResolvedValueOnce({
-        username: 'biometric_check',
-        password: '1234',
+    it('shows the localized prompt and returns true on success', async () => {
+      rnb.simplePrompt.mockResolvedValueOnce({ success: true });
+
+      const ok = await BiometricLockService.authenticateBiometric({
+        promptMessage: 'Unlock Soulbits',
       });
 
-      const ok = await BiometricLockService.authenticateBiometric();
-
       expect(ok).toBe(true);
-      expect(Keychain.getGenericPassword).toHaveBeenCalledWith(
-        expect.objectContaining({
-          service: 'HarmonyAIChat_BiometricLock',
-          accessControl: expect.any(String),
-        }),
+      expect(rnb.simplePrompt).toHaveBeenCalledWith(
+        expect.objectContaining({ promptMessage: 'Unlock Soulbits' }),
       );
     });
 
-    it('returns false when no biometric credential is stored', async () => {
-      Keychain.getGenericPassword.mockResolvedValueOnce(false);
+    it('returns false when the user cancels (success:false, no reject)', async () => {
+      rnb.simplePrompt.mockResolvedValueOnce({ success: false });
       await expect(BiometricLockService.authenticateBiometric()).resolves.toBe(false);
     });
 
-    it('returns false when the user cancels the prompt', async () => {
-      Keychain.getGenericPassword.mockRejectedValueOnce(new Error('Error: Cancel'));
+    it('returns false when the prompt errors (rejects)', async () => {
+      rnb.simplePrompt.mockRejectedValueOnce(new Error('biometric hardware error'));
       await expect(BiometricLockService.authenticateBiometric()).resolves.toBe(false);
     });
 
     it('does NOT hang when the prompt is interrupted (timeout safety net)', async () => {
       // Reproduces the "stuck on Authenticating" bug: the OS kills the prompt
-      // (screen-off / background) and keychain never calls back. The service
+      // (screen-off / background) and the native call never settles. The service
       // must give up after its timeout instead of leaving the UI stranded.
       jest.useFakeTimers();
-      Keychain.getGenericPassword.mockReturnValueOnce(new Promise(() => {}));
+      rnb.simplePrompt.mockReturnValueOnce(new Promise(() => {}));
 
       const pending = BiometricLockService.authenticateBiometric();
-      // Advance well past the configured prompt timeout.
-      jest.advanceTimersByTime(60000);
+      jest.advanceTimersByTime(60000); // well past the configured prompt timeout
 
       const result = await pending;
       expect(result).toBe(false);
@@ -69,22 +68,49 @@ describe('BiometricLockService', () => {
     });
   });
 
-  describe('setupLock', () => {
-    it('stores the biometric credential with accessControl so reads can enforce it', async () => {
-      Keychain.getSupportedBiometryType.mockResolvedValueOnce('FaceID');
-      Keychain.setGenericPassword.mockClear();
+  describe('unlock', () => {
+    it('uses the biometric prompt (not PIN comparison) when no PIN is given', async () => {
+      AsyncStorage.getItem.mockResolvedValueOnce('1234'); // stored PIN present
+      rnb.isSensorAvailable.mockResolvedValueOnce({ available: true });
+      rnb.simplePrompt.mockResolvedValueOnce({ success: true });
 
+      const ok = await BiometricLockService.unlock({
+        prompt: { promptMessage: 'Unlock Soulbits' },
+      });
+
+      expect(ok).toBe(true);
+      expect(rnb.simplePrompt).toHaveBeenCalledWith(
+        expect.objectContaining({ promptMessage: 'Unlock Soulbits' }),
+      );
+    });
+
+    it('returns false without prompting when biometrics are unavailable', async () => {
+      AsyncStorage.getItem.mockResolvedValueOnce('1234');
+      rnb.isSensorAvailable.mockResolvedValueOnce({ available: false });
+
+      await expect(BiometricLockService.unlock()).resolves.toBe(false);
+      expect(rnb.simplePrompt).not.toHaveBeenCalled();
+    });
+
+    it('verifies a provided PIN without triggering any biometric prompt', async () => {
+      // Persistent stored PIN across both checks.
+      AsyncStorage.getItem.mockResolvedValue('1234');
+
+      await expect(BiometricLockService.unlock({ pin: '1234' })).resolves.toBe(true);
+      await expect(BiometricLockService.unlock({ pin: '0000' })).resolves.toBe(false);
+      expect(rnb.simplePrompt).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setupLock', () => {
+    it('stores the PIN in AsyncStorage (no native biometric key generation)', async () => {
       await BiometricLockService.setupLock('1234');
 
-      expect(Keychain.setGenericPassword).toHaveBeenCalledWith(
-        'biometric_check',
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+        '@harmony_setting_lock_pin',
         '1234',
-        expect.objectContaining({
-          service: 'HarmonyAIChat_BiometricLock',
-          accessControl: expect.any(String),
-          accessible: expect.any(String),
-        }),
       );
+      expect(rnb.createKeys).not.toHaveBeenCalled();
     });
   });
 });

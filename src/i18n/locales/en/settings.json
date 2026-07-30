@@ -63,6 +63,7 @@
   "biometricLockTitle": "Locked",
   "biometricLockSubtitle": "Authenticate to unlock the app",
   "biometricUnlock": "Unlock with fingerprint",
+  "biometricPromptMessage": "Unlock Soulbits",
   "usePinInstead": "Use PIN instead",
   "useFingerprint": "Use fingerprint instead",
   "authenticating": "Authenticating…",

@@ -69,7 +69,13 @@ export const LockScreen: React.FC = () => {
     authInProgressRef.current = true;
     setIsAuthenticating(true);
     try {
-      await unlock();
+      await unlock({
+        prompt: {
+          promptMessage: t('biometricPromptMessage'),
+          cancelButtonText: t('cancel'),
+          fallbackPromptMessage: t('usePinInstead'),
+        },
+      });
       // On success the context flips `isLocked=false` and this screen unmounts.
       // On cancel/failure we simply stay locked; the button below lets the user
       // retry, and the resume listener re-arms the auto-prompt on real resume.
@@ -79,7 +85,7 @@ export const LockScreen: React.FC = () => {
         setIsAuthenticating(false);
       }
     }
-  }, [unlock]);
+  }, [unlock, t]);
 
   // Auto-trigger biometric on mount — but only once the app is actually `active`
   // (foregrounded) and after a short debounce so we don't fire the OS prompt
@@ -138,7 +144,7 @@ export const LockScreen: React.FC = () => {
     authInProgressRef.current = true;
     setIsAuthenticating(true);
     try {
-      const success = await unlock(pin);
+      const success = await unlock({ pin });
       if (!success && isMountedRef.current) {
         setPinError(true);
         setPin('');

@@ -13,7 +13,7 @@ import React, {
   useRef,
 } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
-import BiometricLockService, { LockMode } from '../services/BiometricLockService';
+import BiometricLockService, { LockMode, UnlockOptions } from '../services/BiometricLockService';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[BiometricLockContext]');
@@ -32,7 +32,7 @@ interface BiometricLockContextType {
   /** Set/unset the PIN. */
   setupPin: (pin: string) => Promise<void>;
   /** Unlock the app — triggers biometric prompt or verifies PIN. */
-  unlock: (pin?: string) => Promise<boolean>;
+  unlock: (options?: UnlockOptions) => Promise<boolean>;
   /** Lock the app immediately (e.g., manual lock). */
   lock: () => void;
 }
@@ -141,8 +141,8 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
     setLockMode(mode);
   }, []);
 
-  const handleUnlock = useCallback(async (pin?: string): Promise<boolean> => {
-    const success = await BiometricLockService.unlock(pin);
+  const handleUnlock = useCallback(async (options?: UnlockOptions): Promise<boolean> => {
+    const success = await BiometricLockService.unlock(options);
     if (success) {
       setIsLocked(false);
     }
