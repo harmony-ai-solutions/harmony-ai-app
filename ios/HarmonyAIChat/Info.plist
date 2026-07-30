@@ -54,5 +54,19 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>ai.soulbits.chat</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.128352209891-07iqnfd4udu6p7vt86dvh4go65htkv43</string>
+				<string>com.googleusercontent.apps.128352209891-3lm1pgood2a4h97kpasjmjlaer0oighu</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
