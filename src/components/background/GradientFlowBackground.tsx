@@ -206,33 +206,40 @@ const FlowRibbon: React.FC<{ cfg: RibbonCfg }> = ({ cfg }) => {
   const halfDiag = DIAG * 0.75;
 
   return (
-    <Animated.View
-      style={[
-        styles.ribbon,
-        {
-          width: DIAG * 1.5,
-          height: ribbonWidth,
-          left: W * cfg.startX - halfDiag,
-          top: H * cfg.startY - ribbonWidth / 2,
-          opacity: op,
-          transform: [
-            { translateX: tx },
-            { translateY: ty },
-            { rotate: `${cfg.angle}deg` },
-            { scale: sc },
-          ],
-        },
-      ]}
-      pointerEvents="none"
+    <View
+      style={{
+        position: 'absolute',
+        left: W * cfg.startX - halfDiag,
+        top: H * cfg.startY - ribbonWidth / 2,
+        width: DIAG * 1.5,
+        height: ribbonWidth,
+        overflow: 'visible',
+      }}
     >
-      <LinearGradient
-        colors={[cfg.colorB, cfg.colorA, cfg.colorA, cfg.colorB]}
-        locations={[0, 0.18, 0.82, 1]}
-        start={{ x: 0, y: 0.5 }}
-        end={{ x: 1, y: 0.5 }}
-        style={styles.ribbonFill}
-      />
-    </Animated.View>
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            opacity: op,
+            transform: [
+              { translateX: tx },
+              { translateY: ty },
+              { rotate: `${cfg.angle}deg` },
+              { scale: sc },
+            ],
+          },
+        ]}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={[cfg.colorB, cfg.colorA, cfg.colorA, cfg.colorB]}
+          locations={[0, 0.18, 0.82, 1]}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={styles.ribbonFill}
+        />
+      </Animated.View>
+    </View>
   );
 };
 
@@ -313,10 +320,6 @@ const styles = StyleSheet.create({
   root: {
     ...StyleSheet.absoluteFill,
     overflow: 'hidden',
-  },
-  ribbon: {
-    position: 'absolute',
-    overflow: 'visible',
   },
   ribbonFill: {
     flex: 1,

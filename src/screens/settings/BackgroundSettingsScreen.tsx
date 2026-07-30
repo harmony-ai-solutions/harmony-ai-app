@@ -43,11 +43,8 @@ export const BackgroundSettingsScreen: React.FC<Props> = ({ navigation }) => {
     const BACKGROUND_STYLES: { style: BackgroundStyle; label: string; icon: string; description: string }[] = [
         { style: 'aurora', label: t('bgStyleAurora'), icon: 'blur', description: t('bgStyleAuroraDesc') },
         { style: 'geodesic', label: t('bgStyleGeodesic'), icon: 'hexagon', description: t('bgStyleGeodesicDesc') },
-        { style: 'lightPillars', label: t('bgStyleLightPillars'), icon: 'flashlight', description: t('bgStyleLightPillarsDesc') },
-        { style: 'constellation', label: t('bgStyleConstellation'), icon: 'star-four-points', description: t('bgStyleConstellationDesc') },
         { style: 'gradientFlow', label: t('bgStyleGradientFlow'), icon: 'waves', description: t('bgStyleGradientFlowDesc') },
         { style: 'neuralPulse', label: t('bgStyleNeuralPulse'), icon: 'brain', description: t('bgStyleNeuralPulseDesc') },
-        { style: 'soulEchoes', label: t('bgStyleSoulEchoes'), icon: 'ripple', description: t('bgStyleSoulEchoesDesc') },
     ];
 
     const handleDynamicBackgroundToggle = useCallback(async (value: boolean) => {

@@ -125,27 +125,27 @@ function buildNeuralNetwork(primary: string, secondary: string): {
 const NeuronField: React.FC<{ neuron: NeuronCfg; pulseValue: Animated.AnimatedMultiplication<number> }> =
   ({ neuron, pulseValue }) => {
     return (
-      <Animated.View
-        style={[
-          styles.field,
-          {
-            left: neuron.x - neuron.fieldRadius,
-            top: neuron.y - neuron.fieldRadius,
-            width: neuron.fieldRadius * 2,
-            height: neuron.fieldRadius * 2,
-            borderRadius: neuron.fieldRadius,
-            opacity: pulseValue,
-          },
-        ]}
-        pointerEvents="none"
-      >
-        <LinearGradient
-          colors={[neuron.color + '18', neuron.color + '04', neuron.color + '00']}
-          start={{ x: 0.5, y: 0.5 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.fieldFill}
-        />
-      </Animated.View>
+      <View style={{ position: 'absolute', left: neuron.x - neuron.fieldRadius, top: neuron.y - neuron.fieldRadius }}>
+        <Animated.View
+          style={[
+            styles.field,
+            {
+              width: neuron.fieldRadius * 2,
+              height: neuron.fieldRadius * 2,
+              borderRadius: neuron.fieldRadius,
+              opacity: pulseValue,
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <LinearGradient
+            colors={[neuron.color + '18', neuron.color + '04', neuron.color + '00']}
+            start={{ x: 0.5, y: 0.5 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.fieldFill}
+          />
+        </Animated.View>
+      </View>
     );
   };
 
@@ -176,22 +176,22 @@ const SomaDot: React.FC<{
   const combinedOp = Animated.multiply(ownPulse, pulseValue);
 
   return (
-    <Animated.View
-      style={[
-        styles.soma,
-        {
-          left: neuron.x - neuron.somaRadius,
-          top: neuron.y - neuron.somaRadius,
-          width: neuron.somaRadius * 2,
-          height: neuron.somaRadius * 2,
-          borderRadius: neuron.somaRadius,
-          backgroundColor: neuron.color + 'FF',
-          opacity: combinedOp,
-          shadowColor: neuron.color,
-        },
-      ]}
-      pointerEvents="none"
-    />
+    <View style={{ position: 'absolute', left: neuron.x - neuron.somaRadius, top: neuron.y - neuron.somaRadius }}>
+      <Animated.View
+        style={[
+          styles.soma,
+          {
+            width: neuron.somaRadius * 2,
+            height: neuron.somaRadius * 2,
+            borderRadius: neuron.somaRadius,
+            backgroundColor: neuron.color + 'FF',
+            opacity: combinedOp,
+            shadowColor: neuron.color,
+          },
+        ]}
+        pointerEvents="none"
+      />
+    </View>
   );
 };
 
@@ -229,21 +229,21 @@ const DendriteBranch: React.FC<{
   const combinedOp = Animated.multiply(branchOp, pulseValue);
 
   return (
-    <Animated.View
-      style={[
-        styles.dendrite,
-        {
-          left: edge.fromX,
-          top: edge.fromY,
-          width: len,
-          height: 1.2,
-          backgroundColor: color + '88',
-          opacity: combinedOp,
-          transform: [{ rotate: `${angle}deg` }],
-        },
-      ]}
-      pointerEvents="none"
-    />
+    <View style={{ position: 'absolute', left: edge.fromX, top: edge.fromY }}>
+      <Animated.View
+        style={[
+          styles.dendrite,
+          {
+            width: len,
+            height: 1.2,
+            backgroundColor: color + '88',
+            opacity: combinedOp,
+            transform: [{ rotate: `${angle}deg` }],
+          },
+        ]}
+        pointerEvents="none"
+      />
+    </View>
   );
 };
 
@@ -303,38 +303,44 @@ const ActionPotential: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const curX = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [edge.fromX, edge.toX],
-  });
-  const curY = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [edge.fromY, edge.toY],
-  });
-
   const pulseSize = 4;
 
+  const combinedTx = Animated.add(
+    progress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [-pulseSize, edge.toX - edge.fromX - pulseSize],
+    }),
+    0,
+  );
+  const combinedTy = Animated.add(
+    progress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [-pulseSize, edge.toY - edge.fromY - pulseSize],
+    }),
+    0,
+  );
+
   return (
-    <Animated.View
-      style={[
-        styles.actionPotential,
-        {
-          left: curX,
-          top: curY,
-          width: pulseSize * 2,
-          height: pulseSize * 2,
-          borderRadius: pulseSize,
-          backgroundColor: color + 'FF',
-          opacity: op,
-          shadowColor: color,
-          transform: [
-            { translateX: -pulseSize },
-            { translateY: -pulseSize },
-          ],
-        },
-      ]}
-      pointerEvents="none"
-    />
+    <View style={{ position: 'absolute', left: edge.fromX, top: edge.fromY }}>
+      <Animated.View
+        style={[
+          styles.actionPotential,
+          {
+            width: pulseSize * 2,
+            height: pulseSize * 2,
+            borderRadius: pulseSize,
+            backgroundColor: color + 'FF',
+            opacity: op,
+            shadowColor: color,
+            transform: [
+              { translateX: combinedTx },
+              { translateY: combinedTy },
+            ],
+          },
+        ]}
+        pointerEvents="none"
+      />
+    </View>
   );
 };
 
@@ -467,14 +473,12 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   field: {
-    position: 'absolute',
     overflow: 'hidden',
   },
   fieldFill: {
     flex: 1,
   },
   soma: {
-    position: 'absolute',
     ...Platform.select({
       ios: {
         shadowOffset: { width: 0, height: 0 },
@@ -486,11 +490,8 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  dendrite: {
-    position: 'absolute',
-  },
+  dendrite: {},
   actionPotential: {
-    position: 'absolute',
     ...Platform.select({
       ios: {
         shadowOffset: { width: 0, height: 0 },

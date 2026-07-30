@@ -214,96 +214,96 @@ const GeodesicDome: React.FC<{ cfg: DomeCfg }> = ({ cfg }) => {
   }, [geoData.vertices, cfg.radius, cfg.cx, cfg.cy]);
 
   return (
-    <Animated.View
-      style={[
-        styles.domeContainer,
-        {
-          left: 0, top: 0,
-          width: W, height: H,
-          opacity: Animated.multiply(breatheAnim, cfg.opacity),
-          transform: [
-            { perspective: 1000 },
-            { rotateY },
-          ],
-        },
-      ]}
-      pointerEvents="none"
-    >
-      {/* Radial glow behind the dome */}
-      <View
+    <View style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, overflow: 'visible' }}>
+      <Animated.View
         style={[
-          styles.glow,
+          styles.domeContainer,
           {
-            left: cfg.cx - cfg.radius * 1.3,
-            top: cfg.cy - cfg.radius * 1.3,
-            width: cfg.radius * 2.6,
-            height: cfg.radius * 2.6,
-            borderRadius: cfg.radius * 1.3,
-            backgroundColor: cfg.color + '15',
+            opacity: Animated.multiply(breatheAnim, cfg.opacity),
+            transform: [
+              { perspective: 1000 },
+              { rotateY },
+            ],
           },
         ]}
         pointerEvents="none"
-      />
+      >
+        {/* Radial glow behind the dome */}
+        <View
+          style={[
+            styles.glow,
+            {
+              left: cfg.cx - cfg.radius * 1.3,
+              top: cfg.cy - cfg.radius * 1.3,
+              width: cfg.radius * 2.6,
+              height: cfg.radius * 2.6,
+              borderRadius: cfg.radius * 1.3,
+              backgroundColor: cfg.color + '15',
+            },
+          ]}
+          pointerEvents="none"
+        />
 
-      {/* Edges: render each as a thin rotated line */}
-      {geoData.edges.map((edge, idx) => {
-        const p1 = projected[edge.a];
-        const p2 = projected[edge.b];
-        const dx = p2.x - p1.x;
-        const dy = p2.y - p1.y;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        if (len < 0.5) return null; // skip degenerate edges
-        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+        {/* Edges: render each as a thin rotated line */}
+        {geoData.edges.map((edge, idx) => {
+          const p1 = projected[edge.a];
+          const p2 = projected[edge.b];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len < 0.5) return null; // skip degenerate edges
+          const angle = Math.atan2(dy, dx) * (180 / Math.PI);
 
-        // Edge opacity varies with Z (front edges brighter)
-        const zMid = (p1.z + p2.z) / 2;
-        const edgeAlpha = 0.15 + (zMid + 1) * 0.15; // 0.15-0.45 based on depth
+          // Edge opacity varies with Z (front edges brighter)
+          const zMid = (p1.z + p2.z) / 2;
+          const edgeAlpha = 0.15 + (zMid + 1) * 0.15; // 0.15-0.45 based on depth
 
-        return (
-          <View
-            key={`edge-${cfg.id}-${idx}`}
-            style={[
-              styles.edge,
-              {
-                left: p1.x,
-                top: p1.y,
-                width: len,
-                height: 1.2,
-                backgroundColor: cfg.color,
-                opacity: edgeAlpha,
-                transform: [{ rotate: `${angle}deg` }],
-              },
-            ]}
-            pointerEvents="none"
-          />
-        );
-      })}
+          return (
+            <View
+              key={`edge-${cfg.id}-${idx}`}
+              style={[
+                styles.edge,
+                {
+                  left: p1.x,
+                  top: p1.y,
+                  width: len,
+                  height: 1.2,
+                  backgroundColor: cfg.color,
+                  opacity: edgeAlpha,
+                  transform: [{ rotate: `${angle}deg` }],
+                },
+              ]}
+              pointerEvents="none"
+            />
+          );
+        })}
 
-      {/* Vertices: small glowing dots */}
-      {projected.map((pt, idx) => {
-        const size = 2.5 + (pt.z + 1) * 1.5; // 2.5-4px based on depth
-        const dotAlpha = 0.25 + (pt.z + 1) * 0.15;
-        return (
-          <View
-            key={`vert-${cfg.id}-${idx}`}
-            style={[
-              styles.vertex,
-              {
-                left: pt.x - size / 2,
-                top: pt.y - size / 2,
-                width: size,
-                height: size,
-                borderRadius: size / 2,
-                backgroundColor: cfg.color,
-                opacity: dotAlpha,
-                shadowColor: cfg.color,
-              },
-            ]}
-            pointerEvents="none"
-          />
-        );
-      })}
-    </Animated.View>
+        {/* Vertices: small glowing dots */}
+        {projected.map((pt, idx) => {
+          const size = 2.5 + (pt.z + 1) * 1.5; // 2.5-4px based on depth
+          const dotAlpha = 0.25 + (pt.z + 1) * 0.15;
+          return (
+            <View
+              key={`vert-${cfg.id}-${idx}`}
+              style={[
+                styles.vertex,
+                {
+                  left: pt.x - size / 2,
+                  top: pt.y - size / 2,
+                  width: size,
+                  height: size,
+                  borderRadius: size / 2,
+                  backgroundColor: cfg.color,
+                  opacity: dotAlpha,
+                  shadowColor: cfg.color,
+                },
+              ]}
+              pointerEvents="none"
+            />
+          );
+        })}
+      </Animated.View>
+    </View>
   );
 };
 
@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   domeContainer: {
-    position: 'absolute',
+    flex: 1,
     overflow: 'visible',
   },
   glow: {

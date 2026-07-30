@@ -140,11 +140,8 @@ export type ThemeMode =
 export type BackgroundStyle =
   | 'aurora'           // Default: 7 large drifting gradient orbs (nebula/aurora)
   | 'geodesic'         // Rotating geodesic dome wireframes (triangular lattice)
-  | 'lightPillars'     // Volumetric light beams rising from below
-  | 'constellation'    // Rich cosmic starfields with nebula glows & shooting stars
   | 'gradientFlow'     // Multi-layered flowing gradient ribbons
-  | 'neuralPulse'      // Living synaptic network with traveling action potentials
-  | 'soulEchoes';      // Ethereal concentric ripple echoes from soul sources
+  | 'neuralPulse';      // Living synaptic network with traveling action potentials
 
 /**
  * Sync status for themes

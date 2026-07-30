@@ -142,32 +142,39 @@ const WaveRibbon: React.FC<{
   const amplitude = Animated.multiply(audioAmplitude, cfg.amplitude);
 
   return (
-    <Animated.View
-      style={[
-        styles.ribbon,
-        {
-          height: cfg.thickness,
-          top: cfg.startY * H,
-          left: 0,
-          right: 0,
-          opacity: op,
-          transform: [
-            { translateX: tx },
-            { scaleY: scY },
-            { rotate: rotAngle },
-          ],
-        },
-      ]}
-      pointerEvents="none"
+    <View
+      style={{
+        position: 'absolute',
+        top: cfg.startY * H,
+        left: 0,
+        right: 0,
+        height: cfg.thickness,
+        overflow: 'visible',
+      }}
     >
-      <LinearGradient
-        colors={[cfg.colorB + '00', cfg.colorA + '44', cfg.colorA + '44', cfg.colorB + '00']}
-        locations={[0, 0.05, 0.95, 1]}
-        start={{ x: 0, y: 0.5 }}
-        end={{ x: 1, y: 0.5 }}
-        style={styles.ribbonFill}
-      />
-    </Animated.View>
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            opacity: op,
+            transform: [
+              { translateX: tx },
+              { scaleY: scY },
+              { rotate: rotAngle },
+            ],
+          },
+        ]}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={[cfg.colorB + '00', cfg.colorA + '44', cfg.colorA + '44', cfg.colorB + '00']}
+          locations={[0, 0.05, 0.95, 1]}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={styles.ribbonFill}
+        />
+      </Animated.View>
+    </View>
   );
 };
 
@@ -258,10 +265,6 @@ const styles = StyleSheet.create({
   root: {
     ...StyleSheet.absoluteFill,
     overflow: 'hidden',
-  },
-  ribbon: {
-    position: 'absolute',
-    overflow: 'visible',
   },
   ribbonFill: {
     flex: 1,

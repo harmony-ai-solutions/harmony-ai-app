@@ -123,28 +123,35 @@ const AuroraBlob: React.FC<{ cfg: BlobCfg }> = ({ cfg }) => {
   const r = cfg.size / 2;
 
   return (
-    <Animated.View
-      style={[
-        styles.blob,
-        {
-          width: cfg.size,
-          height: cfg.size,
-          borderRadius: r,
-          left: cfg.left,
-          top: cfg.top,
-          opacity: op,
-          transform: [{ translateX: tx }, { translateY: ty }, { scale: sc }],
-        },
-      ]}
-      pointerEvents="none"
+    <View
+      style={{
+        position: 'absolute',
+        left: cfg.left,
+        top: cfg.top,
+        width: cfg.size,
+        height: cfg.size,
+        borderRadius: r,
+        overflow: 'hidden',
+      }}
     >
-      <LinearGradient
-        colors={[cfg.colorA, cfg.colorB]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.blobFill, { borderRadius: r }]}
-      />
-    </Animated.View>
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            opacity: op,
+            transform: [{ translateX: tx }, { translateY: ty }, { scale: sc }],
+          },
+        ]}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={[cfg.colorA, cfg.colorB]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.blobFill, { borderRadius: r }]}
+        />
+      </Animated.View>
+    </View>
   );
 };
 

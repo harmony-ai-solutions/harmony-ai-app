@@ -184,23 +184,23 @@ const SoulBitWidget: React.FC<{
   const parallaxTy = Animated.multiply(gyroY, parallax * 40);
 
   return (
-    <Animated.View
-      style={[
-        styles.soulBit,
-        {
-          left: bit.x - bit.size / 2,
-          top: bit.y - bit.size / 2,
-          width: bit.size,
-          height: bit.size,
-          borderRadius: bit.size / 2,
-          backgroundColor: bit.color,
-          opacity: op,
-          transform: [{ translateX: parallaxTx }, { translateY: parallaxTy }],
-          shadowColor: bit.color,
-        },
-      ]}
-      pointerEvents="none"
-    />
+    <View style={{ position: 'absolute', left: bit.x - bit.size / 2, top: bit.y - bit.size / 2 }}>
+      <Animated.View
+        style={[
+          styles.soulBit,
+          {
+            width: bit.size,
+            height: bit.size,
+            borderRadius: bit.size / 2,
+            backgroundColor: bit.color,
+            opacity: op,
+            transform: [{ translateX: parallaxTx }, { translateY: parallaxTy }],
+            shadowColor: bit.color,
+          },
+        ]}
+        pointerEvents="none"
+      />
+    </View>
   );
 };
 
@@ -250,25 +250,25 @@ const SoulLineWidget: React.FC<{
   const parallaxTy = Animated.multiply(gyroY, parallax * 40);
 
   return (
-    <Animated.View
-      style={[
-        styles.soulLine,
-        {
-          left: x1,
-          top: y1,
-          width: len,
-          height: 0.5,
-          backgroundColor: fromBit.color + '44',
-          opacity: op,
-          transform: [
-            { rotate: `${angle}deg` },
-            { translateX: parallaxTx },
-            { translateY: parallaxTy },
-          ],
-        },
-      ]}
-      pointerEvents="none"
-    />
+    <View style={{ position: 'absolute', left: x1, top: y1 }}>
+      <Animated.View
+        style={[
+          styles.soulLine,
+          {
+            width: len,
+            height: 0.5,
+            backgroundColor: fromBit.color + '44',
+            opacity: op,
+            transform: [
+              { rotate: `${angle}deg` },
+              { translateX: parallaxTx },
+              { translateY: parallaxTy },
+            ],
+          },
+        ]}
+        pointerEvents="none"
+      />
+    </View>
   );
 };
 
@@ -380,7 +380,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   soulBit: {
-    position: 'absolute',
     ...Platform.select({
       ios: {
         shadowOffset: { width: 0, height: 0 },
@@ -392,9 +391,7 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  soulLine: {
-    position: 'absolute',
-  },
+  soulLine: {},
   nebulaGlow: {
     position: 'absolute',
   },

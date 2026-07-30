@@ -11,6 +11,7 @@
 
 import React, { useEffect, useRef, useMemo } from 'react';
 import {
+  View,
   Animated,
   Dimensions,
   StyleSheet,
@@ -89,23 +90,23 @@ const DotWidget: React.FC<{ dot: Dot; color: string }> = ({ dot, color }) => {
   }, []);
 
   return (
-    <Animated.View
-      style={[
-        styles.dot,
-        {
-          left: dot.x,
-          top: dot.y,
-          width: dot.size,
-          height: dot.size,
-          borderRadius: dot.size / 2,
-          backgroundColor: color,
-          opacity: op,
-          transform: [{ translateX: tx }, { translateY: ty }],
-          shadowColor: color,
-        },
-      ]}
-      pointerEvents="none"
-    />
+    <View style={{ position: 'absolute', left: dot.x, top: dot.y }}>
+      <Animated.View
+        style={[
+          styles.dot,
+          {
+            width: dot.size,
+            height: dot.size,
+            borderRadius: dot.size / 2,
+            backgroundColor: color,
+            opacity: op,
+            transform: [{ translateX: tx }, { translateY: ty }],
+            shadowColor: color,
+          },
+        ]}
+        pointerEvents="none"
+      />
+    </View>
   );
 };
 
@@ -141,7 +142,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
   },
   dot: {
-    position: 'absolute',
     ...Platform.select({
       ios: {
         shadowOffset: { width: 0, height: 0 },
