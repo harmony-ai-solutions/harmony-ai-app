@@ -4,6 +4,7 @@ import { FieldDefinition } from '../../constants/providerFieldSchemas';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { SelectPicker } from './SelectPicker';
 
 interface FormFieldProps {
   field: FieldDefinition;
@@ -112,20 +113,12 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange }) 
       
       case 'select':
         return (
-          <TextInput
-            style={[
-              styles.input,
-              {
-                color: theme.colors.text.primary,
-                borderColor: theme.colors.border.default,
-                backgroundColor: theme.colors.background.base,
-              },
-            ]}
-            value={value?.toString() || ''}
-            onChangeText={handleChange}
+          <SelectPicker
+            label={field.label}
+            value={value?.toString() ?? ''}
+            options={field.options ?? []}
+            onChange={(v) => onChange(field.key, v)}
             placeholder={field.placeholder}
-            placeholderTextColor={theme.colors.text.muted}
-            editable={false}
           />
         );
       

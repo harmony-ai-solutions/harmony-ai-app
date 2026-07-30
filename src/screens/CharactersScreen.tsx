@@ -6,12 +6,14 @@ import {
   TextInput,
   ActivityIndicator,
   RefreshControl,
+  TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
+import { pick } from '@react-native-documents/picker';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
@@ -33,11 +35,27 @@ import {
 } from '../database/repositories/characters';
 import { createDataURL } from '../database/base64';
 import { CharacterProfile } from '../database/models';
+import { importCharacterCardFromFile, CharacterCardImportError } from '../services/CharacterCardImportService';
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
 // Using 'any' here avoids CompositeNavigationProp boilerplate while
 // React Navigation v7 resolves routes across nested navigators at runtime.
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+function importMessageKey(code?: string): string {
+  switch (code) {
+    case 'unsupported_type':
+      return 'importUnsupportedType';
+    case 'parse_failed':
+      return 'importParseFailed';
+    case 'name_required':
+      return 'importNameRequired';
+    case 'read_failed':
+      return 'importReadFailed';
+    default:
+      return 'importParseFailed';
+  }
+}
 
 export const CharactersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -148,6 +166,26 @@ export const CharactersScreen: React.FC = () => {
     navigation.navigate('CharacterProfileEdit', {}); // no profileId = create mode
   };
 
+  const handleImportCard = async () => {
+    let docs;
+    try {
+      docs = await pick({ type: ['image/png', 'application/json'] });
+    } catch {
+      // User cancelled or picker error — silent.
+      return;
+    }
+    const doc = docs[0];
+    if (!doc) return;
+    try {
+      await importCharacterCardFromFile(doc.uri, doc.type ?? '');
+      await loadProfiles();
+    } catch (e) {
+      const code = e instanceof CharacterCardImportError ? e.code : undefined;
+      const messageKey = importMessageKey(code);
+      showAlert(t('importFailed'), t(messageKey));
+    }
+  };
+
   if (!theme) return null;
 
   const accent = theme.colors.accent.primary;
@@ -157,7 +195,23 @@ export const CharactersScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* Header + search bar (child, like SearchScreen) */}
-      <ScreenHeader title={t('title')}>
+      <ScreenHeader
+        title={t('title')}
+        right={
+          <TouchableOpacity
+            onPress={handleImportCard}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={t('importCard')}
+            accessibilityRole="button"
+          >
+            <MaterialCommunityIcons
+              name="file-import-outline"
+              size={24}
+              color={theme.colors.accent.primary}
+            />
+          </TouchableOpacity>
+        }
+      >
         <View
           style={[
             styles.searchContainer,

@@ -178,6 +178,14 @@ The `connectionStatus` helper produces a mode-aware display label (`connected`, 
 | `failed` | ❌ | `offline` |
 | `idle` | ❌ | `offline` |
 
+### Soulbits Cloud Module Configuration Convenience
+
+When configuring a module to use the **Soulbits Cloud** provider, two conveniences activate automatically when the app is connected to the cloud backend (`connectionStatus.mode === 'cloud'` && `isConnected`):
+
+1. **Endpoint auto-prefill.** The `base_url` field is prefilled with the beta-aware inference-gateway URL (`CLOUD_HOSTS.inference` — `https://beta.api.soulbits.app` in beta builds, `https://api.soulbits.app` in production). This replaces the hardcoded production default that previously shipped even in beta builds. Switching the provider to Soulbits Cloud fills the field on the fresh slot; editing an existing config never overwrites a stored `base_url`. When disconnected or in self-hosted mode, the static default is used and the field remains editable.
+
+2. **Module-filtered model dropdown.** The `model` field becomes a dropdown pre-filtered to models valid for the current module type (text LLM for Backend/Cognition/Movement, Whisper for STT, TTS models for TTS, embeddings for RAG, image-input models for Vision, image-output models for Imagination). The list is fetched live from the **public, unauthenticated** `GET /v1/models` catalog (5-minute TTL cache, single-flighted per module type), with a curated static fallback when the catalog is unreachable, plus a "Custom…" free-text override. The module-type → catalog filter mapping lives in `src/constants/soulbitsModels.ts`; the fetch/cache service in `src/services/cloud/soulbitsModelsCatalog.ts`.
+
 ### Coupled Release
 
 This asynchronous provisioning model requires a coordinated deploy:

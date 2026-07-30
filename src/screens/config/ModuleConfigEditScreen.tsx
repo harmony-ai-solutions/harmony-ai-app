@@ -28,10 +28,13 @@ import { ThemedText } from '../../components/themed/ThemedText';
 import { useAppAlert } from '../../contexts/AppAlertContext';
 import { FormField } from '../../components/config/FormField';
 import { AdvancedSamplingParams } from '../../components/config/AdvancedSamplingParams';
+import { SoulbitsModelSelect } from '../../components/config/SoulbitsModelSelect';
 import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
 import { MODULE_DEFAULTS, PROVIDER_DEFAULTS } from '../../constants/moduleDefaults';
 import { PROVIDER_SCHEMAS } from '../../constants/providerFieldSchemas';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useSyncConnection } from '../../contexts/SyncConnectionContext';
+import { CLOUD_HOSTS } from '../../config/cloud';
 import {
   createBackendConfig, updateBackendConfig, getBackendConfig, deleteBackendConfig,
   createCognitionConfig, updateCognitionConfig, getCognitionConfig, deleteCognitionConfig,
@@ -103,6 +106,11 @@ type ModuleConfigEditNavigationProp = NativeStackNavigationProp<RootStackParamLi
 
 const OPENAI_FAMILY = ['openai', 'openaicompatible', 'openrouter', 'google', 'xai', 'anthropic'];
 
+/** Beta-aware inference host, used to prefill the Soulbits Cloud base_url when connected. */
+function soulbitsCloudBaseUrl(cloudConnected: boolean): string | undefined {
+  return cloudConnected ? CLOUD_HOSTS.inference : undefined;
+}
+
 const MODULE_REPOSITORIES: Record<string, {
   create: (config: any) => Promise<string>;
   update: (config: any) => Promise<void>;
@@ -150,6 +158,8 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const { showAlert } = useAppAlert();
   const { t } = useTranslation('moduleConfig');
   const { bottom: safeBottom } = useSafeAreaInsets();
+  const { isConnected, connectionStatus } = useSyncConnection();
+  const cloudConnected = connectionStatus?.mode === 'cloud' && isConnected === true;
   
   const { moduleType, configId } = route.params;
   const isCreate = !configId;
@@ -334,6 +344,16 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
     // Reset provider form values to defaults for the new type
     const defaults = PROVIDER_DEFAULTS[providerType] || {};
+
+    // Feature 1: when switching TO Soulbits Cloud while connected, prefill the
+    // beta-aware inference endpoint (overrides the prod default baked into PROVIDER_DEFAULTS).
+    if (providerType === 'soulbitscloud') {
+      const prefillUrl = soulbitsCloudBaseUrl(cloudConnected);
+      if (prefillUrl) {
+        defaults.base_url = prefillUrl;
+      }
+    }
+
     setProviderForms(prev => ({
       ...prev,
       [slot]: {
@@ -599,14 +619,28 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
     return (
       <View style={styles.providerFieldsContainer}>
-        {fields.map((field) => (
-          <FormField
-            key={field.key}
-            field={field}
-            value={form.values[field.key]}
-            onChange={(key, value) => handleProviderFieldChange(slot, key, value)}
-          />
-        ))}
+        {fields.map((field) => {
+          if (providerType === 'soulbitscloud' && field.key === 'model') {
+            return (
+              <View key={field.key} style={{ marginBottom: 16 }}>
+                <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
+                <SoulbitsModelSelect
+                  moduleType={moduleType}
+                  value={form.values.model ?? ''}
+                  onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
+                />
+              </View>
+            );
+          }
+          return (
+            <FormField
+              key={field.key}
+              field={field}
+              value={form.values[field.key]}
+              onChange={(key, value) => handleProviderFieldChange(slot, key, value)}
+            />
+          );
+        })}
 
         {/* Advanced Sampling Params for OpenAI family */}
         {isOpenAIFamily && (

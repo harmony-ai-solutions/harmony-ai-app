@@ -16,10 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Proactive PASETO refresh using `TokenResponse.expires_at`; reactive refresh on WebSocket close (1008/4401).
 - Logout instantly invalidates the PASETO server-side via Valkey cutoff.
 - Build flavours: Android `dev`/`prod` productFlavors; iOS dev/prod via CI build-matrix (react-native-config `.env` + bundle-ID override).
+- Soulbits Cloud module configs now auto-fill the inference endpoint (`base_url`) with the correct beta-aware API URL when the app is connected to the cloud (beta builds use `https://beta.api.soulbits.app`). Previously the field always showed the production URL, even in beta builds.
+- Soulbits Cloud model picker: when configuring a Soulbits Cloud provider, the model field is now a dropdown pre-filtered to the models valid for that module type (text LLM, Whisper for STT, TTS, embeddings, image, etc.). The list is fetched live from the public model catalog, with a cached static fallback when offline, and a free-text override for advanced entry.
+- FormField `select` fields (e.g. OpenAI/xAI `reasoning_effort`, Google/xAI aspect ratios) are now real interactive themed dropdowns instead of read-only disabled text inputs.
 #### Changed
 - Cloud session provisioning is now fully asynchronous — the session broker returns immediately and the app polls until ready. Removed the client-side connect-timeout hack; WebSocket connectivity is tracked separately from the broker session status. Consecutive WebSocket failures (5) trigger a fresh broker re-provision. Token-expiry pre-check runs before every cloud WebSocket dial to prevent expired-PASETO reconnect loops.
 - Cloud session broker requests (connect/disconnect polling) now go through the first-party Soulbits API client. The client is wired in PASETO-only mode so token refresh on 401 stays with the app's auth layer — keeping one persisted, broadcast credential for both REST and WebSocket paths.
 - The first-party Soulbits API client is now pulled directly from its GitHub repository as a dependency, replacing a local folder link. This makes installs consistent and reproducible across developer machines and CI.
+
+### Characters
+#### Added
+- Import Tavern Card V1/V2/V3 character cards from raw JSON or PNG-embedded (`chara`/`ccv3` `tEXt`/`iTXt` chunks) files. Imported cards are mapped to the existing character profile model (with the PNG used as the primary avatar) and persist locally, syncing through the normal pipeline. Reachable from the Characters screen header.
 
 ### Security & Privacy
 
