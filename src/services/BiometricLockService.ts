@@ -30,10 +30,13 @@ const DEFAULT_PROMPT_MESSAGE = 'Confirm your identity to unlock';
 
 /**
  * Hard upper bound for a biometric prompt. If the OS tears the prompt down
- * (screen-off, app backgrounded, system cancel) without settling the promise,
- * we give up after this window so the UI is never stranded on "Authenticating".
+ * (screen-off, app backgrounded, activity recreation, system cancel) without
+ * settling the native promise, we give up after this window so the UI is never
+ * stranded on "Authenticating". The LockScreen additionally force-clears its
+ * in-flight guard on a real resume (see LockScreen.tsx) so recovery is instant
+ * even when RN's timer subsystem was suspended while backgrounded.
  */
-const BIOMETRIC_PROMPT_TIMEOUT_MS = 20000;
+const BIOMETRIC_PROMPT_TIMEOUT_MS = 10000;
 
 // Single shared instance; constructed once (the native bridge is cheap to hold).
 const rnBiometrics = new ReactNativeBiometrics();
@@ -87,12 +90,27 @@ async function getBiometryType(): Promise<string | null> {
 async function authenticateBiometric(prompt?: BiometricPromptStrings): Promise<boolean> {
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
-    const result = await Promise.race([
-      rnBiometrics.simplePrompt({
+    // The native `simplePrompt` promise can be orphaned by the OS: when the host
+    // activity is torn down / recreated (screen-off, config change) the
+    // BiometricPrompt callbacks may never fire, and on other interrupts (window
+    // focus loss → ERROR_CANCELED, hardware errors) react-native-biometrics
+    // *rejects*. Attach a catch so a delayed rejection arriving AFTER the race
+    // has already settled (via the timeout) can never surface as an unhandled
+    // promise rejection, and so any non-success rejection maps to a plain
+    // { success: false } result instead of propagating.
+    const nativePrompt = rnBiometrics
+      .simplePrompt({
         promptMessage: prompt?.promptMessage ?? DEFAULT_PROMPT_MESSAGE,
         cancelButtonText: prompt?.cancelButtonText,
         fallbackPromptMessage: prompt?.fallbackPromptMessage,
-      }),
+      })
+      .catch((err: any) => {
+        log.warn('Biometric native prompt rejected:', err?.message ?? err);
+        return { success: false } as const;
+      });
+
+    const result = await Promise.race([
+      nativePrompt,
       new Promise<{ success: false }>((_, reject) => {
         timeoutHandle = setTimeout(
           () => reject(new Error('biometric_prompt_timeout')),
@@ -107,7 +125,7 @@ async function authenticateBiometric(prompt?: BiometricPromptStrings): Promise<b
     if (success) {
       log.info('Biometric authentication succeeded');
     } else {
-      log.info('Biometric cancelled by user');
+      log.info('Biometric cancelled or failed');
     }
     return success;
   } catch (err: any) {

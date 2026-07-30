@@ -118,11 +118,24 @@ export const LockScreen: React.FC = () => {
       }
       if (next === 'active' && wasBackgroundRef.current) {
         wasBackgroundRef.current = false;
-        if (
-          lockMode === 'biometric' &&
-          !showPinEntryRef.current &&
-          !authInProgressRef.current
-        ) {
+
+        // Any biometric prompt (or PIN verification) that was in flight before the
+        // app was backgrounded is guaranteed dead — Android tears BiometricPrompt
+        // down on background, and its native promise can be orphaned (never
+        // settles). Previously this branch refused to re-arm while
+        // `authInProgressRef` was true, which left the guard stuck `true`
+        // forever and stranded the UI on "Authenticating" with every unlock path
+        // blocked (button disabled, PIN submit early-returns). Force-clear both
+        // the guard and the spinner so recovery is instant rather than depending
+        // on the (possibly suspended) service timeout.
+        if (authInProgressRef.current) {
+          authInProgressRef.current = false;
+          if (isMountedRef.current) {
+            setIsAuthenticating(false);
+          }
+        }
+
+        if (lockMode === 'biometric' && !showPinEntryRef.current) {
           // Reset so the auto-trigger effect above fires again.
           setBiometricAttempted(false);
         }

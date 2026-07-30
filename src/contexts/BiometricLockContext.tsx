@@ -18,6 +18,16 @@ import { createLogger } from '../utils/logger';
 
 const log = createLogger('[BiometricLockContext]');
 
+/**
+ * Grace window applied to a transient `inactive` AppState. On Android/iOS
+ * `inactive` is emitted for overlays (notification shade, Control Center, the
+ * OS biometric prompt's own window-focus change) that are NOT a real app exit.
+ * We only lock if the app stays `inactive` beyond this window without returning
+ * to `active` or progressing to `background`. A real `background` transition
+ * locks immediately (0 grace).
+ */
+const INACTIVE_LOCK_GRACE_MS = 5000;
+
 interface BiometricLockContextType {
   /** Whether the biometric lock feature is enabled by user. */
   isEnabled: boolean;
@@ -64,6 +74,8 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
   const [isPinSet, setIsPinSet] = useState(false);
 
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  // Grace timer for the transient `inactive` case (see INACTIVE_LOCK_GRACE_MS).
+  const inactiveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Mirror isEnabled in a ref so the AppState listener can read the latest value
   // without re-subscribing. Re-subscribing on every enable toggle risks dropping a
   // foreground→background transition mid-flight (race). The listener is created once.
@@ -92,18 +104,34 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
     const handleAppStateChange = (nextState: AppStateStatus) => {
       const prevState = appStateRef.current;
 
-      // Exact equality checks: `prevState.match(/active/)` also matches
-      // 'inactive' (it contains the substring "active"), causing redundant lock
-      // churn. Use strict state comparisons instead.
-      const wasActive = prevState === 'active';
-      const leavingForeground = nextState === 'inactive' || nextState === 'background';
+      // Any state change cancels a pending "sustained inactive" lock. A quick
+      // active↔inactive blip (notification shade, Control Center, or — crucially —
+      // the OS biometric prompt's own focus change while WE are showing it) must
+      // NOT lock the app. Previously this fired on `inactive` too, which locked
+      // the app on every overlay event and churned the lock/unlock UI.
+      if (inactiveTimerRef.current) {
+        clearTimeout(inactiveTimerRef.current);
+        inactiveTimerRef.current = undefined;
+      }
 
-      if (wasActive && leavingForeground) {
-        // App leaving the foreground — lock it
+      if (prevState === 'active' && nextState === 'background') {
+        // Hard background exit — lock immediately.
         if (isEnabledRef.current) {
-          log.info('App entering background — locking');
+          log.info('App backgrounded — locking');
           setIsLocked(true);
         }
+      } else if (prevState === 'active' && nextState === 'inactive') {
+        // Transient overlay. Only lock if it sustains into a real leave without
+        // returning to `active`. Real exits progress to `background` (handled
+        // above) within a moment and cancel this timer; the timer is a fallback
+        // for the rare device that reports `inactive` but never `background`.
+        inactiveTimerRef.current = setTimeout(() => {
+          inactiveTimerRef.current = undefined;
+          if (isEnabledRef.current) {
+            log.info('App inactive-sustained — locking');
+            setIsLocked(true);
+          }
+        }, INACTIVE_LOCK_GRACE_MS);
       }
 
       appStateRef.current = nextState;
@@ -113,6 +141,10 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
 
     return () => {
       subscription.remove();
+      if (inactiveTimerRef.current) {
+        clearTimeout(inactiveTimerRef.current);
+        inactiveTimerRef.current = undefined;
+      }
     };
   }, []);
 
