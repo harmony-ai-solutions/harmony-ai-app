@@ -47,7 +47,7 @@ export const SyncSettingsScreen: React.FC = () => {
 
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
-  const { isConnected, isPaired, isReconnecting, reconnectAttempt, nextReconnectIn, showToast } =
+  const { isConnected, isPaired, isReconnecting, reconnectAttempt, nextReconnectIn, showToast, canUseChat, connectionStatus } =
     useSyncConnection();
 
   // ── Existing state (preserved from original) ────────────────────────────────
@@ -98,14 +98,29 @@ export const SyncSettingsScreen: React.FC = () => {
       setIsSyncing(false);
     };
 
+    // SYNC_REJECT from Harmony Link (e.g. device_unauthorized,
+    // clock_drift_exceeded). Without this listener, initiateSync() resolves
+    // immediately after the WS send and isSyncing never resets (no
+    // SYNC_ACCEPT / sync:error arrives after a reject), leaving the spinner
+    // stuck with no feedback. Mirrors sync:rejected handling in
+    // SyncConnectionContext (defense-in-depth).
+    const rejectedListener = (payload: any) => {
+      setIsSyncing(false);
+      setCurrentSession(null);
+      const message = payload?.message || payload?.reason || t('syncError');
+      showToast(t('syncRejected', { message }));
+    };
+
     SyncService.on('sync:progress', progressListener);
     SyncService.on('sync:completed', completedListener);
     SyncService.on('sync:error', errorListener);
+    SyncService.on('sync:rejected', rejectedListener);
 
     return () => {
       SyncService.removeListener('sync:progress', progressListener);
       SyncService.removeListener('sync:completed', completedListener);
       SyncService.removeListener('sync:error', errorListener);
+      SyncService.removeListener('sync:rejected', rejectedListener);
     };
   }, [loadSettings]);
 
@@ -191,21 +206,25 @@ export const SyncSettingsScreen: React.FC = () => {
 
   // ── Helpers (preserved from original) ──────────────────────────────────────
   const getConnectionStatusText = () => {
-    if (!isPaired) return t('notPaired');
-    if (isConnected) return t('connected');
-    if (isReconnecting) {
+    // Use shared connectionStatus for standard labels; override the
+    // reconnecting-retries detail locally (syncSettings namespace has the
+    // richer reconnectingRetries key).
+    if (connectionStatus.textKey === 'reconnecting') {
       if (reconnectAttempt === 0) return t('reconnecting');
       const retryText = countdown > 0 ? ` in ${countdown}s` : '...';
       return t('reconnectingRetries', { attempts: reconnectAttempt, countdown: retryText });
     }
-    return t('disconnected');
+    // All other textKeys map 1:1 to syncSettings i18n keys
+    return t(connectionStatus.textKey);
   };
 
   const getConnectionStatusColor = (): string => {
-    if (!isPaired) return theme?.colors.accent.primary ?? '#b84fd0';
-    if (isConnected) return theme?.colors.status.success ?? '#4CAF50';
-    if (isReconnecting) return theme?.colors.accent.secondary ?? '#4a5fcf';
-    return theme?.colors.text.muted ?? '#9692b0';
+    // Use the shared connectionStatus color; prefer themed colors by variant
+    // when available for visual consistency.
+    if (connectionStatus.variant === 'success') return theme?.colors.status.success ?? connectionStatus.color;
+    if (connectionStatus.variant === 'error') return theme?.colors.status.error ?? connectionStatus.color;
+    if (connectionStatus.variant === 'warning') return theme?.colors.accent.secondary ?? connectionStatus.color;
+    return theme?.colors.text.muted ?? connectionStatus.color;
   };
 
   const getSecurityModeDisplay = () => {
@@ -305,13 +324,21 @@ export const SyncSettingsScreen: React.FC = () => {
             {getConnectionStatusText()}
           </ThemedText>
           <ThemedText variant="secondary" size={13} style={styles.heroSubtext}>
-            {isConnected
-              ? 'Your data is in sync with Harmony Link'
+            {connectionStatus.mode === 'cloud'
+              ? connectionStatus.textKey === 'connected'
+                ? t('heroSubtextCloudConnected')
+                : connectionStatus.textKey === 'preparing'
+                ? t('heroSubtextCloudPreparing')
+                : connectionStatus.textKey === 'connecting'
+                ? t('heroSubtextCloudConnecting')
+                : t('heroSubtextCloudOffline')
+              : isConnected
+              ? t('heroSubtextConnected')
               : isReconnecting
-              ? 'Attempting to restore connection...'
+              ? t('heroSubtextReconnecting')
               : isPaired
-              ? 'Tap to view connection details'
-              : 'Pair your device to get started'}
+              ? t('heroSubtextPaired')
+              : t('heroSubtextNotPaired')}
           </ThemedText>
         </Animated.View>
 
@@ -359,7 +386,7 @@ export const SyncSettingsScreen: React.FC = () => {
               </ThemedText>
             </View>
 
-            {isPaired && (
+            {connectionStatus.mode === 'selfhosted' && isPaired && (
               <>
                 <View style={styles.detailDivider} />
                 <View style={styles.detailRow}>
@@ -406,34 +433,58 @@ export const SyncSettingsScreen: React.FC = () => {
 
         {/* ── Warning / Info messages ───────────────────────────────────── */}
 
-        {!isPaired && (
+        {connectionStatus.mode === 'cloud' && !canUseChat && (
+          <ThemedCard style={styles.warningCard}>
+            <View style={styles.warningRow}>
+              <Icon name="cloud-sync-outline" size={18} color={accentPrimary} />
+              <ThemedText variant="secondary" size={13} style={styles.warningText}>
+                {t('cloudSessionNotActive')}
+              </ThemedText>
+            </View>
+          </ThemedCard>
+        )}
+
+        {connectionStatus.mode === 'selfhosted' && !isPaired && (
           <ThemedCard style={styles.warningCard}>
             <View style={styles.warningRow}>
               <Icon name="alert-circle-outline" size={18} color={accentPrimary} />
               <ThemedText variant="secondary" size={13} style={styles.warningText}>
-                Not paired with Harmony Link. Go to Connection Setup to pair your device.
+                {t('notPairedWarning')}
               </ThemedText>
             </View>
           </ThemedCard>
         )}
 
-        {isPaired && !isConnected && !isReconnecting && (
+        {connectionStatus.mode === 'selfhosted' && isPaired && !isConnected && !isReconnecting && (
           <ThemedCard style={styles.warningCard}>
             <View style={styles.warningRow}>
               <Icon name="lan-disconnect" size={18} color={accentPrimary} />
               <ThemedText variant="secondary" size={13} style={styles.warningText}>
-                Not connected. Attempting to reconnect...
+                {t('disconnectedWarning')}
               </ThemedText>
             </View>
           </ThemedCard>
         )}
 
-        {isPaired && isReconnecting && (
+        {connectionStatus.mode === 'cloud' && connectionStatus.textKey === 'offline' && (
+          <ThemedCard style={styles.warningCard}>
+            <View style={styles.warningRow}>
+              <Icon name="lan-disconnect" size={18} color={accentPrimary} />
+              <ThemedText variant="secondary" size={13} style={styles.warningText}>
+                {t('cloudDisconnectedWarning')}
+              </ThemedText>
+            </View>
+          </ThemedCard>
+        )}
+
+        {isReconnecting && (
           <ThemedCard style={styles.infoCard}>
             <View style={styles.warningRow}>
               <Icon name="cloud-refresh" size={18} color={accentSecondary} />
               <ThemedText variant="secondary" size={13} style={styles.warningText}>
-                Auto-reconnect in progress. The connection will be restored automatically.
+                {connectionStatus.mode === 'cloud'
+                  ? t('cloudReconnectingInfo')
+                  : t('reconnectingInfo')}
               </ThemedText>
             </View>
           </ThemedCard>

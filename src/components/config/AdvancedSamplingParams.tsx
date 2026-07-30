@@ -153,7 +153,7 @@ export const AdvancedSamplingParams: React.FC<AdvancedSamplingParamsProps> = ({
           colors={[theme.colors.background.elevated, 'transparent']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
         <LinearGradient
           colors={[theme.colors.accent.primary, theme.colors.accent.secondary]}
@@ -206,7 +206,7 @@ export const AdvancedSamplingParams: React.FC<AdvancedSamplingParamsProps> = ({
               ]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
             <Icon name="plus" size={18} color={theme.colors.accent.primary} />
             <ThemedText

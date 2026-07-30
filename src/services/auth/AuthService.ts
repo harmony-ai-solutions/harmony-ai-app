@@ -16,7 +16,6 @@ import {
   saveTokens,
   loadTokens,
   clearTokens,
-  type TokenBlob,
 } from './tokenStorage';
 
 // ── Error types ─────────────────────────────────────────────────────────
@@ -372,6 +371,21 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
    */
   getTokenExpiresAt(): number {
     return this._expiresAtMs;
+  }
+
+  /**
+   * Check whether the cached PASETO has already expired.
+   *
+   * Returns `true` when `_expiresAtMs` is set AND `Date.now()` is at or past
+   * it.  Returns `false` when no token is cached (`_expiresAtMs === 0`) so
+   * callers can always call this safely (if there is no token, the pre-check
+   * is a no-op — the subsequent WS dial will fail with a clearer error).
+   *
+   * Unlike `ConnectionStateManager.getIsTokenExpired()` (which checks the
+   * self-hosted JWT), this checks the cloud PASETO expiry.
+   */
+  isTokenExpired(): boolean {
+    return this._expiresAtMs > 0 && Date.now() >= this._expiresAtMs;
   }
 
   // ──── Invalidation ──────────────────────────────────────────────────

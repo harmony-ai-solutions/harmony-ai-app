@@ -65,17 +65,64 @@ what kinds of tests exist, and how to add new ones.
 npm test
 ```
 
+Runs `test:unit` (isolated — see [Known Issue](#known-issue-better-sqlite3-cross-worker-contamination)) then `test:integration`.
+
 ### Unit Tests Only
 
 ```bash
-npx jest --selectProjects unit
+npm run test:unit
 ```
+
+This is the **recommended** way to run unit tests. It passes `--maxWorkers=16` so
+every test file runs in its own worker, which avoids the better-sqlite3
+cross-worker contamination described below. (`npx jest --selectProjects unit`
+without `--maxWorkers` can intermittently fail — see the known issue.)
 
 ### Integration Tests Only
 
 ```bash
-npx jest --selectProjects integration
+npm run test:integration
 ```
+
+### Raw Jest (no isolation guard)
+
+```bash
+npm run test:raw
+```
+
+Equivalent to the old `jest` invocation — both projects, Jest's default worker
+pool. Only use this when you specifically want the unmodified Jest behaviour;
+it can trigger the contamination known issue.
+
+### Known Issue: better-sqlite3 cross-worker contamination
+
+The unit suites that exercise the real SQLite engine via `better-sqlite3`
+(`NodeDatabase` — the smoke, compat, snapshot, roll-forward, repository and
+cross-repo suites) can **intermittently fail with "Received function did not
+throw"** on UNIQUE / FK / transaction-rollback assertions when two or more of
+those files are assigned to the **same Jest worker**.
+
+- **Symptom**: `expect(...).rejects.toThrow()` reports the DB operation did not
+  throw, even though the same test passes in isolation.
+- **Root cause**: a native-addon (better-sqlite3 12.x on Node 25) state
+  interaction when multiple `:memory:` databases are created and torn down
+  inside one worker process. Bisection ruled out `:memory:` sharing, global
+  UNIQUE disabling, SQL-text collision, and the transaction implementation
+  itself — the failure is GC/native-timing dependent and only manifests across
+  a file boundary within a shared worker.
+- **Trigger**: the default `jest` worker pool can place several DB test files
+  in one worker; `--detectOpenHandles` (which forces serial execution) makes it
+  deterministic.
+- **Fix / workaround**: run unit tests with `--maxWorkers` greater than or equal
+  to the number of unit test files so each file gets its own worker (no sharing
+  → no contamination). The `test:unit` script does this (`--maxWorkers=16` for
+  the current 12 unit files). **If the unit suite grows beyond 16 files, bump
+  the `--maxWorkers` value in `package.json` accordingly.**
+- **Related fix**: `NodeDatabase` no longer applies `PRAGMA journal_mode = WAL`
+  to `:memory:` databases — WAL is meaningless for in-memory DBs and asking
+  better-sqlite3 to switch an in-memory DB into WAL mode hangs the native
+  addon outright (reproduced standalone). WAL is still applied to file-backed
+  test databases.
 
 ### Migration Tests (Snapshot + Roll-forward)
 

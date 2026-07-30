@@ -32,7 +32,7 @@ export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
-  const { isConnected, isPaired, isReconnecting } = useSyncConnection();
+  const { isConnected, connectionStatus } = useSyncConnection();
   const { t } = useTranslation('settings');
 
   const [connectionType, setConnectionType] =
@@ -88,7 +88,7 @@ export const SettingsScreen: React.FC = () => {
       if (sound !== null) setSoundEffects(sound === 'true');
       if (haptic !== null) setHapticFeedback(haptic === 'true');
       if (filter !== null) setContentFilter(filter === 'true');
-    } catch (e) {
+    } catch {
       // ignore — defaults are fine
     }
   };
@@ -101,7 +101,7 @@ export const SettingsScreen: React.FC = () => {
     setter(value);
     try {
       await AsyncStorage.setItem(key, String(value));
-    } catch (e) {
+    } catch {
       // ignore
     }
   };
@@ -110,19 +110,7 @@ export const SettingsScreen: React.FC = () => {
     navigation.navigate('ComingSoon', { titleKey, icon, descriptionKey });
   };
 
-  const connectionStatusText = isConnected
-    ? t('connected')
-    : isReconnecting
-      ? t('reconnecting')
-      : isPaired
-        ? t('disconnected')
-        : t('notPaired');
-
-  const connectionStatusColor = isConnected
-    ? (theme?.colors.status?.success ?? '#4caf50')
-    : isReconnecting || isPaired
-      ? (theme?.colors.status?.warning ?? '#ff9800')
-      : (theme?.colors.status?.error ?? '#f44336');
+  const connectionStatusColor = connectionStatus.color;
 
   const syncStatusText = isConnected ? t('upToDate') : t('offline');
 
@@ -169,7 +157,7 @@ export const SettingsScreen: React.FC = () => {
               valueComponent={
                 <View style={styles.statusRow}>
                   <View style={[styles.statusDot, { backgroundColor: connectionStatusColor }]} />
-                  <ThemedText weight="medium" size={14}>{connectionStatusText}</ThemedText>
+                  <ThemedText weight="medium" size={14}>{t(connectionStatus.textKey)}</ThemedText>
                 </View>
               }
             />

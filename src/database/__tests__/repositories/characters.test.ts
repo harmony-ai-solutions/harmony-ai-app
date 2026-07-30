@@ -115,6 +115,7 @@ describe('characters repository', () => {
 
   describe('createCharacterImage', () => {
     it('Create Character Image', async () => {
+      const now = new Date();
       const profileId = 'profile-img-1';
       await createMinimalProfile(profileId);
       const imageId = await createCharacterImage({
@@ -126,6 +127,7 @@ describe('characters repository', () => {
         display_order: 1,
         vl_model_interpretation: '',
         vl_model: '',
+        updated_at: now,
       });
       expect(imageId).toBeGreaterThan(0);
     });
@@ -135,6 +137,7 @@ describe('characters repository', () => {
     it('Get Character Image', async () => {
       const profileId = 'profile-img-2';
       await createMinimalProfile(profileId);
+      const now = new Date();
       const imageId = await createCharacterImage({
         character_profile_id: profileId,
         image_data: PNG_MAGIC_BASE64,
@@ -144,6 +147,7 @@ describe('characters repository', () => {
         display_order: 1,
         vl_model_interpretation: '',
         vl_model: '',
+        updated_at: now,
       });
       const image = await getCharacterImage(imageId);
       expect(image).not.toBeNull();
@@ -165,6 +169,7 @@ describe('characters repository', () => {
     it('Get Primary Image', async () => {
       const profileId = 'profile-primary-1';
       await createMinimalProfile(profileId);
+      const now = new Date();
       const imageId = await createCharacterImage({
         character_profile_id: profileId,
         image_data: PNG_MAGIC_BASE64,
@@ -174,6 +179,7 @@ describe('characters repository', () => {
         display_order: 1,
         vl_model_interpretation: '',
         vl_model: '',
+        updated_at: now,
       });
       const primary = await getPrimaryImage(profileId);
       expect(primary).not.toBeNull();
@@ -206,6 +212,7 @@ describe('characters repository', () => {
     it('Get Images with Data URLs', async () => {
       const profileId = 'profile-daturl-1';
       await createMinimalProfile(profileId);
+      const now = new Date();
       await createCharacterImage({
         character_profile_id: profileId,
         image_data: PNG_MAGIC_BASE64,
@@ -215,6 +222,7 @@ describe('characters repository', () => {
         display_order: 1,
         vl_model_interpretation: '',
         vl_model: '',
+        updated_at: now,
       });
       const images = await getCharacterImagesWithDataURLs(profileId);
       expect(images).toBeDefined();
@@ -226,6 +234,7 @@ describe('characters repository', () => {
     it('Set Primary Image', async () => {
       const profileId = 'profile-setprimary-1';
       await createMinimalProfile(profileId);
+      const now = new Date();
       const id1 = await createCharacterImage({
         character_profile_id: profileId,
         image_data: PNG_MAGIC_BASE64,
@@ -235,6 +244,7 @@ describe('characters repository', () => {
         display_order: 1,
         vl_model_interpretation: '',
         vl_model: '',
+        updated_at: now,
       });
       const id2 = await createCharacterImage({
         character_profile_id: profileId,
@@ -245,6 +255,7 @@ describe('characters repository', () => {
         display_order: 2,
         vl_model_interpretation: '',
         vl_model: '',
+        updated_at: now,
       });
 
       // Switch primary to id2
@@ -259,6 +270,7 @@ describe('characters repository', () => {
     it('Delete Character Image', async () => {
       const profileId = 'profile-delimg-1';
       await createMinimalProfile(profileId);
+      const now = new Date();
       const imageId = await createCharacterImage({
         character_profile_id: profileId,
         image_data: PNG_MAGIC_BASE64,
@@ -268,6 +280,7 @@ describe('characters repository', () => {
         display_order: 1,
         vl_model_interpretation: '',
         vl_model: '',
+        updated_at: now,
       });
       await deleteCharacterImage(imageId);
       const image = await getCharacterImage(imageId, true);
@@ -280,6 +293,7 @@ describe('characters repository', () => {
     it('Delete Character Profile & CASCADE', async () => {
       const profileId = 'profile-delcascade-1';
       await createMinimalProfile(profileId);
+      const now = new Date();
       const imageId = await createCharacterImage({
         character_profile_id: profileId,
         image_data: PNG_MAGIC_BASE64,
@@ -289,6 +303,7 @@ describe('characters repository', () => {
         display_order: 1,
         vl_model_interpretation: '',
         vl_model: '',
+        updated_at: now,
       });
 
       // Permanent delete (hard delete) should cascade to images

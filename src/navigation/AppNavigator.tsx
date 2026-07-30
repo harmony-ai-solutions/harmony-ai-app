@@ -31,6 +31,10 @@ export type RootStackParamList = {
   MainTabs: undefined;
   /** Legacy landing (kept for backward-compatible deep links) */
   Landing: undefined;
+  /** Tab destinations reachable from the stack navigator (delegated to nested tab nav) */
+  ChatList: undefined;
+  Characters: undefined;
+  Settings: undefined;
   /** Full-screen chat detail pushed over tabs */
   ChatDetail: {
     interactionId: string;

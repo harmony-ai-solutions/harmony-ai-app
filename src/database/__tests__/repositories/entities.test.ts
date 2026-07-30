@@ -122,6 +122,7 @@ describe('entities repository', () => {
           stt_config_id: null,
           tts_config_id: null,
           vision_config_id: null,
+          deleted_at: null,
         }),
       ).resolves.toBeUndefined();
     });
@@ -139,6 +140,7 @@ describe('entities repository', () => {
         stt_config_id: null,
         tts_config_id: null,
         vision_config_id: null,
+        deleted_at: null,
       });
       const mapping = await getEntityModuleMapping(entityId);
       expect(mapping).not.toBeNull();
@@ -158,6 +160,7 @@ describe('entities repository', () => {
         stt_config_id: null,
         tts_config_id: null,
         vision_config_id: null,
+        deleted_at: null,
       });
       // Update with same data should not throw
       await expect(
@@ -171,6 +174,7 @@ describe('entities repository', () => {
           stt_config_id: null,
           tts_config_id: null,
           vision_config_id: null,
+          deleted_at: null,
         }),
       ).resolves.toBeUndefined();
     });
@@ -188,6 +192,7 @@ describe('entities repository', () => {
         stt_config_id: null,
         tts_config_id: null,
         vision_config_id: null,
+        deleted_at: null,
       });
       // Permanent delete should cascade to entity_module_mappings
       await deleteEntity(entityId, true);

@@ -27,6 +27,10 @@
 - Emoji Pattern: emoji_actions table with entity-level mappings, JSON emotion_effects column, soft delete via deleted_at
 - JOIN Query Pattern: conversation_messages JOIN interactions for chat list previews (last message per interaction), with two-phase TEXT column loading for audio/image data
 @Decisions:
+- CloudSessionStatus model: idle|requesting|provisioning|ready|failed. No `active` at service level — WS connectivity is separate (`useSyncConnection().isConnected`). `canUseChat` predicate: cloud→ready, self-hosted→isPaired. `connectionStatus` helper produces mode-aware labels for UI.
+- Async polling flow: POST /v1/session/connect → 202 provisioning → poll at retry_after_ms → 200 ready → open WS. Max 95 polls (~190s). 503 failed = terminal.
+- Consecutive WS failure counter (5): triggers fresh broker re-provision via cloudSessionService.connect(). Token-expiry pre-check before every WS dial. BROKER_CONNECT_TIMEOUT_MS client-side hack removed — stale-session detection delegated to failure counter + broker lifecycle.
+- Coupled release: backend + app deploy together. POST /connect response contract changes (409→202, 200→202-provisioning, failed→503). No API versioning.
 - React Native CLI (not Expo): Full native control for Executorch/messengers
 - React Native Paper: Material Design 3 consistency
 - React Navigation: Type-safe stack navigation

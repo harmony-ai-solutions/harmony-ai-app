@@ -55,7 +55,7 @@ export const ThemedAppbar: React.FC<ThemedAppbarProps> = ({ children, style }) =
                     colors={[theme.colors.accent.primary + '0F', 'transparent']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 0.6, y: 1 }}
-                    style={StyleSheet.absoluteFillObject}
+                    style={StyleSheet.absoluteFill}
                     pointerEvents="none"
                 />
                 <Appbar.Header style={styles.appbar}>

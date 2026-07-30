@@ -44,15 +44,15 @@ export async function getSyncDevice(deviceId: string, includeDeleted = false): P
   
   if (results.rows.length === 0) return null;
   
-  const row = results.rows.item(0);
+  const row = results.rows.item(0) as Record<string, any>;
   return {
-    ...row,
+    ...(row as Record<string, any>),
     approval_requested_at: row.approval_requested_at ? new Date(row.approval_requested_at) : null,
     approved_by_user_at: row.approved_by_user_at ? new Date(row.approved_by_user_at) : null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
-  };
+  } as SyncDevice;
 }
 
 export async function updateSyncDevice(device: SyncDevice): Promise<void> {
@@ -116,15 +116,20 @@ export async function getSyncHistory(id: number): Promise<SyncHistory | null> {
   
   if (results.rows.length === 0) return null;
   
-  const row = results.rows.item(0);
+  const row = results.rows.item(0) as Record<string, any>;
   return {
-    ...row,
+    id: row.id,
+    device_id: row.device_id,
+    records_sent: row.records_sent,
+    records_received: row.records_received,
+    sync_status: row.sync_status,
+    error_message: row.error_message,
     sync_started_at: new Date(row.sync_started_at),
     sync_completed_at: row.sync_completed_at ? new Date(row.sync_completed_at) : null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
-  };
+  } as SyncHistory;
 }
 
 export async function getSyncHistoryList(limit = 50): Promise<SyncHistory[]> {
@@ -136,15 +141,20 @@ export async function getSyncHistoryList(limit = 50): Promise<SyncHistory[]> {
   
   const history: SyncHistory[] = [];
   for (let i = 0; i < results.rows.length; i++) {
-    const row = results.rows.item(i);
+    const row = results.rows.item(i) as Record<string, any>;
     history.push({
-      ...row,
+      id: row.id,
+      device_id: row.device_id,
+      records_sent: row.records_sent,
+      records_received: row.records_received,
+      sync_status: row.sync_status,
+      error_message: row.error_message,
       sync_started_at: new Date(row.sync_started_at),
       sync_completed_at: row.sync_completed_at ? new Date(row.sync_completed_at) : null,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
-    });
+    } as SyncHistory);
   }
   return history;
 }

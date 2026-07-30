@@ -1,31 +1,75 @@
 /**
- * CloudSessionService — broker spawn / claim / disconnect only.
+ * CloudSessionService — broker session lifecycle (async provisioning).
  *
- * Orchestrates the broker side of a cloud session:
- *   - `POST /v1/session/connect`  — spawns / claims the per-user HL task
- *   - `POST /v1/session/disconnect` — triggers the broker's 5-min grace + snapshot
+ * Orchestrates asynchronous session provisioning via `POST /v1/session/connect`:
+ *   - `connect()`  sends the initial request, polls while the broker provisions
+ *                  the ECS task, and resolves when the session is `ready`.
+ *   - `disconnect()` triggers the broker's 5-min grace + snapshot flow.
  *
- * This service does NOT open WebSocket connections.  WS connections remain owned
- * by SyncConnectionContext (sync) and EntitySessionService (entity); Phase 6-3
- * routes those to cloud URLs once `status === 'ready'`.
+ * Key design decisions:
+ *   - **No `active` status** (decision 2). WS connectivity is tracked by
+ *     `useSyncConnection().isConnected` at the sync-context layer.
+ *     `status === 'ready'` means "broker says routable".
+ *   - **No `phase` field** (decision 3). The provisioning sub-phase is an
+ *     internal broker debug signal, not exposed to the client.
+ *   - **Server-owned atomicity.** The broker keys sessions by userID and
+ *     redirects concurrent requests to the same session. The app never forces
+ *     a new session during provisioning.
  *
  * Singleton — use `cloudSessionService` (the exported instance).
  */
 
 import EventEmitter from 'eventemitter3';
-import AuthService from '../auth/AuthService';
-import { authFetch } from '../auth/authFetch';
-import { AUTH_ENDPOINTS } from '../../config/cloud';
+import type { components } from '@harmony-ai-solutions/soulbits-api-client';
+import AuthService, { AuthExpiredError } from '../auth/AuthService';
+import { buildSoulbitsClient } from './soulbitsClient';
+import {
+  DEFAULT_CLOUD_RETRY_MS,
+  MAX_PROVISIONING_ATTEMPTS,
+} from '../../config/cloud';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[CloudSession]');
 
+/**
+ * Wire schema for POST /v1/session/connect — returned on 200 (ready|active),
+ * 202 (provisioning) and 503 (failed). The latter lands in the openapi-fetch
+ * `error` slot, so `_bodyOf` reads from `data ?? error` to stay uniform.
+ */
+type SessionConnectResponse = components['schemas']['SessionConnectResponse'];
+
+/** Normalised shape of one `session.connect()` round-trip (openapi-fetch style). */
+interface ConnectResult {
+  data?: SessionConnectResponse;
+  error?: unknown;
+  response: Response;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────
 
-export type CloudSessionStatus = 'idle' | 'spawning' | 'ready' | 'error';
+export type CloudSessionStatus =
+  | 'idle'          // no session / disconnected
+  | 'requesting'    // initial POST /connect in flight
+  | 'provisioning'  // broker returned 202 provisioning; polling
+  | 'ready'         // broker returned ready; WS dial pending (WS connectivity
+                    // tracked separately by useSyncConnection().isConnected)
+  | 'failed';       // broker returned 503 failed, or max polls exceeded
+
+/**
+ * Richer event payload so the UI (Phase 9) can show failure reason + elapsed.
+ * NO `phase` field (decision 3 — internal broker debug signal only).
+ */
+export interface CloudSessionInfo {
+  sessionId?: string;
+  proxyEndpoint?: string;
+  retryAfterMs?: number;
+  failureReason?: string;
+  readyAt?: number;   // wall-clock ms when 'ready' transitioned
+  requestedAt?: number;
+}
 
 interface CloudSessionEvents {
-  'status': (status: CloudSessionStatus) => void;
+  'status': (status: CloudSessionStatus, info?: CloudSessionInfo) => void;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────
@@ -36,7 +80,16 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
   private status: CloudSessionStatus = 'idle';
   private sessionId: string | null = null;
   private proxyEndpoint: string | null = null;
+  /** Wall-clock ms when the session last became 'ready'. */
+  private readyAt: number | null = null;
+  /** Wall-clock ms when the session was first requested in the current poll. */
+  private requestedAt: number | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Re-entrancy guard — non-null while a connect loop is in-flight. */
+  private _connectPromise: Promise<void> | null = null;
+  /** Set to `true` by `disconnect()` to cancel an in-flight poll loop. */
+  private _cancelled = false;
 
   private constructor() {
     super();
@@ -61,57 +114,208 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
     return this.sessionId;
   }
 
-  // ── Connect (spawn / claim) ─────────────────────────────────────────────
+  /** Wall-clock ms when the session last became 'ready', or null. */
+  getReadyAt(): number | null {
+    return this.readyAt;
+  }
+
+  // ── Connect (request + poll) ────────────────────────────────────────────
 
   /**
-   * Spawn or claim the per-user HL task via the session broker.
+   * Request a cloud session and poll until it is 'ready' (or 'failed').
    *
-   * Idempotent — safe to call multiple times once `status === 'ready'`.
-   * Does NOT open any WebSocket connections (existing services own their WS).
+   * Idempotent:
+   *   - If already `ready` → returns immediately (unless `opts.force` is set).
+   *   - If a request/poll is already in flight → returns the shared promise.
+   *   - Otherwise → POSTs `/connect`, polls at the broker's `retry_after_ms`,
+   *     and resolves when the broker returns 200 with status `ready`.
    *
-   * @throws {Error} if the broker returns a non-OK status.
+   * @param opts.force When true, bypasses the cached `ready` short-circuit and
+   *   forces a fresh broker round-trip. Used by the WS-failure re-provisioning
+   *   path in SyncConnectionContext: if the broker says `ready` but the proxy
+   *   keeps 404ing (e.g., Valkey state mismatch, stale session), the cached
+   *   `ready` would otherwise make this call a no-op and the app would loop
+   *   forever on the same broken session.
+   *
+   * @throws {Error} if the session fails (503, broker `failed`, timeout).
    */
-  async connect(): Promise<void> {
-    if (this.status === 'ready' && this.sessionId) {
-      return; // already connected
+  async connect(opts?: { force?: boolean }): Promise<void> {
+    if (!opts?.force && this.status === 'ready') {
+      return;
     }
+    if (
+      (this.status === 'requesting' || this.status === 'provisioning') &&
+      this._connectPromise
+    ) {
+      return this._connectPromise;
+    }
+    this.setStatus('requesting');
+    this._connectPromise = this._runConnectLoop();
+    return this._connectPromise;
+  }
 
-    this.status = 'spawning';
-    this.emit('status', this.status);
-    log.info('Requesting cloud session from broker');
+  /**
+   * Internal poll loop — single execution via `_connectPromise`.
+   *
+   * Sends POST /connect (via the Soulbits client), then loops while the broker
+   * returns 202 / status === 'provisioning'. Respects `retry_after_ms` with a
+   * 500ms floor. Exits when the broker returns 200 (ready), 503 (failed), or the
+   * max poll count is exceeded.
+   *
+   * The actual round-trip (incl. the 401 → AuthService.refresh → retry) lives in
+   * `_doConnect`; this method owns only the polling state machine.
+   */
+  private async _runConnectLoop(): Promise<void> {
+    this._cancelled = false; // reset on entry — a prior disconnect() may have set this
+    const requestedAt = Date.now();
+    this.requestedAt = requestedAt;
 
     try {
-      const res = await authFetch(AUTH_ENDPOINTS.sessionConnect, {
-        method: 'POST',
-      });
+      let result = await this._doConnect();
+      let attempts = 0;
 
-      if (!res.ok) {
-        this.status = 'error';
-        this.emit('status', this.status);
-        throw new Error(`session/connect ${res.status}`);
+      // Poll while the broker reports provisioning
+      while (this._isProvisioning(result)) {
+        attempts++;
+        if (attempts > MAX_PROVISIONING_ATTEMPTS) {
+          this.setStatus('failed', {
+            failureReason: `provisioning timed out after ${MAX_PROVISIONING_ATTEMPTS} polls`,
+            requestedAt,
+          });
+          throw new Error('cloud session provisioning timed out');
+        }
+
+        const body = this._bodyOf(result);
+        const delay = Math.max(
+          body.retry_after_ms ?? DEFAULT_CLOUD_RETRY_MS,
+          500, // floor — never hammer the broker
+        );
+        this.setStatus('provisioning', {
+          sessionId: body.session_id,
+          retryAfterMs: delay,
+          requestedAt,
+        });
+
+        await this._sleep(delay);
+        if (this._cancelled) {
+          throw new Error('connect cancelled');
+        }
+
+        result = await this._doConnect();
       }
 
-      const body = await res.json();
-      this.sessionId = body.session_id;
-      this.proxyEndpoint = body.proxy_endpoint;
+      const body = this._bodyOf(result);
 
-      // The WS upgrade itself is the readiness signal — there is no explicit
-      // one from the broker.  Existing services will retry the WS upgrade with
-      // backoff until success (~30-35s for warm pool; longer for cold start).
-      this.status = 'ready';
-      this.emit('status', this.status);
+      // ── Terminal response handling ──────────────────────────────────────
+      if (result.response.status === 503 || body.status === 'failed') {
+        const reason = body.failure_reason ?? `HTTP ${result.response.status}`;
+        this.setStatus('failed', { failureReason: reason, requestedAt });
+        throw new Error(`cloud session failed: ${reason}`);
+      }
+
+      // Non-ok status that isn't 503 (safety net — protocol violation)
+      if (!result.response.ok) {
+        const reason = `HTTP ${result.response.status}`;
+        this.setStatus('failed', { failureReason: reason, requestedAt });
+        throw new Error(`cloud session failed: ${reason}`);
+      }
+
+      // Session is ready (or 'active' from a recovered grace_period session)
+      this.sessionId = body.session_id ?? null;
+      this.proxyEndpoint = body.proxy_endpoint ?? null;
+      this.readyAt = Date.now();
+      this.setStatus('ready', {
+        sessionId: this.sessionId ?? undefined,
+        proxyEndpoint: this.proxyEndpoint ?? undefined,
+        readyAt: this.readyAt,
+      });
       this.scheduleProactiveRefresh();
       log.info(`Cloud session ready: ${this.sessionId}`);
     } catch (e) {
-      // Only flip to 'error' if we haven't already in the !res.ok branch.
-      if (this.status === 'spawning') {
-        this.status = 'error';
-        this.emit('status', this.status);
+      // disconnect() may have cancelled and reset to idle; don't overwrite.
+      // AuthExpiredError (terminal refresh failure) is surfaced as 'failed'
+      // here — AuthService.invalidate() has already emitted 'auth:expired' so
+      // the AuthContext logs out in parallel.
+      if (!this._cancelled && this.status !== 'failed') {
+        const reason = e instanceof Error ? e.message : String(e);
+        this.setStatus('failed', { failureReason: reason, requestedAt });
       }
+      const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      log.warn(`Cloud session connect failed: ${detail}`);
       throw e;
+    } finally {
+      this._connectPromise = null;
     }
   }
-  
+
+  /**
+   * One `session.connect()` round-trip via the Soulbits client, with a single
+   * transparent PASETO refresh on 401.
+   *
+   * The client is built PASETO-only (no refreshToken — see `soulbitsClient`),
+   * so it never auto-refreshes; a 401 therefore comes back as `{ error, response }`
+   * and is handled here exactly like `AuthService.fetch()`: refresh once via
+   * `AuthService.refresh()` (which persists the new pair to Keychain and emits
+   * `auth:changed`, so the WebSocket layer picks up the fresh token too), then
+   * retry the request once. A terminal refresh (`refresh()` → false) invalidates
+   * and throws `AuthExpiredError`; a transient refresh (`refresh()` throws)
+   * propagates for the caller to treat as a normal failure.
+   */
+  private async _doConnect(): Promise<ConnectResult> {
+    const call = async (): Promise<ConnectResult> => {
+      const paseto = await AuthService.getToken();
+      return buildSoulbitsClient({ paseto }).session.connect();
+    };
+
+    let result = await call();
+    if (result.response.status !== 401) {
+      return result;
+    }
+
+    const ok = await AuthService.refresh();
+    if (!ok) {
+      await AuthService.invalidate();
+      throw new AuthExpiredError();
+    }
+    return call();
+  }
+
+  /**
+   * Returns `true` while the loop should keep polling.
+   * - HTTP 202 (Accepted) → still provisioning.
+   * - body.status === 'provisioning' (defensive — even on a non-202 status).
+   */
+  private _isProvisioning(result: ConnectResult): boolean {
+    return result.response.status === 202 || this._bodyOf(result).status === 'provisioning';
+  }
+
+  /**
+   * Extract the SessionConnectResponse body from an openapi-fetch result.
+   * openapi-fetch places 2xx bodies in `data` and non-2xx bodies (incl. the 503
+   * `failed` response, which is itself a SessionConnectResponse) in `error`;
+   * reading `data ?? error` keeps the loop agnostic to which slot was used.
+   */
+  private _bodyOf(result: ConnectResult): Partial<SessionConnectResponse> {
+    return (result.data ?? result.error ?? {}) as Partial<SessionConnectResponse>;
+  }
+
+  /** Async sleep — wrapped so tests can mock it. */
+  private _sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Core status transition helper — updates `this.status` and emits the event
+   * with optional info payload.
+   */
+  private setStatus(status: CloudSessionStatus, info?: CloudSessionInfo): void {
+    this.status = status;
+    if (status === 'failed' || status === 'idle') {
+      this.readyAt = null;
+    }
+    this.emit('status', status, info);
+  }
+
   // ── Proactive PASETO refresh ────────────────────────────────────────────
 
   /**
@@ -120,16 +324,19 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
    * Minimum 30s delay to avoid pathological near-expiry scheduling.
    */
   private scheduleProactiveRefresh(): void {
-    if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = null; }
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
     const expMs = AuthService.getTokenExpiresAt();
-    if (!expMs) return; // no token / unknown expiry → can't schedule
-    const fireMs = expMs - 10 * 60 * 1000;                 // 10 min before expiry
-    const delayMs = Math.max(fireMs - Date.now(), 30 * 1000); // min 30s grace
+    if (!expMs) return;                       // no token / unknown expiry
+    const fireMs = expMs - 10 * 60 * 1000;   // 10 min before expiry
+    const delayMs = Math.max(fireMs - Date.now(), 30 * 1000);
     this.refreshTimer = setTimeout(async () => {
       try {
         const ok = await AuthService.refresh();
         if (ok) {
-          this.scheduleProactiveRefresh(); // reschedule against the NEW token's expiry
+          this.scheduleProactiveRefresh();
         } else {
           log.warn('proactive refresh returned false; reactive layer will catch on next reconnect');
         }
@@ -141,43 +348,49 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
   }
 
   private stopProactiveRefresh(): void {
-    if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = null; }
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
   }
 
-  // ── Disconnect (grace period + snapshot) ────────────────────────────────
+  // ── Disconnect ──────────────────────────────────────────────────────────
 
   /**
-   * Trigger the broker's grace-period + snapshot flow.
+   * Cancel any in-flight provisioning and trigger the broker's grace-period.
    *
-   * Safe to call multiple times — when `sessionId` is null (self-hosted mode
-   * or already disconnected) this is a no-op that resets to 'idle'.
-   *
-   * Best-effort: if the RPC fails the session state is still reset locally
-   * so the app can reconnect fresh later.
+   * 1. Cancels the poll loop (`_cancelled = true`).
+   * 2. Resets local state to `idle` immediately.
+   * 3. Best-effort POST /disconnect to the broker.
    */
   async disconnect(): Promise<void> {
-    const sid = this.sessionId;
-    if (!sid) {
-      this.status = 'idle';
-      this.emit('status', this.status);
-      return;
-    }
+    // 1. Cancel any in-flight poll loop
+    this._cancelled = true;
+    this.stopProactiveRefresh();
 
-    try {
-      await authFetch(AUTH_ENDPOINTS.sessionDisconnect, {
-        method: 'POST',
-        body: JSON.stringify({ session_id: sid }),
-        headers: { 'Content-Type': 'application/json' },
-      });
-      log.info(`Cloud session ${sid} disconnect accepted (grace period started)`);
-    } catch (e) {
-      log.warn('Cloud disconnect failed (best-effort)', e);
-    } finally {
-      this.stopProactiveRefresh();
-      this.sessionId = null;
-      this.proxyEndpoint = null;
-      this.status = 'idle';
-      this.emit('status', this.status);
+    const sid = this.sessionId;
+
+    // 2. Reset local state immediately (don't wait for the RPC)
+    this.sessionId = null;
+    this.proxyEndpoint = null;
+    this.readyAt = null;
+    this.requestedAt = null;
+    this.status = 'idle';
+    this.emit('status', this.status);
+    this._connectPromise = null; // ensure new connect() starts fresh
+
+    // 3. Best-effort broker notification (via the Soulbits client).
+    // A 401 here is not retried — disconnect is best-effort and the session is
+    // already released locally; the broker's own abandoned-session sweeper covers
+    // the case where this RPC never lands.
+    if (sid) {
+      try {
+        const paseto = await AuthService.getToken();
+        await buildSoulbitsClient({ paseto }).session.disconnect(sid);
+        log.info(`Cloud session ${sid} disconnect accepted (grace period started)`);
+      } catch (e) {
+        log.warn('Cloud disconnect failed (best-effort)', e);
+      }
     }
   }
 }
