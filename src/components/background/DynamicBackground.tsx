@@ -7,7 +7,7 @@
  * from the Theme Settings screen:
  *
  *   - 'aurora'        → DynamicAtmosphericBackground (drifting nebula orbs)
- *   - 'geodesic'      → GeodesicBackground (rotating geodesic dome wireframes)
+ *   - 'geodesic'      → GeodesicBackground (drifting geometric shapes with glowing halos and luminous cores)
  *   - 'gradientFlow'  → GradientFlowBackground (multi-layer flowing ribbons)
  *   - 'neuralPulse'   → NeuralPulseBackground (synaptic network with action potentials)
  *

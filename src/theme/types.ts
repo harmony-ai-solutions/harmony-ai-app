@@ -139,7 +139,7 @@ export type ThemeMode =
  */
 export type BackgroundStyle =
   | 'aurora'           // Default: 7 large drifting gradient orbs (nebula/aurora)
-  | 'geodesic'         // Rotating geodesic dome wireframes (triangular lattice)
+  | 'geodesic'         // Drifting geometric shapes with glowing halos and luminous cores
   | 'gradientFlow'     // Multi-layered flowing gradient ribbons
   | 'neuralPulse';      // Living synaptic network with traveling action potentials
 
