@@ -5,33 +5,38 @@
  * Exports `signInWithGoogle()` (returns an `idToken` string) and typed error
  * discriminator so UI consumers can branch on failure modes.
  *
- * Key design decisions (v16 SDK):
+ * Key design decisions:
  * - Configure the SDK lazily inside `signInWithGoogle()` — NOT at module scope.
  *   Module-scope configure runs before the RN bridge may have the native config
  *   ready (react-native-config), and a stale empty webClientId causes
  *   `idToken=null` responses.
  * - Call `GoogleSignin.signOut()` before `signIn()` to clear any stale
- *   credential from a previous session. Without this the SDK may return a
- *   cached (possibly expired) credential.
+ *   credential from a previous session.
  * - Request explicit `scopes` (`profile`, `email`, `openid`) to guarantee the
- *   SDK requests an `idToken` from Google. Without explicit scopes, some
- *   devices/accounts may not produce an idToken, resulting in the "no idToken"
- *   error path.
- * - Hard-code a fallback webClientId for development to survive timing issues
- *   with react-native-config.
+ *   SDK requests an `idToken` from Google.
+ * - On Android, do NOT pass webClientId or offlineAccess. The SDK
+ *   auto-discovers the OAuth client from google-services.json at build time.
+ *   Passing an iOS OAuth client ID as webClientId causes DEVELOPER_ERROR.
+ * - On iOS, pass webClientId + offlineAccess so the SDK produces a
+ *   serverAuthCode the backend can exchange for a refresh token.
  *
- * Android prerequisite:
- *   android/app/google-services.json MUST contain real project credentials
- *   (not placeholders). The Google Play Services Gradle plugin reads this file
- *   at build time. Without it, `GoogleSignin.signIn()` returns an error.
+ * Android prerequisites:
+ *   - android/app/google-services.json MUST contain real project credentials
+ *     (not placeholders). The Google Play Services Gradle plugin reads this
+ *     file at build time.
+ *   - The debug/release SHA-1 fingerprint MUST be registered in the GCP
+ *     OAuth 2.0 Android client.
  *
  * iOS prerequisites:
- *   - Info.plist MUST contain a CFBundleURLTypes entry with the
- *     REVERSED_CLIENT_ID from GoogleService-Info.plist.
- *   - AppDelegate MUST call GIDSignIn.sharedInstance.handle(url) for
- *     the OAuth redirect to complete.
+ *   - Info.plist MUST contain CFBundleURLTypes with REVERSED_CLIENT_ID.
+ *   - AppDelegate MUST call GIDSignIn.sharedInstance.handle(url).
+ *
+ * This works for both first-time users (sign-up) AND returning users
+ * (sign-in). The backend `/v1/auth/google` endpoint handles both cases
+ * transparently.
  */
 
+import { Platform } from 'react-native';
 import {
   GoogleSignin,
   isSuccessResponse,
@@ -62,7 +67,7 @@ export enum GoogleSignInErrorType {
  * - `PLAY_SERVICES` → fall back to email/password (do NOT block)
  * - `DEVELOPER_ERROR` → show i18n "not configured" message
  * - `CANCELLED` → silently dismiss (no toast)
- * - `UNKNOWN` → show generic error
+ * - `UNKNOWN` → show generic error with raw message for debugging
  */
 export class GoogleSignInError extends Error {
   constructor(
@@ -74,27 +79,32 @@ export class GoogleSignInError extends Error {
   }
 }
 
-// ── Web client ID resolution ──────────────────────────────────────────
-// react-native-config may not be ready at module scope on cold start.
-// Resolve lazily inside signInWithGoogle() and provide a hard-coded
-// fallback for development builds (matches the value in .env and
-// android/gradle.properties).
+// ── Platform-aware SDK configuration ──────────────────────────────────
+//
+// ANDROID: The SDK auto-discovers the OAuth 2.0 Android client from
+// google-services.json at build time. Do NOT pass webClientId or
+// offlineAccess — the configured GOOGLE_WEB_CLIENT_ID is an iOS OAuth
+// client, and passing it as webClientId on Android → DEVELOPER_ERROR.
+//
+// iOS: The SDK auto-discovers from GoogleService-Info.plist. For offline
+// access (serverAuthCode → backend refresh token), a webClientId is needed.
 
-const DEV_WEB_CLIENT_ID =
-  '128352209891-3lm1pgood2a4h97kpasjmjlaer0oighu.apps.googleusercontent.com';
+function getConfigureParams(): {
+  webClientId?: string;
+  scopes: string[];
+} {
+  const params: { webClientId?: string; scopes: string[] } = {
+    scopes: ['profile', 'email', 'openid'],
+  };
 
-function getWebClientId(): string {
+  // Only pass webClientId on iOS (where it enables offlineAccess).
+  // On Android, let google-services.json handle everything.
   const configured = OAUTH.googleWebClientId;
-  if (configured) {
-    return configured;
+  if (configured && Platform.OS === 'ios') {
+    params.webClientId = configured;
   }
-  // Fallback for development builds where react-native-config hasn't
-  // bridged the native BuildConfig value yet.
-  if (__DEV__) {
-    log.warn('OAUTH.googleWebClientId is empty — using hard-coded dev client ID');
-    return DEV_WEB_CLIENT_ID;
-  }
-  return '';
+
+  return params;
 }
 
 // ── Sign-in wrapper ───────────────────────────────────────────────────
@@ -103,40 +113,27 @@ function getWebClientId(): string {
  * Launch the native Google Sign-In flow.
  *
  * Steps:
- * 1. Configure the SDK with the web client ID + scopes (lazy, not module-scope).
+ * 1. Configure the SDK with platform-appropriate parameters.
  * 2. Sign out any stale credential from a previous session.
- * 3. Check Play Services availability (Android only; no-op on iOS).
+ * 3. Check Play Services availability (Android only).
  * 4. Present the account picker / consent dialog.
  * 5. Return the `idToken` string for backend verification.
- *
- * This works for both first-time users (sign-up) AND returning users
- * (sign-in). The backend `/v1/auth/google` endpoint handles both cases
- * transparently.
  *
  * All failures are mapped to `GoogleSignInError` with a typed `.type`
  * discriminator for clean UI branching.
  */
 export async function signInWithGoogle(): Promise<string> {
   // ── Step 0: Configure the SDK ──────────────────────────────────────
-  // MUST happen before any other SDK call. Placed inside the function
-  // (not module scope) to guarantee the web client ID is resolved.
-  const webClientId = getWebClientId();
+  const params = getConfigureParams();
 
   log.info('Configuring Google Sign-In', {
-    hasWebClientId: !!webClientId,
-    webClientIdPrefix: webClientId ? webClientId.substring(0, 20) + '...' : '(none)',
+    platform: Platform.OS,
+    hasWebClientId: !!params.webClientId,
+    scopes: params.scopes,
   });
 
   try {
-    GoogleSignin.configure({
-      webClientId: webClientId || undefined,
-      // Explicit scopes guarantee the SDK requests an idToken.
-      // Without these, some device/account combinations produce idToken=null.
-      scopes: ['profile', 'email', 'openid'],
-      // Request offline access so the backend can exchange the
-      // serverAuthCode for a refresh token for long-lived sessions.
-      offlineAccess: true,
-    });
+    GoogleSignin.configure(params);
   } catch (configErr: unknown) {
     log.error('GoogleSignin.configure() failed:', configErr);
     throw new GoogleSignInError(
@@ -146,8 +143,6 @@ export async function signInWithGoogle(): Promise<string> {
   }
 
   // ── Step 1: Clear any stale credential ─────────────────────────────
-  // Without this, the SDK may return a cached credential from a previous
-  // session that has an expired or null idToken.
   try {
     await GoogleSignin.signOut();
     log.info('Signed out previous Google credential');
@@ -173,7 +168,6 @@ export async function signInWithGoogle(): Promise<string> {
     log.info('Launching native Google Sign-In...');
     const response = await GoogleSignin.signIn();
 
-    // Handle cancellation as a typed error for consistent UI branching
     if (!isSuccessResponse(response)) {
       log.info('Google Sign-In cancelled by user');
       throw new GoogleSignInError(
@@ -190,10 +184,14 @@ export async function signInWithGoogle(): Promise<string> {
     });
 
     if (!idToken) {
-      log.error('Google Sign-In returned no idToken — check webClientId and scopes');
+      log.error(
+        'Google Sign-In returned no idToken. Verify the OAuth client ' +
+        'type registered in cloud.ts matches your platform. ' +
+        'Current value: ' + (OAUTH.googleWebClientId ? '(set)' : '(empty)'),
+      );
       throw new GoogleSignInError(
         GoogleSignInErrorType.UNKNOWN,
-        'Google Sign-In returned no idToken — the OAuth configuration may be incomplete',
+        'Google Sign-In returned no idToken. The OAuth configuration may be incomplete.',
       );
     }
 
@@ -208,9 +206,8 @@ export async function signInWithGoogle(): Promise<string> {
     if (err && typeof err === 'object' && 'code' in err) {
       const errObj = err as Record<string, unknown>;
       const code = errObj.code;
-      const message = typeof errObj.message === 'string'
-        ? errObj.message
-        : String(err);
+      const message =
+        typeof errObj.message === 'string' ? errObj.message : String(err);
 
       log.error('GoogleSignin.signIn() native error:', { code, message });
 
@@ -228,19 +225,19 @@ export async function signInWithGoogle(): Promise<string> {
         );
       }
 
-      // DEVELOPER_ERROR is not in statusCodes but is a known native error code
-      // (e.g. "DEVELOPER_ERROR" or 10 from GoogleApiClient).
+      // DEVELOPER_ERROR — SHA-1, OAuth client mismatch, or wrong client type
       if (
         typeof code === 'string' &&
-        (code === 'DEVELOPER_ERROR' || code === '10' || code.includes('DEVELOPER'))
+        (code === 'DEVELOPER_ERROR' ||
+          code === '10' ||
+          code.includes('DEVELOPER'))
       ) {
         throw new GoogleSignInError(
           GoogleSignInErrorType.DEVELOPER_ERROR,
-          'Google Sign-In developer error — check SHA-1 and OAuth client configuration',
+          'Google Sign-In developer error — check SHA-1 fingerprint registration and OAuth client type',
         );
       }
 
-      // Map other known error codes
       if (code === statusCodes.SIGN_IN_REQUIRED) {
         throw new GoogleSignInError(
           GoogleSignInErrorType.UNKNOWN,
@@ -259,9 +256,6 @@ export async function signInWithGoogle(): Promise<string> {
     // Fallback: anything else → UNKNOWN (include the raw error for debugging)
     const rawMessage = err instanceof Error ? err.message : String(err);
     log.error('Google Sign-In unexpected error:', rawMessage);
-    throw new GoogleSignInError(
-      GoogleSignInErrorType.UNKNOWN,
-      rawMessage,
-    );
+    throw new GoogleSignInError(GoogleSignInErrorType.UNKNOWN, rawMessage);
   }
 }
