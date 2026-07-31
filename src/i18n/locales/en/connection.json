@@ -51,6 +51,9 @@
   "resetSecurityMessage": "This will clear your security preference and you will be prompted to choose a connection method on next connection attempt.",
   "reset": "Reset",
   "resetToast": "Security mode reset",
+  "certResetTitle": "Certificate Verification Failed",
+  "certResetMessage": "The connection failed because the server's certificate could not be verified. This usually happens when the server uses a self-signed certificate that isn't trusted in secure mode. Would you like to reset your security mode so you can choose a different connection method?",
+  "certResetConfirm": "Reset Security Mode",
   "noServerUrl": "No server URL saved for encrypted connection",
   "noWSUrl": "No WS URL available for unencrypted connection"
 }
