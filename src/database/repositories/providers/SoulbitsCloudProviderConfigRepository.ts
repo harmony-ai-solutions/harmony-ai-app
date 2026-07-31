@@ -251,6 +251,27 @@ export async function updateSoulbitsCloudProviderConfig(config: SoulbitsCloudPro
 }
 
 /**
+ * Bulk-refresh the api_key (cloud PASETO) on every non-deleted SoulbitsCloud
+ * provider config row. Used when the app-side cloud token refreshes so all
+ * stored soulbitscloud entries keep using the current session PASETO.
+ *
+ * Soft-deleted rows are intentionally left untouched. `updated_at` is bumped so
+ * the change is picked up by the next sync and propagated to the engine.
+ */
+export async function updateAllSoulbitsCloudApiKeys(paseto: string): Promise<void> {
+  const db = getDatabase();
+
+  return withTransaction(db, async (tx) => {
+    await tx.executeSql(
+      `UPDATE provider_config_soulbitscloud
+         SET api_key = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE deleted_at IS NULL`,
+      [paseto]
+    );
+  });
+}
+
+/**
  * Check if a SoulbitsCloud provider config is in use by any modules
  */
 export async function isSoulbitsCloudProviderConfigInUse(id: string): Promise<boolean> {

@@ -35,6 +35,8 @@ import { PROVIDER_SCHEMAS } from '../../constants/providerFieldSchemas';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { CLOUD_HOSTS } from '../../config/cloud';
+import { injectSoulbitsToken } from '../../services/cloud/soulbitsTokenSync';
+import AuthService from '../../services/auth/AuthService';
 import {
   createBackendConfig, updateBackendConfig, getBackendConfig, deleteBackendConfig,
   createCognitionConfig, updateCognitionConfig, getCognitionConfig, deleteCognitionConfig,
@@ -109,6 +111,23 @@ const OPENAI_FAMILY = ['openai', 'openaicompatible', 'openrouter', 'google', 'xa
 /** Beta-aware inference host, used to prefill the Soulbits Cloud base_url when connected. */
 function soulbitsCloudBaseUrl(cloudConnected: boolean): string | undefined {
   return cloudConnected ? CLOUD_HOSTS.inference : undefined;
+}
+
+/**
+ * True when the api_key field holds an injected cloud PASETO (v4.local.*) that
+ * must be shown read-only — same prefix heuristic the engine uses to switch
+ * between PASETO mode and plain API-key mode (`strings.HasPrefix(apiKey,
+ * "v4.local.")`). Prevents the user from copying/editing the managed credential.
+ */
+function isManagedSoulbitsApiKey(
+  providerType: string,
+  fieldKey: string,
+  apiKey: string | undefined,
+): boolean {
+  return providerType === 'soulbitscloud'
+    && fieldKey === 'api_key'
+    && typeof apiKey === 'string'
+    && apiKey.startsWith('v4.local.');
 }
 
 const MODULE_REPOSITORIES: Record<string, {
@@ -333,7 +352,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
     }));
   };
 
-  const handleProviderSwitch = (slot: string, providerType: string) => {
+  const handleProviderSwitch = async (slot: string, providerType: string) => {
     if (slot === 'provider') {
       handleModuleFieldChange('provider', providerType);
     } else if (slot === 'transcription') {
@@ -351,6 +370,16 @@ export const ModuleConfigEditScreen: React.FC = () => {
       const prefillUrl = soulbitsCloudBaseUrl(cloudConnected);
       if (prefillUrl) {
         defaults.base_url = prefillUrl;
+      }
+      // Pre-seed the cloud PASETO as api_key (read-only in the form) so new
+      // configs ship with a working credential without manual entry.
+      try {
+        const paseto = await AuthService.getToken();
+        if (paseto) {
+          defaults.api_key = paseto;
+        }
+      } catch {
+        // No cloud token — standalone mode. Leave api_key empty for the user.
       }
     }
 
@@ -388,14 +417,23 @@ export const ModuleConfigEditScreen: React.FC = () => {
       providerConfig.name = `${formValues.name || 'Config'} - ${providerType}`;
     }
 
+    // Inject the current cloud PASETO as api_key for NEW soulbitscloud configs
+    // (belt-and-braces on top of the form prefill — catches token refreshes that
+    // happened while the form was open). No-op for updates / standalone mode.
+    const seededConfig = await injectSoulbitsToken({
+      providerType,
+      isCreate: !form.providerConfigId,
+      providerConfig,
+    });
+
     try {
       if (form.providerConfigId) {
         // Update existing
-        await pRepo.update({ ...providerConfig, id: form.providerConfigId });
+        await pRepo.update({ ...seededConfig, id: form.providerConfigId });
         return form.providerConfigId;
       } else {
         // Create new
-        const newId = await pRepo.create(providerConfig);
+        const newId = await pRepo.create(seededConfig);
         return newId;
       }
     } catch (error) {
@@ -638,6 +676,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
               field={field}
               value={form.values[field.key]}
               onChange={(key, value) => handleProviderFieldChange(slot, key, value)}
+              readOnly={isManagedSoulbitsApiKey(providerType, field.key, form.values.api_key)}
             />
           );
         })}
