@@ -103,7 +103,12 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
     if (variant === 'secondary') {
         return (
             <TouchableOpacity
-                onPress={onPress}
+                onPress={() => {
+                    if (!disabled) {
+                        hapticLightPress();
+                    }
+                    onPress();
+                }}
                 disabled={disabled}
                 activeOpacity={0.7}
                 testID={testID}
@@ -137,7 +142,12 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
     if (variant === 'outline') {
         return (
             <TouchableOpacity
-                onPress={onPress}
+                onPress={() => {
+                    if (!disabled) {
+                        hapticLightPress();
+                    }
+                    onPress();
+                }}
                 disabled={disabled}
                 activeOpacity={0.7}
                 testID={testID}
@@ -170,7 +180,12 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
     // ── Ghost: no border, subtle text ────────────────────────────────────────
     return (
         <TouchableOpacity
-            onPress={onPress}
+            onPress={() => {
+                if (!disabled) {
+                    hapticLightPress();
+                }
+                onPress();
+            }}
             disabled={disabled}
             activeOpacity={0.7}
             testID={testID}

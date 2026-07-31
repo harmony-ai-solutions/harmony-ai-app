@@ -45,7 +45,10 @@ import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
+import { ThemedGradient } from '../components/themed/ThemedGradient';
 import { EntityModuleSelectorWithActions } from '../components/entities/EntityModuleSelectorWithActions';
+import { hexToRgba } from '../utils/colorUtils';
+import { hapticLightPress } from '../utils/haptics';
 import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
 
 import {
@@ -110,6 +113,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // ── Advanced toggle ──────────────────────────────────────────────────────────
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // UI-only: tracks the currently focused identity field for accent highlighting
+  const [focusedField, setFocusedField] = useState<'name' | 'personality' | null>(null);
 
   // ── Module config selections (string IDs for picker; '' = disabled) ──────────
   const [cognitionConfigId, setCognitionConfigId] = useState('');
@@ -417,17 +422,21 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   if (!theme) return null;
 
   // ── Styles derived from theme ────────────────────────────────────────────────
-  const inputStyle = {
-    color: theme.colors.text.primary,
-    borderColor: theme.colors.border.default,
-    backgroundColor: theme.colors.background.base,
-  };
+  const accent = theme.colors.accent.primary;
+  const secondaryAccent = theme.colors.accent.secondary;
+  const surfaceColor = theme.colors.background.surface;
+  const baseColor = theme.colors.background.base;
+  const inputTextStyle = { color: theme.colors.text.primary };
+
+  const isNameFocused = focusedField === 'name';
+  const isPersonalityFocused = focusedField === 'personality';
 
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
       <ScreenHeader
         title={t('title')}
+        subtitle={t('profileHint')}
         onBack={() => navigation.goBack()}
       />
 
@@ -443,187 +452,268 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={[theme.colors.accent.primary]}
-              tintColor={theme.colors.accent.primary}
-              progressBackgroundColor={theme.colors.background.surface}
+              colors={[accent]}
+              tintColor={accent}
+              progressBackgroundColor={surfaceColor}
             />
           }
         >
-          {/* ── Character Profile section ── */}
-          <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title={t('profileLabel')} />
-            <View style={styles.sectionContent}>
-              {/* Profile selector */}
-              <TouchableOpacity
-                style={[
-                  styles.profileSelector,
-                  {
-                    borderColor: theme.colors.border.default,
-                    backgroundColor: theme.colors.background.base,
-                  },
-                ]}
-                onPress={() => setProfilePickerVisible(true)}
-                activeOpacity={0.7}
-              >
-                <ThemedText
-                  size={14}
-                  variant={selectedProfile ? 'primary' : 'muted'}
-                  style={styles.profileSelectorLabel}
-                >
-                  {selectedProfile ? selectedProfile.name : t('createNewProfile')}
-                </ThemedText>
-                <ThemedText size={14} variant="muted">
-                  ▾
-                </ThemedText>
-              </TouchableOpacity>
+          {/* ── Hero: Avatar (only for new profiles) ── */}
+          {!selectedProfile && (
+            <View style={styles.hero}>
+              <Icon
+                name="creation"
+                size={16}
+                color={hexToRgba(secondaryAccent, 0.8)}
+                style={styles.heroSparkleL}
+              />
+              <Icon
+                name="star-four-points"
+                size={12}
+                color={hexToRgba(accent, 0.55)}
+                style={styles.heroSparkleR}
+              />
 
-              {/* Profile preview when an existing profile is linked */}
-              {selectedProfile && (
+              <TouchableOpacity
+                onPress={() => {
+                  hapticLightPress();
+                  handlePickAvatar();
+                }}
+                activeOpacity={0.85}
+                style={styles.avatarPressable}
+              >
+                <ThemedGradient gradient="primary" style={styles.avatarRing}>
+                  <View
+                    style={[
+                      styles.avatarInner,
+                      { backgroundColor: theme.colors.background.elevated },
+                    ]}
+                  >
+                    {avatarUri ? (
+                      <Image
+                        source={{ uri: avatarUri }}
+                        style={styles.avatarImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.avatarPlaceholder}>
+                        <Icon
+                          name="account-outline"
+                          size={46}
+                          color={hexToRgba(accent, 0.9)}
+                        />
+                        <ThemedText size={12} variant="muted" style={styles.avatarHint}>
+                          {t('photo')}
+                        </ThemedText>
+                      </View>
+                    )}
+                  </View>
+                </ThemedGradient>
+
+                {/* Camera badge */}
                 <View
                   style={[
-                    styles.profilePreview,
+                    styles.cameraBadge,
                     {
-                      backgroundColor: theme.colors.background.base,
-                      borderColor: theme.colors.border.default,
+                      backgroundColor: surfaceColor,
+                      borderColor: baseColor,
                     },
                   ]}
                 >
+                  <Icon name="camera" size={16} color={accent} />
+                </View>
+              </TouchableOpacity>
+
+              {avatarUri ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLightPress();
+                    handlePickAvatar();
+                  }}
+                  style={styles.changePhotoLink}
+                >
+                  <ThemedText size={13} variant="accent">
+                    {t('changePhoto')}
+                  </ThemedText>
+                </TouchableOpacity>
+              ) : (
+                <ThemedText size={12} variant="muted" style={styles.heroCaption}>
+                  {t('common:optional')}
+                </ThemedText>
+              )}
+            </View>
+          )}
+
+          {/* ── Hero: Selected existing profile ── */}
+          {selectedProfile && (
+            <View style={styles.hero}>
+              <TouchableOpacity
+                onPress={() => {
+                  hapticLightPress();
+                  setProfilePickerVisible(true);
+                }}
+                activeOpacity={0.85}
+                style={styles.avatarPressable}
+              >
+                <ThemedGradient gradient="primary" style={styles.avatarRing}>
                   <View
                     style={[
-                      styles.previewAvatar,
+                      styles.avatarInner,
                       { backgroundColor: theme.colors.background.elevated },
                     ]}
                   >
                     {selectedProfileImageUri ? (
                       <Image
                         source={{ uri: selectedProfileImageUri }}
-                        style={styles.previewAvatarImage}
+                        style={styles.avatarImage}
                         resizeMode="cover"
                       />
                     ) : (
-                      <Icon
-                        name="account"
-                        size={24}
-                        color={theme.colors.text.muted}
-                      />
+                      <Icon name="account" size={46} color={hexToRgba(accent, 0.9)} />
                     )}
                   </View>
-                  <View style={styles.previewText}>
-                    <ThemedText weight="bold" size={14}>
-                      {selectedProfile.name}
-                    </ThemedText>
-                    <ThemedText variant="muted" size={12} numberOfLines={1}>
-                      {selectedProfile.description ?? t('noDescription')}
-                    </ThemedText>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() =>
-                      navigation.navigate('CharacterProfileEdit', {
-                        profileId: selectedProfile.id,
-                      })
-                    }
-                    style={styles.editProfileButton}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Icon
-                      name="pencil"
-                      size={18}
-                      color={theme.colors.accent.primary}
-                    />
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Hint — only in "create new" mode */}
-              {!selectedProfile && (
-                <ThemedText variant="muted" size={12} style={styles.profileHint}>
-                  {t('profileHint')}
-                </ThemedText>
-              )}
-            </View>
-          </ThemedCard>
-
-          {/* ── Avatar Picker (only for new profiles) ── */}
-          {!selectedProfile && (
-            <View style={styles.avatarSection}>
-            <TouchableOpacity
-              style={[
-                styles.avatarButton,
-                {
-                  borderColor: theme.colors.border.default,
-                  backgroundColor: theme.colors.background.elevated,
-                },
-              ]}
-              onPress={handlePickAvatar}
-              activeOpacity={0.7}
-            >
-              {avatarUri ? (
-                <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <ThemedText size={28} variant="muted">
-                    📷
-                  </ThemedText>
-                  <ThemedText
-                    size={12}
-                    variant="muted"
-                    style={styles.avatarHint}
-                  >
-                    {t('photo')}
-                  </ThemedText>
-                  <ThemedText size={11} variant="muted">
-                    {t('common:optional')}
-                  </ThemedText>
-                </View>
-              )}
-            </TouchableOpacity>
-            {avatarUri && (
-              <TouchableOpacity
-                onPress={handlePickAvatar}
-                style={styles.changePhotoLink}
-              >
-                <ThemedText size={13} variant="accent">
-                  {t('changePhoto')}
-                </ThemedText>
+                </ThemedGradient>
               </TouchableOpacity>
+
+              <ThemedText
+                size={24}
+                weight="bold"
+                hierarchy="header"
+                style={styles.selectedName}
+              >
+                {selectedProfile.name}
+              </ThemedText>
+              <ThemedText
+                variant="muted"
+                size={13}
+                style={styles.selectedDescription}
+                numberOfLines={4}
+              >
+                {selectedProfile.description ?? t('noDescription')}
+              </ThemedText>
+
+              <ThemedText size={12} variant="muted" style={styles.selectedSwitchHint}>
+                {t('changeProfileHint')}
+              </ThemedText>
+            </View>
+          )}
+
+          {/* ── Character Profile card (create-new mode only) ── */}
+          {!selectedProfile && (
+            <ThemedCard elevated accentStripe style={styles.section}>
+              <SectionHeader title={t('profileLabel')} />
+              <View style={styles.sectionContent}>
+                {/* Profile selector */}
+                <TouchableOpacity
+                  style={[
+                    styles.profileSelector,
+                    {
+                      borderColor: theme.colors.border.default,
+                      backgroundColor: hexToRgba(surfaceColor, 0.6),
+                    },
+                  ]}
+                  onPress={() => {
+                    hapticLightPress();
+                    setProfilePickerVisible(true);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.selectorIconWrap,
+                      { backgroundColor: hexToRgba(accent, 0.12) },
+                    ]}
+                  >
+                    <Icon name="account-outline" size={18} color={accent} />
+                  </View>
+                  <ThemedText
+                    size={14}
+                    variant="muted"
+                    style={styles.profileSelectorLabel}
+                  >
+                    {t('createNewProfile')}
+                  </ThemedText>
+                  <Icon name="chevron-down" size={20} color={theme.colors.text.muted} />
+                </TouchableOpacity>
+              </View>
+            </ThemedCard>
+          )}
+
+          {/* ── Identity fields ── */}
+          <View style={styles.fieldsSection}>
+            {/* Name field (entity alias) */}
+            <View style={styles.fieldGroup}>
+              <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
+                {t('nameLabel')}
+              </ThemedText>
+              <View
+                style={[
+                  styles.inputShell,
+                  {
+                    backgroundColor: hexToRgba(surfaceColor, 0.55),
+                    borderColor: isNameFocused ? accent : theme.colors.border.default,
+                  },
+                ]}
+              >
+                <Icon
+                  name="account-edit"
+                  size={20}
+                  color={isNameFocused ? accent : theme.colors.text.muted}
+                />
+                <TextInput
+                  style={[styles.input, inputTextStyle]}
+                  value={name}
+                  onChangeText={setName}
+                  onFocus={() => setFocusedField('name')}
+                  onBlur={() => setFocusedField(null)}
+                  placeholder={t('namePlaceholder')}
+                  placeholderTextColor={theme.colors.text.muted}
+                  returnKeyType="next"
+                  autoCorrect={false}
+                />
+              </View>
+            </View>
+
+            {/* Personality field (only for new profiles) */}
+            {!selectedProfile && (
+              <View style={styles.fieldGroup}>
+                <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
+                  {t('personalityLabel')}
+                </ThemedText>
+                <View
+                  style={[
+                    styles.inputShell,
+                    styles.multilineShell,
+                    {
+                      backgroundColor: hexToRgba(surfaceColor, 0.55),
+                      borderColor: isPersonalityFocused
+                        ? accent
+                        : theme.colors.border.default,
+                    },
+                  ]}
+                >
+                  <Icon
+                    name="message-text-outline"
+                    size={20}
+                    color={isPersonalityFocused ? accent : theme.colors.text.muted}
+                    style={styles.multilineIcon}
+                  />
+                  <TextInput
+                    style={[styles.input, styles.multilineInput, inputTextStyle]}
+                    value={personality}
+                    onChangeText={setPersonality}
+                    onFocus={() => setFocusedField('personality')}
+                    onBlur={() => setFocusedField(null)}
+                    placeholder={t('personalityPlaceholder')}
+                    placeholderTextColor={theme.colors.text.muted}
+                    multiline
+                    numberOfLines={3}
+                    textAlignVertical="top"
+                  />
+                </View>
+              </View>
             )}
           </View>
-          )}
-
-          {/* ── Name field (entity alias) ── */}
-          <View style={styles.fieldGroup}>
-            <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-              {t('nameLabel')}
-            </ThemedText>
-            <TextInput
-              style={[styles.input, inputStyle]}
-              value={name}
-              onChangeText={setName}
-              placeholder={t('namePlaceholder')}
-              placeholderTextColor={theme.colors.text.muted}
-              returnKeyType="next"
-              autoCorrect={false}
-            />
-          </View>
-
-          {/* ── Personality field (only for new profiles) ── */}
-          {!selectedProfile && (
-            <View style={styles.fieldGroup}>
-              <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-                {t('personalityLabel')}
-              </ThemedText>
-              <TextInput
-                style={[styles.input, styles.multilineInput, inputStyle]}
-                value={personality}
-                onChangeText={setPersonality}
-                placeholder={t('personalityPlaceholder')}
-                placeholderTextColor={theme.colors.text.muted}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
-            </View>
-          )}
 
           {/* ── Advanced Settings card ── */}
           <ThemedCard elevated accentStripe accentTint style={styles.section}>
@@ -650,7 +740,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                   <View style={styles.loadingRow}>
                     <ActivityIndicator
                       size="small"
-                      color={theme.colors.accent.primary}
+                      color={accent}
                     />
                     <ThemedText size={13} variant="muted" style={{ marginLeft: 8 }}>
                       {t('loadingConfigs')}
@@ -735,13 +825,14 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
             {isSaving ? (
               <ActivityIndicator
                 size="large"
-                color={theme.colors.accent.primary}
+                color={accent}
               />
             ) : (
               <ThemedButton
                 label={t('startChatting')}
                 onPress={handleCreate}
                 variant="primary"
+                icon="creation"
                 disabled={isSaving}
               />
             )}
@@ -767,9 +858,12 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
               { backgroundColor: theme.colors.background.elevated },
             ]}
           >
-            <ThemedText weight="bold" size={15} style={styles.modalTitle}>
-              {t('selectProfile')}
-            </ThemedText>
+            <View style={styles.modalTitleRow}>
+              <Icon name="account-multiple-outline" size={22} color={accent} />
+              <ThemedText weight="bold" size={15}>
+                {t('selectProfile')}
+              </ThemedText>
+            </View>
 
             <FlatList
               data={
@@ -792,10 +886,11 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                     style={[
                       styles.modalItem,
                       isSelected && {
-                        backgroundColor: theme.colors.accent.primary + '22',
+                        backgroundColor: hexToRgba(accent, 0.14),
                       },
                     ]}
                     onPress={() => {
+                      hapticLightPress();
                       if (isNew) {
                         handleProfileClear();
                       } else {
@@ -803,6 +898,18 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                       }
                     }}
                   >
+                    <View
+                      style={[
+                        styles.modalItemIcon,
+                        { backgroundColor: hexToRgba(accent, isSelected ? 0.20 : 0.08) },
+                      ]}
+                    >
+                      <Icon
+                        name={isNew ? 'account-plus-outline' : 'account'}
+                        size={18}
+                        color={isSelected ? accent : theme.colors.text.muted}
+                      />
+                    </View>
                     <ThemedText
                       size={14}
                       variant={
@@ -814,9 +921,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                       {item.name}
                     </ThemedText>
                     {isSelected && (
-                      <ThemedText size={14} variant="accent">
-                        ✓
-                      </ThemedText>
+                      <Icon name="check-circle" size={18} color={accent} />
                     )}
                   </TouchableOpacity>
                 );
@@ -848,46 +953,113 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
 
+  // ── Hero avatar ──
+  hero: {
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 28,
+  },
+  heroSparkleL: {
+    position: 'absolute',
+    top: 8,
+    left: 36,
+  },
+  heroSparkleR: {
+    position: 'absolute',
+    top: 34,
+    right: 42,
+  },
+  avatarPressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarRing: {
+    width: 148,
+    height: 148,
+    borderRadius: 74,
+    padding: 3,
+  },
+  avatarInner: {
+    flex: 1,
+    borderRadius: 71,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarHint: {
+    marginTop: 6,
+  },
+  cameraBadge: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  changePhotoLink: {
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  heroCaption: {
+    marginTop: 10,
+  },
+
+  // ── Selected profile hero ──
+  selectedName: {
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  selectedDescription: {
+    marginTop: 6,
+    textAlign: 'center',
+    lineHeight: 19,
+    paddingHorizontal: 24,
+  },
+  selectedSwitchHint: {
+    marginTop: 14,
+  },
+
   // ── Profile selector ──
   profileSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    minHeight: 44,
-    marginBottom: 12,
+    minHeight: 52,
+    gap: 10,
+  },
+  selectorIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   profileSelectorLabel: {
     flex: 1,
   },
-  profileHint: {
-    lineHeight: 16,
-  },
-
-  // ── Profile preview ──
-  profilePreview: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 12,
-    gap: 12,
-    marginBottom: 12,
-  },
-  previewAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-    flexShrink: 0,
-  },
-  previewAvatarImage: { width: '100%', height: '100%' },
-  previewText: { flex: 1, gap: 2 },
-  editProfileButton: { padding: 4 },
 
   // ── Modal ──
   modalOverlay: {
@@ -896,14 +1068,17 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     paddingTop: 12,
     paddingBottom: 32,
     maxHeight: '70%',
   },
-  modalTitle: {
-    textAlign: 'center',
+  modalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     paddingVertical: 12,
     paddingHorizontal: 20,
     marginBottom: 4,
@@ -913,60 +1088,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 20,
+    gap: 12,
   },
   modalItemLabel: {
     flex: 1,
   },
-
-  // ── Avatar ──
-  avatarSection: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  avatarButton: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 60,
-  },
-  avatarPlaceholder: {
+  modalItemIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarHint: {
-    marginTop: 4,
-  },
-  changePhotoLink: {
-    marginTop: 8,
-  },
 
-  // ── Fields ──
+  // ── Identity fields ──
+  fieldsSection: {
+    marginBottom: 4,
+  },
   fieldGroup: {
-    marginBottom: 16,
+    marginBottom: 18,
   },
   fieldLabel: {
-    marginBottom: 6,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  inputShell: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    gap: 10,
+    minHeight: 52,
+  },
+  multilineShell: {
+    alignItems: 'flex-start',
+    paddingTop: 13,
+  },
+  multilineIcon: {
+    marginTop: 2,
   },
   input: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    flex: 1,
     fontSize: 15,
+    paddingVertical: 10,
     minHeight: 44,
   },
   multilineInput: {
     minHeight: 88,
-    paddingTop: 10,
   },
 
   // ── Section card ──
@@ -988,7 +1157,7 @@ const styles = StyleSheet.create({
   // ── CTA ──
   ctaSection: {
     marginTop: 8,
-    minHeight: 52,
+    minHeight: 56,
     justifyContent: 'center',
   },
 });
