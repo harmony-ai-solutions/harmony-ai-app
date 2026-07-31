@@ -32,6 +32,7 @@
   "setPrimaryFailed": "Failed to set primary image.",
   "deleteImageFailed": "Failed to delete image.",
   "importCard": "Import Card",
+  "importCardButton": "Import Character Card (PNG / JSON)",
   "importCardPrompt": "Choose a character card (PNG or JSON)",
   "importSuccess": "Imported {{name}}",
   "importFailed": "Import failed",
