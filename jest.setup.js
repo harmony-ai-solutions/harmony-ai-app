@@ -136,7 +136,10 @@ jest.mock('@invertase/react-native-apple-authentication', () => ({
 jest.mock('react-native-config', () => ({
   __esModule: true,
   default: {
-    APP_ENV: 'test',
+    APP_ENV: 'dev',
+    IS_BETA: true,
+    GOOGLE_WEB_CLIENT_ID: 'test-client.apps.googleusercontent.com',
+    APPLE_SERVICES_ID: '',
     API_BASE_URL: 'https://api.example.com',
   },
 }));

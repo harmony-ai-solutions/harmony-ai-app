@@ -104,6 +104,14 @@ function getConfigureParams(): {
     params.webClientId = configured;
   }
 
+  if (!configured) {
+    log.warn(
+      'OAUTH.googleWebClientId is empty — Google Sign-In on iOS may not ' +
+        'return an idToken. Run `npm run oauth:dev` (or `oauth:prod`) to ' +
+        'generate .env + gradle-secrets from the GCP client_secret file.',
+    );
+  }
+
   return params;
 }
 
@@ -185,13 +193,17 @@ export async function signInWithGoogle(): Promise<string> {
 
     if (!idToken) {
       log.error(
-        'Google Sign-In returned no idToken. Verify the OAuth client ' +
-        'type registered in cloud.ts matches your platform. ' +
+        'Google Sign-In returned no idToken. ' +
+        'Check: (1) OAUTH.googleWebClientId must be a Web OAuth client ID, ' +
+        'not an installed/Desktop one (run `npm run oauth:dev`); ' +
+        '(2) on Android, android/app/google-services.json must be the real ' +
+        'file with your package + SHA-1 registered. ' +
         'Current value: ' + (OAUTH.googleWebClientId ? '(set)' : '(empty)'),
       );
       throw new GoogleSignInError(
         GoogleSignInErrorType.UNKNOWN,
-        'Google Sign-In returned no idToken. The OAuth configuration may be incomplete.',
+        'Google Sign-In returned no idToken. The OAuth configuration may be incomplete. ' +
+          'Run `npm run oauth:dev` and verify google-services.json (Android).',
       );
     }
 

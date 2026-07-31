@@ -15,6 +15,14 @@
  */
 declare module 'react-native-config' {
   interface NativeConfig {
+    /**
+     * Active build environment: 'dev' | 'prod'.
+     * Injected per-flavour by scripts/oauth-secrets.cjs (`npm run
+     * oauth:dev|prod`) which writes APP_ENV into the generated .env
+     * (iOS/Metro) and the gradle-secrets.<flavor>.properties files
+     * (Android). Falls back to 'dev' when absent (__DEV__).
+     */
+    APP_ENV?: string;
     IS_BETA?: string | boolean;
     GOOGLE_WEB_CLIENT_ID?: string;
     APPLE_SERVICES_ID?: string;

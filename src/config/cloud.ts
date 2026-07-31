@@ -62,6 +62,20 @@ const IS_BETA: boolean = __DEV__
   ? true
   : (Config?.IS_BETA === true || Config?.IS_BETA === 'true');
 
+/**
+ * Active build environment ('dev' | 'prod').
+ *
+ * Injected per-flavour by scripts/oauth-secrets.cjs:
+ *   - iOS/Metro → APP_ENV written into the generated .env
+ *   - Android   → APP_ENV written into gradle-secrets.<flavor>.properties
+ * Falls back to 'dev' (__DEV__) so local Metro resolves to the dev flavour
+ * even when the native build hasn't regenerated config yet.
+ */
+const APP_ENV: string = Config?.APP_ENV || (__DEV__ ? 'dev' : 'prod');
+
+// OAuth identifiers are injected at build time from the gitignored GCP
+// client_secret_*.json files (see scripts/oauth-secrets.cjs) — never
+// hardcoded in this repo.
 const GOOGLE_WEB_CLIENT_ID: string = Config?.GOOGLE_WEB_CLIENT_ID ?? '';
 const APPLE_SERVICES_ID: string = Config?.APPLE_SERVICES_ID ?? '';
 
@@ -113,6 +127,15 @@ export const WS_PATHS = {
 export const OAUTH = {
   googleWebClientId: GOOGLE_WEB_CLIENT_ID,
   appleServicesId: APPLE_SERVICES_ID,
+};
+
+// ── Environment metadata ───────────────────────────────────────────────
+// Consumer-visible label for the active build environment. `env` is the
+// value injected by the OAuth secrets loader (APP_ENV); `label` is the
+// human-facing name (useful for DEV badges / settings screens).
+export const APP_ENVIRONMENT = {
+  env: APP_ENV as 'dev' | 'prod',
+  label: APP_ENV === 'prod' ? 'Production' : 'Development',
 };
 
 // ── Dev-mode convenience alias ─────────────────────────────────────────

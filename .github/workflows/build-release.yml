@@ -243,11 +243,12 @@ jobs:
 
       - name: Generate .env for ${{ matrix.environment }}
         run: |
-          printf 'IS_BETA=%s\nGOOGLE_WEB_CLIENT_ID=%s\nAPPLE_SERVICES_ID=%s\n' \
+          printf 'APP_ENV=%s\nIS_BETA=%s\nGOOGLE_WEB_CLIENT_ID=%s\nAPPLE_SERVICES_ID=%s\n' \
+            "${{ matrix.environment }}" \
             "${{ matrix.environment == 'dev' && 'true' || 'false' }}" \
             "${{ vars.GOOGLE_WEB_CLIENT_ID }}" \
             "${{ vars.APPLE_SERVICES_ID }}" > .env
-          echo "::notice::Generated .env for ${{ matrix.environment }} (IS_BETA=${{ matrix.environment == 'dev' && 'true' || 'false' }})"
+          echo "::notice::Generated .env for ${{ matrix.environment }} (APP_ENV=${{ matrix.environment }}, IS_BETA=${{ matrix.environment == 'dev' && 'true' || 'false' }})"
 
       - name: Build ${{ matrix.environment }} iOS app
         working-directory: ios

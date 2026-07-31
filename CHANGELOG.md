@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased - 0.1.0]
 
+### Security & Configuration
+#### Added
+- Environment-aware Google OAuth secret wiring: OAuth client IDs are no longer hardcoded in tracked files. A loader (`scripts/oauth-secrets.cjs`) reads the gitignored GCP `client_secret_*.json` per environment (`dev`/`prod`) and generates the derived build config (`.env` + Android `gradle-secrets.<flavor>.properties`). `npm run oauth:dev` / `npm run oauth:prod` expose this; the `android`, `ios`, `start`, and E2E build scripts auto-load. The runtime config now exposes the active environment (`APP_ENV`/`APP_ENVIRONMENT`) for dev/prod awareness.
+
 ### Cloud Integration
 #### Added
 - Cloud connection now polls the session broker until the secure session is ready, showing a multi-stage progress indicator (Requesting → Preparing → Establishing → Connected ✓ / failed + retry). Chat list and settings correctly reflect cloud vs self-hosted connection state.

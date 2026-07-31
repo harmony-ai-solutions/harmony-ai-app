@@ -13,7 +13,9 @@ Android uses `productFlavors` (`dev`/`prod` in `android/app/build.gradle`):
 | **dev** | `com.harmonyai.app.dev` | Co-installable alongside prod. Targets beta hosts. |
 | **prod** | `com.harmonyai.app` | Production release. Targets `*.soulbits.app`. |
 
-`react-native-config` surfaces `IS_BETA` (boolean), `GOOGLE_WEB_CLIENT_ID`, and `APPLE_SERVICES_ID` to JavaScript based on the active flavour.
+`react-native-config` surfaces `APP_ENV`, `IS_BETA` (boolean), `GOOGLE_WEB_CLIENT_ID`, and `APPLE_SERVICES_ID` to JavaScript based on the active flavour.
+
+> OAuth identifiers are **not hardcoded** in tracked files. They are injected per-environment from gitignored GCP `client_secret_*.json` files by `scripts/oauth-secrets.cjs`. See [OAUTH-SECRETS.md](OAUTH-SECRETS.md) for full details.
 
 ### iOS
 
@@ -73,3 +75,23 @@ Download and install the new APK over the existing one. Your data is preserved.
 
 ### Updating
 Download the new `.ipa` and reinstall via your sideloading tool. App data should be preserved.
+
+## Local Development (Google OAuth)
+
+For local development, the Google OAuth client secrets are read from
+**gitignored** `client_secret_*.json` files and injected at build time:
+
+```bash
+# 1. Place the GCP OAuth client JSON (downloaded from Google Cloud Console)
+#    in the repo root or secrets/dev/ (matches client_secret_*.json).
+
+# 2. Generate the environment files:
+npm run oauth:dev      # dev environment (writes .env + gradle-secrets.dev.properties)
+
+# 3. Build / run (the scripts auto-run the loader first):
+npm run android
+npm run ios
+```
+
+See [OAUTH-SECRETS.md](OAUTH-SECRETS.md) for the full environment wiring,
+search order, and CI behaviour.
