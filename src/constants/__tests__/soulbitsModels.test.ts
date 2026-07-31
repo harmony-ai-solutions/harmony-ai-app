@@ -62,8 +62,38 @@ describe('SOULBITS_FALLBACK_MODELS', () => {
     }
   });
 
-  it('seeds the LLM fallback with soulchat-v1', () => {
-    expect(SOULBITS_FALLBACK_MODELS.backend).toContain('soulchat-v1');
+  it('seeds the LLM fallback with a real live-catalog model', () => {
+    expect(SOULBITS_FALLBACK_MODELS.backend).toContain('qwen-35-9b');
+  });
+
+  it('uses only real live-catalog model ids in every fallback list', () => {
+    const liveCatalog = new Set([
+      'voicefixer',
+      'harrier-oss-v1-0-6b',
+      'qwen3-embed-4b',
+      'gemma4-meromero-26b-a4b',
+      'qwen-35-9b',
+      'starfallen-24b',
+      'qwen3-rerank-0-6b',
+      'faster-whisper-large-v3-turbo',
+      'faster-whisper-tiny',
+      'chatterbox_multilingual',
+      'chatterbox',
+      'chatterbox_turbo',
+      'harmonyspeech',
+      'kitten-tts-micro',
+      'kitten-tts-mini',
+      'kitten-tts-nano',
+      'openvoice_v1',
+      'openvoice_v2',
+      'silero-vad',
+      'chatterbox_vc',
+    ]);
+    for (const ids of Object.values(SOULBITS_FALLBACK_MODELS)) {
+      for (const id of ids) {
+        expect(liveCatalog.has(id)).toBe(true);
+      }
+    }
   });
 });
 
@@ -79,7 +109,10 @@ describe('getModelsQueryForModule', () => {
 
 describe('getFallbackModelsForModule', () => {
   it('returns the fallback list for a known module type', () => {
-    expect(getFallbackModelsForModule('stt')).toEqual(['whisper']);
+    expect(getFallbackModelsForModule('stt')).toEqual([
+      'faster-whisper-tiny',
+      'faster-whisper-large-v3-turbo',
+    ]);
   });
 
   it('returns an empty array for an unknown module type', () => {

@@ -38,8 +38,8 @@ describe('fetchModelsForModule', () => {
   it('returns live models mapped to {id,name} on success', async () => {
     mockListModelsOrThrow.mockResolvedValue([
       {
-        model_id: 'soulchat-v1',
-        display_name: 'SoulChat v1',
+        model_id: 'qwen-35-9b',
+        display_name: 'Qwen 3.5 9B',
         model_type: 'llm',
         min_tier: 'free',
         description: 'chat model',
@@ -50,7 +50,7 @@ describe('fetchModelsForModule', () => {
 
     expect(result.source).toBe('live');
     expect(result.models).toEqual([
-      { id: 'soulchat-v1', name: 'SoulChat v1', description: 'chat model' },
+      { id: 'qwen-35-9b', name: 'Qwen 3.5 9B', description: 'chat model' },
     ]);
     expect(mockListModelsOrThrow).toHaveBeenCalledTimes(1);
     expect(mockListModelsOrThrow).toHaveBeenCalledWith({ model_type: 'llm' });
@@ -80,7 +80,11 @@ describe('fetchModelsForModule', () => {
     const result = await fetchModelsForModule('backend');
 
     expect(result.source).toBe('fallback');
-    expect(result.models).toEqual([{ id: 'soulchat-v1' }]);
+    expect(result.models).toEqual([
+      { id: 'qwen-35-9b' },
+      { id: 'starfallen-24b' },
+      { id: 'gemma4-meromero-26b-a4b' },
+    ]);
   });
 
   it('falls back when the live catalog returns an empty array', async () => {

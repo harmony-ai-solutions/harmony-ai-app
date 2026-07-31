@@ -41,15 +41,28 @@ export const SOULBITS_MODEL_QUERY: Record<string, ModelsQuery> = {
 /**
  * Module-type → static fallback model ids (offline safety net only).
  * Keep minimal; the live catalog is authoritative.
+ *
+ * Verified against the live catalog at https://beta.api.soulbits.app/v1/models
+ * on 2026-07-31 — ids below are real entries; free-tier first, then core.
  */
 export const SOULBITS_FALLBACK_MODELS: Record<string, string[]> = {
-  backend: ['soulchat-v1'],
-  cognition: ['soulchat-v1'],
-  movement: ['soulchat-v1'],
-  rag: ['soul-embed-v1'], // placeholder — verify against live catalog
-  tts: ['soul-tts-v1'], // placeholder — verify against live catalog
-  stt: ['whisper'],
-  vision: [],
+  backend: ['qwen-35-9b', 'starfallen-24b', 'gemma4-meromero-26b-a4b'],
+  cognition: ['qwen-35-9b', 'starfallen-24b', 'gemma4-meromero-26b-a4b'],
+  movement: ['qwen-35-9b', 'starfallen-24b', 'gemma4-meromero-26b-a4b'],
+  rag: ['harrier-oss-v1-0-6b', 'qwen3-embed-4b'],
+  tts: [
+    'harmonyspeech',
+    'kitten-tts-micro',
+    'kitten-tts-mini',
+    'kitten-tts-nano',
+    'openvoice_v1',
+    'openvoice_v2',
+    'chatterbox',
+    'chatterbox_multilingual',
+    'chatterbox_turbo',
+  ],
+  stt: ['faster-whisper-tiny', 'faster-whisper-large-v3-turbo'],
+  vision: ['qwen-35-9b', 'gemma4-meromero-26b-a4b'],
   imagination: [],
 };
 
