@@ -25,6 +25,10 @@ import { RegisterScreen } from '../screens/auth/RegisterScreen';
 import { SyncSettingsScreen } from '../screens/settings/SyncSettingsScreen';
 import { BackgroundSettingsScreen } from '../screens/settings/BackgroundSettingsScreen';
 import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen';
+import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen';
+import { AppearanceSettingsScreen } from '../screens/settings/AppearanceSettingsScreen';
+import { AIConversationSettingsScreen } from '../screens/settings/AIConversationSettingsScreen';
+import { HelpSupportSettingsScreen } from '../screens/settings/HelpSupportSettingsScreen';
 
 export type RootStackParamList = {
   /** Tab container — the primary navigation surface (5-tab layout) */
@@ -70,6 +74,10 @@ export type RootStackParamList = {
     configId?: string;
   };
   DatabaseTableViewer?: undefined;
+  AccountSettings: undefined;
+  AppearanceSettings: undefined;
+  AIConversationSettings: undefined;
+  HelpSupportSettings: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -147,6 +155,10 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           name="ProfileSettings"
           component={ProfileSettingsScreen}
         />
+        <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
+        <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
+        <Stack.Screen name="AIConversationSettings" component={AIConversationSettingsScreen} />
+        <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />
         <Stack.Screen
           name="ComingSoon"
           component={ComingSoonScreen}

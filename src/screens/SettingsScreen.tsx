@@ -4,7 +4,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
-import { Switch } from 'react-native-paper';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
@@ -14,11 +13,13 @@ import { ThemedCard } from '../components/themed/ThemedCard';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
-import { hexToRgba } from '../utils/colorUtils';
+import {
+  SettingsLinkRow,
+  SettingsToggleRow,
+  SettingsDetailRow,
+} from '../components/settings/SettingsRows';
 
 type ConnectionType = 'Harmony Link' | 'Cloud' | 'Not configured';
-
-const APP_VERSION = '0.0.1';
 
 // AsyncStorage keys for toggle settings
 const STORAGE_KEYS = {
@@ -57,7 +58,7 @@ export const SettingsScreen: React.FC = () => {
     // Last sync time
     const ts = await AsyncStorage.getItem('last_sync_timestamp');
     if (ts) {
-      const date = new Date(parseInt(ts) * 1000);
+      const date = new Date(parseInt(ts, 10) * 1000);
       setLastSyncTime(date.toLocaleString());
     }
   }, [t]);
@@ -100,10 +101,6 @@ export const SettingsScreen: React.FC = () => {
     } catch {
       // ignore
     }
-  };
-
-  const navigateToComingSoon = (titleKey: string, icon: string, descriptionKey: string) => {
-    navigation.navigate('ComingSoon', { titleKey, icon, descriptionKey });
   };
 
   const connectionStatusColor = connectionStatus.color;
@@ -195,48 +192,40 @@ export const SettingsScreen: React.FC = () => {
           </ThemedCard>
         </TouchableOpacity>
 
-        {/* ── Account & Security ── */}
+        {/* ── Account (submenu) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('security')} style={styles.sectionHeader} />
+          <SectionHeader title={t('account')} style={styles.sectionHeader} />
           <SettingsLinkRow
             icon="account-circle"
-            label={t('userProfile')}
-            onPress={() => navigation.navigate('ProfileSettings')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="fingerprint"
-            label={t('biometricLock')}
-            onPress={() => navigation.navigate('BiometricLockSettings')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="lock-reset"
-            label={t('resetPassword')}
-            onPress={() => navigateToComingSoon('resetPassword', 'lock-reset', 'comingSoonResetPassword')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="devices"
-            label={t('activeSessions')}
-            onPress={() => navigateToComingSoon('activeSessions', 'devices', 'comingSoonActiveSessions')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="delete-forever"
-            label={t('deleteAccount')}
-            onPress={() => navigateToComingSoon('deleteAccount', 'delete-forever', 'comingSoonDeleteAccount')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="account-cancel"
-            label={t('blockedUsers')}
-            onPress={() => navigateToComingSoon('blockedUsers', 'account-cancel', 'comingSoonBlockedUsers')}
+            label={t('account')}
+            onPress={() => navigation.navigate('AccountSettings')}
             theme={theme}
           />
         </ThemedCard>
 
-        {/* ── Notifications & Feedback ── */}
+        {/* ── Appearance (submenu) ── */}
+        <ThemedCard elevated accentStripe style={styles.card}>
+          <SectionHeader title={t('appearance')} style={styles.sectionHeader} />
+          <SettingsLinkRow
+            icon="palette"
+            label={t('appearance')}
+            onPress={() => navigation.navigate('AppearanceSettings')}
+            theme={theme}
+          />
+        </ThemedCard>
+
+        {/* ── AI & Conversation (submenu) ── */}
+        <ThemedCard elevated accentStripe style={styles.card}>
+          <SectionHeader title={t('aiConversation')} style={styles.sectionHeader} />
+          <SettingsLinkRow
+            icon="swap-horizontal-bold"
+            label={t('aiConversation')}
+            onPress={() => navigation.navigate('AIConversationSettings')}
+            theme={theme}
+          />
+        </ThemedCard>
+
+        {/* ── Notifications & Feedback (inline toggles) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('notifications')} style={styles.sectionHeader} />
           <SettingsToggleRow
@@ -252,6 +241,7 @@ export const SettingsScreen: React.FC = () => {
             value={soundEffects}
             onValueChange={(v) => toggleAndStore(STORAGE_KEYS.SOUND_EFFECTS, v, setSoundEffects)}
             theme={theme}
+            showSeparator
           />
           <SettingsToggleRow
             icon="vibrate"
@@ -259,100 +249,19 @@ export const SettingsScreen: React.FC = () => {
             value={hapticFeedback}
             onValueChange={(v) => toggleAndStore(STORAGE_KEYS.HAPTIC_FEEDBACK, v, setHapticFeedback)}
             theme={theme}
+            showSeparator
           />
         </ThemedCard>
 
-        {/* ── Appearance & Display ── */}
-        <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('appearance')} style={styles.sectionHeader} />
-          <SettingsLinkRow
-            icon="palette"
-            label={t('appearanceTheme')}
-            onPress={() => navigation.navigate('ThemeSettings')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="translate"
-            label={t('switchLanguage')}
-            onPress={() => navigateToComingSoon('switchLanguage', 'translate', 'comingSoonSwitchLanguage')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="format-size"
-            label={t('fontSize')}
-            onPress={() => navigateToComingSoon('fontSize', 'format-size', 'comingSoonFontSize')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="cellphone"
-            label={t('appIcon')}
-            onPress={() => navigateToComingSoon('appIcon', 'cellphone', 'comingSoonAppIcon')}
-            theme={theme}
-          />
-        </ThemedCard>
-
-        {/* ── AI & Conversation ── */}
-        <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('aiConversation')} style={styles.sectionHeader} />
-          <SettingsLinkRow
-            icon="swap-horizontal-bold"
-            label={t('streamingResponses')}
-            onPress={() => navigateToComingSoon('streamingResponses', 'swap-horizontal-bold', 'comingSoonStreamingResponses')}
-            theme={theme}
-          />
-        </ThemedCard>
-
-        {/* ── Billing & Purchases ── */}
-        <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('billing')} style={styles.sectionHeader} />
-          <SettingsLinkRow
-            icon="credit-card"
-            label={t('manageSubscription')}
-            onPress={() => navigateToComingSoon('manageSubscription', 'credit-card', 'comingSoonManageSubscription')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="restore"
-            label={t('restorePurchases')}
-            onPress={() => navigateToComingSoon('restorePurchases', 'restore', 'comingSoonRestorePurchases')}
-            theme={theme}
-          />
-        </ThemedCard>
-
-        {/* ── Support & Legal ── */}
+        {/* ── Help & Support (submenu) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('support')} style={styles.sectionHeader} />
           <SettingsLinkRow
             icon="help-circle"
-            label={t('helpCenter')}
-            onPress={() => navigateToComingSoon('helpCenter', 'help-circle', 'comingSoonHelpCenter')}
+            label={t('support')}
+            onPress={() => navigation.navigate('HelpSupportSettings')}
             theme={theme}
           />
-          <SettingsLinkRow
-            icon="bug"
-            label={t('reportBug')}
-            onPress={() => navigateToComingSoon('reportBug', 'bug', 'comingSoonReportBug')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="file-document"
-            label={t('termsOfService')}
-            onPress={() => navigateToComingSoon('termsOfService', 'file-document', 'comingSoonTermsOfService')}
-            theme={theme}
-          />
-          <SettingsLinkRow
-            icon="shield-account"
-            label={t('privacyPolicy')}
-            onPress={() => navigateToComingSoon('privacyPolicy', 'shield-account', 'comingSoonPrivacyPolicy')}
-            theme={theme}
-          />
-          <View>
-            <View style={styles.toggleRow}>
-              <SettingsIconPill name="information" color={theme.colors.accent.primary} size={20} />
-              <ThemedText style={styles.linkLabel}>{t('appVersion')}</ThemedText>
-              <ThemedText style={styles.linkLabel} variant="secondary">{`Harmony AI Chat v${APP_VERSION}`}</ThemedText>
-            </View>
-          </View>
         </ThemedCard>
 
         {/* ── Development Card (DEV only) ── */}
@@ -374,120 +283,6 @@ export const SettingsScreen: React.FC = () => {
   );
 };
 
-// ─── Local helper components ─────────────────────────────────────────────────
-
-/** Shared icon pill — used by all settings rows for visual consistency. */
-const SettingsIconPill: React.FC<{ name: string; color: string; size?: number }> = ({
-  name,
-  color,
-  size = 18,
-}) => (
-  <View style={[styles.iconPill, { backgroundColor: hexToRgba(color, 0.12) }]}>
-    <Icon name={name} size={size} color={color} />
-  </View>
-);
-
-interface SettingsDetailRowProps {
-  icon: string;
-  label: string;
-  value?: string;
-  valueComponent?: React.ReactNode;
-  theme: any;
-}
-
-const SettingsDetailRow: React.FC<SettingsDetailRowProps> = ({
-  icon,
-  label,
-  value,
-  valueComponent,
-  theme,
-}) => (
-  <View style={styles.detailRow}>
-    <View style={styles.detailLabel}>
-      <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={16} />
-      <ThemedText variant="secondary" size={13}>{label}</ThemedText>
-    </View>
-    {valueComponent ? (
-      valueComponent
-    ) : (
-      <ThemedText weight="medium" size={14}>{value ?? '—'}</ThemedText>
-    )}
-  </View>
-);
-
-interface SettingsLinkRowProps {
-  icon: string;
-  label: string;
-  onPress: () => void;
-  theme: any;
-  badge?: string;
-  showSeparator?: boolean;
-}
-
-const SettingsLinkRow: React.FC<SettingsLinkRowProps> = ({
-  icon,
-  label,
-  onPress,
-  theme,
-  badge,
-  showSeparator,
-}) => (
-  <View>
-    {showSeparator && (
-      <View style={[styles.linkSeparator, { backgroundColor: hexToRgba(theme.colors.border.default, 0.3) }]} />
-    )}
-    <TouchableOpacity
-      style={styles.linkRow}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={20} />
-      <ThemedText style={styles.linkLabel}>{label}</ThemedText>
-      {badge && (
-        <View style={[styles.badgeChip, { backgroundColor: hexToRgba(theme.colors.accent.primary, 0.15) }]}>
-          <ThemedText variant="accent" size={11} weight="medium">
-            {badge}
-          </ThemedText>
-        </View>
-      )}
-      <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
-    </TouchableOpacity>
-  </View>
-);
-
-interface SettingsToggleRowProps {
-  icon: string;
-  label: string;
-  value: boolean;
-  onValueChange: (value: boolean) => void;
-  theme: any;
-  showSeparator?: boolean;
-}
-
-const SettingsToggleRow: React.FC<SettingsToggleRowProps> = ({
-  icon,
-  label,
-  value,
-  onValueChange,
-  theme,
-  showSeparator,
-}) => (
-  <View>
-    {showSeparator && (
-      <View style={[styles.linkSeparator, { backgroundColor: hexToRgba(theme.colors.border.default, 0.3) }]} />
-    )}
-    <View style={styles.toggleRow}>
-      <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={20} />
-      <ThemedText style={styles.linkLabel}>{label}</ThemedText>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        color={theme.colors.accent.primary}
-      />
-    </View>
-  </View>
-);
-
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -504,28 +299,6 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     marginTop: 0,
-  },
-  /* Icon pill — shared container for all settings icons */
-  iconPill: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  detailLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    flex: 1,
   },
   tapHintRow: {
     flexDirection: 'row',
@@ -545,31 +318,5 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-  },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-  },
-  linkSeparator: {
-    height: StyleSheet.hairlineWidth,
-    marginHorizontal: 16,
-  },
-  linkLabel: {
-    flex: 1,
-    fontSize: 15,
-  },
-  badgeChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginRight: 8,
   },
 });

@@ -207,6 +207,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - EntityConfigEditScreen, EntityConfigScreen, LandingScreen, SettingsScreen, ModuleConfigEditScreen
 
 #### Changed
+- Settings menu reorganized into sub-menus to reduce clutter on the main Settings screen
+  - Account & Security and Billing & Purchases grouped under an "Account" sub-menu
+  - Appearance options (theme, language, font size, app icon) grouped under an "Appearance" sub-menu
+  - AI & Conversation options grouped under their own sub-menu
+  - Support & Legal options grouped under a "Help & Support" sub-menu
+  - Frequently used controls (Connection status, Sync status, Notifications toggles) remain directly on the main Settings screen
 - "Reset Security Mode" button moved from SyncSettingsScreen to ConnectionSetupScreen
   - Button now appears alongside other connection management actions (Connect & Pair, Reconnect, Unpair Device)
   - Security mode display row remains in SyncSettingsScreen
