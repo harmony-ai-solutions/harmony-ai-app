@@ -10,5 +10,11 @@
   "mainStreamTime": "Main Stream Time (ms)",
   "transitionStreamTime": "Transition Stream Time (ms)",
   "maxBufferCount": "Max Buffer Count",
-  "configName": "Config Name *"
+  "configName": "Config Name *",
+  "model": "Model",
+  "modelLoading": "Loading available models…",
+  "modelNoModels": "No models available — enter manually",
+  "modelCustom": "Custom model…",
+  "modelFallbackHint": "Showing offline defaults (catalog unreachable)",
+  "modelSelectPlaceholder": "Select a model"
 }

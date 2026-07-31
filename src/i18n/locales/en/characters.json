@@ -30,5 +30,14 @@
   "imageError": "Could not read image data.",
   "addImageFailed": "Failed to add image.",
   "setPrimaryFailed": "Failed to set primary image.",
-  "deleteImageFailed": "Failed to delete image."
+  "deleteImageFailed": "Failed to delete image.",
+  "importCard": "Import Card",
+  "importCardButton": "Import Character Card (PNG / JSON)",
+  "importCardPrompt": "Choose a character card (PNG or JSON)",
+  "importSuccess": "Imported {{name}}",
+  "importFailed": "Import failed",
+  "importUnsupportedType": "Unsupported file type — use PNG or JSON",
+  "importParseFailed": "Could not read this character card",
+  "importNameRequired": "The card must have a name",
+  "importReadFailed": "Could not read the file"
 }

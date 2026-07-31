@@ -28,10 +28,15 @@ import { ThemedText } from '../../components/themed/ThemedText';
 import { useAppAlert } from '../../contexts/AppAlertContext';
 import { FormField } from '../../components/config/FormField';
 import { AdvancedSamplingParams } from '../../components/config/AdvancedSamplingParams';
+import { SoulbitsModelSelect } from '../../components/config/SoulbitsModelSelect';
 import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
 import { MODULE_DEFAULTS, PROVIDER_DEFAULTS } from '../../constants/moduleDefaults';
 import { PROVIDER_SCHEMAS } from '../../constants/providerFieldSchemas';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useSyncConnection } from '../../contexts/SyncConnectionContext';
+import { CLOUD_HOSTS } from '../../config/cloud';
+import { injectSoulbitsToken } from '../../services/cloud/soulbitsTokenSync';
+import AuthService from '../../services/auth/AuthService';
 import {
   createBackendConfig, updateBackendConfig, getBackendConfig, deleteBackendConfig,
   createCognitionConfig, updateCognitionConfig, getCognitionConfig, deleteCognitionConfig,
@@ -103,6 +108,28 @@ type ModuleConfigEditNavigationProp = NativeStackNavigationProp<RootStackParamLi
 
 const OPENAI_FAMILY = ['openai', 'openaicompatible', 'openrouter', 'google', 'xai', 'anthropic'];
 
+/** Beta-aware inference host, used to prefill the Soulbits Cloud base_url when connected. */
+function soulbitsCloudBaseUrl(cloudConnected: boolean): string | undefined {
+  return cloudConnected ? CLOUD_HOSTS.inference : undefined;
+}
+
+/**
+ * True when the api_key field holds an injected cloud PASETO (v4.local.*) that
+ * must be shown read-only — same prefix heuristic the engine uses to switch
+ * between PASETO mode and plain API-key mode (`strings.HasPrefix(apiKey,
+ * "v4.local.")`). Prevents the user from copying/editing the managed credential.
+ */
+function isManagedSoulbitsApiKey(
+  providerType: string,
+  fieldKey: string,
+  apiKey: string | undefined,
+): boolean {
+  return providerType === 'soulbitscloud'
+    && fieldKey === 'api_key'
+    && typeof apiKey === 'string'
+    && apiKey.startsWith('v4.local.');
+}
+
 const MODULE_REPOSITORIES: Record<string, {
   create: (config: any) => Promise<string>;
   update: (config: any) => Promise<void>;
@@ -150,6 +177,8 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const { showAlert } = useAppAlert();
   const { t } = useTranslation('moduleConfig');
   const { bottom: safeBottom } = useSafeAreaInsets();
+  const { isConnected, connectionStatus } = useSyncConnection();
+  const cloudConnected = connectionStatus?.mode === 'cloud' && isConnected === true;
   
   const { moduleType, configId } = route.params;
   const isCreate = !configId;
@@ -323,7 +352,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
     }));
   };
 
-  const handleProviderSwitch = (slot: string, providerType: string) => {
+  const handleProviderSwitch = async (slot: string, providerType: string) => {
     if (slot === 'provider') {
       handleModuleFieldChange('provider', providerType);
     } else if (slot === 'transcription') {
@@ -334,6 +363,26 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
     // Reset provider form values to defaults for the new type
     const defaults = PROVIDER_DEFAULTS[providerType] || {};
+
+    // Feature 1: when switching TO Soulbits Cloud while connected, prefill the
+    // beta-aware inference endpoint (overrides the prod default baked into PROVIDER_DEFAULTS).
+    if (providerType === 'soulbitscloud') {
+      const prefillUrl = soulbitsCloudBaseUrl(cloudConnected);
+      if (prefillUrl) {
+        defaults.base_url = prefillUrl;
+      }
+      // Pre-seed the cloud PASETO as api_key (read-only in the form) so new
+      // configs ship with a working credential without manual entry.
+      try {
+        const paseto = await AuthService.getToken();
+        if (paseto) {
+          defaults.api_key = paseto;
+        }
+      } catch {
+        // No cloud token — standalone mode. Leave api_key empty for the user.
+      }
+    }
+
     setProviderForms(prev => ({
       ...prev,
       [slot]: {
@@ -368,14 +417,23 @@ export const ModuleConfigEditScreen: React.FC = () => {
       providerConfig.name = `${formValues.name || 'Config'} - ${providerType}`;
     }
 
+    // Inject the current cloud PASETO as api_key for NEW soulbitscloud configs
+    // (belt-and-braces on top of the form prefill — catches token refreshes that
+    // happened while the form was open). No-op for updates / standalone mode.
+    const seededConfig = await injectSoulbitsToken({
+      providerType,
+      isCreate: !form.providerConfigId,
+      providerConfig,
+    });
+
     try {
       if (form.providerConfigId) {
         // Update existing
-        await pRepo.update({ ...providerConfig, id: form.providerConfigId });
+        await pRepo.update({ ...seededConfig, id: form.providerConfigId });
         return form.providerConfigId;
       } else {
         // Create new
-        const newId = await pRepo.create(providerConfig);
+        const newId = await pRepo.create(seededConfig);
         return newId;
       }
     } catch (error) {
@@ -599,14 +657,29 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
     return (
       <View style={styles.providerFieldsContainer}>
-        {fields.map((field) => (
-          <FormField
-            key={field.key}
-            field={field}
-            value={form.values[field.key]}
-            onChange={(key, value) => handleProviderFieldChange(slot, key, value)}
-          />
-        ))}
+        {fields.map((field) => {
+          if (providerType === 'soulbitscloud' && field.key === 'model') {
+            return (
+              <View key={field.key} style={{ marginBottom: 16 }}>
+                <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
+                <SoulbitsModelSelect
+                  moduleType={moduleType}
+                  value={form.values.model ?? ''}
+                  onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
+                />
+              </View>
+            );
+          }
+          return (
+            <FormField
+              key={field.key}
+              field={field}
+              value={form.values[field.key]}
+              onChange={(key, value) => handleProviderFieldChange(slot, key, value)}
+              readOnly={isManagedSoulbitsApiKey(providerType, field.key, form.values.api_key)}
+            />
+          );
+        })}
 
         {/* Advanced Sampling Params for OpenAI family */}
         {isOpenAIFamily && (

@@ -4,14 +4,20 @@ import { FieldDefinition } from '../../constants/providerFieldSchemas';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { SelectPicker } from './SelectPicker';
 
 interface FormFieldProps {
   field: FieldDefinition;
   value: any;
   onChange: (key: string, value: any) => void;
+  /**
+   * Render the field as read-only. For password fields this also hides the
+   * reveal-eye and disables selection/copy so the value cannot be exposed.
+   */
+  readOnly?: boolean;
 }
 
-export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange }) => {
+export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, readOnly = false }) => {
   const { theme } = useAppTheme();
   const [showPassword, setShowPassword] = useState(false);
 
@@ -33,6 +39,29 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange }) 
   const renderInput = () => {
     switch (field.type) {
       case 'password':
+        if (readOnly) {
+          // Managed credential (e.g. injected cloud PASETO) — mask, lock, and
+          // block selection so the value can't be copied or edited.
+          return (
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  color: theme.colors.text.muted,
+                  borderColor: theme.colors.border.default,
+                  backgroundColor: theme.colors.background.base,
+                },
+              ]}
+              value={value?.toString() || ''}
+              editable={false}
+              selectTextOnFocus={false}
+              secureTextEntry
+              contextMenuHidden
+              placeholder={field.placeholder}
+              placeholderTextColor={theme.colors.text.muted}
+            />
+          );
+        }
         return (
           <View style={styles.passwordContainer}>
             <TextInput
@@ -79,6 +108,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange }) 
             onChangeText={handleChange}
             placeholder={field.placeholder}
             keyboardType="decimal-pad"
+            editable={!readOnly}
             placeholderTextColor={theme.colors.text.muted}
           />
         );
@@ -87,6 +117,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange }) 
         return (
           <Switch
             value={value === true}
+            disabled={readOnly}
             onValueChange={(val) => onChange(field.key, val)}
             trackColor={{ false: theme.colors.border.default, true: theme.colors.accent.primary }}
           />
@@ -106,26 +137,19 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange }) 
             value={value?.toString() || ''}
             onChangeText={(text) => onChange(field.key, text)}
             placeholder={field.placeholder}
+            editable={!readOnly}
             placeholderTextColor={theme.colors.text.muted}
           />
         );
       
       case 'select':
         return (
-          <TextInput
-            style={[
-              styles.input,
-              {
-                color: theme.colors.text.primary,
-                borderColor: theme.colors.border.default,
-                backgroundColor: theme.colors.background.base,
-              },
-            ]}
-            value={value?.toString() || ''}
-            onChangeText={handleChange}
+          <SelectPicker
+            label={field.label}
+            value={value?.toString() ?? ''}
+            options={field.options ?? []}
+            onChange={(v) => onChange(field.key, v)}
             placeholder={field.placeholder}
-            placeholderTextColor={theme.colors.text.muted}
-            editable={false}
           />
         );
       
@@ -143,6 +167,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange }) 
             value={value?.toString() || ''}
             onChangeText={handleChange}
             placeholder={field.placeholder}
+            editable={!readOnly}
             placeholderTextColor={theme.colors.text.muted}
           />
         );

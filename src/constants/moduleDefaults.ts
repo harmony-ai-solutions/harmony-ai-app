@@ -174,7 +174,7 @@ export const PROVIDER_DEFAULTS: Record<string, Record<string, any>> = {
     name: '',
     base_url: 'https://api.soulbits.app',
     api_key: '',
-    model: 'soulchat-v1',
+    model: 'qwen-35-9b',
     sampling_preset_name: '',
     extra_params: '{}',
     max_tokens: -1,

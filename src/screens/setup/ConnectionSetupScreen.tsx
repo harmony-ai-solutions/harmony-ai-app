@@ -425,15 +425,17 @@ export const ConnectionSetupScreen: React.FC = () => {
   };
 
   const handleCertModalChoice = async (mode: 'insecure-ssl' | 'unencrypted' | 'abort') => {
-    hasSelectedSecurityModeRef.current = true;
     setShowCertModal(false);
 
     if (mode === 'abort') {
+      hasSelectedSecurityModeRef.current = false;
       setStatus('Connection aborted by user');
       setIsManuallyConnecting(false);
       showToast('Connection cancelled');
       return;
     }
+
+    hasSelectedSecurityModeRef.current = true;
 
     try {
       await ConnectionStateManager.saveSecurityMode(mode);
@@ -483,6 +485,9 @@ export const ConnectionSetupScreen: React.FC = () => {
 
     const handleHandshakeAccepted = async (payload: any) => {
       log.info('Handshake accepted');
+      // Fresh pairing flow — the user hasn't made a security mode choice yet,
+      // so a subsequent cert failure must re-prompt (see handleCertVerificationFailed).
+      hasSelectedSecurityModeRef.current = false;
       setStatus('Handshake accepted! Saving credentials...');
 
       try {
@@ -528,16 +533,46 @@ export const ConnectionSetupScreen: React.FC = () => {
 
     const handleCertVerificationFailed = (error: any) => {
       log.info('Certificate verification failed:', error);
+
       if (!hasSelectedSecurityModeRef.current) {
+        // User hasn't chosen a security mode in the current pairing flow —
+        // show the certificate choice popup directly.
         setStatus('Certificate verification failed');
         setShowCertModal(true);
-      } else {
-        log.info('Ignoring cert error - user already selected security mode');
+        return;
       }
+
+      // The user already picked a mode, but the secure connection still
+      // failed to verify the server certificate. Inform them and offer to
+      // reset the security mode so they can choose a different method
+      // (e.g. insecure-ssl for self-signed certs).
+      log.info('Cert verification failed after mode selection - offering security mode reset');
+      setStatus('Certificate verification failed');
+      showAlert(
+        t('certResetTitle'),
+        t('certResetMessage'),
+        [
+          { text: t('common:cancel'), style: 'cancel' },
+          {
+            text: t('certResetConfirm'),
+            onPress: async () => {
+              try {
+                await ConnectionStateManager.clearSecurityMode();
+                hasSelectedSecurityModeRef.current = false;
+                setSecurityMode('');
+                setShowCertModal(true);
+              } catch (e) {
+                log.error('Failed to reset security mode:', e);
+              }
+            },
+          },
+        ],
+      );
     };
 
     const handleCredentialsCleared = () => {
       log.info('Credentials cleared, resetting state');
+      hasSelectedSecurityModeRef.current = false;
       setUrl('192.168.1.');
       setPort('8080');
       setSecurityMode('');
@@ -805,6 +840,7 @@ export const ConnectionSetupScreen: React.FC = () => {
                           text: t('unpair'),
                           style: 'destructive',
                           onPress: async () => {
+                            hasSelectedSecurityModeRef.current = false;
                             await ConnectionStateManager.clearAllCredentials();
                             await ConnectionStateManager.clearSecurityMode();
                             connectionManager.disconnectConnection('sync');
@@ -825,16 +861,25 @@ export const ConnectionSetupScreen: React.FC = () => {
                   {securityMode && (
                     <ThemedButton
                       label={t('resetSecurityMode')}
-                      onPress={async () => {
+                      onPress={() => {
                         showAlert(t('resetSecurityTitle'), t('resetSecurityMessage'), [
                           { text: t('common:cancel'), style: 'cancel' },
                           {
                             text: t('reset'),
                             style: 'destructive',
                             onPress: async () => {
-                              await ConnectionStateManager.clearSecurityMode();
-                              setSecurityMode('secure');
-                              showToast('Security mode reset');
+                              try {
+                                await ConnectionStateManager.clearSecurityMode();
+                                hasSelectedSecurityModeRef.current = false;
+                                setSecurityMode('');
+                                showToast(t('resetToast'));
+                                // Continue to the certificate choice popup so the
+                                // user can pick insecure-ssl / unencrypted / abort
+                                // right away instead of waiting for another attempt.
+                                setShowCertModal(true);
+                              } catch (e) {
+                                log.error('Failed to reset security mode:', e);
+                              }
                             },
                           },
                         ]);

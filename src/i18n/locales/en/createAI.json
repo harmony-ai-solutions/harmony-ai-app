@@ -1,5 +1,10 @@
 {
   "title": "Create AI Partner",
+  "profileLabel": "Character Profile",
+  "createNewProfile": "Create new profile",
+  "profileHint": "Link an existing character profile or create a new one.",
+  "selectProfile": "Select a character profile",
+  "noDescription": "No description",
   "nameLabel": "Name *",
   "namePlaceholder": "e.g. Aria, Max, Luna...",
   "personalityLabel": "Personality (optional)",
@@ -8,9 +13,6 @@
   "changePhoto": "Change photo",
   "advancedSettings": "ADVANCED SETTINGS",
   "loadingConfigs": "Loading module configs...",
-  "noConfigsWarning": "⚠ No AI modules configured.",
-  "noConfigsDetail": "Connect to Harmony Link or Cloud to configure AI backends.",
-  "connectionSetup": "→ Connection Setup",
   "moduleBackend": "Backend",
   "moduleCognition": "Cognition",
   "moduleTTS": "Text-to-Speech (TTS)",
@@ -22,5 +24,7 @@
   "startChatting": "Start Chatting  →",
   "nameRequired": "Name Required",
   "nameRequiredMessage": "Please give your AI a name.",
+  "aliasConflictTitle": "Name already in use",
+  "aliasConflictMessage": "Another AI partner already uses this name. Please choose a different name.",
   "createFailed": "Failed to create AI partner: {{message}}"
 }

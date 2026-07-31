@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -6,12 +6,15 @@ import {
   TextInput,
   ActivityIndicator,
   RefreshControl,
+  Animated,
+  TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
+import { pick } from '@react-native-documents/picker';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
@@ -33,11 +36,27 @@ import {
 } from '../database/repositories/characters';
 import { createDataURL } from '../database/base64';
 import { CharacterProfile } from '../database/models';
+import { importCharacterCardFromFile, CharacterCardImportError } from '../services/CharacterCardImportService';
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
 // Using 'any' here avoids CompositeNavigationProp boilerplate while
 // React Navigation v7 resolves routes across nested navigators at runtime.
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+function importMessageKey(code?: string): string {
+  switch (code) {
+    case 'unsupported_type':
+      return 'importUnsupportedType';
+    case 'parse_failed':
+      return 'importParseFailed';
+    case 'name_required':
+      return 'importNameRequired';
+    case 'read_failed':
+      return 'importReadFailed';
+    default:
+      return 'importParseFailed';
+  }
+}
 
 export const CharactersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -54,6 +73,8 @@ export const CharactersScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const expandAnim = useRef(new Animated.Value(0)).current;
 
   // Reload on focus (handles return from edit screen)
   useFocusEffect(
@@ -148,11 +169,61 @@ export const CharactersScreen: React.FC = () => {
     navigation.navigate('CharacterProfileEdit', {}); // no profileId = create mode
   };
 
+  const handleImportCard = async () => {
+    let docs;
+    try {
+      docs = await pick({ type: ['image/png', 'application/json'] });
+    } catch {
+      // User cancelled or picker error — silent.
+      return;
+    }
+    const doc = docs[0];
+    if (!doc) return;
+    try {
+      await importCharacterCardFromFile(doc.uri, doc.type ?? '');
+      await loadProfiles();
+    } catch (e) {
+      const code = e instanceof CharacterCardImportError ? e.code : undefined;
+      const messageKey = importMessageKey(code);
+      showAlert(t('importFailed'), t(messageKey));
+    }
+  };
+
+  // ── FAB speed dial (create / import) ───────────────────────────────────
+  const openSheet = useCallback(() => {
+    setExpanded(true);
+    Animated.timing(expandAnim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+  }, [expandAnim]);
+
+  const closeSheet = useCallback(() => {
+    Animated.timing(expandAnim, { toValue: 0, duration: 180, useNativeDriver: true }).start(
+      ({ finished }) => {
+        if (finished) setExpanded(false);
+      },
+    );
+  }, [expandAnim]);
+
+  const toggleSheet = useCallback(() => {
+    if (expanded) {
+      closeSheet();
+    } else {
+      openSheet();
+    }
+  }, [expanded, openSheet, closeSheet]);
+
+  const rotate = expandAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] });
+  const createOpacity = expandAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+  const createTranslateY = expandAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] });
+  const importOpacity = expandAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+  const importTranslateY = expandAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] });
+
   if (!theme) return null;
 
   const accent = theme.colors.accent.primary;
   const baseHex = theme.colors.background.base;
   const inputBg = hexToRgba(baseHex, 0.55);
+  const speedActionBg = hexToRgba(theme.colors.background.elevated, 0.94);
+  const speedActionBorder = hexToRgba(accent, 0.3);
 
   return (
     <ThemedView style={styles.container}>
@@ -253,11 +324,78 @@ export const CharactersScreen: React.FC = () => {
         )}
       />
 
-      {/* FAB — hide during initial load */}
+      {/* FAB speed dial — hide during initial load */}
       {!isLoading && (
-        <ThemedFab icon="plus" onPress={handleCreateNew} style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }} />
-      )}
+        <>
+          {expanded && (
+            <TouchableOpacity
+              style={[StyleSheet.absoluteFill, styles.backdrop]}
+              activeOpacity={1}
+              onPress={closeSheet}
+              accessibilityLabel={t('common:cancel')}
+            />
+          )}
 
+          <View style={[styles.fabGroup, { bottom: TAB_BAR_FAB_OFFSET + safeBottom }]}>
+            {/* Import character card (PNG / JSON) */}
+            <Animated.View
+              style={[
+                styles.speedAction,
+                styles.speedActionImport,
+                { opacity: importOpacity, transform: [{ translateY: importTranslateY }] },
+              ]}
+              pointerEvents={expanded ? 'auto' : 'none'}
+            >
+              <TouchableOpacity
+                style={[styles.speedActionTouch, { backgroundColor: speedActionBg, borderColor: speedActionBorder }]}
+                onPress={() => {
+                  closeSheet();
+                  handleImportCard();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={t('importCardButton')}
+                testID="import-character-card"
+              >
+                <MaterialCommunityIcons name="file-import-outline" size={18} color={accent} />
+                <ThemedText size={13} weight="bold">
+                  {t('importCardButton')}
+                </ThemedText>
+              </TouchableOpacity>
+            </Animated.View>
+
+            {/* Create new profile */}
+            <Animated.View
+              style={[
+                styles.speedAction,
+                styles.speedActionCreate,
+                { opacity: createOpacity, transform: [{ translateY: createTranslateY }] },
+              ]}
+              pointerEvents={expanded ? 'auto' : 'none'}
+            >
+              <TouchableOpacity
+                style={[styles.speedActionTouch, { backgroundColor: speedActionBg, borderColor: speedActionBorder }]}
+                onPress={() => {
+                  closeSheet();
+                  handleCreateNew();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={t('createProfile')}
+                testID="create-profile-option"
+              >
+                <MaterialCommunityIcons name="account-plus-outline" size={18} color={accent} />
+                <ThemedText size={13} weight="bold">
+                  {t('createProfile')}
+                </ThemedText>
+              </TouchableOpacity>
+            </Animated.View>
+
+            {/* Main FAB — rotates into an ✕ when open */}
+            <Animated.View style={{ transform: [{ rotate }] }}>
+              <ThemedFab icon="plus" onPress={toggleSheet} style={styles.fabFab} />
+            </Animated.View>
+          </View>
+        </>
+      )}
     </ThemedView>
   );
 };
@@ -277,6 +415,46 @@ const styles = StyleSheet.create({
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15, paddingVertical: 0 },
   clearIcon: { marginLeft: 6 },
+  fabGroup: {
+    position: 'absolute',
+    right: 24,
+    alignItems: 'flex-end',
+    zIndex: 10,
+    elevation: 10,
+  },
+  fabFab: {
+    bottom: 0,
+    right: 0,
+  },
+  backdrop: {
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    zIndex: 5,
+  },
+  speedAction: {
+    position: 'absolute',
+    right: 0,
+    zIndex: 10,
+  },
+  speedActionImport: {
+    bottom: 120,
+  },
+  speedActionCreate: {
+    bottom: 68,
+  },
+  speedActionTouch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 6,
+  },
   listContent: { padding: 12, paddingBottom: 80 },
   emptyListContent: { flex: 1, justifyContent: 'center' },
   columnWrapper: { gap: 12, marginBottom: 12 },

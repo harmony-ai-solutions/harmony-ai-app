@@ -31,6 +31,7 @@ Harmony AI App is a React Native Android application that serves as a mobile fro
 - [X] Backend integration (Harmony Link API)
 - [X] Data Sync with Backend
 - [X] Character selection
+- [X] Import Tavern Card V1/V2/V3 character cards (PNG or JSON)
 - [X] AI Audio message support (STT/TTS)
 - [ ] AI Image viewing and generation
 

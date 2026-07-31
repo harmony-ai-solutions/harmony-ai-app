@@ -91,6 +91,8 @@ import {
 import {
   createSoulbitsCloudProviderConfig,
   getSoulbitsCloudProviderConfig,
+  getAllSoulbitsCloudProviderConfigs,
+  updateAllSoulbitsCloudApiKeys,
   deleteSoulbitsCloudProviderConfig,
 } from '../../repositories/providers/SoulbitsCloudProviderConfigRepository';
 
@@ -514,6 +516,51 @@ describe('providers repository', () => {
       await deleteSoulbitsCloudProviderConfig(id, true);
       const afterDelete = await getSoulbitsCloudProviderConfig(id, true);
       expect(afterDelete).toBeNull();
+    });
+
+    it('updateAllSoulbitsCloudApiKeys refreshes every non-deleted row', async () => {
+      const make = (name: string, apiKey: string) =>
+        createSoulbitsCloudProviderConfig({
+          name,
+          base_url: 'https://api.soulbits.app',
+          api_key: apiKey,
+          model: '',
+          max_tokens: 0,
+          max_completion_tokens: 0,
+          temperature: 0,
+          top_p: 0,
+          frequency_penalty: 0,
+          presence_penalty: 0,
+          n: 0,
+          stop_tokens: '[]',
+          seed: 0,
+          response_format: '',
+          sampling_preset_name: '',
+          extra_params: '{}',
+          voice: '',
+          speed: 1.0,
+          format: 'mp3',
+          image_aspect_ratio: '1:1',
+          image_size: '1k',
+        });
+
+      const active1 = await make('Active 1', 'token-old-1');
+      const active2 = await make('Active 2', 'token-old-2');
+      const softDeleted = await make('Soft-Deleted', 'token-old-3');
+      await deleteSoulbitsCloudProviderConfig(softDeleted, false); // soft delete
+
+      await updateAllSoulbitsCloudApiKeys('paseto-v4.local.refreshed');
+
+      const all = await getAllSoulbitsCloudProviderConfigs(true);
+      const byId = new Map(all.map(c => [c.id, c]));
+
+      // Active rows got the new token.
+      expect(byId.get(active1)!.api_key).toBe('paseto-v4.local.refreshed');
+      expect(byId.get(active2)!.api_key).toBe('paseto-v4.local.refreshed');
+      // Soft-deleted row is left untouched.
+      expect(byId.get(softDeleted)!.api_key).toBe('token-old-3');
+      // Non-deleted listing only returns the two active rows.
+      expect(await getAllSoulbitsCloudProviderConfigs()).toHaveLength(2);
     });
   });
 });

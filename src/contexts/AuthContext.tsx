@@ -28,6 +28,7 @@ import AuthService, {
   type UserProfile,
 } from '../services/auth/AuthService';
 import { cloudSessionService } from '../services/cloud/CloudSessionService';
+import { startSoulbitsTokenSync } from '../services/cloud/soulbitsTokenSync';
 import { createLogger } from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -138,6 +139,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => {
       AuthService.off('auth:expired', onExpired);
     };
+  }, []);
+
+  // ── Propagate refreshed cloud PASETO into soulbitscloud provider rows ──
+  // Subscribes to `auth:changed` (login + refresh) and bulk-updates the api_key
+  // of every non-deleted soulbitscloud provider config. DB is guaranteed ready:
+  // AuthProvider sits BELOW DatabaseProvider in App.tsx.
+  useEffect(() => {
+    return startSoulbitsTokenSync();
   }, []);
 
   // ── Listen for auth:changed events (login/refresh) ────────────────────
