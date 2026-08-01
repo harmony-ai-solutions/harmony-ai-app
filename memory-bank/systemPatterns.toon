@@ -57,6 +57,8 @@
 - Advanced sampling params: typical_p, tfs, dry_multiplier, dry_base, dry_allowed_length, dry_sequence_breakers, xtc_probability, xtc_threshold
 - Shared isProviderConfigInUse() helper with UNION ALL for existence checks (replaces 8 separate queries)
 - Model field unification: single `model` column per provider config table (migration 000030)
+- Cloud credential propagation pattern (soulbitscloud): app-side cloud PASETO is injected as `api_key` on NEW provider configs (`injectSoulbitsToken`, create-only) and kept fresh by subscribing to `AuthService.auth:changed` (`startSoulbitsTokenSync` in AuthContext) → bulk `UPDATE provider_config_soulbitscloud SET api_key=?, updated_at=CURRENT_TIMESTAMP WHERE deleted_at IS NULL` → `SyncService.initiateSync()` for immediate engine push. `updated_at` bump is what makes the engine's `GetChangedSoulbitsCloudProviderConfigs` pick the rows up. Engine discriminates PASETO-mode vs plain API-key by `v4.local.` prefix on api_key. Managed credentials render read-only (FormField.readOnly: editable=false, locked secureTextEntry, no eye, contextMenuHidden).
+- Live-catalog contract: hardcoded model fallbacks/defaults must reference real `GET /v1/models` entries; guard test asserts fallback ids ⊆ live catalog.
 @InteractionSession:
 - Replaces DualEntitySession pattern: sessions are scoped to interaction IDs (not entity-pair IDs)
 - InteractionSession interface: interactionId, interaction, participantIds, ownEntityId, connections Map (entityId → connection info), pendingTranscriptions Map
