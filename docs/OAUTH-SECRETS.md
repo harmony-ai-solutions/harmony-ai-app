@@ -17,6 +17,24 @@ npm run android     # runs oauth:dev automatically
 npm run ios         # runs oauth:dev automatically
 ```
 
+## Missing Secret File — Builds Still Work
+
+The build scripts (`android`, `android-prod`, `ios`) call the loader with
+`--if-missing-ok`: if no `client_secret_*.json` is present the loader prints a
+warning and **exits 0**, so the native build proceeds. Google Sign-In simply
+degrades to SDK auto-discovery (`GOOGLE_WEB_CLIENT_ID` empty) — the app
+builds and runs; only iOS offline access / OAuth-driven idToken minting may be
+limited until you add the secret and re-run `npm run oauth:dev`.
+
+Run the loader manually (without `--if-missing-ok`) whenever you DO have a
+secret file, to regenerate `.env` + `android/gradle-secrets.<env>.properties`:
+```
+
+```bash
+npm run oauth:dev      # fails with a clear message if no secret is found
+npm run oauth:dev -- --if-missing-ok   # exit 0 + warn when absent
+```
+
 The loader writes two **gitignored** derived files:
 
 | File | Purpose |

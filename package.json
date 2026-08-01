@@ -5,9 +5,9 @@
   "scripts": {
     "oauth:dev": "node scripts/oauth-secrets.cjs dev",
     "oauth:prod": "node scripts/oauth-secrets.cjs prod",
-    "android": "npm run oauth:dev && react-native run-android --mode=devDebug --appIdSuffix=dev",
-    "android-prod": "npm run oauth:prod && react-native run-android --mode=prodDebug",
-    "ios": "npm run oauth:dev && react-native run-ios",
+    "android": "npm run oauth:dev -- --if-missing-ok && react-native run-android --mode=devDebug --appIdSuffix=dev",
+    "android-prod": "npm run oauth:prod -- --if-missing-ok && react-native run-android --mode=prodDebug",
+    "ios": "npm run oauth:dev -- --if-missing-ok && react-native run-ios",
     "lint": "eslint .",
     "start": "npm run oauth:dev -- --if-missing-ok && react-native start",
     "test": "npm run test:unit && npm run test:integration",
