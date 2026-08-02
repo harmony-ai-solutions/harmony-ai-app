@@ -300,7 +300,20 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       return;
     }
 
-    const lastSync = forceFullSync ? 0 : await this.getLastSyncTimestamp();
+    const storedLastSync = forceFullSync ? 0 : await this.getLastSyncTimestamp();
+
+    // The engine keeps its OWN per-device sync watermark and IGNORES the
+    // client's `last_sync_timestamp` field from SYNC_REQUEST — it only resends
+    // everything when `force_full_sync` is set. So a bare `last_sync_timestamp: 0`
+    // from a freshly-installed or wiped client returns 0 records (the engine
+    // considers its data "already sent" to this device).
+    //
+    // A client with no stored watermark has nothing locally, so requesting a
+    // full pull is correct and lossless: escalate to force_full_sync so the
+    // engine overrides its own watermark and resends all records.
+    const effectiveForceFullSync = forceFullSync || storedLastSync === 0;
+    const lastSync = effectiveForceFullSync ? 0 : storedLastSync;
+
     const deviceId = await DeviceInfo.getUniqueId();
     const deviceName = await DeviceInfo.getDeviceName();
 
@@ -316,7 +329,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       status: 'pending',
       recordsSent: 0,
       recordsReceived: 0,
-      forceFullSync: forceFullSync
+      forceFullSync: effectiveForceFullSync
     };
 
     const event = {
@@ -329,8 +342,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         device_type: 'phone',
         device_platform: Platform.OS,
         current_utc_timestamp: this.currentSession.startTime,
-        last_sync_timestamp: forceFullSync ? 0 : lastSync,
-        force_full_sync: forceFullSync
+        last_sync_timestamp: lastSync,
+        force_full_sync: effectiveForceFullSync
       }
     };
 

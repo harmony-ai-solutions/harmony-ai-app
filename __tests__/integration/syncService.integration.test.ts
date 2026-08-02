@@ -523,4 +523,103 @@ describe('SyncService integration', () => {
     expect(parseInt(timestampStr, 10)).toBeGreaterThan(0);
     expect(await AsyncStorage.getItem('last_sync_timestamp')).toBeNull();
   }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 8: No watermark — sync must escalate to force_full_sync
+  // -----------------------------------------------------------------------
+  it('sends force_full_sync: true when no watermark exists (fresh/wiped client)', async () => {
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    await AsyncStorage.clear();
+
+    // Seed server-side data
+    const serverChar = sampleCharacter({
+      id: 'char-wipe-1',
+      name: 'Server Character After Wipe',
+      created_at: new Date(Date.now() - 10000).toISOString(),
+      updated_at: new Date(Date.now() - 10000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    mockServer.startAutoResponder();
+
+    // Drive sync
+    const completedPromise = new Promise<void>(resolve =>
+      syncService.on('sync:completed', () => resolve()),
+    );
+    syncService.initiateSync();
+    await completedPromise;
+    await new Promise(r => setTimeout(r, 100));
+
+    // VERIFY: The SYNC_REQUEST payload must carry force_full_sync: true with
+    // last_sync_timestamp: 0 — the engine IGNORES a bare last_sync_timestamp: 0
+    // (it keeps its own per-device watermark) and only resends everything when
+    // force_full_sync is set. A client with no watermark has nothing locally,
+    // so requesting a full pull is correct and lossless.
+    const syncRequest = mockServer.receivedEvents.find(
+      (e: any) => e.event_type === 'SYNC_REQUEST',
+    );
+    expect(syncRequest).toBeDefined();
+    expect(syncRequest.payload.force_full_sync).toBe(true);
+    expect(syncRequest.payload.last_sync_timestamp).toBe(0);
+
+    // VERIFY: The server's data actually arrives in the local DB
+    const [result] = await db.executeSql(
+      "SELECT * FROM character_profiles WHERE id = 'char-wipe-1'",
+    );
+    expect(result.rows.length).toBe(1);
+    expect(result.rows.item(0).name).toBe('Server Character After Wipe');
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 9: Existing watermark — sync stays incremental (force_full_sync: false)
+  // -----------------------------------------------------------------------
+  it('keeps force_full_sync: false when a watermark exists (incremental sync)', async () => {
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    const lastSyncTime = Math.floor((Date.now() - 10000) / 1000);
+    await AsyncStorage.setItem('last_sync_timestamp:selfhosted', String(lastSyncTime));
+
+    mockServer.startAutoResponder();
+
+    // Drive sync
+    const completedPromise = new Promise<void>(resolve =>
+      syncService.on('sync:completed', () => resolve()),
+    );
+    syncService.initiateSync();
+    await completedPromise;
+    await new Promise(r => setTimeout(r, 100));
+
+    // VERIFY: With an existing watermark the client must NOT escalate to a
+    // full sync — it requests an incremental sync from its watermark.
+    const syncRequest = mockServer.receivedEvents.find(
+      (e: any) => e.event_type === 'SYNC_REQUEST',
+    );
+    expect(syncRequest).toBeDefined();
+    expect(syncRequest.payload.force_full_sync).toBe(false);
+    expect(syncRequest.payload.last_sync_timestamp).toBe(lastSyncTime);
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 10: Explicit forceFullSync() must always send force_full_sync: true
+  // -----------------------------------------------------------------------
+  it('sends force_full_sync: true when forceFullSync() is called explicitly', async () => {
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    // Even with an existing watermark, an explicit force sync must escalate
+    const lastSyncTime = Math.floor((Date.now() - 10000) / 1000);
+    await AsyncStorage.setItem('last_sync_timestamp:selfhosted', String(lastSyncTime));
+
+    mockServer.startAutoResponder();
+
+    const completedPromise = new Promise<void>(resolve =>
+      syncService.on('sync:completed', () => resolve()),
+    );
+    syncService.forceFullSync();
+    await completedPromise;
+    await new Promise(r => setTimeout(r, 100));
+
+    const syncRequest = mockServer.receivedEvents.find(
+      (e: any) => e.event_type === 'SYNC_REQUEST',
+    );
+    expect(syncRequest).toBeDefined();
+    expect(syncRequest.payload.force_full_sync).toBe(true);
+    expect(syncRequest.payload.last_sync_timestamp).toBe(0);
+  }, 15000);
 });
