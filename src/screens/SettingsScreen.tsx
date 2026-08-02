@@ -3,6 +3,7 @@ import { View, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from '
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import ConnectionStateManager from './../services/ConnectionStateManager';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../contexts/ThemeContext';
@@ -55,10 +56,11 @@ export const SettingsScreen: React.FC = () => {
       setConnectionType(t('common:notConfigured') as ConnectionType);
     }
 
-    // Last sync time
-    const ts = await AsyncStorage.getItem('last_sync_timestamp');
+    // Last sync time — read the per-source watermark (legacy global key removed)
+    const source = await ConnectionStateManager.getCurrentSource();
+    const ts = await ConnectionStateManager.getLastSync(source);
     if (ts) {
-      const date = new Date(parseInt(ts, 10) * 1000);
+      const date = new Date(ts * 1000);
       setLastSyncTime(date.toLocaleString());
     }
   }, [t]);

@@ -44,7 +44,6 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
     SERVER_CERT: 'harmony_server_cert',
     TOKEN_EXPIRES_AT: 'harmony_token_expires_at',
     DEVICE_ID: 'harmony_device_id',
-    LAST_SYNC_TIMESTAMP: 'last_sync_timestamp',
     CONNECTED: 'harmony_connected',
     PAIRED: 'harmony_paired',
     SECURITY_MODE: 'harmony_security_mode', // Per-device security preference
@@ -449,25 +448,40 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
 
   /**
    * Get the last sync timestamp for a given source.
-   * Falls back to the legacy global key for backward-compat (migrated once).
+   * Returns 0 when no watermark has been persisted for that source yet.
    */
   async getLastSync(source: SyncSource): Promise<number> {
     const stored = await AsyncStorage.getItem(ConnectionStateManager.lastSyncKey(source));
-    if (stored) return parseInt(stored, 10);
-    // backward-compat: fall back to the legacy global key, migrated once
-    const legacy = await AsyncStorage.getItem(ConnectionStateManager.STORAGE_KEYS.LAST_SYNC_TIMESTAMP);
-    return legacy ? parseInt(legacy, 10) : 0;
+    return stored ? parseInt(stored, 10) : 0;
   }
 
   /**
    * Set the last sync timestamp for a given source.
-   * Also writes the global alias for backward-compat so legacy readers still work.
    */
   async setLastSync(source: SyncSource, ts: number): Promise<void> {
-    await Promise.all([
-      AsyncStorage.setItem(ConnectionStateManager.lastSyncKey(source), String(ts)),
-      AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.LAST_SYNC_TIMESTAMP, String(ts)),
-    ]);
+    await AsyncStorage.setItem(ConnectionStateManager.lastSyncKey(source), String(ts));
+  }
+
+  /**
+   * Clear ALL persisted last-sync timestamps (per-source keys) so the app
+   * starts from a clean initial state.
+   *
+   * Called by the full database wipe flows (wipeDatabaseCompletely /
+   * clearDatabaseData). Without this, the per-source keys that
+   * getLastSync()/setLastSync() actually use would survive the wipe, making
+   * the next sync an incremental request against a recent watermark — the
+   * engine then has nothing newer to send and no data is transferred.
+   *
+   * This only REMOVES the sync watermark keys. It never writes values and
+   * leaves every other AsyncStorage key (credentials, security mode, etc.)
+   * untouched. Normal per-source get/set behavior is unaffected.
+   */
+  async clearAllLastSyncTimestamps(): Promise<void> {
+    const keys = ConnectionStateManager.SYNC_SOURCES.map(source =>
+      ConnectionStateManager.lastSyncKey(source),
+    );
+    await Promise.all(keys.map(key => AsyncStorage.removeItem(key)));
+    log.info('Cleared all last sync timestamps from AsyncStorage');
   }
 
   /**

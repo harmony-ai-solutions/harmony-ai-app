@@ -59,9 +59,11 @@ export const SyncSettingsScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
 
   const loadSettings = useCallback(async () => {
-    const timestamp = await AsyncStorage.getItem('last_sync_timestamp');
+    // Read the per-source sync watermark (legacy global key was removed).
+    const source = await ConnectionStateManager.getCurrentSource();
+    const timestamp = await ConnectionStateManager.getLastSync(source);
     if (timestamp) {
-      const date = new Date(parseInt(timestamp) * 1000);
+      const date = new Date(timestamp * 1000);
       setLastSyncTime(date.toLocaleString());
     }
 
@@ -98,6 +100,15 @@ export const SyncSettingsScreen: React.FC = () => {
       setIsSyncing(false);
     };
 
+    // Sync was aborted because the connection was lost/replaced mid-session
+    // (e.g. ws→wss upgrade). Reset the spinner so the UI doesn't stay stuck
+    // in a perpetual "syncing…" state; the next settled connection will
+    // auto-sync again.
+    const abortedListener = (_reason: string) => {
+      setCurrentSession(null);
+      setIsSyncing(false);
+    };
+
     // SYNC_REJECT from Harmony Link (e.g. device_unauthorized,
     // clock_drift_exceeded). Without this listener, initiateSync() resolves
     // immediately after the WS send and isSyncing never resets (no
@@ -115,12 +126,14 @@ export const SyncSettingsScreen: React.FC = () => {
     SyncService.on('sync:completed', completedListener);
     SyncService.on('sync:error', errorListener);
     SyncService.on('sync:rejected', rejectedListener);
+    SyncService.on('sync:aborted', abortedListener);
 
     return () => {
       SyncService.removeListener('sync:progress', progressListener);
       SyncService.removeListener('sync:completed', completedListener);
       SyncService.removeListener('sync:error', errorListener);
       SyncService.removeListener('sync:rejected', rejectedListener);
+      SyncService.removeListener('sync:aborted', abortedListener);
     };
   }, [loadSettings]);
 

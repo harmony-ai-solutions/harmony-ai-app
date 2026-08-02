@@ -13,6 +13,7 @@ import {
   canUseChatForMode,
   type ConnectionStatusInfo,
 } from './connectionStatusHelper';
+import { isSyncTransportSettled } from './syncSettlementHelper';
 
 const log = createLogger('[SyncConnectionContext]');
 
@@ -211,7 +212,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   // Connection event handlers
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    const handleSyncConnected = () => {
+    const handleSyncConnected = async () => {
       log.info('Sync connected');
       ConnectionStateManager.markConnected();
       setIsConnectedSync(true);
@@ -222,6 +223,26 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setReconnectAttempts(0);
       setNextReconnectIn(0);
       showToast(i18n.t('syncConnection:connectedToast'));
+
+      // ── Settled-transport gate ────────────────────────────────────────────
+      // During pairing the app first connects over plaintext ws:// to perform
+      // the handshake and learn the server's WSS upgrade details. Auto-syncing
+      // on that provisional connection is wrong:
+      //   1. Sensitive sync data (characters, entities, messages) would cross
+      //      the wire unencrypted before the TLS decision is made.
+      //   2. The subsequent ws→wss upgrade tears the connection down mid-sync,
+      //      orphaning the SyncService session (the "sync already in progress"
+      //      stuck-state bug).
+      // So only auto-sync once the transport is settled: a TLS connection, or
+      // plaintext ws:// only if the user explicitly persisted 'unencrypted'.
+      const conn = connectionManager.getSyncConnection();
+      const persistedMode = await ConnectionStateManager.getSecurityMode();
+      const settled = isSyncTransportSettled(conn?.mode, persistedMode);
+
+      if (!settled) {
+        log.info('Sync connected on provisional connection — deferring sync until transport settles');
+        return;
+      }
 
       // Trigger background sync to pick up any messages generated while disconnected
       SyncServiceClass.getInstance().initiateSync().catch((err: any) => {

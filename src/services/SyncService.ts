@@ -22,6 +22,7 @@ interface SyncServiceEvents {
   'sync:completed': (session: SyncSession) => void;
   'sync:rejected': (payload: any) => void;
   'sync:error': (error: string) => void;
+  'sync:aborted': (reason: string) => void;
 }
 
 export interface SyncSession {
@@ -92,6 +93,20 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   private setupConnectionListeners() {
     // Listen ONLY to sync connection events from ConnectionManager
     this.connectionManager.on('event:sync', this.routeSyncEvent.bind(this));
+
+    // Self-healing: if the sync connection is lost, errors, or is torn down
+    // mid-session (e.g. the ws→wss security-mode upgrade replacing the
+    // connection while SYNC_DATA is being buffered), abort the in-flight
+    // session so the `initiateSync` guard can never be permanently stuck on
+    // 'in_progress'. Without this, a dropped connection leaves currentSession
+    // orphaned and every future sync logs "Sync already in progress, skipping".
+    this.connectionManager.on('disconnected:sync', () => this.abortSync('sync connection disconnected'));
+    this.connectionManager.on('error:sync', () => this.abortSync('sync connection error'));
+    // Emitted by ConnectionManager when createConnection() replaces an existing
+    // sync connection (deliberate teardown). The underlying WS object's own
+    // 'disconnected' event is intentionally suppressed there (listeners removed
+    // before disconnect), so this dedicated signal covers the upgrade path.
+    this.connectionManager.on('sync:connection_replaced', () => this.abortSync('sync connection replaced'));
   }
 
   private routeSyncEvent(data: any) {
@@ -343,6 +358,43 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   async forceFullSync(): Promise<void> {
     log.info('Forcing full re-sync');
     return this.initiateSync(true);
+  }
+
+  /**
+   * Abort any in-flight sync session and reset all sync state.
+   *
+   * Called when the sync connection is lost, errors, or is deliberately
+   * replaced mid-session (e.g. the ws→wss security-mode upgrade tearing down
+   * the provisional connection while SYNC_DATA is being buffered).
+   *
+   * Without this hook, a mid-session connection loss orphans `currentSession`
+   * with status 'in_progress' forever — the `initiateSync` guard then rejects
+   * every future sync ("Sync already in progress, skipping") until the app
+   * process restarts. This method guarantees the sync state machine always
+   * returns to a clean slate so the next connection can start a fresh sync.
+   *
+   * Note: buffered server data is intentionally discarded (not applied). The
+   * last-sync timestamp is not advanced, so the engine re-sends everything on
+   * the next sync — a full re-sync is the safe, lossless recovery path.
+   */
+  abortSync(reason: string = 'connection lost'): void {
+    log.warn(`Aborting sync session: ${reason}`);
+
+    // Reject any pending SYNC_DATA confirmation so awaiting code doesn't hang
+    // until the 30s timeout.
+    if (this.pendingSyncConfirmation) {
+      const { reject } = this.pendingSyncConfirmation;
+      this.pendingSyncConfirmation = null;
+      reject(new Error(`Sync aborted: ${reason}`));
+    }
+
+    // Clear session + phase so the initiateSync guard is released.
+    this.currentSession = null;
+    this.syncPhase = 'IDLE';
+    this.incomingDataBuffer = [];
+    this.serverRecordIds.clear();
+
+    this.emit('sync:aborted', reason);
   }
 
   private async handleSyncAccept(payload: any): Promise<void> {
@@ -907,7 +959,16 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       // Server-received records are filtered out by checking serverRecordIds
       // Use 0 as lastSync for force full sync to re-send all local data
       const lastSync = this.currentSession?.forceFullSync ? 0 : await this.getLastSyncTimestamp();
-      this.sendLocalChangesSequentially(lastSync);
+      // NOTE: must be awaited so the phase machine advances deterministically.
+      // Without the await, a connection drop during CLIENT_SENDING would leave
+      // syncPhase stuck and the orphaned-session bug would persist even after
+      // abortSync (sendLocalChangesSequentially has its own catch that emits
+      // sync:error, so an awaited rejection is handled, not thrown upward).
+      try {
+        await this.sendLocalChangesSequentially(lastSync);
+      } catch (error) {
+        log.error('sendLocalChangesSequentially failed:', error);
+      }
       
     } else if (this.syncPhase === 'CLIENT_SENDING' && status === 'SUCCESS' ) {
       // Server acknowledged our SYNC_COMPLETE

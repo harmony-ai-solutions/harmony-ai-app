@@ -291,7 +291,6 @@ describe('sync clock drift handling', () => {
     // Set previous sync timestamp so client sends incremental updates
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('last_sync_timestamp:selfhosted', '0');
-    await AsyncStorage.setItem('last_sync_timestamp', '0');
 
     mockServer.setServerData('character_profiles', []);
     mockServer.startAutoResponder();
@@ -339,7 +338,6 @@ describe('sync clock drift handling', () => {
     // Set previous sync timestamp so client sends incremental updates
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('last_sync_timestamp:selfhosted', '0');
-    await AsyncStorage.setItem('last_sync_timestamp', '0');
 
     // Seed some local data
     const localChar = sampleCharacter({
@@ -379,7 +377,6 @@ describe('sync clock drift handling', () => {
     // Set previous sync timestamp so client sends incremental updates
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('last_sync_timestamp:selfhosted', '0');
-    await AsyncStorage.setItem('last_sync_timestamp', '0');
 
     // Seed some local data
     const localChar = sampleCharacter({

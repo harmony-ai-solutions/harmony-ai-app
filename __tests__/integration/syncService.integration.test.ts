@@ -297,7 +297,6 @@ describe('SyncService integration', () => {
     const lastSyncTime = Math.floor((Date.now() - 10000) / 1000);
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('last_sync_timestamp:selfhosted', String(lastSyncTime));
-    await AsyncStorage.setItem('last_sync_timestamp', String(lastSyncTime));
 
     // Seed DB with a character that was synced before
     const oldChar = sampleCharacter({
@@ -355,7 +354,6 @@ describe('SyncService integration', () => {
     const lastSyncTime = Math.floor((Date.now() - 10000) / 1000);
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('last_sync_timestamp:selfhosted', String(lastSyncTime));
-    await AsyncStorage.setItem('last_sync_timestamp', String(lastSyncTime));
 
     // Seed DB with a character updated locally
     const updatedChar = sampleCharacter({
@@ -410,7 +408,6 @@ describe('SyncService integration', () => {
     const lastSyncTime = Math.floor((Date.now() - 10000) / 1000);
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('last_sync_timestamp:selfhosted', String(lastSyncTime));
-    await AsyncStorage.setItem('last_sync_timestamp', String(lastSyncTime));
 
     // Server has a deleted character and a kept character
     mockServer.setServerData('character_profiles', [
@@ -519,14 +516,11 @@ describe('SyncService integration', () => {
     await completedPromise;
     await new Promise(r => setTimeout(r, 100));
 
-    // Verify timestamp was updated in AsyncStorage
-    const timestampStr = await AsyncStorage.getItem('last_sync_timestamp');
+    // Verify timestamp was updated in AsyncStorage (per-source key; the
+    // legacy global alias was removed — it must NOT be written anymore)
+    const timestampStr = await AsyncStorage.getItem('last_sync_timestamp:selfhosted');
     expect(timestampStr).toBeTruthy();
     expect(parseInt(timestampStr, 10)).toBeGreaterThan(0);
-
-    // Also verify the per-source key
-    const sourceKey = await AsyncStorage.getItem('last_sync_timestamp:selfhosted');
-    expect(sourceKey).toBeTruthy();
-    expect(parseInt(sourceKey, 10)).toBeGreaterThan(0);
+    expect(await AsyncStorage.getItem('last_sync_timestamp')).toBeNull();
   }, 15000);
 });
