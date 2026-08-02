@@ -21,6 +21,7 @@ import { ThemedView } from '../../components/themed/ThemedView';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedButton } from '../../components/themed/ThemedButton';
 import { ThemedCard } from '../../components/themed/ThemedCard';
+import { SelectPicker } from '../../components/config/SelectPicker';
 import { SyncProgressVisualizer } from '../../components/sync/SyncProgressVisualizer';
 import SyncService, { SyncSession } from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
@@ -55,6 +56,7 @@ export const SyncSettingsScreen: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>('Never');
   const [securityMode, setSecurityMode] = useState<string>('');
+  const [estimateLimit, setEstimateLimit] = useState<string>('5');
   const [countdown, setCountdown] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -73,7 +75,22 @@ export const SyncSettingsScreen: React.FC = () => {
     } else {
       setSecurityMode('secure');
     }
+
+    // Sync confirmation limit (1 / 5 / 10 / 20 / 50 / 100 / Unlimited).
+    const limit = await ConnectionStateManager.getSyncEstimateLimitMB();
+    setEstimateLimit(limit === null ? 'unlimited' : String(limit));
   }, []);
+
+  const handleEstimateLimitChange = async (value: string) => {
+    setEstimateLimit(value);
+    try {
+      await ConnectionStateManager.setSyncEstimateLimitMB(
+        value === 'unlimited' ? null : parseInt(value, 10),
+      );
+    } catch (err: any) {
+      log.error('Failed to save sync estimate limit:', err?.message || err);
+    }
+  };
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -420,6 +437,34 @@ export const SyncSettingsScreen: React.FC = () => {
           </ThemedCard>
         </TouchableOpacity>
 
+        {/* ── Sync Confirmation Limit ──────────────────────────────────── */}
+
+        <ThemedCard style={styles.infoCard}>
+          <View style={styles.cardHeader}>
+            <Icon name="download-lock-outline" size={18} color={accentPrimary} />
+            <ThemedText weight="medium" size={15} style={styles.cardTitle}>
+              {t('estimateConfirmLimit')}
+            </ThemedText>
+          </View>
+          <ThemedText variant="muted" size={12} style={styles.estimateLimitHint}>
+            {t('estimateConfirmLimitHint')}
+          </ThemedText>
+          <SelectPicker
+            label={t('estimateConfirmLimit')}
+            value={estimateLimit}
+            options={[
+              { id: '1', name: '1 MB' },
+              { id: '5', name: '5 MB' },
+              { id: '10', name: '10 MB' },
+              { id: '20', name: '20 MB' },
+              { id: '50', name: '50 MB' },
+              { id: '100', name: '100 MB' },
+              { id: 'unlimited', name: t('unlimited') },
+            ]}
+            onChange={handleEstimateLimitChange}
+          />
+        </ThemedCard>
+
         {/* ── Action Buttons ────────────────────────────────────────────── */}
 
         <ThemedButton
@@ -615,6 +660,10 @@ const styles = StyleSheet.create({
   tapHint: {
     marginTop: 12,
     alignItems: 'flex-end',
+  },
+  estimateLimitHint: {
+    marginBottom: 12,
+    lineHeight: 18,
   },
 
   // ── Buttons ─────────────────────────────────────────────────────────────────

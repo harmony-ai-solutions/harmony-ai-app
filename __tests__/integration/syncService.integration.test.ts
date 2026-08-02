@@ -160,6 +160,7 @@ describe('SyncService integration', () => {
       (syncService as any).currentSession = null;
       (syncService as any).pendingHandshake = null;
       (syncService as any).pendingSyncConfirmation = null;
+      (syncService as any).pendingSizeEstimate = null;
     }
     mockServer.reset();
     testDbRef.current = null;
@@ -621,5 +622,200 @@ describe('SyncService integration', () => {
     expect(syncRequest).toBeDefined();
     expect(syncRequest.payload.force_full_sync).toBe(true);
     expect(syncRequest.payload.last_sync_timestamp).toBe(0);
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 11: SYNC_DATA_SIZE_ESTIMATE — accept path
+  // -----------------------------------------------------------------------
+  it('emits sync:estimate and completes the sync after confirmSizeEstimate(true)', async () => {
+    const serverChar = sampleCharacter({
+      id: 'char-est-accept',
+      name: 'Estimate Accepted Character',
+      created_at: new Date(Date.now() - 5000).toISOString(),
+      updated_at: new Date(Date.now() - 5000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    mockServer.setSendSizeEstimate(true);
+    mockServer.startAutoResponder();
+
+    const estimatePromise = new Promise<any>(resolve =>
+      syncService.once('sync:estimate', resolve),
+    );
+    const completedPromise = new Promise<void>(resolve =>
+      syncService.once('sync:completed', () => resolve()),
+    );
+
+    syncService.initiateSync();
+
+    // The engine blocks until we confirm the estimate — capture it.
+    const estimate = await estimatePromise;
+    expect(estimate).toBeDefined();
+    expect(estimate.event_id).toBeDefined();
+    expect(estimate.sync_session_id).toBeDefined();
+    // The engine serializes the estimate with snake_case JSON tags — the app
+    // must read `total_records` / `image_count` / `estimated_download_mb`.
+    expect(estimate.total_records).toBe(1);
+    expect(estimate.estimated_download_mb).toBeGreaterThan(0);
+    expect(estimate.image_count).toBe(0);
+
+    // Accept → the engine proceeds to stream SYNC_DATA and completes the sync.
+    await syncService.confirmSizeEstimate(true);
+    await completedPromise;
+    await new Promise(r => setTimeout(r, 100));
+
+    // VERIFY: server data was applied
+    const [result] = await db.executeSql(
+      "SELECT id, name FROM character_profiles WHERE id = 'char-est-accept'",
+    );
+    expect(result.rows.length).toBe(1);
+    expect(result.rows.item(0).name).toBe('Estimate Accepted Character');
+
+    // VERIFY: exactly one SUCCESS confirmation was sent, echoing the estimate event_id
+    const confirms = mockServer.receivedEvents.filter(
+      (e: any) => e.event_type === 'SYNC_DATA_SIZE_ESTIMATE_CONFIRM',
+    );
+    expect(confirms.length).toBe(1);
+    expect(confirms[0].payload.status).toBe('SUCCESS');
+    expect(confirms[0].payload.event_id).toBe(estimate.event_id);
+    expect(confirms[0].payload.sync_session_id).toBe(estimate.sync_session_id);
+
+    // VERIFY: pending estimate cleared
+    expect((syncService as any).pendingSizeEstimate).toBeNull();
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 11b: SYNC_DATA_SIZE_ESTIMATE — configurable estimate size
+  // -----------------------------------------------------------------------
+  it('emits the configured estimated_download_mb when setEstimateDownloadMB is used', async () => {
+    const serverChar = sampleCharacter({
+      id: 'char-est-size',
+      name: 'Estimate Size Character',
+      created_at: new Date(Date.now() - 5000).toISOString(),
+      updated_at: new Date(Date.now() - 5000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    mockServer.setSendSizeEstimate(true);
+    mockServer.setEstimateDownloadMB(42);
+    mockServer.startAutoResponder();
+
+    const estimatePromise = new Promise<any>(resolve =>
+      syncService.once('sync:estimate', resolve),
+    );
+
+    syncService.initiateSync();
+    const estimate = await estimatePromise;
+
+    expect(estimate).toBeDefined();
+    expect(estimate.estimated_download_mb).toBe(42);
+    // Snake_case keys are emitted (never PascalCase).
+    expect(estimate.EstimatedDownloadMB).toBeUndefined();
+    expect(estimate.total_records).toBe(1);
+    expect(estimate.image_count).toBe(0);
+
+    // Accept so the session unwinds cleanly (avoid dangling timers).
+    await syncService.confirmSizeEstimate(true);
+    await new Promise(r => setTimeout(r, 50));
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 12: SYNC_DATA_SIZE_ESTIMATE — reject path aborts the session
+  // -----------------------------------------------------------------------
+  it('aborts the sync session when confirmSizeEstimate(false) is called', async () => {
+    const serverChar = sampleCharacter({
+      id: 'char-est-reject',
+      name: 'Estimate Rejected Character',
+      created_at: new Date(Date.now() - 5000).toISOString(),
+      updated_at: new Date(Date.now() - 5000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    mockServer.setSendSizeEstimate(true);
+    mockServer.startAutoResponder();
+
+    const estimatePromise = new Promise<any>(resolve =>
+      syncService.once('sync:estimate', resolve),
+    );
+    const abortedPromise = new Promise<string>(resolve =>
+      syncService.once('sync:aborted', resolve),
+    );
+
+    syncService.initiateSync();
+    const estimate = await estimatePromise;
+
+    await syncService.confirmSizeEstimate(false);
+
+    // VERIFY: sync:aborted emitted with the rejection reason
+    const reason = await abortedPromise;
+    expect(reason).toContain('size estimate rejected');
+
+    // VERIFY: session state fully cleared (abort path)
+    expect((syncService as any).currentSession).toBeNull();
+    expect((syncService as any).syncPhase).toBe('IDLE');
+    expect((syncService as any).pendingSizeEstimate).toBeNull();
+    expect((syncService as any).incomingDataBuffer).toEqual([]);
+
+    // VERIFY: REJECTED confirmation was sent
+    const confirms = mockServer.receivedEvents.filter(
+      (e: any) => e.event_type === 'SYNC_DATA_SIZE_ESTIMATE_CONFIRM',
+    );
+    expect(confirms.length).toBe(1);
+    expect(confirms[0].payload.status).toBe('REJECTED');
+    expect(confirms[0].payload.event_id).toBe(estimate.event_id);
+
+    // VERIFY: no buffered data is ever applied — even if a straggler
+    // SYNC_DATA arrives after the abort (session is gone, record ignored).
+    mockServer.send({
+      event_type: 'SYNC_DATA',
+      status: 'NEW',
+      payload: {
+        sync_session_id: estimate.sync_session_id,
+        event_id: 'straggler_after_reject',
+        table: 'character_profiles',
+        operation: 'insert',
+        record: serverChar,
+      },
+    });
+    await new Promise(r => setTimeout(r, 100));
+    const [result] = await db.executeSql(
+      "SELECT id FROM character_profiles WHERE id = 'char-est-reject'",
+    );
+    expect(result.rows.length).toBe(0);
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 13: Backward compat — engine sends NO estimate, sync proceeds as before
+  // -----------------------------------------------------------------------
+  it('does not wait for a size estimate that never arrives (backward compat)', async () => {
+    const serverChar = sampleCharacter({
+      id: 'char-est-backcompat',
+      name: 'Backward Compat Character',
+      created_at: new Date(Date.now() - 5000).toISOString(),
+      updated_at: new Date(Date.now() - 5000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    // NOTE: setSendSizeEstimate intentionally NOT enabled — legacy engine
+    // goes straight from SYNC_START to SYNC_DATA.
+    mockServer.startAutoResponder();
+
+    const completedPromise = new Promise<void>(resolve =>
+      syncService.once('sync:completed', () => resolve()),
+    );
+    syncService.initiateSync();
+    await completedPromise;
+    await new Promise(r => setTimeout(r, 100));
+
+    // VERIFY: data still pulled + sync finalized without any estimate round-trip
+    const [result] = await db.executeSql(
+      "SELECT id FROM character_profiles WHERE id = 'char-est-backcompat'",
+    );
+    expect(result.rows.length).toBe(1);
+
+    expect(
+      mockServer.receivedEvents.some(
+        (e: any) => e.event_type === 'SYNC_DATA_SIZE_ESTIMATE_CONFIRM',
+      ),
+    ).toBe(false);
+    expect(
+      mockServer.receivedEvents.some((e: any) => e.event_type === 'SYNC_FINALIZE'),
+    ).toBe(true);
   }, 15000);
 });

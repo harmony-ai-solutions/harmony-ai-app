@@ -6,5 +6,7 @@
   "syncRejected": "Sync rejected: {{message}}",
   "failedToConnect": "Failed to connect to Harmony Link",
   "handshakeTimeout": "Handshake connection timeout",
-  "alertTitle": "Harmony Link"
+  "alertTitle": "Harmony Link",
+  "sizeEstimateConfirm": "Sync {{records}} records ({{mb}} MB) from Harmony Link?",
+  "sizeEstimateConfirmImages": "Sync {{records}} records ({{mb}} MB, including {{images}} images) from Harmony Link?"
 }

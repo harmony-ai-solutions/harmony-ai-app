@@ -8,12 +8,17 @@ import { ToastAndroid, Platform, Alert } from 'react-native';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
 import i18n from './I18nContext';
+import { useAppAlert } from './AppAlertContext';
+import { shouldPromptForSyncEstimate } from './syncEstimateHelper';
 import {
   computeConnectionStatus,
   canUseChatForMode,
   type ConnectionStatusInfo,
 } from './connectionStatusHelper';
-import { isSyncTransportSettled } from './syncSettlementHelper';
+import {
+  isSyncTransportSettled,
+  shouldShowConnectionErrorToastForConnection,
+} from './syncSettlementHelper';
 
 const log = createLogger('[SyncConnectionContext]');
 
@@ -82,6 +87,15 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   // ── Phase 10: cloud status + source tracking ───────────────────────────
   const [cloudStatus, setCloudStatus] = useState<CloudSessionStatus>(cloudSessionService.getStatus());
   const [currentSource, setCurrentSource] = useState<SyncSource>('selfhosted');
+
+  // Themed alert dialog (AppAlertProvider is mounted ABOVE this provider in
+  // App.tsx). Captured in a ref because handleSyncEstimate is registered in a
+  // `[]`-deps effect and must never close over a stale showAlert.
+  const { showAlert } = useAppAlert();
+  const showAlertRef = useRef(showAlert);
+  useEffect(() => {
+    showAlertRef.current = showAlert;
+  }, [showAlert]);
   
   const hasInitialized = useRef(false);
   const reconnectAttemptsRef = useRef(0);
@@ -96,6 +110,11 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   const isReconnectingRef      = useRef(false);
   const isPairedRef            = useRef(false);
   const isConnectedRef         = useRef(false);
+  // True while a cert-verification decision is pending/in-progress (the cert
+  // modal is the intended UX). Suppresses connection-error toasts during the
+  // expected TLS/cert churn of the pairing flow. Cleared once the transport
+  // settles successfully.
+  const isCertFlowActiveRef    = useRef(false);
 
   // Keep refs in sync with state so both UI renders (state) and closures (refs) are accurate.
   const setIsConnectingSync = (value: boolean) => {
@@ -239,6 +258,12 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       const persistedMode = await ConnectionStateManager.getSecurityMode();
       const settled = isSyncTransportSettled(conn?.mode, persistedMode);
 
+      // A successfully settled connection resolves any pending cert decision —
+      // connection errors on the settled transport may toast again.
+      if (settled) {
+        isCertFlowActiveRef.current = false;
+      }
+
       if (!settled) {
         log.info('Sync connected on provisional connection — deferring sync until transport settles');
         return;
@@ -270,7 +295,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setIsConnectingSync(false);
     };
 
-    const handleSyncError = (error: any) => {
+    const handleSyncError = async (error: any) => {
       log.error('Sync connection error:', error);
       const errorMessage = error?.message || error?.toString?.() || 'Connection error';
 
@@ -291,7 +316,21 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
           scheduleReconnect();
         }
       } else {
-        if (reconnectAttemptsRef.current === 0 && !isReconnectingRef.current) {
+        // ── Toast gate ────────────────────────────────────────────────────
+        // During pairing the app deliberately connects over plaintext ws://
+        // (provisional), then upgrades to wss:// and verifies the cert. TLS/
+        // cert/connection errors in that window are EXPECTED byproducts — the
+        // cert modal is the intended UX, not a toast. Also never toast while
+        // a reconnect is in flight (backoff loop) or a cert decision is
+        // pending. Only the very first failure on a settled transport may toast.
+        const shouldToast = await shouldShowConnectionErrorToastForConnection({
+          getConnectionInfo: () => connectionManager.getSyncConnection(),
+          getSecurityMode: () => ConnectionStateManager.getSecurityMode(),
+          isReconnecting: isReconnectingRef.current,
+          reconnectAttempt: reconnectAttemptsRef.current,
+          isCertFlowActive: isCertFlowActiveRef.current,
+        });
+        if (shouldToast) {
           showToast(i18n.t('syncConnection:connectionError', { message: errorMessage }));
         }
         
@@ -308,6 +347,10 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
 
     const handleCertVerificationFailed = (_error: any) => {
       log.info('Certificate verification failed');
+      // A cert-verification decision is now pending — the cert modal is the
+      // intended UX for TLS failures, so suppress connection-error toasts
+      // until the transport settles (cleared in handleSyncConnected).
+      isCertFlowActiveRef.current = true;
       cancelReconnect();
       setIsReconnectingSync(false);
       setNextReconnectIn(0);
@@ -337,6 +380,83 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       showToast(i18n.t('syncConnection:syncRejected', { message }));
     };
 
+    // The engine sends a SYNC_DATA_SIZE_ESTIMATE before pushing data and
+    // blocks until we confirm. Surface it to the user when:
+    //  - this is the INITIAL sync (no last-sync watermark yet → new install,
+    //    force_full_sync pull) — ALWAYS prompt for any non-empty estimate, or
+    //  - the estimated download exceeds the configured threshold (default 5 MB).
+    // Anything at or below the limit — and empty estimates — auto-confirm
+    // silently so the engine unblocks and the sync proceeds without interruption.
+    const handleSyncEstimate = async (payload: any) => {
+      log.info('Size estimate received:', payload);
+      // The engine serializes the estimate with snake_case JSON tags
+      // (SyncDataSizeEstimatePayload in eventserver/synchronization.go) —
+      // read total_records / image_count / estimated_download_mb.
+      const records = Number(payload?.total_records ?? 0);
+      const images = Number(payload?.image_count ?? 0);
+      const mb = Number(payload?.estimated_download_mb ?? 0);
+
+      // Initial sync = no persisted last-sync watermark (initiateSync escalates
+      // to force_full_sync when getLastSync() returns 0). The estimate arrives
+      // BEFORE the watermark is written (SYNC_FINALIZE), so a 0 watermark here
+      // reliably identifies the very first sync on a fresh install.
+      const source = await ConnectionStateManager.getCurrentSource();
+      const lastSync = await ConnectionStateManager.getLastSync(source);
+      const isInitialSync = lastSync === 0;
+
+      const limitMB = await ConnectionStateManager.getSyncEstimateLimitMB();
+      if (!shouldPromptForSyncEstimate({ totalRecords: records, imageCount: images, estimatedDownloadMB: mb, limitMB, isInitialSync })) {
+        log.info(
+          isInitialSync
+            ? 'Initial sync with empty estimate — auto-confirming'
+            : `Size estimate within limit (${mb} MB, limit ${limitMB === null ? 'Unlimited' : `${limitMB} MB`}) or empty — auto-confirming`,
+        );
+        SyncService.confirmSizeEstimate(true).catch((err: any) => {
+          log.warn('Auto-confirm of size estimate failed:', err);
+        });
+        return;
+      }
+
+      log.info(
+        isInitialSync
+          ? `Initial sync (no watermark) — prompting for size estimate confirmation (${mb} MB, ${records} records)`
+          : `Size estimate exceeds limit (${mb} MB > ${limitMB} MB) — prompting for confirmation`,
+      );
+
+      const message =
+        images > 0
+          ? i18n.t('syncConnection:sizeEstimateConfirmImages', { records, mb, images })
+          : i18n.t('syncConnection:sizeEstimateConfirm', { records, mb });
+
+      // Themed dialog via AppAlertContext (AppAlertProvider is now mounted
+      // ABOVE SyncConnectionProvider in App.tsx). Use the ref-mirrored
+      // showAlertRef so this []-deps listener never closes over a stale one.
+      showAlertRef.current(
+        i18n.t('syncConnection:alertTitle'),
+        message,
+        [
+          {
+            text: i18n.t('common:cancel'),
+            style: 'cancel',
+            onPress: () => {
+              SyncService.confirmSizeEstimate(false).catch((err: any) => {
+                log.warn('Reject size estimate failed:', err);
+              });
+            },
+          },
+          {
+            text: i18n.t('common:confirm'),
+            onPress: () => {
+              SyncService.confirmSizeEstimate(true).catch((err: any) => {
+                log.warn('Confirm size estimate failed:', err);
+              });
+            },
+          },
+        ],
+        { icon: 'cloud-download-outline', blockBackdropDismiss: true },
+      );
+    };
+
     connectionManager.on('connected:sync',            handleSyncConnected);
     connectionManager.on('disconnected:sync',         handleSyncDisconnected);
     connectionManager.on('error:sync',                handleSyncError);
@@ -345,6 +465,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     SyncService.on('sync:completed',                  handleSyncCompleted);
     SyncService.on('sync:error',                      handleSyncErrorEvent);
     SyncService.on('sync:rejected',                   handleSyncRejected);
+    SyncService.on('sync:estimate',                   handleSyncEstimate);
 
     if (!hasInitialized.current) {
       hasInitialized.current = true;
@@ -360,6 +481,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       SyncService.off('sync:completed',                  handleSyncCompleted);
       SyncService.off('sync:error',                      handleSyncErrorEvent);
       SyncService.off('sync:rejected',                   handleSyncRejected);
+      SyncService.off('sync:estimate',                   handleSyncEstimate);
     };
   }, []);
 
@@ -478,6 +600,14 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
         throw new Error('No server URL configured');
       }
 
+      // A secure (TLS) dial during pairing may legitimately fail on cert
+      // verification — mark the cert flow active so expected TLS errors in
+      // this window don't surface as toasts. Cleared on a settled connect
+      // (handleSyncConnected) or when the transport otherwise resolves.
+      if (mode === 'secure' || mode === 'insecure-ssl') {
+        isCertFlowActiveRef.current = true;
+      }
+
       await connectionManager.createConnection('sync', 'sync', url, mode as any);
       
       log.info('Sync connection established');
@@ -486,7 +616,18 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setIsConnectingSync(false);
       setIsConnectedSync(false);
       
-      if (reconnectAttemptsRef.current === 0) {
+      // Same toast gate as handleSyncError: suppress failedToConnect when this
+      // failure is an expected byproduct of the pairing/cert flow or a
+      // reconnect attempt (only the very first failure on a settled transport
+      // may toast).
+      const shouldToast = await shouldShowConnectionErrorToastForConnection({
+        getConnectionInfo: () => connectionManager.getSyncConnection(),
+        getSecurityMode: () => ConnectionStateManager.getSecurityMode(),
+        isReconnecting: isReconnectingRef.current,
+        reconnectAttempt: reconnectAttemptsRef.current,
+        isCertFlowActive: isCertFlowActiveRef.current,
+      });
+      if (shouldToast) {
         showToast(i18n.t('syncConnection:failedToConnect'));
       }
       

@@ -116,17 +116,17 @@ function App() {
           <I18nProvider>
             <DatabaseProvider>
               <AuthProvider>
-                <SyncConnectionProvider>
-                  <EntitySessionProvider>
-                    <EmojiProvider>
-                      <AppAlertProvider>
+                <AppAlertProvider>
+                  <SyncConnectionProvider>
+                    <EntitySessionProvider>
+                      <EmojiProvider>
                         <BiometricLockProvider>
                           <AppShell />
                         </BiometricLockProvider>
-                      </AppAlertProvider>
-                    </EmojiProvider>
-                  </EntitySessionProvider>
-                </SyncConnectionProvider>
+                      </EmojiProvider>
+                    </EntitySessionProvider>
+                  </SyncConnectionProvider>
+                </AppAlertProvider>
               </AuthProvider>
             </DatabaseProvider>
           </I18nProvider>

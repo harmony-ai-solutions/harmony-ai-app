@@ -47,6 +47,7 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
     CONNECTED: 'harmony_connected',
     PAIRED: 'harmony_paired',
     SECURITY_MODE: 'harmony_security_mode', // Per-device security preference
+    SYNC_ESTIMATE_LIMIT_MB: 'sync_estimate_limit_mb', // Sync size-estimate confirmation threshold (null = unlimited)
   };
   
   public static readonly SYNC_SOURCES = ['selfhosted', 'cloud'] as const;
@@ -506,6 +507,56 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
       log.info('Security mode cleared');
     } catch (error) {
       log.error('Failed to clear security mode:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the sync size-estimate confirmation threshold in MB.
+   *
+   * Returns a number (the threshold) or null for "Unlimited" (never prompt).
+   * Defaults to 5 when the key is unset, empty, or holds an invalid value.
+   */
+  async getSyncEstimateLimitMB(): Promise<number | null> {
+    try {
+      const stored = await AsyncStorage.getItem(ConnectionStateManager.STORAGE_KEYS.SYNC_ESTIMATE_LIMIT_MB);
+      if (stored === null || stored === '') return 5; // unset → default
+      if (stored === 'unlimited') return null; // Unlimited
+      const parsed = Number(stored);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 5; // invalid → default
+    } catch (error) {
+      log.error('Failed to read sync estimate limit:', error);
+      return 5;
+    }
+  }
+
+  /**
+   * Persist the sync size-estimate confirmation threshold in MB.
+   *
+   * @param mb Numeric threshold, or null for "Unlimited" (stored as the
+   *           string 'unlimited' so it round-trips through AsyncStorage).
+   */
+  async setSyncEstimateLimitMB(mb: number | null): Promise<void> {
+    try {
+      const value = mb === null ? 'unlimited' : String(mb);
+      await AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.SYNC_ESTIMATE_LIMIT_MB, value);
+      log.info(`Sync estimate limit saved: ${value}`);
+    } catch (error) {
+      log.error('Failed to save sync estimate limit:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove the persisted sync size-estimate threshold so the default (5 MB)
+   * applies again.
+   */
+  async clearSyncEstimateLimitMB(): Promise<void> {
+    try {
+      await AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.SYNC_ESTIMATE_LIMIT_MB);
+      log.info('Sync estimate limit cleared');
+    } catch (error) {
+      log.error('Failed to clear sync estimate limit:', error);
       throw error;
     }
   }

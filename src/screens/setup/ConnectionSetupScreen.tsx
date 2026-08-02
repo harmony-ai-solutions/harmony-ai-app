@@ -28,6 +28,7 @@ import { cloudSessionService, type CloudSessionStatus, type CloudSessionInfo } f
 import { StatusPulseDot, type RadarState } from '../../components/cloud/StatusPulseDot';
 import { CloudProvisioningCard } from '../../components/cloud/CloudProvisioningCard';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
+import { shouldShowConnectionErrorToastForConnection } from '../../contexts/syncSettlementHelper';
 import { useAuth } from '../../contexts/AuthContext';
 import { hexToRgba } from '../../utils/colorUtils';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
@@ -261,6 +262,14 @@ export const ConnectionSetupScreen: React.FC = () => {
 
   const hasSelectedSecurityModeRef = useRef(false);
 
+  // Mirror of the showCertModal state for use inside the effect-registered
+  // event handlers (those closures capture values from effect-run time, so a
+  // plain state read would go stale the moment the cert modal opens).
+  const showCertModalRef = useRef(false);
+  useEffect(() => {
+    showCertModalRef.current = showCertModal;
+  }, [showCertModal]);
+
   // ── Derived radar state ───────────────────────────────────────────────
   const radarState = useMemo(() => classifyStatus(status), [status]);
 
@@ -395,7 +404,7 @@ export const ConnectionSetupScreen: React.FC = () => {
 
       setStatus('Connected successfully!');
       setIsManuallyConnecting(false);
-      showToast('Successfully connected to Harmony Link!');
+      showToast(t('connectedToast'));
 
       setTimeout(() => {
         navigation.navigate('SyncSettings');
@@ -431,7 +440,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       hasSelectedSecurityModeRef.current = false;
       setStatus('Connection aborted by user');
       setIsManuallyConnecting(false);
-      showToast('Connection cancelled');
+      showToast(t('connectionCancelled'));
       return;
     }
 
@@ -461,7 +470,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       }
 
       setIsManuallyConnecting(false);
-      showToast('Successfully connected to Harmony Link!');
+      showToast(t('connectedToast'));
 
       setTimeout(() => {
         navigation.navigate('SyncSettings');
@@ -470,7 +479,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       log.error('Connection with selected mode failed:', err);
       setStatus('Connection failed');
       setIsManuallyConnecting(false);
-      showToast('Failed to connect with selected security mode');
+      showToast(t('securityModeFailed'));
       showAlert('Connection Failed', 'Failed to connect: ' + (err.message || 'Unknown error'));
     }
   };
@@ -508,7 +517,23 @@ export const ConnectionSetupScreen: React.FC = () => {
         log.error('Connection setup failed:', err);
         setStatus('Connection failed');
         setIsManuallyConnecting(false);
-        showToast('Failed to establish connection');
+
+        // Same toast gate as handleConnectionError: during the pairing handshake
+        // the secure (wss) attempt is expected to fail until a security mode is
+        // chosen (the cert modal / status text are the UX, not a toast). Without
+        // this, a fresh pairing shows a spurious "Failed to establish connection"
+        // toast right before the connection is re-established.
+        const certFlowActive = showCertModalRef.current || !hasSelectedSecurityModeRef.current;
+        const shouldToast = await shouldShowConnectionErrorToastForConnection({
+          getConnectionInfo: () => connectionManager.getSyncConnection(),
+          getSecurityMode: () => ConnectionStateManager.getSecurityMode(),
+          isReconnecting: false,
+          reconnectAttempt: 0,
+          isCertFlowActive: certFlowActive,
+        });
+        if (shouldToast) {
+          showToast(t('failedToEstablishConnection'));
+        }
       }
     };
 
@@ -516,19 +541,34 @@ export const ConnectionSetupScreen: React.FC = () => {
       log.info('Handshake rejected');
       setStatus('Connection rejected');
       setIsManuallyConnecting(false);
-      showToast('Harmony Link rejected the connection request');
+      showToast(t('connectionRejectedToast'));
       showAlert(
         'Connection Rejected',
         'Harmony Link rejected the connection request. Please try again or check device approval settings on Harmony Link.',
       );
     };
 
-    const handleConnectionError = (id: string, error: any) => {
+    const handleConnectionError = async (id: string, error: any) => {
       if (id !== 'sync') return;
       log.error('Sync connection error:', error);
       setStatus('Connection error');
       setIsManuallyConnecting(false);
-      showToast('Connection error occurred');
+
+      // Suppress the 'Connection error occurred' toast while the cert flow is
+      // active (the cert modal is the intended UX for TLS failures) or the
+      // transport isn't settled (provisional ws:// handshake connection).
+      // Keep the status text update either way.
+      const certFlowActive = showCertModalRef.current || !hasSelectedSecurityModeRef.current;
+      const shouldToast = await shouldShowConnectionErrorToastForConnection({
+        getConnectionInfo: () => connectionManager.getSyncConnection(),
+        getSecurityMode: () => ConnectionStateManager.getSecurityMode(),
+        isReconnecting: false,
+        reconnectAttempt: 0,
+        isCertFlowActive: certFlowActive,
+      });
+      if (shouldToast) {
+        showToast(t('connectionErrorToast'));
+      }
     };
 
     const handleCertVerificationFailed = (error: any) => {
@@ -617,7 +657,7 @@ export const ConnectionSetupScreen: React.FC = () => {
       log.error('Connection failed:', err);
       setStatus('Connection failed');
       setIsManuallyConnecting(false);
-      showToast('Failed to connect to Harmony Link');
+      showToast(t('connectionFailedToast'));
       showAlert(
         'Connection Failed',
         'Failed to connect to Harmony Link. Please check the IP address and port, and ensure Harmony Link is running.',
@@ -819,11 +859,11 @@ export const ConnectionSetupScreen: React.FC = () => {
                           setStatus('Reconnecting...');
                           await reconnect();
                           setStatus('Connected!');
-                          showToast('Reconnected successfully');
+                          showToast(t('reconnectedToast'));
                         } catch (error: any) {
                           log.error('Manual reconnect failed:', error);
                           setStatus('Reconnection failed');
-                          showToast('Failed to reconnect');
+                          showToast(t('reconnectFailedToast'));
                         }
                       }}
                       disabled={isConnecting}
@@ -849,7 +889,7 @@ export const ConnectionSetupScreen: React.FC = () => {
                             setStatus('Idle');
                             setSecurityMode('');
                             setServerCertificate('');
-                            showToast('Device unpaired');
+                            showToast(t('unpairedToast'));
                           },
                         },
                       ]);

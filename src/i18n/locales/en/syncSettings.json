@@ -30,5 +30,8 @@
   "cloudReconnectingInfo": "Auto-reconnect in progress. The cloud connection will be restored automatically.",
   "notPairedWarning": "Not paired with Harmony Link. Go to Connection Setup to pair your device.",
   "disconnectedWarning": "Not connected. Attempting to reconnect...",
-  "reconnectingInfo": "Auto-reconnect in progress. The connection will be restored automatically."
+  "reconnectingInfo": "Auto-reconnect in progress. The connection will be restored automatically.",
+  "estimateConfirmLimit": "Sync confirmation limit",
+  "estimateConfirmLimitHint": "Ask before syncing when the download is larger than this.",
+  "unlimited": "Unlimited"
 }

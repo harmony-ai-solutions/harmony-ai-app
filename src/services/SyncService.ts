@@ -23,6 +23,8 @@ interface SyncServiceEvents {
   'sync:rejected': (payload: any) => void;
   'sync:error': (error: string) => void;
   'sync:aborted': (reason: string) => void;
+  'sync:estimate': (payload: any) => void;
+  'sync:estimate:confirm': (accepted: boolean) => void;
 }
 
 export interface SyncSession {
@@ -47,6 +49,16 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     eventId: string;
     resolve: (value: any) => void;
     reject: (reason: any) => void;
+  } | null = null;
+
+  // Pending SYNC_DATA_SIZE_ESTIMATE awaiting the user's accept/reject decision.
+  // The engine (new protocol) sends an estimate and BLOCKS until the app
+  // replies with SYNC_DATA_SIZE_ESTIMATE_CONFIRM — if we never confirm, the
+  // engine aborts the sync after its own 60s timeout.
+  private pendingSizeEstimate: {
+    syncSessionId: string;
+    eventId: string;
+    estimate: any;
   } | null = null;
 
   // Handshake promise tracking
@@ -114,8 +126,9 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
     // IGNORE acknowledgment statuses - these are transport/processing confirmations, not actionable events
     // Only process NEW and ERROR status events which contain actionable data
-    // EXCEPTION: Allow SYNC_COMPLETE and SYNC_FINALIZE with SUCCESS status through (it's a protocol signal when finishing the sync process)
-    if (data.status === 'PENDING' || (data.status === 'SUCCESS' && (data.event_type !== 'SYNC_COMPLETE') && data.event_type !== 'SYNC_FINALIZE')) {
+    // EXCEPTION: Allow SYNC_COMPLETE, SYNC_FINALIZE and SYNC_DATA_SIZE_ESTIMATE
+    // with SUCCESS status through (protocol signals when finishing/measuring the sync).
+    if (data.status === 'PENDING' || (data.status === 'SUCCESS' && (data.event_type !== 'SYNC_COMPLETE') && data.event_type !== 'SYNC_FINALIZE' && data.event_type !== 'SYNC_DATA_SIZE_ESTIMATE')) {
       log.debug(`Ignoring ${data.status} status event: ${data.event_type}`);
       return;
     }
@@ -145,6 +158,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
       case 'SYNC_REJECT':
         this.emit('sync:rejected', data.payload);
+        break;
+
+      case 'SYNC_DATA_SIZE_ESTIMATE':
+        this.handleSizeEstimate(data.payload);
         break;
 
       case 'SYNC_DATA':
@@ -445,6 +462,96 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     await this.connectionManager.sendEvent('sync', startEvent);
 
     // DO NOT send local changes yet - wait for server SYNC_COMPLETE
+  }
+
+  /**
+   * Handle a SYNC_DATA_SIZE_ESTIMATE from the engine.
+   *
+   * The engine (new protocol) sends an estimate of the data it is about to
+   * push, then BLOCKS until the app replies with SYNC_DATA_SIZE_ESTIMATE_CONFIRM
+   * (60s timeout → engine aborts). We do NOT block here — we store the pending
+   * estimate and surface it via the 'sync:estimate' event so the UI layer can
+   * prompt the user and eventually call `confirmSizeEstimate`.
+   *
+   * Backward compat: if an older engine sends no estimate and goes straight to
+   * SYNC_DATA, nothing is stored and the sync proceeds exactly as before.
+   */
+  private async handleSizeEstimate(payload: any): Promise<void> {
+    if (!payload || !payload.event_id || !payload.sync_session_id) {
+      log.warn('SYNC_DATA_SIZE_ESTIMATE missing event_id or sync_session_id, ignoring');
+      return;
+    }
+
+    if (!this.currentSession) {
+      log.warn('Received SYNC_DATA_SIZE_ESTIMATE but no current session, ignoring');
+      return;
+    }
+
+    // Defensive: ignore an estimate that does not belong to the active session
+    // (e.g. a stale estimate from a previous, already-aborted session).
+    if (this.currentSession.sessionId !== payload.sync_session_id) {
+      log.warn(
+        `Received SYNC_DATA_SIZE_ESTIMATE for session ${payload.sync_session_id} but active session is ${this.currentSession.sessionId} — ignoring`,
+      );
+      return;
+    }
+
+    this.pendingSizeEstimate = {
+      syncSessionId: payload.sync_session_id,
+      eventId: payload.event_id,
+      estimate: payload,
+    };
+
+    log.info(
+      `Received size estimate for session ${payload.sync_session_id} (event ${payload.event_id})`,
+    );
+    this.emit('sync:estimate', payload);
+  }
+
+  /**
+   * Confirm (or reject) the pending size estimate back to the engine.
+   *
+   * The engine is waiting on its own side — the app just needs to eventually
+   * send the confirmation so the engine can proceed (SUCCESS) or abort (REJECTED).
+   *
+   * @param accepted true → SYNC_DATA_SIZE_ESTIMATE_CONFIRM status SUCCESS,
+   *                 false → status REJECTED + the session is aborted.
+   */
+  async confirmSizeEstimate(accepted: boolean): Promise<void> {
+    if (!this.pendingSizeEstimate) {
+      log.warn('confirmSizeEstimate called but no pending size estimate');
+      return;
+    }
+
+    const { syncSessionId, eventId } = this.pendingSizeEstimate;
+    this.pendingSizeEstimate = null;
+
+    const event = {
+      event_id: this.generateEventId(),
+      event_type: 'SYNC_DATA_SIZE_ESTIMATE_CONFIRM',
+      status: 'NEW',
+      payload: {
+        sync_session_id: syncSessionId,
+        event_id: eventId,
+        status: accepted ? 'SUCCESS' : 'REJECTED',
+      },
+    };
+
+    log.info(`Sending size estimate confirmation: ${accepted ? 'SUCCESS' : 'REJECTED'}`);
+
+    try {
+      await this.connectionManager.sendEvent('sync', event);
+    } catch (sendError) {
+      log.error('Failed to send SYNC_DATA_SIZE_ESTIMATE_CONFIRM:', sendError);
+    }
+
+    if (!accepted) {
+      // User rejected the estimated download — tear down the session. Buffered
+      // server data (if any) is discarded; nothing is applied to the database.
+      this.abortSync('size estimate rejected');
+    }
+
+    this.emit('sync:estimate:confirm', accepted);
   }
 
   /**

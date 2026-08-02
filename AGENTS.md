@@ -7,10 +7,19 @@ This project uses Roo Code with custom rules stored in `.roo/rules/`. Read these
 - **[implementation-plans.md](.roo/rules/implementation-plans.md)** - Creating and managing implementation plans (manual plans only, not GSD)
 - **[gsd-validation-notes.md](.roo/rules/gsd-validation-notes.md)** - Notes on GSD frontmatter validation quirks
 
+## Testing
+
+This project has a comprehensive test framework. See [`docs/TESTING.md`](docs/TESTING.md) for the full strategy, run commands, and architecture decisions.
+
+Quick start:
+- `npm test` — Run all unit + integration tests
+- `npx jest --selectProjects unit --testPathPatterns migrations` — Migration tests only
+- See [`docs/future-work.md`](docs/future-work.md) for known gaps
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **harmony-ai-app** (2795 symbols, 5599 relationships, 218 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **harmony-ai-app** (4643 symbols, 9547 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -28,15 +37,6 @@ This project is indexed by GitNexus as **harmony-ai-app** (2795 symbols, 5599 re
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
 - NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
 - NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Testing
-
-This project has a comprehensive test framework. See [`docs/TESTING.md`](docs/TESTING.md) for the full strategy, run commands, and architecture decisions.
-
-Quick start:
-- `npm test` — Run all unit + integration tests
-- `npx jest --selectProjects unit --testPathPatterns migrations` — Migration tests only
-- See [`docs/future-work.md`](docs/future-work.md) for known gaps
 
 ## Resources
 
