@@ -13,6 +13,7 @@ import {
   updateEntity,
   deleteEntity,
   createEntityModuleMapping,
+  createOrUpdateEntityModuleMapping,
   getEntityModuleMapping,
   updateEntityModuleMapping,
   deleteEntityModuleMapping,
@@ -177,6 +178,65 @@ describe('entities repository', () => {
           deleted_at: null,
         }),
       ).resolves.toBeUndefined();
+    });
+
+    it('Create Entity Module Mapping with empty-string config IDs (defaults from CreateAIScreen) does not throw FK error', async () => {
+      const entityId = 'entity-mapping-empty-string';
+      await createEntity({id: entityId, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
+      // Reproduces the CreateAIScreen bug: config IDs default to '' (empty string)
+      // when the advanced panel was never opened, and '' ?? null still yields ''.
+      // Inserting '' into FK columns violated the config-table constraints (code 787).
+      await expect(
+        createEntityModuleMapping({
+          entity_id: entityId,
+          backend_config_id: '',
+          cognition_config_id: '',
+          imagination_config_id: '',
+          movement_config_id: '',
+          rag_config_id: '',
+          stt_config_id: '',
+          tts_config_id: '',
+          vision_config_id: '',
+          deleted_at: null,
+        }),
+      ).resolves.toBeUndefined();
+
+      // The stored mapping must have NULLs, not empty strings, so sync doesn't
+      // propagate garbage and the FK columns stay valid.
+      const mapping = await getEntityModuleMapping(entityId);
+      expect(mapping).not.toBeNull();
+      expect(mapping!.backend_config_id).toBeNull();
+      expect(mapping!.cognition_config_id).toBeNull();
+      expect(mapping!.imagination_config_id).toBeNull();
+      expect(mapping!.movement_config_id).toBeNull();
+      expect(mapping!.rag_config_id).toBeNull();
+      expect(mapping!.stt_config_id).toBeNull();
+      expect(mapping!.tts_config_id).toBeNull();
+      expect(mapping!.vision_config_id).toBeNull();
+    });
+
+    it('createOrUpdateEntityModuleMapping with empty-string config IDs does not throw FK error', async () => {
+      const entityId = 'entity-mapping-empty-string-upsert';
+      await createEntity({id: entityId, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
+      // EntityConfigEditScreen passes '' defaults the same way ('' ?? null == '').
+      await expect(
+        createOrUpdateEntityModuleMapping({
+          entity_id: entityId,
+          backend_config_id: '',
+          cognition_config_id: '',
+          imagination_config_id: '',
+          movement_config_id: '',
+          rag_config_id: '',
+          stt_config_id: '',
+          tts_config_id: '',
+          vision_config_id: '',
+        }),
+      ).resolves.toBeUndefined();
+
+      const mapping = await getEntityModuleMapping(entityId);
+      expect(mapping).not.toBeNull();
+      expect(mapping!.backend_config_id).toBeNull();
+      expect(mapping!.cognition_config_id).toBeNull();
     });
 
     it('CASCADE Delete Test', async () => {

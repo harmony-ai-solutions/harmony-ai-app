@@ -238,6 +238,24 @@ export async function deleteEntity(
 // ============================================================================
 
 /**
+ * Normalize a module config ID for FK columns.
+ *
+ * Callers (CreateAIScreen / EntityConfigEditScreen) default their config
+ * selectors to '' ("Disabled") and pass `id ?? null`, which still yields ''
+ * because '' is not nullish. Inserting '' into a column with a FOREIGN KEY to
+ * a config table fails with SQLITE_CONSTRAINT_FOREIGNKEY (787). Coerce any
+ * falsy/whitespace value to null so the FK columns stay valid and sync doesn't
+ * propagate garbage.
+ */
+function normalizeConfigId(
+  id: string | null | undefined,
+): string | null {
+  if (id == null) return null;
+  const trimmed = String(id).trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/**
  * Create entity module mapping
  */
 export async function createEntityModuleMapping(
@@ -253,14 +271,14 @@ export async function createEntityModuleMapping(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         mapping.entity_id,
-        mapping.backend_config_id,
-        mapping.cognition_config_id,
-        mapping.imagination_config_id,
-        mapping.movement_config_id,
-        mapping.rag_config_id,
-        mapping.stt_config_id,
-        mapping.tts_config_id,
-        mapping.vision_config_id,
+        normalizeConfigId(mapping.backend_config_id),
+        normalizeConfigId(mapping.cognition_config_id),
+        normalizeConfigId(mapping.imagination_config_id),
+        normalizeConfigId(mapping.movement_config_id),
+        normalizeConfigId(mapping.rag_config_id),
+        normalizeConfigId(mapping.stt_config_id),
+        normalizeConfigId(mapping.tts_config_id),
+        normalizeConfigId(mapping.vision_config_id),
       ],
     );
   });
@@ -379,14 +397,14 @@ export async function createOrUpdateEntityModuleMapping(
              updated_at             = ?
          WHERE entity_id = ?`,
         [
-          mapping.backend_config_id ?? null,
-          mapping.cognition_config_id ?? null,
-          mapping.imagination_config_id ?? null,
-          mapping.movement_config_id ?? null,
-          mapping.rag_config_id ?? null,
-          mapping.stt_config_id ?? null,
-          mapping.tts_config_id ?? null,
-          mapping.vision_config_id ?? null,
+          normalizeConfigId(mapping.backend_config_id),
+          normalizeConfigId(mapping.cognition_config_id),
+          normalizeConfigId(mapping.imagination_config_id),
+          normalizeConfigId(mapping.movement_config_id),
+          normalizeConfigId(mapping.rag_config_id),
+          normalizeConfigId(mapping.stt_config_id),
+          normalizeConfigId(mapping.tts_config_id),
+          normalizeConfigId(mapping.vision_config_id),
           now,  // updated_at - ISO 8601 format
           mapping.entity_id,
         ],
@@ -401,14 +419,14 @@ export async function createOrUpdateEntityModuleMapping(
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           mapping.entity_id,
-          mapping.backend_config_id ?? null,
-          mapping.cognition_config_id ?? null,
-          mapping.imagination_config_id ?? null,
-          mapping.movement_config_id ?? null,
-          mapping.rag_config_id ?? null,
-          mapping.stt_config_id ?? null,
-          mapping.tts_config_id ?? null,
-          mapping.vision_config_id ?? null,
+          normalizeConfigId(mapping.backend_config_id),
+          normalizeConfigId(mapping.cognition_config_id),
+          normalizeConfigId(mapping.imagination_config_id),
+          normalizeConfigId(mapping.movement_config_id),
+          normalizeConfigId(mapping.rag_config_id),
+          normalizeConfigId(mapping.stt_config_id),
+          normalizeConfigId(mapping.tts_config_id),
+          normalizeConfigId(mapping.vision_config_id),
           now,  // created_at - ISO 8601 format
           now,  // updated_at - ISO 8601 format
         ],
