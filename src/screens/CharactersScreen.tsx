@@ -38,6 +38,7 @@ import {
 import { createDataURL } from '../database/base64';
 import { CharacterProfile } from '../database/models';
 import { importCharacterCardFromFile, CharacterCardImportError } from '../services/CharacterCardImportService';
+import syncService from '../services/SyncService';
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
 // Using 'any' here avoids CompositeNavigationProp boilerplate while
@@ -187,6 +188,13 @@ export const CharactersScreen: React.FC = () => {
     try {
       await importCharacterCardFromFile(doc.uri, doc.type ?? '');
       await loadProfiles();
+
+      // Push the imported profile (+ image) to the engine so it can be used in
+      // chat sessions. Without an explicit sync, the engine never learns about
+      // the imported profile until some unrelated sync happens.
+      syncService.initiateSync().catch(syncErr => {
+        log.warn('Auto-sync after character import failed (non-critical):', syncErr);
+      });
     } catch (e) {
       const code = e instanceof CharacterCardImportError ? e.code : undefined;
       const messageKey = importMessageKey(code);

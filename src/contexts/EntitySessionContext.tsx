@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import EntitySessionService, { InteractionSession } from '../services/EntitySessionService';
+import syncService from '../services/SyncService';
 import { useSyncConnection } from './SyncConnectionContext';
 import { createLogger } from '../utils/logger';
 
@@ -44,6 +45,10 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
   const [retryState, setRetryState] = useState<Map<string, RetryState>>(new Map());
   const entitySessionService = EntitySessionService;
   const { isConnected: isSyncConnected } = useSyncConnection();
+
+  // Always points at the latest render's scheduleRetry so the []-dep event
+  // listeners (session:error etc.) never invoke a stale closure.
+  const scheduleRetryRef = useRef<((key: string, ownEntityId: string, participantIds: string[], error: any) => void) | null>(null);
 
   const canStartSession = isSyncConnected;
 
@@ -104,11 +109,40 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
 
     const handleSessionError = (interactionId: string, error: string) => {
       log.error('Session error for interaction:', interactionId, error);
+
+      // Capture participant info BEFORE deleting the session so we can schedule
+      // a retry. A freshly-created entity is often not yet synced to the engine
+      // when the first INIT_ENTITY is sent — the engine rejects it with
+      // "entity_not_defined", which self-heals once the entity data is pushed
+      // via sync. Trigger a sync + retry instead of giving up permanently.
+      //
+      // Note: the service emits session:error BEFORE it deletes the session
+      // from its own map, so getInteractionSession still resolves here.
+      const session = entitySessionService.getInteractionSession(interactionId);
+      let retryKey: string | null = null;
+      let retryOwnEntityId = '';
+      let retryParticipantIds: string[] = [];
+      if (session) {
+        retryKey = session.participantIds.sort().join('+');
+        retryOwnEntityId = session.ownEntityId;
+        retryParticipantIds = [...session.participantIds];
+      }
+
       setActiveSessions(prev => {
         const newMap = new Map(prev);
         newMap.delete(interactionId);
         return newMap;
       });
+
+      // entity_not_defined is retryable — the engine may simply not have the
+      // entity yet (it only learns about it via sync). scheduleRetryRef points
+      // at the latest render's scheduleRetry (the []-dep effect would otherwise
+      // capture a stale closure). retryInitialization re-triggers a sync before
+      // re-attempting.
+      if (retryKey && error.includes('entity_not_defined')) {
+        log.info(`entity_not_defined for ${retryKey} — scheduling retry after sync`);
+        scheduleRetryRef.current?.(retryKey, retryOwnEntityId, retryParticipantIds, new Error(error));
+      }
     };
 
     entitySessionService.on('session:started', handleSessionStarted);
@@ -283,6 +317,10 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     });
   };
 
+  // Keep the ref pointing at the latest scheduleRetry so the []-dep event
+  // listeners (which capture first-render closures) can still schedule retries.
+  scheduleRetryRef.current = scheduleRetry;
+
   const retryInitialization = async (
     key: string,
     ownEntityId: string,
@@ -290,6 +328,16 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     replyMode?: string
   ) => {
     log.info(`Retrying initialization for ${key}`);
+
+    // A retry usually means the first INIT_ENTITY attempt failed — frequently
+    // because a freshly-created entity hasn't been synced to the engine yet
+    // (the engine rejects it with entity_not_defined until it learns about it
+    // via sync). Re-trigger a sync before retrying so the engine gets the
+    // entity data, then the retried session can initialize. Fire-and-forget:
+    // initiateSync self-guards against concurrent sessions.
+    syncService.initiateSync().catch(err => {
+      log.warn('Auto-sync before session retry failed (non-critical):', err);
+    });
 
     // Clean up any existing sessions with these participants
     // Find any active session that matches this participant set

@@ -77,6 +77,7 @@ import {
   CharacterProfile,
 } from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import syncService from '../services/SyncService';
 import { getAllEntities } from '../database/repositories/entities';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -385,6 +386,16 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         imagination_config_id: imaginationConfigId ?? null,
         movement_config_id: movementConfigId ?? null,
         deleted_at: null,
+      });
+
+      // 4b. Push the new entity (and its profile/mapping) to the engine so the
+      // chat session can initialize. Without an explicit sync here, the engine
+      // never learns about the entity until some unrelated sync happens, and
+      // INIT_ENTITY fails with entity_not_defined (chat stuck on "Connecting...").
+      // Fire-and-forget: non-blocking; the session retry logic re-triggers sync
+      // if this one hasn't completed by the time INIT_ENTITY is sent.
+      syncService.initiateSync().catch(syncErr => {
+        log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
       });
 
       // 5. Resolve the impersonated entity for ChatDetail
