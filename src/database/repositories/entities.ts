@@ -6,7 +6,10 @@
  */
 
 import { getDatabase } from '../connection';
-import { withTransaction } from '../transaction';
+import {
+  withTransaction,
+  runStatementsInTransaction,
+} from '../transaction';
 import { Entity, EntityModuleMapping } from '../models';
 
 // ============================================================================
@@ -212,25 +215,56 @@ export async function deleteEntity(
     throw new Error(`Entity not found: ${id}`);
   }
 
-  return withTransaction(db, async tx => {
-    if (permanent) {
-      // Hard delete - FK cascade will handle entity_module_mappings
-      await tx.executeSql('DELETE FROM entities WHERE id = ?', [id]);
-    } else {
-      // Soft delete - must manually cascade to entity_module_mappings
-      // (FK ON DELETE CASCADE only works for hard deletes, not soft deletes)
-      const now = new Date().toISOString();
-      await tx.executeSql(
-        'UPDATE entities SET deleted_at = ?, updated_at = ? WHERE id = ?',
-        [now, now, id],
-      );
-      // Also soft-delete the entity_module_mappings to maintain data integrity
-      await tx.executeSql(
-        'UPDATE entity_module_mappings SET deleted_at = ?, updated_at = ? WHERE entity_id = ?',
-        [now, now, id],
-      );
-    }
-  });
+  if (permanent) {
+    // Hard delete.
+    //
+    // ⚠️ CRITICAL: this is a MULTI-statement transaction. Do NOT convert it to
+    // withTransaction + sequential `await tx.executeSql()` calls. react-native-
+    // sqlite-storage transactions follow run-to-completion semantics: the tx is
+    // finalized immediately after the callback's synchronous portion returns, so
+    // a second `await tx.executeSql()` throws
+    //   "InvalidStateError: DOM Exception 11: This transaction is already finalized."
+    // (see src/database/README.md — "Multiple sequential statements | ❌ NO").
+    // Use nested callbacks in a single transaction instead.
+    //
+    // Delete order matters: children first, entity last. interactions and
+    // conversation_messages have NO ON DELETE CASCADE (interactions has no FK;
+    // conversation_messages FK is plain REFERENCES), and entity_emoji_actions
+    // FK has no ON DELETE CASCADE either. emotion_state / memories /
+    // entity_module_mappings cascade via their ON DELETE CASCADE FKs.
+    return runStatementsInTransaction(db, [
+      { sql: 'DELETE FROM entity_emoji_actions WHERE entity_id = ?', params: [id] },
+      { sql: 'DELETE FROM interactions WHERE entity_id = ?', params: [id] },
+      { sql: 'DELETE FROM conversation_messages WHERE entity_id = ?', params: [id] },
+      { sql: 'DELETE FROM entities WHERE id = ?', params: [id] },
+    ]);
+  }
+
+  // Soft delete — cascade to child rows rooted at this entity ONLY.
+  //
+  // ⚠️ CRITICAL: this is a MULTI-statement transaction. Do NOT convert it to
+  // withTransaction + sequential `await tx.executeSql()` calls. react-native-
+  // sqlite-storage transactions follow run-to-completion semantics: the tx is
+  // finalized immediately after the callback's synchronous portion returns, so
+  // a second `await tx.executeSql()` throws
+  //   "InvalidStateError: DOM Exception 11: This transaction is already finalized."
+  // (see src/database/README.md — "Multiple sequential statements | ❌ NO").
+  // Use nested callbacks in a single transaction instead.
+  //
+  // ⚠️ BUSINESS RULE: every cascade predicate is `WHERE entity_id = ?` —
+  // NEVER match by participant_ids, participant_key, sender_entity_id, or via
+  // interaction joins. Conversations rooted at another entity that merely
+  // mention the deleted entity must remain untouched.
+  const now = new Date().toISOString();
+  return runStatementsInTransaction(db, [
+    { sql: 'UPDATE entities SET deleted_at = ?, updated_at = ? WHERE id = ?', params: [now, now, id] },
+    { sql: 'UPDATE entity_module_mappings SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE memories SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE emotion_state SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE entity_emoji_actions SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE interactions SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE conversation_messages SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+  ]);
 }
 
 // ============================================================================
@@ -373,6 +407,7 @@ export async function createOrUpdateEntityModuleMapping(
   // the promise-based db.executeSql() API.  tx.executeSql() inside a
   // withTransaction callback is callback-only and does NOT return a Promise,
   // so awaiting it returns undefined and crashes on `.rows.length`.
+  // (See src/database/README.md — transaction run-to-completion semantics.)
   const [existingCheck] = await db.executeSql(
     'SELECT entity_id FROM entity_module_mappings WHERE entity_id = ?',
     [mapping.entity_id],

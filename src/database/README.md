@@ -76,9 +76,17 @@ useEffect(() => {
 
 The `withTransaction()` helper has a **major limitation** in React Native SQLite:
 
-**❌ DO NOT USE for INSERT operations that need to return `insertId`**
+**❌ DO NOT use it for transactions that issue more than ONE `await tx.executeSql()` per callback.**
 
-The helper uses async/await with Promises, which causes transactions to finalize before values can be returned. This breaks INSERT operations that need to return the auto-generated ID.
+react-native-sqlite-storage's `tx.executeSql` is **callback-based** — it does *not* return a Promise. Inside an async `withTransaction` callback, `await tx.executeSql(...)` therefore just defers to a microtask; it does not wait for the statement. The library's `SQLitePluginTransaction.start()` (see `node_modules/react-native-sqlite-storage/lib/sqlite.core.js`) runs your callback **synchronously** and finalizes the transaction right after the callback's synchronous portion returns. Consequences:
+
+- **One awaited statement is safe.** The `tx.executeSql(...)` *call itself* runs synchronously — the statement is queued before the `await` yields — so the transaction still executes it.
+- **A second `await tx.executeSql(...)` in the same callback throws** `InvalidStateError: DOM Exception 11: This transaction is already finalized.` The second call is issued from a microtask, after the transaction has already been finalized.
+- **INSERT returning `insertId` is also broken**: `await tx.executeSql(...)` yields `undefined` (no result set), so you can never read the auto-generated ID.
+
+If you see DOM Exception 11 at runtime, you have more than one `await tx.executeSql(...)` inside a single `withTransaction` callback — even "harmless" pairs of UPDATEs (e.g. a soft-delete that also touches a child table). The fix is the callback-form `db.transaction` with nested success callbacks (see below).
+
+> ⚠️ **Why the tests don't catch this:** the NodeDatabase test double (`__test_utils__/nodeDatabase.ts`) implements a *proper* promise-based `tx.executeSql`, which is strictly more lenient than the real RN adapter. Code that passes all Jest DB tests can still throw DOM Exception 11 on device. The RN-semantics double in `entities.test.ts` (`createRunToCompletionDatabase`) reproduces the real behaviour.
 
 #### ✅ Correct Pattern for INSERT with insertId
 
@@ -150,12 +158,28 @@ export async function setPrimaryImage(profileId: string, imageId: number): Promi
 }
 ```
 
+> 💡 **Prefer the helper:** for anything beyond a couple of statements, use the exported `runStatementsInTransaction(db, statements)` helper from `./database/transaction` (re-exported from `./database`). It wraps exactly this nested-callback pattern in a `Promise`, chaining each statement from the previous one's success callback:
+>
+> ```typescript
+> import {runStatementsInTransaction} from './database';
+>
+> // ✅ CORRECT: Sequential multi-statement transaction (RN-safe)
+> await runStatementsInTransaction(db, [
+>   {sql: 'UPDATE images SET is_primary = 0 WHERE profile_id = ?', params: [profileId]},
+>   {sql: 'UPDATE images SET is_primary = 1 WHERE id = ?', params: [imageId]},
+> ]);
+> ```
+>
+> Resolves when the last statement succeeds; rejects on any statement error or transaction rollback.
+
 #### ✅ When withTransaction() IS Safe to Use
 
-The `withTransaction()` helper can be used for:
+The `withTransaction()` helper can be used for — **provided the callback contains only ONE `await tx.executeSql()`**:
 - UPDATE operations that don't need return values (other than rowsAffected check)
 - DELETE operations that don't need return values (other than rowsAffected check)
 - Operations where you construct the return value from input data
+
+> ⚠️ **Rule of thumb:** one `await tx.executeSql()` per `withTransaction` callback. The instant you need a second statement, switch to the callback-form `db.transaction` with nested success callbacks (previous section). Do not "just add another `await`".
 
 ```typescript
 // ✅ SAFE: UPDATE that returns input object
@@ -182,16 +206,14 @@ await withTransaction(db, async (tx) => {
 
 #### Summary Table
 
-| Operation Type | Use withTransaction? | Pattern |
-|----------------|---------------------|---------|
-| INSERT returning insertId | ❌ NO | Direct callback with Promise wrapper |
-| INSERT not returning insertId | ✅ YES | withTransaction is fine |
-| UPDATE with checks | ✅ YES | withTransaction is fine |
-| DELETE with checks | ✅ YES | withTransaction is fine |
-| Multiple sequential statements | ❌ NO | Nested callbacks in single transaction |
-| SELECT queries | ✅ YES | Can use either pattern |
+| Operation | Use withTransaction()? | Pattern |
+|-----------|------------------------|---------|
+| Single statement (one `await tx.executeSql`) | ✅ YES | `withTransaction` is fine |
+| INSERT returning `insertId` | ❌ NO | Callback-form `db.transaction` + Promise wrapper |
+| Second+ `await tx.executeSql()` in the same callback | ❌ NO | `runStatementsInTransaction(db, statements)` (or manual nested `executeSql` success callbacks) |
+| SELECT queries | ✅ YES | Either pattern (reads don't mutate) |
 
-**Root Cause:** React Native SQLite transactions follow run-to-completion semantics. When using Promises with A+ standard, resolution occurs on a subsequent tick, which happens after the transaction has already committed. This causes the "transaction already finalized" error.
+**Root Cause:** react-native-sqlite-storage's `tx.executeSql` is callback-based (returns `undefined`, not a Promise), and `SQLitePluginTransaction.start()` finalizes the transaction immediately after the callback's *synchronous* portion returns. `await`-ing `tx.executeSql` only defers to a microtask — so the first statement is queued synchronously and runs, but a second statement queued from a microtask hits an already-finalized transaction and throws `InvalidStateError: DOM Exception 11: This transaction is already finalized.`
 
 ## 📋 Schema Overview
 

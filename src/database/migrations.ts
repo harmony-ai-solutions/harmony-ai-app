@@ -40,6 +40,7 @@ import { migration029 } from './migrations/000029_rag_reindex_flag';
 import { migration030 } from './migrations/000030_add_provider_expansion';
 import { migration031 } from './migrations/000031_config_uuid_primary_keys';
 import { migration032 } from './migrations/000032_add_soulbitscloud_provider';
+import { migration033 } from './migrations/000033_add_emotion_state_deleted_at';
 
 // Migration definition
 export interface Migration {
@@ -211,6 +212,11 @@ export const MIGRATIONS: Migration[] = [
     version: 32,
     description: 'add_soulbitscloud_provider',
     sql: migration032,
+   },
+   {
+    version: 33,
+    description: 'add_emotion_state_deleted_at',
+    sql: migration033,
    },
   ];
 

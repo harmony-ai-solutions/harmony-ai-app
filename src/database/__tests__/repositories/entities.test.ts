@@ -6,6 +6,8 @@
  */
 
 import {useFreshDatabase} from '../repositoryFixtures';
+import * as connection from '../../connection';
+import type {Database, DatabaseTransaction} from '../../types';
 import {
   createEntity,
   getEntity,
@@ -18,6 +20,153 @@ import {
   updateEntityModuleMapping,
   deleteEntityModuleMapping,
 } from '../../repositories/entities';
+import {insertMemory} from '../../repositories/memories';
+import {upsertEmotionState} from '../../repositories/emotion_state';
+import {createEmojiAction} from '../../repositories/emoji_actions';
+import {createInteraction} from '../../repositories/interactions';
+import {createConversationMessage} from '../../repositories/conversation_messages';
+import type {
+  EntityModuleMapping,
+  EmotionState,
+  Interaction,
+  Memory,
+  ConversationMessage,
+} from '../../models';
+
+/**
+ * Test double that emulates react-native-sqlite-storage's run-to-completion
+ * transaction semantics (see src/database/README.md).
+ *
+ * react-native-sqlite-storage's SQLitePluginTransaction executes the callback
+ * synchronously and finalizes the transaction immediately afterwards — it does
+ * NOT wait for promises. Any tx.executeSql issued from a later microtask (i.e.
+ * after an `await` inside an async transaction callback) throws
+ *   "InvalidStateError: DOM Exception 11: This transaction is already finalized."
+ *
+ * The promise-form transaction() here reproduces that exact behaviour: the
+ * transaction is marked finalized right after the callback's synchronous
+ * portion returns, so a second `await tx.executeSql(...)` in the same callback
+ * rejects. The callback form reproduces the safe nested-callback pattern.
+ */
+function createRunToCompletionDatabase(real: Database): Database {
+  const wrapper: any = {
+    async executeSql(sql: string, params?: any[]) {
+      return real.executeSql(sql, params);
+    },
+
+    transaction(
+      fn: any,
+      errorCallback?: any,
+      successCallback?: any,
+    ): any {
+      if (errorCallback !== undefined || successCallback !== undefined) {
+        // Callback form — RN's run-to-completion loop: statements issued
+        // synchronously (or from success callbacks) are all processed before
+        // the transaction finalizes.
+        const queue: Array<{
+          sql: string;
+          params: any[];
+          success?: any;
+          error?: any;
+        }> = [];
+        let failure: Error | null = null;
+        const tx: any = {
+          executeSql: (sql: string, params?: any[], success?: any, error?: any) => {
+            queue.push({sql, params: params ?? [], success, error});
+          },
+        };
+        try {
+          fn(tx);
+        } catch (e) {
+          failure = e as Error;
+        }
+        const process = () => {
+          if (failure) {
+            if (errorCallback) errorCallback(failure);
+            return;
+          }
+          const batch = queue.splice(0);
+          if (batch.length === 0) {
+            if (successCallback) successCallback();
+            return;
+          }
+          let i = 0;
+          const step = () => {
+            if (i >= batch.length) {
+              process();
+              return;
+            }
+            const stmt = batch[i++];
+            real.executeSql(stmt.sql, stmt.params).then(
+              res => {
+                try {
+                  if (stmt.success) stmt.success(null, res[0]);
+                } catch (e) {
+                  failure = e as Error;
+                }
+                step();
+              },
+              err => {
+                if (stmt.error) {
+                  try {
+                    stmt.error(null, err);
+                  } catch (e) {
+                    failure = e as Error;
+                  }
+                  step();
+                } else {
+                  failure = err as Error;
+                  if (errorCallback) errorCallback(err);
+                }
+              },
+            );
+          };
+          step();
+        };
+        process();
+        return;
+      }
+
+      // Promise form — reproduce RN finalize-after-sync-callback semantics.
+      return new Promise<any>((resolve, reject) => {
+        let finalized = false;
+        const tx: DatabaseTransaction = {
+          executeSql: (sql: string, params?: any[]) => {
+            if (finalized) {
+              return Promise.reject(
+                Object.assign(
+                  new Error(
+                    'InvalidStateError: DOM Exception 11: This transaction is already finalized. ' +
+                      'Transactions are committed after its success or failure handlers are called. ' +
+                      'If you are using a Promise to handle callbacks, be aware that implementations ' +
+                      'following the A+ standard adhere to run-to-completion semantics and so Promise ' +
+                      'resolution occurs on a subsequent tick and therefore after the transaction commits.',
+                  ),
+                  {code: 11},
+                ),
+              );
+            }
+            return real.executeSql(sql, params);
+          },
+        };
+        try {
+          const result = fn(tx);
+          // Emulate RN start(): after the callback's synchronous portion
+          // returns, the transaction is finalized.
+          finalized = true;
+          Promise.resolve(result).then(resolve, reject);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    },
+
+    close() {
+      return real.close();
+    },
+  };
+  return wrapper;
+}
 
 describe('entities repository', () => {
   const {getDb} = useFreshDatabase();
@@ -104,6 +253,259 @@ describe('entities repository', () => {
   describe('deleteEntity', () => {
     it('Delete Non-existent Entity (Error Handling)', async () => {
       await expect(deleteEntity('non-existent-id')).rejects.toThrow();
+    });
+
+    it('soft-delete does not throw "transaction is already finalized" under RN run-to-completion semantics', async () => {
+      // This reproduces react-native-sqlite-storage's run-to-completion
+      // transaction behavior (see src/database/README.md "Multiple sequential
+      // statements | ❌ NO"). The library's SQLitePluginTransaction finalizes
+      // the transaction immediately after the callback's synchronous portion
+      // returns; any tx.executeSql issued from a later microtask (i.e. after
+      // an `await` inside the callback) throws DOM Exception 11:
+      //   "This transaction is already finalized."
+      // deleteEntity's soft-delete must NOT use two sequential
+      // `await tx.executeSql()` calls inside one withTransaction.
+      const entityId = 'entity-soft-delete-rn';
+      await createEntity({id: entityId, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntityModuleMapping({
+        entity_id: entityId,
+        backend_config_id: null,
+        cognition_config_id: null,
+        imagination_config_id: null,
+        movement_config_id: null,
+        rag_config_id: null,
+        stt_config_id: null,
+        tts_config_id: null,
+        vision_config_id: null,
+        deleted_at: null,
+      });
+
+      const rnDb = createRunToCompletionDatabase(getDb());
+      jest.spyOn(connection, 'getDatabase').mockReturnValue(rnDb);
+
+      await expect(deleteEntity(entityId)).resolves.toBeUndefined();
+
+      // Both rows must be soft-deleted (deleted_at set, not null).
+      const entity = await getEntity(entityId, true);
+      expect(entity).not.toBeNull();
+      expect(entity!.deleted_at).not.toBeNull();
+      const mapping = await getEntityModuleMapping(entityId, true);
+      expect(mapping).not.toBeNull();
+      expect(mapping!.deleted_at).not.toBeNull();
+    });
+  });
+
+  describe('deleteEntity cascade', () => {
+    const nowIso = () => new Date().toISOString();
+
+    const makeMapping = (entityId: string): EntityModuleMapping => ({
+      entity_id: entityId,
+      backend_config_id: null,
+      cognition_config_id: null,
+      imagination_config_id: null,
+      movement_config_id: null,
+      rag_config_id: null,
+      stt_config_id: null,
+      tts_config_id: null,
+      vision_config_id: null,
+      deleted_at: null,
+    });
+
+    const makeEmotionState = (entityId: string): EmotionState => ({
+      entity_id: entityId,
+      joy_intensity: 0.1,
+      sadness_intensity: 0.1,
+      trust_intensity: 0.1,
+      disgust_intensity: 0.1,
+      fear_intensity: 0.1,
+      anger_intensity: 0.1,
+      surprise_intensity: 0.1,
+      anticipation_intensity: 0.1,
+      joy_baseline: 0.1,
+      sadness_baseline: 0.1,
+      trust_baseline: 0.1,
+      disgust_baseline: 0.1,
+      fear_baseline: 0.1,
+      anger_baseline: 0.1,
+      surprise_baseline: 0.1,
+      anticipation_baseline: 0.1,
+      joy_crystallize_start: null,
+      sadness_crystallize_start: null,
+      trust_crystallize_start: null,
+      disgust_crystallize_start: null,
+      fear_crystallize_start: null,
+      anger_crystallize_start: null,
+      surprise_crystallize_start: null,
+      anticipation_crystallize_start: null,
+      last_update: new Date(),
+      decay_tau: 3600,
+      high_threshold: 6,
+      low_threshold: 1,
+      crystallize_intensity: 7,
+      crystallize_min_hours: 2,
+      created_at: new Date(),
+      updated_at: new Date(),
+      deleted_at: null,
+    });
+
+    const makeInteraction = (id: string, entityId: string, participantIds: string[], senderIsOther = false): Interaction => {
+      const iso = nowIso();
+      return {
+        id,
+        entity_id: entityId,
+        interaction_scope: 'private',
+        participant_key: entityId < 'user' ? `${entityId}+user` : `user+${entityId}`,
+        participant_ids: JSON.stringify(participantIds),
+        status: 'active',
+        started_at: iso,
+        last_activity_at: iso,
+        ended_at: null,
+        memory_id: null,
+        continued_interaction_id: null,
+        metadata: null,
+        summary: null,
+        presence_type: 'phone',
+        created_at: iso,
+        updated_at: iso,
+        deleted_at: null,
+      };
+    };
+
+    const makeMessage = (id: string, entityId: string, senderEntityId: string, interactionId: string): Omit<ConversationMessage, 'created_at' | 'updated_at' | 'deleted_at'> => ({
+      id,
+      entity_id: entityId,
+      sender_entity_id: senderEntityId,
+      interaction_id: interactionId,
+      content: `message from ${id}`,
+      audio_duration: null,
+      message_type: 'text',
+      emotional_state_bits: 0,
+      is_recon_followup: false,
+      is_edited: false,
+      edit_of_message_id: null,
+    });
+
+    /** Seed an entity with one of every child row type rooted at it. */
+    async function seedEntityWithChildren(entityId: string, interactionId: string) {
+      await createEntity({id: entityId, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntityModuleMapping(makeMapping(entityId));
+      await insertMemory({
+        id: `mem-${entityId}`,
+        entity_id: entityId,
+        compaction_level: 1,
+        content: `memory of ${entityId}`,
+        emotional_state_bits: 0,
+        start_date: null,
+        end_date: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+        deleted_at: null,
+      });
+      await upsertEmotionState(makeEmotionState(entityId));
+      await createEmojiAction({
+        id: `emoji-${entityId}`,
+        entityId,
+        emojiNative: '👍',
+        emotionEffect: null,
+        metabolismVector: null,
+        substitutionText: null,
+        autoGenerated: false,
+        isDefault: false,
+      });
+      await createInteraction(makeInteraction(interactionId, entityId, [entityId, 'user']));
+      await createConversationMessage(makeMessage(`msg-${entityId}`, entityId, entityId, interactionId));
+    }
+
+    /** Raw deleted_at value for a row identified by table + id column + id. */
+    async function deletedAtOf(table: string, idColumn: string, id: string): Promise<string | null> {
+      const [result] = await getDb().executeSql(
+        `SELECT deleted_at FROM ${table} WHERE ${idColumn} = ?`,
+        [id],
+      );
+      if (result.rows.length === 0) return undefined as unknown as null;
+      return result.rows.item(0).deleted_at;
+    }
+
+    it('soft-delete cascades deleted_at to all child rows rooted at the entity (RN run-to-completion)', async () => {
+      const entityId = 'entity-cascade-soft';
+      await seedEntityWithChildren(entityId, `int-${entityId}`);
+
+      // Run the delete through the RN-semantics double to prove the
+      // multi-statement transaction does not throw DOM Exception 11.
+      const rnDb = createRunToCompletionDatabase(getDb());
+      jest.spyOn(connection, 'getDatabase').mockReturnValue(rnDb);
+
+      await expect(deleteEntity(entityId)).resolves.toBeUndefined();
+
+      // Entity + mapping soft-deleted
+      const entity = await getEntity(entityId, true);
+      expect(entity).not.toBeNull();
+      expect(entity!.deleted_at).not.toBeNull();
+      const mapping = await getEntityModuleMapping(entityId, true);
+      expect(mapping).not.toBeNull();
+      expect(mapping!.deleted_at).not.toBeNull();
+
+      // All child rows soft-deleted
+      expect(await deletedAtOf('memories', 'id', `mem-${entityId}`)).not.toBeNull();
+      expect(await deletedAtOf('emotion_state', 'entity_id', entityId)).not.toBeNull();
+      expect(await deletedAtOf('entity_emoji_actions', 'id', `emoji-${entityId}`)).not.toBeNull();
+      expect(await deletedAtOf('interactions', 'id', `int-${entityId}`)).not.toBeNull();
+      expect(await deletedAtOf('conversation_messages', 'id', `msg-${entityId}`)).not.toBeNull();
+    });
+
+    it('does NOT cascade to interactions/messages rooted at OTHER entities (business rule)', async () => {
+      const entityA = 'entity-A';
+      const entityB = 'entity-B';
+
+      // Entity B owns an interaction + message that merely MENTION entity A in
+      // participant_ids / sender_entity_id — they must remain untouched.
+      await seedEntityWithChildren(entityB, `int-${entityB}`);
+      // Re-point B's seeded message to reference A as sender to prove the
+      // sender_entity_id is not used as a cascade predicate.
+      await getDb().executeSql(
+        'UPDATE conversation_messages SET sender_entity_id = ? WHERE id = ?',
+        [entityA, `msg-${entityB}`],
+      );
+      // B's interaction participant_ids include A.
+      await getDb().executeSql(
+        'UPDATE interactions SET participant_ids = ? WHERE id = ?',
+        [JSON.stringify([entityA, entityB]), `int-${entityB}`],
+      );
+
+      // Entity A gets its own rooted children.
+      await seedEntityWithChildren(entityA, `int-${entityA}`);
+
+      await deleteEntity(entityA);
+
+      // B-rooted rows untouched (deleted_at still null)
+      expect(await deletedAtOf('interactions', 'id', `int-${entityB}`)).toBeNull();
+      expect(await deletedAtOf('conversation_messages', 'id', `msg-${entityB}`)).toBeNull();
+      expect(await deletedAtOf('emotion_state', 'entity_id', entityB)).toBeNull();
+      expect(await deletedAtOf('memories', 'id', `mem-${entityB}`)).toBeNull();
+
+      // A-rooted rows soft-deleted
+      expect(await deletedAtOf('interactions', 'id', `int-${entityA}`)).not.toBeNull();
+      expect(await deletedAtOf('conversation_messages', 'id', `msg-${entityA}`)).not.toBeNull();
+      expect(await deletedAtOf('emotion_state', 'entity_id', entityA)).not.toBeNull();
+      expect(await deletedAtOf('memories', 'id', `mem-${entityA}`)).not.toBeNull();
+    });
+
+    it('permanent delete removes the entity and all child rows from the DB', async () => {
+      const entityId = 'entity-cascade-permanent';
+      await seedEntityWithChildren(entityId, `int-${entityId}`);
+
+      await deleteEntity(entityId, true);
+
+      // Entity + mapping gone
+      expect(await getEntity(entityId, true)).toBeNull();
+      expect(await getEntityModuleMapping(entityId, true)).toBeNull();
+
+      // Child rows gone (query returns no rows)
+      expect(await deletedAtOf('memories', 'id', `mem-${entityId}`)).toBeUndefined();
+      expect(await deletedAtOf('emotion_state', 'entity_id', entityId)).toBeUndefined();
+      expect(await deletedAtOf('entity_emoji_actions', 'id', `emoji-${entityId}`)).toBeUndefined();
+      expect(await deletedAtOf('interactions', 'id', `int-${entityId}`)).toBeUndefined();
+      expect(await deletedAtOf('conversation_messages', 'id', `msg-${entityId}`)).toBeUndefined();
     });
   });
 
