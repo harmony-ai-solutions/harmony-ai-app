@@ -23,6 +23,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -49,6 +50,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
   const route = useRoute<Route>();
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
+  const { withExternalFlow } = useBiometricLock();
   const { t } = useTranslation('characters');
   const { bottom: safeBottom } = useSafeAreaInsets();
 
@@ -209,11 +211,15 @@ export const CharacterProfileEditScreen: React.FC = () => {
     }
 
     try {
-      const result = await launchImageLibrary({
-        mediaType: 'photo',
-        includeBase64: true,
-        quality: 0.8,
-      });
+      // The system image picker backgrounds the app while open — run it as an
+      // external flow so the app-lock is suspended for the round-trip.
+      const result = await withExternalFlow(() =>
+        launchImageLibrary({
+          mediaType: 'photo',
+          includeBase64: true,
+          quality: 0.8,
+        }),
+      );
 
       if (result.assets && result.assets[0]) {
         const asset = result.assets[0];

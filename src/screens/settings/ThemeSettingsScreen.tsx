@@ -17,6 +17,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { hexToRgba } from '../../utils/colorUtils';
 import { useAppAlert } from '../../contexts/AppAlertContext';
+import { useBiometricLock } from '../../contexts/BiometricLockContext';
 import { useEmoji } from '../../contexts/EmojiContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
@@ -50,6 +51,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
     const { emojiSet, setEmojiSet } = useEmoji();
     const { showAlert } = useAppAlert();
+    const { withExternalFlow } = useBiometricLock();
 
     const EMOJI_STYLES = [
         { set: 'native' as EmojiSet, label: t('nativeLabel'), description: t('nativeDesc'), sampleEmojis: ['😀', '👍', '❤️', '🎉', '🚀'] },
@@ -153,9 +155,13 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
     const handleImportTheme = async () => {
         try {
-            const [result] = await DocumentPicker.pick({
-                type: [DocumentPicker.types.json],
-            });
+            // The system document picker backgrounds the app while open — run it
+            // as an external flow so the app-lock is suspended for the round-trip.
+            const [result] = await withExternalFlow(() =>
+                DocumentPicker.pick({
+                    type: [DocumentPicker.types.json],
+                }),
+            );
 
             if (result) {
                 const fileContent = await RNFS.readFile(result.uri, 'utf8');

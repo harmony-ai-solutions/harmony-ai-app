@@ -18,6 +18,7 @@ import { pick } from '@react-native-documents/picker';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -62,6 +63,7 @@ export const CharactersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
+  const { withExternalFlow } = useBiometricLock();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('characters');
 
@@ -172,7 +174,10 @@ export const CharactersScreen: React.FC = () => {
   const handleImportCard = async () => {
     let docs;
     try {
-      docs = await pick({ type: ['image/png', 'application/json'] });
+      // Opening the system file picker backgrounds the app (DocumentsUI is a
+      // separate Activity). Run it as an external flow so the app-lock is
+      // suspended for the picker round-trip instead of locking mid-import.
+      docs = await withExternalFlow(() => pick({ type: ['image/png', 'application/json'] }));
     } catch {
       // User cancelled or picker error — silent.
       return;

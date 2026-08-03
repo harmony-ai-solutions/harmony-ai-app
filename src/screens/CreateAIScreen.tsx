@@ -42,6 +42,7 @@ const log = createLogger('[CreateAIScreen]');
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -91,6 +92,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'CreateAI'>;
 export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
+  const { withExternalFlow } = useBiometricLock();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('createAI');
 
@@ -206,11 +208,15 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // ── Avatar picker ────────────────────────────────────────────────────────────
   const handlePickAvatar = async () => {
     try {
-      const result = await launchImageLibrary({
-        mediaType: 'photo',
-        includeBase64: true,
-        quality: 0.7,
-      });
+      // The system image picker backgrounds the app while open — run it as an
+      // external flow so the app-lock is suspended for the round-trip.
+      const result = await withExternalFlow(() =>
+        launchImageLibrary({
+          mediaType: 'photo',
+          includeBase64: true,
+          quality: 0.7,
+        }),
+      );
       if (result.assets?.[0]) {
         const asset = result.assets[0];
         setAvatarUri(asset.uri ?? null);
