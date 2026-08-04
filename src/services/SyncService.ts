@@ -9,6 +9,18 @@ import type { ConnectionManager } from './connection/ConnectionManager';
 import { getDatabase, getSyncDatabase } from '../database/connection';
 import { createLogger } from '../utils/logger';
 import EntityEmojiActionService from './EntityEmojiActionService';
+import {
+  CONFIG_ID_REFERENCES,
+  generateRenamedName,
+  isNameUniqueTable,
+  nameClashKey,
+  PROVIDER_CONFIG_REFERENCES,
+  type KeepProviderRefCapture,
+  type NameClashApplyDirective,
+  type NameClashInfo,
+  type NameClashResolution,
+} from './syncNameClash';
+import type { Database, DatabaseTransaction } from '../database/types';
 
 const log = createLogger('[SyncService]');
 
@@ -25,6 +37,12 @@ interface SyncServiceEvents {
   'sync:aborted': (reason: string) => void;
   'sync:estimate': (payload: any) => void;
   'sync:estimate:confirm': (accepted: boolean) => void;
+  /**
+   * Emitted when an incoming server record's unique `name` collides with a
+   * DIFFERENT local row during sync apply. The sync pauses until the UI calls
+   * `resolveNameClash(resolution, applyToAll)`.
+   */
+  'sync:nameclash': (clash: NameClashInfo) => void;
 }
 
 export interface SyncSession {
@@ -43,6 +61,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   private static instance: SyncService;
   private connectionManager: ConnectionManager;
   private currentSession: SyncSession | null = null;
+
+  // Shared promise for concurrent syncAndWait() callers. While set, additional
+  // callers attach to the same in-flight wait instead of starting another one.
+  private currentSyncWait: Promise<void> | null = null;
 
   private syncPhase: 'IDLE' | 'SERVER_SENDING' | 'CLIENT_SENDING' | 'FINALIZING' = 'IDLE';
   private pendingSyncConfirmation: {
@@ -89,6 +111,28 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   // Track IDs of records received from server this session to exclude from local changes
   private serverRecordIds: Set<string> = new Set();
 
+  // Provider config rows merged into the server row by a "keep" resolution
+  // (table:id of the SERVER row that now holds the app-local values). These
+  // must also be re-sent in the upload phase — removing them from
+  // serverRecordIds lets them through.
+  private keepCascadedProviderKeys: Set<string> = new Set();
+
+  // Pending name-clash resolution: the sync apply is paused until the user
+  // decides (overwrite/keep/rename) for each clash in `clashes` (or selects
+  // "apply to all"). Mirrors pendingSizeEstimate / confirmSizeEstimate.
+  private pendingNameClash: {
+    clashes: NameClashInfo[];
+    index: number;
+    decisions: Map<string, NameClashResolution>;
+    resolve: () => void;
+    reject: (reason: Error) => void;
+  } | null = null;
+
+  // "Apply to all" decision memorized for the CURRENT sync session only.
+  // Cleared whenever a new sync session starts (initiateSync) or the session
+  // aborts/rejects — it must never leak into the next sync.
+  private nameClashApplyToAllResolution: NameClashResolution | null = null;
+
   private constructor() {
     super();
     this.connectionManager = connectionManagerInstance;
@@ -102,9 +146,42 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     return SyncService.instance;
   }
 
+  /**
+   * Register the sync connection listeners.
+   *
+   * IMPORTANT — idempotency across Metro hot reloads: this module default-
+   * exports a singleton and is re-executed on every Fast Refresh, which would
+   * normally create a NEW SyncService instance that registers ANOTHER listener
+   * set on the RETAINED ConnectionManager singleton. Old instances are
+   * orphaned but their listeners persist, so every event would be delivered
+   * once per instance (observed 8-10x on-device: "Received SYNC_ACCEPT but no
+   * current session" x10, "Aborting sync session" x7-9 per event). Two
+   * mechanisms prevent that:
+   *
+   *  1. The ConnectionManager singleton holds the CURRENT SyncService instance
+   *     in `syncServiceEventTarget`. Each new SyncService constructor sets it,
+   *     so the single installed listener set always delegates to the newest
+   *     instance and stale instances are bypassed entirely.
+   *  2. The actual listeners are installed only ONCE per ConnectionManager
+   *     lifetime (guarded by `syncServiceListenersInstalled`).
+   */
   private setupConnectionListeners() {
-    // Listen ONLY to sync connection events from ConnectionManager
-    this.connectionManager.on('event:sync', this.routeSyncEvent.bind(this));
+    const cm = this.connectionManager as ConnectionManager & {
+      syncServiceEventTarget?: SyncService | null;
+      syncServiceListenersInstalled?: boolean;
+    };
+
+    // Make THIS instance the current event target (survives hot reloads).
+    cm.syncServiceEventTarget = this;
+
+    // Install the listeners exactly once per ConnectionManager lifetime.
+    if (cm.syncServiceListenersInstalled) {
+      return;
+    }
+    cm.syncServiceListenersInstalled = true;
+
+    // Listen ONLY to sync connection events from ConnectionManager.
+    cm.on('event:sync', (data: any) => cm.syncServiceEventTarget?.routeSyncEvent(data));
 
     // Self-healing: if the sync connection is lost, errors, or is torn down
     // mid-session (e.g. the ws→wss security-mode upgrade replacing the
@@ -112,13 +189,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     // session so the `initiateSync` guard can never be permanently stuck on
     // 'in_progress'. Without this, a dropped connection leaves currentSession
     // orphaned and every future sync logs "Sync already in progress, skipping".
-    this.connectionManager.on('disconnected:sync', () => this.abortSync('sync connection disconnected'));
-    this.connectionManager.on('error:sync', () => this.abortSync('sync connection error'));
+    cm.on('disconnected:sync', () => cm.syncServiceEventTarget?.abortSync('sync connection disconnected'));
+    cm.on('error:sync', () => cm.syncServiceEventTarget?.abortSync('sync connection error'));
     // Emitted by ConnectionManager when createConnection() replaces an existing
     // sync connection (deliberate teardown). The underlying WS object's own
     // 'disconnected' event is intentionally suppressed there (listeners removed
     // before disconnect), so this dedicated signal covers the upgrade path.
-    this.connectionManager.on('sync:connection_replaced', () => this.abortSync('sync connection replaced'));
+    cm.on('sync:connection_replaced', () => cm.syncServiceEventTarget?.abortSync('sync connection replaced'));
   }
 
   private routeSyncEvent(data: any) {
@@ -148,7 +225,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
       case 'SYNC_REQUEST':
         if (data.status === 'ERROR') {
-          this.emit('sync:rejected', data.payload);
+          this.handleSyncReject(data.payload);
         }
         break;
 
@@ -157,7 +234,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         break;
 
       case 'SYNC_REJECT':
-        this.emit('sync:rejected', data.payload);
+        this.handleSyncReject(data.payload);
         break;
 
       case 'SYNC_DATA_SIZE_ESTIMATE':
@@ -305,9 +382,19 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   }
 
   async initiateSync(forceFullSync: boolean = false): Promise<void> {
-    // Guard: Skip if sync is already in progress
-    if (this.currentSession && this.currentSession.status === 'in_progress') {
-      log.info('Sync already in progress, skipping');
+    // Guard: Skip if a sync is already in flight — either actively in progress
+    // (SYNC_ACCEPT received) OR still awaiting acceptance (SYNC_REQUEST sent,
+    // status 'pending'). Without the 'pending' check, two concurrent callers
+    // (e.g. auto-sync on connect + syncAndWait after entity creation) each send
+    // a SYNC_REQUEST milliseconds apart. The second request overwrites
+    // currentSession, so the engine's SYNC_DATA_SIZE_ESTIMATE for the FIRST
+    // session is ignored (session-id mismatch) and never confirmed — the engine
+    // then aborts the sync after its own timeout with `size_estimate_rejected`.
+    if (
+      this.currentSession &&
+      (this.currentSession.status === 'in_progress' || this.currentSession.status === 'pending')
+    ) {
+      log.info('Sync already in progress (or awaiting acceptance), skipping');
       return;
     }
 
@@ -336,6 +423,12 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
     // Clear server to ensure we have a clean session
     this.serverRecordIds.clear();
+    this.keepCascadedProviderKeys.clear();
+
+    // Name-clash decisions are SESSION-scoped: forget any "apply to all"
+    // selection from a previous sync session and drop a stale pending wait.
+    this.nameClashApplyToAllResolution = null;
+    this.pendingNameClash = null;
 
     // new sync session
     this.currentSession = {
@@ -391,6 +484,80 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   }
 
   /**
+   * Initiate a sync (if one isn't already running) and resolve once it actually
+   * COMPLETES (SYNC_FINALIZE → 'sync:completed').
+   *
+   * Why this exists: `initiateSync()` resolves the moment SYNC_REQUEST is *sent*,
+   * not when the engine has applied the data. Callers that need the engine to
+   * already know about freshly-created records (e.g. creating an entity then
+   * immediately opening its chat, which sends INIT_ENTITY) must wait for the
+   * full round-trip — otherwise the engine rejects with `entity_not_defined`.
+   *
+   * Behaviour:
+   *   - Resolves on 'sync:completed'.
+   *   - Resolves best-effort (with a warning) on 'sync:error'/'sync:rejected'/
+   *     'sync:aborted' or after `timeoutMs`, so callers are never blocked
+   *     forever (e.g. a pending size-estimate confirmation the user hasn't
+   *     acted on). The caller proceeds; the chat's own session logic surfaces
+   *     any remaining problem.
+   *   - Concurrent callers share a single wait.
+   */
+  async syncAndWait(options?: { timeoutMs?: number }): Promise<void> {
+    // If a sync is already running (started via initiateSync or another waiter),
+    // attach to the shared wait promise.
+    if (this.currentSyncWait) {
+      return this.currentSyncWait;
+    }
+
+    const timeoutMs = options?.timeoutMs ?? 45_000;
+    this.currentSyncWait = this.runSyncAndWait(timeoutMs);
+    try {
+      await this.currentSyncWait;
+    } finally {
+      this.currentSyncWait = null;
+    }
+  }
+
+  private runSyncAndWait(timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout>;
+
+      const cleanup = () => {
+        this.off('sync:completed', onDone);
+        this.off('sync:error', onDone);
+        this.off('sync:rejected', onDone);
+        this.off('sync:aborted', onDone);
+      };
+
+      const onDone = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        cleanup();
+        resolve();
+      };
+
+      timer = setTimeout(() => {
+        log.warn(`syncAndWait timed out after ${timeoutMs}ms — proceeding (best-effort)`);
+        onDone();
+      }, timeoutMs);
+
+      this.on('sync:completed', onDone);
+      this.on('sync:error', onDone);
+      this.on('sync:rejected', onDone);
+      this.on('sync:aborted', onDone);
+
+      // Kick off a sync if one isn't already running. initiateSync self-guards
+      // (no-op when one is in progress or the connection is unavailable), so we
+      // safely attach to an in-flight sync when present.
+      this.initiateSync().catch(err => {
+        log.warn('syncAndWait: initiateSync failed (best-effort):', err);
+      });
+    });
+  }
+
+  /**
    * Abort any in-flight sync session and reset all sync state.
    *
    * Called when the sync connection is lost, errors, or is deliberately
@@ -408,6 +575,14 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
    * the next sync — a full re-sync is the safe, lossless recovery path.
    */
   abortSync(reason: string = 'connection lost'): void {
+    // Idempotent guard: if nothing is in flight there is nothing to abort.
+    // Duplicate/legacy listeners (or repeated calls) must not re-log or
+    // re-emit `sync:aborted` — this makes N stacked listeners harmless even
+    // before a cold restart clears them.
+    if (!this.currentSession && !this.pendingSyncConfirmation && !this.pendingNameClash) {
+      return;
+    }
+
     log.warn(`Aborting sync session: ${reason}`);
 
     // Reject any pending SYNC_DATA confirmation so awaiting code doesn't hang
@@ -418,6 +593,15 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       reject(new Error(`Sync aborted: ${reason}`));
     }
 
+    // Reject any pending name-clash wait so applyBufferedSyncData does not
+    // hang on a user decision that can never come (the sync is gone).
+    if (this.pendingNameClash) {
+      const pending = this.pendingNameClash;
+      this.pendingNameClash = null;
+      pending.reject(new Error(`Sync aborted: ${reason}`));
+    }
+    this.nameClashApplyToAllResolution = null;
+
     // Clear session + phase so the initiateSync guard is released.
     this.currentSession = null;
     this.syncPhase = 'IDLE';
@@ -425,6 +609,37 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     this.serverRecordIds.clear();
 
     this.emit('sync:aborted', reason);
+  }
+
+  /**
+   * Handle a sync rejection from the engine (SYNC_REJECT, or SYNC_REQUEST with
+   * ERROR status). The engine aborts a sync for reasons like a rejected size
+   * estimate or a confirmation timeout.
+   *
+   * The session state MUST be reset here — otherwise currentSession is left
+   * stuck and the `initiateSync` guard blocks every future sync (the engine
+   * already considers the session dead, so it never clears it via SYNC_ACCEPT).
+   */
+  private handleSyncReject(payload: any): void {
+    log.warn('Sync rejected:', payload);
+
+    if (this.currentSession) {
+      this.currentSession.status = 'failed';
+      this.currentSession = null;
+    }
+    this.syncPhase = 'IDLE';
+    this.incomingDataBuffer = [];
+    this.serverRecordIds.clear();
+
+    // Unblock any pending name-clash wait — the session is dead.
+    if (this.pendingNameClash) {
+      const pending = this.pendingNameClash;
+      this.pendingNameClash = null;
+      pending.reject(new Error('Sync rejected'));
+    }
+    this.nameClashApplyToAllResolution = null;
+
+    this.emit('sync:rejected', payload);
   }
 
   private async handleSyncAccept(payload: any): Promise<void> {
@@ -579,6 +794,51 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       log.info(`  [${index + 1}/${recordCount}] ${item.table}.${item.operation} (${pkField}=${pkValue})`);
     });
 
+    // ── Name-clash resolution (pre-pass) ──────────────────────────────────
+    // An incoming record whose unique `name` collides with a DIFFERENT local
+    // row would fail on the UNIQUE(name) constraint and roll back the whole
+    // transaction. Detect those BEFORE opening the transaction, ask the user
+    // (via sync:nameclash + resolveNameClash) how to resolve each clash, and
+    // build an apply plan so the transaction never touches a violating INSERT.
+    const clashes = await this.detectNameClashes(db);
+    let applyPlan = new Map<string, NameClashApplyDirective>();
+    if (clashes.length > 0) {
+      log.warn(`Detected ${clashes.length} name clash(es) in buffered server data`);
+      let decisions: Map<string, NameClashResolution>;
+      try {
+        decisions = await this.collectNameClashDecisions(clashes);
+      } catch (error) {
+        // Session was aborted/rejected while the user was deciding — discard
+        // the buffered data without erroring (abortSync already reset state).
+        log.warn('Name-clash decision wait aborted, discarding buffered data:', error);
+        this.incomingDataBuffer = [];
+        this.serverRecordIds.clear();
+        return;
+      }
+      applyPlan = await this.buildApplyPlan(db, clashes, decisions);
+    }
+
+    // Provider config rows that a "keep" directive adopts: the incoming row is
+    // SKIPPED during the apply (no insert), because the keep cascade renames
+    // the app-local provider config to that server id instead — preserving the
+    // app-local provider values (see cascadeKeepProviderConfig).
+    const keptProviderServerIds = new Set<string>();
+    for (const [key, directive] of applyPlan) {
+      if (directive.kind === 'keep') {
+        const clash = clashes.find(c => nameClashKey(c.table, c.incomingId) === key);
+        const incoming = clash?.incomingRecord;
+        for (const ref of directive.providerRefs) {
+          const incomingProvider = incoming?.[ref.providerColumn];
+          const incomingProviderConfigId = incoming?.[ref.configColumn];
+          if (incomingProvider && incomingProviderConfigId) {
+            keptProviderServerIds.add(
+              `provider_config_${incomingProvider}:${incomingProviderConfigId}`,
+            );
+          }
+        }
+      }
+    }
+
     return new Promise<void>((resolve, reject) => {
       // Sort buffer by dependency order to satisfy FK constraints in correct sequence:
       // 1. Provider configs (no dependencies)
@@ -642,6 +902,32 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
             const pkField = (item.table === 'entity_module_mappings' || item.table === 'emotion_state') ? 'entity_id' : 'id';
             const pkValue = item.record[pkField];
 
+            // ── Name-clash resolutions ────────────────────────────────────
+            const directive = applyPlan.get(nameClashKey(item.table, pkValue));
+            if (directive && directive.kind !== 'rename') {
+              // overwrite / keep: adopt the server id (+ values) and remap
+              // local references. No INSERT is attempted, so the UNIQUE(name)
+              // constraint is never violated.
+              this.applyIdAdoption(tx, item, directive);
+              continue;
+            }
+            if (directive && directive.kind === 'rename') {
+              // Rename the local entry (freeing the unique name), then fall
+              // through to the normal INSERT path for the server record below.
+              tx.executeSql(
+                `UPDATE ${item.table} SET name = ?, updated_at = ? WHERE id = ?`,
+                [directive.newName, new Date().toISOString(), directive.localId],
+                () => {
+                  log.debug(`  ✓ RENAMED local ${item.table}:${directive.localId} → ${directive.newName}`);
+                },
+                (_, error) => {
+                  log.error(`  ❌ RENAME FAILED for ${item.table}:${directive.localId}`);
+                  log.error(`  Error: ${error.message} (code: ${(error as any).code || 'unknown'})`);
+                  return false; // Rollback
+                }
+              );
+            }
+
             if (item.operation === 'delete') {
               // Soft delete
               log.debug(`  Executing DELETE for ${item.table}:${pkValue}`);
@@ -658,6 +944,12 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
                   return false; // Rollback
                 }
               );
+            } else if (keptProviderServerIds.has(`${item.table}:${pkValue}`)) {
+              // A provider config a "keep" directive adopts: skip the insert —
+              // the cascade renames the app-local provider config to this id
+              // (keeping the app-local values), so inserting the server copy
+              // would collide with the renamed row.
+              log.debug(`Skipping insert for keep-adopted provider config ${item.table}:${pkValue}`);
             } else {
               // Check if record exists, then insert or update
               tx.executeSql(
@@ -678,7 +970,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
                       () => {
                         log.debug(`  ✓ INSERT successful for ${item.table}:${pkValue}`);
                       },
-                      (_, error) => {
+                      (__, error) => {
                         log.error(`  ❌ INSERT FAILED for ${item.table}:${pkValue}`);
                         log.error(`  Error: ${error.message} (code: ${(error as any).code || 'unknown'})`);
                         log.error(`  SQL: INSERT INTO ${item.table} (${columns}) VALUES (...)`);
@@ -721,7 +1013,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
                         () => {
                           log.debug(`  ✓ UPDATE successful for ${item.table}:${pkValue}`);
                         },
-                        (_, error) => {
+                        (__, error) => {
                           log.error(`  ❌ UPDATE FAILED for ${item.table}:${pkValue}`);
                           log.error(`  Error: ${error.message} (code: ${(error as any).code || 'unknown'})`);
                           log.error(`  Record:`, JSON.stringify(item.record, null, 2));
@@ -750,6 +1042,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
           log.warn('Cleaning up after transaction failure');
           this.incomingDataBuffer = []; // Clear buffer
           this.serverRecordIds.clear(); // Clear server record tracking
+          this.keepCascadedProviderKeys.clear();
           this.syncPhase = 'IDLE'; // Reset sync phase
 
           // Clear current session
@@ -764,6 +1057,26 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         () => {
           log.info(`✅ Transaction committed successfully - applied ${recordCount} records`);
           this.incomingDataBuffer = []; // Clear buffer after successful commit
+
+          // "keep"-resolved records must be RE-SENT in the upload phase: the
+          // local values now live under the server's id, but the server's copy
+          // still holds ITS values. Remove them from serverRecordIds so the
+          // upload filter (sendLocalChangesSequentially) lets them through —
+          // otherwise the server never learns the kept (final) version.
+          for (const [key, directive] of applyPlan) {
+            if (directive.kind === 'keep') {
+              this.serverRecordIds.delete(key);
+              log.debug(`Re-queueing keep-resolved record for upload: ${key}`);
+            }
+          }
+
+          // The "keep"-cascaded provider configs too: their rows now hold the
+          // app-local provider values under the server's provider config id.
+          for (const providerKey of this.keepCascadedProviderKeys) {
+            this.serverRecordIds.delete(providerKey);
+            log.debug(`Re-queueing keep-cascaded provider config for upload: ${providerKey}`);
+          }
+          this.keepCascadedProviderKeys.clear();
 
           // Invalidate service caches that may be stale after incoming sync
           EntityEmojiActionService.invalidateAllCaches();
@@ -1063,6 +1376,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       // Server finished sending - apply buffered data atomically and move to next phase
       try {
         await this.applyBufferedSyncData();
+        if (!this.currentSession) {
+          // The session was aborted/rejected while applying (e.g. during a
+          // pending name-clash decision) — abortSync already reset state, so
+          // do NOT proceed to client transmission.
+          log.warn('Session no longer active after applying server data — skipping client transmission');
+          return;
+        }
         log.info('Server data applied successfully');
       } catch (error) {
         log.error('Failed to apply server data:', error);
@@ -1239,6 +1559,406 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     };
 
     return fkMap[table] || [];
+  }
+
+  // -------------------------------------------------------------------------
+  // Name-clash resolution
+  // -------------------------------------------------------------------------
+
+  /**
+   * Scan the buffered server data for records whose unique `name` would
+   * collide with a DIFFERENT local row on INSERT (the exact failure mode that
+   * previously rolled back the whole sync transaction).
+   */
+  private async detectNameClashes(db: Database): Promise<NameClashInfo[]> {
+    const clashes: NameClashInfo[] = [];
+
+    for (const item of this.incomingDataBuffer) {
+      if (item.operation === 'delete') continue;
+      if (!isNameUniqueTable(item.table)) continue;
+
+      const incomingId = item.record?.id;
+      const name = item.record?.name;
+      if (!incomingId || !name) continue;
+
+      const [result] = await db.executeSql(
+        `SELECT * FROM ${item.table} WHERE name = ?`,
+        [name],
+      );
+
+      // If a same-name row with the INCOMING id exists locally, this is a
+      // normal LWW update (no INSERT → no unique violation). Otherwise any
+      // other row with the same name is a candidate clash.
+      let local: any = null;
+      for (let i = 0; i < result.rows.length; i++) {
+        const row = result.rows.item(i);
+        if (row.id === incomingId) {
+          local = null;
+          break;
+        }
+        if (!local) local = row;
+      }
+      if (!local) continue;
+
+      // Only a real clash when the incoming record would actually be INSERTed
+      // (its id is not present locally) — that INSERT is what the UNIQUE(name)
+      // constraint would reject.
+      const [pkResult] = await db.executeSql(
+        `SELECT id FROM ${item.table} WHERE id = ?`,
+        [incomingId],
+      );
+      if (pkResult.rows.length > 0) continue;
+
+      clashes.push({
+        table: item.table,
+        name,
+        localId: local.id,
+        incomingId,
+        localRecord: local,
+        incomingRecord: item.record,
+      });
+    }
+
+    return clashes;
+  }
+
+  /**
+   * Collect the user's resolution for every clash. If a prior "apply to all"
+   * decision was made earlier in THIS sync session, it is applied to every
+   * clash without prompting. Otherwise each clash is surfaced via
+   * `sync:nameclash` (one at a time) and `resolveNameClash` advances the
+   * queue. Resolves once all clashes have a decision.
+   */
+  private collectNameClashDecisions(
+    clashes: NameClashInfo[],
+  ): Promise<Map<string, NameClashResolution>> {
+    const decisions = new Map<string, NameClashResolution>();
+
+    if (this.nameClashApplyToAllResolution) {
+      for (const clash of clashes) {
+        decisions.set(
+          nameClashKey(clash.table, clash.incomingId),
+          this.nameClashApplyToAllResolution,
+        );
+      }
+      return Promise.resolve(decisions);
+    }
+
+    return new Promise((resolve, reject) => {
+      this.pendingNameClash = {
+        clashes,
+        index: 0,
+        decisions,
+        resolve: () => {
+          this.pendingNameClash = null;
+          resolve(decisions);
+        },
+        reject,
+      };
+      this.emit('sync:nameclash', clashes[0]);
+    });
+  }
+
+  /**
+   * User (or UI) decision for the currently-pending name clash.
+   *
+   * @param resolution  'overwrite' | 'keep' | 'rename'
+   * @param applyToAll  When true, the decision is memorized for every OTHER
+   *                    clash in this sync session (and only this session).
+   */
+  async resolveNameClash(
+    resolution: NameClashResolution,
+    applyToAll: boolean = false,
+  ): Promise<void> {
+    const pending = this.pendingNameClash;
+    if (!pending) {
+      log.warn('resolveNameClash called but no pending name clash');
+      return;
+    }
+
+    const clash = pending.clashes[pending.index];
+    if (!clash) return;
+
+    log.info(
+      `Resolving name clash ${clash.table}:${clash.name} → ${resolution}${applyToAll ? ' (apply to all)' : ''}`,
+    );
+    pending.decisions.set(nameClashKey(clash.table, clash.incomingId), resolution);
+
+    if (applyToAll) {
+      this.nameClashApplyToAllResolution = resolution;
+      for (let i = pending.index + 1; i < pending.clashes.length; i++) {
+        const c = pending.clashes[i];
+        pending.decisions.set(nameClashKey(c.table, c.incomingId), resolution);
+      }
+      pending.resolve();
+      return;
+    }
+
+    pending.index++;
+    if (pending.index >= pending.clashes.length) {
+      pending.resolve();
+    } else {
+      this.emit('sync:nameclash', pending.clashes[pending.index]);
+    }
+  }
+
+  /**
+   * Translate resolved clashes into concrete per-record apply directives.
+   * For `rename` this also picks a clash-free new name (avoiding collisions
+   * with names already present in the local table).
+   */
+  private async buildApplyPlan(
+    db: Database,
+    clashes: NameClashInfo[],
+    decisions: Map<string, NameClashResolution>,
+  ): Promise<Map<string, NameClashApplyDirective>> {
+    const plan = new Map<string, NameClashApplyDirective>();
+    if (clashes.length === 0) return plan;
+
+    // One unix timestamp shared by every rename in this apply pass so the
+    // suffixes are consistent.
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    for (const clash of clashes) {
+      const key = nameClashKey(clash.table, clash.incomingId);
+      const resolution = decisions.get(key);
+      if (!resolution) continue;
+
+      if (resolution === 'rename') {
+        const taken = await this.collectExistingNames(db, clash.table);
+        const newName = generateRenamedName(clash.name, {
+          takenNames: taken,
+          nowSeconds,
+        });
+        plan.set(key, {kind: 'rename', localId: clash.localId, newName});
+      } else if (resolution === 'keep') {
+        // Capture the local provider references BEFORE the apply transaction
+        // adopts the server id — the cascade renames the local provider
+        // configs to the server's provider config ids (see
+        // cascadeKeepProviderConfig). Uses PROVIDER_CONFIG_REFERENCES because
+        // stt_configs references TWO provider configs (transcription + VAD)
+        // instead of one.
+        const providerRefs: KeepProviderRefCapture[] = [];
+        for (const ref of PROVIDER_CONFIG_REFERENCES[clash.table] ?? []) {
+          providerRefs.push({
+            configColumn: ref.configColumn,
+            providerColumn: ref.providerColumn,
+            localProvider: clash.localRecord?.[ref.providerColumn] ?? null,
+            localProviderConfigId: clash.localRecord?.[ref.configColumn] ?? null,
+          });
+        }
+        plan.set(key, {
+          kind: 'keep',
+          localId: clash.localId,
+          providerRefs,
+        });
+      } else {
+        plan.set(key, {kind: resolution, localId: clash.localId});
+      }
+    }
+
+    return plan;
+  }
+
+  private async collectExistingNames(db: Database, table: string): Promise<string[]> {
+    const [result] = await db.executeSql(`SELECT name FROM ${table}`);
+    const names: string[] = [];
+    for (let i = 0; i < result.rows.length; i++) {
+      names.push(result.rows.item(i).name);
+    }
+    return names;
+  }
+
+  /**
+   * Apply an overwrite/keep directive inside the apply transaction.
+   *
+   *  - overwrite: the local row adopts the incoming id AND all incoming values
+   *  - keep:      the local row keeps its values, only the id is adopted
+   *
+   * Both then remap every local reference to the old id (via
+   * CONFIG_ID_REFERENCES) so FK constraints still resolve to the adopted row.
+   */
+  private applyIdAdoption(
+    tx: DatabaseTransaction,
+    item: {table: string; record: any},
+    directive: Extract<NameClashApplyDirective, {kind: 'overwrite' | 'keep'}>,
+  ): void {
+    const incomingId = item.record.id;
+
+    const logFailure = (_: any, error: any) => {
+      log.error(`  ❌ ${directive.kind.toUpperCase()} FAILED for ${item.table}:${directive.localId} → ${incomingId}`);
+      log.error(`  Error: ${error.message} (code: ${(error as any).code || 'unknown'})`);
+      return false; // Rollback
+    };
+
+    if (directive.kind === 'overwrite') {
+      const columns = Object.keys(item.record).filter(k => k !== 'id');
+      const updates = columns.map(c => `${c} = ?`).join(', ');
+      const values = columns.map(c => item.record[c]);
+      tx.executeSql(
+        `UPDATE ${item.table} SET id = ?, ${updates} WHERE id = ?`,
+        [incomingId, ...values, directive.localId],
+        () => {
+          log.debug(`  ✓ OVERWROTE local ${item.table}:${directive.localId} → ${incomingId} with server values`);
+        },
+        logFailure,
+      );
+    } else {
+      // keep: adopt the server id but preserve local values. Re-point every
+      // provider reference (provider_config_id, or the stt_configs
+      // transcription/vad columns) at the incoming (server) provider config id
+      // and bump updated_at so the row is picked up as a local change and the
+      // server learns the kept (final) values.
+      //
+      // All statements here are issued SYNCHRONOUSLY (no callback nesting) —
+      // the transaction executes each tx.executeSql in order, which matches
+      // both the real RN SQLite and the test harness.
+      const refs = directive.providerRefs ?? [];
+      const setClauses = refs.map(r => `${r.configColumn} = ?`);
+      const setValues = refs.map(r => item.record[r.configColumn]);
+      tx.executeSql(
+        `UPDATE ${item.table} SET id = ?, updated_at = ?, ${setClauses.join(', ')} WHERE id = ?`,
+        [incomingId, new Date().toISOString(), ...setValues, directive.localId],
+        () => {
+          log.debug(`  ✓ KEPT local ${item.table}:${directive.localId} values, adopted id ${incomingId}`);
+        },
+        logFailure,
+      );
+
+      // Cascade: keep the COMPLETE setup (module config + its provider
+      // configs). The incoming provider config rows were skipped from the
+      // buffer (keptProviderServerIds), so renaming the local provider configs
+      // to the server ids cannot collide.
+      for (const ref of refs) {
+        const localProviderConfigId = ref.localProviderConfigId;
+        const incomingProviderConfigId = item.record[ref.configColumn];
+        const localProviderTable = ref.localProvider
+          ? `provider_config_${ref.localProvider}`
+          : null;
+        const incomingProviderTable = item.record[ref.providerColumn]
+          ? `provider_config_${item.record[ref.providerColumn]}`
+          : null;
+        if (
+          localProviderConfigId &&
+          incomingProviderConfigId &&
+          localProviderTable &&
+          localProviderTable === incomingProviderTable
+        ) {
+          this.cascadeKeepProviderConfig(
+            tx,
+            incomingProviderTable,
+            localProviderConfigId,
+            incomingProviderConfigId,
+          );
+        } else if (
+          ref.localProvider &&
+          item.record[ref.providerColumn] &&
+          ref.localProvider !== item.record[ref.providerColumn]
+        ) {
+          log.warn(
+            `  ↳ Provider tables differ (${localProviderTable} vs ${incomingProviderTable}) — ` +
+            `skipping provider config cascade for ${item.table}:${directive.localId}`,
+          );
+        }
+      }
+    }
+
+    for (const ref of CONFIG_ID_REFERENCES[item.table] ?? []) {
+      tx.executeSql(
+        `UPDATE ${ref.table} SET ${ref.column} = ? WHERE ${ref.column} = ?`,
+        [incomingId, directive.localId],
+        () => {
+          log.debug(`  ✓ Remapped ${ref.table}.${ref.column} ${directive.localId} → ${incomingId}`);
+        },
+        (_: any, error: any) => {
+          log.error(`  ❌ REMAP FAILED for ${ref.table}.${ref.column} ${directive.localId} → ${incomingId}`);
+          log.error(`  Error: ${error.message}`);
+          return false; // Rollback
+        },
+      );
+    }
+  }
+
+  /**
+   * Keep-cascade: preserve the app's COMPLETE setup by renaming the local
+   * provider config to the server's provider config id.
+   *
+   * The incoming server provider config row was SKIPPED during the apply
+   * (keptProviderServerIds), so this rename cannot collide. The local row
+   * keeps all its values and created_at; only the id changes (to the server
+   * id) and updated_at is bumped (so it is detected as a local change and
+   * re-sent back to the engine — which learns the app-local provider
+   * settings). Nothing is orphaned: the row itself survives under the new id,
+   * and every module config that referenced the old id is re-pointed.
+   *
+   * All statements are issued SYNCHRONOUSLY (the transaction executes each
+   * tx.executeSql in order — no callback nesting, which would break on the
+   * test harness where callbacks are deferred microtasks).
+   */
+  private cascadeKeepProviderConfig(
+    tx: DatabaseTransaction,
+    providerTable: string,
+    localProviderId: string,
+    serverProviderId: string,
+  ): void {
+    const logFailure = (_: any, error: any) => {
+      log.error(
+        `  ❌ Provider config cascade FAILED for ${providerTable}:${localProviderId} → ${serverProviderId}`,
+      );
+      log.error(`  Error: ${error.message} (code: ${(error as any).code || 'unknown'})`);
+      return false; // Rollback
+    };
+
+    const key = `${providerTable}:${serverProviderId}`;
+    if (!this.keepCascadedProviderKeys.has(key)) {
+      // Track synchronously (used as the duplicate-cascade guard AND for the
+      // post-commit serverRecordIds cleanup).
+      this.keepCascadedProviderKeys.add(key);
+
+      if (localProviderId !== serverProviderId) {
+        tx.executeSql(
+          `UPDATE ${providerTable} SET id = ?, updated_at = ? WHERE id = ?`,
+          [serverProviderId, new Date().toISOString(), localProviderId],
+          () => {
+            log.debug(`  ↳ ✓ Renamed local provider config ${providerTable}:${localProviderId} → ${serverProviderId}`);
+          },
+          logFailure,
+        );
+      } else {
+        // Same id locally + on the server — just bump updated_at so the kept
+        // (local) provider values are re-sent.
+        tx.executeSql(
+          `UPDATE ${providerTable} SET updated_at = ? WHERE id = ?`,
+          [new Date().toISOString(), serverProviderId],
+          () => {
+            log.debug(`  ↳ ✓ Bumped updated_at on kept provider config ${key}`);
+          },
+          logFailure,
+        );
+      }
+    } else {
+      log.debug(`  ↳ Provider config ${key} already adopted by another keep — skipping rename`);
+    }
+
+    // Re-point every module config that still references the local id at the
+    // server id (the kept module config was already re-pointed; this covers
+    // any OTHER rows — e.g. module configs not part of this sync). Iterates
+    // PROVIDER_CONFIG_REFERENCES because stt_configs uses two provider
+    // reference columns (transcription + VAD) instead of provider_config_id.
+    for (const table of Object.keys(PROVIDER_CONFIG_REFERENCES)) {
+      for (const ref of PROVIDER_CONFIG_REFERENCES[table]) {
+        tx.executeSql(
+          `UPDATE ${table} SET ${ref.configColumn} = ? WHERE ${ref.configColumn} = ?`,
+          [serverProviderId, localProviderId],
+          () => {
+            log.debug(
+              `  ↳ ✓ Remapped ${table}.${ref.configColumn} ${localProviderId} → ${serverProviderId}`,
+            );
+          },
+          logFailure,
+        );
+      }
+    }
   }
 }
 

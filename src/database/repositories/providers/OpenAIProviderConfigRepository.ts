@@ -231,8 +231,9 @@ export async function updateOpenAIProviderConfig(config: OpenAIProviderConfig): 
            top_p = ?, n = ?, stop_tokens = ?,
            voice = ?, speed = ?, format = ?,
            frequency_penalty = ?, presence_penalty = ?, max_completion_tokens = ?,
-           seed = ?, response_format = ?, reasoning_effort = ?,
-           top_k = ?, top_a = ?, min_p = ?, repetition_penalty = ?, sampling_preset_name = ?, extra_params = ?
+            seed = ?, response_format = ?, reasoning_effort = ?,
+            top_k = ?, top_a = ?, min_p = ?, repetition_penalty = ?, sampling_preset_name = ?, extra_params = ?,
+            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,

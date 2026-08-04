@@ -73,7 +73,7 @@ Runs `test:unit` (isolated — see [Known Issue](#known-issue-better-sqlite3-cro
 npm run test:unit
 ```
 
-This is the **recommended** way to run unit tests. It passes `--maxWorkers=16` so
+This is the **recommended** way to run unit tests. It passes `--maxWorkers=40` so
 every test file runs in its own worker, which avoids the better-sqlite3
 cross-worker contamination described below. (`npx jest --selectProjects unit`
 without `--maxWorkers` can intermittently fail — see the known issue.)
@@ -115,8 +115,8 @@ those files are assigned to the **same Jest worker**.
   deterministic.
 - **Fix / workaround**: run unit tests with `--maxWorkers` greater than or equal
   to the number of unit test files so each file gets its own worker (no sharing
-  → no contamination). The `test:unit` script does this (`--maxWorkers=16` for
-  the current 12 unit files). **If the unit suite grows beyond 16 files, bump
+  → no contamination). The `test:unit` script does this (`--maxWorkers=40` for
+  the current 35 unit files). **If the unit suite grows beyond 40 files, bump
   the `--maxWorkers` value in `package.json` accordingly.**
 - **Related fix**: `NodeDatabase` no longer applies `PRAGMA journal_mode = WAL`
   to `:memory:` databases — WAL is meaningless for in-memory DBs and asking

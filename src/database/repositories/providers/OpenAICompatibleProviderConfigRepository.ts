@@ -203,7 +203,8 @@ export async function updateOpenAICompatibleProviderConfig(config: OpenAICompati
       `UPDATE provider_config_openaicompatible
        SET name = ?, base_url = ?, api_key = ?, model = ?, max_tokens = ?, temperature = ?, top_p = ?, n = ?, stop_tokens = ?,
            frequency_penalty = ?, presence_penalty = ?, max_completion_tokens = ?, seed = ?, response_format = ?,
-           top_k = ?, top_a = ?, min_p = ?, repetition_penalty = ?, sampling_preset_name = ?, extra_params = ?
+           top_k = ?, top_a = ?, min_p = ?, repetition_penalty = ?, sampling_preset_name = ?, extra_params = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name, config.base_url, config.api_key, config.model, config.max_tokens, config.temperature, config.top_p, config.n, config.stop_tokens,

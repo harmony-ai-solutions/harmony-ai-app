@@ -18,7 +18,7 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
-import { AppAlertModal, AlertConfig, AlertButton } from '../components/modals/AppAlertModal';
+import { AppAlertModal, AlertConfig, AlertButton, AlertCheckbox } from '../components/modals/AppAlertModal';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,16 +29,19 @@ interface AppAlertContextValue {
    * @param title   - Alert title (required)
    * @param message - Alert body text (optional)
    * @param buttons - Array of action buttons. Defaults to [{ text: 'OK' }].
-   *                  Each button: { text, onPress?, style?: 'default' | 'cancel' | 'destructive' }
+   *                  Each button: { text, onPress?, style?: 'default' | 'cancel' | 'destructive' }.
+   *                  When `options.checkbox` is set, onPress receives the
+   *                  checkbox's current checked state.
    * @param options - Additional options:
    *   - icon: MaterialCommunityIcons name to display
    *   - blockBackdropDismiss: prevent tapping outside to dismiss
+   *   - checkbox: optional checkbox row above the buttons (e.g. "Apply to all")
    */
   showAlert: (
     title: string,
     message?: string,
     buttons?: AlertButton[],
-    options?: { icon?: string; blockBackdropDismiss?: boolean },
+    options?: { icon?: string; blockBackdropDismiss?: boolean; checkbox?: AlertCheckbox },
   ) => void;
 }
 
@@ -56,10 +59,18 @@ export const AppAlertProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const handleDismiss = useCallback(() => {
     setVisible(false);
-    // Clear config after animation
+    // Capture the config being dismissed. The delayed cleanup (config cleared
+    // after the fade animation) must NOT clobber a NEWER alert that was shown
+    // before the timer fires — e.g. the sync name-clash popup is re-shown
+    // synchronously for the next clash when the user resolves one without
+    // "apply to all". Without this guard, the second popup vanished after the
+    // 200ms timer and the sync hung waiting for a decision.
+    const dismissedConfig = pendingRef.current;
     setTimeout(() => {
-      setConfig(null);
-      pendingRef.current = null;
+      if (pendingRef.current === dismissedConfig) {
+        setConfig(null);
+        pendingRef.current = null;
+      }
     }, 200);
   }, []);
 
@@ -71,6 +82,7 @@ export const AppAlertProvider: React.FC<{ children: React.ReactNode }> = ({
         buttons: buttons ?? [{ text: 'OK' }],
         icon: options?.icon,
         blockBackdropDismiss: options?.blockBackdropDismiss,
+        checkbox: options?.checkbox,
       };
       pendingRef.current = newConfig;
       setConfig(newConfig);

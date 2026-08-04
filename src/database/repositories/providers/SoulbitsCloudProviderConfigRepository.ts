@@ -216,7 +216,8 @@ export async function updateSoulbitsCloudProviderConfig(config: SoulbitsCloudPro
            max_tokens = ?, max_completion_tokens = ?,
            temperature = ?, top_p = ?, frequency_penalty = ?, presence_penalty = ?, n = ?,
            stop_tokens = ?, seed = ?, response_format = ?, sampling_preset_name = ?, extra_params = ?,
-           voice = ?, speed = ?, format = ?, image_aspect_ratio = ?, image_size = ?
+           voice = ?, speed = ?, format = ?, image_aspect_ratio = ?, image_size = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,

@@ -95,7 +95,8 @@ export async function updateAnthropicProviderConfig(config: AnthropicProviderCon
     const [result] = await tx.executeSql(
       `UPDATE provider_config_anthropic
        SET name = ?, api_key = ?, model = ?, max_tokens = ?, temperature = ?, top_p = ?, top_k = ?,
-           stop_sequences = ?, sampling_preset_name = ?, extra_params = ?
+           stop_sequences = ?, sampling_preset_name = ?, extra_params = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name, config.api_key, config.model, config.max_tokens, config.temperature,

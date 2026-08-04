@@ -65,7 +65,7 @@ export async function updateLocalAIProviderConfig(config: LocalAIProviderConfig)
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_localai SET name = ?, model = ? WHERE id = ?',
+      'UPDATE provider_config_localai SET name = ?, model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.model, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`LocalAI provider config not found: ${config.id}`);

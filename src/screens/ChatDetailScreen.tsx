@@ -1304,9 +1304,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* Android: 'height' recomputes the container frame on every re-render
+          (e.g. during session/retry churn), which makes the bottom input flicker.
+          Leave behavior undefined on Android — the window resizes for the keyboard
+          by default and we avoid the re-layout feedback loop. */}
       <KeyboardAvoidingView
         style={[styles.content, !isReadyToShow && styles.hidden]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <FlatList

@@ -80,7 +80,7 @@ CREATE TABLE entity_emoji_actions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT
 CREATE TABLE "entity_module_mappings" ( entity_id TEXT PRIMARY KEY, backend_config_id TEXT, cognition_config_id TEXT, imagination_config_id TEXT, movement_config_id TEXT, rag_config_id TEXT, stt_config_id TEXT, tts_config_id TEXT, vision_config_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (imagination_config_id) REFERENCES imagination_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL, FOREIGN KEY (vision_config_id) REFERENCES vision_configs(id) ON DELETE SET NULL );
 
 -- table: imagination_configs
-CREATE TABLE "imagination_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+CREATE TABLE "imagination_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
 
 -- table: interactions
 CREATE TABLE interactions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, interaction_scope TEXT NOT NULL, participant_key TEXT, participant_ids TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', started_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, ended_at TEXT, metadata TEXT, deleted_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP , summary TEXT DEFAULT '', memory_id TEXT, continued_interaction_id TEXT, presence_type TEXT NOT NULL DEFAULT 'unknown');
@@ -158,7 +158,7 @@ CREATE TABLE "sync_history" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TE
 CREATE TABLE "tts_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
 
 -- table: vision_configs
-CREATE TABLE "vision_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+CREATE TABLE "vision_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
 "
 `;
 
@@ -915,7 +915,7 @@ CREATE TABLE vision_configs ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NO
 "
 `;
 
-exports[`migration roll-forward schema at version 33 matches snapshot: v33 1`] = `
+exports[`migration roll-forward schema at version 34 matches snapshot: v34 1`] = `
 "-- index: idx_character_image_primary
 CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
 
@@ -995,7 +995,7 @@ CREATE TABLE entity_emoji_actions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT
 CREATE TABLE "entity_module_mappings" ( entity_id TEXT PRIMARY KEY, backend_config_id TEXT, cognition_config_id TEXT, imagination_config_id TEXT, movement_config_id TEXT, rag_config_id TEXT, stt_config_id TEXT, tts_config_id TEXT, vision_config_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (imagination_config_id) REFERENCES imagination_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL, FOREIGN KEY (vision_config_id) REFERENCES vision_configs(id) ON DELETE SET NULL );
 
 -- table: imagination_configs
-CREATE TABLE "imagination_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+CREATE TABLE "imagination_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
 
 -- table: interactions
 CREATE TABLE interactions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, interaction_scope TEXT NOT NULL, participant_key TEXT, participant_ids TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', started_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, ended_at TEXT, metadata TEXT, deleted_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP , summary TEXT DEFAULT '', memory_id TEXT, continued_interaction_id TEXT, presence_type TEXT NOT NULL DEFAULT 'unknown');
@@ -1073,6 +1073,6 @@ CREATE TABLE "sync_history" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TE
 CREATE TABLE "tts_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
 
 -- table: vision_configs
-CREATE TABLE "vision_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+CREATE TABLE "vision_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
 "
 `;

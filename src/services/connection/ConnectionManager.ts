@@ -143,6 +143,14 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
       log.error(`Failed to connect ${id}:`, error);
       connectionInfo.status = 'error';
       this.emit('connection:error', id, error);
+
+      // Fully tear down and remove the failed connection. Without this the
+      // errored ConnectionInfo stays in the map: the next createConnection(id)
+      // finds a stale "already exists" entry, its disconnect() is a no-op (the
+      // wrapper never wired its socket on a failed connect), and a lingering
+      // native socket deadlocks the retry with "Already Connected".
+      this.disconnectConnection(id);
+
       throw error;
     }
   }

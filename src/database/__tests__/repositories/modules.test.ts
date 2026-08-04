@@ -9,6 +9,7 @@
  */
 
 import {useFreshDatabase} from '../repositoryFixtures';
+import {getChangedRecords} from '../../sync';
 import {
   createBackendConfig,
   getBackendConfig,
@@ -28,6 +29,7 @@ import {
 import {
   createCognitionConfig,
   getCognitionConfig,
+  updateCognitionConfig,
   deleteCognitionConfig,
 } from '../../repositories/modules';
 import {
@@ -430,6 +432,113 @@ describe('modules repository', () => {
       const afterDelete = await getVisionConfig(visId, true);
       expect(afterDelete).toBeNull();
 
+      await deleteOpenAIProviderConfig(providerId, true);
+    });
+  });
+
+  describe('updated_at bump on update (sync dirty-tracking)', () => {
+    const makeOpenAIProvider = () =>
+      createOpenAIProviderConfig({
+        name: 'Bump OpenAI',
+        api_key: 'sk-test',
+        model: 'gpt-4',
+        max_tokens: 0,
+        temperature: 0,
+        top_p: 0,
+        n: 0,
+        stop_tokens: '',
+        voice: '',
+        speed: 0,
+        format: '',
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        max_completion_tokens: 0,
+        seed: 0,
+        response_format: '',
+        reasoning_effort: '',
+        top_k: 0,
+        top_a: 0,
+        min_p: 0,
+        repetition_penalty: 0,
+        sampling_preset_name: '',
+        extra_params: '{}',
+      });
+
+    it('updateBackendConfig bumps updated_at so the change is picked up by sync', async () => {
+      const providerId = await makeOpenAIProvider();
+      const backendId = await createBackendConfig({
+        name: 'Bump Backend',
+        provider: 'openai',
+        provider_config_id: providerId,
+      });
+
+      // Push created_at/updated_at into the past so the row is NOT dirty
+      // before the update and the sync pick-up can only come from the bump.
+      await getDb().executeSql(
+        'UPDATE backend_configs SET created_at = ?, updated_at = ? WHERE id = ?',
+        ['2000-01-01 00:00:00', '2000-01-01 00:00:00', backendId]
+      );
+
+      await updateBackendConfig({
+        id: backendId,
+        name: 'Bump Backend',
+        provider: 'openai',
+        provider_config_id: providerId,
+        deleted_at: null,
+      });
+
+      // updated_at must now be newer than the forced past value.
+      const [result] = await getDb().executeSql(
+        "SELECT CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix FROM backend_configs WHERE id = ?",
+        [backendId]
+      );
+      const pastUnix = Math.floor(new Date('2000-01-01T00:00:00Z').getTime() / 1000);
+      expect(result.rows.item(0).updated_at_unix).toBeGreaterThan(pastUnix);
+
+      // getChangedRecords must include the row for a lastSync between past and now.
+      const records = await getChangedRecords('backend_configs', pastUnix);
+      expect(records.some(r => r.id === backendId)).toBe(true);
+
+      await deleteBackendConfig(backendId, true);
+      await deleteOpenAIProviderConfig(providerId, true);
+    });
+
+    it('updateCognitionConfig bumps updated_at so the change is picked up by sync', async () => {
+      const providerId = await makeOpenAIProvider();
+      const cogId = await createCognitionConfig({
+        name: 'Bump Cognition',
+        provider: 'openai',
+        provider_config_id: providerId,
+        max_cognition_events: 20,
+        generate_expressions: 1,
+      });
+
+      await getDb().executeSql(
+        'UPDATE cognition_configs SET created_at = ?, updated_at = ? WHERE id = ?',
+        ['2000-01-01 00:00:00', '2000-01-01 00:00:00', cogId]
+      );
+
+      await updateCognitionConfig({
+        id: cogId,
+        name: 'Bump Cognition',
+        provider: 'openai',
+        provider_config_id: providerId,
+        max_cognition_events: 20,
+        generate_expressions: 1,
+        deleted_at: null,
+      });
+
+      const [result] = await getDb().executeSql(
+        "SELECT CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix FROM cognition_configs WHERE id = ?",
+        [cogId]
+      );
+      const pastUnix = Math.floor(new Date('2000-01-01T00:00:00Z').getTime() / 1000);
+      expect(result.rows.item(0).updated_at_unix).toBeGreaterThan(pastUnix);
+
+      const records = await getChangedRecords('cognition_configs', pastUnix);
+      expect(records.some(r => r.id === cogId)).toBe(true);
+
+      await deleteCognitionConfig(cogId, true);
       await deleteOpenAIProviderConfig(providerId, true);
     });
   });

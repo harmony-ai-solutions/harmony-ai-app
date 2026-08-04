@@ -99,6 +99,14 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
           if (this.wssSelfSigned === ws) {
             this.wssSelfSigned = null;
           }
+
+          // Best-effort close so a lingering native socket can't deadlock the
+          // next connect with "Already Connected" (see connect() catch).
+          try {
+            ws.close();
+          } catch (closeErr) {
+            log.warn('Error closing errored self-signed connection:', closeErr);
+          }
           
           const error = new Error(err);
           this.emit('error', error);
@@ -114,7 +122,20 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
           .catch((err: any) => {
             clearTimeout(connectionTimeout);
             log.error('Failed to connect with self-signed library:', err);
-            
+
+            // Best-effort close of the native socket for this URL. The native
+            // module keeps a per-URL socket map and rejects any later connect()
+            // with "Already Connected" while a socket lingers. A failed connect
+            // used to leave this.wssSelfSigned unset, so a subsequent
+            // disconnect() was a no-op and the stale socket deadlocked every
+            // retry. Closing here (and in the error handler below) guarantees
+            // the next attempt starts from a clean native state.
+            try {
+              ws.close();
+            } catch (closeErr) {
+              log.warn('Error closing failed self-signed connection:', closeErr);
+            }
+
             // Clean up
             if (this.wssSelfSigned === ws) {
               this.wssSelfSigned = null;

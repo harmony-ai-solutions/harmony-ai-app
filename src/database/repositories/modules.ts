@@ -128,7 +128,7 @@ export async function updateBackendConfig(config: BackendConfig): Promise<void> 
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE backend_configs
-       SET name = ?, provider = ?, provider_config_id = ?
+       SET name = ?, provider = ?, provider_config_id = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [config.name, config.provider, config.provider_config_id, config.id]
     );
@@ -303,7 +303,7 @@ export async function updateCognitionConfig(config: CognitionConfig): Promise<vo
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE cognition_configs
-       SET name = ?, provider = ?, provider_config_id = ?, max_cognition_events = ?, generate_expressions = ?
+       SET name = ?, provider = ?, provider_config_id = ?, max_cognition_events = ?, generate_expressions = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,
@@ -485,7 +485,7 @@ export async function updateMovementConfig(config: MovementConfig): Promise<void
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE movement_configs
-       SET name = ?, provider = ?, provider_config_id = ?, startup_sync_timeout = ?, execution_threshold = ?
+       SET name = ?, provider = ?, provider_config_id = ?, startup_sync_timeout = ?, execution_threshold = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,
@@ -663,7 +663,7 @@ export async function updateRAGConfig(config: RAGConfig): Promise<void> {
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE rag_configs
-       SET name = ?, provider = ?, provider_config_id = ?, embedding_concurrency = ?
+       SET name = ?, provider = ?, provider_config_id = ?, embedding_concurrency = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,
@@ -873,7 +873,7 @@ export async function updateSTTConfig(config: STTConfig): Promise<void> {
       `UPDATE stt_configs
        SET name = ?, main_stream_time_millis = ?, transition_stream_time_millis = ?, max_buffer_count = ?,
            transcription_provider = ?, transcription_provider_config_id = ?,
-           vad_provider = ?, vad_provider_config_id = ?
+           vad_provider = ?, vad_provider_config_id = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,
@@ -1062,7 +1062,7 @@ export async function updateTTSConfig(config: TTSConfig): Promise<void> {
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE tts_configs
-       SET name = ?, provider = ?, provider_config_id = ?, output_type = ?, words_to_replace = ?, vocalize_nonverbal = ?
+       SET name = ?, provider = ?, provider_config_id = ?, output_type = ?, words_to_replace = ?, vocalize_nonverbal = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,
@@ -1239,7 +1239,7 @@ export async function updateVisionConfig(config: VisionConfig): Promise<void> {
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE vision_configs
-       SET name = ?, provider = ?, provider_config_id = ?, resolution_width = ?, resolution_height = ?
+       SET name = ?, provider = ?, provider_config_id = ?, resolution_width = ?, resolution_height = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [config.name, config.provider, config.provider_config_id, config.resolution_width, config.resolution_height, config.id]
     );
@@ -1400,7 +1400,7 @@ export async function updateImaginationConfig(config: ImaginationConfig): Promis
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE imagination_configs
-       SET name = ?, provider = ?, provider_config_id = ?
+       SET name = ?, provider = ?, provider_config_id = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [config.name, config.provider, config.provider_config_id, config.id]
     );

@@ -1,7 +1,7 @@
 import EventEmitter from 'eventemitter3';
 import DeviceInfo from 'react-native-device-info';
 import { Platform, AppState } from 'react-native';
-import ConnectionManager, { ConnectionMode } from './connection/ConnectionManager';
+import ConnectionManager from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
 import { cloudSessionService } from './cloud/CloudSessionService';
 import { createLogger } from '../utils/logger';
@@ -151,9 +151,39 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     });
   }
 
+  /**
+   * Register the entity connection listeners.
+   *
+   * IMPORTANT — idempotency across Metro hot reloads: this module default-
+   * exports a singleton and is re-executed on every Fast Refresh, which would
+   * normally create a NEW EntitySessionService instance that registers ANOTHER
+   * listener set on the RETAINED ConnectionManager singleton. Old instances
+   * are orphaned but their listeners persist, so every entity event would be
+   * delivered once per instance. The ConnectionManager singleton holds the
+   * CURRENT instance in `entitySessionEventTarget` and the actual listeners
+   * are installed only once per ConnectionManager lifetime.
+   */
   private setupConnectionListeners() {
-    this.connectionManager.on('event:entity', this.handleEntityEvent.bind(this));
-    this.connectionManager.on('disconnected:entity', this.handleEntityDisconnected.bind(this));
+    const cm = this.connectionManager as typeof ConnectionManager & {
+      entitySessionEventTarget?: EntitySessionService | null;
+      entitySessionListenersInstalled?: boolean;
+    };
+
+    // Make THIS instance the current event target (survives hot reloads).
+    cm.entitySessionEventTarget = this;
+
+    // Install the listeners exactly once per ConnectionManager lifetime.
+    if (cm.entitySessionListenersInstalled) {
+      return;
+    }
+    cm.entitySessionListenersInstalled = true;
+
+    cm.on('event:entity', (entityId: string, event: any) => {
+      cm.entitySessionEventTarget?.handleEntityEvent(entityId, event);
+    });
+    cm.on('disconnected:entity', (entityId: string) => {
+      cm.entitySessionEventTarget?.handleEntityDisconnected(entityId);
+    });
   }
 
   // ---------------------------------------------------------------------------

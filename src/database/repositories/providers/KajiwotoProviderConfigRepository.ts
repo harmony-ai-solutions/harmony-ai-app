@@ -65,7 +65,7 @@ export async function updateKajiwotoProviderConfig(config: KajiwotoProviderConfi
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_kajiwoto SET name = ?, username = ?, password = ?, room_url = ? WHERE id = ?',
+      'UPDATE provider_config_kajiwoto SET name = ?, username = ?, password = ?, room_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.username, config.password, config.room_url, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`Kajiwoto provider config not found: ${config.id}`);

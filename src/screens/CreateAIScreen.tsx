@@ -388,15 +388,20 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         deleted_at: null,
       });
 
-      // 4b. Push the new entity (and its profile/mapping) to the engine so the
-      // chat session can initialize. Without an explicit sync here, the engine
-      // never learns about the entity until some unrelated sync happens, and
-      // INIT_ENTITY fails with entity_not_defined (chat stuck on "Connecting...").
-      // Fire-and-forget: non-blocking; the session retry logic re-triggers sync
-      // if this one hasn't completed by the time INIT_ENTITY is sent.
-      syncService.initiateSync().catch(syncErr => {
+      // 4b. Push the new entity (and its profile/mapping) to the engine and WAIT
+      // for the sync to complete before navigating. Without this, the engine
+      // doesn't know about the entity yet when ChatDetail sends INIT_ENTITY, so
+      // it rejects with entity_not_defined (chat stuck on "Connecting...").
+      // initiateSync() alone only resolves once SYNC_REQUEST is *sent*;
+      // syncAndWait resolves on SYNC_FINALIZE so the engine has actually
+      // ingested the data. Best-effort: resolves on completion, terminal failure,
+      // or timeout — never blocks navigation forever. isSaving stays true so the
+      // spinner shows during the wait.
+      try {
+        await syncService.syncAndWait({ timeoutMs: 45_000 });
+      } catch (syncErr) {
         log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
-      });
+      }
 
       // 5. Resolve the impersonated entity for ChatDetail
       const allEntities = await getAllEntities();

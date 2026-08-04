@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
 import ConnectionStateManager, { type SyncSource } from '../services/ConnectionStateManager';
 import ConnectionManager from '../services/connection/ConnectionManager';
 import SyncService, { SyncService as SyncServiceClass } from '../services/SyncService';
@@ -457,6 +457,48 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       );
     };
 
+    // A name clash during sync apply: an incoming server record's unique
+    // `name` collides with a DIFFERENT local row (e.g. two instances seeded
+    // the same default config with different UUIDs). The sync is PAUSED until
+    // the user picks a resolution. "Apply to all" memorizes the decision for
+    // every other clash in this sync session only.
+    const handleSyncNameClash = (clash: any) => {
+      log.warn('Sync name clash detected:', clash);
+      const name = clash?.name || '';
+      const table = clash?.table || '';
+      const resolve = (resolution: 'overwrite' | 'keep' | 'rename') => (
+        applyToAll?: boolean,
+      ) => {
+        SyncService.resolveNameClash(resolution, !!applyToAll).catch((err: any) => {
+          log.warn(`Resolve name clash (${resolution}) failed:`, err);
+        });
+      };
+
+      showAlertRef.current(
+        i18n.t('syncConnection:nameClashTitle'),
+        i18n.t('syncConnection:nameClashMessage', { name, table }),
+        [
+          {
+            text: i18n.t('syncConnection:nameClashOverwrite'),
+            onPress: resolve('overwrite'),
+          },
+          {
+            text: i18n.t('syncConnection:nameClashKeep'),
+            onPress: resolve('keep'),
+          },
+          {
+            text: i18n.t('syncConnection:nameClashRename'),
+            onPress: resolve('rename'),
+          },
+        ],
+        {
+          icon: 'swap-horizontal',
+          blockBackdropDismiss: true,
+          checkbox: { label: i18n.t('syncConnection:nameClashApplyToAll') },
+        },
+      );
+    };
+
     connectionManager.on('connected:sync',            handleSyncConnected);
     connectionManager.on('disconnected:sync',         handleSyncDisconnected);
     connectionManager.on('error:sync',                handleSyncError);
@@ -466,6 +508,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     SyncService.on('sync:error',                      handleSyncErrorEvent);
     SyncService.on('sync:rejected',                   handleSyncRejected);
     SyncService.on('sync:estimate',                   handleSyncEstimate);
+    SyncService.on('sync:nameclash',                  handleSyncNameClash);
 
     if (!hasInitialized.current) {
       hasInitialized.current = true;
@@ -482,6 +525,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       SyncService.off('sync:error',                      handleSyncErrorEvent);
       SyncService.off('sync:rejected',                   handleSyncRejected);
       SyncService.off('sync:estimate',                   handleSyncEstimate);
+      SyncService.off('sync:nameclash',                  handleSyncNameClash);
     };
   }, []);
 
@@ -780,12 +824,25 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   };
 
   // ── Phase 10: derived values ───────────────────────────────────────────
-  const canUseChat = canUseChatForMode(currentSource, cloudStatus, isPaired);
-  const connectionStatus = computeConnectionStatus(
-    currentSource, cloudStatus, isPaired, isConnected, isReconnecting,
+  // Memoized so the context value (and its consumers) only updates when the
+  // underlying inputs actually change — otherwise these recomputed objects
+  // would force a new context value (and a re-render of every consumer) on
+  // every provider render (e.g. during connection churn).
+  const canUseChat = useMemo(
+    () => canUseChatForMode(currentSource, cloudStatus, isPaired),
+    [currentSource, cloudStatus, isPaired],
+  );
+  const connectionStatus = useMemo(
+    () => computeConnectionStatus(currentSource, cloudStatus, isPaired, isConnected, isReconnecting),
+    [currentSource, cloudStatus, isPaired, isConnected, isReconnecting],
   );
 
-  const value: SyncConnectionContextType = {
+  // Memoize the context value over the exposed state + derived values. The
+  // callbacks (connect/disconnect/reconnect/showToast) read live state through
+  // refs / external services / setters rather than closure-captured React state,
+  // so memoized instances stay correct between recomputations (same pattern as
+  // EntitySessionContext).
+  const value: SyncConnectionContextType = useMemo(() => ({
     isPaired,
     isConnected,
     isConnecting,
@@ -798,7 +855,11 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     showToast,
     canUseChat,
     connectionStatus,
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [
+    isPaired, isConnected, isConnecting, isReconnecting,
+    reconnectAttempts, nextReconnectIn, canUseChat, connectionStatus,
+  ]);
 
   return (
     <SyncConnectionContext.Provider value={value}>

@@ -818,4 +818,43 @@ describe('SyncService integration', () => {
       mockServer.receivedEvents.some((e: any) => e.event_type === 'SYNC_FINALIZE'),
     ).toBe(true);
   }, 15000);
+
+  // -----------------------------------------------------------------------
+  // syncAndWait: resolves only after the sync round-trip completes
+  // -----------------------------------------------------------------------
+  it('syncAndWait resolves after the sync completes', async () => {
+    const serverChar = sampleCharacter({
+      id: 'char-wait-complete',
+      name: 'Wait Complete Character',
+      created_at: new Date(Date.now() - 5000).toISOString(),
+      updated_at: new Date(Date.now() - 5000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    mockServer.startAutoResponder();
+
+    // syncAndWait must resolve only once the engine has ingested the data
+    // (sync:completed / SYNC_FINALIZE) — not merely when SYNC_REQUEST is sent.
+    await syncService.syncAndWait({ timeoutMs: 8000 });
+    await new Promise(r => setTimeout(r, 100));
+
+    const [result] = await db.executeSql(
+      "SELECT id FROM character_profiles WHERE id = 'char-wait-complete'",
+    );
+    expect(result.rows.length).toBe(1);
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // syncAndWait: best-effort timeout — never blocks navigation forever
+  // -----------------------------------------------------------------------
+  it('syncAndWait resolves on timeout when the server never completes', async () => {
+    // No server data + no auto-responder → sync stalls at SYNC_REQUEST and never
+    // emits sync:completed. syncAndWait must still resolve after the timeout so
+    // callers (e.g. entity creation → chat navigation) are never blocked forever.
+    const start = Date.now();
+    await syncService.syncAndWait({ timeoutMs: 300 });
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeGreaterThanOrEqual(300);
+    expect(elapsed).toBeLessThan(3000);
+  }, 15000);
 });
