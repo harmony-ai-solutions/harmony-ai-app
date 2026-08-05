@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "start": "npm run oauth:dev -- --if-missing-ok && react-native start",
     "test": "npm run test:unit && npm run test:integration",
-    "test:unit": "jest --selectProjects unit --maxWorkers=40",
+    "test:unit": "jest --selectProjects unit --maxWorkers=45",
     "test:integration": "jest --selectProjects integration",
     "test:raw": "jest",
     "schema:dump": "ts-node --project scripts/tsconfig.json scripts/dump-schema.ts",

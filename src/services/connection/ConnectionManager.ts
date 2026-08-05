@@ -283,7 +283,17 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
   }
   
   getEntityConnection(entityId: string): ConnectionInfo | null {
-    return this.connections.get(`entity-${entityId}`) || null;
+    // Connection IDs are participant-set-scoped (`entity-${entityId}-${participantKey}`),
+    // so a bare `entity-${entityId}` lookup no longer matches. Scan by the stored
+    // entityId. NOTE: with concurrent sessions sharing an entity (e.g. two chats
+    // both with 'user') this returns the FIRST match — callers needing a specific
+    // session should resolve it via EntitySessionService.
+    for (const info of this.connections.values()) {
+      if (info.type === 'entity' && info.entityId === entityId) {
+        return info;
+      }
+    }
+    return null;
   }
   
   getAllEntityConnections(): ConnectionInfo[] {

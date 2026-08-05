@@ -301,6 +301,14 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
   ) => {
     log.info(`Retrying initialization for ${key}`);
 
+    // Snapshot the retry state BEFORE the cleanup below: stopInteractionSession
+    // unconditionally deletes the participant-key retry entry ("Cancelled
+    // pending fallback retry"), which would reset the attempt counter to 0 on
+    // every retry — the second half of the infinite "Scheduling retry 1/3"
+    // loop (the preserveRetryState flag alone only covers the clear inside
+    // startInteractionSession, not the cleanup stop).
+    const preservedRetryState = retryStateRef.current.get(key);
+
     // Clean up any existing sessions with these participants
     // Find any active session that matches this participant set
     for (const [interactionId, session] of activeSessionsRef.current.entries()) {
@@ -308,6 +316,13 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
           session.participantIds.sort().join('+') === participantIds.sort().join('+')) {
         await stopInteractionSession(interactionId);
       }
+    }
+
+    // Restore the attempt counter if the cleanup stop wiped it. The stored
+    // retryTimer has already fired (we're executing inside it), so restoring
+    // the entry is safe — scheduleRetry overwrites it with the next timer.
+    if (preservedRetryState && !retryStateRef.current.has(key)) {
+      retryStateRef.current.set(key, preservedRetryState);
     }
 
     // Retry (preserve the attempt counter so scheduleRetry can escalate to the

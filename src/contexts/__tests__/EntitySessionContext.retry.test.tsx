@@ -103,4 +103,94 @@ describe('EntitySessionContext retry policy', () => {
       jest.useRealTimers();
     }
   });
+
+  /**
+   * Second half of the infinite-retry bug (observed on device 2026-08-05):
+   * `retryInitialization` first STOPS the lingering half-open session, and the
+   * context's `stopInteractionSession` unconditionally deletes the
+   * participant-key retry state ("Cancelled pending fallback retry") — wiping
+   * the attempt counter that `preserveRetryState` was supposed to protect.
+   * Every retry then logged "Scheduling retry 1/3" again and the app looped a
+   * connect/disconnect cycle against the engine every ~1s forever.
+   *
+   * This test reproduces that exact path: a session IS present in
+   * activeSessions when the retry fires (from an earlier attempt that got far
+   * enough to register one), so the cleanup stop runs and must NOT reset the
+   * counter.
+   */
+  it('keeps escalating when the retry cleanup stops a lingering session', async () => {
+    jest.useFakeTimers();
+    try {
+      // First attempt gets far enough to register a session (connections stay
+      // 'connecting', so the 15s initialization timeout will fire).
+      const lingeringSession = {
+        interactionId: 'temp-1',
+        interaction: null,
+        ownEntityId: 'user',
+        participantIds: ['claire', 'user'],
+        connections: new Map([
+          ['claire', { connectionId: 'entity-claire', status: 'connecting' }],
+          ['user', { connectionId: 'entity-user', status: 'connecting' }],
+        ]),
+        pendingTranscriptions: new Map(),
+      };
+      serviceMock.startInteractionSession.mockResolvedValueOnce(lingeringSession);
+      serviceMock.stopInteractionSession.mockResolvedValue(undefined);
+
+      const { result } = await renderHook(() => useEntitySession(), { wrapper });
+
+      // Attempt 1 "succeeds" (session registered, connections never activate)
+      await act(async () => {
+        await result.current.startInteractionSession('user', ['claire', 'user']);
+      });
+      expect(serviceMock.startInteractionSession).toHaveBeenCalledTimes(1);
+
+      // 15s initialization timeout → schedules retry 1/3 (1000ms)
+      await act(async () => {
+        jest.advanceTimersByTime(15000);
+      });
+
+      // Retry 1: cleanup finds the lingering session and stops it…
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      expect(serviceMock.stopInteractionSession).toHaveBeenCalledWith('temp-1');
+      // …then re-attempts (fails) — attempt counter must SURVIVE the stop.
+      expect(serviceMock.startInteractionSession).toHaveBeenCalledTimes(2);
+
+      // With the counter wiped (bug), the next retry would fire after 1000ms
+      // again as "1/3"; with the fix it escalates: 2/3 after 2000ms.
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      // No early retry may have fired (would prove the delay reset to 1000ms).
+      expect(serviceMock.startInteractionSession).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      expect(serviceMock.startInteractionSession).toHaveBeenCalledTimes(3);
+
+      // Retry 3/3 after 4000ms, then permanent give-up.
+      await act(async () => {
+        jest.advanceTimersByTime(4000);
+      });
+      expect(serviceMock.startInteractionSession).toHaveBeenCalledTimes(4);
+
+      // No infinite loop…
+      await act(async () => {
+        jest.advanceTimersByTime(10000);
+      });
+      expect(serviceMock.startInteractionSession).toHaveBeenCalledTimes(4);
+
+      // …and a permanent failure is surfaced.
+      expect(serviceMock.emit).toHaveBeenCalledWith(
+        'session:error',
+        expect.any(String),
+        expect.stringContaining('Failed to initialize session after 3 attempts'),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

@@ -115,8 +115,8 @@ those files are assigned to the **same Jest worker**.
   deterministic.
 - **Fix / workaround**: run unit tests with `--maxWorkers` greater than or equal
   to the number of unit test files so each file gets its own worker (no sharing
-  → no contamination). The `test:unit` script does this (`--maxWorkers=40` for
-  the current 35 unit files). **If the unit suite grows beyond 40 files, bump
+  → no contamination). The `test:unit` script does this (`--maxWorkers=45` for
+  the current 44 unit files). **If the unit suite grows beyond 45 files, bump
   the `--maxWorkers` value in `package.json` accordingly.**
 - **Related fix**: `NodeDatabase` no longer applies `PRAGMA journal_mode = WAL`
   to `:memory:` databases — WAL is meaningless for in-memory DBs and asking

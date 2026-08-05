@@ -29,7 +29,7 @@ export interface InteractionSession {
   participantIds: string[];        // ALL participants including ownEntityId
   ownEntityId: string;             // The impersonated entity — all messages stored from this perspective
   connections: Map<string, {       // entityId -> connection info
-    connectionId: string;           // 'entity-{entityId}'
+    connectionId: string;           // 'entity-{entityId}[-{participantKey}]'
     status: 'connecting' | 'active' | 'disconnected';
   }>;
   pendingTranscriptions: Map<string, {
@@ -37,6 +37,12 @@ export interface InteractionSession {
     interactionId: string;
     timeout: ReturnType<typeof setTimeout>;
   }>;
+  // Guards a single session:started emission per InteractionSession. Without it,
+  // the two participants' INIT_ENTITY SUCCESS responses race through the
+  // own-entity's `await createInteraction(...)` window and BOTH re-enter the
+  // all-active check after both connections are already 'active' — emitting
+  // session:started twice (and double-triggering the on-start sync).
+  started?: boolean;
 }
 
 /**
@@ -397,6 +403,20 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     // Build connections map
     const connections = new Map<string, { connectionId: string; status: 'connecting' | 'active' | 'disconnected' }>();
 
+    // Participant-set discriminator for the connection IDs. The engine keys
+    // interaction sessions by participant set (one canonical interaction_id per
+    // distinct participant set), so a Marcella+user chat and a claire+user chat
+    // each need their OWN `entity-user` socket — they must NOT share the single
+    // `entity-user` slot (ConnectionManager id + native per-URL socket key).
+    // Without this, rapid chat switching raced the previous session's
+    // `entity-user` teardown against the new session's `entity-user` setup →
+    // native "Already Connected"/stale-socket failures → 15s init timeouts →
+    // the "Scheduling retry 1/3…3/3" connection delay. ('+' from
+    // deriveParticipantKey is URL-unsafe in `?connection_id=`, so sanitize it.)
+    const scope = deriveScopeFromParticipants(participantIds);
+    const participantKey = deriveParticipantKey(participantIds, ownEntityId, scope);
+    const connKeySuffix = participantKey ? `-${participantKey.replace(/\+/g, '-')}` : '';
+
     try {
       // Create the InteractionSession with temp interactionId
       const session: InteractionSession = {
@@ -408,13 +428,24 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         pendingTranscriptions: new Map(),
       };
 
+      // Register the session BEFORE sending INIT_ENTITY. The engine can return
+      // INIT_ENTITY SUCCESS before this Promise.all resolves (notably the partner
+      // entity's response); if the session isn't in `this.sessions` yet,
+      // handleEntityEvent → handleInitEntityResponse runs with interactionSession
+      // === null and never marks the connection 'active', so the session can
+      // never reach all-active and stalls until the 15s init retry (observed
+      // on device: a chat stuck in "connecting" for ~15s). The connections map
+      // is shared by reference, so entries added below stay visible. Removed on
+      // error in the catch below.
+      this.sessions.set(tempInteractionId, session);
+
       // Create WebSocket connections for ALL participants in PARALLEL (N+1 per D-18).
       // Previously this was a serial for-loop with await — each WS connection (TCP + TLS +
       // WS handshake) had to complete before the next one started.  For a 2-participant chat
       // that meant ~2-6 s of sequential network I/O.  Running all connections concurrently
       // collapses total wall-clock time to the single slowest handshake.
       await Promise.all(participantIds.map(async (entityId) => {
-        const connectionId = `entity-${entityId}`;
+        const connectionId = `entity-${entityId}${connKeySuffix}`;
         connections.set(entityId, {
           connectionId,
           status: 'connecting',
@@ -469,14 +500,16 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         log.info(`INIT_ENTITY sent for ${entityId}, waiting for backend response via events...`);
       }));
 
-      // Store the session (all connections in 'connecting' status)
-      this.sessions.set(tempInteractionId, session);
-
       log.info(`Interaction session created for participants [${participantIds.join(', ')}] with temp interactionId ${tempInteractionId}`);
 
       return session;
     } catch (error) {
       log.error(`Failed to start interaction session:`, error);
+
+      // The session was registered before the parallel connect/send below;
+      // remove it so a failed start doesn't leave a half-initialized entry
+      // that later INIT_ENTITY responses (or the init timer) would act on.
+      this.sessions.delete(tempInteractionId);
 
       // Clean up any connections that were created
       for (const [entityId, conn] of connections.entries()) {
@@ -558,8 +591,17 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     log.info(`Stopping interaction session for ${interactionId}`);
 
     try {
-      // Stop any playing audio
-      await AudioPlayer.stop();
+      // Stop any playing audio. Isolated on purpose: AudioPlayer.stop() throws
+      // 'player_not_initialized' when TrackPlayer was never set up (the chat
+      // had no audio playback). Letting that bubble into the outer catch used
+      // to SKIP the connection teardown below — leaking every entity WebSocket
+      // (live heartbeat, "already exists" on the next session, orphaned
+      // engine-side sessions).
+      try {
+        await AudioPlayer.stop();
+      } catch (audioError) {
+        log.warn('AudioPlayer.stop() failed during session stop (ignored):', audioError);
+      }
 
       // Clean up all pending transcriptions for this interaction
       this.cleanupTranscriptionsForInteraction(interactionId);
@@ -567,23 +609,29 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       // Cancel any pending reconnect timers
       this.cancelReconnectsForInteraction(interactionId);
 
-      // Disconnect ALL connections
+      // Disconnect ALL connections — fault-isolated per connection so one
+      // failing ENTITY_SESSION_END/disconnect can't strand the remaining
+      // connections (same leak class as the audio error above).
       for (const [entityId, conn] of session.connections.entries()) {
-        if (this.connectionManager.isConnected(conn.connectionId)) {
-          await this.connectionManager.sendEvent(
-            conn.connectionId,
-            {
-              event_id: this.generateEventId(),
-              event_type: 'ENTITY_SESSION_END',
-              status: 'NEW',
-              payload: { session_id: interactionId }
-            }
-          );
-          this.connectionManager.disconnectConnection(conn.connectionId);
-        }
+        try {
+          if (this.connectionManager.isConnected(conn.connectionId)) {
+            await this.connectionManager.sendEvent(
+              conn.connectionId,
+              {
+                event_id: this.generateEventId(),
+                event_type: 'ENTITY_SESSION_END',
+                status: 'NEW',
+                payload: { session_id: interactionId }
+              }
+            );
+            this.connectionManager.disconnectConnection(conn.connectionId);
+          }
 
-        // Clean up pending sessions
-        this.pendingSessions.delete(entityId);
+          // Clean up pending sessions
+          this.pendingSessions.delete(entityId);
+        } catch (connError) {
+          log.warn(`Error tearing down connection ${conn.connectionId} during session stop:`, connError);
+        }
       }
     } catch (error) {
       log.error('Error stopping session:', error);
@@ -1154,7 +1202,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
           }
         }
 
-        if (allActive) {
+        if (allActive && !interactionSession.started) {
+          interactionSession.started = true;
           log.info(`All connections active for interaction ${interactionSession.interactionId} — emitting session:started`);
 
           // Remove from pending sessions now that all are fully active
