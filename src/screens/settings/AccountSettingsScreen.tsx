@@ -90,13 +90,6 @@ export const AccountSettingsScreen: React.FC = () => {
             onPress={() => navigateToComingSoon('manageSubscription', 'credit-card', 'comingSoonManageSubscription')}
             theme={theme}
           />
-          <SettingsLinkRow
-            icon="restore"
-            label={t('restorePurchases')}
-            onPress={() => navigateToComingSoon('restorePurchases', 'restore', 'comingSoonRestorePurchases')}
-            theme={theme}
-            showSeparator
-          />
         </ThemedCard>
       </ScrollView>
     </ThemedView>
