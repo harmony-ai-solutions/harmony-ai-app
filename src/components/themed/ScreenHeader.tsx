@@ -21,6 +21,10 @@ interface ScreenHeaderProps {
   right?: React.ReactNode;
   /** Optional element(s) rendered between the subtitle and content (e.g. search bar) */
   children?: React.ReactNode;
+  /** Override the title font size (default 24) */
+  titleSize?: number;
+  /** If set, the title is clamped to this many lines (e.g. 1 for single-line) */
+  titleNumberOfLines?: number;
   /** Additional style for the outermost wrapper */
   style?: ViewStyle;
   /** Additional style for the inner content area (below accent stripe) */
@@ -46,6 +50,8 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
   titleRight,
   right,
   children,
+  titleSize,
+  titleNumberOfLines,
   style,
   contentStyle,
 }) => {
@@ -83,9 +89,10 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
           <View style={styles.titleGroup}>
             <ThemedText
               variant="primary"
-              size={24}
+              size={titleSize ?? 24}
               weight="bold"
               hierarchy="header"
+              numberOfLines={titleNumberOfLines}
             >
               {title}
             </ThemedText>
