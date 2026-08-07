@@ -214,17 +214,6 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
-        {/* ── AI & Conversation (submenu) ── */}
-        <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('aiConversation')} style={styles.sectionHeader} />
-          <SettingsLinkRow
-            icon="swap-horizontal-bold"
-            label={t('aiConversation')}
-            onPress={() => navigation.navigate('AIConversationSettings')}
-            theme={theme}
-          />
-        </ThemedCard>
-
         {/* ── Notifications & Feedback (inline toggles) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('notifications')} style={styles.sectionHeader} />

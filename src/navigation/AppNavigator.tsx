@@ -27,7 +27,6 @@ import { BackgroundSettingsScreen } from '../screens/settings/BackgroundSettings
 import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen';
 import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen';
 import { AppearanceSettingsScreen } from '../screens/settings/AppearanceSettingsScreen';
-import { AIConversationSettingsScreen } from '../screens/settings/AIConversationSettingsScreen';
 import { HelpSupportSettingsScreen } from '../screens/settings/HelpSupportSettingsScreen';
 
 export type RootStackParamList = {
@@ -76,7 +75,6 @@ export type RootStackParamList = {
   DatabaseTableViewer?: undefined;
   AccountSettings: undefined;
   AppearanceSettings: undefined;
-  AIConversationSettings: undefined;
   HelpSupportSettings: undefined;
 };
 
@@ -157,7 +155,6 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         />
         <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
         <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
-        <Stack.Screen name="AIConversationSettings" component={AIConversationSettingsScreen} />
         <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />
         <Stack.Screen
           name="ComingSoon"
