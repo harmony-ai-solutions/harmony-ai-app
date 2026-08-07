@@ -1,269 +1,204 @@
 # Codebase Structure
 
-**Analysis Date:** 2026-05-24
+**Analysis Date:** 2026-08-07
 
 ## Directory Layout
 
 ```
-harmony-ai-app/
-├── App.tsx                    # Root component, app entry point
-├── index.js                   # React Native entry
-├── package.json               # Dependencies and scripts (React Native 0.83.1)
-├── jest.config.js             # Test configuration
-├── src/
-│   ├── assets/                # Static assets (emoji sprite sheets)
-│   ├── components/            # Reusable UI components (12 subdirectories)
-│   ├── constants/             # Module/provider config schemas and defaults
-│   ├── contexts/              # React Context providers (5 contexts)
-│   ├── database/              # SQLite database layer (28 migrations, 10 repositories)
-│   ├── navigation/            # Navigation configuration (native stack)
-│   ├── screens/               # Screen components (14 screens, 4 subdirectories)
-│   ├── services/              # Business logic services (8 services, 2 subdirectories)
-│   ├── theme/                 # Theme system (9 themes)
-│   ├── types/                 # TypeScript type definitions
-│   └── utils/                 # Utility functions (5 files)
-├── __tests__/                 # Root test files
-├── android/                   # Android native code
-├── ios/                       # iOS native code
-├── design/                    # Design documents
-├── docs/                      # Documentation
-└── memory-bank/               # Project memory/context
+harmony-ai-app/                        # React Native app (bare RN 0.86, TypeScript)
+├── index.js                           # Native entry — registers App component
+├── App.tsx                            # Root component — provider tree + AppShell
+├── app.json                           # App name/displayName ("HarmonyAIChat")
+├── package.json                       # Deps/scripts (android/ios/start/test/lint/e2e)
+├── tsconfig.json                      # TypeScript config
+├── babel.config.js / metro.config.js  # Build tooling
+├── jest.config.js / jest.setup.js     # Multi-project Jest (unit + integration)
+├── .eslintrc.js / .prettierrc.js      # Lint/format
+├── react-native.config.js             # RN asset/vector-icons config
+├── .env.example                       # Env template (react-native-config)
+├── src/                               # ★ All application code (TS/TSX)
+│   ├── components/                    #   Reusable UI (feature-sliced)
+│   ├── config/                        #   Environment/host resolution
+│   ├── constants/                     #   Static metadata (models, modules, providers)
+│   ├── contexts/                      #   React Context providers + hooks
+│   ├── database/                      #   SQLite layer, migrations, repositories
+│   ├── i18n/                          #   Locale namespaces (en/*)
+│   ├── navigation/                    #   Root stack + tab navigators
+│   ├── screens/                       #   Route components (30)
+│   ├── services/                      #   Singleton services (sync, auth, cloud, ws)
+│   ├── theme/                         #   Theme types + 9 theme definitions
+│   ├── types/                         #   Shared TS types (emoji, config decls)
+│   ├── utils/                         #   Logging, colors, uuid, permissions, charactercard
+│   └── assets/emoji/                  #   Emoji sprite sheets
+├── ios/                               # Native iOS project (Xcode)
+│   └── HarmonyAIChat/                 #   AppDelegate.swift, Info.plist, OAuth plists
+├── android/                           # Native Android project (Gradle)
+│   └── app/src/main/java/ai/soulbits/chat/   # MainActivity.kt, MainApplication.kt
+├── __tests__/                         # App-level + integration tests (sync, wss)
+│   └── integration/                   #   Sync protocol integration suite + mock server
+├── e2e/                               # Maestro E2E flows + Docker harness
+│   ├── .maestro/                      #   YAML flows + config
+│   └── docker-compose.yml             #   maestro-runner + harmony-link + emulator
+├── schema/                            # rn-schema.json dump + compare scripts
+├── scripts/                           # dump-schema.ts, oauth-secrets.cjs, IPA packaging
+├── docs/                              # Design docs, TESTING.md, architecture diagrams
+├── design/                            # Theming/UI design proposals
+├── plans/                             # Implementation plan notes
+├── reports/                           # CI/test report output
+├── memory-bank/                       # Roo memory-bank project context
+├── .planning/                         # GSD codebase map (this folder)
+└── undefined/.cache/huggingface/      # ⚠ Stray artifact dir — ONNX embedding cache
 ```
 
 ## Directory Purposes
 
-**src/assets:**
-- Purpose: Static asset files bundled with the app
-- Contains: Emoji sprite sheets
-- Key files: `emoji/sheets/google-64.png`, `emoji/sheets/twitter-64.png`
-
 **src/components:**
-- Purpose: Reusable UI components organized by domain
-- Contains:
-  - `characters/`: `CharacterProfileCard.tsx`, `ProfileImagePicker.tsx`
-  - `chat/`: `ChatBubble.tsx`, `ChatInput.tsx`, `EmojiActionInput.tsx`, `NewMessagesDivider.tsx`, `TypingIndicator.tsx`
-  - `common/`: Empty (reserved for shared components)
-  - `config/`: `AdvancedSamplingParams.tsx`, `FormField.tsx`
-  - `database/`: `DatabaseLoadingScreen.tsx`
-  - `emoji/`: 11 files including `EmojiPickerInline.tsx`, `EmojiPickerModal.tsx`, `EmojiGrid.tsx`, `EmojiSearchBar.tsx`, `EmojiAutocomplete.tsx`, `index.ts`
-  - `entities/`: `EntityCard.tsx`, `EntityModuleSelector.tsx`, `EntityModuleSelectorWithActions.tsx`
-  - `landing/`: `LandingCard.tsx`
-  - `modals/`: `InitialPairingModal.tsx`, `CertificateDetailsModal.tsx`, `CertificateVerificationModal.tsx`, `ImageViewerModal.tsx`, `ImpersonationSelectorModal.tsx`, `InfoModal.tsx`
-  - `navigation/`: `SettingsMenu.tsx`
-  - `settings/`: `ConnectionStatusBadge.tsx`, `EmojiActionCard.tsx`, `EmojiActionEditModal.tsx`, `EmojiStyleCard.tsx`, `ThemeCard.tsx`
-  - `themed/`: `ThemedAppbar.tsx`, `ThemedButton.tsx`, `ThemedCard.tsx`, `ThemedGradient.tsx`, `ThemedText.tsx`, `ThemedView.tsx`, `SectionHeader.tsx`
-
-**src/constants:**
-- Purpose: Configuration schemas and metadata for module/provider config system
-- Contains: Module type definitions, provider field schemas, default values, extended parameter metadata
-- Key files:
-  - `moduleConfiguration.ts`: ModuleTypeConfig definitions (backend, cognition, movement, rag, stt, tts, vision, imagination)
-  - `providerFieldSchemas.ts`: Field definition types and schemas
-  - `moduleDefaults.ts`: Default configuration values
-  - `extendedParamMetadata.ts`: LLM sampling parameter metadata
-
-**src/contexts:**
-- Purpose: React Context providers for state management
-- Contains: 5 context providers
-- Key files:
-  - `ThemeContext.tsx`: Theme selection, custom theme editing
-  - `DatabaseContext.tsx`: SQLite initialization, DB ready state
-  - `SyncConnectionContext.tsx`: Pairing/connection state
-  - `EntitySessionContext.tsx`: Entity session management
-  - `EmojiContext.tsx`: Emoji style preferences, recent emojis, skin tone
-
-**src/database:**
-- Purpose: SQLite database layer with migrations and repositories
-- Contains: Connection management, 28 migrations, 10 repositories, models, sync utilities, transaction helpers, test files
-- Key files:
-  - `index.ts`: Layer exports
-  - `connection.ts`: Database initialization and connection management
-  - `migrations.ts`: Migration runner (applies all 28 migrations)
-  - `models.ts`: All TypeScript interfaces matching Go structs (519 lines)
-  - `sync.ts`: Sync/replication utilities
-  - `transaction.ts`: `withTransaction()` and `execInTransaction()` helpers
-  - `base64.ts`: Base64 encoding utilities for images
-  - `repositories/`: `characters.ts`, `entities.ts`, `conversation_messages.ts`, `interactions.ts`, `emotion_state.ts`, `emoji_actions.ts`, `memories.ts`, `modules.ts`, `sync.ts`, plus per-provider files in `repositories/providers/` (`OpenAIProviderConfigRepository.ts`, `SoulbitsCloudProviderConfigRepository.ts`, etc. — split from monolithic `providers.ts` in Phase 7-0a)
-  - `migrations/`: 000001 through 000028, covering initial schema, character cards, chat images, provider configs, emotion state, memories, emoji actions, interactions, presence type
-  - `__tests__/`: Test files for characters, entities, memories, modules, providers
-
-**src/navigation:**
-- Purpose: React Navigation configuration
-- Contains: Single native stack navigator with 18 screens
-- Key files: `AppNavigator.tsx`
+- Purpose: Reusable, feature-sliced UI components. Subfolders: `themed/` (design-system primitives: `ThemedText.tsx`, `ThemedButton.tsx`, `ThemedCard.tsx`, `ThemedView.tsx`, `ThemedAppbar.tsx`, `ThemedFab.tsx`, `ScreenHeader.tsx`, `SectionHeader.tsx`), `chat/`, `emoji/`, `modals/`, `settings/`, `background/`, `characters/`, `cloud/`, `config/`, `entities/`, `landing/`, `lock/`, `navigation/` (`GlassTabBar.tsx`, `SettingsMenu.tsx`), `sync/`, `database/` (`DatabaseLoadingScreen.tsx`), plus `ErrorBoundary.tsx`.
+- Key files: `src/components/themed/ThemedButton.tsx`, `src/components/navigation/GlassTabBar.tsx`, `src/components/modals/InitialPairingModal.tsx`, `src/components/background/DynamicBackground.tsx`, `src/components/ErrorBoundary.tsx`.
 
 **src/screens:**
-- Purpose: Screen components (full-page views)
-- Contains: 14 screen files, 4 subdirectories
-- Key files:
-  - `LandingScreen.tsx`: Main landing page with navigation cards
-  - `ChatListScreen.tsx`: Chat list with Interaction-based grouping (now using JOIN queries)
-  - `ChatDetailScreen.tsx`: Chat interface with emoji support, message editing (1542 lines)
-  - `CharactersScreen.tsx`: Character profile browsing
-  - `CharacterProfileEditScreen.tsx`: Character profile editing with image picker
-  - `CreateAIScreen.tsx`: AI entity creation wizard
-  - `EntityConfigScreen.tsx`: Entity management list
-  - `EntityConfigEditScreen.tsx`: Entity configuration editing
-  - `AIConfigScreen.tsx`: AI configuration
-  - `SettingsScreen.tsx`: Main settings with menu navigation
-  - `settings/`: `ThemeSettingsScreen.tsx`, `ThemeEditorScreen.tsx`, `EmojiActionEditorScreen.tsx`, `ProfileSettingsScreen.tsx`, `SyncSettingsScreen.tsx`
-  - `config/`: `ModuleConfigEditScreen.tsx`
-  - `setup/`: `ConnectionSetupScreen.tsx`
-  - `development/`: `DatabaseTestScreen.tsx`, `DatabaseTableViewerScreen.tsx` (DEV only)
+- Purpose: Route-level components. Top-level: `DiscoverScreen.tsx`, `SearchScreen.tsx`, `ChatListScreen.tsx` (tab "Chat"), `CharactersScreen.tsx`, `SettingsScreen.tsx`, `ChatDetailScreen.tsx`, `CreateAIScreen.tsx`, `EntityConfigScreen.tsx`, `EntityConfigEditScreen.tsx`, `CharacterProfileEditScreen.tsx`, `AIConfigScreen.tsx`, `LandingScreen.tsx` (legacy).
+- Subfolders: `auth/` (`LoginScreen.tsx`, `RegisterScreen.tsx`, `VerifyPrompt.tsx`), `settings/` (13 subpages incl. `SyncSettingsScreen.tsx`, `ThemeSettingsScreen.tsx`, `BiometricLockSettingsScreen.tsx`, `EmojiActionEditorScreen.tsx`, `ComingSoonScreen.tsx`), `setup/` (`ConnectionSetupScreen.tsx`), `config/` (`ModuleConfigEditScreen.tsx`), `development/` (`DatabaseTableViewerScreen.tsx` — DEV-only).
+
+**src/contexts:**
+- Purpose: React Context providers exposing typed hooks. 11 providers: `ThemeContext.tsx`, `I18nContext.tsx`, `DatabaseContext.tsx`, `AuthContext.tsx`, `AppAlertContext.tsx`, `SyncConnectionContext.tsx` (833 lines — largest), `EntitySessionContext.tsx`, `EmojiContext.tsx`, `BiometricLockContext.tsx`; helpers `connectionStatusHelper.ts`, `syncEstimateHelper.ts`, `syncSettlementHelper.ts`.
+- Key files: `src/contexts/SyncConnectionContext.tsx`, `src/contexts/ThemeContext.tsx`.
 
 **src/services:**
-- Purpose: Business logic and external communication
-- Contains: 8 service files, 2 subdirectories
-- Key files:
-  - `SyncService.ts`: Sync logic (884 lines) - handles data sync with Harmony Link
-  - `EntitySessionService.ts`: Entity session management (1143 lines)
-  - `ChatPreferencesService.ts`: Per-chat entity preferences, last-read timestamps, reply modes
-  - `EmojiService.ts`: Emoji data singleton (363 lines) - loads emoji-mart and emoji-datasource data, builds sprite maps
-  - `EntityEmojiActionService.ts`: Per-entity emoji action mappings (317 lines) - CRUD, cache, message resolution
-  - `ConnectionStateManager.ts`: Connection state tracking (314 lines)
-  - `AudioPlayer.ts`: Audio playback (200 lines)
-  - `AudioRecorder.ts`: Audio recording
-  - `connection/`: `ConnectionManager.ts` (345 lines)
-  - `websocket/`: `BaseWebSocketConnection.ts`, `SecureWebSocketConnection.ts`, `InsecureSSLWebSocketConnection.ts`, `UnencryptedWebSocketConnection.ts`, `WebSocketConnection.ts`, `WebSocketConnectionFactory.ts`
+- Purpose: Singleton business-logic services (EventEmitter-based). Root: `SyncService.ts` (1746 lines), `EntitySessionService.ts` (1449 lines), `ConnectionStateManager.ts`, `AudioPlayer.ts`, `AudioRecorder.ts`, `BiometricLockService.ts`, `CharacterCardImportService.ts`, `ChatPreferencesService.ts`, `EmojiService.ts`, `EntityEmojiActionService.ts`, `syncNameClash.ts`.
+- Subfolders: `auth/` (`AuthService.ts`, `authFetch.ts`, `googleSignIn.ts`, `appleSignIn.ts`, `tokenStorage.ts`), `cloud/` (`CloudSessionService.ts`, `soulbitsClient.ts`, `soulbitsModelsCatalog.ts`, `soulbitsTokenSync.ts`), `connection/` (`ConnectionManager.ts`, `createWebSocket.ts`), `websocket/` (interface + factory + 4 mode implementations).
+- Key files: `src/services/SyncService.ts`, `src/services/connection/ConnectionManager.ts`, `src/services/auth/AuthService.ts`.
+
+**src/database:**
+- Purpose: Data layer. Root modules: `connection.ts` (open/close/WAL/secondary sync connection), `migrations.ts`, `models.ts` (TS interfaces mirroring Go structs), `sync.ts` (serialization/chunking), `transaction.ts`, `types.ts`, `reactNativeDatabase.ts`, `index.ts` (barrel).
+- Subfolders: `migrations/` (34 files `000001_…` → `000034_…`), `repositories/` (per-table modules + `providers/` with 16 per-provider repos), `__tests__/`, `__test_utils__/` (`testDatabase.ts`, `nodeDatabase.ts`, `dumpSchema.ts`).
+- Key files: `src/database/connection.ts`, `src/database/index.ts`, `src/database/migrations.ts`, `src/database/repositories/interactions.ts`.
 
 **src/theme:**
-- Purpose: Theme system with multiple theme presets
-- Contains: Theme type definitions, 9 themes
-- Key files:
-  - `types.ts`: Theme type interfaces
-  - `themes/index.ts`: Theme registry
-  - `themes/`: `classicHarmony.ts`, `forestNight.ts`, `midnightRose.ts`, `oceanBreeze.ts`, `pureDark.ts`, `sunsetGlow.ts`, `soulBitsDark.ts`, `soulBitsLight.ts`
+- Purpose: Theme typing + definitions. `types.ts`; `themes/` contains `classicHarmony.ts`, `forestNight.ts`, `hauteGoth.ts`, `midnightRose.ts`, `oceanBreeze.ts`, `pureDark.ts`, `soulBitsLight.ts`, `sunsetGlow.ts`, `index.ts` (registry).
 
-**src/types:**
-- Purpose: Additional TypeScript type definitions
-- Contains: Emoji type definitions
-- Key files: `emoji.ts` (111 lines) - EmojiSet, EmojiEntry, EmotionEffect, ResolvedMessageActions, Ekman8Emotion
+**src/i18n:**
+- Purpose: i18next resources. `src/i18n/locales/index.ts`; `src/i18n/locales/en/` holds 24 JSON namespaces (e.g. `common.json`, `chatList.json`, `chatDetail.json`, `settings.json`, `connection.json`, `syncConnection.json`, `entityConfig.json`).
+
+**src/config & src/constants:**
+- Purpose: `src/config/cloud.ts` — single source of truth for cloud hosts, OAuth IDs, WS paths, auth endpoints (driven by `react-native-config`). `src/constants/` — `soulbitsModels.ts`, `moduleConfiguration.ts`, `moduleDefaults.ts`, `providerFieldSchemas.ts`, `extendedParamMetadata.ts`.
 
 **src/utils:**
-- Purpose: Utility functions
-- Contains: 5 files
-- Key files:
-  - `logger.ts`: Custom logging via react-native-logs
-  - `emojiSprite.ts`: Emoji sprite rendering utilities (sheet dimensions, position calculation)
-  - `configHelpers.ts`: Configuration helper functions
-  - `permissions.ts`: Permission handling utilities
-  - `version.ts`: App version retrieval
+- Purpose: Shared helpers: `logger.ts` (`createLogger`), `colorUtils.ts`, `uuid.ts`, `haptics.ts`, `permissions.ts`, `version.ts`, `configHelpers.ts`, `emojiSprite.ts`, `charactercard/` (SillyTavern PNG/JSON card import: `index.ts`, `pngParser.ts`, `jsonParser.ts`, `mapper.ts`, `types.ts`).
 
 ## Key File Locations
 
 **Entry Points:**
-- `App.tsx`: Root React component, initializes all 5 providers
-- `index.js`: React Native app registration
+- `index.js`: AppRegistry registration + uuid polyfill import.
+- `App.tsx`: Provider tree + `AppShell` (DB gate, pairing modal, lock overlay, background layer).
+- `src/navigation/AppNavigator.tsx`: Root native-stack (`RootStackParamList`).
+- `src/navigation/MainTabNavigator.tsx`: 5-tab layout (`MainTabParamList`).
+- Native: `android/app/src/main/java/ai/soulbits/chat/MainApplication.kt` (Android), `ios/HarmonyAIChat/AppDelegate.swift` (iOS).
 
 **Configuration:**
-- `package.json`: Dependencies and scripts
-- `jest.config.js`: Test configuration
-- `babel.config.js`: Babel configuration
-- `metro.config.js`: Metro bundler configuration
-- `tsconfig.json`: TypeScript configuration
+- `src/config/cloud.ts`: Hosts, OAuth IDs, endpoints, env metadata.
+- `scripts/oauth-secrets.cjs`: Injects OAuth secrets + `APP_ENV` per build flavor (`npm run oauth:dev` / `oauth:prod`).
+- `.env.example`: Env var template (react-native-config). Real `.env*` files are gitignored.
+- `jest.config.js`: Unit + integration project split.
+- `babel.config.js`, `metro.config.js`, `react-native.config.js`, `tsconfig.json`, `.eslintrc.js`, `.prettierrc.js`.
 
 **Core Logic:**
-- `src/database/index.ts`: Database layer exports
-- `src/services/SyncService.ts`: Sync logic (884 lines)
-- `src/services/EntitySessionService.ts`: Entity session management (1143 lines)
-- `src/screens/ChatDetailScreen.tsx`: Chat screen (1542 lines)
-- `src/database/repositories/providers.ts`: Provider repository (2279 lines - largest file)
-- `src/database/repositories/modules.ts`: Module repository (1324 lines)
+- `src/services/SyncService.ts`: Sync engine (handshake, buffered atomic apply, name-clash and size-estimate pauses).
+- `src/services/connection/ConnectionManager.ts`: WebSocket connection lifecycle + typed events.
+- `src/services/websocket/WebSocketConnectionFactory.ts`: Mode→implementation mapping.
+- `src/services/EntitySessionService.ts`: Chat session protocol (INIT_ENTITY, per-participant connections).
+- `src/services/auth/AuthService.ts`: Cloud PASETO lifecycle + refresh dedup.
+- `src/services/cloud/CloudSessionService.ts` + `soulbitsClient.ts`: Cloud session broker integration.
+- `src/database/connection.ts`: DB init, WAL, secondary sync connection.
+- `src/database/sync.ts`: Sync record serialization + chunked large-field transfer.
 
 **Testing:**
-- `__tests__/`: Root test files
-- `src/database/__tests__/`: Database tests (characters, entities, memories, modules, providers, cross-repo)
-- `jest.setup.js`: Jest global setup
-- See `docs/TESTING.md` for the full testing strategy
+- `jest.config.js`: Two projects — `unit` (`src/**/*.test.{ts,tsx}` + `__tests__/**` excluding `integration/`) and `integration` (`__tests__/integration/**`).
+- `__tests__/App.test.tsx`: Root render smoke test.
+- `__tests__/integration/`: Sync protocol suite — `sync.abort.test.ts`, `sync.conflict.test.ts`, `sync.concurrent.test.ts`, `sync.network.test.ts`, `sync.failures.test.ts`, `sync.clock.test.ts`, `syncService.integration.test.ts`, `syncNameClash.integration.test.ts`, `wss.smoke.integration.test.ts`; harness in `helpers/` (`HarmonyLinkMockServer.ts`, `runFullSync.ts`, `resetSyncService.ts`, `fixtures.ts`).
+- Co-located unit tests: `src/database/__tests__/`, `src/contexts/__tests__/`, `src/services/__tests__/`, `src/services/websocket/__tests__/`, `src/constants/__tests__/`, `src/database/__test_utils__/`.
+- E2E: `e2e/.maestro/` (`01-smoke-boot.yaml`, `02-happy-path-pull.yaml`, `03-conflict-resolution.yaml`, `04-network-reconnect.yaml`), run via `docker compose -f e2e/docker-compose.yml`.
 
 ## Naming Conventions
 
 **Files:**
-- PascalCase for components: `ChatBubble.tsx`, `ThemeContext.tsx`, `EmojiPickerInline.tsx`
-- camelCase for utilities: `connection.ts`, `base64.ts`, `emojiSprite.ts`
-- kebab-case for config: `jest.config.js`
-- snake_case for migrations: `000001_initial_schema.ts`
+- Screens: `PascalCaseScreen.tsx` (e.g. `ChatDetailScreen.tsx`, `SettingsScreen.tsx`); subfolder screens keep suffix (`AccountSettingsScreen.tsx`).
+- Components: `PascalCase.tsx` (e.g. `ThemedButton.tsx`, `ChatBubble.tsx`, `GlassTabBar.tsx`); index barrels named `index.ts` (used in `src/components/emoji/index.ts`, `src/components/background/index.ts`, `src/theme/themes/index.ts`).
+- Services: `PascalCaseService.ts` for domain services (`SyncService.ts`, `EntitySessionService.ts`, `BiometricLockService.ts`); infrastructure services plain PascalCase (`ConnectionManager.ts`, `AudioPlayer.ts`, `EmojiService.ts`).
+- WebSocket variants: `{SecurityMode}WebSocketConnection.ts` (`Unencrypted`, `Secure`, `InsecureSSL`, `Cloud`).
+- Migrations: `NNNNNN_snake_case_description.ts` (zero-padded 6-digit version prefix).
+- Repositories: `snake_case_table_name.ts` for tables (`conversation_messages.ts`, `emoji_actions.ts`); `PascalCaseProviderConfigRepository.ts` for providers (`OpenAIProviderConfigRepository.ts`).
+- Tests: co-located `*.test.ts` / `*.test.tsx` beside source; integration in `__tests__/integration/` as `*.integration.test.ts` or `sync.<topic>.test.ts`.
 
 **Directories:**
-- camelCase: `src/components`, `src/services`, `src/database`, `src/screens`
-- PascalCase for type definitions: `src/types`
-- Domain-based: `src/components/emoji/`, `src/components/themed/`, `src/screens/settings/`
-
-**TypeScript:**
-- Interfaces: PascalCase with descriptive names: `ConversationMessage`, `EmojiAction`, `Interaction`, `EmotionEffect`
-- Types: PascalCase: `ThemeContextType`, `RootStackParamList`, `EmojiSet`, `Ekman8Emotion`
-- Enums: PascalCase const objects: `EKMAN8_EMOTIONS`
+- Feature-sliced: `src/components/<feature>/`, `src/screens/<feature>/`, `src/services/<feature>/`.
+- Provider configs: `src/database/repositories/providers/`.
+- Tests: `__tests__/` (integration), `*.test.ts` co-located.
+- Internal doc/plan dirs: `docs/`, `plans/`, `design/`, `.planning/`.
 
 ## Where to Add New Code
 
-**New Feature:**
-- Primary code: `src/services/` (business logic) or `src/screens/` (UI)
-- State management: `src/contexts/` if global state needed
-- Tests: `src/database/__tests__/` or `__tests__/`
+**New Feature (e.g. a new settings page):**
+- Screen: `src/screens/settings/<Feature>SettingsScreen.tsx`; register in `src/navigation/AppNavigator.tsx` (`RootStackParamList` + `<Stack.Screen>`).
+- Components: `src/components/settings/` (or a new feature subfolder under `src/components/`).
+- Business logic: `src/services/<Feature>Service.ts` (follow the `extends EventEmitter` + `getInstance()` singleton pattern if long-lived).
+- State: `src/contexts/<Feature>Context.tsx` if cross-cutting; provider must be wired into the tree in `App.tsx` (mind nesting order).
+- Persistence: add SQL to a new migration `src/database/migrations/NNNNNN_<snake_case>.ts`, register in `src/database/migrations.ts`, add repository functions in `src/database/repositories/<table>.ts`, re-export from `src/database/index.ts`.
+- i18n: add strings to the matching namespace in `src/i18n/locales/en/` (or a new namespace file + register in `src/i18n/locales/index.ts`).
+- Tests: co-located `*.test.ts(x)` for unit; integration under `__tests__/integration/` if it touches the sync protocol.
 
 **New Component/Module:**
-- UI Component: `src/components/<domain>/` (create new domain dir if needed)
-- Themed wrapper: `src/components/themed/`
-- Business logic: `src/services/`
-- Config metadata: `src/constants/` if schema-related
-
-**New Database Table:**
-- Model: `src/database/models.ts` (match Go structs exactly)
-- Repository: `src/database/repositories/<name>.ts`
-- Migration: `src/database/migrations/` (sequential numbering)
-- Migration registration: update `src/database/migrations.ts`
-
-**New Screen:**
-- Screen component: `src/screens/<Name>Screen.tsx` or `src/screens/<domain>/<Name>Screen.tsx`
-- Route registration: `src/navigation/AppNavigator.tsx` (add to RootStackParamList + Stack.Navigator)
-
-**New Theme:**
-- Implementation: `src/theme/themes/<name>.ts`
-- Export: `src/theme/themes/index.ts`
-
-**Emoji Feature:**
-- Business logic: `src/services/EmojiService.ts` or `src/services/EntityEmojiActionService.ts`
-- Types: `src/types/emoji.ts`
-- Components: `src/components/emoji/`
-- Sprites: `src/assets/emoji/sheets/`
+- Implementation: `src/components/<feature>/<PascalCase>.tsx`; design-system primitives go in `src/components/themed/`.
+- If used across screens, add to a barrel `index.ts` only where a barrel already exists (emoji, background).
 
 **Utilities:**
-- Shared helpers: `src/utils/`
+- Shared helpers: `src/utils/<camelCase>.ts`; log via `createLogger('[Tag]')` from `src/utils/logger.ts`.
+
+**New Provider (LLM/TTS backend):**
+- Repo: `src/database/repositories/providers/<PascalCase>ProviderConfigRepository.ts` (mirror an existing provider repo, e.g. `OpenAIProviderConfigRepository.ts`), export from `src/database/index.ts`.
+- Schema: `src/database/repositories/providers/shared.ts` for shared helpers.
+- Config UI metadata: `src/constants/providerFieldSchemas.ts`, `src/constants/soulbitsModels.ts`.
 
 ## Special Directories
 
-**src/database/migrations:**
-- Purpose: Database schema migrations (28 total, up to 000028)
-- Generated: No (manually created)
-- Committed: Yes
-- Pattern: Sequential numbering (000001, 000002, etc.)
-- Latest: `000028_add_presence_type.ts`
+**android/ & ios/:**
+- Purpose: Native build projects (bare RN; not generated per build — committed).
+- Generated: No (checked in).
+- Committed: Yes.
+- Note: `android/app/src/main/java/ai/soulbits/chat/` holds `MainActivity.kt`/`MainApplication.kt`; iOS holds OAuth plists (`GoogleService-Info.plist`, `GoogleService-Info-Dev.plist`) and `PrivacyInfo.xcprivacy`. `release.keystore` sits at repo root (do not read/commit secrets).
 
-**src/database/repositories:**
-- Purpose: Data access layer (10 repositories)
-- Generated: No
-- Committed: Yes
-- Pattern: One file per entity type
-- Latest additions: `interactions.ts`, `emoji_actions.ts`, `memories.ts`, `modules.ts`, `providers.ts`
+**__tests__/integration/:**
+- Purpose: Node-environment sync-protocol integration tests with an in-process `HarmonyLinkMockServer`.
+- Generated: No.
+- Committed: Yes.
 
-**android/, ios/:**
-- Purpose: Native platform code
-- Generated: Partially (from React Native CLI)
-- Committed: Yes
-- Contains: MainActivity, MainApplication, build configs
+**e2e/:**
+- Purpose: Maestro E2E flows + Docker Compose harness (`maestro-runner`, `harmony-link`, `android-emulator`).
+- Generated: `app-debug.apk`, `reports/junit-report.xml`, `.maestro;C`/`app-debug.apk;C` stray entries are build artifacts.
+- Committed: Partially (flows and compose are committed; artifacts should not be).
 
-**__tests__/ and src/database/__tests__/:**
-- Purpose: Test files
-- Generated: No
-- Committed: Yes
-- Types: Database integration tests (5 test files), test utilities, runner
+**coverage/ & reports/:**
+- Purpose: Jest coverage (`coverage/lcov-report/`) and CI/JUnit report output.
+- Generated: Yes.
+- Committed: No (build output).
 
-**src/assets/emoji/:**
-- Purpose: Bundled emoji sprite sheets
-- Generated: Yes (downloaded from emoji-datasource)
-- Committed: Yes (required for offline rendering)
-- Contains: `sheets/google-64.png` (13.2MB), `sheets/twitter-64.png` (10.8MB)
+**schema/:**
+- Purpose: `rn-schema.json` (DB schema dump) + `scripts/compare-schemas.py` parity check against backend schemas.
+- Generated: `schema/rn-schema.json` regenerated via `npm run schema:dump`.
+- Committed: Yes.
+
+**undefined/:**
+- Purpose: None — stray artifact. Contains `.cache/huggingface/Snowflake/snowflake-arctic-embed-xs/` (ONNX tokenizer/model) — an embedding-model download that landed in the wrong working directory during a RAG experiment.
+- Generated: Yes.
+- Committed: Unknown — should be removed and gitignored.
+
+**memory-bank/, plans/, .current_work/, .planning/:**
+- Purpose: Project-context memory (Roo memory-bank), implementation-plan notes, in-progress work scratch, and GSD codebase maps.
+- Committed: Yes (memory-bank, plans, .planning are tracked; `.current_work/` is scratch).
+
+**design/:**
+- Purpose: Theming/UI design proposal docs (`00 Design Document.md`, `01 Theming Implementation Plan.md`, `02 UI Visual Enhancement Proposal.md`).
 
 ---
 
-*Structure analysis: 2026-05-24*
+*Structure analysis: 2026-08-07*
