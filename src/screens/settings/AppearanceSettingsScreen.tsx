@@ -59,13 +59,6 @@ export const AppearanceSettingsScreen: React.FC = () => {
             theme={theme}
             showSeparator
           />
-          <SettingsLinkRow
-            icon="cellphone"
-            label={t('appIcon')}
-            onPress={() => navigateToComingSoon('appIcon', 'cellphone', 'comingSoonAppIcon')}
-            theme={theme}
-            showSeparator
-          />
         </ThemedCard>
       </ScrollView>
     </ThemedView>
