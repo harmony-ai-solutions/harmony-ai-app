@@ -160,6 +160,7 @@ describe('SyncService integration', () => {
       (syncService as any).currentSession = null;
       (syncService as any).pendingHandshake = null;
       (syncService as any).pendingSyncConfirmation = null;
+      (syncService as any).pendingSizeEstimate = null;
     }
     mockServer.reset();
     testDbRef.current = null;
@@ -297,7 +298,6 @@ describe('SyncService integration', () => {
     const lastSyncTime = Math.floor((Date.now() - 10000) / 1000);
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('last_sync_timestamp:selfhosted', String(lastSyncTime));
-    await AsyncStorage.setItem('last_sync_timestamp', String(lastSyncTime));
 
     // Seed DB with a character that was synced before
     const oldChar = sampleCharacter({
@@ -355,7 +355,6 @@ describe('SyncService integration', () => {
     const lastSyncTime = Math.floor((Date.now() - 10000) / 1000);
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('last_sync_timestamp:selfhosted', String(lastSyncTime));
-    await AsyncStorage.setItem('last_sync_timestamp', String(lastSyncTime));
 
     // Seed DB with a character updated locally
     const updatedChar = sampleCharacter({
@@ -410,7 +409,6 @@ describe('SyncService integration', () => {
     const lastSyncTime = Math.floor((Date.now() - 10000) / 1000);
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.setItem('last_sync_timestamp:selfhosted', String(lastSyncTime));
-    await AsyncStorage.setItem('last_sync_timestamp', String(lastSyncTime));
 
     // Server has a deleted character and a kept character
     mockServer.setServerData('character_profiles', [
@@ -519,14 +517,344 @@ describe('SyncService integration', () => {
     await completedPromise;
     await new Promise(r => setTimeout(r, 100));
 
-    // Verify timestamp was updated in AsyncStorage
-    const timestampStr = await AsyncStorage.getItem('last_sync_timestamp');
+    // Verify timestamp was updated in AsyncStorage (per-source key; the
+    // legacy global alias was removed — it must NOT be written anymore)
+    const timestampStr = await AsyncStorage.getItem('last_sync_timestamp:selfhosted');
     expect(timestampStr).toBeTruthy();
     expect(parseInt(timestampStr, 10)).toBeGreaterThan(0);
+    expect(await AsyncStorage.getItem('last_sync_timestamp')).toBeNull();
+  }, 15000);
 
-    // Also verify the per-source key
-    const sourceKey = await AsyncStorage.getItem('last_sync_timestamp:selfhosted');
-    expect(sourceKey).toBeTruthy();
-    expect(parseInt(sourceKey, 10)).toBeGreaterThan(0);
+  // -----------------------------------------------------------------------
+  // Test 8: No watermark — sync must escalate to force_full_sync
+  // -----------------------------------------------------------------------
+  it('sends force_full_sync: true when no watermark exists (fresh/wiped client)', async () => {
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    await AsyncStorage.clear();
+
+    // Seed server-side data
+    const serverChar = sampleCharacter({
+      id: 'char-wipe-1',
+      name: 'Server Character After Wipe',
+      created_at: new Date(Date.now() - 10000).toISOString(),
+      updated_at: new Date(Date.now() - 10000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    mockServer.startAutoResponder();
+
+    // Drive sync
+    const completedPromise = new Promise<void>(resolve =>
+      syncService.on('sync:completed', () => resolve()),
+    );
+    syncService.initiateSync();
+    await completedPromise;
+    await new Promise(r => setTimeout(r, 100));
+
+    // VERIFY: The SYNC_REQUEST payload must carry force_full_sync: true with
+    // last_sync_timestamp: 0 — the engine IGNORES a bare last_sync_timestamp: 0
+    // (it keeps its own per-device watermark) and only resends everything when
+    // force_full_sync is set. A client with no watermark has nothing locally,
+    // so requesting a full pull is correct and lossless.
+    const syncRequest = mockServer.receivedEvents.find(
+      (e: any) => e.event_type === 'SYNC_REQUEST',
+    );
+    expect(syncRequest).toBeDefined();
+    expect(syncRequest.payload.force_full_sync).toBe(true);
+    expect(syncRequest.payload.last_sync_timestamp).toBe(0);
+
+    // VERIFY: The server's data actually arrives in the local DB
+    const [result] = await db.executeSql(
+      "SELECT * FROM character_profiles WHERE id = 'char-wipe-1'",
+    );
+    expect(result.rows.length).toBe(1);
+    expect(result.rows.item(0).name).toBe('Server Character After Wipe');
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 9: Existing watermark — sync stays incremental (force_full_sync: false)
+  // -----------------------------------------------------------------------
+  it('keeps force_full_sync: false when a watermark exists (incremental sync)', async () => {
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    const lastSyncTime = Math.floor((Date.now() - 10000) / 1000);
+    await AsyncStorage.setItem('last_sync_timestamp:selfhosted', String(lastSyncTime));
+
+    mockServer.startAutoResponder();
+
+    // Drive sync
+    const completedPromise = new Promise<void>(resolve =>
+      syncService.on('sync:completed', () => resolve()),
+    );
+    syncService.initiateSync();
+    await completedPromise;
+    await new Promise(r => setTimeout(r, 100));
+
+    // VERIFY: With an existing watermark the client must NOT escalate to a
+    // full sync — it requests an incremental sync from its watermark.
+    const syncRequest = mockServer.receivedEvents.find(
+      (e: any) => e.event_type === 'SYNC_REQUEST',
+    );
+    expect(syncRequest).toBeDefined();
+    expect(syncRequest.payload.force_full_sync).toBe(false);
+    expect(syncRequest.payload.last_sync_timestamp).toBe(lastSyncTime);
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 10: Explicit forceFullSync() must always send force_full_sync: true
+  // -----------------------------------------------------------------------
+  it('sends force_full_sync: true when forceFullSync() is called explicitly', async () => {
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    // Even with an existing watermark, an explicit force sync must escalate
+    const lastSyncTime = Math.floor((Date.now() - 10000) / 1000);
+    await AsyncStorage.setItem('last_sync_timestamp:selfhosted', String(lastSyncTime));
+
+    mockServer.startAutoResponder();
+
+    const completedPromise = new Promise<void>(resolve =>
+      syncService.on('sync:completed', () => resolve()),
+    );
+    syncService.forceFullSync();
+    await completedPromise;
+    await new Promise(r => setTimeout(r, 100));
+
+    const syncRequest = mockServer.receivedEvents.find(
+      (e: any) => e.event_type === 'SYNC_REQUEST',
+    );
+    expect(syncRequest).toBeDefined();
+    expect(syncRequest.payload.force_full_sync).toBe(true);
+    expect(syncRequest.payload.last_sync_timestamp).toBe(0);
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 11: SYNC_DATA_SIZE_ESTIMATE — accept path
+  // -----------------------------------------------------------------------
+  it('emits sync:estimate and completes the sync after confirmSizeEstimate(true)', async () => {
+    const serverChar = sampleCharacter({
+      id: 'char-est-accept',
+      name: 'Estimate Accepted Character',
+      created_at: new Date(Date.now() - 5000).toISOString(),
+      updated_at: new Date(Date.now() - 5000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    mockServer.setSendSizeEstimate(true);
+    mockServer.startAutoResponder();
+
+    const estimatePromise = new Promise<any>(resolve =>
+      syncService.once('sync:estimate', resolve),
+    );
+    const completedPromise = new Promise<void>(resolve =>
+      syncService.once('sync:completed', () => resolve()),
+    );
+
+    syncService.initiateSync();
+
+    // The engine blocks until we confirm the estimate — capture it.
+    const estimate = await estimatePromise;
+    expect(estimate).toBeDefined();
+    expect(estimate.event_id).toBeDefined();
+    expect(estimate.sync_session_id).toBeDefined();
+    // The engine serializes the estimate with snake_case JSON tags — the app
+    // must read `total_records` / `image_count` / `estimated_download_mb`.
+    expect(estimate.total_records).toBe(1);
+    expect(estimate.estimated_download_mb).toBeGreaterThan(0);
+    expect(estimate.image_count).toBe(0);
+
+    // Accept → the engine proceeds to stream SYNC_DATA and completes the sync.
+    await syncService.confirmSizeEstimate(true);
+    await completedPromise;
+    await new Promise(r => setTimeout(r, 100));
+
+    // VERIFY: server data was applied
+    const [result] = await db.executeSql(
+      "SELECT id, name FROM character_profiles WHERE id = 'char-est-accept'",
+    );
+    expect(result.rows.length).toBe(1);
+    expect(result.rows.item(0).name).toBe('Estimate Accepted Character');
+
+    // VERIFY: exactly one SUCCESS confirmation was sent, echoing the estimate event_id
+    const confirms = mockServer.receivedEvents.filter(
+      (e: any) => e.event_type === 'SYNC_DATA_SIZE_ESTIMATE_CONFIRM',
+    );
+    expect(confirms.length).toBe(1);
+    expect(confirms[0].payload.status).toBe('SUCCESS');
+    expect(confirms[0].payload.event_id).toBe(estimate.event_id);
+    expect(confirms[0].payload.sync_session_id).toBe(estimate.sync_session_id);
+
+    // VERIFY: pending estimate cleared
+    expect((syncService as any).pendingSizeEstimate).toBeNull();
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 11b: SYNC_DATA_SIZE_ESTIMATE — configurable estimate size
+  // -----------------------------------------------------------------------
+  it('emits the configured estimated_download_mb when setEstimateDownloadMB is used', async () => {
+    const serverChar = sampleCharacter({
+      id: 'char-est-size',
+      name: 'Estimate Size Character',
+      created_at: new Date(Date.now() - 5000).toISOString(),
+      updated_at: new Date(Date.now() - 5000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    mockServer.setSendSizeEstimate(true);
+    mockServer.setEstimateDownloadMB(42);
+    mockServer.startAutoResponder();
+
+    const estimatePromise = new Promise<any>(resolve =>
+      syncService.once('sync:estimate', resolve),
+    );
+
+    syncService.initiateSync();
+    const estimate = await estimatePromise;
+
+    expect(estimate).toBeDefined();
+    expect(estimate.estimated_download_mb).toBe(42);
+    // Snake_case keys are emitted (never PascalCase).
+    expect(estimate.EstimatedDownloadMB).toBeUndefined();
+    expect(estimate.total_records).toBe(1);
+    expect(estimate.image_count).toBe(0);
+
+    // Accept so the session unwinds cleanly (avoid dangling timers).
+    await syncService.confirmSizeEstimate(true);
+    await new Promise(r => setTimeout(r, 50));
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 12: SYNC_DATA_SIZE_ESTIMATE — reject path aborts the session
+  // -----------------------------------------------------------------------
+  it('aborts the sync session when confirmSizeEstimate(false) is called', async () => {
+    const serverChar = sampleCharacter({
+      id: 'char-est-reject',
+      name: 'Estimate Rejected Character',
+      created_at: new Date(Date.now() - 5000).toISOString(),
+      updated_at: new Date(Date.now() - 5000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    mockServer.setSendSizeEstimate(true);
+    mockServer.startAutoResponder();
+
+    const estimatePromise = new Promise<any>(resolve =>
+      syncService.once('sync:estimate', resolve),
+    );
+    const abortedPromise = new Promise<string>(resolve =>
+      syncService.once('sync:aborted', resolve),
+    );
+
+    syncService.initiateSync();
+    const estimate = await estimatePromise;
+
+    await syncService.confirmSizeEstimate(false);
+
+    // VERIFY: sync:aborted emitted with the rejection reason
+    const reason = await abortedPromise;
+    expect(reason).toContain('size estimate rejected');
+
+    // VERIFY: session state fully cleared (abort path)
+    expect((syncService as any).currentSession).toBeNull();
+    expect((syncService as any).syncPhase).toBe('IDLE');
+    expect((syncService as any).pendingSizeEstimate).toBeNull();
+    expect((syncService as any).incomingDataBuffer).toEqual([]);
+
+    // VERIFY: REJECTED confirmation was sent
+    const confirms = mockServer.receivedEvents.filter(
+      (e: any) => e.event_type === 'SYNC_DATA_SIZE_ESTIMATE_CONFIRM',
+    );
+    expect(confirms.length).toBe(1);
+    expect(confirms[0].payload.status).toBe('REJECTED');
+    expect(confirms[0].payload.event_id).toBe(estimate.event_id);
+
+    // VERIFY: no buffered data is ever applied — even if a straggler
+    // SYNC_DATA arrives after the abort (session is gone, record ignored).
+    mockServer.send({
+      event_type: 'SYNC_DATA',
+      status: 'NEW',
+      payload: {
+        sync_session_id: estimate.sync_session_id,
+        event_id: 'straggler_after_reject',
+        table: 'character_profiles',
+        operation: 'insert',
+        record: serverChar,
+      },
+    });
+    await new Promise(r => setTimeout(r, 100));
+    const [result] = await db.executeSql(
+      "SELECT id FROM character_profiles WHERE id = 'char-est-reject'",
+    );
+    expect(result.rows.length).toBe(0);
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // Test 13: Backward compat — engine sends NO estimate, sync proceeds as before
+  // -----------------------------------------------------------------------
+  it('does not wait for a size estimate that never arrives (backward compat)', async () => {
+    const serverChar = sampleCharacter({
+      id: 'char-est-backcompat',
+      name: 'Backward Compat Character',
+      created_at: new Date(Date.now() - 5000).toISOString(),
+      updated_at: new Date(Date.now() - 5000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    // NOTE: setSendSizeEstimate intentionally NOT enabled — legacy engine
+    // goes straight from SYNC_START to SYNC_DATA.
+    mockServer.startAutoResponder();
+
+    const completedPromise = new Promise<void>(resolve =>
+      syncService.once('sync:completed', () => resolve()),
+    );
+    syncService.initiateSync();
+    await completedPromise;
+    await new Promise(r => setTimeout(r, 100));
+
+    // VERIFY: data still pulled + sync finalized without any estimate round-trip
+    const [result] = await db.executeSql(
+      "SELECT id FROM character_profiles WHERE id = 'char-est-backcompat'",
+    );
+    expect(result.rows.length).toBe(1);
+
+    expect(
+      mockServer.receivedEvents.some(
+        (e: any) => e.event_type === 'SYNC_DATA_SIZE_ESTIMATE_CONFIRM',
+      ),
+    ).toBe(false);
+    expect(
+      mockServer.receivedEvents.some((e: any) => e.event_type === 'SYNC_FINALIZE'),
+    ).toBe(true);
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // syncAndWait: resolves only after the sync round-trip completes
+  // -----------------------------------------------------------------------
+  it('syncAndWait resolves after the sync completes', async () => {
+    const serverChar = sampleCharacter({
+      id: 'char-wait-complete',
+      name: 'Wait Complete Character',
+      created_at: new Date(Date.now() - 5000).toISOString(),
+      updated_at: new Date(Date.now() - 5000).toISOString(),
+    });
+    mockServer.setServerData('character_profiles', [serverChar]);
+    mockServer.startAutoResponder();
+
+    // syncAndWait must resolve only once the engine has ingested the data
+    // (sync:completed / SYNC_FINALIZE) — not merely when SYNC_REQUEST is sent.
+    await syncService.syncAndWait({ timeoutMs: 8000 });
+    await new Promise(r => setTimeout(r, 100));
+
+    const [result] = await db.executeSql(
+      "SELECT id FROM character_profiles WHERE id = 'char-wait-complete'",
+    );
+    expect(result.rows.length).toBe(1);
+  }, 15000);
+
+  // -----------------------------------------------------------------------
+  // syncAndWait: best-effort timeout — never blocks navigation forever
+  // -----------------------------------------------------------------------
+  it('syncAndWait resolves on timeout when the server never completes', async () => {
+    // No server data + no auto-responder → sync stalls at SYNC_REQUEST and never
+    // emits sync:completed. syncAndWait must still resolve after the timeout so
+    // callers (e.g. entity creation → chat navigation) are never blocked forever.
+    const start = Date.now();
+    await syncService.syncAndWait({ timeoutMs: 300 });
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeGreaterThanOrEqual(300);
+    expect(elapsed).toBeLessThan(3000);
   }, 15000);
 });

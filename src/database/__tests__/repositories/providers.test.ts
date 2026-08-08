@@ -9,11 +9,13 @@
  */
 
 import {useFreshDatabase} from '../repositoryFixtures';
+import {getChangedRecords} from '../../sync';
 
 // Ported providers (11 types)
 import {
   createOpenAIProviderConfig,
   getOpenAIProviderConfig,
+  updateOpenAIProviderConfig,
   deleteOpenAIProviderConfig,
 } from '../../repositories/providers/OpenAIProviderConfigRepository';
 import {
@@ -64,6 +66,7 @@ import {
 import {
   createOllamaProviderConfig,
   getOllamaProviderConfig,
+  updateOllamaProviderConfig,
   deleteOllamaProviderConfig,
 } from '../../repositories/providers/OllamaProviderConfigRepository';
 
@@ -86,11 +89,13 @@ import {
 import {
   createAnthropicProviderConfig,
   getAnthropicProviderConfig,
+  updateAnthropicProviderConfig,
   deleteAnthropicProviderConfig,
 } from '../../repositories/providers/AnthropicProviderConfigRepository';
 import {
   createSoulbitsCloudProviderConfig,
   getSoulbitsCloudProviderConfig,
+  updateSoulbitsCloudProviderConfig,
   getAllSoulbitsCloudProviderConfigs,
   updateAllSoulbitsCloudApiKeys,
   deleteSoulbitsCloudProviderConfig,
@@ -561,6 +566,203 @@ describe('providers repository', () => {
       expect(byId.get(softDeleted)!.api_key).toBe('token-old-3');
       // Non-deleted listing only returns the two active rows.
       expect(await getAllSoulbitsCloudProviderConfigs()).toHaveLength(2);
+    });
+  });
+
+  // ===========================================================================
+  // Sync dirty-tracking: update<Provider>Config must bump updated_at so the
+  // edited row is selected by getChangedRecords and pushed to the engine.
+  // (Last-write-wins sync relies on updated_at > lastSyncTimestamp.)
+  // ===========================================================================
+
+  describe('update bumps updated_at (sync dirty-tracking)', () => {
+    async function readUpdatedAt(table: string, id: string): Promise<string | null> {
+      const [result] = await getDb().executeSql(
+        `SELECT updated_at FROM ${table} WHERE id = ?`,
+        [id],
+      );
+      if (result.rows.length === 0) return null;
+      return result.rows.item(0).updated_at;
+    }
+
+    it('updateOpenAIProviderConfig bumps updated_at', async () => {
+      const id = await createOpenAIProviderConfig({
+        name: 'Test OpenAI',
+        api_key: 'sk-test-123',
+        model: 'gpt-4',
+        max_tokens: 0,
+        temperature: 0,
+        top_p: 0,
+        n: 0,
+        stop_tokens: '',
+        voice: '',
+        speed: 0,
+        format: '',
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        max_completion_tokens: 0,
+        seed: 0,
+        response_format: '',
+        reasoning_effort: '',
+        top_k: 0,
+        top_a: 0,
+        min_p: 0,
+        repetition_penalty: 0,
+        sampling_preset_name: '',
+        extra_params: '{}',
+      });
+
+      // Backdate updated_at so the bump is observable (CURRENT_TIMESTAMP has
+      // 1-second resolution; create + update may land in the same second).
+      await getDb().executeSql(
+        `UPDATE provider_config_openai SET updated_at = '2000-01-01 00:00:00' WHERE id = ?`,
+        [id],
+      );
+      const before = await readUpdatedAt('provider_config_openai', id);
+
+      const config = await getOpenAIProviderConfig(id, true);
+      await updateOpenAIProviderConfig({...config!, name: 'Renamed OpenAI'});
+
+      const after = await readUpdatedAt('provider_config_openai', id);
+      expect(after).not.toBeNull();
+      expect(new Date(after!).getTime()).toBeGreaterThan(new Date(before!).getTime());
+    });
+
+    it('updateOllamaProviderConfig bumps updated_at', async () => {
+      const id = await createOllamaProviderConfig({
+        name: 'Test Ollama',
+        base_url: 'http://ollama',
+        model: null,
+      });
+
+      await getDb().executeSql(
+        `UPDATE provider_config_ollama SET updated_at = '2000-01-01 00:00:00' WHERE id = ?`,
+        [id],
+      );
+      const before = await readUpdatedAt('provider_config_ollama', id);
+
+      const config = await getOllamaProviderConfig(id, true);
+      await updateOllamaProviderConfig({...config!, name: 'Renamed Ollama'});
+
+      const after = await readUpdatedAt('provider_config_ollama', id);
+      expect(after).not.toBeNull();
+      expect(new Date(after!).getTime()).toBeGreaterThan(new Date(before!).getTime());
+    });
+
+    it('updateAnthropicProviderConfig bumps updated_at', async () => {
+      const id = await createAnthropicProviderConfig({
+        name: 'Test Anthropic',
+        api_key: 'sk-test',
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        temperature: 0,
+        top_p: 0,
+        top_k: 0,
+        stop_sequences: '[]',
+        sampling_preset_name: '',
+        extra_params: '{}',
+      });
+
+      await getDb().executeSql(
+        `UPDATE provider_config_anthropic SET updated_at = '2000-01-01 00:00:00' WHERE id = ?`,
+        [id],
+      );
+      const before = await readUpdatedAt('provider_config_anthropic', id);
+
+      const config = await getAnthropicProviderConfig(id, true);
+      await updateAnthropicProviderConfig({...config!, name: 'Renamed Anthropic'});
+
+      const after = await readUpdatedAt('provider_config_anthropic', id);
+      expect(after).not.toBeNull();
+      expect(new Date(after!).getTime()).toBeGreaterThan(new Date(before!).getTime());
+    });
+
+    it('updateSoulbitsCloudProviderConfig bumps updated_at', async () => {
+      const id = await createSoulbitsCloudProviderConfig({
+        name: 'Test Soulbits',
+        base_url: 'https://api.soulbits.app',
+        api_key: '',
+        model: '',
+        max_tokens: 0,
+        max_completion_tokens: 0,
+        temperature: 0,
+        top_p: 0,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        n: 0,
+        stop_tokens: '[]',
+        seed: 0,
+        response_format: '',
+        sampling_preset_name: '',
+        extra_params: '{}',
+        voice: '',
+        speed: 1.0,
+        format: 'mp3',
+        image_aspect_ratio: '1:1',
+        image_size: '1k',
+      });
+
+      // Backdate updated_at + created_at to simulate a row synced long ago.
+      await getDb().executeSql(
+        `UPDATE provider_config_soulbitscloud
+            SET created_at = '2000-01-01 00:00:00', updated_at = '2000-01-01 00:00:00'
+          WHERE id = ?`,
+        [id],
+      );
+      const before = await readUpdatedAt('provider_config_soulbitscloud', id);
+
+      const config = await getSoulbitsCloudProviderConfig(id, true);
+      await updateSoulbitsCloudProviderConfig({...config!, api_key: 'sk-new-key'});
+
+      const after = await readUpdatedAt('provider_config_soulbitscloud', id);
+      expect(after).not.toBeNull();
+      expect(new Date(after!).getTime()).toBeGreaterThan(new Date(before!).getTime());
+    });
+
+    it('updateSoulbitsCloudProviderConfig makes the edited row visible to getChangedRecords', async () => {
+      const id = await createSoulbitsCloudProviderConfig({
+        name: 'Test Soulbits',
+        base_url: 'https://api.soulbits.app',
+        api_key: '',
+        model: '',
+        max_tokens: 0,
+        max_completion_tokens: 0,
+        temperature: 0,
+        top_p: 0,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        n: 0,
+        stop_tokens: '[]',
+        seed: 0,
+        response_format: '',
+        sampling_preset_name: '',
+        extra_params: '{}',
+        voice: '',
+        speed: 1.0,
+        format: 'mp3',
+        image_aspect_ratio: '1:1',
+        image_size: '1k',
+      });
+
+      // Backdate both timestamps so the row looks like it was already synced.
+      await getDb().executeSql(
+        `UPDATE provider_config_soulbitscloud
+            SET created_at = '2000-01-01 00:00:00', updated_at = '2000-01-01 00:00:00'
+          WHERE id = ?`,
+        [id],
+      );
+      // lastSync is 1s in the past so an updated_at bumped to "now" is always > it.
+      const lastSync = Math.floor(Date.now() / 1000) - 1;
+
+      // Before the edit the row is not dirty.
+      const beforeRecords = await getChangedRecords('provider_config_soulbitscloud', lastSync);
+      expect(beforeRecords.some(r => r.id === id)).toBe(false);
+
+      const config = await getSoulbitsCloudProviderConfig(id, true);
+      await updateSoulbitsCloudProviderConfig({...config!, api_key: 'sk-new-key'});
+
+      const afterRecords = await getChangedRecords('provider_config_soulbitscloud', lastSync);
+      expect(afterRecords.some(r => r.id === id)).toBe(true);
     });
   });
 });

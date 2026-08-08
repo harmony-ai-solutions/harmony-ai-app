@@ -66,7 +66,7 @@ export async function updateElevenLabsProviderConfig(config: ElevenLabsProviderC
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_elevenlabs SET name = ?, api_key = ?, voice_id = ?, model_id = ?, stability = ?, similarity_boost = ?, style = ?, speaker_boost = ? WHERE id = ?',
+      'UPDATE provider_config_elevenlabs SET name = ?, api_key = ?, voice_id = ?, model_id = ?, stability = ?, similarity_boost = ?, style = ?, speaker_boost = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.api_key, config.voice_id, config.model_id, config.stability, config.similarity_boost, config.style, config.speaker_boost, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`ElevenLabs provider config not found: ${config.id}`);

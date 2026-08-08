@@ -143,12 +143,58 @@ export class NodeDatabase implements IDatabase {
     // For NodeDatabase, only the promise form is supported in tests.
     // The callback form is a no-op pass-through for type compatibility.
     if (errorCallback !== undefined || successCallback !== undefined) {
-      // Callback form: execute synchronously and call callbacks
+      // Callback form: emulate a real RN SQLite transaction. All tx.executeSql
+      // calls execute SYNCHRONOUSLY inside fn (better-sqlite3 is synchronous —
+      // executeSql's async body has no awaits before the statement), so the
+      // writes are durable before COMMIT and the success callback sees the
+      // committed data. defer_foreign_keys mirrors SyncService's real
+      // transaction so cross-table FK reparenting (e.g. config id adoption)
+      // can complete before the commit-time check. Nesting uses SAVEPOINTs,
+      // matching the promise form below.
+      const depth = this.transactionDepth++;
+      const savepointName = `sp_${depth}`;
+      if (depth === 0) {
+        this.db.exec('BEGIN');
+        this.db.pragma('defer_foreign_keys = ON');
+      } else {
+        this.db.exec(`SAVEPOINT ${savepointName}`);
+      }
+
+      let txError: Error | null = null;
       try {
         (fn as (tx: DatabaseTransaction) => void)(this.makeTx());
-        if (successCallback) successCallback();
       } catch (err) {
-        if (errorCallback) errorCallback(err as Error);
+        txError = err as Error;
+      }
+
+      if (txError) {
+        if (depth === 0) {
+          this.db.exec('ROLLBACK');
+        } else {
+          this.db.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+          this.db.exec(`RELEASE SAVEPOINT ${savepointName}`);
+        }
+        this.transactionDepth--;
+        if (errorCallback) errorCallback(txError);
+      } else {
+        try {
+          if (depth === 0) {
+            this.db.exec('COMMIT');
+          } else {
+            this.db.exec(`RELEASE SAVEPOINT ${savepointName}`);
+          }
+          this.transactionDepth--;
+          if (successCallback) successCallback();
+        } catch (commitErr) {
+          // Deferred FK (or any) failure surfaced at COMMIT.
+          try {
+            this.db.exec('ROLLBACK');
+          } catch {
+            // Best-effort rollback.
+          }
+          this.transactionDepth--;
+          if (errorCallback) errorCallback(commitErr as Error);
+        }
       }
       return;
     }

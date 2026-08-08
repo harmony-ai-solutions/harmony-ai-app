@@ -402,3 +402,34 @@ production code path now reads `Config.HARMONY_LINK_WSS_URL` and
 **Trigger**: N/A.
 
 **Source**: Post-plan Phase B-3 work.
+
+---
+
+### 24. Upstream `react-native-websocket-self-signed` native hardening
+
+**Description**: The Android native module (`WebsocketSelfSignedModule.kt`, v0.4.0)
+has three defects the app now defends against in JS
+(`InsecureSSLWebSocketConnection`): (1) `close(url)` on a missing socket emits an
+`onError("No active WebSocket for this URL")` event — this fed an
+error→close→error loop while any listener answered errors with another
+`close()`; (2) `onClosed` is not overridden and `onClosing` doesn't remove the
+URL from the active-socket map, so server-initiated closes leak a map entry and
+the next `connect()` is rejected with "Already Connected" until a close clears
+it; (3) `connect()` doesn't track in-flight handshakes, so two concurrent
+connects for the same URL can race. Upstream a patch (silent close on missing
+socket, map removal in `onClosing`/`onClosed`, in-flight connect guard) and
+bump the dependency.
+
+**Why it matters**: The JS-side guards break the crash loop (on-device incident
+2026-08-05: error flood → JNI global reference table overflow), but the native
+module still costs one failed-then-retried connect after every server-initiated
+close, and the iOS side of the library was never audited.
+
+**Effort**: 0.5 day (patch + upstream PR + dependency bump).
+
+**Trigger**: If the library needs a version bump anyway, or if "Already
+Connected" retry noise shows up in connection logs again.
+
+**Source**: Chat connection cascade incident 2026-08-05 (adb logcat + docker
+logs). node_modules edits are not allowed in this repo (no patch-package), so
+the fix must land upstream.

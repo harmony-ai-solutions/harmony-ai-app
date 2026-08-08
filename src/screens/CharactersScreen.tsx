@@ -18,6 +18,7 @@ import { pick } from '@react-native-documents/picker';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -37,6 +38,7 @@ import {
 import { createDataURL } from '../database/base64';
 import { CharacterProfile } from '../database/models';
 import { importCharacterCardFromFile, CharacterCardImportError } from '../services/CharacterCardImportService';
+import syncService from '../services/SyncService';
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
 // Using 'any' here avoids CompositeNavigationProp boilerplate while
@@ -62,6 +64,7 @@ export const CharactersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
+  const { withExternalFlow } = useBiometricLock();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('characters');
 
@@ -172,7 +175,10 @@ export const CharactersScreen: React.FC = () => {
   const handleImportCard = async () => {
     let docs;
     try {
-      docs = await pick({ type: ['image/png', 'application/json'] });
+      // Opening the system file picker backgrounds the app (DocumentsUI is a
+      // separate Activity). Run it as an external flow so the app-lock is
+      // suspended for the picker round-trip instead of locking mid-import.
+      docs = await withExternalFlow(() => pick({ type: ['image/png', 'application/json'] }));
     } catch {
       // User cancelled or picker error — silent.
       return;
@@ -182,6 +188,13 @@ export const CharactersScreen: React.FC = () => {
     try {
       await importCharacterCardFromFile(doc.uri, doc.type ?? '');
       await loadProfiles();
+
+      // Push the imported profile (+ image) to the engine so it can be used in
+      // chat sessions. Without an explicit sync, the engine never learns about
+      // the imported profile until some unrelated sync happens.
+      syncService.initiateSync().catch(syncErr => {
+        log.warn('Auto-sync after character import failed (non-critical):', syncErr);
+      });
     } catch (e) {
       const code = e instanceof CharacterCardImportError ? e.code : undefined;
       const messageKey = importMessageKey(code);

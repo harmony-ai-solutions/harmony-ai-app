@@ -297,7 +297,7 @@ async function getChangedRecordsWithText(
  * Automatically routes TEXT tables to two-phase query
  */
 // Tables that do not have a deleted_at column — deletions cascade from parent entity deletes
-const NO_DELETED_AT_TABLES = ['emotion_state'];
+const NO_DELETED_AT_TABLES: string[] = [];
 
 export const getChangedRecords = async (
   table: string,

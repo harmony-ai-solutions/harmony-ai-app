@@ -110,7 +110,8 @@ export async function updateGoogleProviderConfig(config: GoogleProviderConfig): 
       `UPDATE provider_config_google
        SET name = ?, api_key = ?, model = ?, max_output_tokens = ?, temperature = ?, top_p = ?, top_k = ?,
            stop_tokens = ?, seed = ?, response_mime_type = ?, sampling_preset_name = ?, extra_params = ?,
-           number_of_images = ?, aspect_ratio = ?
+           number_of_images = ?, aspect_ratio = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name, config.api_key, config.model, config.max_output_tokens, config.temperature, config.top_p, config.top_k,

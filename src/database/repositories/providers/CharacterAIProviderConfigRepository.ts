@@ -65,7 +65,7 @@ export async function updateCharacterAIProviderConfig(config: CharacterAIProvide
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_characterai SET name = ?, api_token = ?, chatroom_url = ? WHERE id = ?',
+      'UPDATE provider_config_characterai SET name = ?, api_token = ?, chatroom_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.api_token, config.chatroom_url, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`CharacterAI provider config not found: ${config.id}`);

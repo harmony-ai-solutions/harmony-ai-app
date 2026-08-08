@@ -19,7 +19,12 @@ export {
 export {runMigrations, getCurrentVersion} from './migrations';
 
 // Transaction helpers
-export {withTransaction, execInTransaction} from './transaction';
+export {
+  withTransaction,
+  execInTransaction,
+  runStatementsInTransaction,
+} from './transaction';
+export type {TransactionStatement} from './transaction';
 
 // Database interface types
 export type {

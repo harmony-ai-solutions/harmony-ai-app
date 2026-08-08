@@ -35,6 +35,12 @@ interface ConnectionManagerEvents {
   'disconnected:sync': () => void;
   'error:sync': (error: any) => void;
   'event:sync': (data: any) => void;
+
+  // Emitted when createConnection() replaces an existing sync connection.
+  // The underlying WS's own 'disconnected' event is suppressed in that path
+  // (listeners removed before disconnect), so this is the ONLY signal that
+  // SyncService receives to abort a mid-session sync before the swap.
+  'sync:connection_replaced': () => void;
   
   'connected:entity': (entityId: string) => void;
   'disconnected:entity': (entityId: string) => void;
@@ -81,6 +87,15 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
     // Check if connection already exists
     if (this.connections.has(id)) {
       log.warn(`Connection ${id} already exists, disconnecting first`);
+
+      // Notify SyncService BEFORE the teardown: the old connection's own
+      // 'disconnected' event will be suppressed (listeners removed below in
+      // disconnectConnection), so without this signal an in-flight sync
+      // session would be orphaned with status 'in_progress' forever.
+      if (id === 'sync') {
+        this.emit('sync:connection_replaced');
+      }
+
       this.disconnectConnection(id);
     }
     
@@ -128,6 +143,14 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
       log.error(`Failed to connect ${id}:`, error);
       connectionInfo.status = 'error';
       this.emit('connection:error', id, error);
+
+      // Fully tear down and remove the failed connection. Without this the
+      // errored ConnectionInfo stays in the map: the next createConnection(id)
+      // finds a stale "already exists" entry, its disconnect() is a no-op (the
+      // wrapper never wired its socket on a failed connect), and a lingering
+      // native socket deadlocks the retry with "Already Connected".
+      this.disconnectConnection(id);
+
       throw error;
     }
   }
@@ -260,7 +283,17 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
   }
   
   getEntityConnection(entityId: string): ConnectionInfo | null {
-    return this.connections.get(`entity-${entityId}`) || null;
+    // Connection IDs are participant-set-scoped (`entity-${entityId}-${participantKey}`),
+    // so a bare `entity-${entityId}` lookup no longer matches. Scan by the stored
+    // entityId. NOTE: with concurrent sessions sharing an entity (e.g. two chats
+    // both with 'user') this returns the FIRST match — callers needing a specific
+    // session should resolve it via EntitySessionService.
+    for (const info of this.connections.values()) {
+      if (info.type === 'entity' && info.entityId === entityId) {
+        return info;
+      }
+    }
+    return null;
   }
   
   getAllEntityConnections(): ConnectionInfo[] {

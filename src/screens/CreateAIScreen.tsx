@@ -42,6 +42,7 @@ const log = createLogger('[CreateAIScreen]');
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -76,6 +77,7 @@ import {
   CharacterProfile,
 } from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import syncService from '../services/SyncService';
 import { getAllEntities } from '../database/repositories/entities';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,6 +93,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'CreateAI'>;
 export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
+  const { withExternalFlow } = useBiometricLock();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('createAI');
 
@@ -206,11 +209,15 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // ── Avatar picker ────────────────────────────────────────────────────────────
   const handlePickAvatar = async () => {
     try {
-      const result = await launchImageLibrary({
-        mediaType: 'photo',
-        includeBase64: true,
-        quality: 0.7,
-      });
+      // The system image picker backgrounds the app while open — run it as an
+      // external flow so the app-lock is suspended for the round-trip.
+      const result = await withExternalFlow(() =>
+        launchImageLibrary({
+          mediaType: 'photo',
+          includeBase64: true,
+          quality: 0.7,
+        }),
+      );
       if (result.assets?.[0]) {
         const asset = result.assets[0];
         setAvatarUri(asset.uri ?? null);
@@ -380,6 +387,21 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         movement_config_id: movementConfigId ?? null,
         deleted_at: null,
       });
+
+      // 4b. Push the new entity (and its profile/mapping) to the engine and WAIT
+      // for the sync to complete before navigating. Without this, the engine
+      // doesn't know about the entity yet when ChatDetail sends INIT_ENTITY, so
+      // it rejects with entity_not_defined (chat stuck on "Connecting...").
+      // initiateSync() alone only resolves once SYNC_REQUEST is *sent*;
+      // syncAndWait resolves on SYNC_FINALIZE so the engine has actually
+      // ingested the data. Best-effort: resolves on completion, terminal failure,
+      // or timeout — never blocks navigation forever. isSaving stays true so the
+      // spinner shows during the wait.
+      try {
+        await syncService.syncAndWait({ timeoutMs: 45_000 });
+      } catch (syncErr) {
+        log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
+      }
 
       // 5. Resolve the impersonated entity for ChatDetail
       const allEntities = await getAllEntities();

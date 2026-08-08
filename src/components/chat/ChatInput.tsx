@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
 import { useAppAlert } from '../../contexts/AppAlertContext';
+import { useBiometricLock } from '../../contexts/BiometricLockContext';
 import AudioRecorder from '../../services/AudioRecorder';
 import { Theme } from '../../theme/types';
 import { createLogger } from '../../utils/logger';
@@ -56,6 +57,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('chatDetail');
   const { showAlert } = useAppAlert();
+  const { withExternalFlow } = useBiometricLock();
   const [text, setText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -250,11 +252,15 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
     if (disabled) return;
     
     try {
-      const result = await launchImageLibrary({
-        mediaType: 'photo',
-        quality: 0.8,
-        includeBase64: true,
-      });
+      // The system photo picker backgrounds the app while open — run it as an
+      // external flow so the app-lock is suspended for the round-trip.
+      const result = await withExternalFlow(() =>
+        launchImageLibrary({
+          mediaType: 'photo',
+          quality: 0.8,
+          includeBase64: true,
+        }),
+      );
       
       if (result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
@@ -274,7 +280,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
       log.error('Failed to pick image:', error);
       showAlert(t('common:error'), t('imagePickFailed'));
     }
-  }, [disabled, onSendImage]);
+  }, [disabled, onSendImage, withExternalFlow]);
 
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);

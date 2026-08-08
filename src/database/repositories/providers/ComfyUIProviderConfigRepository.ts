@@ -65,7 +65,7 @@ export async function updateComfyUIProviderConfig(config: ComfyUIProviderConfig)
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_comfyui SET name = ?, base_url = ?, api_key = ?, workflow_profiles = ? WHERE id = ?',
+      'UPDATE provider_config_comfyui SET name = ?, base_url = ?, api_key = ?, workflow_profiles = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.base_url, config.api_key, config.workflow_profiles, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`ComfyUI provider config not found: ${config.id}`);

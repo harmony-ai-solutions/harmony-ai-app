@@ -65,7 +65,7 @@ export async function updateKindroidProviderConfig(config: KindroidProviderConfi
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_kindroid SET name = ?, api_key = ?, kindroid_id = ? WHERE id = ?',
+      'UPDATE provider_config_kindroid SET name = ?, api_key = ?, kindroid_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.api_key, config.kindroid_id, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`Kindroid provider config not found: ${config.id}`);

@@ -11,9 +11,9 @@
 import SQLite from 'react-native-sqlite-storage';
 import RNFS from 'react-native-fs';
 import * as Keychain from 'react-native-keychain';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {runMigrations} from './migrations';
 import {createLogger} from '../utils/logger';
+import {ConnectionStateManager} from '../services/ConnectionStateManager';
 import type {Database, DatabaseResultSet} from './types';
 import {ReactNativeDatabase} from './reactNativeDatabase';
 
@@ -233,6 +233,19 @@ export async function clearDatabaseData(
     // Re-enable foreign keys
     await database.executeSql('PRAGMA foreign_keys = ON;');
 
+    // Clear the sync watermark(s) from AsyncStorage so the next sync requests
+    // a FULL data pull instead of an incremental one against a stale
+    // last_sync_timestamp (which would leave the app believing it was already
+    // in sync and transfer nothing).
+    try {
+      await ConnectionStateManager.getInstance().clearAllLastSyncTimestamps();
+      if (!silent) {
+        log.info('Cleared last sync timestamps from AsyncStorage');
+      }
+    } catch (error) {
+      log.warn('Failed to clear last sync timestamps:', error);
+    }
+
     if (!silent) {
       log.info('Schema dropped. Re-applying migrations...');
     }
@@ -289,15 +302,18 @@ export async function wipeDatabaseCompletely(
       log.warn('Failed to clear encryption key (may not exist):', error);
     }
 
-    // Step 2b: Clear sync timestamp from AsyncStorage to allow full sync after wipe
-    // This ensures the app requests all data from Harmony Link instead of just changes since last sync
+    // Step 2b: Clear sync timestamp(s) from AsyncStorage to allow full sync after wipe
+    // This ensures the app requests ALL data from Harmony Link instead of just
+    // changes since last sync. Clears the per-source keys (selfhosted/cloud)
+    // that getLastSync()/setLastSync() use. Per-source sync behavior itself is
+    // unaffected — only the persisted watermark is removed.
     try {
-      await AsyncStorage.removeItem('last_sync_timestamp');
+      await ConnectionStateManager.getInstance().clearAllLastSyncTimestamps();
       if (!silent) {
-        log.info('Cleared last_sync_timestamp from AsyncStorage');
+        log.info('Cleared last sync timestamps from AsyncStorage');
       }
     } catch (error) {
-      log.warn('Failed to clear last_sync_timestamp:', error);
+      log.warn('Failed to clear last sync timestamps:', error);
     }
 
     // Step 3: Force a small delay to ensure SQLite releases all file handles

@@ -66,7 +66,7 @@ export async function updateHarmonySpeechProviderConfig(config: HarmonySpeechPro
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_harmonyspeech SET name = ?, endpoint = ?, model = ?, voice_config_file = ?, format = ?, sample_rate = ?, stream = ? WHERE id = ?',
+      'UPDATE provider_config_harmonyspeech SET name = ?, endpoint = ?, model = ?, voice_config_file = ?, format = ?, sample_rate = ?, stream = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.endpoint, config.model, config.voice_config_file, config.format, config.sample_rate, config.stream, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`HarmonySpeech provider config not found: ${config.id}`);

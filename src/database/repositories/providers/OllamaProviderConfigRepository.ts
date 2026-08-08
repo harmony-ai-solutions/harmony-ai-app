@@ -65,7 +65,7 @@ export async function updateOllamaProviderConfig(config: OllamaProviderConfig): 
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_ollama SET name = ?, base_url = ?, model = ? WHERE id = ?',
+      'UPDATE provider_config_ollama SET name = ?, base_url = ?, model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.base_url, config.model, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`Ollama provider config not found: ${config.id}`);

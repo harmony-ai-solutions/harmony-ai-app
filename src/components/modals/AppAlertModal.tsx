@@ -7,7 +7,7 @@
  * Rendered imperatively via AppAlertContext.showAlert(title, message, buttons).
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Modal,
   View,
@@ -25,8 +25,18 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 
 export interface AlertButton {
   text: string;
-  onPress?: () => void;
+  /**
+   * Invoked when the button is pressed. When the alert has a `checkbox`, the
+   * checkbox's current checked state is passed as the first argument.
+   */
+  onPress?: (checkboxChecked?: boolean) => void;
   style?: 'default' | 'cancel' | 'destructive';
+}
+
+export interface AlertCheckbox {
+  label: string;
+  /** Initial checked state (default false). */
+  checked?: boolean;
 }
 
 export interface AlertConfig {
@@ -37,6 +47,8 @@ export interface AlertConfig {
   icon?: string;
   /** When true, tapping the overlay backdrop does NOT dismiss the alert */
   blockBackdropDismiss?: boolean;
+  /** Optional checkbox rendered above the buttons (e.g. "Apply to all"). */
+  checkbox?: AlertCheckbox;
 }
 
 // ── Default icon per alert context ───────────────────────────────────────────
@@ -77,9 +89,15 @@ export const AppAlertModal: React.FC<AppAlertModalProps> = ({
 }) => {
   const { theme } = useAppTheme();
 
+  // Local checkbox state, reset whenever a new alert config is shown.
+  const [checkboxChecked, setCheckboxChecked] = useState(false);
+  useEffect(() => {
+    setCheckboxChecked(config?.checkbox?.checked ?? false);
+  }, [config]);
+
   if (!theme || !config) return null;
 
-  const { title, message, buttons, icon, blockBackdropDismiss } = config;
+  const { title, message, buttons, icon, blockBackdropDismiss, checkbox } = config;
   const accent = theme.colors.accent.primary;
   const accentSecondary =
     theme.colors.accent.secondary ?? theme.colors.accent.primaryHover;
@@ -214,6 +232,40 @@ export const AppAlertModal: React.FC<AppAlertModalProps> = ({
                   </ThemedText>
                 ) : null}
 
+                {/* ── Checkbox (e.g. "Apply to all") ── */}
+                {checkbox ? (
+                  <TouchableOpacity
+                    style={styles.checkboxRow}
+                    onPress={() => setCheckboxChecked(prev => !prev)}
+                    activeOpacity={0.7}
+                  >
+                    <View
+                      style={[
+                        styles.checkboxBox,
+                        {
+                          borderColor: checkboxChecked
+                            ? accent
+                            : theme.colors.text.secondary,
+                          backgroundColor: checkboxChecked
+                            ? accent + '22'
+                            : 'transparent',
+                        },
+                      ]}
+                    >
+                      {checkboxChecked && (
+                        <Icon name="check" size={16} color={accent} />
+                      )}
+                    </View>
+                    <ThemedText
+                      variant="secondary"
+                      size={13}
+                      style={styles.checkboxLabel}
+                    >
+                      {checkbox.label}
+                    </ThemedText>
+                  </TouchableOpacity>
+                ) : null}
+
                 {/* ── Buttons ── */}
                 <View style={styles.buttonRow}>
                   {/* Cancel button on the left */}
@@ -221,7 +273,7 @@ export const AppAlertModal: React.FC<AppAlertModalProps> = ({
                     <TouchableOpacity
                       onPress={() => {
                         onDismiss();
-                        cancelBtn.onPress?.();
+                        cancelBtn.onPress?.(checkboxChecked);
                       }}
                       activeOpacity={0.7}
                       style={styles.cancelBtnWrapper}
@@ -259,7 +311,7 @@ export const AppAlertModal: React.FC<AppAlertModalProps> = ({
                         key={idx}
                         onPress={() => {
                           onDismiss();
-                          btn.onPress?.();
+                          btn.onPress?.(checkboxChecked);
                         }}
                         activeOpacity={0.8}
                         style={[
@@ -371,6 +423,25 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 21,
     marginBottom: 20,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    marginBottom: 20,
+    paddingVertical: 4,
+  },
+  checkboxBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  checkboxLabel: {
+    flex: 1,
   },
   buttonRow: {
     flexDirection: 'row',

@@ -21,10 +21,10 @@ export async function upsertEmotionState(state: EmotionState): Promise<void> {
       surprise_crystallize_start, anticipation_crystallize_start,
       last_update, decay_tau, high_threshold, low_threshold,
       crystallize_intensity, crystallize_min_hours,
-      created_at, updated_at
+      created_at, updated_at, deleted_at
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )`,
     [
       state.entity_id,
@@ -45,17 +45,19 @@ export async function upsertEmotionState(state: EmotionState): Promise<void> {
       state.crystallize_intensity, state.crystallize_min_hours,
       state.created_at instanceof Date ? state.created_at.toISOString() : (state.created_at ?? now),
       state.updated_at instanceof Date ? state.updated_at.toISOString() : (state.updated_at ?? now),
+      state.deleted_at ? state.deleted_at.toISOString() : null,
     ]
   );
 }
 
 /**
  * Get the emotion state for a specific entity.
+ * Returns null if not found or if the row is soft-deleted.
  */
 export async function getEmotionState(entityId: string): Promise<EmotionState | null> {
   const db = getDatabase();
   const [result] = await db.executeSql(
-    'SELECT * FROM emotion_state WHERE entity_id = ?',
+    'SELECT * FROM emotion_state WHERE entity_id = ? AND deleted_at IS NULL',
     [entityId]
   );
 
@@ -63,6 +65,20 @@ export async function getEmotionState(entityId: string): Promise<EmotionState | 
 
   const row = result.rows.item(0);
   return mapRowToEmotionState(row);
+}
+
+/**
+ * Soft delete an emotion_state row by entity_id (sets deleted_at + updated_at).
+ * Used when the owning entity is deleted, so the row stops being read and the
+ * deletion propagates through sync's standard deleted_at query path.
+ */
+export async function softDeleteEmotionState(entityId: string): Promise<void> {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  await db.executeSql(
+    'UPDATE emotion_state SET deleted_at = ?, updated_at = ? WHERE entity_id = ?',
+    [now, now, entityId]
+  );
 }
 
 function mapRowToEmotionState(row: any): EmotionState {
@@ -100,5 +116,6 @@ function mapRowToEmotionState(row: any): EmotionState {
     crystallize_min_hours: row.crystallize_min_hours,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
 }

@@ -44,10 +44,10 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
     SERVER_CERT: 'harmony_server_cert',
     TOKEN_EXPIRES_AT: 'harmony_token_expires_at',
     DEVICE_ID: 'harmony_device_id',
-    LAST_SYNC_TIMESTAMP: 'last_sync_timestamp',
     CONNECTED: 'harmony_connected',
     PAIRED: 'harmony_paired',
     SECURITY_MODE: 'harmony_security_mode', // Per-device security preference
+    SYNC_ESTIMATE_LIMIT_MB: 'sync_estimate_limit_mb', // Sync size-estimate confirmation threshold (null = unlimited)
   };
   
   public static readonly SYNC_SOURCES = ['selfhosted', 'cloud'] as const;
@@ -449,25 +449,40 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
 
   /**
    * Get the last sync timestamp for a given source.
-   * Falls back to the legacy global key for backward-compat (migrated once).
+   * Returns 0 when no watermark has been persisted for that source yet.
    */
   async getLastSync(source: SyncSource): Promise<number> {
     const stored = await AsyncStorage.getItem(ConnectionStateManager.lastSyncKey(source));
-    if (stored) return parseInt(stored, 10);
-    // backward-compat: fall back to the legacy global key, migrated once
-    const legacy = await AsyncStorage.getItem(ConnectionStateManager.STORAGE_KEYS.LAST_SYNC_TIMESTAMP);
-    return legacy ? parseInt(legacy, 10) : 0;
+    return stored ? parseInt(stored, 10) : 0;
   }
 
   /**
    * Set the last sync timestamp for a given source.
-   * Also writes the global alias for backward-compat so legacy readers still work.
    */
   async setLastSync(source: SyncSource, ts: number): Promise<void> {
-    await Promise.all([
-      AsyncStorage.setItem(ConnectionStateManager.lastSyncKey(source), String(ts)),
-      AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.LAST_SYNC_TIMESTAMP, String(ts)),
-    ]);
+    await AsyncStorage.setItem(ConnectionStateManager.lastSyncKey(source), String(ts));
+  }
+
+  /**
+   * Clear ALL persisted last-sync timestamps (per-source keys) so the app
+   * starts from a clean initial state.
+   *
+   * Called by the full database wipe flows (wipeDatabaseCompletely /
+   * clearDatabaseData). Without this, the per-source keys that
+   * getLastSync()/setLastSync() actually use would survive the wipe, making
+   * the next sync an incremental request against a recent watermark — the
+   * engine then has nothing newer to send and no data is transferred.
+   *
+   * This only REMOVES the sync watermark keys. It never writes values and
+   * leaves every other AsyncStorage key (credentials, security mode, etc.)
+   * untouched. Normal per-source get/set behavior is unaffected.
+   */
+  async clearAllLastSyncTimestamps(): Promise<void> {
+    const keys = ConnectionStateManager.SYNC_SOURCES.map(source =>
+      ConnectionStateManager.lastSyncKey(source),
+    );
+    await Promise.all(keys.map(key => AsyncStorage.removeItem(key)));
+    log.info('Cleared all last sync timestamps from AsyncStorage');
   }
 
   /**
@@ -492,6 +507,56 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
       log.info('Security mode cleared');
     } catch (error) {
       log.error('Failed to clear security mode:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the sync size-estimate confirmation threshold in MB.
+   *
+   * Returns a number (the threshold) or null for "Unlimited" (never prompt).
+   * Defaults to 5 when the key is unset, empty, or holds an invalid value.
+   */
+  async getSyncEstimateLimitMB(): Promise<number | null> {
+    try {
+      const stored = await AsyncStorage.getItem(ConnectionStateManager.STORAGE_KEYS.SYNC_ESTIMATE_LIMIT_MB);
+      if (stored === null || stored === '') return 5; // unset → default
+      if (stored === 'unlimited') return null; // Unlimited
+      const parsed = Number(stored);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 5; // invalid → default
+    } catch (error) {
+      log.error('Failed to read sync estimate limit:', error);
+      return 5;
+    }
+  }
+
+  /**
+   * Persist the sync size-estimate confirmation threshold in MB.
+   *
+   * @param mb Numeric threshold, or null for "Unlimited" (stored as the
+   *           string 'unlimited' so it round-trips through AsyncStorage).
+   */
+  async setSyncEstimateLimitMB(mb: number | null): Promise<void> {
+    try {
+      const value = mb === null ? 'unlimited' : String(mb);
+      await AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.SYNC_ESTIMATE_LIMIT_MB, value);
+      log.info(`Sync estimate limit saved: ${value}`);
+    } catch (error) {
+      log.error('Failed to save sync estimate limit:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove the persisted sync size-estimate threshold so the default (5 MB)
+   * applies again.
+   */
+  async clearSyncEstimateLimitMB(): Promise<void> {
+    try {
+      await AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.SYNC_ESTIMATE_LIMIT_MB);
+      log.info('Sync estimate limit cleared');
+    } catch (error) {
+      log.error('Failed to clear sync estimate limit:', error);
       throw error;
     }
   }

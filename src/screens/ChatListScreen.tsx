@@ -131,6 +131,14 @@ export const ChatListScreen: React.FC = () => {
           const partnerEntityId = participantIds.find(id => id !== activeEntityId);
           if (!partnerEntityId) continue;
 
+          // Defensive: skip interactions whose partner entity no longer exists.
+          // getAllEntities() only returns non-deleted entities, so a partner
+          // absent from entityMap means the entity was deleted (or never
+          // synced). Without this skip, a deleted partner renders as a bare
+          // entity ID row with no profile info. This only applies to private
+          // (pair) interactions — group chats handle missing members by name.
+          if (!entityMap.has(partnerEntityId)) continue;
+
           // Mark this partner as seen to prevent duplicate entries in the "no messages yet" section
           seenPartnerEntityIds.add(partnerEntityId);
 

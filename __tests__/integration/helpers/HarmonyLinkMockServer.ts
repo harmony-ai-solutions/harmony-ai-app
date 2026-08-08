@@ -70,6 +70,11 @@ export class HarmonyLinkMockServer extends EventEmitter {
   private _serverLastSync: number = 0;
   private _manualMode: boolean = false;
   private _nextResponseDelay: number = 0;
+  private _sendSizeEstimate: boolean = false;
+  private _awaitingEstimateConfirm: boolean = false;
+  // Override for the estimate's estimated_download_mb. null → derive a
+  // sensible default from the record count at emit time.
+  private _estimateDownloadMB: number | null = null;
 
   // Callback set by the test harness to deliver events to the SyncService
   private _eventHandler: ((event: any) => void) | null = null;
@@ -98,6 +103,26 @@ export class HarmonyLinkMockServer extends EventEmitter {
   /** Set the last_sync_timestamp the server reports to the client. */
   setServerLastSync(timestamp: number): void {
     this._serverLastSync = timestamp;
+  }
+
+  /**
+   * When enabled, the auto-responder sends a SYNC_DATA_SIZE_ESTIMATE after
+   * receiving SYNC_START and then BLOCKS until the client replies with
+   * SYNC_DATA_SIZE_ESTIMATE_CONFIRM (mimicking the new engine behavior).
+   * Only confirmed (SUCCESS) estimates proceed to SYNC_DATA delivery.
+   */
+  setSendSizeEstimate(enabled: boolean): void {
+    this._sendSizeEstimate = enabled;
+  }
+
+  /**
+   * Override the estimated_download_mb value sent in SYNC_DATA_SIZE_ESTIMATE.
+   * When not set, the server derives a default from the record count
+   * (Math.max(0.1, recordCount * 0.001)) so tests can drive the confirmation
+   * threshold in the UI layer.
+   */
+  setEstimateDownloadMB(mb: number): void {
+    this._estimateDownloadMB = mb;
   }
 
   /** Start the auto-responder that drives the protocol automatically. */
@@ -204,6 +229,9 @@ export class HarmonyLinkMockServer extends EventEmitter {
     this._manualMode = false;
     this._eventHandler = null;
     this._nextResponseDelay = 0;
+    this._sendSizeEstimate = false;
+    this._awaitingEstimateConfirm = false;
+    this._estimateDownloadMB = null;
   }
 
   /** Current protocol phase. */
@@ -268,41 +296,45 @@ export class HarmonyLinkMockServer extends EventEmitter {
 
       case 'SYNC_START':
         this._phase = 'SYNC_START';
-        // Send server data records
-        for (const [table, records] of this._serverData.entries()) {
-          for (const record of records) {
-            const createdAtSeconds = Math.floor(
-              new Date(record.created_at).getTime() / 1000,
-            );
-            const operation =
-              record.deleted_at
-                ? 'delete'
-                : createdAtSeconds > this._serverLastSync
-                  ? 'insert'
-                  : 'update';
-
-            this.send({
-              event_type: 'SYNC_DATA',
-              status: 'NEW',
-              payload: {
-                sync_session_id: this._sessionId,
-                event_id: `server_data_${record.id}`,
-                table,
-                operation,
-                record,
-              },
-            });
-          }
+        if (this._sendSizeEstimate) {
+          // New engine behavior: send a size estimate, then BLOCK until the
+          // client confirms it (SUCCESS) before streaming SYNC_DATA.
+          this._awaitingEstimateConfirm = true;
+          const recordCount = Array.from(this._serverData.values()).reduce(
+            (sum, records) => sum + records.length,
+            0,
+          );
+          const imageCount = (this._serverData.get('character_image') || []).length;
+          const estimateMB = this._estimateDownloadMB ?? Math.max(0.1, recordCount * 0.001);
+          this.send({
+            event_type: 'SYNC_DATA_SIZE_ESTIMATE',
+            status: 'NEW',
+            payload: {
+              sync_session_id: this._sessionId,
+              event_id: `estimate_${this._sessionId}`,
+              // Snake_case keys — mirror the engine's SyncDataSizeEstimatePayload
+              // JSON tags (eventserver/synchronization.go).
+              total_records: recordCount,
+              image_count: imageCount,
+              estimated_download_mb: estimateMB,
+            },
+          });
+        } else {
+          // Legacy behavior: stream server data immediately.
+          this._sendServerData();
         }
-        // Then send SYNC_COMPLETE
-        this.send({
-          event_type: 'SYNC_COMPLETE',
-          status: 'NEW',
-          payload: {
-            sync_session_id: this._sessionId,
-          },
-        });
-        this._phase = 'SYNC_DATA';
+        break;
+
+      case 'SYNC_DATA_SIZE_ESTIMATE_CONFIRM':
+        // Client replied to the size estimate. SUCCESS → start streaming data.
+        // REJECTED → the client aborted the session; do not send anything.
+        if (event.payload?.status === 'SUCCESS') {
+          this._awaitingEstimateConfirm = false;
+          this._sendServerData();
+        } else {
+          this._awaitingEstimateConfirm = false;
+          this._phase = 'SYNC_DATA';
+        }
         break;
 
       case 'SYNC_DATA':
@@ -348,6 +380,48 @@ export class HarmonyLinkMockServer extends EventEmitter {
         // Unknown event types are silently ignored by the auto-responder
         break;
     }
+  }
+
+  /**
+   * Stream all server data to the client as SYNC_DATA records, followed by
+   * SYNC_COMPLETE. Used by both the legacy SYNC_START path and the estimate
+   * confirm path.
+   */
+  private _sendServerData(): void {
+    for (const [table, records] of this._serverData.entries()) {
+      for (const record of records) {
+        const createdAtSeconds = Math.floor(
+          new Date(record.created_at).getTime() / 1000,
+        );
+        const operation =
+          record.deleted_at
+            ? 'delete'
+            : createdAtSeconds > this._serverLastSync
+              ? 'insert'
+              : 'update';
+
+        this.send({
+          event_type: 'SYNC_DATA',
+          status: 'NEW',
+          payload: {
+            sync_session_id: this._sessionId,
+            event_id: `server_data_${record.id}`,
+            table,
+            operation,
+            record,
+          },
+        });
+      }
+    }
+    // Then send SYNC_COMPLETE
+    this.send({
+      event_type: 'SYNC_COMPLETE',
+      status: 'NEW',
+      payload: {
+        sync_session_id: this._sessionId,
+      },
+    });
+    this._phase = 'SYNC_DATA';
   }
 
   private _storeReceivedData(table: string, record: ServerRecord): void {

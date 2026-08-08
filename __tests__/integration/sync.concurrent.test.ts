@@ -210,6 +210,37 @@ describe('sync concurrent sessions', () => {
   }, 10000);
 
   // -------------------------------------------------------------------------
+  // Test 1b: Skips a second sync while the first is still awaiting SYNC_ACCEPT
+  // (status 'pending'). Two concurrent SYNC_REQUESTs make the engine send a
+  // size estimate for the FIRST session that the client ignores (currentSession
+  // was clobbered by the second request), so the estimate is never confirmed
+  // and the engine aborts the sync after its own timeout.
+  // -------------------------------------------------------------------------
+  it('silently skips a second sync while the first is still pending', async () => {
+    mockServer.setManualMode(true);
+    mockServer.startAutoResponder();
+
+    // First sync: SYNC_REQUEST sent; status stays 'pending' because manual mode
+    // prevents the auto-responder from replying with SYNC_ACCEPT.
+    syncService.initiateSync();
+    await new Promise(r => setTimeout(r, 100));
+
+    expect((syncService as any).currentSession?.status).toBe('pending');
+
+    // Second sync while 'pending' must ALSO be skipped — not just 'in_progress'.
+    await syncService.initiateSync();
+    await new Promise(r => setTimeout(r, 100));
+
+    const syncRequests = mockServer.receivedEvents.filter(
+      (e: any) => e.event_type === 'SYNC_REQUEST',
+    );
+    expect(syncRequests.length).toBe(1);
+
+    // Clean up the dangling pending session
+    (syncService as any).currentSession = null;
+  }, 10000);
+
+  // -------------------------------------------------------------------------
   // Test 2: Subsequent sync succeeds after current sync completes
   // -------------------------------------------------------------------------
   it('allows new sync after previous one completes', async () => {

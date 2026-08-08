@@ -121,7 +121,8 @@ export async function updateXAIProviderConfig(config: XAIProviderConfig): Promis
            temperature = ?, top_p = ?,
            frequency_penalty = ?, presence_penalty = ?, n = ?, stop_tokens = ?,
            seed = ?, response_format = ?, reasoning_effort = ?,
-           sampling_preset_name = ?, extra_params = ?, image_aspect_ratio = ?, image_resolution = ?
+           sampling_preset_name = ?, extra_params = ?, image_aspect_ratio = ?, image_resolution = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name, config.api_key, config.model, config.max_tokens, config.max_completion_tokens,
