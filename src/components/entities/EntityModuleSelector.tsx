@@ -24,6 +24,8 @@ interface EntityModuleSelectorProps {
   isLoading?: boolean;
   /** Hide the inline label — used by EntityModuleSelectorWithActions which renders its own label row */
   hideLabel?: boolean;
+  /** When provided, renders a "Create new config…" row at the bottom of the sheet. */
+  onCreateNew?: () => void;
 }
 
 export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
@@ -33,6 +35,7 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
   onChange,
   isLoading = false,
   hideLabel = false,
+  onCreateNew,
 }) => {
   const { theme } = useAppTheme();
   const [modalVisible, setModalVisible] = useState(false);
@@ -232,6 +235,40 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
               }}
               style={styles.optionsList}
             />
+
+            {/* Create new config row */}
+            {onCreateNew && (
+              <>
+                <View
+                  style={[
+                    styles.separator,
+                    { backgroundColor: theme.colors.border.default + '66' },
+                  ]}
+                />
+                <TouchableOpacity
+                  style={styles.createNewRow}
+                  onPress={() => {
+                    setModalVisible(false);
+                    onCreateNew();
+                  }}
+                  activeOpacity={0.65}
+                >
+                  <Icon
+                    name="plus-circle-outline"
+                    size={18}
+                    color={theme.colors.accent.primary}
+                  />
+                  <ThemedText
+                    size={14}
+                    variant="accent"
+                    weight="medium"
+                    style={styles.createNewText}
+                  >
+                    Create new config…
+                  </ThemedText>
+                </TouchableOpacity>
+              </>
+            )}
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -325,5 +362,15 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 2,
     marginRight: 0,
+  },
+  createNewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  createNewText: {
+    flex: 1,
   },
 });

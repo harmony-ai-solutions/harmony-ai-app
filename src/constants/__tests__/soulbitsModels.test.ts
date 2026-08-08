@@ -28,6 +28,10 @@ describe('SOULBITS_MODEL_QUERY', () => {
     });
   });
 
+  it('maps the STT VAD slot to its own model type', () => {
+    expect(SOULBITS_MODEL_QUERY.vad).toEqual({ model_type: 'vad' });
+  });
+
   it('covers every app module type', () => {
     const moduleIds = [
       'backend',
@@ -36,6 +40,7 @@ describe('SOULBITS_MODEL_QUERY', () => {
       'rag',
       'tts',
       'stt',
+      'vad',
       'vision',
       'imagination',
     ];
@@ -54,6 +59,7 @@ describe('SOULBITS_FALLBACK_MODELS', () => {
       'rag',
       'tts',
       'stt',
+      'vad',
       'vision',
       'imagination',
     ];

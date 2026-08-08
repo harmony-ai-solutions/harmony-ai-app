@@ -1,14 +1,13 @@
 /**
  * EntityModuleSelectorWithActions
  *
- * A wrapper around EntityModuleSelector that adds edit/create action buttons.
- * Allows users to quickly edit an existing module config or create a new one
- * directly from the entity configuration screen.
+ * A wrapper around EntityModuleSelector that adds an edit action for the
+ * currently selected module config. "Create new config…" lives inside the
+ * selector's sheet (last row) instead of a separate + button, keeping the
+ * row of trailing icon buttons out of the entity configuration screen.
  *
- * Layout: Label on its own row, then selector + action buttons side-by-side
- * on the same vertical center — no fragile marginTop offsets.
- *
- * Phase 4-5: Integration wrapper for module config editing
+ * Layout: Label on its own row, then the selector (with a pencil edit icon
+ * shown only when a config is selected).
  */
 
 import React from 'react';
@@ -75,7 +74,7 @@ export const EntityModuleSelectorWithActions: React.FC<
         {label}
       </ThemedText>
 
-      {/* Selector + actions on the same baseline */}
+      {/* Selector + edit action on the same baseline */}
       <View style={styles.row}>
         <View style={styles.selectorWrapper}>
           <EntityModuleSelector
@@ -85,29 +84,20 @@ export const EntityModuleSelectorWithActions: React.FC<
             selectedId={selectedId}
             onChange={onChange}
             isLoading={isLoading}
+            onCreateNew={handleCreate}
           />
         </View>
 
-        <View style={styles.actions}>
-          {selectedId && selectedId !== '' ? (
-            <TouchableOpacity
-              onPress={handleEdit}
-              style={styles.actionButton}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel={`Edit ${label} configuration`}
-            >
-              <Icon name="pencil" size={16} color={theme.colors.accent.primary} />
-            </TouchableOpacity>
-          ) : null}
+        {selectedId && selectedId !== '' ? (
           <TouchableOpacity
-            onPress={handleCreate}
+            onPress={handleEdit}
             style={styles.actionButton}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            accessibilityLabel={`Create new ${label} configuration`}
+            accessibilityLabel={`Edit ${label} configuration`}
           >
-            <Icon name="plus" size={16} color={theme.colors.accent.secondary} />
+            <Icon name="pencil" size={16} color={theme.colors.accent.primary} />
           </TouchableOpacity>
-        </View>
+        ) : null}
       </View>
     </View>
   );
@@ -128,16 +118,12 @@ const styles = StyleSheet.create({
   selectorWrapper: {
     flex: 1,
   },
-  actions: {
-    flexDirection: 'row',
-    marginLeft: 6,
-    gap: 2,
-  },
   actionButton: {
     width: 36,
     height: 36,
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 6,
   },
 });

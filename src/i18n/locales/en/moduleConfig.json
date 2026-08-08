@@ -16,5 +16,10 @@
   "modelNoModels": "No models available — enter manually",
   "modelCustom": "Custom model…",
   "modelFallbackHint": "Showing offline defaults (catalog unreachable)",
-  "modelSelectPlaceholder": "Select a model"
+  "modelSelectPlaceholder": "Select a model",
+  "modeLabel": "View",
+  "modeSimple": "Simple",
+  "modeAdvanced": "Advanced",
+  "modeSimpleHint": "Just the essentials — provider, model and credentials.",
+  "modeAdvancedHint": "Full control over sampling, limits and credentials."
 }

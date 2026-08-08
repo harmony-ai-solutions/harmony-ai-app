@@ -57,6 +57,7 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     { id: 'openai', name: 'OpenAI', icon: 'api' },
     { id: 'openaicompatible', name: 'OpenAI Compatible', icon: 'server' },
     { id: 'openrouter', name: 'OpenRouter', icon: 'router-wireless' },
+    { id: 'soulbitscloud', name: 'Soulbits Cloud', icon: 'cloud' },
   ], hasGeneralSettings: false, moduleSpecificFields: [
     { key: 'embedding_concurrency', label: 'Embedding Concurrency', type: 'number', placeholder: '0' },
   ] },
@@ -64,12 +65,14 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     { id: 'openai', name: 'OpenAI', icon: 'api' },
     { id: 'openaicompatible', name: 'OpenAI Compatible', icon: 'server' },
     { id: 'openrouter', name: 'OpenRouter', icon: 'router-wireless' },
+    { id: 'soulbitscloud', name: 'Soulbits Cloud', icon: 'cloud' },
     { id: 'elevenlabs', name: 'ElevenLabs', icon: 'microphone' },
   ], hasGeneralSettings: false, moduleSpecificFields: [] },  // STT is special: handled separately in ModuleConfigEditScreen
   { id: 'tts', name: 'TTS', icon: 'volume-high', description: 'Text to speech', providerOptions: [
     { id: 'openai', name: 'OpenAI', icon: 'api' },
     { id: 'openaicompatible', name: 'OpenAI Compatible', icon: 'server' },
     { id: 'openrouter', name: 'OpenRouter', icon: 'router-wireless' },
+    { id: 'soulbitscloud', name: 'Soulbits Cloud', icon: 'cloud' },
     { id: 'elevenlabs', name: 'ElevenLabs', icon: 'microphone' },
     { id: 'harmonyspeech', name: 'HarmonySpeech', icon: 'volume-high' },
   ], hasGeneralSettings: false, moduleSpecificFields: [

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -16,9 +16,13 @@ import { useTranslation } from 'react-i18next';
 import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[ModuleConfigEditScreen]');
+
+/** Persisted user preference for the Simple vs Advanced view toggle. */
+const MODE_TOGGLE_KEY = 'module_config_show_advanced';
 
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedCard } from '../../components/themed/ThemedCard';
@@ -32,6 +36,7 @@ import { SoulbitsModelSelect } from '../../components/config/SoulbitsModelSelect
 import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
 import { MODULE_DEFAULTS, PROVIDER_DEFAULTS } from '../../constants/moduleDefaults';
 import { PROVIDER_SCHEMAS } from '../../constants/providerFieldSchemas';
+import { isSimpleFieldKey, isManagedCloudField } from '../../constants/moduleConfigVisibility';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { CLOUD_HOSTS } from '../../config/cloud';
@@ -179,6 +184,10 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { isConnected, connectionStatus } = useSyncConnection();
   const cloudConnected = connectionStatus?.mode === 'cloud' && isConnected === true;
+  // Managed Soulbits Cloud mode — endpoint + tokens are auto-synced from the
+  // backend, so the credential/endpoint fields should be hidden regardless of
+  // the momentary WS connection state.
+  const isCloudMode = connectionStatus?.mode === 'cloud';
   
   const { moduleType, configId } = route.params;
   const isCreate = !configId;
@@ -201,6 +210,32 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Simple vs Advanced mode toggle — Simple hides the deep technical fields.
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Restore the persisted Simple/Advanced preference.
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(MODE_TOGGLE_KEY)
+      .then((val) => {
+        if (alive && val === 'true') {
+          setShowAdvanced(true);
+        }
+      })
+      .catch(() => {
+        // Best-effort — default to Simple view.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Persist the preference whenever it changes.
+  useEffect(() => {
+    AsyncStorage.setItem(MODE_TOGGLE_KEY, String(showAdvanced)).catch(() => {
+      // Best-effort — non-critical persistence failure.
+    });
+  }, [showAdvanced]);
 
   useFocusEffect(
     useCallback(() => {
@@ -652,18 +687,41 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
     const isOpenAIFamily = OPENAI_FAMILY.includes(providerType);
 
-    // Filter out 'name' field — it's auto-generated from module config name
-    const fields = schema.fields.filter(f => f.key !== 'name');
+    // Fields used to look up the module model catalog. The STT VAD slot uses a
+    // dedicated 'vad' mapping (voice-activity models, e.g. silero-vad) instead
+    // of the STT transcription models.
+    const modelModuleType = slot === 'vad' ? 'vad' : moduleType;
+
+    // Filter out 'name' field (auto-generated from module config name) and, in
+    // Simple mode, any field not in the essential set.
+    const fields = schema.fields.filter(f => {
+      if (f.key === 'name') return false;
+      if (showAdvanced) return true;
+      return isSimpleFieldKey(f.key);
+    });
+
+    // Managed Soulbits Cloud provider (cloud mode): the endpoint and the
+    // API key/token are auto-synced from the backend — hide both fields in
+    // Simple AND Advanced mode so the screen never suggests they are
+    // user-configurable. The credential is still injected server-side
+    // (injectSoulbitsToken) and synced via soulbitsTokenSync.
+    const isManagedCloudProvider =
+      providerType === 'soulbitscloud' && isCloudMode;
 
     return (
       <View style={styles.providerFieldsContainer}>
         {fields.map((field) => {
+          // Hide endpoint/credential fields for managed Soulbits Cloud providers.
+          if (isManagedCloudProvider && isManagedCloudField(field.key)) {
+            return null;
+          }
+
           if (providerType === 'soulbitscloud' && field.key === 'model') {
             return (
               <View key={field.key} style={{ marginBottom: 16 }}>
                 <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
                 <SoulbitsModelSelect
-                  moduleType={moduleType}
+                  moduleType={modelModuleType}
                   value={form.values.model ?? ''}
                   onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
                 />
@@ -681,8 +739,8 @@ export const ModuleConfigEditScreen: React.FC = () => {
           );
         })}
 
-        {/* Advanced Sampling Params for OpenAI family */}
-        {isOpenAIFamily && (
+        {/* Advanced Sampling Params for OpenAI family (Advanced mode only) */}
+        {showAdvanced && isOpenAIFamily && (
           <AdvancedSamplingParams
             extraParamsJson={form.values.extra_params || '{}'}
             onChange={(json) => handleExtraParamsChange(slot, json)}
@@ -900,6 +958,75 @@ export const ModuleConfigEditScreen: React.FC = () => {
             </View>
           </ThemedCard>
 
+          {/* ── Simple / Advanced mode toggle ── */}
+          <ThemedCard elevated style={styles.section}>
+            <View style={styles.modeToggleRow}>
+              <View style={styles.modeToggleCopy}>
+                <ThemedText size={15} weight="medium">
+                  {t('modeLabel')}
+                </ThemedText>
+                <ThemedText size={12} variant="muted" style={styles.modeToggleHint}>
+                  {showAdvanced ? t('modeAdvancedHint') : t('modeSimpleHint')}
+                </ThemedText>
+              </View>
+
+              <View
+                style={[
+                  styles.modeSegmented,
+                  { backgroundColor: theme.colors.background.surface },
+                ]}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.modeSegment,
+                    !showAdvanced && [
+                      styles.modeSegmentActive,
+                      { backgroundColor: theme.colors.accent.primary },
+                    ],
+                  ]}
+                  onPress={() => setShowAdvanced(false)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('modeSimple')}
+                  accessibilityState={{ selected: !showAdvanced }}
+                >
+                  <ThemedText
+                    size={13}
+                    weight="medium"
+                    variant={showAdvanced ? 'secondary' : 'primary'}
+                    style={!showAdvanced ? styles.modeSegmentActiveText : undefined}
+                  >
+                    {t('modeSimple')}
+                  </ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modeSegment,
+                    showAdvanced && [
+                      styles.modeSegmentActive,
+                      { backgroundColor: theme.colors.accent.primary },
+                    ],
+                  ]}
+                  onPress={() => setShowAdvanced(true)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('modeAdvanced')}
+                  accessibilityState={{ selected: showAdvanced }}
+                >
+                  <ThemedText
+                    size={13}
+                    weight="medium"
+                    variant={showAdvanced ? 'primary' : 'secondary'}
+                    style={showAdvanced ? styles.modeSegmentActiveText : undefined}
+                  >
+                    {t('modeAdvanced')}
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ThemedCard>
+
           {/* Module-specific fields (including STT dual-provider) */}
           {renderModuleSpecificFields()}
 
@@ -1039,5 +1166,38 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  // ── Simple / Advanced mode toggle ──
+  modeToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: 16,
+  },
+  modeToggleCopy: {
+    flex: 1,
+    marginRight: 8,
+  },
+  modeToggleHint: {
+    marginTop: 2,
+  },
+  modeSegmented: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    padding: 3,
+    gap: 3,
+  },
+  modeSegment: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  modeSegmentActive: {
+    elevation: 1,
+  },
+  modeSegmentActiveText: {
+    color: '#FFFFFF',
   },
 });

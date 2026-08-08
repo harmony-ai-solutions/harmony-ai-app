@@ -34,6 +34,8 @@ export const SOULBITS_MODEL_QUERY: Record<string, ModelsQuery> = {
   rag: { model_type: 'embeddings' },
   tts: { model_type: 'tts' },
   stt: { model_type: 'stt' },
+  /** VAD slot of the STT module — filtered to actual voice-activity models. */
+  vad: { model_type: 'vad' },
   vision: { input_modalities: ['image'] },
   imagination: { output_modalities: ['image'] },
 };
@@ -62,6 +64,8 @@ export const SOULBITS_FALLBACK_MODELS: Record<string, string[]> = {
     'chatterbox_turbo',
   ],
   stt: ['faster-whisper-tiny', 'faster-whisper-large-v3-turbo'],
+  /** VAD slot of the STT module — silero-vad is a real live-catalog entry. */
+  vad: ['silero-vad'],
   vision: ['qwen-35-9b', 'gemma4-meromero-26b-a4b'],
   imagination: [],
 };
