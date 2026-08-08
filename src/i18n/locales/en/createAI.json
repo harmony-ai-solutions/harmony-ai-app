@@ -2,6 +2,7 @@
   "title": "Create AI Partner",
   "profileLabel": "Character Profile",
   "createNewProfile": "Create new profile",
+  "createNewProfileHint": "Build a fresh persona from scratch",
   "profileHint": "Link an existing character profile or create a new one.",
   "selectProfile": "Select a character profile",
   "noDescription": "No description",

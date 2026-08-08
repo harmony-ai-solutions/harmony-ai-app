@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Characters
 #### Added
 - Import Tavern Card V1/V2/V3 character cards from raw JSON or PNG-embedded (`chara`/`ccv3` `tEXt`/`iTXt` chunks) files. Imported cards are mapped to the existing character profile model (with the PNG used as the primary avatar) and persist locally, syncing through the normal pipeline. Reachable from the Characters screen header.
+- The "Create AI Partner" flow now picks an existing character profile from a visual card carousel instead of a text dropdown. Each card shows the character's portrait, name, and description up front, styled to match the character cards on the Character Profile Management screen. Selecting "Create new profile" resets the identity fields.
 
 ### Security & Privacy
 

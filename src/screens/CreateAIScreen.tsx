@@ -9,7 +9,7 @@
  * Route params: { prefillProfileId?: string }
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -18,7 +18,6 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Image,
-  Modal,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -48,6 +47,7 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
 import { EntityModuleSelectorWithActions } from '../components/entities/EntityModuleSelectorWithActions';
+import { ProfilePickerCard } from '../components/characters/ProfilePickerCard';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
@@ -86,6 +86,12 @@ import { getAllEntities } from '../database/repositories/entities';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateAI'>;
 
+/** Item rendered in the profile picker carousel ("create new" + existing). */
+type ProfilePickerItem = Pick<
+  CharacterProfile,
+  'id' | 'name' | 'description'
+>;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CreateAIScreen
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,13 +112,18 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // ── Existing profile selection ('' = create a new profile) ───────────────────
   const [allProfiles, setAllProfiles] = useState<CharacterProfile[]>([]);
+  const [profileImages, setProfileImages] = useState<
+    Record<string, string | null>
+  >({});
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [selectedProfile, setSelectedProfile] =
     useState<CharacterProfile | null>(null);
   const [selectedProfileImageUri, setSelectedProfileImageUri] = useState<
     string | null
   >(null);
-  const [profilePickerVisible, setProfilePickerVisible] = useState(false);
+
+  // Carousel ref — scrolls to the selected card when the picker opens
+  const pickerListRef = useRef<FlatList<ProfilePickerItem>>(null);
 
   // ── Advanced toggle ──────────────────────────────────────────────────────────
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -229,7 +240,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   };
 
-  // ── Load existing profiles (for "use existing profile" mode) ─────────────────
+  // ── Load existing profiles + their primary images (for the picker carousel) ──
   useEffect(() => {
     let cancelled = false;
     const loadProfiles = async () => {
@@ -237,6 +248,25 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         const profiles = await getAllCharacterProfiles();
         if (cancelled) return;
         setAllProfiles(profiles);
+
+        // Load the primary image for every profile so the carousel cards show
+        // a live avatar preview before the user confirms any selection.
+        const imageMap: Record<string, string | null> = {};
+        await Promise.all(
+          profiles.map(async profile => {
+            try {
+              const images = await getCharacterImages(profile.id);
+              const primary = images.find(img => img.is_primary === true);
+              imageMap[profile.id] = primary
+                ? createDataURL(primary.image_data, primary.mime_type)
+                : null;
+            } catch {
+              imageMap[profile.id] = null;
+            }
+          }),
+        );
+        if (cancelled) return;
+        setProfileImages(imageMap);
 
         // Honor prefillProfileId route param (e.g. "create partner from this profile")
         const prefillId = route.params?.prefillProfileId;
@@ -247,7 +277,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
             setSelectedProfile(match);
             setName(match.name);
             setPersonality(match.personality ?? '');
-            await loadProfilePreviewImage(match.id);
+            setSelectedProfileImageUri(imageMap[match.id] ?? null);
           }
         }
       } catch (err) {
@@ -261,29 +291,18 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadProfilePreviewImage = async (profileId: string) => {
-    try {
-      const images = await getCharacterImages(profileId);
-      const primary = images.find(img => img.is_primary === true);
-      setSelectedProfileImageUri(
-        primary ? createDataURL(primary.image_data, primary.mime_type) : null,
-      );
-    } catch {
-      setSelectedProfileImageUri(null);
-    }
-  };
-
   const handleProfileSelect = async (profileId: string) => {
     const profile = allProfiles.find(p => p.id === profileId) ?? null;
     setSelectedProfileId(profileId);
     setSelectedProfile(profile);
-    setSelectedProfileImageUri(null);
-    setProfilePickerVisible(false);
     if (profile) {
       // Prefill the identity fields from the selected profile
       setName(profile.name);
       setPersonality(profile.personality ?? '');
-      await loadProfilePreviewImage(profile.id);
+      // Use the already-loaded carousel image (no extra DB round-trip)
+      setSelectedProfileImageUri(profileImages[profile.id] ?? null);
+    } else {
+      setSelectedProfileImageUri(null);
     }
   };
 
@@ -291,8 +310,44 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     setSelectedProfileId('');
     setSelectedProfile(null);
     setSelectedProfileImageUri(null);
-    setProfilePickerVisible(false);
+    // Reset the prefilled identity fields so the "create new profile" card
+    // doesn't keep the previous profile's name/personality.
+    setName('');
+    setPersonality('');
   };
+
+  // ── Carousel data: "Create new profile" card + one card per existing profile ──
+  const pickerItems = useMemo(
+    () =>
+      [
+        { id: '', name: t('createNewProfile'), description: null } as ProfilePickerItem,
+        ...allProfiles,
+      ] as ProfilePickerItem[],
+    [allProfiles, t],
+  );
+
+  const scrollToSelectedProfile = useCallback(
+    (index: number) => {
+      requestAnimationFrame(() => {
+        pickerListRef.current?.scrollToIndex({
+          index,
+          animated: true,
+          viewPosition: 0.5,
+        });
+      });
+    },
+    [],
+  );
+
+  // Whenever the picker list is ready, center the selected card
+  const handlePickerListReady = useCallback(() => {
+    const selectedIndex = pickerItems.findIndex(
+      item => (item.id === '' ? !selectedProfileId : item.id === selectedProfileId),
+    );
+    if (selectedIndex >= 0) {
+      scrollToSelectedProfile(selectedIndex);
+    }
+  }, [pickerItems, selectedProfileId, scrollToSelectedProfile]);
 
   // ── Save & Create ────────────────────────────────────────────────────────────
   const handleCreate = async () => {
@@ -572,7 +627,11 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
               <TouchableOpacity
                 onPress={() => {
                   hapticLightPress();
-                  setProfilePickerVisible(true);
+                  // Recenter the carousel on the currently selected card
+                  const index = pickerItems.findIndex(
+                    item => item.id === selectedProfileId,
+                  );
+                  if (index >= 0) scrollToSelectedProfile(index);
                 }}
                 activeOpacity={0.85}
                 style={styles.avatarPressable}
@@ -620,46 +679,53 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
             </View>
           )}
 
-          {/* ── Character Profile card (create-new mode only) ── */}
-          {!selectedProfile && (
-            <ThemedCard elevated accentStripe style={styles.section}>
-              <SectionHeader title={t('profileLabel')} />
-              <View style={styles.sectionContent}>
-                {/* Profile selector */}
-                <TouchableOpacity
-                  style={[
-                    styles.profileSelector,
-                    {
-                      borderColor: theme.colors.border.default,
-                      backgroundColor: hexToRgba(surfaceColor, 0.6),
-                    },
-                  ]}
-                  onPress={() => {
-                    hapticLightPress();
-                    setProfilePickerVisible(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[
-                      styles.selectorIconWrap,
-                      { backgroundColor: hexToRgba(accent, 0.12) },
-                    ]}
-                  >
-                    <Icon name="account-outline" size={18} color={accent} />
-                  </View>
-                  <ThemedText
-                    size={14}
-                    variant="muted"
-                    style={styles.profileSelectorLabel}
-                  >
-                    {t('createNewProfile')}
-                  </ThemedText>
-                  <Icon name="chevron-down" size={20} color={theme.colors.text.muted} />
-                </TouchableOpacity>
-              </View>
-            </ThemedCard>
-          )}
+          {/* ── Character Profile card — visual picker carousel ── */}
+          <ThemedCard elevated accentStripe style={styles.section}>
+            <SectionHeader title={t('profileLabel')} />
+            <View style={styles.sectionContent}>
+              <FlatList
+                ref={pickerListRef}
+                data={pickerItems}
+                keyExtractor={item => item.id || 'new-profile'}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.pickerListContent}
+                onLayout={handlePickerListReady}
+                onScrollToIndexFailed={() => {
+                  // Scroll target may not be measured on first pass — the next
+                  // onLayout/selection change recenters it.
+                }}
+                initialNumToRender={8}
+                renderItem={({ item }) => {
+                  const isNew = item.id === '';
+                  const isSelected = isNew
+                    ? !selectedProfileId
+                    : item.id === selectedProfileId;
+                  return (
+                    <ProfilePickerCard
+                      title={isNew ? t('createNewProfile') : item.name}
+                      subtitle={
+                        isNew
+                          ? t('createNewProfileHint')
+                          : item.description ?? t('noDescription')
+                      }
+                      imageUri={isNew ? null : profileImages[item.id] ?? null}
+                      isNew={isNew}
+                      isSelected={isSelected}
+                      onPress={() => {
+                        hapticLightPress();
+                        if (isNew) {
+                          handleProfileClear();
+                        } else {
+                          handleProfileSelect(item.id);
+                        }
+                      }}
+                    />
+                  );
+                }}
+              />
+            </View>
+          </ThemedCard>
 
           {/* ── Identity fields ── */}
           <View style={styles.fieldsSection}>
@@ -861,97 +927,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      {/* ── Profile Picker Modal ── */}
-      <Modal
-        visible={profilePickerVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setProfilePickerVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setProfilePickerVisible(false)}
-        >
-          <View
-            style={[
-              styles.modalSheet,
-              { backgroundColor: theme.colors.background.elevated },
-            ]}
-          >
-            <View style={styles.modalTitleRow}>
-              <Icon name="account-multiple-outline" size={22} color={accent} />
-              <ThemedText weight="bold" size={15}>
-                {t('selectProfile')}
-              </ThemedText>
-            </View>
-
-            <FlatList
-              data={
-                [
-                  { id: '', name: t('createNewProfile') } as Pick<
-                    CharacterProfile,
-                    'id' | 'name'
-                  >,
-                  ...allProfiles,
-                ] as Array<Pick<CharacterProfile, 'id' | 'name'>>
-              }
-              keyExtractor={item => item.id || 'new-profile'}
-              renderItem={({ item }) => {
-                const isNew = item.id === '';
-                const isSelected = isNew
-                  ? !selectedProfileId
-                  : item.id === selectedProfileId;
-                return (
-                  <TouchableOpacity
-                    style={[
-                      styles.modalItem,
-                      isSelected && {
-                        backgroundColor: hexToRgba(accent, 0.14),
-                      },
-                    ]}
-                    onPress={() => {
-                      hapticLightPress();
-                      if (isNew) {
-                        handleProfileClear();
-                      } else {
-                        handleProfileSelect(item.id);
-                      }
-                    }}
-                  >
-                    <View
-                      style={[
-                        styles.modalItemIcon,
-                        { backgroundColor: hexToRgba(accent, isSelected ? 0.20 : 0.08) },
-                      ]}
-                    >
-                      <Icon
-                        name={isNew ? 'account-plus-outline' : 'account'}
-                        size={18}
-                        color={isSelected ? accent : theme.colors.text.muted}
-                      />
-                    </View>
-                    <ThemedText
-                      size={14}
-                      variant={
-                        isSelected ? 'accent' : isNew ? 'muted' : 'primary'
-                      }
-                      weight={isSelected ? 'medium' : 'normal'}
-                      style={styles.modalItemLabel}
-                    >
-                      {item.name}
-                    </ThemedText>
-                    {isSelected && (
-                      <Icon name="check-circle" size={18} color={accent} />
-                    )}
-                  </TouchableOpacity>
-                );
-              }}
-            />
-          </View>
-        </TouchableOpacity>
-      </Modal>
     </ThemedView>
   );
 };
@@ -1061,66 +1036,10 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
 
-  // ── Profile selector ──
-  profileSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    minHeight: 52,
-    gap: 10,
-  },
-  selectorIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileSelectorLabel: {
-    flex: 1,
-  },
-
-  // ── Modal ──
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 12,
-    paddingBottom: 32,
-    maxHeight: '70%',
-  },
-  modalTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginBottom: 4,
-  },
-  modalItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    gap: 12,
-  },
-  modalItemLabel: {
-    flex: 1,
-  },
-  modalItemIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+  // ── Profile picker carousel ──
+  pickerListContent: {
+    paddingHorizontal: 4,
+    paddingVertical: 6,
   },
 
   // ── Identity fields ──
