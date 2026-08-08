@@ -1,6 +1,8 @@
 {
   "title": "Chats",
   "chattingAs": "Chatting as",
+  "editMyIdentity": "Edit my identity settings",
+  "editIdentityAction": "Edit Identity Settings",
   "notConnected": "Not connected",
   "notConnectedHint": "Connect to Harmony Link or cloud to load your entities.",
   "connectNow": "Connect Now",

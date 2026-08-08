@@ -446,6 +446,14 @@ export const ChatListScreen: React.FC = () => {
     }
   };
 
+  // Open the settings / module configuration for the currently selected
+  // role-playing identity (the entity the user is "acting as").
+  const handleEditMyIdentity = useCallback(() => {
+    navigation.navigate('EntityConfigEdit', {
+      entityId: impersonatedEntityIdRef.current,
+    });
+  }, [navigation]);
+
   const renderItem = ({ item }: { item: ChatListItem }) => (
     <TouchableOpacity
       onPress={() => handleChatPress(item)}
@@ -557,6 +565,36 @@ export const ChatListScreen: React.FC = () => {
           </TouchableOpacity>
         }
         right={
+          <View style={styles.headerRightRow}>
+            {/* ── "My Identity Settings" quick access ── */}
+            <TouchableOpacity
+              onPress={handleEditMyIdentity}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={[
+                styles.myIdentityButton,
+                { backgroundColor: hexToRgba(theme?.colors.background.base ?? '#0f172a', 0.75) },
+              ]}
+              activeOpacity={0.7}
+              accessibilityLabel={t('editMyIdentity')}
+              testID="edit-my-identity-button"
+            >
+              <LinearGradient
+                colors={[
+                  (theme?.colors.accent.primary ?? '#ec4899') + '18',
+                  'transparent',
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
+              <Icon
+                name="cog-outline"
+                size={18}
+                color={theme?.colors.text.primary}
+              />
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.impersonationHeaderAction}
               onPress={() => setSelectorModalVisible(true)}
@@ -630,6 +668,7 @@ export const ChatListScreen: React.FC = () => {
                 />
               </View>
             </TouchableOpacity>
+          </View>
         }
       />
 
@@ -721,6 +760,10 @@ export const ChatListScreen: React.FC = () => {
         onSelect={handleImpersonationSelect}
         onCancel={() => setSelectorModalVisible(false)}
         preSelectedEntityId={impersonatedEntityId}
+        onEditIdentity={(entityId) => {
+          setSelectorModalVisible(false);
+          navigation.navigate('EntityConfigEdit', { entityId });
+        }}
       />
 
       <InfoModal
@@ -822,6 +865,19 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  // ── "My Identity Settings" quick-access button ──
+  myIdentityButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',

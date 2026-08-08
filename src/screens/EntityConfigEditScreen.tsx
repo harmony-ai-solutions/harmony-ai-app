@@ -26,7 +26,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
-import LinearGradient from 'react-native-linear-gradient';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
@@ -614,81 +613,46 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
             </View>
           </ThemedCard>
 
-          {/* ── Emoji Actions ── */}
-          <ThemedCard elevated style={styles.section}>
-            <SectionHeader title={t('emojiActions')} accentPip={false} />
-            <View style={styles.sectionContent}>
-              <TouchableOpacity
-                style={styles.menuRow}
-                onPress={() => navigation.navigate('EmojiActionEditor', {
-                  entityId: entityId!,
-                  entityName: alias || entityId!.substring(0, 8),
-                })}
-              >
-                <View style={styles.menuRowLeft}>
-                  <Icon name="emoticon-outline" size={24} color={theme.colors.accent.primary} />
-                  <ThemedText variant="primary" style={styles.menuRowText}>
-                    {t('emojiActions')}
-                  </ThemedText>
-                </View>
-                <View style={styles.menuRowRight}>
-                  <ThemedText variant="secondary" style={styles.menuRowHint}>
-                    {t('emojiActionsHint')}
-                  </ThemedText>
-                  <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
-                </View>
-              </TouchableOpacity>
-            </View>
-          </ThemedCard>
-
           {/* ── Danger Zone ── */}
-          <ThemedCard
-            elevated
-            style={[
-              styles.section,
-              styles.dangerSection,
-              { borderColor: theme.colors.status.error },
-            ]}
-          >
-            <SectionHeader
-              title={t('dangerZone')}
-              accentPip={false}
-              style={{ borderBottomColor: theme.colors.status.error + '44' }}
-            />
+          <ThemedCard elevated style={styles.section}>
+            <SectionHeader title={t('dangerZone')} accentPip={false} />
             <View style={styles.sectionContent}>
-
-            <TouchableOpacity
-              style={[
-                styles.deleteButton,
-                { borderColor: theme.colors.status.error + '88' },
-              ]}
-              onPress={handleDelete}
-              activeOpacity={0.75}
-            >
-              <LinearGradient
-                colors={[
-                  theme.colors.status.error + '33',
-                  theme.colors.status.error + '11',
-                ]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={StyleSheet.absoluteFill}
-              />
-              <View style={styles.deleteIconBadge}>
-                <Icon
-                  name="delete-outline"
-                  size={16}
-                  color={theme.colors.status.error}
-                />
-              </View>
-              <ThemedText
-                size={14}
-                weight="medium"
-                style={{ color: theme.colors.status.error }}
-              >
-                {t('deleteEntityButton')}
+              <ThemedText variant="muted" size={12} style={styles.dangerHint}>
+                {t('deleteEntityMessage')}
               </ThemedText>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.deleteButton,
+                  {
+                    borderColor: theme.colors.border.default,
+                    backgroundColor: theme.colors.background.base,
+                  },
+                ]}
+                onPress={handleDelete}
+                activeOpacity={0.7}
+              >
+                <View style={styles.deleteIconBadge}>
+                  <Icon
+                    name="trash-can-outline"
+                    size={16}
+                    color={theme.colors.text.muted}
+                  />
+                </View>
+                <ThemedText
+                  size={14}
+                  weight="medium"
+                  variant="secondary"
+                  style={styles.deleteButtonText}
+                >
+                  {t('deleteEntityButton')}
+                </ThemedText>
+                <Icon
+                  name="chevron-right"
+                  size={18}
+                  color={theme.colors.text.muted}
+                  style={styles.deleteChevron}
+                />
+              </TouchableOpacity>
             </View>
           </ThemedCard>
         </ScrollView>
@@ -780,7 +744,7 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   savingIndicator: { marginRight: 16 },
   keyboardAvoid: { flex: 1 },
-  scrollContent: { padding: 16, paddingBottom: 48 },
+  scrollContent: { padding: 16, paddingBottom: 48, gap: 14 },
 
   // ── Sections ──
   section: {
@@ -790,9 +754,6 @@ const styles = StyleSheet.create({
   sectionContent: {
     padding: 16,
     gap: 12,
-  },
-  dangerSection: {
-    borderWidth: 1.5,
   },
   sectionTitle: {
     letterSpacing: 0.8,
@@ -846,21 +807,29 @@ const styles = StyleSheet.create({
   editProfileButton: { padding: 4 },
 
   // ── Danger zone ──
+  dangerHint: {
+    lineHeight: 18,
+  },
   deleteButton: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 11,
-    alignSelf: 'flex-start',
-    gap: 10,
+    paddingVertical: 12,
+    gap: 12,
     overflow: 'hidden',
   },
+  deleteButtonText: {
+    flex: 1,
+  },
+  deleteChevron: {
+    opacity: 0.6,
+  },
   deleteIconBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.06)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -890,30 +859,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 20,
-  },
-
-  // ── Emoji Actions menu row ──
-  menuRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 4,
-  },
-  menuRowLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  menuRowText: {
-    fontSize: 16,
-  },
-  menuRowRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  menuRowHint: {
-    fontSize: 13,
   },
 });

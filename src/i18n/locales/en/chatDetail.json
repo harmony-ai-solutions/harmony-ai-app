@@ -39,5 +39,9 @@
   "deleteEntityTitle": "Delete Entity",
   "deleteEntityBody": "Delete \"{{name}}\"? Chat history will be preserved but this entity will no longer be accessible.",
   "retryFailedTitle": "Retry Failed",
-  "errorTitle": "Error"
+  "errorTitle": "Error",
+  "myIdentitySettings": "My Identity Settings",
+  "myIdentitySettingsCaption": "Edit the settings and modules for the persona you're acting as",
+  "partnerSettings": "Partner / Character Settings",
+  "partnerSettingsCaption": "Edit {{name}}'s settings and modules"
 }

@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Modal, Portal, ActivityIndicator } from 'react-native-paper';
 import LinearGradient from 'react-native-linear-gradient';
+import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
@@ -28,6 +29,8 @@ interface ImpersonationSelectorModalProps {
   onSelect: (entityId: string) => void;
   onCancel: () => void;
   preSelectedEntityId?: string;
+  /** Open settings/module configuration for the currently selected identity. */
+  onEditIdentity?: (entityId: string) => void;
 }
 
 interface EntityDisplayItem {
@@ -55,8 +58,9 @@ const determineDefaultEntity = (
 
 export const ImpersonationSelectorModal: React.FC<
   ImpersonationSelectorModalProps
-> = ({ visible, onSelect, onCancel, preSelectedEntityId }) => {
+> = ({ visible, onSelect, onCancel, preSelectedEntityId, onEditIdentity }) => {
   const { theme } = useAppTheme();
+  const { t } = useTranslation('chatList');
   const [entities, setEntities] = useState<EntityDisplayItem[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -293,6 +297,29 @@ export const ImpersonationSelectorModal: React.FC<
                 ]}
               />
 
+              {/* Edit-identity shortcut (only when a selection is active) */}
+              {onEditIdentity && selectedEntityId && (
+                <TouchableOpacity
+                  onPress={() => onEditIdentity(selectedEntityId)}
+                  activeOpacity={0.7}
+                  style={[
+                    styles.editIdentityButton,
+                    { backgroundColor: accentPrimary + '12' },
+                  ]}
+                  testID="edit-identity-action"
+                >
+                  <Icon name="cog-outline" size={16} color={accentPrimary} />
+                  <ThemedText
+                    size={13}
+                    weight="medium"
+                    style={{ color: accentPrimary }}
+                  >
+                    {t('editIdentityAction')}
+                  </ThemedText>
+                  <Icon name="chevron-right" size={16} color={accentPrimary} />
+                </TouchableOpacity>
+              )}
+
               {/* Action buttons */}
               <View style={styles.actions}>
                 <ThemedButton
@@ -324,11 +351,13 @@ const styles = StyleSheet.create({
     margin: 20,
     borderRadius: 16,
     maxHeight: '80%',
+    flexShrink: 1,
     backgroundColor: '#151d30', // opaque fallback — prevents transparency
   },
   modalShell: {
     borderRadius: 16,
     overflow: 'hidden',
+    flexShrink: 1,
     backgroundColor: '#151d30', // opaque fallback — prevents transparency
   },
   modalRadius: {
@@ -424,6 +453,17 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     padding: 16,
     gap: 12,
+  },
+  editIdentityButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    borderRadius: 12,
   },
   button: {
     minWidth: 100,

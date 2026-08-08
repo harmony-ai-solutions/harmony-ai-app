@@ -969,12 +969,23 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }, [ownEntityId, participantIds, headerName, navigation]);
 
-  const handleEntitySettings = useCallback(() => {
+  // Open settings/module configuration for the identity the user is
+  // currently acting as (the "My Identity" role in this chat).
+  const handleMyIdentitySettings = useCallback(() => {
+    setMenuVisible(false);
+    navigation.navigate('EntityConfigEdit', { entityId: ownEntityId });
+  }, [ownEntityId, navigation]);
+
+  // Open settings/module configuration for the OTHER participant
+  // (partner/character) in this chat.
+  const handlePartnerSettings = useCallback(() => {
     setMenuVisible(false);
     // For entity settings, we need the partner entity ID
     const otherIds = participantIds.filter(id => id !== ownEntityId);
     const partnerEntityId = otherIds[0] || '';
-    navigation.navigate('EntityConfigEdit', { entityId: partnerEntityId });
+    if (partnerEntityId) {
+      navigation.navigate('EntityConfigEdit', { entityId: partnerEntityId });
+    }
   }, [ownEntityId, participantIds, navigation]);
 
   const handleToggleReplyMode = useCallback(async () => {
@@ -1256,9 +1267,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   end={{ x: 1, y: 0 }}
                   style={styles.menuTopStripe}
                 />
+                {/* ── My Identity (the persona the user is acting as) ── */}
                 <TouchableOpacity
                   style={styles.menuItem}
-                  onPress={handleEntitySettings}
+                  onPress={handleMyIdentitySettings}
                   activeOpacity={0.65}
                 >
                   <View
@@ -1267,13 +1279,49 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                       { backgroundColor: theme!.colors.accent.primary + '1A' },
                     ]}
                   >
-                    <Icon name="cog" size={18} color={theme!.colors.accent.primary} />
+                    <Icon name="account-cog-outline" size={18} color={theme!.colors.accent.primary} />
                   </View>
                   <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
-                    Entity Settings
+                    {t('myIdentitySettings')}
                   </ThemedText>
                   <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
+                <ThemedText variant="muted" size={11} style={styles.menuItemCaption}>
+                  {t('myIdentitySettingsCaption')}
+                </ThemedText>
+                <View
+                  style={[
+                    styles.menuItemSeparator,
+                    { backgroundColor: theme!.colors.border.default + '44' },
+                  ]}
+                />
+
+                {/* ── Partner / Character (the OTHER participant) ── */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handlePartnerSettings}
+                  activeOpacity={0.65}
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: (theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover) + '1A' },
+                    ]}
+                  >
+                    <Icon
+                      name="cog-outline"
+                      size={18}
+                      color={theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover}
+                    />
+                  </View>
+                  <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
+                    {t('partnerSettings')}
+                  </ThemedText>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
+                <ThemedText variant="muted" size={11} style={styles.menuItemCaption}>
+                  {t('partnerSettingsCaption', { name: headerName })}
+                </ThemedText>
                 <View
                   style={[
                     styles.menuItemSeparator,
@@ -1550,5 +1598,12 @@ const styles = StyleSheet.create({
   menuItemSeparator: {
     height: StyleSheet.hairlineWidth,
     marginLeft: 62,
+  },
+  menuItemCaption: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    paddingTop: 0,
+    marginTop: -4,
+    marginLeft: 46,
   },
 });
