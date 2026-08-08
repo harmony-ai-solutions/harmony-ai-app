@@ -331,7 +331,7 @@ const styles = StyleSheet.create({
   // Action sheet
   sheetOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.18)',
     justifyContent: 'flex-end',
   },
   sheetWrapper: {

@@ -5,8 +5,9 @@ import {
   FlatList,
   TouchableOpacity,
   Image,
+  Modal,
 } from 'react-native';
-import { Modal, Portal, ActivityIndicator } from 'react-native-paper';
+import { ActivityIndicator } from 'react-native-paper';
 import LinearGradient from 'react-native-linear-gradient';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -209,13 +210,18 @@ export const ImpersonationSelectorModal: React.FC<
   };
 
   return (
-    <Portal>
-      <Modal
-        visible={visible}
-        onDismiss={onCancel}
-        contentContainerStyle={styles.modalOuter}
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onCancel}
+    >
+      <TouchableOpacity
+        style={styles.modalOverlay}
+        activeOpacity={1}
+        onPress={onCancel}
       >
-        <View style={styles.modalShell}>
+        <TouchableOpacity activeOpacity={1} style={styles.modalShell}>
           {/* Gradient background */}
           <LinearGradient
             colors={[
@@ -340,28 +346,29 @@ export const ImpersonationSelectorModal: React.FC<
               </View>
             </>
           )}
-        </View>
-      </Modal>
-    </Portal>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  modalOuter: {
-    margin: 20,
-    borderRadius: 16,
-    maxHeight: '80%',
-    flexShrink: 1,
-    backgroundColor: '#151d30', // opaque fallback — prevents transparency
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    justifyContent: 'flex-end',
   },
   modalShell: {
-    borderRadius: 16,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     overflow: 'hidden',
-    flexShrink: 1,
+    maxHeight: '85%',
+    paddingBottom: 36,
     backgroundColor: '#151d30', // opaque fallback — prevents transparency
   },
   modalRadius: {
-    borderRadius: 16,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
   },
   topStripe: {
     height: 2,
