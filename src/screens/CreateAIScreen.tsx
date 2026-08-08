@@ -670,9 +670,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 {selectedProfile.description ?? t('noDescription')}
               </ThemedText>
 
-              <ThemedText size={12} variant="muted" style={styles.selectedSwitchHint}>
-                {t('changeProfileHint')}
-              </ThemedText>
             </View>
           )}
 
@@ -1028,9 +1025,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 19,
     paddingHorizontal: 24,
-  },
-  selectedSwitchHint: {
-    marginTop: 14,
   },
 
   // ── Profile picker carousel ──
