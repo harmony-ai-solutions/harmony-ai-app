@@ -486,7 +486,8 @@ export const CharacterProfileEditScreen: React.FC = () => {
                   <ThemedText
                     size={13}
                     variant="secondary"
-                    style={styles.fieldLabel}
+                    numberOfLines={1}
+                    style={styles.numericFieldLabel}
                   >
                     Typing Speed (WPM)
                   </ThemedText>
@@ -505,7 +506,8 @@ export const CharacterProfileEditScreen: React.FC = () => {
                   <ThemedText
                     size={13}
                     variant="secondary"
-                    style={styles.fieldLabel}
+                    numberOfLines={1}
+                    style={styles.numericFieldLabel}
                   >
                     Audio Chance (%)
                   </ThemedText>
@@ -679,6 +681,10 @@ const styles = StyleSheet.create({
   numericField: {
     flex: 1,
     gap: 6,
+  },
+  numericFieldLabel: {
+    letterSpacing: 0.2,
+    height: 18,
   },
   numericInput: {
     textAlign: 'center',
