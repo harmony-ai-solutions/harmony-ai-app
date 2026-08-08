@@ -117,6 +117,48 @@ export async function getAllEntities(
 }
 
 /**
+ * Find an entity linked to the given character profile.
+ *
+ * A single character profile may be linked to multiple entities (e.g. the
+ * user acts as a character in one chat and chats with it in another), so
+ * multiple rows can share the same character_profile_id. This returns the
+ * most recently created active entity to keep navigation deterministic.
+ * Returns null if no active entity references the profile.
+ */
+export async function getEntityByCharacterProfileId(
+  characterProfileId: string,
+  includeDeleted = false,
+): Promise<Entity | null> {
+  const db = getDatabase();
+
+  const query = includeDeleted
+    ? `SELECT * FROM entities
+       WHERE character_profile_id = ?
+       ORDER BY created_at DESC LIMIT 1`
+    : `SELECT * FROM entities
+       WHERE character_profile_id = ? AND deleted_at IS NULL
+       ORDER BY created_at DESC LIMIT 1`;
+
+  const [results] = await db.executeSql(query, [characterProfileId]);
+
+  if (results.rows.length === 0) {
+    return null;
+  }
+
+  const row = results.rows.item(0);
+  return {
+    id: row.id,
+    alias: row.alias,
+    character_profile_id: row.character_profile_id,
+    lifecycle_config: row.lifecycle_config ?? null,
+    rag_reindex_required: row.rag_reindex_required ?? 1,
+    created_at: new Date(row.created_at),
+    updated_at: new Date(row.updated_at),
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+  };
+}
+
+/**
  * Update an existing entity
  * Throws error if entity not found
  */

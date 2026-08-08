@@ -39,5 +39,6 @@
   "importUnsupportedType": "Unsupported file type — use PNG or JSON",
   "importParseFailed": "Could not read this character card",
   "importNameRequired": "The card must have a name",
-  "importReadFailed": "Could not read the file"
+  "importReadFailed": "Could not read the file",
+  "chatOpenFailed": "Could not open chat with this character."
 }

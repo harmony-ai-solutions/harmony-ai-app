@@ -36,6 +36,18 @@ import {
   deleteCharacterProfile,
 } from '../database/repositories/characters';
 import { createDataURL } from '../database/base64';
+import {
+  getAllEntities,
+  createEntity,
+  createEntityModuleMapping,
+  getEntityByCharacterProfileId,
+} from '../database/repositories/entities';
+import {
+  deriveParticipantKey,
+  deriveScopeFromParticipants,
+} from '../database/repositories/interactions';
+import { v7 as uuidv7 } from 'uuid';
+import ChatPreferencesService from '../services/ChatPreferencesService';
 import { CharacterProfile } from '../database/models';
 import { importCharacterCardFromFile, CharacterCardImportError } from '../services/CharacterCardImportService';
 import syncService from '../services/SyncService';
@@ -134,6 +146,91 @@ export const CharactersScreen: React.FC = () => {
 
   const handleEdit = (profile: CharacterProfile) => {
     navigation.navigate('CharacterProfileEdit', { profileId: profile.id });
+  };
+
+  /**
+   * Open a chat with the character that uses this profile.
+   *
+   * ChatDetail requires an ENTITY linked to the character profile (plus the
+   * impersonated "user" entity). If no entity uses this profile yet, one is
+   * created on the fly (mirroring the CreateAI flow), synced to the engine so
+   * INIT_ENTITY succeeds, and the user is dropped straight into the chat.
+   */
+  const handleChatPress = async (profile: CharacterProfile) => {
+    try {
+      // 1. Resolve the impersonated entity (the "user" identity we chat as)
+      const allEntities = await getAllEntities();
+      const storedId =
+        await ChatPreferencesService.getGlobalImpersonatedEntity();
+      let impersonatedEntityId = storedId;
+      if (
+        !impersonatedEntityId ||
+        !allEntities.some(e => e.id === impersonatedEntityId)
+      ) {
+        const userEntity = allEntities.find(e => e.id === 'user');
+        impersonatedEntityId = userEntity
+          ? userEntity.id
+          : (allEntities[0]?.id ?? 'user');
+      }
+
+      // 2. Reuse an entity linked to this profile, or create one
+      let entity = await getEntityByCharacterProfileId(profile.id);
+      let createdNewEntity = false;
+      if (!entity) {
+        createdNewEntity = true;
+        const entityId = profile.name.trim();
+        entity = await createEntity({
+          id: entityId,
+          alias: profile.name.trim(),
+          character_profile_id: profile.id,
+          lifecycle_config: '{}',
+          rag_reindex_required: 1,
+        });
+        await createEntityModuleMapping({
+          entity_id: entityId,
+          backend_config_id: null,
+          cognition_config_id: null,
+          tts_config_id: null,
+          stt_config_id: null,
+          vision_config_id: null,
+          rag_config_id: null,
+          imagination_config_id: null,
+          movement_config_id: null,
+          deleted_at: null,
+        });
+      }
+
+      // 3. Push a NEWLY created entity to the engine BEFORE navigating.
+      //    ChatDetail sends INIT_ENTITY on mount; if the engine has not yet
+      //    ingested the entity it rejects with entity_not_defined and the chat
+      //    is stuck on "Connecting..." (same constraint documented in
+      //    CreateAIScreen). Existing entities are already known — no wait.
+      if (createdNewEntity) {
+        await syncService.syncAndWait({ timeoutMs: 15_000 }).catch(syncErr => {
+          log.warn('Auto-sync before chat failed (non-critical):', syncErr);
+        });
+      }
+
+      // 4. Derive chat params and navigate
+      const participantIds = [impersonatedEntityId ?? 'user', entity.id];
+      const scope = deriveScopeFromParticipants(participantIds);
+      const participantKey = deriveParticipantKey(
+        participantIds,
+        impersonatedEntityId ?? 'user',
+        scope,
+      );
+      const tempInteractionId = uuidv7();
+      navigation.navigate('ChatDetail', {
+        interactionId: tempInteractionId,
+        participantKey,
+        participantIds,
+        entityId: impersonatedEntityId ?? 'user',
+        entityName: profile.name,
+      });
+    } catch (err) {
+      log.error('Failed to open chat:', err);
+      showAlert(t('common:error'), t('chatOpenFailed'));
+    }
   };
 
   const handleLongPress = (profile: CharacterProfile) => {
@@ -333,6 +430,7 @@ export const CharactersScreen: React.FC = () => {
             imageCount={imageCounts[item.id] ?? 0}
             onPress={() => handleEdit(item)}
             onLongPress={() => handleLongPress(item)}
+            onChatPress={() => handleChatPress(item)}
           />
         )}
       />

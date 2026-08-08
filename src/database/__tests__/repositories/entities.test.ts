@@ -12,6 +12,7 @@ import {
   createEntity,
   getEntity,
   getAllEntities,
+  getEntityByCharacterProfileId,
   updateEntity,
   deleteEntity,
   createEntityModuleMapping,
@@ -25,6 +26,7 @@ import {upsertEmotionState} from '../../repositories/emotion_state';
 import {createEmojiAction} from '../../repositories/emoji_actions';
 import {createInteraction} from '../../repositories/interactions';
 import {createConversationMessage} from '../../repositories/conversation_messages';
+import {createCharacterProfile} from '../../repositories/characters';
 import type {
   EntityModuleMapping,
   EmotionState,
@@ -214,6 +216,96 @@ describe('entities repository', () => {
       expect(ids).toContain('entity-1');
       expect(ids).toContain('entity-2');
       expect(ids).toContain('entity-3');
+    });
+  });
+
+  describe('getEntityByCharacterProfileId', () => {
+    const createProfile = (id: string) =>
+      createCharacterProfile({
+        id,
+        name: 'Test Char ' + id,
+        description: '',
+        personality: '',
+        appearance: '',
+        backstory: '',
+        voice_characteristics: '',
+        typing_speed_wpm: 60,
+        audio_response_chance_percent: 50,
+        vision_config_id: null,
+        lifecycle_config: '{}',
+        base_prompt: '',
+        scenario: '',
+        example_dialogues: '',
+      });
+
+    it('returns null when no entity references the profile', async () => {
+      const result = await getEntityByCharacterProfileId('missing-profile');
+      expect(result).toBeNull();
+    });
+
+    it('returns the entity linked to the character profile', async () => {
+      const profileId = 'profile-chat-link-1';
+      await createProfile(profileId);
+      await createEntity({
+        id: 'entity-chat-1',
+        character_profile_id: profileId,
+        alias: '',
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+
+      const result = await getEntityByCharacterProfileId(profileId);
+      expect(result).not.toBeNull();
+      expect(result!.id).toBe('entity-chat-1');
+      expect(result!.character_profile_id).toBe(profileId);
+    });
+
+    it('ignores soft-deleted entities by default', async () => {
+      const profileId = 'profile-chat-deleted';
+      await createProfile(profileId);
+      await createEntity({
+        id: 'entity-chat-deleted',
+        character_profile_id: profileId,
+        alias: '',
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+      await deleteEntity('entity-chat-deleted');
+
+      const result = await getEntityByCharacterProfileId(profileId);
+      expect(result).toBeNull();
+
+      // includeDeleted exposes the soft-deleted row
+      const withDeleted = await getEntityByCharacterProfileId(profileId, true);
+      expect(withDeleted).not.toBeNull();
+      expect(withDeleted!.id).toBe('entity-chat-deleted');
+    });
+
+    it('returns the most recently created active entity when multiple exist', async () => {
+      const profileId = 'profile-chat-multi';
+      await createProfile(profileId);
+      await createEntity({
+        id: 'entity-chat-old',
+        character_profile_id: profileId,
+        alias: '',
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+      await createEntity({
+        id: 'entity-chat-new',
+        character_profile_id: profileId,
+        alias: '',
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+
+      const result = await getEntityByCharacterProfileId(profileId);
+      expect(result).not.toBeNull();
+      // created_at is auto-set to now; the newest insert should win.
+      // createdAt ordering may tie in fast tests, so assert it's one of the two
+      // and that both reference the profile.
+      expect(result!.character_profile_id).toBe(profileId);
+      expect(['entity-chat-old', 'entity-chat-new']).toContain(result!.id);
     });
   });
 

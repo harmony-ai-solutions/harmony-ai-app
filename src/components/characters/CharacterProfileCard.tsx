@@ -19,6 +19,7 @@ interface CharacterProfileCardProps {
   imageCount?: number;     // total images this profile has
   onPress: () => void;
   onLongPress: () => void;
+  onChatPress: () => void;
 }
 
 /**
@@ -46,6 +47,7 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
   imageCount = 0,
   onPress,
   onLongPress,
+  onChatPress,
 }) => {
   const { theme } = useAppTheme();
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -147,6 +149,29 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
                   </ThemedText>
                 </View>
               )}
+
+              {/* Chat button — floating glass pill over the image. Nested
+                  TouchableOpacity captures the touch so tapping it does NOT
+                  trigger the parent card's onPress/onLongPress. */}
+              <TouchableOpacity
+                onPress={onChatPress}
+                onPressIn={e => e.stopPropagation()}
+                onPressOut={e => e.stopPropagation()}
+                activeOpacity={0.82}
+                style={styles.chatButton}
+                testID="character-chat-button"
+                accessibilityRole="button"
+                accessibilityLabel={`Chat with ${profile.name}`}
+              >
+                <LinearGradient
+                  colors={[accent.primary, accentSecondary]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.chatButtonFill}
+                >
+                  <Icon name="chat-processing-outline" size={16} color="#fff" />
+                </LinearGradient>
+              </TouchableOpacity>
 
               {/* Dark fade overlay — blends image into glass text area */}
               <LinearGradient
@@ -268,6 +293,31 @@ const styles = StyleSheet.create({
   },
   imageBadgeText: {
     color: '#fff',
+  },
+  // ── Chat button (floating over the image) ──
+  chatButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    // Dark glass shell + subtle glow so it reads on any image
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.15)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 4,
+    overflow: 'hidden',
+  },
+  chatButtonFill: {
+    flex: 1,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   // ── Text area ──
   textContainer: {
