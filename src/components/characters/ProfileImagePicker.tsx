@@ -27,10 +27,10 @@ import { CharacterImage } from '../../database/models';
 
 interface ProfileImagePickerProps {
   images: CharacterImage[];
-  primaryImageId: number | null;
+  primaryImageId: string | null;
   onAddImage: () => void;
-  onSetPrimary: (id: number) => void;
-  onDeleteImage: (id: number) => void;
+  onSetPrimary: (id: string) => void;
+  onDeleteImage: (id: string) => void;
 }
 
 export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
@@ -50,7 +50,7 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
 
   // Action sheet state
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
-  const [actionTargetId, setActionTargetId] = useState<number | null>(null);
+  const [actionTargetId, setActionTargetId] = useState<string | null>(null);
   const [actionTargetIsPrimary, setActionTargetIsPrimary] = useState(false);
 
   const openViewer = (img: CharacterImage) => {

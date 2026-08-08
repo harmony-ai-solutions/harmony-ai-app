@@ -423,10 +423,13 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
           : `Size estimate exceeds limit (${mb} MB > ${limitMB} MB) — prompting for confirmation`,
       );
 
+      // Format the estimate for display only (up to two decimal places) — the
+      // decision above compared the RAW float so threshold checks stay exact.
+      const mbDisplay = Number(mb.toFixed(2));
       const message =
         images > 0
-          ? i18n.t('syncConnection:sizeEstimateConfirmImages', { records, mb, images })
-          : i18n.t('syncConnection:sizeEstimateConfirm', { records, mb });
+          ? i18n.t('syncConnection:sizeEstimateConfirmImages', { records, mb: mbDisplay, images })
+          : i18n.t('syncConnection:sizeEstimateConfirm', { records, mb: mbDisplay });
 
       // Themed dialog via AppAlertContext (AppAlertProvider is now mounted
       // ABOVE SyncConnectionProvider in App.tsx). Use the ref-mirrored

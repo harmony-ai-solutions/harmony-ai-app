@@ -11,6 +11,7 @@ import {withTransaction} from '../transaction';
 import {CharacterProfile, CharacterImage, CharacterImageInfo} from '../models';
 import {uint8ArrayToBase64, createDataURL} from '../base64';
 import {loadTextColumn} from '../sync';
+import {generateId} from '../../utils/uuid';
 
 // ============================================================================
 // Character Profile CRUD Operations
@@ -271,18 +272,20 @@ export async function deleteCharacterProfile(id: string, permanent = false): Pro
  */
 export async function createCharacterImage(
   image: Omit<CharacterImage, 'id' | 'created_at' | 'deleted_at'>
-): Promise<number> {
+): Promise<string> {
   const db = getDatabase();
+  const id = generateId();
   
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     db.transaction(
       (tx) => {
         tx.executeSql(
           `INSERT INTO character_image (
-            character_profile_id, image_data, mime_type, description,
+            id, character_profile_id, image_data, mime_type, description,
             is_primary, display_order, vl_model_interpretation, vl_model
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
+            id,
             image.character_profile_id,
             image.image_data,
             image.mime_type,
@@ -292,8 +295,8 @@ export async function createCharacterImage(
             image.vl_model_interpretation,
             image.vl_model,
           ],
-          (_, result) => {
-            resolve(result.insertId!);
+          () => {
+            resolve(id);
           },
           (_, error) => {
             reject(error);
@@ -310,7 +313,7 @@ export async function createCharacterImage(
  * Get character image by ID
  * Returns null if not found or soft deleted (unless includeDeleted is true)
  */
-export async function getCharacterImage(id: number, includeDeleted = false): Promise<CharacterImage | null> {
+export async function getCharacterImage(id: string, includeDeleted = false): Promise<CharacterImage | null> {
   const db = getDatabase();
   
   const query = includeDeleted
@@ -433,7 +436,7 @@ export async function updateCharacterImage(
  * Soft delete character image
  * Throws error if image not found
  */
-export async function deleteCharacterImage(id: number, permanent = false): Promise<void> {
+export async function deleteCharacterImage(id: string, permanent = false): Promise<void> {
   const db = getDatabase();
   
   return withTransaction(db, async (tx) => {
@@ -459,7 +462,7 @@ export async function deleteCharacterImage(id: number, permanent = false): Promi
  * Set a specific image as primary and unset any previous primary
  * Ensures only one image is primary per character profile
  */
-export async function setPrimaryImage(profileId: string, imageId: number): Promise<void> {
+export async function setPrimaryImage(profileId: string, imageId: string): Promise<void> {
   const db = getDatabase();
   
   return new Promise<void>((resolve, reject) => {

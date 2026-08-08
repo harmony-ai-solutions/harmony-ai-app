@@ -129,7 +129,8 @@ describe('characters repository', () => {
         vl_model: '',
         updated_at: now,
       });
-      expect(imageId).toBeGreaterThan(0);
+      expect(typeof imageId).toBe('string');
+      expect(imageId.length).toBeGreaterThan(0);
     });
   });
 
@@ -190,7 +191,7 @@ describe('characters repository', () => {
   describe('imageToDataURL', () => {
     it('Image to Data URL Conversion', async () => {
       const image: CharacterImage = {
-        id: 1,
+        id: 'image-1',
         character_profile_id: 'profile-dummy',
         image_data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk',
         mime_type: 'image/png',

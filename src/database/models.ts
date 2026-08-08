@@ -396,7 +396,7 @@ export interface ImaginationConfig {
 // ============================================================================
 
 export interface CharacterImage {
-  id: number;
+  id: string;
   character_profile_id: string;
   image_data: string; // Base64 encoded image
   mime_type: string;
@@ -498,7 +498,7 @@ export interface ConversationMessage {
 }
 
 export interface CharacterImageInfo {
-  id: number;
+  id: string;
   character_profile_id: string;
   mime_type: string;
   description: string;

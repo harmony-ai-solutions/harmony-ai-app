@@ -42,6 +42,7 @@ import { migration031 } from './migrations/000031_config_uuid_primary_keys';
 import { migration032 } from './migrations/000032_add_soulbitscloud_provider';
 import { migration033 } from './migrations/000033_add_emotion_state_deleted_at';
 import { migration034 } from './migrations/000034_add_unique_name_constraint_vision_imagination';
+import { migration035 } from './migrations/000035_character_image_uuid_primary_key';
 
 // Migration definition
 export interface Migration {
@@ -223,6 +224,11 @@ export const MIGRATIONS: Migration[] = [
     version: 34,
     description: 'add_unique_name_constraint_vision_imagination',
     sql: migration034,
+   },
+   {
+    version: 35,
+    description: 'character_image_uuid_primary_key',
+    sql: migration035,
    },
   ];
 

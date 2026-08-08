@@ -72,7 +72,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
 
   // ── Images ──────────────────────────────────────────────────────────────────
   const [images, setImages] = useState<CharacterImage[]>([]);
-  const [primaryImageId, setPrimaryImageId] = useState<number | null>(null);
+  const [primaryImageId, setPrimaryImageId] = useState<string | null>(null);
 
   // ── UI state ────────────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false);
@@ -260,7 +260,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
     }
   };
 
-  const handleSetPrimary = async (imageId: number) => {
+  const handleSetPrimary = async (imageId: string) => {
     if (!profileId) return;
     try {
       await setPrimaryImage(profileId, imageId);
@@ -275,7 +275,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
     }
   };
 
-  const handleDeleteImage = async (imageId: number) => {
+  const handleDeleteImage = async (imageId: string) => {
     try {
       await deleteCharacterImage(imageId);
       const remaining = images.filter(img => img.id !== imageId);

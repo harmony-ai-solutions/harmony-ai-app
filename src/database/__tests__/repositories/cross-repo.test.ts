@@ -62,12 +62,12 @@ describe('cross-repository behavior', () => {
 
       // Insert a character image directly (to test CASCADE)
       const db = getDb();
-      const [insertResult] = await db.executeSql(
-        `INSERT INTO character_image (character_profile_id, image_data, mime_type, description, is_primary, display_order, vl_model_interpretation, vl_model)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [profileId, 'testdata', 'image/png', 'Test', 0, 0, '', ''],
+      const imageId = 'cascade-image-1';
+      await db.executeSql(
+        `INSERT INTO character_image (id, character_profile_id, image_data, mime_type, description, is_primary, display_order, vl_model_interpretation, vl_model)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [imageId, profileId, 'testdata', 'image/png', 'Test', 0, 0, '', ''],
       );
-      const imageId = insertResult.insertId!;
 
       // Permanent delete profile — should CASCADE to character_image
       await deleteCharacterProfile(profileId, true);
