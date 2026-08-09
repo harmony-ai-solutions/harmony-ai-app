@@ -92,7 +92,7 @@
   {
     "type": "table",
     "name": "character_image",
-    "sql": "CREATE TABLE \"character_image\" ( id INTEGER PRIMARY KEY AUTOINCREMENT, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE )"
+    "sql": "CREATE TABLE \"character_image\" ( id TEXT PRIMARY KEY, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE )"
   },
   {
     "type": "table",
@@ -112,7 +112,7 @@
   {
     "type": "table",
     "name": "emotion_state",
-    "sql": "CREATE TABLE emotion_state ( entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE, joy_intensity REAL NOT NULL DEFAULT 0.1, sadness_intensity REAL NOT NULL DEFAULT 0.1, trust_intensity REAL NOT NULL DEFAULT 0.1, disgust_intensity REAL NOT NULL DEFAULT 0.1, fear_intensity REAL NOT NULL DEFAULT 0.1, anger_intensity REAL NOT NULL DEFAULT 0.1, surprise_intensity REAL NOT NULL DEFAULT 0.1, anticipation_intensity REAL NOT NULL DEFAULT 0.1, joy_baseline REAL NOT NULL DEFAULT 0.1, sadness_baseline REAL NOT NULL DEFAULT 0.1, trust_baseline REAL NOT NULL DEFAULT 0.1, disgust_baseline REAL NOT NULL DEFAULT 0.1, fear_baseline REAL NOT NULL DEFAULT 0.1, anger_baseline REAL NOT NULL DEFAULT 0.1, surprise_baseline REAL NOT NULL DEFAULT 0.1, anticipation_baseline REAL NOT NULL DEFAULT 0.1, joy_crystallize_start TIMESTAMP NULL, sadness_crystallize_start TIMESTAMP NULL, trust_crystallize_start TIMESTAMP NULL, disgust_crystallize_start TIMESTAMP NULL, fear_crystallize_start TIMESTAMP NULL, anger_crystallize_start TIMESTAMP NULL, surprise_crystallize_start TIMESTAMP NULL, anticipation_crystallize_start TIMESTAMP NULL, last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, decay_tau REAL NOT NULL DEFAULT 3600.0, high_threshold REAL NOT NULL DEFAULT 6.0, low_threshold REAL NOT NULL DEFAULT 1.0, crystallize_intensity REAL NOT NULL DEFAULT 7.0, crystallize_min_hours REAL NOT NULL DEFAULT 2.0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP )"
+    "sql": "CREATE TABLE emotion_state ( entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE, joy_intensity REAL NOT NULL DEFAULT 0.1, sadness_intensity REAL NOT NULL DEFAULT 0.1, trust_intensity REAL NOT NULL DEFAULT 0.1, disgust_intensity REAL NOT NULL DEFAULT 0.1, fear_intensity REAL NOT NULL DEFAULT 0.1, anger_intensity REAL NOT NULL DEFAULT 0.1, surprise_intensity REAL NOT NULL DEFAULT 0.1, anticipation_intensity REAL NOT NULL DEFAULT 0.1, joy_baseline REAL NOT NULL DEFAULT 0.1, sadness_baseline REAL NOT NULL DEFAULT 0.1, trust_baseline REAL NOT NULL DEFAULT 0.1, disgust_baseline REAL NOT NULL DEFAULT 0.1, fear_baseline REAL NOT NULL DEFAULT 0.1, anger_baseline REAL NOT NULL DEFAULT 0.1, surprise_baseline REAL NOT NULL DEFAULT 0.1, anticipation_baseline REAL NOT NULL DEFAULT 0.1, joy_crystallize_start TIMESTAMP NULL, sadness_crystallize_start TIMESTAMP NULL, trust_crystallize_start TIMESTAMP NULL, disgust_crystallize_start TIMESTAMP NULL, fear_crystallize_start TIMESTAMP NULL, anger_crystallize_start TIMESTAMP NULL, surprise_crystallize_start TIMESTAMP NULL, anticipation_crystallize_start TIMESTAMP NULL, last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, decay_tau REAL NOT NULL DEFAULT 3600.0, high_threshold REAL NOT NULL DEFAULT 6.0, low_threshold REAL NOT NULL DEFAULT 1.0, crystallize_intensity REAL NOT NULL DEFAULT 7.0, crystallize_min_hours REAL NOT NULL DEFAULT 2.0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP , deleted_at TEXT DEFAULT NULL)"
   },
   {
     "type": "table",
@@ -132,7 +132,7 @@
   {
     "type": "table",
     "name": "imagination_configs",
-    "sql": "CREATE TABLE \"imagination_configs\" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
+    "sql": "CREATE TABLE \"imagination_configs\" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
   },
   {
     "type": "table",
@@ -172,12 +172,12 @@
   {
     "type": "table",
     "name": "provider_config_google",
-    "sql": "CREATE TABLE \"provider_config_google\" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_output_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, top_k INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER, response_mime_type TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', number_of_images INTEGER NOT NULL DEFAULT 1, aspect_ratio TEXT NOT NULL DEFAULT '1:1', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
+    "sql": "CREATE TABLE \"provider_config_google\" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_output_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, top_k INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER NOT NULL DEFAULT 0, response_mime_type TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', number_of_images INTEGER NOT NULL DEFAULT 1, aspect_ratio TEXT NOT NULL DEFAULT '1:1', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
   },
   {
     "type": "table",
     "name": "provider_config_harmonyspeech",
-    "sql": "CREATE TABLE \"provider_config_harmonyspeech\" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME )"
+    "sql": "CREATE TABLE \"provider_config_harmonyspeech\" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, endpoint TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', voice_config_file TEXT NOT NULL DEFAULT '', format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, stream INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME , api_key TEXT NOT NULL DEFAULT '')"
   },
   {
     "type": "table",
@@ -222,12 +222,12 @@
   {
     "type": "table",
     "name": "provider_config_soulbitscloud",
-    "sql": "CREATE TABLE provider_config_soulbitscloud ( id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL DEFAULT 'https://api.soulbits.app', api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER, response_format TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 1.0, format TEXT NOT NULL DEFAULT 'mp3', image_aspect_ratio TEXT NOT NULL DEFAULT '1:1', image_size TEXT NOT NULL DEFAULT '1k', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
+    "sql": "CREATE TABLE provider_config_soulbitscloud ( id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL DEFAULT 'https://api.soulbits.app', api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', voice TEXT NOT NULL DEFAULT '', speed REAL NOT NULL DEFAULT 1.0, format TEXT NOT NULL DEFAULT 'mp3', image_aspect_ratio TEXT NOT NULL DEFAULT '1:1', image_size TEXT NOT NULL DEFAULT '1k', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
   },
   {
     "type": "table",
     "name": "provider_config_xai",
-    "sql": "CREATE TABLE \"provider_config_xai\" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT 'grok-4.3', max_tokens INTEGER NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER, response_format TEXT NOT NULL DEFAULT '', reasoning_effort TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', image_aspect_ratio TEXT NOT NULL DEFAULT '1:1', image_resolution TEXT NOT NULL DEFAULT '1k', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
+    "sql": "CREATE TABLE \"provider_config_xai\" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT 'grok-4.3', max_tokens INTEGER NOT NULL DEFAULT 0, max_completion_tokens INTEGER NOT NULL DEFAULT 0, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, frequency_penalty REAL NOT NULL DEFAULT 0, presence_penalty REAL NOT NULL DEFAULT 0, n INTEGER NOT NULL DEFAULT 0, stop_tokens TEXT NOT NULL DEFAULT '[]', seed INTEGER NOT NULL DEFAULT 0, response_format TEXT NOT NULL DEFAULT '', reasoning_effort TEXT NOT NULL DEFAULT '', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', image_aspect_ratio TEXT NOT NULL DEFAULT '1:1', image_resolution TEXT NOT NULL DEFAULT '1k', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
   },
   {
     "type": "table",
@@ -262,6 +262,6 @@
   {
     "type": "table",
     "name": "vision_configs",
-    "sql": "CREATE TABLE \"vision_configs\" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
+    "sql": "CREATE TABLE \"vision_configs\" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
   }
 ]

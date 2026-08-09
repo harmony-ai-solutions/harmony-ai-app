@@ -148,6 +148,7 @@ export interface HarmonySpeechProviderConfig {
   id: string;
   name: string;
   endpoint: string;
+  api_key: string;
   model: string | null;
   voice_config_file: string | null;
   format: string | null;

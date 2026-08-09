@@ -114,6 +114,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'endpoint', label: 'Endpoint URL', type: 'text', required: true, placeholder: 'http://localhost:5000' },
+      { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'Optional for self-hosted HSE' },
       { key: 'model', label: 'Model', type: 'text' },
       { key: 'voice_config_file', label: 'Voice Config File', type: 'text' },
       { key: 'format', label: 'Format', type: 'text', placeholder: 'wav' },

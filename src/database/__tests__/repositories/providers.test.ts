@@ -226,6 +226,7 @@ describe('providers repository', () => {
       const id = await createHarmonySpeechProviderConfig({
         name: 'Test HS',
         endpoint: 'http://localhost:9000',
+        api_key: '',
         model: 'default',
         voice_config_file: '',  // NOT NULL DEFAULT ''
         format: '',

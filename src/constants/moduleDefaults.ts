@@ -82,6 +82,7 @@ export const PROVIDER_DEFAULTS: Record<string, Record<string, any>> = {
   harmonyspeech: {
     name: '',
     endpoint: '',
+    api_key: '',
     model: '',
     voice_config_file: '',
     format: 'wav',
