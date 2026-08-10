@@ -26,7 +26,7 @@
 
 **Databases:**
 - SQLite via `react-native-sqlite-storage` `^6.0.1` — local DB `harmony.db` at `RNFS.DocumentDirectoryPath` (`src/database/connection.ts`); WAL mode, foreign keys ON, synchronous NORMAL; secondary connection for sync write-transactions (`getSyncDatabase()`)
-- 34 migration files in `src/database/migrations/0000XX_*.ts` (initial schema through `000034_add_unique_name_*`), applied by `src/database/migrations.ts`
+- 36 migration files in `src/database/migrations/0000XX_*.ts` (initial schema through `000036_backfill_character_profile_source`), applied by `src/database/migrations.ts`. Migrations 000035/000036 create a CLIENT-ONLY sidecar `character_profile_sources` (source tagging for the Discover community grid) — excluded from the schema-parity dump.
 - Repository layer: `src/database/repositories/` (characters, conversation_messages, entities, interactions, memories, modules, sync, emotion_state, emoji_actions, providers)
 - Node-side SQLite (`better-sqlite3`, devDependency) mirrors the schema for tests: `src/database/__test_utils__/nodeDatabase.ts`, `schema/rn-schema.json`
 

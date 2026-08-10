@@ -44,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The lorebook entry editor no longer shows the Advanced (export-only) fields; name and comment now appear above the content. Existing advanced data is still preserved when saving and exporting.
 - The "Advanced" profile section is now labelled "AI Behaviour".
 
+### Navigation
+#### Changed
+- Removed the dedicated Search tab. The Discover tab now includes a search bar and displays the user's AI characters in a two-column grid, so browsing and searching happen on one screen. Tapping a card opens its profile, and the chat button starts a conversation with that character.
+- Discover now shows **AI characters created by other users** (characters synced down from the engine). The current user's own characters — created through "Create AI", the profile editor, or imported character cards — are hidden from their own Discover grid (tracked via a client-only source tag that never affects engine sync), while remaining fully available on the Characters screen and still syncing up so other users can discover them.
+
 ### Security & Privacy
 
 #### Added

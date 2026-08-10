@@ -19,7 +19,7 @@ Branch: `fix/rr-hotfixes-2` (last 20 commits are almost entirely `fix:` commits 
 - Fix approach: Replace `any` payload types with discriminated unions; extract transcription tracking and reconnect scheduling into separate helpers.
 
 **Copy-paste `setRefreshing(false)` timer hack:**
-- Issue: The same `setTimeout(() => setRefreshing(false), 800)` pattern is duplicated in 10+ screens — `src/screens/CreateAIScreen.tsx:150`, `src/screens/settings/ThemeSettingsScreen.tsx:66`, `src/screens/auth/LoginScreen.tsx:72`, `src/screens/auth/RegisterScreen.tsx:56`, `src/screens/SearchScreen.tsx:39`, `src/screens/LandingScreen.tsx:30`, `src/screens/AIConfigScreen.tsx:18`, `src/screens/DiscoverScreen.tsx:30`, `src/screens/settings/ProfileSettingsScreen.tsx:30`, `src/screens/settings/ComingSoonScreen.tsx:35`, `src/screens/settings/BiometricLockSettingsScreen.tsx:52`.
+- Issue: The same `setTimeout(() => setRefreshing(false), 800)` pattern is duplicated in 10+ screens — `src/screens/CreateAIScreen.tsx:150`, `src/screens/settings/ThemeSettingsScreen.tsx:66`, `src/screens/auth/LoginScreen.tsx:72`, `src/screens/auth/RegisterScreen.tsx:56`, `src/screens/LandingScreen.tsx:30`, `src/screens/AIConfigScreen.tsx:18`, `src/screens/DiscoverScreen.tsx:30`, `src/screens/settings/ProfileSettingsScreen.tsx:30`, `src/screens/settings/ComingSoonScreen.tsx:35`, `src/screens/settings/BiometricLockSettingsScreen.tsx:52`.
 - Impact: Magic 800ms delay baked into pull-to-refresh UX; arbitrary timing that will drift out of sync with actual refresh completion. Uncanceled timers on unmount.
 - Fix approach: Extract a `useRefreshControl()` hook that ties `refreshing` to the actual async refresh promise.
 

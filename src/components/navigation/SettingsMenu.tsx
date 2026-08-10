@@ -52,7 +52,6 @@ const getMenuSections = (t: ReturnType<typeof useTranslation<'navigation'>>['t']
       { icon: 'account-group', label: t('nav.characters'), screen: 'Characters', type: 'navigate' },
       { icon: 'tune', label: t('nav.settings'), screen: 'Settings', type: 'navigate' },
       { icon: 'compass', label: t('nav.discover'), screen: 'Discover', type: 'navigate' },
-      { icon: 'magnify', label: t('nav.search'), screen: 'Search', type: 'navigate' },
     ],
   },
   {

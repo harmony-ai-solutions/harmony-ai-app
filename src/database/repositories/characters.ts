@@ -721,3 +721,111 @@ export async function getCharacterImagesWithDataURLs(
     created_at: image.created_at,
   }));
 }
+
+// ============================================================================
+// Character Profile Source Tagging (client-only)
+// ============================================================================
+//
+// The source sidecar records whether a profile was created by the app user
+// ('user') or is a community/default character ('community'). Stored in a
+// separate CLIENT-ONLY table that is never synced, so the engine schema
+// (strict parity, docs/schema-parity.md) stays untouched. A profile with no
+// sidecar row defaults to 'community'.
+
+export type CharacterProfileSource = 'user' | 'community';
+
+export const CHARACTER_PROFILE_SOURCE_USER = 'user' as const;
+export const CHARACTER_PROFILE_SOURCE_COMMUNITY = 'community' as const;
+
+/**
+ * Mark a character profile as user-created (via the app's Create AI / edit flows).
+ * Upserts the sidecar row. Never touches character_profiles itself.
+ */
+export async function setCharacterProfileSource(
+  profileId: string,
+  source: CharacterProfileSource,
+): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql(
+    `INSERT INTO character_profile_sources (profile_id, source, created_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(profile_id) DO UPDATE SET source = excluded.source`,
+    [profileId, source, new Date().toISOString()],
+  );
+}
+
+/**
+ * Get the source for a single profile. Returns 'community' when no sidecar
+ * row exists (default).
+ */
+export async function getCharacterProfileSource(
+  profileId: string,
+): Promise<CharacterProfileSource> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT source FROM character_profile_sources WHERE profile_id = ?',
+    [profileId],
+  );
+  if (results.rows.length === 0) {
+    return CHARACTER_PROFILE_SOURCE_COMMUNITY;
+  }
+  const source = results.rows.item(0).source as CharacterProfileSource;
+  return source === 'user' ? source : CHARACTER_PROFILE_SOURCE_COMMUNITY;
+}
+
+/**
+ * Get all character profiles whose source is 'community' (imported cards,
+ * synced from the engine, or legacy rows without a sidecar tag). Filters out
+ * soft-deleted by default — identical semantics to getAllCharacterProfiles.
+ */
+export async function getCommunityCharacterProfiles(
+  includeDeleted = false,
+): Promise<CharacterProfile[]> {
+  const db = getDatabase();
+  const query = includeDeleted
+    ? `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
+              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+       FROM character_profiles cp
+       LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
+       WHERE cps.profile_id IS NULL OR cps.source = 'community'
+       ORDER BY cp.name`
+    : `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
+              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+       FROM character_profiles cp
+       LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
+       WHERE cp.deleted_at IS NULL
+         AND (cps.profile_id IS NULL OR cps.source = 'community')
+       ORDER BY cp.name`;
+
+  const [results] = await db.executeSql(query);
+
+  const profiles: CharacterProfile[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    const row = results.rows.item(i);
+    profiles.push({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      personality: row.personality,
+      appearance: row.appearance,
+      backstory: row.backstory,
+      voice_characteristics: row.voice_characteristics,
+      base_prompt: row.base_prompt,
+      scenario: row.scenario,
+      example_dialogues: row.example_dialogues,
+      typing_speed_wpm: row.typing_speed_wpm,
+      audio_response_chance_percent: row.audio_response_chance_percent,
+      vision_config_id: row.vision_config_id ?? null,
+      lifecycle_config: row.lifecycle_config ?? null,
+      created_at: new Date(row.created_at),
+      updated_at: new Date(row.updated_at),
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+    });
+  }
+
+  return profiles;
+}

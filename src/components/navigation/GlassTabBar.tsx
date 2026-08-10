@@ -49,7 +49,6 @@ const FADE_OVERLAY_HEIGHT = 56;
 // ── Tab icon mapping (Material Community Icons) ─────────────────────────────
 const TAB_ICONS: Record<string, { default: string; focused: string }> = {
   Discover: { default: 'compass-outline', focused: 'compass' },
-  Search: { default: 'magnify', focused: 'magnify' },
   Chat: { default: 'chat-processing-outline', focused: 'chat-processing' },
   Characters: { default: 'account-group-outline', focused: 'account-group' },
   Settings: { default: 'cog-outline', focused: 'cog' },
@@ -58,7 +57,6 @@ const TAB_ICONS: Record<string, { default: string; focused: string }> = {
 // ── Fallback labels (overridable via navigator options.tabBarLabel) ─────────
 const FALLBACK_LABELS: Record<string, string> = {
   Discover: 'Discover',
-  Search: 'Search',
   Chat: 'Chat',
   Characters: 'Characters',
   Settings: 'Settings',

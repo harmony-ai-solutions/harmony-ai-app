@@ -57,7 +57,7 @@ harmony-ai-app/                        # React Native app (bare RN 0.86, TypeScr
 - Key files: `src/components/themed/ThemedButton.tsx`, `src/components/navigation/GlassTabBar.tsx`, `src/components/modals/InitialPairingModal.tsx`, `src/components/background/DynamicBackground.tsx`, `src/components/ErrorBoundary.tsx`.
 
 **src/screens:**
-- Purpose: Route-level components. Top-level: `DiscoverScreen.tsx`, `SearchScreen.tsx`, `ChatListScreen.tsx` (tab "Chat"), `CharactersScreen.tsx`, `SettingsScreen.tsx`, `ChatDetailScreen.tsx`, `CreateAIScreen.tsx`, `EntityConfigScreen.tsx`, `EntityConfigEditScreen.tsx`, `CharacterProfileEditScreen.tsx`, `AIConfigScreen.tsx`, `LandingScreen.tsx` (legacy).
+- Purpose: Route-level components. Top-level: `DiscoverScreen.tsx`, `ChatListScreen.tsx` (tab "Chat"), `CharactersScreen.tsx`, `SettingsScreen.tsx`, `ChatDetailScreen.tsx`, `CreateAIScreen.tsx`, `EntityConfigScreen.tsx`, `EntityConfigEditScreen.tsx`, `CharacterProfileEditScreen.tsx`, `AIConfigScreen.tsx`, `LandingScreen.tsx` (legacy).
 - Subfolders: `auth/` (`LoginScreen.tsx`, `RegisterScreen.tsx`, `VerifyPrompt.tsx`), `settings/` (13 subpages incl. `SyncSettingsScreen.tsx`, `ThemeSettingsScreen.tsx`, `BiometricLockSettingsScreen.tsx`, `EmojiActionEditorScreen.tsx`, `ComingSoonScreen.tsx`), `setup/` (`ConnectionSetupScreen.tsx`), `config/` (`ModuleConfigEditScreen.tsx`), `development/` (`DatabaseTableViewerScreen.tsx` — DEV-only).
 
 **src/contexts:**
@@ -71,7 +71,7 @@ harmony-ai-app/                        # React Native app (bare RN 0.86, TypeScr
 
 **src/database:**
 - Purpose: Data layer. Root modules: `connection.ts` (open/close/WAL/secondary sync connection), `migrations.ts`, `models.ts` (TS interfaces mirroring Go structs), `sync.ts` (serialization/chunking), `transaction.ts`, `types.ts`, `reactNativeDatabase.ts`, `index.ts` (barrel).
-- Subfolders: `migrations/` (34 files `000001_…` → `000034_…`), `repositories/` (per-table modules + `providers/` with 16 per-provider repos), `__tests__/`, `__test_utils__/` (`testDatabase.ts`, `nodeDatabase.ts`, `dumpSchema.ts`).
+- Subfolders: `migrations/` (36 files `000001_…` → `000036_backfill_character_profile_source`), `repositories/` (per-table modules + `providers/` with 16 per-provider repos), `__tests__/`, `__test_utils__/` (`testDatabase.ts`, `nodeDatabase.ts`, `dumpSchema.ts`).
 - Key files: `src/database/connection.ts`, `src/database/index.ts`, `src/database/migrations.ts`, `src/database/repositories/interactions.ts`.
 
 **src/theme:**

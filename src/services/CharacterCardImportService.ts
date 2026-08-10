@@ -14,7 +14,11 @@ import {
   collectDroppedCardFields,
   CharacterCardParseError,
 } from '../utils/charactercard';
-import { createCharacterProfile, createCharacterImage } from '../database/repositories/characters';
+import {
+  createCharacterProfile,
+  createCharacterImage,
+  setCharacterProfileSource,
+} from '../database/repositories/characters';
 import { base64ToUint8Array } from '../database/base64';
 import { createLogger } from '../utils/logger';
 
@@ -200,6 +204,10 @@ export async function importCharacterCardFromFile(
   // Step 5: Persist
   try {
     await createCharacterProfile(mapped.profile);
+    // Imported cards are the CURRENT user's own characters — tag them as
+    // 'user' so they do not appear on THIS user's Discover grid. They still
+    // sync up to the engine and will appear on OTHER users' Discover grids.
+    await setCharacterProfileSource(mapped.profile.id, 'user');
     if (mapped.image) {
       await createCharacterImage(mapped.image);
     }

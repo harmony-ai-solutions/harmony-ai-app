@@ -36,7 +36,6 @@ import auth from '../i18n/locales/en/auth.json';
 import themeSettings from '../i18n/locales/en/themeSettings.json';
 import syncSettings from '../i18n/locales/en/syncSettings.json';
 import discover from '../i18n/locales/en/discover.json';
-import search from '../i18n/locales/en/search.json';
 import moduleConfig from '../i18n/locales/en/moduleConfig.json';
 import syncConnection from '../i18n/locales/en/syncConnection.json';
 import scenario from '../i18n/locales/en/scenario.json';
@@ -91,7 +90,6 @@ const resources = {
     themeSettings,
     syncSettings,
     discover,
-    search,
     moduleConfig,
     syncConnection,
     scenario,
@@ -126,7 +124,6 @@ const i18nConfig: InitOptions = {
     'themeSettings',
     'syncSettings',
     'discover',
-    'search',
     'moduleConfig',
     'syncConnection',
     'scenario',

@@ -120,7 +120,6 @@ screens/
 ├── CharacterProfileEditScreen.tsx
 ├── CreateAIScreen.tsx
 ├── DiscoverScreen.tsx
-├── SearchScreen.tsx
 ├── EntityConfigScreen.tsx
 ├── EntityConfigEditScreen.tsx
 ├── LandingScreen.tsx
@@ -291,7 +290,6 @@ NavigationContainer (transparent theme, fade animations)
 └── RootStack (Native Stack)
     ├── MainTabs (Bottom Tab Navigator, GlassTabBar)
     │   ├── Discover (DiscoverScreen)
-    │   ├── Search (SearchScreen)
     │   ├── Chat [CENTER, initial] (ChatListScreen)
     │   ├── Characters (CharactersScreen)
     │   └── Settings (SettingsScreen)

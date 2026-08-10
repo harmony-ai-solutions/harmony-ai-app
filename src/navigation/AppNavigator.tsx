@@ -114,7 +114,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           animation: 'fade',
         }}
       >
-        {/* ── Primary tab container (5-tab layout: Discover | Search | Chat | Characters | Settings) ── */}
+        {/* ── Primary tab container (4-tab layout: Discover | Chat | Characters | Settings) ── */}
         <Stack.Screen name="MainTabs" component={MainTabNavigator} />
 
         {/* ── Legacy landing (kept for backward-compatible deep links) ── */}

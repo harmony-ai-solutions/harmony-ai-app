@@ -15,6 +15,7 @@
  *   - Collapse whitespace to single spaces
  *   - Strip trailing semicolons
  *   - Exclude internal sqlite_* tables
+ *   - Exclude CLIENT-ONLY tables (never synced, never present on the Go engine)
  *
  * Usage:
  *   npx ts-node scripts/dump-schema.ts > rn-schema.json
@@ -31,6 +32,15 @@
 import {createInMemoryDatabase} from '../src/database/__test_utils__/testDatabase';
 import {runMigrations} from '../src/database/migrations';
 import {dumpSchema} from '../src/database/__test_utils__/dumpSchema';
+
+/**
+ * Tables that exist ONLY on the RN client and are never synced to the Go
+ * engine. They must be excluded from the schema dump so the parity gate
+ * (RN ↔ Go) does not report them as "RN-only" drift.
+ */
+const CLIENT_ONLY_TABLES = new Set<string>([
+  'character_profile_sources',
+]);
 
 interface Args {
   output?: string;
@@ -52,7 +62,9 @@ async function main() {
   try {
     // silent=true suppresses migration log output
     await runMigrations(db, true);
-    const schema = await dumpSchema(db);
+    const schema = (await dumpSchema(db)).filter(
+      entry => !CLIENT_ONLY_TABLES.has(entry.name),
+    );
     const json = JSON.stringify(schema, null, 2);
 
     if (args.output) {

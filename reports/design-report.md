@@ -325,8 +325,7 @@ RootStack (Native Stack, transparent, fade animations)
 | **ChatListScreen** | [`ChatListScreen.tsx`](../src/screens/ChatListScreen.tsx) | Conversation list with last message previews, entity selection, JOIN-based queries |
 | **ChatDetailScreen** | [`ChatDetailScreen.tsx`](../src/screens/ChatDetailScreen.tsx) | Full chat interface with text/audio bubbles, QoL features |
 | **CharactersScreen** | [`CharactersScreen.tsx`](../src/screens/CharactersScreen.tsx) | AI character list and management |
-| **DiscoverScreen** | [`DiscoverScreen.tsx`](../src/screens/DiscoverScreen.tsx) | Content discovery, featured content |
-| **SearchScreen** | [`SearchScreen.tsx`](../src/screens/SearchScreen.tsx) | Global search across entities and content |
+| **DiscoverScreen** | [`DiscoverScreen.tsx`](../src/screens/DiscoverScreen.tsx) | Content discovery, featured content, character search |
 | **SettingsScreen** | [`SettingsScreen.tsx`](../src/screens/SettingsScreen.tsx) | Settings hub with categorized sections |
 | **LandingScreen** | [`LandingScreen.tsx`](../src/screens/LandingScreen.tsx) | Legacy landing with hero cards |
 
@@ -467,7 +466,7 @@ Additional props: `weight` (normal, bold, semibold), `size` (numeric), `align` (
 
 The app uses [`react-native-vector-icons`](https://github.com/oblador/react-native-vector-icons) with Material Community Icons as the primary icon set:
 
-- **Tab bar icons**: Discover (compass), Search (magnify), Chat (message-text), Characters (account-group), Settings (cog)
+- **Tab bar icons**: Discover (compass), Chat (message-text), Characters (account-group), Settings (cog)
 - **Status icons**: Connected (check-circle), Disconnected (close-circle), Provisioning (clock-outline)
 - **Action icons**: Send (send), Microphone (microphone), Stop (stop), Play (play), Pause (pause)
 - **Navigation icons**: Back (chevron-left), Close (close), Menu (dots-vertical)
@@ -505,7 +504,6 @@ Currently supports **English (en)** with 25 namespaces:
 | `moduleConfig` | Module configuration |
 | `navigation` | Tab labels, screen titles |
 | `profile` | User profile |
-| `search` | Search functionality |
 | `settings` | Settings categories |
 | `syncConnection` | Sync connection status/alerts |
 | `syncSettings` | Sync settings screen |

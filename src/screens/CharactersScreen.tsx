@@ -536,7 +536,7 @@ export const CharactersScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
-      {/* Header + search bar (child, like SearchScreen) */}
+      {/* Header + search bar (child) */}
       <ScreenHeader title={t('title')}>
         <View
           style={[

@@ -49,6 +49,11 @@ import { migration038 } from './migrations/000038_add_lifecycle_state';
 import { migration039 } from './migrations/000039_device_push_tokens_reserved';
 import { migration040 } from './migrations/000040_lifecycle_state_sync_columns';
 
+// NOTE(rebase): senju migration imports below collide on identifiers
+// (migration035/000036…) until integration commit A renumbers them 41–55.
+import { migration035 as migration035s } from './migrations/000035_add_character_profile_source';
+import { migration036 as migration036s } from './migrations/000036_backfill_character_profile_source';
+
 // Migration definition
 export interface Migration {
   version: number;
@@ -259,6 +264,18 @@ export const MIGRATIONS: Migration[] = [
     version: 40,
     description: 'lifecycle_state sync columns (watermark contract)',
     sql: migration040,
+   },
+   // NOTE(rebase): senju pre-renumber registrations below — duplicate versions
+   // 35/36 until integration commit A renumbers these entries 41–55.
+   {
+    version: 35,
+    description: 'add_character_profile_source',
+    sql: migration035s,
+   },
+   {
+    version: 36,
+    description: 'backfill_character_profile_source',
+    sql: migration036s,
    },
   ];
 

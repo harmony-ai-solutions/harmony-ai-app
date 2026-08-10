@@ -1,6 +1,10 @@
 {
   "title": "Discover",
-  "subtitle": "Explore AI personas, trending characters, and community showcases",
-  "comingSoon": "Coming Soon",
-  "description": "We're curating an immersive discovery experience\nfilled with AI personas, trending characters,\nand community showcases."
+  "subtitle": "Discover AI characters created by other users",
+  "searchPlaceholder": "Search characters...",
+  "noResults": "No results found for \"{{query}}\"",
+  "noResultsHint": "Try a different name or letter.",
+  "noCharacters": "No characters to discover yet",
+  "noCharactersHint": "Characters created by other users will show up here.",
+  "chatOpenFailed": "Could not open chat with this character."
 }

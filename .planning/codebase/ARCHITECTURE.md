@@ -37,7 +37,7 @@
 
 **Navigation:**
 - Purpose: Declares the route graph and navigation theming.
-- Location: `src/navigation/AppNavigator.tsx` (root native stack, `RootStackParamList` type), `src/navigation/MainTabNavigator.tsx` (5 tabs: Discover | Search | Chat | Characters | Settings).
+- Location: `src/navigation/AppNavigator.tsx` (root native stack, `RootStackParamList` type), `src/navigation/MainTabNavigator.tsx` (4 tabs: Discover | Chat | Characters | Settings).
 - Contains: `RootStackParamList` and `MainTabParamList` route param types.
 - Depends on: `@react-navigation/native`, `@react-navigation/native-stack`, `@react-navigation/bottom-tabs`, screens.
 - Used by: `App.tsx` (`AppShell`).
@@ -146,7 +146,8 @@
 
 **Versioned migrations:**
 - Purpose: Forward-only schema evolution with a schema dump for parity checks.
-- Examples: `src/database/migrations/000001_initial_schema.ts` … `000034_add_unique_name_constraint_vision_imagination.ts`, orchestrated by `src/database/migrations.ts`; dump tool `scripts/dump-schema.ts` + comparison `scripts/compare-schemas.py` against `schema/rn-schema.json`.
+- Examples: `src/database/migrations/000001_initial_schema.ts` … `000036_backfill_character_profile_source.ts`, orchestrated by `src/database/migrations.ts`; dump tool `scripts/dump-schema.ts` + comparison `scripts/compare-schemas.py` against `schema/rn-schema.json`.
+- Note: Migrations 000035/000036 add a CLIENT-ONLY table (`character_profile_sources`) that is excluded from the RN↔Go schema parity dump via `CLIENT_ONLY_TABLES` in `scripts/dump-schema.ts` — it never exists on the engine.
 
 ## Entry Points
 

@@ -21,6 +21,9 @@ import {
   getPrimaryImage,
   imageToDataURL,
   getCharacterImagesWithDataURLs,
+  setCharacterProfileSource,
+  getCharacterProfileSource,
+  getCommunityCharacterProfiles,
 } from '../../repositories/characters';
 import type {CharacterImage} from '../../models';
 
@@ -399,6 +402,47 @@ describe('characters repository', () => {
       for (const [key, value] of Object.entries(v3Fields)) {
         expect(retrieved![key as keyof typeof v3Fields]).toBe(value);
       }
+    });
+  });
+  describe('character profile source tagging', () => {
+    it('defaults to community when no sidecar row exists', async () => {
+      await createMinimalProfile('src-default-community');
+      const source = await getCharacterProfileSource('src-default-community');
+      expect(source).toBe('community');
+    });
+
+    it('setCharacterProfileSource marks a profile as user', async () => {
+      await createMinimalProfile('src-user');
+      await setCharacterProfileSource('src-user', 'user');
+      expect(await getCharacterProfileSource('src-user')).toBe('user');
+    });
+
+    it('setCharacterProfileSource upserts (idempotent re-tag)', async () => {
+      await createMinimalProfile('src-retag');
+      await setCharacterProfileSource('src-retag', 'community');
+      expect(await getCharacterProfileSource('src-retag')).toBe('community');
+      await setCharacterProfileSource('src-retag', 'user');
+      expect(await getCharacterProfileSource('src-retag')).toBe('user');
+    });
+
+    it('getCommunityCharacterProfiles excludes user-tagged profiles', async () => {
+      await createMinimalProfile('src-comm-1');
+      await createMinimalProfile('src-comm-2');
+      await createMinimalProfile('src-user-1');
+      await setCharacterProfileSource('src-user-1', 'user');
+
+      const community = await getCommunityCharacterProfiles();
+      const ids = community.map(p => p.id);
+      expect(ids).toContain('src-comm-1');
+      expect(ids).toContain('src-comm-2');
+      expect(ids).not.toContain('src-user-1');
+    });
+
+    it('getCommunityCharacterProfiles excludes soft-deleted profiles', async () => {
+      await createMinimalProfile('src-del-1');
+      await deleteCharacterProfile('src-del-1');
+      const community = await getCommunityCharacterProfiles();
+      expect(community.some(p => p.id === 'src-del-1')).toBe(false);
     });
   });
 });

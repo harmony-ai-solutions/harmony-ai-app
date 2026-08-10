@@ -57,6 +57,7 @@ import {
   createCharacterImage,
   getAllCharacterProfiles,
   getCharacterImages,
+  setCharacterProfileSource,
 } from '../database/repositories/characters';
 import { createDataURL } from '../database/base64';
 import {
@@ -383,6 +384,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           base_prompt: '',
           scenario: '',
         });
+        // Tag as user-created so it is hidden from the Discover community grid
+        await setCharacterProfileSource(profileId, 'user');
 
         // 2. Add avatar image if selected (only for newly created profiles)
         if (avatarBase64 && avatarMimeType) {
