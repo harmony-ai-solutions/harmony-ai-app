@@ -1,8 +1,8 @@
 /**
- * MainTabNavigator — 4-Tab Bottom Navigation with GlassTabBar
+ * MainTabNavigator — 5-Tab Bottom Navigation with GlassTabBar
  *
  * Layout order (Discover is centered and is the default tab shown on app open):
- *   Chat  |  Discover [CENTER]  |  Characters  |  Market
+ *   Characters  |  Chat  |  Discover [CENTER]  |  Market  |  My Profile
  *
  * Settings is NOT a tab anymore — it's pushed over the tabs from the root
  * stack and is reachable via the hamburger (☰) menu in each tab header
@@ -19,6 +19,7 @@ import { DiscoverScreen } from '../screens/DiscoverScreen';
 import { ChatListScreen } from '../screens/ChatListScreen';
 import { CharactersScreen } from '../screens/CharactersScreen';
 import { MarketScreen } from '../screens/MarketScreen';
+import { MyProfileScreen } from '../screens/MyProfileScreen';
 
 // ── Tab param list ──────────────────────────────────────────────────────────
 export type MainTabParamList = {
@@ -26,6 +27,7 @@ export type MainTabParamList = {
   Chat: undefined;
   Characters: undefined;
   Market: undefined;
+  MyProfile: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -55,6 +57,14 @@ export const MainTabNavigator: React.FC = () => {
       initialRouteName="Discover"
     >
       <Tab.Screen
+        name="Characters"
+        component={CharactersScreen}
+        options={{
+          tabBarLabel: 'Characters',
+          tabBarButtonTestID: 'tab-characters',
+        }}
+      />
+      <Tab.Screen
         name="Chat"
         component={ChatListScreen}
         options={{
@@ -71,19 +81,19 @@ export const MainTabNavigator: React.FC = () => {
         }}
       />
       <Tab.Screen
-        name="Characters"
-        component={CharactersScreen}
-        options={{
-          tabBarLabel: 'Characters',
-          tabBarButtonTestID: 'tab-characters',
-        }}
-      />
-      <Tab.Screen
         name="Market"
         component={MarketScreen}
         options={{
           tabBarLabel: 'Market',
           tabBarButtonTestID: 'tab-market',
+        }}
+      />
+      <Tab.Screen
+        name="MyProfile"
+        component={MyProfileScreen}
+        options={{
+          tabBarLabel: 'My Profile',
+          tabBarButtonTestID: 'tab-my-profile',
         }}
       />
     </Tab.Navigator>

@@ -52,6 +52,7 @@ const TAB_ICONS: Record<string, { default: string; focused: string }> = {
   Chat: { default: 'chat-processing-outline', focused: 'chat-processing' },
   Characters: { default: 'account-group-outline', focused: 'account-group' },
   Market: { default: 'storefront-outline', focused: 'storefront' },
+  MyProfile: { default: 'account-circle-outline', focused: 'account-circle' },
 };
 
 // ── Fallback labels (overridable via navigator options.tabBarLabel) ─────────
@@ -60,6 +61,7 @@ const FALLBACK_LABELS: Record<string, string> = {
   Chat: 'Chat',
   Characters: 'Characters',
   Market: 'Market',
+  MyProfile: 'My Profile',
 };
 
 // ── Component ───────────────────────────────────────────────────────────────

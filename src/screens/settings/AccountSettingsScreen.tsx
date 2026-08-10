@@ -39,12 +39,6 @@ export const AccountSettingsScreen: React.FC = () => {
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('security')} style={styles.sectionHeader} />
           <SettingsLinkRow
-            icon="account-circle"
-            label={t('userProfile')}
-            onPress={() => navigation.navigate('ProfileSettings')}
-            theme={theme}
-          />
-          <SettingsLinkRow
             icon="fingerprint"
             label={t('biometricLock')}
             onPress={() => navigation.navigate('BiometricLockSettings')}

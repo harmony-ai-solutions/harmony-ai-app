@@ -31,7 +31,7 @@ import { HelpSupportSettingsScreen } from '../screens/settings/HelpSupportSettin
 import { SettingsScreen } from '../screens/SettingsScreen';
 
 export type RootStackParamList = {
-  /** Tab container — the primary navigation surface (4-tab layout) */
+  /** Tab container — the primary navigation surface (5-tab layout) */
   MainTabs: undefined;
   /** Legacy landing (kept for backward-compatible deep links) */
   Landing: undefined;
@@ -117,7 +117,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           animation: 'fade',
         }}
       >
-        {/* ── Primary tab container (4-tab layout: Chat | Discover | Characters | Market) ── */}
+        {/* ── Primary tab container (5-tab layout: Characters | Chat | Discover | Market | My Profile) ── */}
         <Stack.Screen name="MainTabs" component={MainTabNavigator} />
 
         {/* ── Legacy landing (kept for backward-compatible deep links) ── */}
