@@ -38,7 +38,6 @@ import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { hexToRgba } from '../utils/colorUtils';
-import { ImpersonationSelectorModal } from '../components/modals/ImpersonationSelectorModal';
 import { InfoModal } from '../components/modals/InfoModal';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { createLogger } from '../utils/logger';
@@ -84,13 +83,11 @@ export const ChatListScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [infoModalVisible, setInfoModalVisible] = useState(false);
 
-  // Global impersonation state
+  // Global impersonation state (the persona the user is "chatting as").
+  // The "Chatting as" pill selector was removed from this screen to be
+  // re-introduced on another screen later, but the selected persona still
+  // drives which conversations are shown here.
   const [impersonatedEntityId, setImpersonatedEntityId] = useState<string>('user');
-  const [impersonatedEntityDisplay, setImpersonatedEntityDisplay] = useState<{
-    name: string;
-    avatarUri: string | null;
-  }>({ name: 'User', avatarUri: null });
-  const [selectorModalVisible, setSelectorModalVisible] = useState(false);
 
   // Stable ref so onRefresh ([] deps) always reads the latest entity ID
   const impersonatedEntityIdRef = useRef(impersonatedEntityId);
@@ -354,19 +351,6 @@ export const ChatListScreen: React.FC = () => {
       }
 
       setImpersonatedEntityId(resolvedId);
-
-      // Load display info for banner
-      const entity = allEntities.find(e => e.id === resolvedId);
-      if (entity?.character_profile_id) {
-        const profile = await getCharacterProfile(entity.character_profile_id);
-        const image = await getPrimaryImage(entity.character_profile_id);
-        setImpersonatedEntityDisplay({
-          name: profile?.name ?? resolvedId,
-          avatarUri: image ? imageToDataURL(image) : null,
-        });
-      } else {
-        setImpersonatedEntityDisplay({ name: resolvedId, avatarUri: null });
-      }
     } catch (error) {
       log.error('Failed to load impersonated entity:', error);
     }
@@ -420,41 +404,6 @@ export const ChatListScreen: React.FC = () => {
       });
     }
   };
-
-  const handleImpersonationSelect = async (entityId: string) => {
-    try {
-      await ChatPreferencesService.setGlobalImpersonatedEntity(entityId);
-      setImpersonatedEntityId(entityId);
-
-      // Also update the display info for the banner
-      const allEntities = await getAllEntities();
-      const entity = allEntities.find(e => e.id === entityId);
-      if (entity?.character_profile_id) {
-        const profile = await getCharacterProfile(entity.character_profile_id);
-        const image = await getPrimaryImage(entity.character_profile_id);
-        setImpersonatedEntityDisplay({
-          name: profile?.name ?? entityId,
-          avatarUri: image ? imageToDataURL(image) : null,
-        });
-      } else {
-        setImpersonatedEntityDisplay({ name: entityId, avatarUri: null });
-      }
-
-      setSelectorModalVisible(false);
-      // loadChatList will re-run via the useEffect that watches impersonatedEntityId
-    } catch (error) {
-      log.error('Failed to save global entity preference:', error);
-      setSelectorModalVisible(false);
-    }
-  };
-
-  // Open the settings / module configuration for the currently selected
-  // role-playing identity (the entity the user is "acting as").
-  const handleEditMyIdentity = useCallback(() => {
-    navigation.navigate('EntityConfigEdit', {
-      entityId: impersonatedEntityIdRef.current,
-    });
-  }, [navigation]);
 
   const renderItem = ({ item }: { item: ChatListItem }) => (
     <TouchableOpacity
@@ -570,109 +519,6 @@ export const ChatListScreen: React.FC = () => {
           <View style={styles.headerRightRow}>
             {/* ── "Three lines" menu — opens the Settings screen ── */}
             <HeaderMenuButton />
-
-            {/* ── "My Identity Settings" quick access ── */}
-            <TouchableOpacity
-              onPress={handleEditMyIdentity}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={[
-                styles.myIdentityButton,
-                { backgroundColor: hexToRgba(theme?.colors.background.base ?? '#0f172a', 0.75) },
-              ]}
-              activeOpacity={0.7}
-              accessibilityLabel={t('editMyIdentity')}
-              testID="edit-my-identity-button"
-            >
-              <LinearGradient
-                colors={[
-                  (theme?.colors.accent.primary ?? '#ec4899') + '18',
-                  'transparent',
-                ]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFill}
-                pointerEvents="none"
-              />
-              <Icon
-                name="cog-outline"
-                size={18}
-                color={theme?.colors.text.primary}
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.impersonationHeaderAction}
-              onPress={() => setSelectorModalVisible(true)}
-              activeOpacity={0.7}
-            >
-              {/* ── Obsidian Glass pill chip ── */}
-              <View
-                style={[
-                  styles.impersonationPill,
-                  {
-                    backgroundColor: hexToRgba(theme?.colors.background.base ?? '#0f172a', 0.78),
-                    shadowColor: theme?.colors.accent.primary ?? '#ec4899',
-                  },
-                ]}
-              >
-                {/* Prismatic tint overlay */}
-                <LinearGradient
-                  colors={[
-                    (theme?.colors.accent.primary ?? '#ec4899') + '12',
-                    'transparent',
-                    (theme?.colors.accent.secondary ?? '#a78bfa') + '0A',
-                  ]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFill}
-                  pointerEvents="none"
-                />
-                {/* ── Gradient ring avatar ── */}
-                <LinearGradient
-                  colors={[
-                    theme?.colors.accent.primary ?? '#ec4899',
-                    theme?.colors.accent.secondary ?? '#a78bfa',
-                  ]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.impersonationPillAvatarRing}
-                >
-                  <View style={[styles.impersonationPillAvatarInner, { backgroundColor: theme?.colors.background.elevated ?? '#334155' }]}>
-                    {impersonatedEntityDisplay.avatarUri ? (
-                      <Image
-                        source={{ uri: impersonatedEntityDisplay.avatarUri }}
-                        style={styles.impersonationPillAvatarImage}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <ThemedText
-                        size={11}
-                        weight="bold"
-                        style={{ color: theme?.colors.accent.primary }}
-                      >
-                        {impersonatedEntityDisplay.name.substring(0, 2).toUpperCase()}
-                      </ThemedText>
-                    )}
-                  </View>
-                </LinearGradient>
-                {/* ── Labels ── */}
-                <View style={styles.impersonationPillLabels}>
-                  <ThemedText variant="muted" size={10} hierarchy="caption">
-                    {t('chattingAs')}
-                  </ThemedText>
-                  <ThemedText size={13} weight="bold" numberOfLines={1} style={styles.impersonationPillName}>
-                    {impersonatedEntityDisplay.name}
-                  </ThemedText>
-                </View>
-                {/* ── Chevron indicator ── */}
-                <Icon
-                  name="chevron-down"
-                  size={14}
-                  color={theme?.colors.text.muted}
-                  style={styles.impersonationPillChevron}
-                />
-              </View>
-            </TouchableOpacity>
           </View>
         }
       />
@@ -754,17 +600,6 @@ export const ChatListScreen: React.FC = () => {
 
 
       <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }} />
-
-      <ImpersonationSelectorModal
-        visible={selectorModalVisible}
-        onSelect={handleImpersonationSelect}
-        onCancel={() => setSelectorModalVisible(false)}
-        preSelectedEntityId={impersonatedEntityId}
-        onEditIdentity={(entityId) => {
-          setSelectorModalVisible(false);
-          navigation.navigate('EntityConfigEdit', { entityId });
-        }}
-      />
 
       <InfoModal
         visible={infoModalVisible}
@@ -864,70 +699,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 6,
     elevation: 3,
-  },
-  // ── "My Identity Settings" quick-access button ──
-  myIdentityButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  impersonationHeaderAction: {
-    // no-op — pill handles its own layout
-  },
-  // ── Obsidian Glass pill chip ──
-  impersonationPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 20,
-    paddingLeft: 3,
-    paddingRight: 10,
-    paddingVertical: 4,
-    gap: 7,
-    overflow: 'hidden',
-    // ambient glow
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  impersonationPillAvatarRing: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    padding: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexShrink: 0,
-  },
-  impersonationPillAvatarInner: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  impersonationPillAvatarImage: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-  },
-  impersonationPillLabels: {
-    alignItems: 'flex-start',
-    gap: 1,
-  },
-  impersonationPillName: {
-    maxWidth: 90,
-  },
-  impersonationPillChevron: {
-    marginLeft: 1,
   },
   timeText: {
     alignSelf: 'center',
