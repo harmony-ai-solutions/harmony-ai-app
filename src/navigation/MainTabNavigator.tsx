@@ -1,8 +1,8 @@
 /**
  * MainTabNavigator — 4-Tab Bottom Navigation with GlassTabBar
  *
- * Layout order (center-anchored Chat as primary workspace):
- *   Discover  |  Chat [CENTER]  |  Characters  |  Settings
+ * Layout order (Discover is centered and is the default tab shown on app open):
+ *   Chat  |  Discover [CENTER]  |  Characters  |  Settings
  *
  * Each tab screen renders with a transparent/glass background so the
  * persistent DynamicAtmosphericBackground aurora layer bleeds through.
@@ -48,22 +48,22 @@ export const MainTabNavigator: React.FC = () => {
         ...screenOptions,
         tabBarStyle: tabBarOptions.style,
       }}
-      initialRouteName="Chat"
+      initialRouteName="Discover"
     >
-      <Tab.Screen
-        name="Discover"
-        component={DiscoverScreen}
-        options={{
-          tabBarLabel: 'Discover',
-          tabBarButtonTestID: 'tab-discover',
-        }}
-      />
       <Tab.Screen
         name="Chat"
         component={ChatListScreen}
         options={{
           tabBarLabel: 'Chat',
           tabBarButtonTestID: 'tab-chat',
+        }}
+      />
+      <Tab.Screen
+        name="Discover"
+        component={DiscoverScreen}
+        options={{
+          tabBarLabel: 'Discover',
+          tabBarButtonTestID: 'tab-discover',
         }}
       />
       <Tab.Screen
