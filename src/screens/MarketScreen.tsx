@@ -27,6 +27,7 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
+import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SoulIcon } from '../components/market/SoulIcon';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
@@ -159,36 +160,12 @@ export const MarketScreen: React.FC = () => {
       >
         {/* ── Search state: query with no content ─────────────────────────── */}
         {hasQuery ? (
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIconWrap}>
-              <ThemedGradient gradient="primary" style={styles.emptyIconRing}>
-                <ThemedView variant="elevated" style={styles.emptyIconInner}>
-                  <Icon
-                    name="file-search-outline"
-                    size={40}
-                    color={theme.colors.accent.primary}
-                  />
-                </ThemedView>
-              </ThemedGradient>
-            </View>
-            <ThemedText
-              variant="primary"
-              size={18}
-              weight="bold"
-              hierarchy="header"
-              style={styles.emptyTitle}
-            >
-              {t('noResultsTitle')}
-            </ThemedText>
-            <ThemedText
-              variant="muted"
-              size={14}
-              hierarchy="subtext"
-              style={styles.emptySubtext}
-            >
-              {t('noResultsHint', { query })}
-            </ThemedText>
-          </View>
+          <ThemedEmptyState
+            icon="file-search-outline"
+            title={t('noResultsTitle')}
+            subtitle={t('noResultsHint', { query })}
+            style={styles.emptyState}
+          />
         ) : (
           <>
             {/* ── Coming Soon hero card ── */}
@@ -341,29 +318,8 @@ const styles = StyleSheet.create({
   clearIcon: { marginLeft: 6 },
   // ── Empty state (search with no content) ──────────────────────────────
   emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 64,
-    paddingHorizontal: 24,
-    gap: 8,
+    width: '100%',
   },
-  emptyIconWrap: { marginBottom: 8 },
-  emptyIconRing: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyIconInner: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTitle: { textAlign: 'center' },
-  emptySubtext: { textAlign: 'center', lineHeight: 20 },
   // ── Hero "Coming Soon" card ───────────────────────────────────────────
   heroCard: {
     marginBottom: 16,

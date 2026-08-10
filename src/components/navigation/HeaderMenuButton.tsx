@@ -7,6 +7,15 @@ import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
 
 /**
+ * Build the theme's primary gradient stops for a single hamburger line.
+ * Mirrors `theme.colors.gradients.primary` (accent primary → secondary),
+ * e.g. Midnight Rose renders pink → purple instead of a flat accent color.
+ */
+function accentGradient(primary: string, secondary: string): string[] {
+  return [primary, secondary ?? primary];
+}
+
+/**
  * HeaderMenuButton — "three lines" (☰) hamburger menu button.
  *
  * Renders a compact obsidian-glass circular button containing three
@@ -28,7 +37,11 @@ export const HeaderMenuButton: React.FC = () => {
   if (!theme) return null;
 
   const accentPrimary = theme.colors.accent.primary;
+  const accentSecondary = theme.colors.accent.secondary;
   const baseHex = theme.colors.background.base;
+
+  // Design gradient for the hamburger lines (e.g. pink → purple)
+  const lineColors = accentGradient(accentPrimary, accentSecondary);
 
   return (
     <TouchableOpacity
@@ -49,11 +62,26 @@ export const HeaderMenuButton: React.FC = () => {
         pointerEvents="none"
       />
 
-      {/* ── Three lines ── */}
+      {/* ── Three lines — gradient (primary → secondary) matching the design ── */}
       <View style={styles.lines}>
-        <View style={[styles.line, { backgroundColor: accentPrimary }]} />
-        <View style={[styles.line, { backgroundColor: accentPrimary }]} />
-        <View style={[styles.line, { backgroundColor: accentPrimary }]} />
+        <LinearGradient
+          colors={lineColors}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.line}
+        />
+        <LinearGradient
+          colors={lineColors}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.line}
+        />
+        <LinearGradient
+          colors={lineColors}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.line}
+        />
       </View>
     </TouchableOpacity>
   );

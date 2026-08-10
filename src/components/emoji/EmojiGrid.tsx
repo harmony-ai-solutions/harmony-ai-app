@@ -12,6 +12,7 @@ import { EmojiCategory, EmojiEntry } from '../../types/emoji';
 import { EmojiAction } from '../../database/models';
 import EmojiItem from './EmojiItem';
 import { ThemedText } from '../themed/ThemedText';
+import { ThemedEmptyState } from '../themed/ThemedEmptyState';
 
 interface EmojiGridProps {
   categories: EmojiCategory[];
@@ -115,6 +116,15 @@ export const EmojiGrid: React.FC<EmojiGridProps> = memo(({
       keyExtractor={keyExtractor}
       showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.contentContainer}
+      ListEmptyComponent={
+        <ThemedEmptyState
+          icon="emoticon-search-outline"
+          title="No emoji found"
+          subtitle="Try a different search term."
+          compact
+          style={styles.emptyState}
+        />
+      }
       removeClippedSubviews={true}
       maxToRenderPerBatch={20}
       windowSize={5}
@@ -138,6 +148,10 @@ const styles = StyleSheet.create({
   contentContainer: {
     paddingHorizontal: 12,
     paddingBottom: 8,
+    flexGrow: 1,
+  },
+  emptyState: {
+    width: '100%',
   },
   headerContainer: {
     width: '100%',

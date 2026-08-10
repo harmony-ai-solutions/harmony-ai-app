@@ -7,7 +7,6 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -15,8 +14,8 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
-import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
+import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ThemedFab } from '../components/themed/ThemedFab';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { createLogger } from '../utils/logger';
@@ -173,25 +172,20 @@ export const EntityConfigScreen: React.FC = () => {
               <ActivityIndicator size="large" color={theme.colors.accent.primary} />
             </View>
           ) : (
-            <View style={styles.emptyContainer}>
-              <Icon
-                name="robot-outline"
-                size={72}
-                color={theme.colors.text.muted}
-              />
-              <ThemedText weight="bold" size={18} style={styles.emptyTitle}>
-                No AI entities configured
-              </ThemedText>
-              <ThemedText variant="muted" size={14} style={styles.emptySubtext}>
-                Tap + to create your first AI chat partner.
-              </ThemedText>
-              <ThemedButton
-                variant="primary"
-                label="+ Create First AI"
-                onPress={() => navigation.navigate('CreateAI', {})}
-                style={styles.emptyButton}
-              />
-            </View>
+            <ThemedEmptyState
+              icon="robot-outline"
+              title="No AI entities configured"
+              subtitle="Tap + to create your first AI chat partner."
+              style={styles.emptyContainer}
+              action={
+                <ThemedButton
+                  variant="primary"
+                  label="+ Create First AI"
+                  onPress={() => navigation.navigate('CreateAI', {})}
+                  style={styles.emptyButton}
+                />
+              }
+            />
           )
         }
         renderItem={({ item }) => (
@@ -220,15 +214,10 @@ const styles = StyleSheet.create({
   header: { elevation: 4 },
   centered: { paddingTop: 100, justifyContent: 'center', alignItems: 'center' },
   listContent: { padding: 12, paddingBottom: 80 },
-  emptyListContent: { flex: 1, justifyContent: 'center' },
+  emptyListContent: { flex: 1 },
   emptyContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-    gap: 12,
+    width: '100%',
   },
-  emptyTitle: { textAlign: 'center', marginTop: 12 },
-  emptySubtext: { textAlign: 'center' },
-  emptyButton: { marginTop: 8, width: '100%' },
+  emptyButton: { width: '100%' },
   fab: { position: 'absolute', bottom: 24, right: 24 },
 });

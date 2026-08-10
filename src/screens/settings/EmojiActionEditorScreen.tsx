@@ -14,6 +14,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { createLogger } from '../../utils/logger';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedView } from '../../components/themed/ThemedView';
+import { ThemedEmptyState } from '../../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedButton } from '../../components/themed/ThemedButton';
 import { ThemedFab } from '../../components/themed/ThemedFab';
@@ -145,14 +146,12 @@ export const EmojiActionEditorScreen: React.FC = () => {
 
   // Empty component
   const ListEmptyComponent = () => (
-    <View style={styles.emptyContainer}>
-      <ThemedText variant="muted" size={16} style={styles.emptyText}>
-        No emoji actions yet
-      </ThemedText>
-      <ThemedText variant="secondary" size={13} style={styles.emptySubtext}>
-        Tap + to add your first action
-      </ThemedText>
-    </View>
+    <ThemedEmptyState
+      icon="emoticon-outline"
+      title="No emoji actions yet"
+      subtitle="Tap + to add your first action"
+      style={styles.emptyContainer}
+    />
   );
 
   // Header component
@@ -258,14 +257,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   emptyContainer: {
-    alignItems: 'center',
-    paddingTop: 60,
-  },
-  emptyText: {
-    marginBottom: 8,
-  },
-  emptySubtext: {
-    textAlign: 'center',
+    width: '100%',
   },
   fab: {
     position: 'absolute',

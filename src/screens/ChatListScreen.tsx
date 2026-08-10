@@ -15,6 +15,7 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
+import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ThemedFab } from '../components/themed/ThemedFab';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
@@ -684,16 +685,18 @@ export const ChatListScreen: React.FC = () => {
             testID="chat-list-cloud-preparing"
             accessibilityLabel="Preparing cloud session"
           >
-            <Icon name="cloud-sync-outline" size={64} color={theme?.colors.text.muted} />
-            <ThemedText style={styles.notPairedText}>{t('preparingCloudTitle')}</ThemedText>
-            <ThemedText variant="muted" size={13} style={styles.notPairedSubText}>
-              {t('preparingCloudHint')}
-            </ThemedText>
-            <ThemedButton
-              label={t('openConnectionManager')}
-              onPress={() => navigation.navigate('ConnectionSetup')}
-              style={styles.connectButton}
-              testID="open-connection-manager-button"
+            <ThemedEmptyState
+              icon="cloud-sync-outline"
+              title={t('preparingCloudTitle')}
+              subtitle={t('preparingCloudHint')}
+              action={
+                <ThemedButton
+                  label={t('openConnectionManager')}
+                  onPress={() => navigation.navigate('ConnectionSetup')}
+                  style={styles.connectButton}
+                  testID="open-connection-manager-button"
+                />
+              }
             />
           </View>
         ) : (
@@ -703,16 +706,18 @@ export const ChatListScreen: React.FC = () => {
             testID="chat-list-not-paired"
             accessibilityLabel="Not paired with Harmony Link"
           >
-            <Icon name="connection" size={64} color={theme?.colors.text.muted} />
-            <ThemedText style={styles.notPairedText}>{t('notConnected')}</ThemedText>
-            <ThemedText variant="muted" size={13} style={styles.notPairedSubText}>
-              {t('notConnectedHint')}
-            </ThemedText>
-            <ThemedButton
-              label={t('connectNow')}
-              onPress={() => navigation.navigate('ConnectionSetup')}
-              style={styles.connectButton}
-              testID="connect-now-button"
+            <ThemedEmptyState
+              icon="connection"
+              title={t('notConnected')}
+              subtitle={t('notConnectedHint')}
+              action={
+                <ThemedButton
+                  label={t('connectNow')}
+                  onPress={() => navigation.navigate('ConnectionSetup')}
+                  style={styles.connectButton}
+                  testID="connect-now-button"
+                />
+              }
             />
           </View>
         )
@@ -735,23 +740,14 @@ export const ChatListScreen: React.FC = () => {
             />
           }
           ListEmptyComponent={
-            <View
+            <ThemedEmptyState
+              icon="chat-outline"
+              title={t('noConversations')}
+              subtitle={t('noConversationsHint')}
               style={styles.emptyContainer}
               testID="chat-list-empty"
               accessibilityLabel="No conversations yet"
-            >
-              <Icon
-                name="chat-outline"
-                size={64}
-                color={theme?.colors.text.muted}
-              />
-              <ThemedText variant="secondary" style={styles.emptyText}>
-                {t('noConversations')}
-              </ThemedText>
-              <ThemedText variant="muted" size={12}>
-                {t('noConversationsHint')}
-              </ThemedText>
-            </View>
+            />
           }
         />
       )}
@@ -843,23 +839,15 @@ const styles = StyleSheet.create({
   },
   notPairedContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
+    alignItems: 'stretch',
+    paddingHorizontal: 20,
   },
-  notPairedText: { marginTop: 16, marginBottom: 8 },
-  notPairedSubText: { marginBottom: 24, textAlign: 'center' },
   connectButton: {
     width: '100%',
   },
   emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-    marginTop: 100,
+    width: '100%',
   },
-  emptyText: { marginTop: 16, marginBottom: 8 },
   headerRightRow: {
     flexDirection: 'row',
     alignItems: 'center',

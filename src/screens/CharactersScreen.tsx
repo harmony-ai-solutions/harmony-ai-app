@@ -23,6 +23,7 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedFab } from '../components/themed/ThemedFab';
+import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
@@ -661,45 +662,38 @@ export const CharactersScreen: React.FC = () => {
               <ActivityIndicator size="large" color={theme.colors.accent.primary} />
             </View>
           ) : (
-            <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons
-                name={
-                  hasActiveFilters
-                    ? 'filter-remove-outline'
-                    : searchQuery
-                      ? 'file-search-outline'
-                      : 'account-outline'
-                }
-                size={72}
-                color={theme.colors.text.muted}
-              />
-              <ThemedText weight="bold" size={18} style={styles.emptyTitle}>
-                {hasActiveFilters || searchQuery
-                  ? t('noResults')
-                  : t('noProfiles')}
-              </ThemedText>
-              <ThemedText variant="muted" size={14} style={styles.emptySubtext}>
-                {hasActiveFilters || searchQuery
-                  ? t('noResultsHint')
-                  : t('noProfilesHint')}
-              </ThemedText>
-              {hasActiveFilters ? (
-                <ThemedButton
-                  variant="outline"
-                  label={t('clearFilters')}
-                  onPress={clearFilters}
-                  style={styles.emptyButton}
-                  testID="empty-clear-filters"
-                />
-              ) : !searchQuery ? (
-                <ThemedButton
-                  variant="primary"
-                  label={t('createFirst')}
-                  onPress={handleCreateNew}
-                  style={styles.emptyButton}
-                />
-              ) : null}
-            </View>
+<ThemedEmptyState
+              icon={
+                hasActiveFilters
+                  ? 'filter-remove-outline'
+                  : searchQuery
+                    ? 'file-search-outline'
+                    : 'account-group-outline'
+              }
+              title={hasActiveFilters || searchQuery ? t('noResults') : t('noProfiles')}
+              subtitle={
+                hasActiveFilters || searchQuery ? t('noResultsHint') : t('noProfilesHint')
+              }
+              style={styles.emptyContainer}
+              action={
+                hasActiveFilters ? (
+                  <ThemedButton
+                    variant="outline"
+                    label={t('clearFilters')}
+                    onPress={clearFilters}
+                    style={styles.emptyButton}
+                    testID="empty-clear-filters"
+                  />
+                ) : !searchQuery ? (
+                  <ThemedButton
+                    variant="primary"
+                    label={t('createFirst')}
+                    onPress={handleCreateNew}
+                    style={styles.emptyButton}
+                  />
+                ) : undefined
+              }
+            />
           )
         }
         renderItem={({ item }) => (
@@ -886,18 +880,13 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   listContent: { padding: 12, paddingBottom: 80 },
-  emptyListContent: { flex: 1, justifyContent: 'center' },
+  emptyListContent: { flex: 1 },
   columnWrapper: { gap: 12, marginBottom: 12 },
   centered: { paddingTop: 100, justifyContent: 'center', alignItems: 'center' },
   emptyContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-    gap: 12,
+    width: '100%',
   },
-  emptyTitle: { textAlign: 'center', marginTop: 12 },
-  emptySubtext: { textAlign: 'center' },
-  emptyButton: { marginTop: 8, width: '100%' },
+  emptyButton: { width: '100%' },
   fab: {
     position: 'absolute',
     bottom: 24,

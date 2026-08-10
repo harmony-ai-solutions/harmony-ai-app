@@ -23,7 +23,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
-import { ThemedText } from '../components/themed/ThemedText';
+import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
@@ -322,17 +322,12 @@ export const DiscoverScreen: React.FC = () => {
         {/* Empty / 0-results overlay */}
         {!isLoading && filteredProfiles.length === 0 && (
           <View style={styles.overlay} pointerEvents="none">
-            <MaterialCommunityIcons
-              name={query ? 'file-search-outline' : 'compass-outline'}
-              size={72}
-              color={theme.colors.text.muted}
+            <ThemedEmptyState
+              icon={query ? 'file-search-outline' : 'compass-outline'}
+              title={query ? t('noResults', { query }) : t('noCharacters')}
+              subtitle={query ? t('noResultsHint') : t('noCharactersHint')}
+              style={styles.emptyOverlay}
             />
-            <ThemedText weight="bold" size={18} style={styles.emptyTitle}>
-              {query ? t('noResults', { query }) : t('noCharacters')}
-            </ThemedText>
-            <ThemedText variant="muted" size={14} style={styles.emptySubtext}>
-              {query ? t('noResultsHint') : t('noCharactersHint')}
-            </ThemedText>
           </View>
         )}
       </View>
@@ -350,9 +345,9 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 32,
-    gap: 12,
+  },
+  emptyOverlay: {
+    width: '100%',
   },
   searchBar: {
     flexDirection: 'row',
@@ -369,8 +364,6 @@ const styles = StyleSheet.create({
   clearIcon: { marginLeft: 6 },
   listContent: { padding: 12, paddingBottom: 80 },
   columnWrapper: { gap: 12, marginBottom: 12 },
-  emptyTitle: { textAlign: 'center', marginTop: 12 },
-  emptySubtext: { textAlign: 'center' },
 });
 
 export default DiscoverScreen;
