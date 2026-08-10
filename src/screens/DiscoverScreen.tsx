@@ -25,6 +25,7 @@ import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
+import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 import { createLogger } from '../utils/logger';
@@ -234,6 +235,7 @@ export const DiscoverScreen: React.FC = () => {
           title={t('title')}
           subtitle={t('subtitle')}
           style={{ paddingTop: 0 }}
+          right={<HeaderMenuButton />}
         >
           {/* Search bar */}
           <View

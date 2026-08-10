@@ -40,7 +40,7 @@ The design system is built on a custom theme engine that mirrors the Harmony Lin
 - Full glassmorphism card system with specular gradient borders and neon glow shadows
 - 8 bundled themes + custom theme creation with RGB editor and JSON import/export
 - Emoji-rich chat with Ekman8 emotion model integration
-- 5-tab bottom navigation with floating glass tab bar
+- 4-tab bottom navigation with floating glass tab bar (Settings moved into the header hamburger menu)
 
 ---
 
@@ -178,7 +178,7 @@ All themed components live in [`src/components/themed/`](../src/components/theme
 | **Characters** | `CharacterProfileCard` (hero card with avatar), `ProfileImagePicker` |
 | **Entities** | `EntityCard` (list item with accent stripe), `EntityModuleSelector` |
 | **Emoji** | `EmojiPickerModal` (full-screen), `EmojiPickerInline` (compact), `EmojiGrid`, `EmojiSearchBar`, `CategoryTabBar`, `SkinToneSelector`, `EmojiAwareText`, `EmojiText` |
-| **Navigation** | `GlassTabBar` (floating translucent tab bar), `SettingsMenu` |
+| **Navigation** | `GlassTabBar` (floating translucent tab bar), `HeaderMenuButton` (hamburger → Settings) |
 | **Settings** | `ThemeCard` (theme preview/selector), `ConnectionStatusBadge`, `EmojiActionCard`, `EmojiStyleCard` |
 | **Cloud** | `CloudProvisioningCard` (multi-stage provisioning with elapsed timer), `StatusPulseDot` |
 | **Modals** | `AppAlertModal`, `CertificateVerificationModal`, `ImageViewerModal`, `ImpersonationSelectorModal`, `InitialPairingModal` |
@@ -613,7 +613,7 @@ The [UI Visual Enhancement Proposal](../design/02%20UI%20Visual%20Enhancement%20
 | [`src/components/background/`](../src/components/background/) | Atmospheric background system |
 | [`src/components/emoji/`](../src/components/emoji/) | Emoji component library |
 | [`src/components/navigation/GlassTabBar.tsx`](../src/components/navigation/GlassTabBar.tsx) | Floating glass tab bar |
-| [`src/components/navigation/SettingsMenu.tsx`](../src/components/navigation/SettingsMenu.tsx) | Settings overlay menu |
+| [`src/components/navigation/HeaderMenuButton.tsx`](../src/components/navigation/HeaderMenuButton.tsx) | Header hamburger (three lines) → Settings |
 
 ### Design Documentation
 

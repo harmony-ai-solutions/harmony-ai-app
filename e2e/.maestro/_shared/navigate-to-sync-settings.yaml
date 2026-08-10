@@ -1,19 +1,21 @@
 # e2e/.maestro/_shared/navigate-to-sync-settings.yaml
 # Reusable flow: navigate from any tab screen to the SyncSettings screen.
 #
-# Path: tap the Settings tab → tap the Sync card on the Settings screen.
-# Selectors verified against src/screens/SettingsScreen.tsx and
-# src/i18n/locales/en/settings.json.
+# Path: tap the header "three lines" (☰) menu button → Settings screen loads
+# (pushed over the tabs) → tap the Sync card.
+# Selectors verified against src/components/navigation/HeaderMenuButton.tsx,
+# src/screens/SettingsScreen.tsx and src/screens/settings/SyncSettingsScreen.tsx.
 
 appId: ai.soulbits.chat.dev
 
 ---
-# Tap the Settings tab in the bottom GlassTabBar.
-# Uses the testID set via tabBarButtonTestID in MainTabNavigator.tsx.
+# Tap the hamburger menu button in the screen header (testID set in
+# HeaderMenuButton.tsx). Settings is no longer a bottom tab — it's accessed
+# via this menu from every tab screen header.
 - tapOn:
-    id: "tab-settings"
+    id: "header-menu-button"
 
-# Settings screen renders two tappable cards: Connection + Sync.
-# Tap the Sync card (the ThemedCard containing the "Sync" section header).
+# The Settings screen opens (pushed over the tabs). Tap the Sync card
+# (the ThemedCard containing the "Sync" section header).
 - tapOn:
     id: "settings-sync-card"

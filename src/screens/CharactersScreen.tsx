@@ -24,6 +24,7 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedFab } from '../components/themed/ThemedFab';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
+import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 import { createLogger } from '../utils/logger';
@@ -537,7 +538,7 @@ export const CharactersScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* Header + search bar (child) */}
-      <ScreenHeader title={t('title')}>
+      <ScreenHeader title={t('title')} right={<HeaderMenuButton />}>
         <View
           style={[
             styles.searchContainer,

@@ -39,6 +39,7 @@ import ChatPreferencesService from '../services/ChatPreferencesService';
 import { hexToRgba } from '../utils/colorUtils';
 import { ImpersonationSelectorModal } from '../components/modals/ImpersonationSelectorModal';
 import { InfoModal } from '../components/modals/InfoModal';
+import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[ChatListScreen]');
@@ -566,6 +567,9 @@ export const ChatListScreen: React.FC = () => {
         }
         right={
           <View style={styles.headerRightRow}>
+            {/* ── "Three lines" menu — opens the Settings screen ── */}
+            <HeaderMenuButton />
+
             {/* ── "My Identity Settings" quick access ── */}
             <TouchableOpacity
               onPress={handleEditMyIdentity}

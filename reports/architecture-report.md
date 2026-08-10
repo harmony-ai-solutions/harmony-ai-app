@@ -143,7 +143,7 @@ components/
 ├── landing/        (1)  — LandingCard
 ├── lock/           (2)  — LockScreen, PinSetupModal
 ├── modals/         (7)  — AppAlert, Certificate, ImageViewer, Impersonation, Info, InitialPairing
-├── navigation/     (2)  — GlassTabBar, SettingsMenu
+├── navigation/     (2)  — GlassTabBar, HeaderMenuButton
 ├── settings/       (4)  — ConnectionStatusBadge, EmojiActionCard/Modal, EmojiStyleCard, ThemeCard
 ├── sync/           (1)  — SyncProgressVisualizer
 └── themed/         (9)  — ThemedView, ThemedText, ThemedButton, ThemedCard, ThemedGradient, etc.
@@ -154,7 +154,7 @@ components/
 | File | Purpose |
 |------|---------|
 | [`AppNavigator.tsx`](../src/navigation/AppNavigator.tsx) | Root Native Stack with typed params (`RootStackParamList`), transparent theme |
-| [`MainTabNavigator.tsx`](../src/navigation/MainTabNavigator.tsx) | 5-tab bottom navigator with GlassTabBar |
+| [`MainTabNavigator.tsx`](../src/navigation/MainTabNavigator.tsx) | 4-tab bottom navigator with GlassTabBar (Settings is a root-stack screen opened from the header hamburger menu) |
 
 ### 3.2 Business Logic Layer
 

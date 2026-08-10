@@ -28,9 +28,10 @@ import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen
 import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen';
 import { AppearanceSettingsScreen } from '../screens/settings/AppearanceSettingsScreen';
 import { HelpSupportSettingsScreen } from '../screens/settings/HelpSupportSettingsScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
 
 export type RootStackParamList = {
-  /** Tab container — the primary navigation surface (5-tab layout) */
+  /** Tab container — the primary navigation surface (4-tab layout) */
   MainTabs: undefined;
   /** Legacy landing (kept for backward-compatible deep links) */
   Landing: undefined;
@@ -38,6 +39,7 @@ export type RootStackParamList = {
   ChatList: undefined;
   Characters: undefined;
   Market: undefined;
+  /** Full settings screen — pushed over the tabs from the header hamburger menu */
   Settings: undefined;
   /** Full-screen chat detail pushed over tabs */
   ChatDetail: {
@@ -115,7 +117,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           animation: 'fade',
         }}
       >
-        {/* ── Primary tab container (5-tab layout: Chat | Discover | Characters | Market | Settings) ── */}
+        {/* ── Primary tab container (4-tab layout: Chat | Discover | Characters | Market) ── */}
         <Stack.Screen name="MainTabs" component={MainTabNavigator} />
 
         {/* ── Legacy landing (kept for backward-compatible deep links) ── */}
@@ -134,7 +136,10 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           component={EntityConfigEditScreen}
         />
 
-        {/* ── Settings sub-pages (pushed over tabs from Settings tab) ── */}
+        {/* ── Settings (pushed over tabs from the header hamburger menu) ── */}
+        <Stack.Screen name="Settings" component={SettingsScreen} />
+
+        {/* ── Settings sub-pages (pushed over tabs from Settings) ── */}
         <Stack.Screen name="ConnectionSetup" component={ConnectionSetupScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Register" component={RegisterScreen} />

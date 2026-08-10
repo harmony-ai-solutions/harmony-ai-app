@@ -53,7 +53,7 @@ harmony-ai-app/                        # React Native app (bare RN 0.86, TypeScr
 ## Directory Purposes
 
 **src/components:**
-- Purpose: Reusable, feature-sliced UI components. Subfolders: `themed/` (design-system primitives: `ThemedText.tsx`, `ThemedButton.tsx`, `ThemedCard.tsx`, `ThemedView.tsx`, `ThemedAppbar.tsx`, `ThemedFab.tsx`, `ScreenHeader.tsx`, `SectionHeader.tsx`), `chat/`, `emoji/`, `modals/`, `settings/`, `background/`, `characters/`, `cloud/`, `config/`, `entities/`, `landing/`, `lock/`, `navigation/` (`GlassTabBar.tsx`, `SettingsMenu.tsx`), `sync/`, `database/` (`DatabaseLoadingScreen.tsx`), plus `ErrorBoundary.tsx`.
+- Purpose: Reusable, feature-sliced UI components. Subfolders: `themed/` (design-system primitives: `ThemedText.tsx`, `ThemedButton.tsx`, `ThemedCard.tsx`, `ThemedView.tsx`, `ThemedAppbar.tsx`, `ThemedFab.tsx`, `ScreenHeader.tsx`, `SectionHeader.tsx`), `chat/`, `emoji/`, `modals/`, `settings/`, `background/`, `characters/`, `cloud/`, `config/`, `entities/`, `landing/`, `lock/`, `navigation/` (`GlassTabBar.tsx`, `HeaderMenuButton.tsx`), `sync/`, `database/` (`DatabaseLoadingScreen.tsx`), plus `ErrorBoundary.tsx`.
 - Key files: `src/components/themed/ThemedButton.tsx`, `src/components/navigation/GlassTabBar.tsx`, `src/components/modals/InitialPairingModal.tsx`, `src/components/background/DynamicBackground.tsx`, `src/components/ErrorBoundary.tsx`.
 
 **src/screens:**
@@ -92,7 +92,7 @@ harmony-ai-app/                        # React Native app (bare RN 0.86, TypeScr
 - `index.js`: AppRegistry registration + uuid polyfill import.
 - `App.tsx`: Provider tree + `AppShell` (DB gate, pairing modal, lock overlay, background layer).
 - `src/navigation/AppNavigator.tsx`: Root native-stack (`RootStackParamList`).
-- `src/navigation/MainTabNavigator.tsx`: 5-tab layout (`MainTabParamList`).
+- `src/navigation/MainTabNavigator.tsx`: 4-tab layout (`MainTabParamList`); Settings is a root-stack screen accessed via the header hamburger menu (`HeaderMenuButton`).
 - Native: `android/app/src/main/java/ai/soulbits/chat/MainApplication.kt` (Android), `ios/HarmonyAIChat/AppDelegate.swift` (iOS).
 
 **Configuration:**

@@ -29,6 +29,7 @@ import { ThemedCard } from '../components/themed/ThemedCard';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SoulIcon } from '../components/market/SoulIcon';
+import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 
@@ -79,6 +80,7 @@ export const MarketScreen: React.FC = () => {
       <ScreenHeader
         title={t('title')}
         subtitle={t('subtitle')}
+        right={<HeaderMenuButton />}
         titleRight={
           <View style={styles.balanceBadge}>
             <SoulIcon size={18} />

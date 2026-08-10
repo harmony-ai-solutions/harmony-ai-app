@@ -113,8 +113,8 @@ export const SettingsScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
-      {/* Header */}
-      <ScreenHeader title={t('title')} />
+      {/* Header — back button returns to the tabs since Settings is pushed over them */}
+      <ScreenHeader title={t('title')} onBack={() => navigation.goBack()} />
 
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }]}

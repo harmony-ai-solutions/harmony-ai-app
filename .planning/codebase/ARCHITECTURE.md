@@ -37,7 +37,7 @@
 
 **Navigation:**
 - Purpose: Declares the route graph and navigation theming.
-- Location: `src/navigation/AppNavigator.tsx` (root native stack, `RootStackParamList` type), `src/navigation/MainTabNavigator.tsx` (4 tabs: Discover | Chat | Characters | Settings).
+- Location: `src/navigation/AppNavigator.tsx` (root native stack, `RootStackParamList` type), `src/navigation/MainTabNavigator.tsx` (4 tabs: Chat | Discover | Characters | Market; Settings is a root-stack screen pushed over the tabs, opened from the header hamburger `HeaderMenuButton`).
 - Contains: `RootStackParamList` and `MainTabParamList` route param types.
 - Depends on: `@react-navigation/native`, `@react-navigation/native-stack`, `@react-navigation/bottom-tabs`, screens.
 - Used by: `App.tsx` (`AppShell`).

@@ -28,7 +28,6 @@ import theme from '../i18n/locales/en/theme.json';
 import profile from '../i18n/locales/en/profile.json';
 import entityConfig from '../i18n/locales/en/entityConfig.json';
 import modals from '../i18n/locales/en/modals.json';
-import navigation from '../i18n/locales/en/navigation.json';
 import database from '../i18n/locales/en/database.json';
 import config from '../i18n/locales/en/config.json';
 import development from '../i18n/locales/en/development.json';
@@ -83,7 +82,6 @@ const resources = {
     profile,
     entityConfig,
     modals,
-    navigation,
     database,
     config,
     development,
@@ -118,7 +116,6 @@ const i18nConfig: InitOptions = {
     'profile',
     'entityConfig',
     'modals',
-    'navigation',
     'database',
     'config',
     'development',
