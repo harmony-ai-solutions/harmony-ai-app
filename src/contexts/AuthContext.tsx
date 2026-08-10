@@ -52,6 +52,13 @@ export interface AuthContextType {
   user: UserProfile | null;
   status: AuthStatus;
 
+  // Monotonic counter incremented after EVERY explicit sign-in action
+  // (email/password, Google, Apple). AppShell observes it to navigate the
+  // user straight to their profile (MyProfile tab) after a fresh sign-in —
+  // the app-start bootstrap path (persisted token) does NOT bump it, so
+  // returning users are not yanked to the profile on every launch.
+  signInVersion: number;
+
   // All login/register methods return void: the backend token-pair response
   // carries no user profile, so `user` is populated asynchronously by the
   // `auth:changed` listener (via getProfile). Callers should read `user`/
@@ -82,6 +89,13 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
+  // Incremented on every explicit sign-in (login / social). AppShell watches
+  // this to navigate the freshly-signed-in user to their profile.
+  const [signInVersion, setSignInVersion] = useState(0);
+
+  const bumpSignInVersion = useCallback(() => {
+    setSignInVersion(v => v + 1);
+  }, []);
 
   // ── Bootstrap: load persisted tokens and attempt profile fetch ─────────
   useEffect(() => {
@@ -189,7 +203,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // AuthService.login stores the token pair and emits `auth:changed`; the
     // listener above fetches the profile and flips status to `authenticated`.
     await AuthService.login(email, password);
-  }, []);
+    bumpSignInVersion();
+  }, [bumpSignInVersion]);
 
   const registerAction = useCallback(
     async (email: string, password: string, displayName: string) => {
@@ -201,11 +216,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const loginWithGoogle = useCallback(async (idToken: string) => {
     await AuthService.loginWithGoogle(idToken);
-  }, []);
+    bumpSignInVersion();
+  }, [bumpSignInVersion]);
 
   const loginWithApple = useCallback(async (identityToken: string) => {
     await AuthService.loginWithApple(identityToken);
-  }, []);
+    bumpSignInVersion();
+  }, [bumpSignInVersion]);
 
   const logout = useCallback(async () => {
     await cloudSessionService.disconnect().catch(() => {});
@@ -220,6 +237,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       value={{
         user,
         status,
+        signInVersion,
         login,
         register: registerAction,
         loginWithGoogle,

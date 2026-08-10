@@ -53,11 +53,11 @@ harmony-ai-app/                        # React Native app (bare RN 0.86, TypeScr
 ## Directory Purposes
 
 **src/components:**
-- Purpose: Reusable, feature-sliced UI components. Subfolders: `themed/` (design-system primitives: `ThemedText.tsx`, `ThemedButton.tsx`, `ThemedCard.tsx`, `ThemedView.tsx`, `ThemedAppbar.tsx`, `ThemedFab.tsx`, `ScreenHeader.tsx`, `SectionHeader.tsx`), `chat/`, `emoji/`, `modals/`, `settings/`, `background/`, `characters/`, `cloud/`, `config/`, `entities/`, `landing/`, `lock/`, `navigation/` (`GlassTabBar.tsx`, `HeaderMenuButton.tsx`), `sync/`, `database/` (`DatabaseLoadingScreen.tsx`), plus `ErrorBoundary.tsx`.
+- Purpose: Reusable, feature-sliced UI components. Subfolders: `themed/` (design-system primitives: `ThemedText.tsx`, `ThemedButton.tsx`, `ThemedCard.tsx`, `ThemedView.tsx`, `ThemedAppbar.tsx`, `ThemedFab.tsx`, `ScreenHeader.tsx`, `SectionHeader.tsx`), `chat/`, `emoji/`, `modals/`, `settings/`, `background/`, `characters/`, `cloud/`, `config/`, `entities/`, `landing/`, `lock/`, `navigation/` (`GlassTabBar.tsx`, `HeaderMenuButton.tsx`), `profile/` (`ProfileAvatar.tsx`, `PersonaRow.tsx`, `ProfileTabs.tsx`), `sync/`, `database/` (`DatabaseLoadingScreen.tsx`), plus `ErrorBoundary.tsx`.
 - Key files: `src/components/themed/ThemedButton.tsx`, `src/components/navigation/GlassTabBar.tsx`, `src/components/modals/InitialPairingModal.tsx`, `src/components/background/DynamicBackground.tsx`, `src/components/ErrorBoundary.tsx`.
 
 **src/screens:**
-- Purpose: Route-level components. Top-level: `DiscoverScreen.tsx`, `ChatListScreen.tsx` (tab "Chat"), `CharactersScreen.tsx`, `SettingsScreen.tsx`, `ChatDetailScreen.tsx`, `CreateAIScreen.tsx`, `EntityConfigScreen.tsx`, `EntityConfigEditScreen.tsx`, `CharacterProfileEditScreen.tsx`, `AIConfigScreen.tsx`, `LandingScreen.tsx` (legacy).
+- Purpose: Route-level components. Top-level: `DiscoverScreen.tsx`, `ChatListScreen.tsx` (tab "Chat"), `CharactersScreen.tsx`, `MyProfileScreen.tsx` (tab "My Profile"), `SettingsScreen.tsx`, `ChatDetailScreen.tsx`, `CreateAIScreen.tsx`, `EntityConfigScreen.tsx`, `EntityConfigEditScreen.tsx`, `CharacterProfileEditScreen.tsx`, `EditProfileScreen.tsx`, `PersonaEditScreen.tsx`, `AIConfigScreen.tsx`, `LandingScreen.tsx` (legacy).
 - Subfolders: `auth/` (`LoginScreen.tsx`, `RegisterScreen.tsx`, `VerifyPrompt.tsx`), `settings/` (13 subpages incl. `SyncSettingsScreen.tsx`, `ThemeSettingsScreen.tsx`, `BiometricLockSettingsScreen.tsx`, `EmojiActionEditorScreen.tsx`, `ComingSoonScreen.tsx`), `setup/` (`ConnectionSetupScreen.tsx`), `config/` (`ModuleConfigEditScreen.tsx`), `development/` (`DatabaseTableViewerScreen.tsx` — DEV-only).
 
 **src/contexts:**
@@ -92,7 +92,7 @@ harmony-ai-app/                        # React Native app (bare RN 0.86, TypeScr
 - `index.js`: AppRegistry registration + uuid polyfill import.
 - `App.tsx`: Provider tree + `AppShell` (DB gate, pairing modal, lock overlay, background layer).
 - `src/navigation/AppNavigator.tsx`: Root native-stack (`RootStackParamList`).
-- `src/navigation/MainTabNavigator.tsx`: 4-tab layout (`MainTabParamList`); Settings is a root-stack screen accessed via the header hamburger menu (`HeaderMenuButton`).
+- `src/navigation/MainTabNavigator.tsx`: 5-tab layout (`MainTabParamList`: Characters | Chat | Discover [CENTER] | Market | My Profile); Settings is a root-stack screen accessed via the header hamburger menu (`HeaderMenuButton`).
 - Native: `android/app/src/main/java/ai/soulbits/chat/MainApplication.kt` (Android), `ios/HarmonyAIChat/AppDelegate.swift` (iOS).
 
 **Configuration:**

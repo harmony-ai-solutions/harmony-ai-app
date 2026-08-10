@@ -13,7 +13,7 @@ import { NavigationContainerRef } from '@react-navigation/native';
 import { AppNavigator, RootStackParamList } from './src/navigation/AppNavigator';
 import { ThemeProvider, usePaperTheme, useAppTheme } from './src/contexts/ThemeContext';
 import { DatabaseProvider, useDatabase } from './src/contexts/DatabaseContext';
-import { AuthProvider } from './src/contexts/AuthContext';
+import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { BiometricLockProvider, useBiometricLock } from './src/contexts/BiometricLockContext';
 import { SyncConnectionProvider, useSyncConnection } from './src/contexts/SyncConnectionContext';
 import { EntitySessionProvider } from './src/contexts/EntitySessionContext';
@@ -36,10 +36,26 @@ function AppShell() {
   const { isReady, isLoading } = useDatabase();
   const { isPaired } = useSyncConnection();
   const { isLocked } = useBiometricLock();
+  const { signInVersion } = useAuth();
   const [showPairingModal, setShowPairingModal] = useState(false);
   const [pairingModalChecked, setPairingModalChecked] = useState(false);
 
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList> | null>(null);
+  // Skip the first render (signInVersion starts at 0) — only react to a real
+  // explicit sign-in. Returns early so the app-start bootstrap (persisted
+  // token) never triggers a redirect to the profile.
+  const prevSignInVersionRef = useRef(signInVersion);
+
+  useEffect(() => {
+    if (prevSignInVersionRef.current === signInVersion) return;
+    prevSignInVersionRef.current = signInVersion;
+    if (signInVersion > 0) {
+      // Fresh sign-in → send the user straight to their profile page.
+      setTimeout(() => {
+        navigationRef.current?.navigate('MainTabs', { screen: 'MyProfile' });
+      }, 100);
+    }
+  }, [signInVersion]);
 
   useEffect(() => {
     const checkFirstLaunch = async () => {

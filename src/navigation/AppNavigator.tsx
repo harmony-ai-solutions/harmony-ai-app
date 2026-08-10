@@ -3,9 +3,10 @@ import {
   NavigationContainer,
   NavigationContainerRef,
   DefaultTheme,
+  NavigatorScreenParams,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { MainTabNavigator } from './MainTabNavigator';
+import { MainTabNavigator, MainTabParamList } from './MainTabNavigator';
 import { LandingScreen } from '../screens/LandingScreen';
 import { ChatDetailScreen } from '../screens/ChatDetailScreen';
 import { CharacterProfileEditScreen } from '../screens/CharacterProfileEditScreen';
@@ -16,6 +17,8 @@ import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
 import { EmojiActionEditorScreen } from '../screens/settings/EmojiActionEditorScreen';
 import { ProfileSettingsScreen } from '../screens/settings/ProfileSettingsScreen';
+import { EditProfileScreen } from '../screens/EditProfileScreen';
+import { PersonaEditScreen } from '../screens/PersonaEditScreen';
 import { BiometricLockSettingsScreen } from '../screens/settings/BiometricLockSettingsScreen';
 import { ComingSoonScreen } from '../screens/settings/ComingSoonScreen';
 import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
@@ -32,7 +35,7 @@ import { SettingsScreen } from '../screens/SettingsScreen';
 
 export type RootStackParamList = {
   /** Tab container — the primary navigation surface (5-tab layout) */
-  MainTabs: undefined;
+  MainTabs: NavigatorScreenParams<MainTabParamList> | undefined;
   /** Legacy landing (kept for backward-compatible deep links) */
   Landing: undefined;
   /** Tab destinations reachable from the stack navigator (delegated to nested tab nav) */
@@ -66,6 +69,8 @@ export type RootStackParamList = {
   };
   BiometricLockSettings: undefined;
   ProfileSettings: undefined;
+  EditProfile: undefined;
+  PersonaEdit: { entityId?: string } | undefined;
   ComingSoon: {
     titleKey: string;
     icon: string;
@@ -159,6 +164,8 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           name="ProfileSettings"
           component={ProfileSettingsScreen}
         />
+        <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+        <Stack.Screen name="PersonaEdit" component={PersonaEditScreen} />
         <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
         <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
         <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />

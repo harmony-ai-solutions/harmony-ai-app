@@ -253,7 +253,7 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
        ORDER BY name`;
 
   const [results] = await db.executeSql(query);
-  
+
   const profiles: CharacterProfile[] = [];
   for (let i = 0; i < results.rows.length; i++) {
     const row = results.rows.item(i);
@@ -288,7 +288,65 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
     });
   }
-  
+
+  return profiles;
+}
+
+/**
+ * Get all character profiles whose source is 'user' (created by the app user
+ * via Create AI / profile editing / character-card import). Used by the My
+ * Profile "AI Characters" tab. Filters out soft-deleted by default — identical
+ * semantics to getAllCharacterProfiles / getCommunityCharacterProfiles.
+ */
+export async function getUserCharacterProfiles(
+  includeDeleted = false,
+): Promise<CharacterProfile[]> {
+  const db = getDatabase();
+  const query = includeDeleted
+    ? `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
+              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+       FROM character_profiles cp
+       INNER JOIN character_profile_sources cps ON cps.profile_id = cp.id
+       WHERE cps.source = 'user'
+       ORDER BY cp.name`
+    : `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
+              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+       FROM character_profiles cp
+       INNER JOIN character_profile_sources cps ON cps.profile_id = cp.id
+       WHERE cp.deleted_at IS NULL
+         AND cps.source = 'user'
+       ORDER BY cp.name`;
+
+  const [results] = await db.executeSql(query);
+
+  const profiles: CharacterProfile[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    const row = results.rows.item(i);
+    profiles.push({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      personality: row.personality,
+      appearance: row.appearance,
+      backstory: row.backstory,
+      voice_characteristics: row.voice_characteristics,
+      base_prompt: row.base_prompt,
+      scenario: row.scenario,
+      example_dialogues: row.example_dialogues,
+      typing_speed_wpm: row.typing_speed_wpm,
+      audio_response_chance_percent: row.audio_response_chance_percent,
+      vision_config_id: row.vision_config_id ?? null,
+      lifecycle_config: row.lifecycle_config ?? null,
+      created_at: new Date(row.created_at),
+      updated_at: new Date(row.updated_at),
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+    });
+  }
+
   return profiles;
 }
 

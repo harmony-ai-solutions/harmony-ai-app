@@ -44,6 +44,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The lorebook entry editor no longer shows the Advanced (export-only) fields; name and comment now appear above the content. Existing advanced data is still preserved when saving and exporting.
 - The "Advanced" profile section is now labelled "AI Behaviour".
 
+### Profile
+#### Added
+- Full **My Profile** screen in the profile tab: gradient-ring avatar, display name with the username underneath (small, non-bold), an Edit Profile button, a stats card (Followers · Following · AI Characters), a bio block, and three sections — **AI Characters**, **Posts**, and **Saved**.
+- **Edit Profile** screen to set the display name, username, bio and a locally-stored avatar (picked from the photo library). The editable extras persist per cloud account via local storage until the backend exposes a profile-update endpoint.
+- **Personas**: the profile now lists the identities the user chats as (the "Chatting as" concept). Each persona shows its avatar, name and description, can be set as the active chat identity, and opens a dedicated **Persona** editor where the name, description, personality and picture can be managed — or a new persona created. Personas reuse the existing character-profile pipeline and sync normally.
+- After a successful sign-in (email/password, Google, or Apple), the app now takes the user straight to their **My Profile** page.
+
 ### Navigation
 #### Changed
 - The Settings screen is no longer a bottom tab. It is now opened from a "three lines" (☰) menu button in the header of every primary screen, which opens the full Settings screen. The bottom tab bar now contains Chat, Discover, Characters, and Market only.

@@ -66,6 +66,13 @@ export interface UserProfile {
   // optional so the type reflects the wire contract honestly.
   tier_id?: string;
   created_at: string;
+  // Optional social-profile extras. The current backend MeResponse does not
+  // return these yet — they are kept optional so the type stays truthful to
+  // the wire contract. The My Profile feature persists them locally via
+  // UserProfileStore and merges them over this base object.
+  username?: string;
+  bio?: string;
+  avatar_url?: string;
 }
 
 interface TokenResponse {
