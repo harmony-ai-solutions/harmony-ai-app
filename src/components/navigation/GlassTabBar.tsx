@@ -51,6 +51,7 @@ const TAB_ICONS: Record<string, { default: string; focused: string }> = {
   Discover: { default: 'compass-outline', focused: 'compass' },
   Chat: { default: 'chat-processing-outline', focused: 'chat-processing' },
   Characters: { default: 'account-group-outline', focused: 'account-group' },
+  Market: { default: 'storefront-outline', focused: 'storefront' },
   Settings: { default: 'cog-outline', focused: 'cog' },
 };
 
@@ -59,6 +60,7 @@ const FALLBACK_LABELS: Record<string, string> = {
   Discover: 'Discover',
   Chat: 'Chat',
   Characters: 'Characters',
+  Market: 'Market',
   Settings: 'Settings',
 };
 

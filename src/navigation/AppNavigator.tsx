@@ -37,6 +37,7 @@ export type RootStackParamList = {
   /** Tab destinations reachable from the stack navigator (delegated to nested tab nav) */
   ChatList: undefined;
   Characters: undefined;
+  Market: undefined;
   Settings: undefined;
   /** Full-screen chat detail pushed over tabs */
   ChatDetail: {
@@ -114,7 +115,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           animation: 'fade',
         }}
       >
-        {/* ── Primary tab container (4-tab layout: Discover | Chat | Characters | Settings) ── */}
+        {/* ── Primary tab container (5-tab layout: Chat | Discover | Characters | Market | Settings) ── */}
         <Stack.Screen name="MainTabs" component={MainTabNavigator} />
 
         {/* ── Legacy landing (kept for backward-compatible deep links) ── */}

@@ -14,3 +14,4 @@ export { default as navigation } from './en/navigation.json';
 export { default as database } from './en/database.json';
 export { default as config } from './en/config.json';
 export { default as development } from './en/development.json';
+export { default as market } from './en/market.json';
