@@ -35,7 +35,6 @@ import {
   getCharacterImages,
 } from '../database/repositories/characters';
 import {
-  getAllEntities,
   createEntity,
   createEntityModuleMapping,
   getEntityByCharacterProfileId,
@@ -46,6 +45,7 @@ import {
 } from '../database/repositories/interactions';
 import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import { resolvePersonaId } from '../database/repositories/personas';
 import syncService from '../services/SyncService';
 import { createDataURL } from '../database/base64';
 import { CharacterProfile } from '../database/models';
@@ -148,20 +148,11 @@ export const DiscoverScreen: React.FC = () => {
    */
   const handleChat = async (profile: CharacterProfile) => {
     try {
-      // 1. Resolve the impersonated entity (the "user" identity we chat as)
-      const allEntities = await getAllEntities();
+      // 1. Resolve the persona we chat as (only personas — never AI
+      //    characters — are valid identities; falls back to 'user').
       const storedId =
         await ChatPreferencesService.getGlobalImpersonatedEntity();
-      let impersonatedEntityId = storedId;
-      if (
-        !impersonatedEntityId ||
-        !allEntities.some(e => e.id === impersonatedEntityId)
-      ) {
-        const userEntity = allEntities.find(e => e.id === 'user');
-        impersonatedEntityId = userEntity
-          ? userEntity.id
-          : (allEntities[0]?.id ?? 'user');
-      }
+      const impersonatedEntityId = await resolvePersonaId(storedId);
 
       // 2. Reuse an entity linked to this profile, or create one
       let entity = await getEntityByCharacterProfileId(profile.id);

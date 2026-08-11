@@ -20,6 +20,7 @@ import { ThemedFab } from '../components/themed/ThemedFab';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { getAllEntities } from '../database/repositories/entities';
+import { resolvePersonaId } from '../database/repositories/personas';
 import {
   getRecentPhoneInteractions,
   getLastInteractionMessage,
@@ -334,25 +335,16 @@ export const ChatListScreen: React.FC = () => {
     }
   };
 
-  // Load global impersonated entity on mount
+  // Load global impersonated persona on mount (personas are the ONLY
+  // identities the user can chat as — falls back to the built-in 'user').
   const loadImpersonatedEntity = useCallback(async () => {
     try {
-      const allEntities = await getAllEntities();
       const storedId =
         await ChatPreferencesService.getGlobalImpersonatedEntity();
-
-      // Pick best default: stored > 'user' entity > first entity
-      let resolvedId = storedId;
-      if (!resolvedId || !allEntities.some(e => e.id === resolvedId)) {
-        const userEntity = allEntities.find(e => e.id === 'user');
-        resolvedId = userEntity
-          ? userEntity.id
-          : (allEntities[0]?.id ?? 'user');
-      }
-
+      const resolvedId = await resolvePersonaId(storedId);
       setImpersonatedEntityId(resolvedId);
     } catch (error) {
-      log.error('Failed to load impersonated entity:', error);
+      log.error('Failed to load impersonated persona:', error);
     }
   }, []);
 

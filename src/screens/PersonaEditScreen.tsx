@@ -1,15 +1,16 @@
 /**
  * PersonaEditScreen — create / edit a user persona.
  *
- * A persona is an Entity whose linked CharacterProfile is tagged source='user'
- * and whose primary character image is the persona's picture. This screen
- * reuses the full character-profile pipeline:
- *   - Create:  new character profile (tagged 'user') + entity (alias = name)
- *              + optional primary image
- *   - Edit:    update the linked character profile (name / description /
- *              personality) + manage the primary image
+ * A persona is the identity the USER chats AS. It stores ONLY identity fields:
+ * name, description, personality and a picture — deliberately NO AI character
+ * profile and NO AI module configs (that is the domain of AI characters, the
+ * entities the user chats WITH).
  *
- * After saving, the new/changed persona is pushed to the engine (best-effort
+ * Internally the persona id doubles as an Entity id (alias = name, no linked
+ * profile) so chat INIT_ENTITY resolves the persona as the "chatting as"
+ * identity — the same way the built-in 'user' identity works.
+ *
+ * After saving, the backing entity is pushed to the engine (best-effort
  * syncAndWait) so INIT_ENTITY succeeds when chatting as this persona.
  */
 
@@ -38,23 +39,11 @@ import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import {
-  createCharacterProfile,
-  createCharacterImage,
-  getCharacterProfile,
-  getCharacterImages,
-  setCharacterProfileSource,
-  updateCharacterProfile,
-  deleteCharacterImage,
-} from '../database/repositories/characters';
-import {
-  createEntity,
-  createEntityModuleMapping,
-  updateEntity,
-  deleteEntity,
-  getEntity,
-} from '../database/repositories/entities';
-import { generateId } from '../utils/uuid';
-import { createDataURL } from '../database/base64';
+  createPersona,
+  getPersona,
+  updatePersona,
+  deletePersona,
+} from '../database/repositories/personas';
 import syncService from '../services/SyncService';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
@@ -62,6 +51,13 @@ import { createLogger } from '../utils/logger';
 const log = createLogger('[PersonaEditScreen]');
 
 type PersonaEditRouteProp = RouteProp<RootStackParamList, 'PersonaEdit'>;
+
+/** Split a `data:<mime>;base64,<data>` URL into {mime, base64}, or null. */
+function splitDataUrl(url: string): { mimeType: string; base64: string } | null {
+  const match = url.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+  return { mimeType: match[1] || 'image/jpeg', base64: match[2] };
+}
 
 export const PersonaEditScreen: React.FC = () => {
   const { theme } = useAppTheme();
@@ -72,8 +68,8 @@ export const PersonaEditScreen: React.FC = () => {
   const { showAlert } = useAppAlert();
   const { withExternalFlow } = useBiometricLock();
 
-  const entityId = route.params?.entityId;
-  const isEdit = !!entityId;
+  const personaId = route.params?.entityId;
+  const isEdit = !!personaId;
 
   // ── Form state ─────────────────────────────────────────────────────────
   const [name, setName] = useState('');
@@ -95,25 +91,16 @@ export const PersonaEditScreen: React.FC = () => {
         return;
       }
       try {
-        const entity = await getEntity(entityId!);
-        if (!entity || !entity.character_profile_id) {
-          if (!cancelled) {
-            showAlert(t('common:error'), t('personaSaveFailed', { message: 'Persona not found' }));
-            navigation.goBack();
-          }
-          return;
+        const persona = await getPersona(personaId!);
+        if (!cancelled && persona) {
+          setName(persona.name);
+          setDescription(persona.description ?? '');
+          setPersonality(persona.personality ?? '');
+          setAvatarUri(persona.avatarUri);
         }
-        const profile = await getCharacterProfile(entity.character_profile_id);
-        if (!cancelled && profile) {
-          setName(profile.name);
-          setDescription(profile.description ?? '');
-          setPersonality(profile.personality ?? '');
-        }
-        // Avatar
-        const images = await getCharacterImages(entity.character_profile_id);
-        if (!cancelled && images.length > 0) {
-          const primary = images.find(img => img.is_primary) ?? images[0];
-          setAvatarUri(createDataURL(primary.image_data, primary.mime_type));
+        if (!cancelled && !persona) {
+          showAlert(t('common:error'), t('personaSaveFailed', { message: 'Persona not found' }));
+          navigation.goBack();
         }
         if (!cancelled) setLoaded(true);
       } catch (err) {
@@ -127,7 +114,7 @@ export const PersonaEditScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [isEdit, entityId, navigation, showAlert, t]);
+  }, [isEdit, personaId, navigation, showAlert, t]);
 
   // ── Avatar ─────────────────────────────────────────────────────────────
   const handlePickAvatar = async () => {
@@ -162,137 +149,36 @@ export const PersonaEditScreen: React.FC = () => {
 
     setIsSaving(true);
     try {
-      let profileId: string;
+      let avatarImageData: string | null = null;
+      let avatarMimeType: string | null = null;
+      if (avatarUri?.startsWith('data:')) {
+        const split = splitDataUrl(avatarUri);
+        if (split) {
+          avatarImageData = split.base64;
+          avatarMimeType = split.mimeType;
+        }
+      }
 
       if (isEdit) {
-        // ── Edit path ──
-        const entity = await getEntity(entityId!);
-        if (!entity || !entity.character_profile_id) {
-          throw new Error('Persona not found');
-        }
-        profileId = entity.character_profile_id;
-
-        await updateCharacterProfile({
-          id: profileId,
+        await updatePersona(personaId!, {
           name: name.trim(),
-          description: description.trim() || null,
-          personality: personality.trim() || null,
-          appearance: null,
-          backstory: null,
-          voice_characteristics: null,
-          base_prompt: null,
-          scenario: null,
-          example_dialogues: null,
-          typing_speed_wpm: 60,
-          audio_response_chance_percent: 50,
-          vision_config_id: null,
-          lifecycle_config: '{}',
-          created_at: new Date(),
-          updated_at: new Date(),
-          deleted_at: null,
-        });
-
-        // Keep entity alias in sync with the persona name
-        await updateEntity({
-          ...entity,
-          alias: name.trim(),
-          updated_at: new Date(),
+          description: description.trim(),
+          personality: personality.trim(),
+          avatar_image_data: avatarImageData,
+          avatar_mime_type: avatarMimeType,
         });
       } else {
-        // ── Create path ──
-        profileId = generateId();
-        await createCharacterProfile({
-          id: profileId,
+        await createPersona({
           name: name.trim(),
-          description: description.trim() || '',
-          personality: personality.trim() || '',
-          appearance: '',
-          backstory: '',
-          voice_characteristics: '',
-          base_prompt: '',
-          scenario: '',
-          example_dialogues: '',
-          typing_speed_wpm: 60,
-          audio_response_chance_percent: 50,
-          vision_config_id: null,
-          lifecycle_config: '{}',
-        });
-        // Tag as user-created so it appears as a persona + in My Profile
-        await setCharacterProfileSource(profileId, 'user');
-
-        // Entity id = name (mirrors CreateAI) with UNIQUE-alias conflict guard
-        const entityIdNew = name.trim();
-        try {
-          await createEntity({
-            id: entityIdNew,
-            alias: name.trim(),
-            character_profile_id: profileId,
-            lifecycle_config: '{}',
-            rag_reindex_required: 1,
-          });
-        } catch (err: any) {
-          if (
-            err?.message?.includes('UNIQUE') ||
-            err?.message?.includes('alias')
-          ) {
-            showAlert(t('personaAliasConflict'));
-            setIsSaving(false);
-            return;
-          }
-          throw err;
-        }
-
-        await createEntityModuleMapping({
-          entity_id: entityIdNew,
-          backend_config_id: null,
-          cognition_config_id: null,
-          tts_config_id: null,
-          stt_config_id: null,
-          vision_config_id: null,
-          rag_config_id: null,
-          imagination_config_id: null,
-          movement_config_id: null,
-          deleted_at: null,
+          description: description.trim(),
+          personality: personality.trim(),
+          avatar_image_data: avatarImageData,
+          avatar_mime_type: avatarMimeType,
         });
       }
 
-      // ── Avatar image handling ──
-      if (avatarUri?.startsWith('data:')) {
-        // New avatar picked → replace the existing primary (edit) or add first
-        const match = avatarUri.match(/^data:([^;]+);base64,(.+)$/);
-        if (match) {
-          const mimeType = match[1] || 'image/jpeg';
-          const base64Data = match[2];
-          const images = await getCharacterImages(profileId);
-
-          // Remove existing primary (edit path)
-          const primary = images.find(img => img.is_primary);
-          if (primary) {
-            await deleteCharacterImage(primary.id).catch(() => {});
-          }
-
-          await createCharacterImage({
-            character_profile_id: profileId,
-            image_data: base64Data,
-            mime_type: mimeType,
-            description: '',
-            is_primary: true,
-            display_order: 0,
-            vl_model_interpretation: '',
-            vl_model: '',
-            updated_at: new Date(),
-          });
-        }
-      } else if (isEdit && avatarUri === null) {
-        // Avatar removed (edit path) — delete the existing primary image
-        const images = await getCharacterImages(profileId);
-        const primary = images.find(img => img.is_primary);
-        if (primary) {
-          await deleteCharacterImage(primary.id).catch(() => {});
-        }
-      }
-
-      // ── Push to engine (best-effort) so chat INIT_ENTITY succeeds ──
+      // ── Push the backing entity to the engine (best-effort) so chat
+      //    INIT_ENTITY succeeds when chatting as this persona. ──
       try {
         await syncService.syncAndWait({ timeoutMs: 45_000 });
       } catch (syncErr) {
@@ -307,21 +193,11 @@ export const PersonaEditScreen: React.FC = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [
-    isEdit,
-    entityId,
-    name,
-    description,
-    personality,
-    avatarUri,
-    navigation,
-    showAlert,
-    t,
-  ]);
+  }, [isEdit, personaId, name, description, personality, avatarUri, navigation, showAlert, t]);
 
   // ── Delete persona ─────────────────────────────────────────────────────
   const handleDelete = useCallback(() => {
-    if (!isEdit || !entityId) return;
+    if (!isEdit || !personaId) return;
     showAlert(t('personaDeleteConfirm'), t('personaDeleteConfirmHint'), [
       { text: t('common:cancel'), style: 'cancel' },
       {
@@ -329,7 +205,7 @@ export const PersonaEditScreen: React.FC = () => {
         style: 'destructive',
         onPress: async () => {
           try {
-            await deleteEntity(entityId);
+            await deletePersona(personaId);
             showAlert(t('personaDeleted'), undefined, [{ text: 'OK' }]);
             navigation.goBack();
           } catch (err) {
@@ -339,7 +215,7 @@ export const PersonaEditScreen: React.FC = () => {
         },
       },
     ]);
-  }, [isEdit, entityId, navigation, showAlert, t]);
+  }, [isEdit, personaId, navigation, showAlert, t]);
 
   if (!theme || !loaded) return null;
 

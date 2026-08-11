@@ -97,6 +97,9 @@ CREATE TABLE memories ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES 
 -- table: movement_configs
 CREATE TABLE "movement_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
 
+-- table: personas
+CREATE TABLE personas ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', avatar_image_data TEXT, avatar_mime_type TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
 -- table: provider_config_anthropic
 CREATE TABLE "provider_config_anthropic" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6', max_tokens INTEGER NOT NULL DEFAULT 4096, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, top_k INTEGER NOT NULL DEFAULT 0, stop_sequences TEXT NOT NULL DEFAULT '[]', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
 
@@ -1086,7 +1089,7 @@ CREATE TABLE "vision_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, 
 "
 `;
 
-exports[`migration roll-forward schema at version 36 matches snapshot: v36 1`] = `
+exports[`migration roll-forward schema at version 38 matches snapshot: v38 1`] = `
 "-- index: idx_character_image_primary
 CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
 
@@ -1179,6 +1182,9 @@ CREATE TABLE memories ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES 
 
 -- table: movement_configs
 CREATE TABLE "movement_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: personas
+CREATE TABLE personas ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', avatar_image_data TEXT, avatar_mime_type TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
 -- table: provider_config_anthropic
 CREATE TABLE "provider_config_anthropic" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6', max_tokens INTEGER NOT NULL DEFAULT 4096, temperature REAL NOT NULL DEFAULT 0, top_p REAL NOT NULL DEFAULT 0, top_k INTEGER NOT NULL DEFAULT 0, stop_sequences TEXT NOT NULL DEFAULT '[]', sampling_preset_name TEXT NOT NULL DEFAULT '', extra_params TEXT NOT NULL DEFAULT '{}', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );

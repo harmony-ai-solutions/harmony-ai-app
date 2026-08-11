@@ -79,7 +79,7 @@ import {
 } from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import syncService from '../services/SyncService';
-import { getAllEntities } from '../database/repositories/entities';
+import { resolvePersonaId } from '../database/repositories/personas';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -458,20 +458,11 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
       }
 
-      // 5. Resolve the impersonated entity for ChatDetail
-      const allEntities = await getAllEntities();
+      // 5. Resolve the persona we chat as (only personas — never AI
+      //    characters — are valid identities; falls back to 'user').
       const storedId =
         await ChatPreferencesService.getGlobalImpersonatedEntity();
-      let impersonatedEntityId = storedId;
-      if (
-        !impersonatedEntityId ||
-        !allEntities.some(e => e.id === impersonatedEntityId)
-      ) {
-        const userEntity = allEntities.find(e => e.id === 'user');
-        impersonatedEntityId = userEntity
-          ? userEntity.id
-          : (allEntities[0]?.id ?? 'user');
-      }
+      const impersonatedEntityId = await resolvePersonaId(storedId);
 
       // 6. Navigate to ChatDetail — replace so back goes to ChatList, not here
       const participantIds = [impersonatedEntityId ?? 'user', entityId];

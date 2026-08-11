@@ -13,13 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
-import { getAllEntities } from '../../database/repositories/entities';
-import {
-  getCharacterProfile,
-  getPrimaryImage,
-  imageToDataURL,
-} from '../../database/repositories/characters';
-import { Entity } from '../../database/models';
+import { getAllPersonas, Persona } from '../../database/repositories/personas';
 import { createLogger } from '../../utils/logger';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
@@ -40,21 +34,18 @@ interface EntityDisplayItem {
   avatarUri: string | null;
 }
 
-const determineDefaultEntity = (
-  entities: Entity[],
+const determineDefaultPersona = (
+  personas: Persona[],
   preSelectedEntityId?: string,
 ): string | null => {
-  if (entities.length === 0) return null;
+  if (personas.length === 0) return null;
 
   if (preSelectedEntityId) {
-    const isValid = entities.some(e => e.id === preSelectedEntityId);
+    const isValid = personas.some(p => p.id === preSelectedEntityId);
     if (isValid) return preSelectedEntityId;
   }
 
-  const userEntity = entities.find(e => e.id === 'user');
-  if (userEntity) return userEntity.id;
-
-  return entities[0].id;
+  return personas[0].id;
 };
 
 export const ImpersonationSelectorModal: React.FC<
@@ -78,39 +69,26 @@ export const ImpersonationSelectorModal: React.FC<
     setError(null);
 
     try {
-      const allEntities = await getAllEntities();
+      const allPersonas = await getAllPersonas();
 
-      if (allEntities.length === 0) {
-        setError('No entities available. Please create a user entity first.');
+      if (allPersonas.length === 0) {
+        setError('No personas available. Create a persona in My Profile first.');
         setLoading(false);
         return;
       }
 
-      const displayItems: EntityDisplayItem[] = [];
-      for (const entity of allEntities) {
-        let characterName = entity.id;
-        let avatarUri: string | null = null;
-
-        if (entity.character_profile_id) {
-          const profile = await getCharacterProfile(entity.character_profile_id);
-          if (profile) {
-            characterName = profile.name;
-          }
-          const image = await getPrimaryImage(entity.character_profile_id);
-          if (image) {
-            avatarUri = imageToDataURL(image);
-          }
-        }
-
-        displayItems.push({ entityId: entity.id, characterName, avatarUri });
-      }
+      const displayItems: EntityDisplayItem[] = allPersonas.map(p => ({
+        entityId: p.id,
+        characterName: p.name,
+        avatarUri: p.avatarUri,
+      }));
 
       setEntities(displayItems);
-      const defaultId = determineDefaultEntity(allEntities, preSelectedEntityId);
+      const defaultId = determineDefaultPersona(allPersonas, preSelectedEntityId);
       setSelectedEntityId(defaultId);
     } catch (err) {
-      log.error('Failed to load entities:', err);
-      setError('Failed to load entities. Please try again.');
+      log.error('Failed to load personas:', err);
+      setError('Failed to load personas. Please try again.');
     } finally {
       setLoading(false);
     }

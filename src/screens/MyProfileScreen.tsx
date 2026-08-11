@@ -42,7 +42,7 @@ import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { ProfileTabs, ProfileTabKey, ProfileTabDef } from '../components/profile/ProfileTabs';
 import { getUserCharacterProfiles } from '../database/repositories/characters';
-import { getUserPersonas, Persona } from '../database/repositories/personas';
+import { getAllPersonas, Persona } from '../database/repositories/personas';
 import { CharacterProfile } from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import UserProfileStore from '../services/profile/UserProfileStore';
@@ -105,19 +105,21 @@ export const MyProfileScreen: React.FC = () => {
   const loadPersonas = useCallback(async () => {
     try {
       const stored = await ChatPreferencesService.getGlobalImpersonatedEntity();
-      const all = await getUserPersonas();
-      const active =
-        stored && all.some(p => p.entityId === stored) ? stored : null;
+      const all = await getAllPersonas();
+      const active = stored && all.some(p => p.id === stored) ? stored : null;
       setActivePersonaId(active);
-      setPersonas(all.map(p => ({ ...p, isActive: p.entityId === active })));
+      setPersonas(all.map(p => ({ ...p, isActive: p.id === active })));
     } catch (err) {
       log.error('Failed to load personas:', err);
     }
   }, []);
 
-  // Reload on focus so edits (profile, persona, character) reflect immediately
+  // Reload on focus so edits (profile, persona, character) reflect immediately.
+  // Also reset the tab back to Posts — the default — every time the screen is
+  // focused, so returning to the profile never lands on a stale sub-tab.
   useFocusEffect(
     useCallback(() => {
+      setActiveTab('posts');
       loadProfile();
       loadCharacters();
       loadPersonas();
@@ -131,13 +133,13 @@ export const MyProfileScreen: React.FC = () => {
   }, [loadProfile, loadCharacters, loadPersonas]);
 
   // ── Persona actions ────────────────────────────────────────────────────
-  const handleSetActivePersona = async (entityId: string) => {
+  const handleSetActivePersona = async (id: string) => {
     try {
-      await ChatPreferencesService.setGlobalImpersonatedEntity(entityId);
-      const persona = personas.find(p => p.entityId === entityId);
-      setActivePersonaId(entityId);
+      await ChatPreferencesService.setGlobalImpersonatedEntity(id);
+      const persona = personas.find(p => p.id === id);
+      setActivePersonaId(id);
       setPersonas(prev =>
-        prev.map(p => ({ ...p, isActive: p.entityId === entityId })),
+        prev.map(p => ({ ...p, isActive: p.id === id })),
       );
       showAlert(t('personaSetActiveDone', { name: persona?.name ?? '' }));
     } catch (err) {
@@ -394,12 +396,12 @@ export const MyProfileScreen: React.FC = () => {
               <>
                 <View style={styles.grid}>
                   {personas.map(p => {
-                    const isActive = p.entityId === activePersonaId;
+                    const isActive = p.id === activePersonaId;
                     return (
                       <TouchableOpacity
-                        key={p.entityId}
-                        onPress={() => handleOpenPersonaEdit(p.entityId)}
-                        onLongPress={() => handleSetActivePersona(p.entityId)}
+                        key={p.id}
+                        onPress={() => handleOpenPersonaEdit(p.id)}
+                        onLongPress={() => handleSetActivePersona(p.id)}
                         activeOpacity={0.75}
                         style={styles.gridItem}
                         testID="profile-persona-cell"

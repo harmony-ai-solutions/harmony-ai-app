@@ -36,6 +36,7 @@ import { ChatBubble, isPartnerMessage } from '../components/chat/ChatBubble';
 import { ChatInput, ChatInputRef } from '../components/chat/ChatInput';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewMessagesDivider } from '../components/chat/NewMessagesDivider';
+import { PersonaChangeDivider } from '../components/chat/PersonaChangeDivider';
 import { EmojiPickerInline } from '../components/emoji/EmojiPickerInline';
 import { AlternateGreetingSwiper, parseAlternateGreetings } from '../components/chat/AlternateGreetingSwiper';
 import { EmptyChatCTA } from '../components/chat/EmptyChatCTA';
@@ -60,6 +61,8 @@ import {
 } from '../database/repositories/characters';
 import { getAllEntities } from '../database/repositories/entities';
 import { deleteEntity } from '../database/repositories/entities';
+import { getPersona } from '../database/repositories/personas';
+import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { createLogger } from '../utils/logger';
@@ -190,6 +193,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const lastReadTimestampRef = useRef<number>(0);
   const [showDivider, setShowDivider] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [personaSwitcherVisible, setPersonaSwitcherVisible] = useState(false);
+  // In-chat persona switch confirmation (rendered like a date/divider row)
+  const [personaChangeText, setPersonaChangeText] = useState<string | null>(null);
   const [replyMode, setReplyMode] = useState<string>('realistic');
   const replyModeRef = useRef<string>('realistic');
   const [isGroupChat, setIsGroupChat] = useState(false);
@@ -1053,12 +1059,38 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }, [ownEntityId, participantIds, headerName, navigation]);
 
-  // Open settings/module configuration for the identity the user is
-  // currently acting as (the "My Identity" role in this chat).
-  const handleMyIdentitySettings = useCallback(() => {
+  // Open the persona switcher (the "My Personas" role in this chat). Personas
+  // are the ONLY identities the user can chat as; switching the active persona
+  // persists the global preference and shows a confirmation in the chat.
+  const handleOpenPersonaSwitcher = useCallback(() => {
     setMenuVisible(false);
-    navigation.navigate('EntityConfigEdit', { entityId: ownEntityId });
-  }, [ownEntityId, navigation]);
+    setPersonaSwitcherVisible(true);
+  }, []);
+
+  // Switch the active persona for this chat ('user' = chat as own profile).
+  // Persists the global preference and renders an in-chat divider
+  // ("Now chatting as X") matching the app's divider/date-row design language.
+  const handleSwitchPersona = useCallback(
+    async (personaId: string) => {
+      setPersonaSwitcherVisible(false);
+      try {
+        if (personaId === 'user') {
+          // Chat as my own profile — clear the stored persona preference.
+          await ChatPreferencesService.setGlobalImpersonatedEntity('user');
+          setPersonaChangeText(t('personaChangedUser'));
+          return;
+        }
+
+        const persona = await getPersona(personaId);
+        await ChatPreferencesService.setGlobalImpersonatedEntity(personaId);
+
+        setPersonaChangeText(t('personaChanged', { name: persona?.name ?? personaId }));
+      } catch (err) {
+        log.error('Failed to switch persona:', err);
+      }
+    },
+    [t],
+  );
 
   // Open settings/module configuration for the OTHER participant
   // (partner/character) in this chat.
@@ -1092,7 +1124,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // Calculate messages with divider AND compute the initial scroll target
   const { messagesWithDivider, initialScrollTarget } = useMemo(() => {
-    if (messages.length === 0) {
+    if (messages.length === 0 && !personaChangeText) {
       return { messagesWithDivider: messages, initialScrollTarget: 'bottom' as const };
     }
 
@@ -1117,7 +1149,22 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     }
 
-    const dividerIndex = withDivider.findIndex((m: any) => m.type === 'divider');
+    // Append the in-chat persona-switch confirmation at the very bottom
+    // (rendered like a date/divider row, matching the chat's divider rhythm).
+    if (personaChangeText) {
+      withDivider = [
+        ...withDivider,
+        {
+          id: 'persona-change-divider',
+          type: 'personaChange',
+          personaName: personaChangeText,
+        },
+      ];
+    }
+
+    const dividerIndex = withDivider.findIndex(
+      (m: any) => m.type === 'divider' || m.type === 'personaChange',
+    );
     let target: 'bottom' | number = 'bottom';
     if (dividerIndex !== -1) {
       const messagesAfterDivider = withDivider.length - dividerIndex - 1;
@@ -1128,7 +1175,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
     return { messagesWithDivider: withDivider, initialScrollTarget: target };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, showDivider, ownEntityId]);
+  }, [messages, showDivider, ownEntityId, personaChangeText]);
 
   useEffect(() => {
     if (!isInitialScrollDone.current) {
@@ -1369,6 +1416,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       if (item.type === 'divider') {
         return <NewMessagesDivider count={item.count} theme={theme!} />;
       }
+      if (item.type === 'personaChange') {
+        return <PersonaChangeDivider personaName={item.personaName} theme={theme!} />;
+      }
 
       const isOwn = !isPartnerMessage(item, ownEntityId);
 
@@ -1600,11 +1650,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   end={{ x: 1, y: 0 }}
                   style={styles.menuTopStripe}
                 />
-                {/* ── My Identity (the persona the user is acting as) ── */}
+                {/* ── My Personas (the identity the user is acting as) ── */}
                 <TouchableOpacity
                   style={styles.menuItem}
-                  onPress={handleMyIdentitySettings}
+                  onPress={handleOpenPersonaSwitcher}
                   activeOpacity={0.65}
+                  testID="chat-persona-switcher"
                 >
                   <View
                     style={[
@@ -1612,15 +1663,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                       { backgroundColor: theme!.colors.accent.primary + '1A' },
                     ]}
                   >
-                    <Icon name="account-cog-outline" size={18} color={theme!.colors.accent.primary} />
+                    <Icon name="account-switch-outline" size={18} color={theme!.colors.accent.primary} />
                   </View>
                   <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
-                    {t('myIdentitySettings')}
+                    {t('myPersonas')}
                   </ThemedText>
                   <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
                 <ThemedText variant="muted" size={11} style={styles.menuItemCaption}>
-                  {t('myIdentitySettingsCaption')}
+                  {t('myPersonasCaption')}
                 </ThemedText>
                 <View
                   style={[
@@ -1684,6 +1735,14 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* Persona switcher — pick the persona to chat as, or create a new one */}
+      <PersonaSwitcherModal
+        visible={personaSwitcherVisible}
+        activePersonaId={ownEntityId === 'user' ? null : ownEntityId}
+        onSelect={handleSwitchPersona}
+        onClose={() => setPersonaSwitcherVisible(false)}
+      />
 
       {/* Android: 'height' recomputes the container frame on every re-render
           (e.g. during session/retry churn), which makes the bottom input flicker.

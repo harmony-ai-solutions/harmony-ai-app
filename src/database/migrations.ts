@@ -53,6 +53,8 @@ import { migration040 } from './migrations/000040_lifecycle_state_sync_columns';
 // (migration035/000036…) until integration commit A renumbers them 41–55.
 import { migration035 as migration035s } from './migrations/000035_add_character_profile_source';
 import { migration036 as migration036s } from './migrations/000036_backfill_character_profile_source';
+import { migration037 as migration037s } from './migrations/000037_add_personas_table';
+import { migration038 as migration038s } from './migrations/000038_cleanup_leaked_persona_rows';
 
 // Migration definition
 export interface Migration {
@@ -276,6 +278,16 @@ export const MIGRATIONS: Migration[] = [
     version: 36,
     description: 'backfill_character_profile_source',
     sql: migration036s,
+   },
+   {
+    version: 37,
+    description: 'add_personas_table',
+    sql: migration037s,
+   },
+   {
+    version: 38,
+    description: 'purge_leaked_persona_rows',
+    sql: migration038s,
    },
   ];
 
