@@ -89,6 +89,34 @@ Defined in [`ConversationMessage`](src/database/models.ts:468) (table `conversat
 - One message inside an interaction: `content`, `message_type` (`text` / `audio` / `image` / `greeting` …), optional media, emotional state.
 - **Crucially, it always carries a [`sender_entity_id`](src/database/models.ts:471)** — the entity that said it. There is no nullable "the human typed this" flag.
 
+### 3.5 Presence — where an entity lives (channels & plugins)
+
+An entity doesn't just *exist* — it **lives** in one or more **Presences**: concrete communication channels that carry its contextual reality. A presence separates *where* the entity is (channel context) from *how* it is connected (plumbing). Each active entity session carries one presence.
+
+A presence owns:
+- **Presence type** — the channel topology (phone app, game plugin, web, messaging…)
+- **Capabilities** — what the entity can do there (audio, vision, movement…)
+- **Participant set** — who else is present in this context
+- **Perception context** — what the entity currently perceives
+- **Output preferences** — TTS output type, reply mode (instant / realistic)
+
+**Plugins are presences.** Harmony Link game plugins and other application plugins act as presence providers: they report the participant set with every message, and the engine derives the interaction scope from it. The engine trusts what the plugin reports — it does *not* model perception asymmetry (e.g. eavesdropping) itself; that is the plugin's responsibility.
+
+| Presence Type | Interaction Scope |
+|---|---|
+| App / Messaging (1:1) | Private — exactly 2 participants |
+| App / Messaging (group) | Group — managed roster |
+| **Game Plugin** | Derived from participant set (in-game scenes, NPC dialogue) |
+| World (ambient) | World — entity perceives world events |
+
+Key rules:
+- An entity can have **zero or more** active presences at once; events are routed to presences, not to entities directly.
+- A presence can be **suspended and resumed** (phone session behaviour).
+- Multiple presences can feed the **same interaction** (phone + Discord DM with the same partner = one interaction); one presence can host several interactions.
+- When a plugin-provided participant set shifts the scope (2 → 3 participants), the current interaction is **closed** and a new one with the new scope is created — scope transitions are interaction boundaries.
+
+> Full detail: [Presence — Entity Channel Context](../harmony-link-private/docs/Cognition-System.md) in the Harmony Link Cognition System docs.
+
 ---
 
 ## 4. The "user entity": why *you* are an entity too
