@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Import Tavern Card V1/V2/V3 character cards from raw JSON or PNG-embedded (`chara`/`ccv3` `tEXt`/`iTXt` chunks) files. Imported cards are mapped to the existing character profile model (with the PNG used as the primary avatar) and persist locally, syncing through the normal pipeline. Reachable from the Characters screen header.
 - The "Create AI Partner" flow now picks an existing character profile from a visual card carousel instead of a text dropdown. Each card shows the character's portrait, name, and description up front, styled to match the character cards on the Character Profile Management screen. Selecting "Create new profile" resets the identity fields.
 - Character cards on the Characters screen now have a chat button that opens a direct chat with that character. If no AI entity exists for the profile yet, one is created and synced automatically before the chat opens.
+- AI Lifecycle editor on the character profile: configure the autonomous-beat defaults (autonomy, beat schedule, sleep & exhaustion, emotion decay, crystallization, memory) that new AI characters inherit from the profile. Each section has a tap-to-expand explanation, and a banner notes these are profile defaults that can be overridden per character.
+#### Changed
+- Character profile editor section order now matches the desktop UI: Images appear right after the identity/persona basics, the AI Lifecycle section sits after the Lorebook, and Attribution is last.
+- The lorebook entry editor no longer shows the Advanced (export-only) fields; name and comment now appear above the content. Existing advanced data is still preserved when saving and exporting.
+- The "Advanced" profile section is now labelled "AI Behaviour".
 
 ### Security & Privacy
 

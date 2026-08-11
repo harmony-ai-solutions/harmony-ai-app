@@ -1,12 +1,13 @@
 /**
  * LorebookEntryEditor (3-4) — per-entry lorebook editor.
  *
- * Matching is **semantic**, so `content` is the primary field (what gets
- * embedded + matched). Keyword/position/budget fields are shown under
- * "Advanced — preserved for export" (they round-trip to the card but do not
- * drive matching). Macros in `content` are **highlighted, not resolved**
- * (card-management screen, §1-7). New entries get sensible defaults
- * (`enabled=true`, `position=before_char`, `insertion_order=10`).
+ * Aligned with the Wails `frontend/src/components/characters/LorebookEditor.jsx`
+ * layout: Name/Comment → Content → Keys → Matching drivers. The Character
+ * Card spec's advanced fields (position, insertion order, priority,
+ * selective/secondary keys, case-sensitive, regex, id) are **hidden** but
+ * carried verbatim from the seeded draft so imported cards round-trip
+ * faithfully on save (matching the desktop editor's data-preservation
+ * behaviour). Macros in `content` are highlighted, not resolved.
  *
  * Built on paper `Modal`+`Portal` via the shared `SheetModal` (§A18).
  */
@@ -17,7 +18,6 @@ import {
   StyleSheet,
   Switch,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
@@ -37,11 +37,6 @@ export interface LorebookEntryEditorProps {
   onSave: (entry: CharacterBookEntry) => void;
 }
 
-const POSITIONS: Array<'before_char' | 'after_char'> = [
-  'before_char',
-  'after_char',
-];
-
 export const LorebookEntryEditor: React.FC<LorebookEntryEditorProps> = ({
   open,
   onClose,
@@ -52,15 +47,7 @@ export const LorebookEntryEditor: React.FC<LorebookEntryEditorProps> = ({
   const { t } = useTranslation('characters');
 
   const [draft, setDraft] = useState<CharacterBookEntry | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [keysText, setKeysText] = useState('');
-  const [secondaryKeysText, setSecondaryKeysText] = useState('');
-  const [position, setPosition] = useState<'before_char' | 'after_char'>(
-    'before_char',
-  );
-  const [insertionOrderText, setInsertionOrderText] = useState('10');
-  const [priorityText, setPriorityText] = useState('');
-  const [idText, setIdText] = useState('');
 
   // Re-seed the draft whenever the sheet opens / target entry changes.
   useEffect(() => {
@@ -68,12 +55,6 @@ export const LorebookEntryEditor: React.FC<LorebookEntryEditorProps> = ({
     const base = entry ?? createDefaultLorebookEntry();
     setDraft({ ...base });
     setKeysText((base.keys ?? []).join(', '));
-    setSecondaryKeysText((base.secondary_keys ?? []).join(', '));
-    setPosition(base.position ?? 'before_char');
-    setInsertionOrderText(String(base.insertion_order ?? 10));
-    setPriorityText(base.priority != null ? String(base.priority) : '');
-    setIdText(base.id != null ? String(base.id) : '');
-    setAdvancedOpen(false);
   }, [open, entry]);
 
   if (!theme) return null;
@@ -98,28 +79,11 @@ export const LorebookEntryEditor: React.FC<LorebookEntryEditorProps> = ({
       .split(',')
       .map(k => k.trim())
       .filter(Boolean);
-    const secondaryKeys = secondaryKeysText
-      .split(',')
-      .map(k => k.trim())
-      .filter(Boolean);
-    const insertionOrder = parseInt(insertionOrderText, 10);
-    const priority = priorityText.trim() === '' ? undefined : parseInt(priorityText, 10);
-    const parsedId =
-      idText.trim() === ''
-        ? undefined
-        : /^\d+$/.test(idText.trim())
-          ? Number(idText.trim())
-          : idText.trim();
-
-    onSave({
-      ...draft,
-      keys,
-      secondary_keys: secondaryKeys.length ? secondaryKeys : draft.secondary_keys,
-      position,
-      insertion_order: isNaN(insertionOrder) ? draft.insertion_order ?? 10 : insertionOrder,
-      priority,
-      id: parsedId,
-    });
+    // The advanced spec fields (position, insertion_order, priority,
+    // selective, secondary_keys, case_sensitive, use_regex, id) have no
+    // editor, so they are carried verbatim from the seeded draft to
+    // preserve imported data on round-trip — mirroring the Wails editor.
+    onSave({ ...draft, keys });
     onClose();
   };
 
@@ -163,6 +127,31 @@ export const LorebookEntryEditor: React.FC<LorebookEntryEditorProps> = ({
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
+        {/* ── Name / Comment (display labels, shown first) ── */}
+        <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
+          {t('lorebookName')}
+        </ThemedText>
+        <TextInput
+          value={draft?.name ?? ''}
+          onChangeText={text => setField('name', text)}
+          style={[styles.singleInput, inputStyle]}
+          placeholderTextColor={theme.colors.text.muted}
+          testID="lorebook-entry-name-input"
+        />
+
+        <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
+          {t('lorebookComment')}
+        </ThemedText>
+        <TextInput
+          value={draft?.comment ?? ''}
+          onChangeText={text => setField('comment', text)}
+          multiline
+          numberOfLines={2}
+          style={[styles.singleInput, inputStyle]}
+          placeholderTextColor={theme.colors.text.muted}
+          testID="lorebook-entry-comment-input"
+        />
+
         {/* ── Primary field: content (embedded + matched semantically) ── */}
         <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
           {t('lorebookContent')}
@@ -208,6 +197,19 @@ export const LorebookEntryEditor: React.FC<LorebookEntryEditorProps> = ({
           />
         </View>
 
+        {/* ── Keys (export-only — semantic matching is driven by content) ── */}
+        <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
+          {t('lorebookEntryKeys')}
+        </ThemedText>
+        <TextInput
+          value={keysText}
+          onChangeText={setKeysText}
+          style={[styles.singleInput, inputStyle]}
+          placeholder="keyword, keyword2"
+          placeholderTextColor={theme.colors.text.muted}
+          testID="lorebook-entry-keys-input"
+        />
+
         {/* ── Matching (behavioural drivers: enabled + constant) ── */}
         <View style={[styles.matchingGroup, { borderColor: theme.colors.border.default }]}>
           <ThemedText size={13} weight="medium" variant="secondary" style={styles.matchingGroupLabel}>
@@ -228,155 +230,6 @@ export const LorebookEntryEditor: React.FC<LorebookEntryEditorProps> = ({
             t('lorebookConstantHint'),
           )}
         </View>
-
-        {/* ── Advanced — preserved for export ── */}
-        <TouchableOpacity
-          style={styles.advancedToggle}
-          onPress={() => setAdvancedOpen(prev => !prev)}
-          accessibilityRole="button"
-          accessibilityState={{ expanded: advancedOpen }}
-          testID="lorebook-entry-advanced-toggle"
-        >
-          <ThemedText size={14} weight="bold" variant="accent">
-            {t('lorebookFieldsExportOnly')}
-          </ThemedText>
-          <ThemedText variant="muted" size={12}>
-            {advancedOpen ? '▴' : '▾'}
-          </ThemedText>
-        </TouchableOpacity>
-        {advancedOpen && (
-          <View style={styles.advancedBody}>
-            <ThemedText variant="muted" size={12} style={styles.hint}>
-              {t('lorebookFieldsExportOnlyHint')}
-            </ThemedText>
-
-            <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
-              {t('lorebookEntryKeys')}
-            </ThemedText>
-            <TextInput
-              value={keysText}
-              onChangeText={setKeysText}
-              style={[styles.singleInput, inputStyle]}
-              placeholder="keyword, keyword2"
-              placeholderTextColor={theme.colors.text.muted}
-              testID="lorebook-entry-keys-input"
-            />
-
-            {renderSwitchField('lorebook-selective-switch', t('lorebookSelective'), draft?.selective ?? false, v =>
-              setField('selective', v),
-            )}
-            {draft?.selective && (
-              <>
-                <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
-                  {t('lorebookSecondaryKeys')}
-                </ThemedText>
-                <TextInput
-                  value={secondaryKeysText}
-                  onChangeText={setSecondaryKeysText}
-                  style={[styles.singleInput, inputStyle]}
-                  placeholder="secondary keyword"
-                  placeholderTextColor={theme.colors.text.muted}
-                  testID="lorebook-entry-secondary-keys-input"
-                />
-              </>
-            )}
-
-            <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
-              {t('lorebookPosition')}
-            </ThemedText>
-            <View style={styles.chipRow}>
-              {POSITIONS.map(pos => {
-                const selected = position === pos;
-                return (
-                  <TouchableOpacity
-                    key={pos}
-                    onPress={() => setPosition(pos)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    style={[
-                      styles.chip,
-                      {
-                        borderColor: selected ? accent : theme.colors.border.default,
-                        backgroundColor: selected ? accent + '1A' : 'transparent',
-                      },
-                    ]}
-                    testID={`lorebook-position-${pos}`}
-                  >
-                    <ThemedText size={13} variant={selected ? 'accent' : 'primary'}>
-                      {t(pos === 'before_char' ? 'lorebookPositionBeforeChar' : 'lorebookPositionAfterChar')}
-                    </ThemedText>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
-              {t('lorebookInsertionOrder')}
-            </ThemedText>
-            <TextInput
-              value={insertionOrderText}
-              onChangeText={setInsertionOrderText}
-              keyboardType="numeric"
-              style={[styles.singleInput, inputStyle]}
-              placeholderTextColor={theme.colors.text.muted}
-              testID="lorebook-entry-insertion-order-input"
-            />
-
-            {renderSwitchField('lorebook-case-sensitive-switch', t('lorebookCaseSensitive'), draft?.case_sensitive ?? false, v =>
-              setField('case_sensitive', v),
-            )}
-            {renderSwitchField('lorebook-use-regex-switch', t('lorebookUseRegex'), draft?.use_regex ?? false, v =>
-              setField('use_regex', v),
-            )}
-
-            <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
-              {t('lorebookName')}
-            </ThemedText>
-            <TextInput
-              value={draft?.name ?? ''}
-              onChangeText={text => setField('name', text)}
-              style={[styles.singleInput, inputStyle]}
-              placeholderTextColor={theme.colors.text.muted}
-              testID="lorebook-entry-name-input"
-            />
-
-            <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
-              {t('lorebookComment')}
-            </ThemedText>
-            <TextInput
-              value={draft?.comment ?? ''}
-              onChangeText={text => setField('comment', text)}
-              multiline
-              numberOfLines={2}
-              style={[styles.singleInput, inputStyle]}
-              placeholderTextColor={theme.colors.text.muted}
-              testID="lorebook-entry-comment-input"
-            />
-
-            <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
-              {t('lorebookPriority')}
-            </ThemedText>
-            <TextInput
-              value={priorityText}
-              onChangeText={setPriorityText}
-              keyboardType="numeric"
-              style={[styles.singleInput, inputStyle]}
-              placeholderTextColor={theme.colors.text.muted}
-              testID="lorebook-entry-priority-input"
-            />
-
-            <ThemedText variant="secondary" size={13} weight="medium" style={styles.label}>
-              {t('lorebookId')}
-            </ThemedText>
-            <TextInput
-              value={idText}
-              onChangeText={setIdText}
-              style={[styles.singleInput, inputStyle]}
-              placeholderTextColor={theme.colors.text.muted}
-              testID="lorebook-entry-id-input"
-            />
-          </View>
-        )}
       </ScrollView>
 
       {/* Actions */}
@@ -460,17 +313,6 @@ const styles = StyleSheet.create({
     height: 44,
     alignSelf: 'flex-start',
   },
-  advancedToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    marginTop: 8,
-  },
-  advancedBody: {
-    gap: 4,
-  },
   matchingGroup: {
     borderRadius: 8,
     borderWidth: 1,
@@ -500,17 +342,6 @@ const styles = StyleSheet.create({
   },
   switchHint: {
     flexShrink: 1,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    borderWidth: 1,
   },
   actions: {
     flexDirection: 'row',

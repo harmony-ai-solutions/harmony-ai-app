@@ -38,6 +38,8 @@ import { CreatorAttributionBadge } from '../components/character-card/CreatorAtt
 import { TagChips } from '../components/character-card/TagChips';
 import { MacroHighlighter } from '../components/character-card/MacroHighlighter';
 import { SheetModal } from '../components/character-card/SheetModal';
+import { LifecycleConfigEditor } from '../components/character-card/LifecycleConfigEditor';
+import type { LifecycleConfig } from '../components/character-card/LifecycleConfigEditor';
 import {
   countConstantEntries,
   parseJsonColumn,
@@ -109,6 +111,9 @@ export const CharacterProfileEditScreen: React.FC = () => {
   const [assets, setAssets] = useState<unknown[] | null>(null);
   const [cardProvenance, setCardProvenance] = useState<Record<string, unknown> | null>(null);
   const [characterBook, setCharacterBook] = useState<string | null>(null);
+
+  // ── Lifecycle config (defaults inherited by AI characters/entities) ──────────
+  const [lifecycleConfig, setLifecycleConfig] = useState<LifecycleConfig>({});
 
   // ── Images ──────────────────────────────────────────────────────────────────
   const [images, setImages] = useState<CharacterImage[]>([]);
@@ -200,6 +205,11 @@ export const CharacterProfileEditScreen: React.FC = () => {
       setCardProvenance(parseJsonColumn<Record<string, unknown>>(profile.card_provenance));
       setCharacterBook(profile.character_book ?? null);
 
+      // Lifecycle config (snake_case JSON column → typed object)
+      setLifecycleConfig(
+        parseJsonColumn<LifecycleConfig>(profile.lifecycle_config) ?? {},
+      );
+
       // Load images
       const imgs = await getCharacterImages(id);
       setImages(imgs);
@@ -259,6 +269,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
       assets: JSON.stringify(assets),
       card_provenance: cardProvenance ? JSON.stringify(cardProvenance) : '',
       character_book: characterBook ?? '',
+      lifecycle_config: JSON.stringify(lifecycleConfig),
     };
   };
 
@@ -298,7 +309,6 @@ export const CharacterProfileEditScreen: React.FC = () => {
           id: newId,
           ...buildProfileFields(),
           vision_config_id: null,
-          lifecycle_config: '{}',
         });
       }
       navigation.goBack();
@@ -322,7 +332,6 @@ export const CharacterProfileEditScreen: React.FC = () => {
       id: profileId ?? 'export',
       ...fields,
       vision_config_id: null,
-      lifecycle_config: '{}',
       created_at: new Date(),
       updated_at: new Date(),
       deleted_at: null,
@@ -744,6 +753,34 @@ export const CharacterProfileEditScreen: React.FC = () => {
           )}
 
 
+          {/* ── IMAGES ── */}
+          {renderSection(
+            'IMAGES',
+            <View style={styles.imagesSection}>
+              {isEditMode && profileId ? (
+                <>
+                  <ProfileImagePicker
+                    images={images}
+                    primaryImageId={primaryImageId}
+                    onAddImage={handleAddImage}
+                    onSetPrimary={handleSetPrimary}
+                    onDeleteImage={handleDeleteImage}
+                  />
+                  <ThemedText variant="muted" size={12} style={styles.imageHint}>
+                    {images.length > 0
+                      ? `${images.length} image${images.length !== 1 ? 's' : ''} · Tap to view · Hold for options`
+                      : 'Tap + to add images'}
+                  </ThemedText>
+                </>
+              ) : (
+                <ThemedText variant="muted" size={13} style={styles.imageHint}>
+                  Save the profile first to add images.
+                </ThemedText>
+              )}
+            </View>,
+          )}
+
+
           {/* ── GREETING ── */}
           {renderSection(
             t('greetingSection'),
@@ -872,27 +909,36 @@ export const CharacterProfileEditScreen: React.FC = () => {
             </>,
           )}
 
-          {/* ── ATTRIBUTION ── */}
+          {/* ── LIFECYCLE ── */}
           {renderSection(
-            t('attributionSection'),
-            <>
-              <CreatorAttributionBadge
-                creator={creator.trim() || null}
-                creatorNotes={creatorNotes.trim() || null}
-                characterVersion={characterVersion.trim() || null}
-                source={provenanceSource}
-                provenance={cardProvenance}
+            t('lifecycleSection'),
+            <View style={styles.lifecycleSection}>
+              <View
+                style={[
+                  styles.defaultsBanner,
+                  {
+                    borderColor: theme.colors.accent.primary + '40',
+                    backgroundColor: theme.colors.accent.primary + '14',
+                  },
+                ]}>
+                <Icon
+                  name="information-outline"
+                  size={15}
+                  color={theme.colors.accent.primary}
+                  style={styles.defaultsBannerIcon}
+                />
+                <ThemedText
+                  variant="secondary"
+                  size={12}
+                  style={styles.defaultsBannerText}>
+                  {t('lifecycle.defaultsNote')}
+                </ThemedText>
+              </View>
+              <LifecycleConfigEditor
+                config={lifecycleConfig}
+                onChange={setLifecycleConfig}
               />
-              {renderField(
-                t('tags'),
-                <TagChips
-                  tags={tags}
-                  onChange={setTags}
-                  suggestions={libraryTags}
-                  testID="profile-tag-chips"
-                />,
-              )}
-            </>,
+            </View>,
           )}
 
           {/* ── ADVANCED (collapsible) ── */}
@@ -1012,35 +1058,27 @@ export const CharacterProfileEditScreen: React.FC = () => {
             </>,
           )}
 
-          {/* ── IMAGES ── */}
+          {/* ── ATTRIBUTION ── */}
           {renderSection(
-            'IMAGES',
-            <View style={styles.imagesSection}>
-              {isEditMode && profileId ? (
-                <>
-                  <ProfileImagePicker
-                      images={images}
-                      primaryImageId={primaryImageId}
-                      onAddImage={handleAddImage}
-                      onSetPrimary={handleSetPrimary}
-                      onDeleteImage={handleDeleteImage}
-                    />
-                    <ThemedText
-                      variant="muted"
-                      size={12}
-                      style={styles.imageHint}
-                    >
-                      {images.length > 0
-                        ? `${images.length} image${images.length !== 1 ? 's' : ''} · Tap to view · Hold for options`
-                        : 'Tap + to add images'}
-                    </ThemedText>
-                </>
-              ) : (
-                <ThemedText variant="muted" size={13} style={styles.imageHint}>
-                  Save the profile first to add images.
-                </ThemedText>
+            t('attributionSection'),
+            <>
+              <CreatorAttributionBadge
+                creator={creator.trim() || null}
+                creatorNotes={creatorNotes.trim() || null}
+                characterVersion={characterVersion.trim() || null}
+                source={provenanceSource}
+                provenance={cardProvenance}
+              />
+              {renderField(
+                t('tags'),
+                <TagChips
+                  tags={tags}
+                  onChange={setTags}
+                  suggestions={libraryTags}
+                  testID="profile-tag-chips"
+                />,
               )}
-            </View>,
+            </>,
           )}
 
           {/* Bottom save button */}
@@ -1317,6 +1355,27 @@ const styles = StyleSheet.create({
   },
   imageHint: {
     marginTop: 4,
+  },
+
+  // Lifecycle section
+  lifecycleSection: {
+    gap: 12,
+  },
+  defaultsBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  defaultsBannerIcon: {
+    marginTop: 1,
+  },
+  defaultsBannerText: {
+    flex: 1,
+    lineHeight: 17,
   },
 
   // Save button

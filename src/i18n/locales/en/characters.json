@@ -62,7 +62,8 @@
   "scenarioSection": "Scenario",
   "lorebookSection": "Lorebook",
   "attributionSection": "Attribution",
-  "advanced": "Advanced",
+  "advanced": "AI Behaviour",
+  "lifecycleSection": "AI Lifecycle",
   "advancedHint": "Power-user fields. Macros are highlighted, not resolved, on this screen.",
   "macrosHighlightedHint": "Macros are highlighted, not resolved, on this screen.",
   "previewOpening": "Preview opening",
@@ -156,5 +157,104 @@
   "importProvenanceNone": "No provenance metadata",
   "importCancel": "Cancel",
   "importSave": "Save imported card",
-  "reviewAndEditFields": "Review & edit fields"
+  "reviewAndEditFields": "Review & edit fields",
+  "lifecycle": {
+    "defaultsNote": "These are the default lifecycle settings applied when a new AI character is created from this profile. Each character (entity) created from this profile inherits these values, but they can be customized individually in that entity's detail settings.",
+    "beatSchedule": {
+      "title": "Beat Schedule",
+      "tooltip": "Controls the character's autonomous 'beat' loop — how often it thinks, reflects, or reaches out on its own when no one is talking to it, and which kinds of actions it tends toward. Higher autonomy means more independent behavior.",
+      "autonomyLevel": {
+        "label": "Autonomy Level",
+        "unit": "0-3",
+        "hint": "How independently the character acts on its own. 0 = never self-initiates (only responds to you). 1 = quietly reflects and updates its inner state. 2 = may reach out and start conversations. 3 = fully autonomous (reserved/experimental)."
+      },
+      "autonomyLevels": {
+        "observe": "0 - Observe",
+        "reflect": "1 - Reflect",
+        "reachOut": "2 - Reach Out",
+        "act": "3 - Act (reserved)"
+      },
+      "beatInterval": {
+        "label": "Beat Interval",
+        "unit": "seconds",
+        "hint": "How often the autonomous 'beat' loop runs. Shorter intervals make the character more active and aware but use more resources; longer intervals make it more subdued. 1800s = a beat roughly every 30 minutes."
+      },
+      "beatTypeWeights": {
+        "label": "Beat Type Weights",
+        "hint": "Relative chance of each beat type when one fires. Self-reflection and curiosity are passive (internal musing); relationship and outreach are active and can generate messages to you. Values should roughly sum to 1.0."
+      },
+      "beatTypes": {
+        "self_reflection": "Self Reflection",
+        "curiosity": "Curiosity",
+        "relationship": "Relationship",
+        "outreach": "Outreach"
+      }
+    },
+    "sleepExhaustion": {
+      "title": "Sleep & Exhaustion",
+      "tooltip": "Models the character getting tired from activity and resting. Each beat adds exhaustion; once it crosses the sleep threshold the character dozes off, recovering until it drops below the wake threshold.",
+      "sleepThreshold": {
+        "label": "Sleep Threshold",
+        "unit": "0-1",
+        "hint": "Exhaustion level (0–1) at which the character falls asleep and stops responding until it has rested. Raise it to let the character stay awake longer under heavy activity."
+      },
+      "wakeThreshold": {
+        "label": "Wake Threshold",
+        "unit": "0-1",
+        "hint": "Exhaustion level the character must recover to before waking back up. Keep this below the sleep threshold; a lower value means longer, deeper sleeps."
+      },
+      "exhaustionAccumulation": {
+        "label": "Exhaustion Accumulation",
+        "unit": "per beat",
+        "hint": "How much exhaustion (0–1) each beat adds. Higher values make the character tire quickly from activity; 0 means it never tires."
+      },
+      "exhaustionDecay": {
+        "label": "Exhaustion Decay",
+        "unit": "per tick",
+        "hint": "How much exhaustion (0–1) each tick removes while the character rests. Higher values mean faster recovery during sleep."
+      }
+    },
+    "emotionDecay": {
+      "title": "Emotion Decay",
+      "tooltip": "Governs how the character's feelings fade back toward calm over time. The decay tau is the time constant of that fade (larger = longer-lasting); the high/low thresholds flag emotionally significant moments.",
+      "decayTau": {
+        "label": "Decay Tau",
+        "unit": "seconds",
+        "hint": "Time constant (seconds) for emotions fading back toward calm — roughly the half-life of a feeling. Larger values make moods linger; smaller values make them shift quickly. 3600s ≈ a 1-hour half-life."
+      },
+      "highThreshold": {
+        "label": "Emotion High Threshold",
+        "unit": "0-10",
+        "hint": "Emotion intensity (0–10) counted as a 'high' spike. These are the moments strong enough to drive memory formation and crystallization."
+      },
+      "lowThreshold": {
+        "label": "Emotion Low Threshold",
+        "unit": "0-10",
+        "hint": "Emotion intensity (0–10) below which a feeling is treated as negligible and barely influences the character's behavior."
+      }
+    },
+    "crystallization": {
+      "title": "Crystallization",
+      "tooltip": "Decides when a strong, sustained feeling hardens into a permanent personality trait. An emotion held at high intensity for at least the minimum hours becomes 'crystallized' and shapes the character going forward.",
+      "intensity": {
+        "label": "Crystallize Intensity",
+        "unit": "0-10",
+        "hint": "Minimum sustained emotion intensity (0–10) before that emotion can crystallize into a permanent personality trait. Only strong, persistent feelings qualify."
+      },
+      "minHours": {
+        "label": "Crystallize Min Hours",
+        "unit": "hours",
+        "hint": "How long (hours) a high-intensity emotion must keep going before it crystallizes. Higher values mean only very stable feelings become permanent."
+      }
+    },
+    "memory": {
+      "title": "Memory",
+      "tooltip": "Controls how many 'core' memories stay pinned at the top of the character's recall regardless of age — the formative moments that always shape its responses.",
+      "coreMemoriesK": {
+        "label": "Core Memories K",
+        "unit": "count",
+        "hint": "How many memories are kept 'core' — pinned at the top of recall regardless of age, so the formative moments always shape the character's responses."
+      }
+    }
+  }
 }
