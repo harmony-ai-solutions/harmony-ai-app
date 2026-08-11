@@ -43,6 +43,36 @@ export interface InteractionSession {
   // all-active check after both connections are already 'active' — emitting
   // session:started twice (and double-triggering the on-start sync).
   started?: boolean;
+  /**
+   * Render-only greeting support (§1-10): true when the character's card has an
+   * authored `first_mes` (read from the INIT_ENTITY SUCCESS payload). The
+   * greeting itself is NOT fabricated here — it arrives as a normal
+   * `message_type="greeting"` ConversationMessage via the message-load/sync
+   * path. `undefined` until an INIT_ENTITY SUCCESS carrying `has_first_mes`
+   * has been processed.
+   */
+  hasFirstMes?: boolean;
+}
+
+/**
+ * Guided scenario inputs (§2-4) — maps 1:1 to the engine `guided` payload
+ * shape for GENERATE_GREETING / START_NEW_SCENARIO. Structurally identical to
+ * `ScenarioGeneratorSheet`'s `ScenarioGuidedInputs` (the screen passes it
+ * through untouched).
+ */
+export interface GuidedScenarioInput {
+  mood: string[];
+  setting: string;
+  relationship: string;
+  timeOfDay: string;
+  whoFirst: 'character' | 'user';
+  premise: string;
+}
+
+/** Success result of a scenario generation dispatch. */
+export interface ScenarioGenerationResult {
+  greeting: string;
+  interactionId: string;
 }
 
 /**
@@ -90,6 +120,17 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   private pendingSessions: Map<string, EntitySession> = new Map(); // Track individual sessions during initialization (keyed by entityId)
   private transcriptionStates: Map<string, 'pending' | 'failed'> = new Map(); // Track transcription state (keyed by messageId)
   private reconnectTimers: Map<string, { interactionId: string; entityId: string; attempts: number; timer: ReturnType<typeof setTimeout> | null }> = new Map();
+  /**
+   * Pending GENERATE_GREETING / START_NEW_SCENARIO dispatches awaiting their
+   * engine response, keyed by event_id (§2-4). The engine replies on the same
+   * WebSocket asynchronously, so each dispatch registers a waiter that the
+   * matching response handler resolves/rejects.
+   */
+  private pendingGenerations: Map<string, {
+    resolve: (result: ScenarioGenerationResult) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = new Map();
   private appStateSubscription: any;
 
   private constructor() {
@@ -578,6 +619,193 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
 
   // ---------------------------------------------------------------------------
+  // generateGreeting / startNewScenario — scenario generation events (§2-4)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Resolve the connection to send a scenario event on. The generating entity
+   * is `entityId` (the character whose greeting is being authored), so prefer
+   * its own connection; fall back to any active partner connection.
+   */
+  private getGenerationConnection(
+    session: InteractionSession,
+    entityId: string,
+  ): { connectionId: string } | null {
+    const own = session.connections.get(entityId);
+    if (own && (own.status === 'active' || own.status === 'connecting')) {
+      return { connectionId: own.connectionId };
+    }
+    const partnerIds = this.getPartnerConnectionIds(session);
+    if (partnerIds.length > 0) {
+      return { connectionId: partnerIds[0] };
+    }
+    for (const [, conn] of session.connections.entries()) {
+      if (conn.status === 'active' || conn.status === 'connecting') {
+        return { connectionId: conn.connectionId };
+      }
+    }
+    return null;
+  }
+
+  private registerGenerationWaiter(
+    eventId: string,
+    timeoutMs: number,
+  ): Promise<ScenarioGenerationResult> {
+    return new Promise<ScenarioGenerationResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingGenerations.delete(eventId);
+        reject(new Error('Scenario generation timed out'));
+      }, timeoutMs);
+      this.pendingGenerations.set(eventId, { resolve, reject, timer });
+    });
+  }
+
+  /**
+   * Dispatch GENERATE_GREETING — first custom greeting + regenerate. Valid only
+   * while the greeting is the only message (the engine enforces this and
+   * returns ERROR otherwise; the client should fall back to START_NEW_SCENARIO).
+   *
+   * Resolves with the generated greeting + interaction_id from the engine.
+   */
+  async generateGreeting(payload: {
+    entityId: string;
+    targetEntityId: string;
+    interactionId: string;
+    mode: 'random' | 'directed';
+    guided?: GuidedScenarioInput;
+  }): Promise<ScenarioGenerationResult> {
+    const session = this.sessions.get(payload.interactionId);
+    if (!session) {
+      throw new Error(`No active session for interaction ${payload.interactionId}`);
+    }
+    const connection = this.getGenerationConnection(session, payload.entityId);
+    if (!connection) {
+      throw new Error('No active connection to generate a greeting on');
+    }
+
+    const eventId = this.generateEventId();
+    const waiter = this.registerGenerationWaiter(eventId, 30_000);
+
+    const event: any = {
+      event_id: eventId,
+      event_type: 'GENERATE_GREETING',
+      status: 'NEW',
+      payload: {
+        entity_id: payload.entityId,
+        target_entity_id: payload.targetEntityId,
+        interaction_id: payload.interactionId,
+        mode: payload.mode,
+      },
+    };
+    if (payload.guided) {
+      event.payload.guided = payload.guided;
+    }
+
+    log.info(`Sending GENERATE_GREETING (${payload.mode}) for interaction ${payload.interactionId}`);
+    await this.connectionManager.sendEvent(connection.connectionId, event);
+    return waiter;
+  }
+
+  /**
+   * Dispatch START_NEW_SCENARIO — scenario restart mid-conversation. The engine
+   * creates a BRAND-NEW interaction (fresh `interaction_id` in the SUCCESS
+   * payload); the caller swaps the active interactionId + runs a blocking sync.
+   *
+   * No interactionId in the payload (per the engine contract): the session is
+   * resolved from the entity's connection.
+   */
+  async startNewScenario(payload: {
+    entityId: string;
+    targetEntityId: string;
+    mode: 'random' | 'directed';
+    guided?: GuidedScenarioInput;
+  }): Promise<ScenarioGenerationResult> {
+    // The session map is keyed by interaction id; the caller may still be on
+    // the OLD id when restarting, so find the session via the entity connection.
+    let session: InteractionSession | null = null;
+    for (const [, s] of this.sessions.entries()) {
+      if (s.connections.has(payload.entityId)) {
+        session = s;
+        break;
+      }
+    }
+    if (!session) {
+      throw new Error(`No active session for entity ${payload.entityId}`);
+    }
+    const connection = this.getGenerationConnection(session, payload.entityId);
+    if (!connection) {
+      throw new Error('No active connection to start a scenario on');
+    }
+
+    const eventId = this.generateEventId();
+    const waiter = this.registerGenerationWaiter(eventId, 30_000);
+
+    const event: any = {
+      event_id: eventId,
+      event_type: 'START_NEW_SCENARIO',
+      status: 'NEW',
+      payload: {
+        entity_id: payload.entityId,
+        target_entity_id: payload.targetEntityId,
+        mode: payload.mode,
+      },
+    };
+    if (payload.guided) {
+      event.payload.guided = payload.guided;
+    }
+
+    log.info(`Sending START_NEW_SCENARIO (${payload.mode}) on interaction ${session.interactionId}`);
+    await this.connectionManager.sendEvent(connection.connectionId, event);
+    return waiter;
+  }
+
+  private handleGenerationResponse(
+    entityId: string,
+    event: any,
+    interactionSession: InteractionSession | null,
+    interactionId: string,
+  ): void {
+    const waiter = this.pendingGenerations.get(event.event_id);
+    if (!waiter) {
+      log.warn(`Scenario generation response for unknown event_id ${event.event_id} (${event.event_type})`);
+      return;
+    }
+    clearTimeout(waiter.timer);
+    this.pendingGenerations.delete(event.event_id);
+
+    if (event.status !== 'SUCCESS') {
+      const error =
+        event.payload?.error || `${event.event_type} failed (${event.status || 'unknown'})`;
+      waiter.reject(new Error(error));
+      return;
+    }
+
+    const greeting: string = event.payload?.greeting ?? '';
+    let resultInteractionId: string =
+      event.payload?.interaction_id ?? interactionId ?? '';
+
+    // START_NEW_SCENARIO returns a brand-new interaction — re-key the session
+    // so subsequent events (message:received, sendTextMessage, ...) route to
+    // the new interaction (mirrors the INIT_ENTITY canonical-id replacement).
+    if (event.event_type === 'START_NEW_SCENARIO' && interactionSession && resultInteractionId) {
+      if (resultInteractionId !== interactionSession.interactionId) {
+        const oldId = interactionSession.interactionId;
+        log.info(`START_NEW_SCENARIO: re-keying session ${oldId} → ${resultInteractionId}`);
+        interactionSession.interactionId = resultInteractionId;
+        this.sessions.delete(oldId);
+        this.sessions.set(resultInteractionId, interactionSession);
+      }
+      // The engine owns the interaction record on this path (sync delivers it).
+    } else if (event.event_type === 'START_NEW_SCENARIO' && !resultInteractionId) {
+      // Defensive: keep the current id rather than dropping it to ''.
+      resultInteractionId = interactionSession?.interactionId ?? '';
+      log.warn(`START_NEW_SCENARIO SUCCESS without interaction_id — keeping ${resultInteractionId}`);
+    }
+
+    waiter.resolve({ greeting, interactionId: resultInteractionId });
+  }
+
+  // ---------------------------------------------------------------------------
   // stopInteractionSession — replaces stopSession
   // ---------------------------------------------------------------------------
 
@@ -975,6 +1203,13 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       return;
     }
 
+    // Handle scenario generation responses (§2-4) — GENERATE_GREETING and
+    // START_NEW_SCENARIO resolve their waiter (the screen awaits the dispatch).
+    if (event.event_type === 'GENERATE_GREETING' || event.event_type === 'START_NEW_SCENARIO') {
+      this.handleGenerationResponse(entityId, event, interactionSession, interactionId ?? '');
+      return;
+    }
+
     // For remaining event types, we need an InteractionSession
     if (!interactionSession || !interactionId) {
       log.debug(`Event ${event.event_type} for ${entityId} - no interaction session yet, ignoring`);
@@ -1090,6 +1325,20 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
       // Update the connection status in the InteractionSession
       if (interactionSession) {
+        // Render-only greeting support (§1-10): surface `has_first_mes` from
+        // the INIT_ENTITY SUCCESS payload so ChatDetailScreen can branch
+        // synchronously (GreetingBubble vs EmptyChatCTA). The greeting itself
+        // is NOT fabricated here — the engine delivers it as a normal
+        // message_type="greeting" message via the message-load/sync path.
+        // Read BEFORE the all-active check so the value is on the session by
+        // the time session:started emits (which carries the session object).
+        if (typeof event.payload?.has_first_mes === 'boolean') {
+          interactionSession.hasFirstMes = event.payload.has_first_mes;
+          log.info(
+            `Entity ${entityId} reports has_first_mes=${event.payload.has_first_mes} (interaction ${interactionId})`,
+          );
+        }
+
         const connection = interactionSession.connections.get(entityId);
         if (connection) {
           connection.status = 'active';

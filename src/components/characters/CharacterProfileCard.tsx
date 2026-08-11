@@ -9,6 +9,7 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
 import { hexToRgba } from '../../utils/colorUtils';
 import { CharacterProfile } from '../../database/models';
@@ -20,6 +21,12 @@ interface CharacterProfileCardProps {
   onPress: () => void;
   onLongPress: () => void;
   onChatPress: () => void;
+  /**
+   * Tap handler for the creator attribution line (4-3). When set, the compact
+   * "by {creator}" row becomes tappable and drives the management-screen
+   * creator filter. Optional — cards render the row read-only without it.
+   */
+  onCreatorPress?: (creator: string) => void;
 }
 
 /**
@@ -48,8 +55,10 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
   onPress,
   onLongPress,
   onChatPress,
+  onCreatorPress,
 }) => {
   const { theme } = useAppTheme();
+  const { t } = useTranslation('characters');
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
@@ -219,6 +228,37 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
               >
                 {profile.description || 'No description provided.'}
               </ThemedText>
+
+              {/* Compact creator attribution (4-3) — tappable to filter.
+                  The full CreatorAttributionBadge is editor-width; the grid
+                  card gets a compact, actionable row instead. */}
+              {profile.creator ? (
+                <TouchableOpacity
+                  onPress={() => onCreatorPress?.(profile.creator as string)}
+                  disabled={!onCreatorPress}
+                  style={styles.creatorRow}
+                  testID={`creator-attribution-${profile.id}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('byCreator', { creator: profile.creator })}
+                >
+                  <Icon
+                    name="account-outline"
+                    size={12}
+                    color={accent.primary}
+                  />
+                  <ThemedText
+                    variant="muted"
+                    size={10}
+                    numberOfLines={1}
+                    style={styles.creatorText}
+                  >
+                    {t('byCreator', { creator: profile.creator })}
+                    {profile.character_version
+                      ? ` · v${profile.character_version}`
+                      : ''}
+                  </ThemedText>
+                </TouchableOpacity>
+              ) : null}
             </View>
 
             {/* ── Left accent stripe ── */}
@@ -330,6 +370,18 @@ const styles = StyleSheet.create({
   description: {
     lineHeight: 15,
     minHeight: 30, // reserve space for 2 lines
+  },
+  // ── Compact creator attribution row (4-3) ──
+  creatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  creatorText: {
+    flexShrink: 1,
   },
   // ── Left accent stripe ──
   accentStripe: {

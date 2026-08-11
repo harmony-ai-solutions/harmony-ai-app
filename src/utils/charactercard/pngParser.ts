@@ -217,9 +217,10 @@ export function findCharacterCardTextChunks(
 /**
  * Extract a character card from a PNG image byte buffer.
  *
- * Mirrors Go ExtractCharacterCardFromPNG exactly:
  * - Validates PNG signature
- * - Walks chunks, stops at FIRST tEXt/iTXt chunk with keyword "chara" or "ccv3"
+ * - Scans ALL tEXt/iTXt chunks for the "chara" / "ccv3" keywords
+ * - PREFERS the "ccv3" chunk when both are present (SPEC_V3:28); falls back
+ *   to the "chara" chunk otherwise (mirrors the Go side)
  * - Base64-decodes the text content
  * - Parses JSON into TavernCardV2
  * - Returns both the card and the original image bytes
@@ -227,75 +228,19 @@ export function findCharacterCardTextChunks(
 export function extractCharacterCardFromPNG(
   bytes: Uint8Array,
 ): { card: TavernCardV2; imageBytes: Uint8Array } {
-  // Validate PNG signature
-  for (let i = 0; i < 8; i++) {
-    if (bytes[i] !== PNG_SIGNATURE[i]) {
-      throw new CharacterCardParseError('not a valid PNG file');
-    }
-  }
+  // findCharacterCardTextChunks validates the PNG signature and collects ALL
+  // chara/ccv3 tEXt/iTXt chunks (it does not stop at the first match).
+  const chunks = findCharacterCardTextChunks(bytes);
 
-  let jsonStr: string | null = null;
-  let offset = 8;
+  // Prefer the V3 chunk over the backfilled V2 chunk (SPEC_V3:28).
+  const ccv3 = chunks.find((chunk) => chunk.keyword === 'ccv3');
+  const selected = ccv3 ?? chunks.find((chunk) => chunk.keyword === 'chara');
 
-  while (offset < bytes.length) {
-    // Read 4-byte length (big-endian uint32)
-    if (offset + 4 > bytes.length) break;
-    const length = readUint32BE(bytes, offset);
-    offset += 4;
-
-    // Read 4-byte chunk type
-    if (offset + 4 > bytes.length) break;
-    const chunkTypeBytes = bytes.slice(offset, offset + 4);
-    offset += 4;
-
-    // Read chunk data (length bytes)
-    if (offset + length > bytes.length) break;
-    const chunkData = bytes.slice(offset, offset + length);
-    offset += length;
-
-    // Skip 4-byte CRC
-    if (offset + 4 > bytes.length) break;
-    offset += 4;
-
-    // Only process tEXt and iTXt chunks
-    const typeStr = bytesToString(chunkTypeBytes);
-    if (typeStr !== 'tEXt' && typeStr !== 'iTXt') {
-      continue;
-    }
-
-    // Find null terminator for keyword
-    const nullIdx = chunkData.indexOf(0);
-    if (nullIdx === -1) continue;
-
-    const keyword = bytesToString(chunkData.slice(0, nullIdx));
-    if (keyword === 'chara' || keyword === 'ccv3') {
-      if (typeStr === 'iTXt') {
-        // iTXt: Keyword (0) Compression Flag (1) Compression Method (1) Language Tag (0) Translated Keyword (0) Text
-        let dataStart = nullIdx + 1 + 2; // skip keyword null + compression flag + method
-
-        // Skip language tag
-        const langIdx = chunkData.subarray(dataStart).indexOf(0);
-        if (langIdx !== -1) {
-          dataStart += langIdx + 1;
-
-          // Skip translated keyword
-          const transIdx = chunkData.subarray(dataStart).indexOf(0);
-          if (transIdx !== -1) {
-            dataStart += transIdx + 1;
-            jsonStr = bytesToString(chunkData.slice(dataStart));
-          }
-        }
-      } else {
-        // tEXt: Keyword (0) Text
-        jsonStr = bytesToString(chunkData.slice(nullIdx + 1));
-      }
-      break; // Stop at FIRST matching chunk (mirrors Go behavior)
-    }
-  }
-
-  if (jsonStr === null) {
+  if (!selected) {
     throw new CharacterCardParseError('no character card data found in PNG');
   }
+
+  let jsonStr = selected.text;
 
   // Attempt base64 decode; fall back to raw text on failure (mirrors Go)
   const decoded = base64DecodeToUtf8(jsonStr);

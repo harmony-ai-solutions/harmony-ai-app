@@ -32,15 +32,20 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
-import { ChatBubble } from '../components/chat/ChatBubble';
+import { ChatBubble, isPartnerMessage } from '../components/chat/ChatBubble';
 import { ChatInput, ChatInputRef } from '../components/chat/ChatInput';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewMessagesDivider } from '../components/chat/NewMessagesDivider';
 import { EmojiPickerInline } from '../components/emoji/EmojiPickerInline';
+import { AlternateGreetingSwiper, parseAlternateGreetings } from '../components/chat/AlternateGreetingSwiper';
+import { EmptyChatCTA } from '../components/chat/EmptyChatCTA';
+import { GreetingBubble } from '../components/chat/GreetingBubble';
+import { ScenarioGeneratorSheet, ScenarioGuidedInputs } from '../components/chat/ScenarioGeneratorSheet';
 import EntityEmojiActionService from '../services/EntityEmojiActionService';
 import { EmojiEntry } from '../types/emoji';
 import { useEntitySession } from '../contexts/EntitySessionContext';
 import EntitySessionService, { InteractionSession } from '../services/EntitySessionService'; // Still needed for event listeners
+import { SyncService } from '../services/SyncService';
 import {
   getConversationMessagesByParticipantKey,
   getRecentConversationMessages,
@@ -58,7 +63,7 @@ import { deleteEntity } from '../database/repositories/entities';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { createLogger } from '../utils/logger';
-import { ConversationMessage } from '../database/models';
+import { ConversationMessage, CharacterProfile } from '../database/models';
 import {
   deriveParticipantKey,
   deriveScopeFromParticipants,
@@ -74,6 +79,35 @@ const log = createLogger('[ChatDetailScreen]');
 // (append new, keep older pages) so the user doesn't lose already-loaded history.
 // For now, this constant controls the fixed window size shown on open and refresh.
 const MESSAGES_PAGE_SIZE = 200;
+
+/**
+ * Empty-chat hint gate (§1-10): show the (P1-disabled) "generate a greeting"
+ * hint only when the engine told us the card has NO first_mes AND the
+ * conversation has zero messages — the display mirror of the engine's
+ * truly-new-chat gate ("no prior interaction with messages"). `null` means the
+ * INIT_ENTITY signal hasn't arrived yet → show nothing (still loading).
+ */
+export function shouldShowEmptyChatHint(
+  hasFirstMes: boolean | null,
+  messageCount: number,
+): boolean {
+  return hasFirstMes === false && messageCount === 0;
+}
+
+/**
+ * Replace-vs-restart gate (§2-4): GENERATE_GREETING is valid only while the
+ * greeting is the only message (the engine enforces this too and returns ERROR
+ * otherwise — the client then falls back to START_NEW_SCENARIO). `true` also
+ * covers the truly-empty chat (FIRST custom greeting).
+ */
+export function shouldUseGenerateGreeting(
+  messages: Pick<ConversationMessage, 'message_type'>[],
+): boolean {
+  return (
+    messages.length === 0 ||
+    (messages.length === 1 && messages[0].message_type === 'greeting')
+  );
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
@@ -103,6 +137,28 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [failedTranscriptions, setFailedTranscriptions] = useState<Set<string>>(
     new Set(),
   );
+
+  // Render-only greeting support (§1-10):
+  // - hasFirstMes: surfaced from the INIT_ENTITY SUCCESS payload via the
+  //   InteractionSession (session:started). null until known.
+  // - partnerProfile: the partner character's profile — provides
+  //   alternate_greetings (authored swipes) + nickname for macro resolution.
+  // - ownEntityName: the own entity's alias — {{user}} macro substitution.
+  const [hasFirstMes, setHasFirstMes] = useState<boolean | null>(null);
+  const [partnerProfile, setPartnerProfile] = useState<CharacterProfile | null>(null);
+  const [ownEntityName, setOwnEntityName] = useState<string>('You');
+
+  // Scenario generation (§2-4):
+  // - scenarioSheetOpen: drives the ScenarioGeneratorSheet (paper Modal+Portal).
+  // - greetingPreparing: in-flight generation → GreetingBubble `preparing`
+  //   (GreetingShimmer + TypingIndicator). No streaming — the shimmer is the
+  //   sole latency affordance.
+  // - lastGuidedRef: remembers the last guided inputs so the swiper's
+  //   "Generate another" reuses the same directed style (or random if the last
+  //   generation was "Surprise me").
+  const [scenarioSheetOpen, setScenarioSheetOpen] = useState(false);
+  const [greetingPreparing, setGreetingPreparing] = useState(false);
+  const lastGuidedRef = useRef<ScenarioGuidedInputs | null>(null);
 
   // Resolve participant info for header
   const [participantIds, setParticipantIds] = useState<string[]>(
@@ -214,14 +270,25 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         const entity = allEntities.find(e => e.id === partnerEntityId);
         if (entity?.character_profile_id) {
           const profile = await getCharacterProfile(entity.character_profile_id);
-          if (profile && !routeEntityName) {
-            setPartnerName(profile.name);
-            setHeaderName(profile.name);
+          if (profile) {
+            // Partner profile — drives authored alternate-greeting swipes and
+            // {{char}} macro resolution (nickname || name) for the greeting.
+            setPartnerProfile(profile);
+            if (!routeEntityName) {
+              setPartnerName(profile.name);
+              setHeaderName(profile.name);
+            }
           }
           const image = await getPrimaryImage(entity.character_profile_id);
           if (image) {
             setPartnerAvatar(imageToDataURL(image));
           }
+        }
+
+        // Own entity's display name — {{user}} macro substitution in greetings.
+        const own = allEntities.find(e => e.id === ownEntityId);
+        if (own?.alias) {
+          setOwnEntityName(own.alias);
         }
       }
     };
@@ -281,6 +348,16 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       setLastReadTimestamp(timestamp);
       lastReadTimestampRef.current = timestamp;
       sessionDividerTimestamp.current = timestamp;
+
+      // Fallback: if session:started fired before this screen mounted, read
+      // has_first_mes straight from the live session (primary path is the
+      // session:started listener below).
+      const liveSession = EntitySessionService.getInteractionSession(
+        currentInteractionIdRef.current,
+      );
+      if (liveSession?.hasFirstMes !== undefined) {
+        setHasFirstMes(liveSession.hasFirstMes);
+      }
     } catch (error) {
       log.error('Failed to load messages:', error);
     }
@@ -320,9 +397,16 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       if (session.ownEntityId === ownEntityId) {
         const screenParticipants = [...participantIds].sort().join('+');
         const sessionParticipants = [...session.participantIds].sort().join('+');
-        if (screenParticipants === sessionParticipants && interactionId !== currentInteractionIdRef.current) {
-          log.info(`InteractionId updated from ${currentInteractionIdRef.current} to canonical ${interactionId}`);
-          currentInteractionIdRef.current = interactionId;
+        if (screenParticipants === sessionParticipants) {
+          if (interactionId !== currentInteractionIdRef.current) {
+            log.info(`InteractionId updated from ${currentInteractionIdRef.current} to canonical ${interactionId}`);
+            currentInteractionIdRef.current = interactionId;
+          }
+          // Render-only greeting support (§1-10): surface has_first_mes so the
+          // screen can branch synchronously (GreetingBubble vs EmptyChatCTA).
+          if (session.hasFirstMes !== undefined) {
+            setHasFirstMes(session.hasFirstMes);
+          }
         }
       }
     };
@@ -1100,13 +1184,229 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     [persistMarkAsRead],
   );
 
+  // ✨ Scenario trigger (§2-4): P1 left the composer ✨ icon + ✨ pill PRESENT
+  // but DISABLED. Opening the sheet is now wired (the sheet's Generate →
+  // onGenerate → runScenarioGeneration dispatches the engine event).
+  const openScenarioSheet = useCallback(() => {
+    setScenarioSheetOpen(true);
+  }, []);
+
+  const closeScenarioSheet = useCallback(() => {
+    setScenarioSheetOpen(false);
+  }, []);
+
+  const showGenerateFailed = useCallback(() => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(t('scenario:generateFailedBackend'), ToastAndroid.LONG);
+    } else {
+      showAlert(t('scenario:title'), t('scenario:generateFailedBackend'), [
+        { text: t('common:ok') },
+      ]);
+    }
+  }, [t, showAlert]);
+
+  /** Dispatch GENERATE_GREETING (replace path) — shared by the sheet's
+   *  replace branch and the swiper's "Generate another" slot. */
+  const performGenerateGreeting = useCallback(
+    async (guided: ScenarioGuidedInputs | null) => {
+      const partnerEntityId = participantIds.find(id => id !== ownEntityId);
+      if (!partnerEntityId) return;
+
+      const mode = guided ? ('directed' as const) : ('random' as const);
+
+      setGreetingPreparing(true);
+      try {
+        await EntitySessionService.generateGreeting({
+          entityId: partnerEntityId,
+          targetEntityId: ownEntityId,
+          interactionId: currentInteractionIdRef.current,
+          mode,
+          ...(guided ? { guided } : {}),
+        });
+
+        // Reload so the (new/updated) greeting message renders — the engine
+        // delivers it via the message/sync path; this is a belt-and-braces
+        // refresh on top of the message:received listener.
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          setMessages(updatedMessages);
+          loadedMessagesRef.current = updatedMessages;
+        }
+      } catch (error) {
+        log.error('Greeting generation failed:', error);
+        // Non-blocking toast/alert — chat stays as-is (no fabrication).
+        showGenerateFailed();
+      } finally {
+        setGreetingPreparing(false);
+      }
+    },
+    [participantIds, ownEntityId, participantKey, showGenerateFailed],
+  );
+
+  /** Restart path — START_NEW_SCENARIO with interaction-id swap + blocking sync. */
+  const performScenarioRestart = useCallback(
+    async (guided: ScenarioGuidedInputs | null) => {
+      const partnerEntityId = participantIds.find(id => id !== ownEntityId);
+      if (!partnerEntityId) return;
+
+      const mode = guided ? ('directed' as const) : ('random' as const);
+
+      setGreetingPreparing(true);
+      try {
+        const result = await EntitySessionService.startNewScenario({
+          entityId: partnerEntityId,
+          targetEntityId: ownEntityId,
+          mode,
+          ...(guided ? { guided } : {}),
+        });
+
+        // Swap the active interactionId to the brand-new interaction, then run
+        // a blocking sync to fetch the new interaction + its first message
+        // before unblocking (the chat re-renders the fresh scenario).
+        if (result.interactionId && result.interactionId !== currentInteractionIdRef.current) {
+          log.info(
+            `Scenario restart: swapping interaction ${currentInteractionIdRef.current} → ${result.interactionId}`,
+          );
+          currentInteractionIdRef.current = result.interactionId;
+        }
+        setHasFirstMes(true);
+
+        await SyncService.getInstance()
+          .syncAndWait()
+          .catch(err => {
+            log.warn('Scenario restart sync failed (best-effort):', err);
+          });
+
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          setMessages(updatedMessages);
+          loadedMessagesRef.current = updatedMessages;
+        }
+      } catch (error) {
+        log.error('Scenario restart failed:', error);
+        showGenerateFailed();
+      } finally {
+        setGreetingPreparing(false);
+      }
+    },
+    [participantIds, ownEntityId, participantKey, showGenerateFailed],
+  );
+
+  /** Replace-vs-restart dispatch selection (based on message count). */
+  const runScenarioGeneration = useCallback(
+    async (guided: ScenarioGuidedInputs | null) => {
+      if (shouldUseGenerateGreeting(messages)) {
+        await performGenerateGreeting(guided);
+      } else {
+        await performScenarioRestart(guided);
+      }
+    },
+    [messages, performGenerateGreeting, performScenarioRestart],
+  );
+
+  const handleScenarioGenerate = useCallback(
+    async (guided: ScenarioGuidedInputs | null) => {
+      lastGuidedRef.current = guided;
+      setScenarioSheetOpen(false); // Generate collapses the sheet
+      await runScenarioGeneration(guided);
+    },
+    [runScenarioGeneration],
+  );
+
+  /** Regenerate swipe — "Generate another" in the AlternateGreetingSwiper slot. */
+  const handleRegenerateGreeting = useCallback(async () => {
+    if (greetingPreparing) return;
+    await performGenerateGreeting(lastGuidedRef.current);
+  }, [greetingPreparing, performGenerateGreeting]);
+
+  // The regenerate slot is only shown while the greeting is still the only
+  // message (GENERATE_GREETING gate — the engine enforces this too).
+  const canRegenerateGreeting = useMemo(
+    () => shouldUseGenerateGreeting(messages),
+    [messages],
+  );
+
+  // Render-only greeting support (§1-10): the engine delivers the authored
+  // first_mes as a normal message_type="greeting" PARTNER message. For a
+  // truly-new chat it is the FIRST message in the conversation — wrap it in
+  // the authored AlternateGreetingSwiper (first_mes + alternate_greetings from
+  // the profile JSON column). No local first_mes, no optimistic placeholder,
+  // no reconciliation.
+  const { greetingMessage, isGreetingOpening } = useMemo(() => {
+    const idx = messages.findIndex(
+      m => m.message_type === 'greeting' && isPartnerMessage(m, ownEntityId),
+    );
+    const found = idx === -1 ? null : messages[idx];
+    return {
+      greetingMessage: found,
+      isGreetingOpening: found !== null && messages[0]?.id === found.id,
+    };
+  }, [messages, ownEntityId]);
+
+  // Authored swipes: [delivered first_mes, ...alternate_greetings (JSON)].
+  // Each swipe is macro-resolved for display inside GreetingBubble.
+  const greetingSwipes = useMemo(() => {
+    if (!greetingMessage) return [];
+    const alternates = parseAlternateGreetings(partnerProfile?.alternate_greetings);
+    return [greetingMessage.content, ...alternates].filter(
+      g => g && g.trim().length > 0,
+    );
+  }, [greetingMessage, partnerProfile]);
+
+  // {{char}} → profile nickname || name; {{user}} → own entity alias.
+  const charName = partnerProfile?.nickname || partnerProfile?.name || partnerName;
+
   const renderMessage = useCallback(
     ({ item }: { item: any }) => {
       if (item.type === 'divider') {
         return <NewMessagesDivider count={item.count} theme={theme!} />;
       }
 
-      const isOwn = item.sender_entity_id === ownEntityId;
+      const isOwn = !isPartnerMessage(item, ownEntityId);
+
+      // Truly-new chat + has_first_mes → the delivered greeting is the opening:
+      // render it wrapped in the authored AlternateGreetingSwiper, with the ✨
+      // Scenario pill beside it for discoverability (enabled in P2 — opens the
+      // generator sheet). The regenerate slot appears after the last authored
+      // greeting while GENERATE_GREETING is valid (greeting = only message).
+      if (
+        !isOwn &&
+        item.message_type === 'greeting' &&
+        item.id === greetingMessage?.id &&
+        isGreetingOpening
+      ) {
+        return (
+          <View style={styles.greetingWrap}>
+            <AlternateGreetingSwiper
+              key={item.id}
+              greetings={greetingSwipes}
+              charName={charName}
+              userName={ownEntityName}
+              theme={theme!}
+              onRegenerateSwipe={
+                canRegenerateGreeting ? handleRegenerateGreeting : undefined
+              }
+            />
+            <View style={styles.scenarioPillRow}>
+              <EmptyChatCTA
+                variant="pill"
+                disabled={false}
+                onPress={openScenarioSheet}
+                theme={theme!}
+              />
+            </View>
+          </View>
+        );
+      }
+
       const isLastMessage =
         messages.length > 0 && item.id === messages[messages.length - 1].id;
       const isTranscriptionFailed = failedTranscriptions.has(item.id);
@@ -1140,9 +1440,42 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       handleRegenerateMessage,
       handleEditMessage,
       handleRetryTranscription,
+      greetingMessage,
+      isGreetingOpening,
+      greetingSwipes,
+      charName,
+      ownEntityName,
+      openScenarioSheet,
+      canRegenerateGreeting,
+      handleRegenerateGreeting,
     ],
   );
 
+
+  // In-flight generation affordance (§2-4): GreetingBubble `preparing` (shimmer
+  // + TypingIndicator) plus the "Preparing the opening…" caption. No streaming —
+  // this shimmer is the sole latency affordance.
+  const renderGreetingPreparing = useCallback(() => {
+    return (
+      <View style={styles.preparingWrap} testID="scenario-preparing">
+        <GreetingBubble
+          text=""
+          charName={charName}
+          userName={ownEntityName}
+          theme={theme}
+          state="preparing"
+        />
+        <ThemedText
+          variant="muted"
+          size={12}
+          style={styles.preparingText}
+          testID="scenario-preparing-text"
+        >
+          {t('scenario:preparingOpening')}
+        </ThemedText>
+      </View>
+    );
+  }, [charName, ownEntityName, theme, t]);
 
   return (
     <ThemedView style={styles.container}>
@@ -1368,6 +1701,28 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           renderItem={renderMessage}
           keyExtractor={item => item.id}
           contentContainerStyle={[styles.messageList, { flexGrow: 1 }]}
+          ListEmptyComponent={
+            // In-flight first generation → preparing shimmer instead of the hint.
+            greetingPreparing ? (
+              <View style={styles.emptyChat}>{renderGreetingPreparing()}</View>
+            ) : // No first_mes → empty chat + the generate-greeting hint (enabled
+            // in P2 — tapping opens the ScenarioGeneratorSheet). has_first_mes=false
+            // is known only once the session surfaces it; before that we show
+            // nothing (still loading).
+            shouldShowEmptyChatHint(hasFirstMes, messagesWithDivider.length) ? (
+              <View style={styles.emptyChat}>
+                <ThemedText variant="muted" size={13} style={styles.emptyChatHint}>
+                  {t('scenario:noGreetingHint')}
+                </ThemedText>
+                <EmptyChatCTA
+                  variant="pill"
+                  disabled={false}
+                  onPress={openScenarioSheet}
+                  theme={theme!}
+                />
+              </View>
+            ) : null
+          }
           onScroll={handleScroll}
           scrollEventThrottle={100}
           onMomentumScrollEnd={handleScrollEnd}
@@ -1438,6 +1793,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           }}
         />
 
+        {greetingPreparing && messages.length > 0 && renderGreetingPreparing()}
         {isTyping && <TypingIndicator theme={theme} mode="text" />}
         {isRecording && <TypingIndicator theme={theme} mode="audio" />}
 
@@ -1471,6 +1827,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           showEmojiButton={true}
           disabled={!isSessionActive(currentInteractionIdRef.current)}
           entityId={currentInteractionIdRef.current}
+          showScenarioButton={true}
+          onScenarioPress={openScenarioSheet}
           theme={theme!}
         />
         {showEmojiPicker && (
@@ -1487,6 +1845,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           />
         )}
       </KeyboardAvoidingView>
+
+      {/* Scenario generator bottom sheet (§2-4) — paper Modal+Portal (§A18).
+          Generate collapses the sheet and dispatches GENERATE_GREETING /
+          START_NEW_SCENARIO (replace vs restart) via handleScenarioGenerate. */}
+      <ScenarioGeneratorSheet
+        open={scenarioSheetOpen}
+        onClose={closeScenarioSheet}
+        onGenerate={handleScenarioGenerate}
+      />
     </ThemedView>
   );
 };
@@ -1511,6 +1878,34 @@ const styles = StyleSheet.create({
   },
   messageList: {
     paddingVertical: 8,
+  },
+  greetingWrap: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  preparingWrap: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  preparingText: {
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  scenarioPillRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  emptyChat: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingBottom: 48,
+  },
+  emptyChatHint: {
+    textAlign: 'center',
+    marginBottom: 12,
   },
   headerAvatar: {
     marginRight: 8,

@@ -30,27 +30,42 @@ export async function createCharacterProfile(
     
     await tx.executeSql(
       `INSERT INTO character_profiles (
-        id, name, description, personality, appearance, backstory,
-        voice_characteristics, base_prompt, scenario, example_dialogues,
+        id, name, description, personality,
+        voice_characteristics, base_prompt, scenario,
         typing_speed_wpm, audio_response_chance_percent, vision_config_id,
         lifecycle_config,
+        first_mes, mes_example, alternate_greetings, post_history_instructions,
+        creator_notes, creator, character_version, nickname,
+        tags, group_only_greetings, extensions, assets,
+        card_provenance, character_book,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         profile.id,
         profile.name,
         profile.description,
         profile.personality,
-        profile.appearance,
-        profile.backstory,
         profile.voice_characteristics,
         profile.base_prompt,
         profile.scenario,
-        profile.example_dialogues,
         profile.typing_speed_wpm,
         profile.audio_response_chance_percent,
         profile.vision_config_id ?? null,
         profile.lifecycle_config ?? null,
+        profile.first_mes ?? '',
+        profile.mes_example ?? '',
+        profile.alternate_greetings ?? '',
+        profile.post_history_instructions ?? '',
+        profile.creator_notes ?? '',
+        profile.creator ?? '',
+        profile.character_version ?? '',
+        profile.nickname ?? '',
+        profile.tags ?? '',
+        profile.group_only_greetings ?? '',
+        profile.extensions ?? '',
+        profile.assets ?? '',
+        profile.card_provenance ?? '',
+        profile.character_book ?? '',
         now,
         now,
       ]
@@ -73,17 +88,25 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
   const db = getDatabase();
   
   const query = includeDeleted
-    ? `SELECT id, name, description, personality, appearance, backstory,
-              voice_characteristics, base_prompt, scenario, example_dialogues,
+    ? `SELECT id, name, description, personality,
+              voice_characteristics, base_prompt, scenario,
               typing_speed_wpm, audio_response_chance_percent, vision_config_id,
               lifecycle_config,
+              first_mes, mes_example, alternate_greetings, post_history_instructions,
+              creator_notes, creator, character_version, nickname,
+              tags, group_only_greetings, extensions, assets,
+              card_provenance, character_book,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE id = ?`
-    : `SELECT id, name, description, personality, appearance, backstory,
-              voice_characteristics, base_prompt, scenario, example_dialogues,
+    : `SELECT id, name, description, personality,
+              voice_characteristics, base_prompt, scenario,
               typing_speed_wpm, audio_response_chance_percent, vision_config_id,
               lifecycle_config,
+              first_mes, mes_example, alternate_greetings, post_history_instructions,
+              creator_notes, creator, character_version, nickname,
+              tags, group_only_greetings, extensions, assets,
+              card_provenance, character_book,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE id = ? AND deleted_at IS NULL`;
@@ -100,20 +123,101 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
     name: row.name,
     description: row.description,
     personality: row.personality,
-    appearance: row.appearance,
-    backstory: row.backstory,
     voice_characteristics: row.voice_characteristics,
     base_prompt: row.base_prompt,
     scenario: row.scenario,
-    example_dialogues: row.example_dialogues,
     typing_speed_wpm: row.typing_speed_wpm,
     audio_response_chance_percent: row.audio_response_chance_percent,
     vision_config_id: row.vision_config_id ?? null,
     lifecycle_config: row.lifecycle_config ?? null,
+    first_mes: row.first_mes ?? '',
+    mes_example: row.mes_example ?? '',
+    alternate_greetings: row.alternate_greetings ?? '',
+    post_history_instructions: row.post_history_instructions ?? '',
+    creator_notes: row.creator_notes ?? '',
+    creator: row.creator ?? '',
+    character_version: row.character_version ?? '',
+    nickname: row.nickname ?? '',
+    tags: row.tags ?? '',
+    group_only_greetings: row.group_only_greetings ?? '',
+    extensions: row.extensions ?? '',
+    assets: row.assets ?? '',
+    card_provenance: row.card_provenance ?? '',
+    character_book: row.character_book ?? '',
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
   };
+}
+
+/**
+ * Get all distinct tags across the character library (4-3).
+ *
+ * v1 uses SQLite JSON1 (`json_each(tags)`) over the `tags` JSON column
+ * (concept §4.2). If the query helper doesn't expose JSON1 cleanly (e.g. a
+ * legacy SQLite build, or a malformed column), we fall back to computing the
+ * distinct set client-side from the loaded profiles.
+ *
+ * Returns tags deduplicated case-insensitively and sorted case-insensitively,
+ * so the filter chip row is stable and free of `"Fantasy"`/`"fantasy"` dupes.
+ *
+ * > P4+ option (concept §4.2): if list performance ever degrades, upgrade to a
+ * > `character_tags(profile_id, tag)` join table and backfill from the JSON
+ * > column — trivial, since all tags live in `character_profiles.tags`.
+ */
+export async function getDistinctTags(): Promise<string[]> {
+  const db = getDatabase();
+
+  const collect = (rows: { tag: string | null }[]): string[] => {
+    const unique = new Map<string, string>();
+    for (const row of rows) {
+      const tag = (row.tag ?? '').trim();
+      if (!tag) continue;
+      const key = tag.toLowerCase();
+      if (!unique.has(key)) unique.set(key, tag);
+    }
+    return [...unique.values()].sort((a, b) =>
+      a.toLowerCase().localeCompare(b.toLowerCase()),
+    );
+  };
+
+  try {
+    const [results] = await db.executeSql(
+      `SELECT DISTINCT json_each.value AS tag
+       FROM character_profiles, json_each(character_profiles.tags)
+       WHERE character_profiles.deleted_at IS NULL
+         AND json_each.value IS NOT NULL
+         AND json_each.value != ''
+       ORDER BY tag COLLATE NOCASE`,
+    );
+    const rows: { tag: string | null }[] = [];
+    for (let i = 0; i < results.rows.length; i++) {
+      rows.push({ tag: results.rows.item(i).tag as string | null });
+    }
+    return collect(rows);
+  } catch {
+    // JSON1 unavailable or a malformed column — compute client-side from the
+    // loaded profiles (defensive; the join table upgrade remains the P4+ path).
+    const profiles = await getAllCharacterProfiles();
+    const rows: { tag: string | null }[] = [];
+    for (const p of profiles) {
+      const parsed = parseTagsColumn(p.tags);
+      for (const tag of parsed) rows.push({ tag });
+    }
+    return collect(rows);
+  }
+}
+
+/** Defensive parse of the `tags` JSON-string column (engine may sync 'null'/''). */
+function parseTagsColumn(col: string | null | undefined): string[] {
+  if (!col || col === '' || col === 'null') return [];
+  try {
+    const parsed = JSON.parse(col);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x): x is string => typeof x === 'string');
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -124,17 +228,25 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
   const db = getDatabase();
   
   const query = includeDeleted
-    ? `SELECT id, name, description, personality, appearance, backstory,
-              voice_characteristics, base_prompt, scenario, example_dialogues,
+    ? `SELECT id, name, description, personality,
+              voice_characteristics, base_prompt, scenario,
               typing_speed_wpm, audio_response_chance_percent, vision_config_id,
               lifecycle_config,
+              first_mes, mes_example, alternate_greetings, post_history_instructions,
+              creator_notes, creator, character_version, nickname,
+              tags, group_only_greetings, extensions, assets,
+              card_provenance, character_book,
               created_at, updated_at, deleted_at
        FROM character_profiles
        ORDER BY name`
-    : `SELECT id, name, description, personality, appearance, backstory,
-              voice_characteristics, base_prompt, scenario, example_dialogues,
+    : `SELECT id, name, description, personality,
+              voice_characteristics, base_prompt, scenario,
               typing_speed_wpm, audio_response_chance_percent, vision_config_id,
               lifecycle_config,
+              first_mes, mes_example, alternate_greetings, post_history_instructions,
+              creator_notes, creator, character_version, nickname,
+              tags, group_only_greetings, extensions, assets,
+              card_provenance, character_book,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE deleted_at IS NULL
@@ -150,16 +262,27 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
       name: row.name,
       description: row.description,
       personality: row.personality,
-      appearance: row.appearance,
-      backstory: row.backstory,
       voice_characteristics: row.voice_characteristics,
       base_prompt: row.base_prompt,
       scenario: row.scenario,
-      example_dialogues: row.example_dialogues,
       typing_speed_wpm: row.typing_speed_wpm,
       audio_response_chance_percent: row.audio_response_chance_percent,
       vision_config_id: row.vision_config_id ?? null,
       lifecycle_config: row.lifecycle_config ?? null,
+      first_mes: row.first_mes ?? '',
+      mes_example: row.mes_example ?? '',
+      alternate_greetings: row.alternate_greetings ?? '',
+      post_history_instructions: row.post_history_instructions ?? '',
+      creator_notes: row.creator_notes ?? '',
+      creator: row.creator ?? '',
+      character_version: row.character_version ?? '',
+      nickname: row.nickname ?? '',
+      tags: row.tags ?? '',
+      group_only_greetings: row.group_only_greetings ?? '',
+      extensions: row.extensions ?? '',
+      assets: row.assets ?? '',
+      card_provenance: row.card_provenance ?? '',
+      character_book: row.character_book ?? '',
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -181,26 +304,43 @@ export async function updateCharacterProfile(profile: CharacterProfile): Promise
     
     const [result] = await tx.executeSql(
       `UPDATE character_profiles
-       SET name = ?, description = ?, personality = ?, appearance = ?,
-           backstory = ?, voice_characteristics = ?, base_prompt = ?,
-           scenario = ?, example_dialogues = ?,
+       SET name = ?, description = ?, personality = ?,
+           voice_characteristics = ?, base_prompt = ?,
+           scenario = ?,
            typing_speed_wpm = ?, audio_response_chance_percent = ?,
-           vision_config_id = ?, lifecycle_config = ?, updated_at = ?
+           vision_config_id = ?, lifecycle_config = ?,
+           first_mes = ?, mes_example = ?, alternate_greetings = ?,
+           post_history_instructions = ?, creator_notes = ?, creator = ?,
+           character_version = ?, nickname = ?, tags = ?,
+           group_only_greetings = ?, extensions = ?, assets = ?,
+           card_provenance = ?, character_book = ?,
+           updated_at = ?
        WHERE id = ?`,
       [
         profile.name,
         profile.description,
         profile.personality,
-        profile.appearance,
-        profile.backstory,
         profile.voice_characteristics,
         profile.base_prompt,
         profile.scenario,
-        profile.example_dialogues,
         profile.typing_speed_wpm,
         profile.audio_response_chance_percent,
         profile.vision_config_id ?? null,
         profile.lifecycle_config ?? null,
+        profile.first_mes ?? '',
+        profile.mes_example ?? '',
+        profile.alternate_greetings ?? '',
+        profile.post_history_instructions ?? '',
+        profile.creator_notes ?? '',
+        profile.creator ?? '',
+        profile.character_version ?? '',
+        profile.nickname ?? '',
+        profile.tags ?? '',
+        profile.group_only_greetings ?? '',
+        profile.extensions ?? '',
+        profile.assets ?? '',
+        profile.card_provenance ?? '',
+        profile.character_book ?? '',
         now,
         profile.id,
       ]

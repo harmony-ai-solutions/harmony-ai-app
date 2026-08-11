@@ -226,8 +226,6 @@ describe('entities repository', () => {
         name: 'Test Char ' + id,
         description: '',
         personality: '',
-        appearance: '',
-        backstory: '',
         voice_characteristics: '',
         typing_speed_wpm: 60,
         audio_response_chance_percent: 50,
@@ -235,7 +233,6 @@ describe('entities repository', () => {
         lifecycle_config: '{}',
         base_prompt: '',
         scenario: '',
-        example_dialogues: '',
       });
 
     it('returns null when no entity references the profile', async () => {

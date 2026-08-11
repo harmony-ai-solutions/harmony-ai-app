@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -27,15 +27,34 @@ import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 import { createLogger } from '../utils/logger';
+import { TagChips } from '../components/character-card/TagChips';
+import { parseJsonColumn } from '../components/character-card/lorebook';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 const log = createLogger('[CharactersScreen]');
 import { CharacterProfileCard } from '../components/characters/CharacterProfileCard';
 import {
   getAllCharacterProfiles,
   getCharacterImages,
+  getDistinctTags,
   deleteCharacterProfile,
+  createCharacterProfile,
+  createCharacterImage,
 } from '../database/repositories/characters';
-import { createDataURL } from '../database/base64';
+import { createDataURL, base64ToUint8Array } from '../database/base64';
+import RNFS from 'react-native-fs';
+import {
+  extractCharacterCardFromPNG,
+  parseCharacterCard,
+  mapCardToProfile,
+  base64DecodeToUtf8,
+} from '../utils/charactercard';
+import type { TavernCardV2 } from '../utils/charactercard/types';
+import {
+  ImportReviewSheet,
+  buildImportDetectionSummary,
+} from '../components/character-card/ImportReviewSheet';
+import type { ImportDetectionSummary } from '../components/character-card/ImportReviewSheet';
 import {
   getAllEntities,
   createEntity,
@@ -49,7 +68,7 @@ import {
 import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { CharacterProfile } from '../database/models';
-import { importCharacterCardFromFile, CharacterCardImportError } from '../services/CharacterCardImportService';
+import { CharacterCardImportError } from '../services/CharacterCardImportService';
 import syncService from '../services/SyncService';
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
@@ -72,6 +91,62 @@ function importMessageKey(code?: string): string {
   }
 }
 
+/**
+ * Read + parse a picked character card WITHOUT persisting (3-5). The parsed
+ * card + optional embedded image are shown in the `ImportReviewSheet` first;
+ * persistence happens only on an explicit sheet action. Mirrors the first four
+ * steps of `CharacterCardImportService.importCharacterCardFromFile`.
+ */
+async function parseCardFile(
+  uri: string,
+  mime: string,
+): Promise<{ card: TavernCardV2; imageBytes?: Uint8Array }> {
+  if (!uri) {
+    throw new CharacterCardImportError('no_file');
+  }
+
+  let b64: string;
+  try {
+    b64 = await RNFS.readFile(uri, 'base64');
+  } catch {
+    throw new CharacterCardImportError('read_failed');
+  }
+
+  const lowerMime = (mime || '').toLowerCase();
+  const lowerUri = uri.toLowerCase();
+
+  const isPNG = lowerMime === 'image/png' || lowerUri.endsWith('.png');
+  const isJSON = lowerMime === 'application/json' || lowerUri.endsWith('.json');
+
+  if (isPNG) {
+    const bytes = base64ToUint8Array(b64);
+    try {
+      const result = extractCharacterCardFromPNG(bytes);
+      return { card: result.card, imageBytes: result.imageBytes };
+    } catch {
+      throw new CharacterCardImportError('parse_failed');
+    }
+  } else if (isJSON) {
+    const text = base64DecodeToUtf8(b64);
+    if (text == null) {
+      throw new CharacterCardImportError('parse_failed');
+    }
+    try {
+      return { card: parseCharacterCard(text) };
+    } catch {
+      throw new CharacterCardImportError('parse_failed');
+    }
+  }
+
+  throw new CharacterCardImportError('unsupported_type');
+}
+
+interface PendingImport {
+  card: TavernCardV2;
+  mapped: ReturnType<typeof mapCardToProfile>;
+  summary: ImportDetectionSummary;
+}
+
 export const CharactersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
@@ -90,6 +165,30 @@ export const CharactersScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const expandAnim = useRef(new Animated.Value(0)).current;
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+
+  // ── 4-3: tag / creator filtering ──────────────────────────────────────────
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [creatorFilter, setCreatorFilter] = useState<string | null>(null);
+  const reduceMotion = useReducedMotion();
+  const filterBannerAnim = useRef(new Animated.Value(0)).current;
+  const hasActiveFilters = selectedTags.length > 0 || creatorFilter !== null;
+
+  // Fade/slide the active-filter banner in unless the OS wants reduced motion.
+  useEffect(() => {
+    if (!hasActiveFilters) return;
+    if (reduceMotion) {
+      filterBannerAnim.setValue(1);
+      return;
+    }
+    filterBannerAnim.setValue(0);
+    Animated.timing(filterBannerAnim, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [hasActiveFilters, reduceMotion, filterBannerAnim]);
 
   // Reload on focus (handles return from edit screen)
   useFocusEffect(
@@ -102,6 +201,15 @@ export const CharactersScreen: React.FC = () => {
     try {
       const data = await getAllCharacterProfiles();
       setProfiles(data);
+
+      // Distinct library tags for the filter chip row (4-3) — isolated so a
+      // tag-load failure never aborts the profile/image load below.
+      try {
+        const tags = await getDistinctTags();
+        setAllTags(tags);
+      } catch (tagErr) {
+        log.warn('Failed to load distinct tags:', tagErr);
+      }
 
       // Load primary images + image counts for all profiles in parallel
       const imageMap: Record<string, string | null> = {};
@@ -137,12 +245,39 @@ export const CharactersScreen: React.FC = () => {
     setRefreshing(false);
   }, []);
 
-  const filteredProfiles = profiles.filter(
-    p =>
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.description?.toLowerCase().includes(searchQuery.toLowerCase()) ??
-        false),
-  );
+  /** Search + tag (multi-select OR) + creator filter (4-3). */
+  const filteredProfiles = profiles.filter(p => {
+    const q = searchQuery.trim().toLowerCase();
+    const matchesSearch =
+      !q ||
+      p.name.toLowerCase().includes(q) ||
+      (p.description?.toLowerCase().includes(q) ?? false);
+    if (!matchesSearch) return false;
+
+    if (selectedTags.length > 0) {
+      const tags = parseJsonColumn<string[]>(p.tags) ?? [];
+      const matchesAnyTag = tags.some(tag =>
+        selectedTags.some(sel => sel.toLowerCase() === tag.toLowerCase()),
+      );
+      if (!matchesAnyTag) return false;
+    }
+
+    if (creatorFilter) {
+      const creator = (p.creator ?? '').trim();
+      if (creator.toLowerCase() !== creatorFilter.toLowerCase()) return false;
+    }
+
+    return true;
+  });
+
+  const handleCreatorPress = useCallback((creator: string) => {
+    setCreatorFilter(creator);
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setSelectedTags([]);
+    setCreatorFilter(null);
+  }, []);
 
   const handleEdit = (profile: CharacterProfile) => {
     navigation.navigate('CharacterProfileEdit', { profileId: profile.id });
@@ -283,19 +418,83 @@ export const CharactersScreen: React.FC = () => {
     const doc = docs[0];
     if (!doc) return;
     try {
-      await importCharacterCardFromFile(doc.uri, doc.type ?? '');
-      await loadProfiles();
-
-      // Push the imported profile (+ image) to the engine so it can be used in
-      // chat sessions. Without an explicit sync, the engine never learns about
-      // the imported profile until some unrelated sync happens.
-      syncService.initiateSync().catch(syncErr => {
-        log.warn('Auto-sync after character import failed (non-critical):', syncErr);
+      // Parse + map BEFORE persisting so ImportReviewSheet can review what was
+      // detected (greeting / alternates / lorebook / tags / provenance). The
+      // profile is persisted only on an explicit sheet action (3-5, §A16).
+      const { card, imageBytes } = await parseCardFile(doc.uri, doc.type ?? '');
+      const mapped = mapCardToProfile(card, imageBytes);
+      setPendingImport({
+        card,
+        mapped,
+        summary: buildImportDetectionSummary(card),
       });
     } catch (e) {
       const code = e instanceof CharacterCardImportError ? e.code : undefined;
       const messageKey = importMessageKey(code);
       showAlert(t('importFailed'), t(messageKey));
+    }
+  };
+
+  /** Persist the already-mapped profile + optional embedded image (3-5). */
+  const persistImported = async (mapped: ReturnType<typeof mapCardToProfile>) => {
+    await createCharacterProfile(mapped.profile);
+    if (mapped.image) {
+      await createCharacterImage(mapped.image);
+    }
+  };
+
+  const closeReviewAndRefresh = async () => {
+    setPendingImport(null);
+    await loadProfiles();
+
+    // Push the imported profile (+ image) to the engine so it can be used in
+    // chat sessions. Without an explicit sync, the engine never learns about
+    // the imported profile until some unrelated sync happens.
+    syncService.initiateSync().catch(syncErr => {
+      log.warn('Auto-sync after character import failed (non-critical):', syncErr);
+    });
+  };
+
+  const handleImportError = (err: unknown) => {
+    log.error('Failed to persist imported card:', err);
+    showAlert(t('importFailed'), t('importParseFailed'));
+    setPendingImport(null);
+  };
+
+  /** Sheet Save — persist + reload + sync. */
+  const handleImportSave = async () => {
+    if (!pendingImport) return;
+    try {
+      await persistImported(pendingImport.mapped);
+      await closeReviewAndRefresh();
+    } catch (e) {
+      handleImportError(e);
+    }
+  };
+
+  /** "Review & edit fields" — persist, then deep-link the profile editor. */
+  const handleImportReviewAndEdit = async () => {
+    if (!pendingImport) return;
+    try {
+      await persistImported(pendingImport.mapped);
+      const profileId = pendingImport.mapped.profile.id;
+      await closeReviewAndRefresh();
+      navigation.navigate('CharacterProfileEdit', { profileId });
+    } catch (e) {
+      handleImportError(e);
+    }
+  };
+
+  /** No-greeting CTA — persist, then open the editor to author/generate one. */
+  const handleImportGenerateGreeting = async () => {
+    if (!pendingImport) return;
+    try {
+      await persistImported(pendingImport.mapped);
+      const profileId = pendingImport.mapped.profile.id;
+      await closeReviewAndRefresh();
+      navigation.navigate('CharacterProfileEdit', { profileId });
+    } catch (e) {
+      handleImportError(e);
     }
   };
 
@@ -371,6 +570,69 @@ export const CharactersScreen: React.FC = () => {
         </View>
       </ScreenHeader>
 
+      {/* 4-3: tag filter row (multi-select OR) — TagChips in filter mode, fed
+          by the distinct library tags. Hidden until the library has tags. */}
+      {allTags.length > 0 && (
+        <View style={styles.filterRow} testID="tag-filter-row">
+          <ThemedText variant="muted" size={12} style={styles.filterLabel}>
+            {t('filterByTag')}
+          </ThemedText>
+          <TagChips
+            tags={selectedTags}
+            onChange={setSelectedTags}
+            suggestions={allTags}
+            testID="filter-tag-chips"
+          />
+        </View>
+      )}
+
+      {/* Active-filter banner (creator filter + clear) — animated entrance
+          unless the OS requests reduced motion. */}
+      {hasActiveFilters && (
+        <Animated.View
+          testID={
+            reduceMotion
+              ? 'active-filter-banner-static'
+              : 'active-filter-banner-animated'
+          }
+          style={[
+            styles.filterBanner,
+            { opacity: filterBannerAnim },
+          ]}
+        >
+          {creatorFilter && (
+            <View style={[styles.filterChip, { borderColor: hexToRgba(accent, 0.45), backgroundColor: accent + '1A' }]}>
+              <MaterialCommunityIcons
+                name="account-filter-outline"
+                size={14}
+                color={accent}
+              />
+              <ThemedText size={13} variant="accent">
+                {t('filterByCreator', { creator: creatorFilter })}
+              </ThemedText>
+              <TouchableOpacity
+                onPress={() => setCreatorFilter(null)}
+                accessibilityRole="button"
+                accessibilityLabel={t('clearFilters')}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <MaterialCommunityIcons name="close-circle" size={16} color={accent} />
+              </TouchableOpacity>
+            </View>
+          )}
+          <TouchableOpacity
+            onPress={clearFilters}
+            accessibilityRole="button"
+            style={styles.clearFiltersButton}
+            testID="clear-filters"
+          >
+            <ThemedText size={13} variant="accent" weight="bold">
+              {t('clearFilters')}
+            </ThemedText>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
       {/* FlatList ALWAYS renders so RefreshControl is always reachable.
           Use ListEmptyComponent for empty state, loading overlay for initial load. */}
       <FlatList style={{ flex: 1 }}
@@ -400,26 +662,42 @@ export const CharactersScreen: React.FC = () => {
           ) : (
             <View style={styles.emptyContainer}>
               <MaterialCommunityIcons
-                name={searchQuery ? 'file-search-outline' : 'account-outline'}
+                name={
+                  hasActiveFilters
+                    ? 'filter-remove-outline'
+                    : searchQuery
+                      ? 'file-search-outline'
+                      : 'account-outline'
+                }
                 size={72}
                 color={theme.colors.text.muted}
               />
               <ThemedText weight="bold" size={18} style={styles.emptyTitle}>
-                {searchQuery ? t('noResults') : t('noProfiles')}
+                {hasActiveFilters || searchQuery
+                  ? t('noResults')
+                  : t('noProfiles')}
               </ThemedText>
               <ThemedText variant="muted" size={14} style={styles.emptySubtext}>
-                {searchQuery
+                {hasActiveFilters || searchQuery
                   ? t('noResultsHint')
                   : t('noProfilesHint')}
               </ThemedText>
-              {!searchQuery && (
+              {hasActiveFilters ? (
+                <ThemedButton
+                  variant="outline"
+                  label={t('clearFilters')}
+                  onPress={clearFilters}
+                  style={styles.emptyButton}
+                  testID="empty-clear-filters"
+                />
+              ) : !searchQuery ? (
                 <ThemedButton
                   variant="primary"
                   label={t('createFirst')}
                   onPress={handleCreateNew}
                   style={styles.emptyButton}
                 />
-              )}
+              ) : null}
             </View>
           )
         }
@@ -431,6 +709,7 @@ export const CharactersScreen: React.FC = () => {
             onPress={() => handleEdit(item)}
             onLongPress={() => handleLongPress(item)}
             onChatPress={() => handleChatPress(item)}
+            onCreatorPress={handleCreatorPress}
           />
         )}
       />
@@ -507,12 +786,51 @@ export const CharactersScreen: React.FC = () => {
           </View>
         </>
       )}
+
+      {/* Post-import review (3-5) — opens after the card parses, before persist. */}
+      <ImportReviewSheet
+        open={pendingImport !== null}
+        summary={pendingImport?.summary ?? null}
+        onCancel={() => setPendingImport(null)}
+        onSave={handleImportSave}
+        onReviewAndEdit={handleImportReviewAndEdit}
+        onGenerateGreeting={handleImportGenerateGreeting}
+      />
     </ThemedView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  // ── 4-3 filter row / banner ──
+  filterRow: {
+    paddingHorizontal: 20,
+    paddingBottom: 4,
+    gap: 4,
+  },
+  filterLabel: {
+    letterSpacing: 0.3,
+  },
+  filterBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  clearFiltersButton: {
+    paddingVertical: 4,
+  },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',

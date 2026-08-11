@@ -29,9 +29,15 @@ function normalizeArray<T>(val: unknown): T[] {
 /**
  * Normalize TavernCardV2Data fields to handle missing/null JSON fields
  * (Go would zero-value them; TS needs explicit defaults).
+ *
+ * Unknown top-level keys are PRESERVED: we spread the incoming `data` and
+ * override only the known/normalized fields, so spec-mandated unknown-key
+ * round-tripping (SPEC_V3:115 — P4 export depends on it) is retained.
+ * `extensions` stays opaque.
  */
 function normalizeData(data: Partial<TavernCardV2Data>): TavernCardV2Data {
   return {
+    ...data,
     name: normalizeString(data.name),
     description: normalizeString(data.description),
     personality: normalizeString(data.personality),

@@ -12,4 +12,4 @@ export {
   findCharacterCardTextChunks,
   base64DecodeToUtf8,
 } from './pngParser';
-export { mapCardToProfile } from './mapper';
+export { mapCardToProfile, collectDroppedCardFields } from './mapper';

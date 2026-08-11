@@ -28,7 +28,7 @@ describe('characters repository', () => {
   const {getDb} = useFreshDatabase();
 
   // Helper: create a basic character profile with minimal fields
-  // Note: description, personality, appearance, backstory, voice_characteristics
+  // Note: description, personality, voice_characteristics
   // are NOT NULL DEFAULT '' in the schema — must pass '' not null.
   // lifecycle_config is NOT NULL DEFAULT '{}'.
   async function createMinimalProfile(id: string) {
@@ -37,12 +37,9 @@ describe('characters repository', () => {
       name: 'Test Character',
       description: '',
       personality: '',
-      appearance: '',
-      backstory: '',
       voice_characteristics: '',
-      base_prompt: null,
-      scenario: null,
-      example_dialogues: null,
+      base_prompt: '',
+      scenario: '',
       typing_speed_wpm: 60,
       audio_response_chance_percent: 50,
       vision_config_id: null,
@@ -313,6 +310,95 @@ describe('characters repository', () => {
       expect(profile).toBeNull();
       const image = await getCharacterImage(imageId, true);
       expect(image).toBeNull();
+    });
+  });
+
+  describe('character card V3 standard fields (migration 000037)', () => {
+    // Distinctive values so a round-trip failure (column omitted from INSERT,
+    // SELECT, or row-map) is immediately obvious.
+    const v3Fields = {
+      first_mes: 'Hello there!',
+      mes_example: '<START>\n{{user}}: Hi\n{{char}}: Hello',
+      alternate_greetings: '["Hi there!","Hey!"]',
+      post_history_instructions: 'Keep responses in character.',
+      creator_notes: 'Test card notes',
+      creator: 'Test Creator',
+      character_version: '1.0.0',
+      nickname: 'Test Nick',
+      tags: '["fantasy","wizard"]',
+      group_only_greetings: '["greet group"]',
+      extensions: '{"project":"test"}',
+      assets: '[{"type":"character","uri":"http://example.com/a.png"}]',
+      card_provenance: '{"source":"test"}',
+      character_book: '{"name":"Test Book","entries":[]}',
+    };
+
+    it('round-trips all 14 fields through create → get', async () => {
+      const id = 'profile-v3-1';
+      const created = await createCharacterProfile({
+        id,
+        name: 'V3 Character',
+        description: '',
+        personality: '',
+        voice_characteristics: '',
+        base_prompt: '',
+        scenario: '',
+        typing_speed_wpm: 60,
+        audio_response_chance_percent: 50,
+        vision_config_id: null,
+        lifecycle_config: '{}',
+        ...v3Fields,
+      });
+
+      // The repository returns the input object — assert it carried the fields.
+      for (const [key, value] of Object.entries(v3Fields)) {
+        expect(created[key as keyof typeof v3Fields]).toBe(value);
+      }
+
+      const retrieved = await getCharacterProfile(id);
+      expect(retrieved).not.toBeNull();
+      for (const [key, value] of Object.entries(v3Fields)) {
+        expect(retrieved![key as keyof typeof v3Fields]).toBe(value);
+      }
+
+      // SELECT-all path + row-map must carry them too.
+      const all = await getAllCharacterProfiles();
+      const fromAll = all.find(p => p.id === id);
+      expect(fromAll).toBeDefined();
+      for (const [key, value] of Object.entries(v3Fields)) {
+        expect(fromAll![key as keyof typeof v3Fields]).toBe(value);
+      }
+    });
+
+    it('persists all 14 fields through update → get', async () => {
+      const id = 'profile-v3-upd-1';
+      await createCharacterProfile({
+        id,
+        name: 'V3 Update Target',
+        description: '',
+        personality: '',
+        voice_characteristics: '',
+        base_prompt: '',
+        scenario: '',
+        typing_speed_wpm: 60,
+        audio_response_chance_percent: 50,
+        vision_config_id: null,
+        lifecycle_config: '{}',
+      });
+
+      const existing = await getCharacterProfile(id);
+      expect(existing).not.toBeNull();
+
+      await updateCharacterProfile({
+        ...existing!,
+        ...v3Fields,
+      });
+
+      const retrieved = await getCharacterProfile(id);
+      expect(retrieved).not.toBeNull();
+      for (const [key, value] of Object.entries(v3Fields)) {
+        expect(retrieved![key as keyof typeof v3Fields]).toBe(value);
+      }
     });
   });
 });

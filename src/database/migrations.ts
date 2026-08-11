@@ -44,6 +44,7 @@ import { migration033 } from './migrations/000033_add_emotion_state_deleted_at';
 import { migration034 } from './migrations/000034_add_unique_name_constraint_vision_imagination';
 import { migration035 } from './migrations/000035_character_image_uuid_primary_key';
 import { migration036 } from './migrations/000036_harmonyspeech_api_key';
+import { migration037 } from './migrations/000037_add_character_card_standard_fields';
 
 // Migration definition
 export interface Migration {
@@ -235,6 +236,11 @@ export const MIGRATIONS: Migration[] = [
     version: 36,
     description: 'harmonyspeech_api_key',
     sql: migration036,
+   },
+   {
+    version: 37,
+    description: 'Add character card standard fields (V3 fidelity, incl. character_book JSON)',
+    sql: migration037,
    },
   ];
 

@@ -14,6 +14,19 @@ import { createLogger } from '../../utils/logger';
 const log = createLogger('[ChatBubble]');
 const { width: screenWidth } = Dimensions.get('window');
 
+/**
+ * Partner-message derivation (§1-10): a message is a PARTNER message when its
+ * sender is NOT the own entity. `message_type="greeting"` messages are always
+ * sent by the character (`sender_entity_id` = character), so they naturally
+ * derive as partner messages — no message_type special-casing needed.
+ */
+export function isPartnerMessage(
+  message: Pick<ConversationMessage, 'sender_entity_id'>,
+  ownEntityId: string,
+): boolean {
+  return message.sender_entity_id !== ownEntityId;
+}
+
 interface ChatBubbleProps {
   message: ConversationMessage;
   isOwn: boolean;

@@ -11,6 +11,7 @@ import {
   extractCharacterCardFromPNG,
   parseCharacterCard,
   mapCardToProfile,
+  collectDroppedCardFields,
   CharacterCardParseError,
 } from '../utils/charactercard';
 import { createCharacterProfile, createCharacterImage } from '../database/repositories/characters';
@@ -42,6 +43,9 @@ export interface ImportResult {
   profileId: string;
   name: string;
   hadImage: boolean;
+  /** Non-spec card keys detected and dropped on import (empty when the card
+   *  was fully spec-conformant). Callers can surface this as a user warning. */
+  droppedFields: string[];
 }
 
 // ============================================================================
@@ -172,6 +176,16 @@ export async function importCharacterCardFromFile(
     throw new CharacterCardImportError('unsupported_type');
   }
 
+  // Detect non-spec keys before mapping so they can be reported. The mapper
+  // drops them (no-unknown-fields policy); surface the list as a warning.
+  const droppedFields = collectDroppedCardFields(card);
+  if (droppedFields.length > 0) {
+    log.warn(
+      `Character card "${card.data?.name ?? '?'}" carries ${droppedFields.length} ` +
+        `non-spec field(s) that were dropped on import: ${droppedFields.join(', ')}`,
+    );
+  }
+
   // Step 4: Map to profile + optional image
   let mapped: ReturnType<typeof mapCardToProfile>;
   try {
@@ -199,5 +213,6 @@ export async function importCharacterCardFromFile(
     profileId: mapped.profile.id,
     name: mapped.profile.name,
     hadImage: !!mapped.image,
+    droppedFields,
   };
 }

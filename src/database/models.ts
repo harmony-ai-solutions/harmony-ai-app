@@ -13,18 +13,33 @@ import type { EmotionEffect, MetabolismVector } from '../types/emoji';
 export interface CharacterProfile {
   id: string;
   name: string;
-  description: string | null;
-  personality: string | null;
-  appearance: string | null;
-  backstory: string | null;
-  voice_characteristics: string | null;
-  base_prompt: string | null;
-  scenario: string | null;
-  example_dialogues: string | null;
+  description: string;
+  personality: string;
+  voice_characteristics: string;
+  base_prompt: string;
+  scenario: string;
   typing_speed_wpm: number;
   audio_response_chance_percent: number;
   vision_config_id: string | null;
-  lifecycle_config: string | null; // Opaque JSON blob
+  lifecycle_config: string; // Opaque JSON blob
+  // Character Card V3 standard fields (migration 000037). Columns are NOT NULL
+  // DEFAULT '' (absent = empty string, never null). Optional (`?`) only because
+  // some in-memory construction sites predate these fields; persisted rows and
+  // engine-synced rows always carry them.
+  first_mes?: string;
+  mes_example?: string;
+  alternate_greetings?: string; // JSON []
+  post_history_instructions?: string;
+  creator_notes?: string;
+  creator?: string;
+  character_version?: string;
+  nickname?: string;
+  tags?: string; // JSON []
+  group_only_greetings?: string; // JSON []
+  extensions?: string; // JSON {}
+  assets?: string; // JSON []
+  card_provenance?: string; // JSON {}
+  character_book?: string; // JSON {}
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -473,7 +488,7 @@ export interface ConversationMessage {
   interaction_id: string | null;
   content: string;
   audio_duration: number | null;
-  message_type: 'text' | 'audio' | 'combined' | 'image';
+  message_type: 'text' | 'audio' | 'combined' | 'image' | 'greeting';
 
   // Audio storage (base64 encoded)
   audio_data?: string | null;

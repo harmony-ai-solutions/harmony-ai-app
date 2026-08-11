@@ -39,6 +39,7 @@ import discover from '../i18n/locales/en/discover.json';
 import search from '../i18n/locales/en/search.json';
 import moduleConfig from '../i18n/locales/en/moduleConfig.json';
 import syncConnection from '../i18n/locales/en/syncConnection.json';
+import scenario from '../i18n/locales/en/scenario.json';
 
 // ── Storage key ─────────────────────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ const resources = {
     search,
     moduleConfig,
     syncConnection,
+    scenario,
   },
 };
 
@@ -127,6 +129,7 @@ const i18nConfig: InitOptions = {
     'search',
     'moduleConfig',
     'syncConnection',
+    'scenario',
   ],
   interpolation: {
     escapeValue: false, // React already escapes

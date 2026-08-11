@@ -1,6 +1,6 @@
 # Character Data & Chat-Start — Implementation Plan
 
-> **Status:** Ready for execution. Plan validated against both repos by 6 parallel code-expert verification passes (see [`00-VerificationAndGroundTruth.md`](00-VerificationAndGroundTruth.md)).
+> **Status:** ✅ **IMPLEMENTED** (all 24 subtasks across both repos). Validated end-to-end: Go `go build ./...` + `go test ./...` green; App `tsc --noEmit` + unit (68 suites / 584 tests) + integration (46 passed) green; `character_profiles` schema parity holds between repos (14 new columns both sides). Plan validated against both repos by 6 parallel code-expert verification passes (see [`00-VerificationAndGroundTruth.md`](00-VerificationAndGroundTruth.md)).
 > **Source concepts:** [`../character-data-chat-start-concept/01-data-and-engine-concept.md`](../character-data-chat-start-concept/01-data-and-engine-concept.md) (data/backend) · [`../character-data-chat-start-concept/02-frontend-and-ux-concept.md`](../character-data-chat-start-concept/02-frontend-and-ux-concept.md) (frontend/UX).
 > **Affected repos (coupled release mandatory):**
 > - **Go backend (engine):** `../harmony-link-private` — referenced below as **`harmony-link-private/`**.
@@ -56,35 +56,35 @@ All file:line anchors in this plan are **verified ground truth** (see [`00-Verif
 
 Track the completion of each phase as implementation progresses:
 
-- [ ] **Phase 0: Verification & Ground Truth** ([00-VerificationAndGroundTruth.md](00-VerificationAndGroundTruth.md)) — *reference; not a code deliverable*
-- [ ] **Phase 1: Data Model + Authored Static Greeting**
-  - [ ] 1-1 Go Migration `000037` ([1-1-GoMigration000037.md](1-1-GoMigration000037.md))
-  - [ ] 1-2 Go `CharacterProfile` Model + Sync DTO + Repository + `sync_utils` ([1-2-GoCharacterProfileModelAndSync.md](1-2-GoCharacterProfileModelAndSync.md))
-  - [ ] 1-3 App Migration `000037` + `models.ts` ([1-3-AppMigration000037AndModels.md](1-3-AppMigration000037AndModels.md))
-  - [ ] 1-4 App `characters.ts` Repository + Schema-Parity Baselines ([1-4-AppCharactersRepositoryAndSchemaParity.md](1-4-AppCharactersRepositoryAndSchemaParity.md))
-  - [ ] 1-5 Character-Card V3 Types + PNG `ccv3` Parser Fix ([1-5-CharacterCardV3TypesAndPngParser.md](1-5-CharacterCardV3TypesAndPngParser.md))
-  - [ ] 1-6 Character-Card Mapper Redesign (stop the mangling) ([1-6-CharacterCardMapperRedesign.md](1-6-CharacterCardMapperRedesign.md))
-  - [ ] 1-7 Macro Engine `ResolveMacros` (net-new, both repos) ([1-7-MacroEngine.md](1-7-MacroEngine.md))
-  - [ ] 1-8 Go Greeting Delivery Primitives (`DeliverGreeting`, `message_type="greeting"`) ([1-8-GoGreetingDeliveryPrimitives.md](1-8-GoGreetingDeliveryPrimitives.md))
-  - [ ] 1-9 Go `handleInitEntity` Greeting Hook (4 guards + `has_first_mes`) ([1-9-GoInitEntityGreetingHook.md](1-9-GoInitEntityGreetingHook.md))
-  - [ ] 1-10 App Greeting Render-Only UX ([1-10-AppGreetingRenderUx.md](1-10-AppGreetingRenderUx.md))
-- [ ] **Phase 2: Engine Generation Hook + Scenario Restart**
-  - [ ] 2-1 Go `BuildScenarioGreetingPrompt` (4th builder mode) ([2-1-GoBuildScenarioGreetingPrompt.md](2-1-GoBuildScenarioGreetingPrompt.md))
-  - [ ] 2-2 Go `GENERATE_GREETING` Event Handler ([2-2-GoGenerateGreetingEvent.md](2-2-GoGenerateGreetingEvent.md))
-  - [ ] 2-3 Go `START_NEW_SCENARIO` (Scenario Restart) Handler ([2-3-GoStartNewScenarioHandler.md](2-3-GoStartNewScenarioHandler.md))
-  - [ ] 2-4 App `ScenarioGeneratorSheet` + Generate/Regenerate UX ([2-4-AppScenarioGeneratorSheetAndGenerateUx.md](2-4-AppScenarioGeneratorSheetAndGenerateUx.md))
-- [ ] **Phase 3: Lorebook RAG + Editor + Guided Mode**
-  - [ ] 3-1 Go `lore` RAG Collection + Service Wiring ([3-1-GoLoreRagCollection.md](3-1-GoLoreRagCollection.md))
-  - [ ] 3-2 Go Lore Embedding (import/edit/`INIT_ENTITY`) ([3-2-GoLoreEmbedding.md](3-2-GoLoreEmbedding.md))
-  - [ ] 3-3 Go Lore Semantic Retrieval in Prompt Build ([3-3-GoLoreRetrievalInPromptBuild.md](3-3-GoLoreRetrievalInPromptBuild.md))
-  - [ ] 3-4 App Lorebook Editor (`LorebookViewerSheet` + `LorebookEntryEditor`) ([3-4-AppLorebookEditor.md](3-4-AppLorebookEditor.md))
-  - [ ] 3-5 App Profile-Editor Sections + `ImportReviewSheet` ([3-5-AppProfileEditorSectionsAndImport.md](3-5-AppProfileEditorSectionsAndImport.md))
-  - [ ] 3-6 App Guided-Mode Plumbing + UJB/`{{original}}` Surfacing ([3-6-AppGuidedModeAndUjbSurfacing.md](3-6-AppGuidedModeAndUjbSurfacing.md))
-- [ ] **Phase 4: Export / V3 Round-Trip + Tags**
-  - [ ] 4-1 Go `ExportProfileToCardV3` (JSON + PNG `ccv3`) ([4-1-GoExporter.md](4-1-GoExporter.md))
-  - [ ] 4-2 App Exporter Mirror ([4-2-AppExporterMirror.md](4-2-AppExporterMirror.md))
-  - [ ] 4-3 App Character-Card Tag Filtering ([4-3-AppTagFiltering.md](4-3-AppTagFiltering.md))
-  - [ ] 4-4 Export Affordance + Round-Trip Test ([4-4-ExportAffordanceAndRoundTripTest.md](4-4-ExportAffordanceAndRoundTripTest.md))
+- [x] **Phase 0: Verification & Ground Truth** ([00-VerificationAndGroundTruth.md](00-VerificationAndGroundTruth.md)) — *reference; not a code deliverable*
+- [x] **Phase 1: Data Model + Authored Static Greeting**
+  - [x] 1-1 Go Migration `000037` ([1-1-GoMigration000037.md](1-1-GoMigration000037.md))
+  - [x] 1-2 Go `CharacterProfile` Model + Sync DTO + Repository + `sync_utils` ([1-2-GoCharacterProfileModelAndSync.md](1-2-GoCharacterProfileModelAndSync.md))
+  - [x] 1-3 App Migration `000037` + `models.ts` ([1-3-AppMigration000037AndModels.md](1-3-AppMigration000037AndModels.md))
+  - [x] 1-4 App `characters.ts` Repository + Schema-Parity Baselines ([1-4-AppCharactersRepositoryAndSchemaParity.md](1-4-AppCharactersRepositoryAndSchemaParity.md))
+  - [x] 1-5 Character-Card V3 Types + PNG `ccv3` Parser Fix ([1-5-CharacterCardV3TypesAndPngParser.md](1-5-CharacterCardV3TypesAndPngParser.md))
+  - [x] 1-6 Character-Card Mapper Redesign (stop the mangling) ([1-6-CharacterCardMapperRedesign.md](1-6-CharacterCardMapperRedesign.md))
+  - [x] 1-7 Macro Engine `ResolveMacros` (net-new, both repos) ([1-7-MacroEngine.md](1-7-MacroEngine.md))
+  - [x] 1-8 Go Greeting Delivery Primitives (`DeliverGreeting`, `message_type="greeting"`) ([1-8-GoGreetingDeliveryPrimitives.md](1-8-GoGreetingDeliveryPrimitives.md))
+  - [x] 1-9 Go `handleInitEntity` Greeting Hook (4 guards + `has_first_mes`) ([1-9-GoInitEntityGreetingHook.md](1-9-GoInitEntityGreetingHook.md))
+  - [x] 1-10 App Greeting Render-Only UX ([1-10-AppGreetingRenderUx.md](1-10-AppGreetingRenderUx.md))
+- [x] **Phase 2: Engine Generation Hook + Scenario Restart**
+  - [x] 2-1 Go `BuildScenarioGreetingPrompt` (4th builder mode) ([2-1-GoBuildScenarioGreetingPrompt.md](2-1-GoBuildScenarioGreetingPrompt.md))
+  - [x] 2-2 Go `GENERATE_GREETING` Event Handler ([2-2-GoGenerateGreetingEvent.md](2-2-GoGenerateGreetingEvent.md))
+  - [x] 2-3 Go `START_NEW_SCENARIO` (Scenario Restart) Handler ([2-3-GoStartNewScenarioHandler.md](2-3-GoStartNewScenarioHandler.md))
+  - [x] 2-4 App `ScenarioGeneratorSheet` + Generate/Regenerate UX ([2-4-AppScenarioGeneratorSheetAndGenerateUx.md](2-4-AppScenarioGeneratorSheetAndGenerateUx.md))
+- [x] **Phase 3: Lorebook RAG + Editor + Guided Mode**
+  - [x] 3-1 Go `lore` RAG Collection + Service Wiring ([3-1-GoLoreRagCollection.md](3-1-GoLoreRagCollection.md))
+  - [x] 3-2 Go Lore Embedding (import/edit/`INIT_ENTITY`) ([3-2-GoLoreEmbedding.md](3-2-GoLoreEmbedding.md))
+  - [x] 3-3 Go Lore Semantic Retrieval in Prompt Build ([3-3-GoLoreRetrievalInPromptBuild.md](3-3-GoLoreRetrievalInPromptBuild.md))
+  - [x] 3-4 App Lorebook Editor (`LorebookViewerSheet` + `LorebookEntryEditor`) ([3-4-AppLorebookEditor.md](3-4-AppLorebookEditor.md))
+  - [x] 3-5 App Profile-Editor Sections + `ImportReviewSheet` ([3-5-AppProfileEditorSectionsAndImport.md](3-5-AppProfileEditorSectionsAndImport.md))
+  - [x] 3-6 App Guided-Mode Plumbing + UJB/`{{original}}` Surfacing ([3-6-AppGuidedModeAndUjbSurfacing.md](3-6-AppGuidedModeAndUjbSurfacing.md))
+- [x] **Phase 4: Export / V3 Round-Trip + Tags**
+  - [x] 4-1 Go `ExportProfileToCardV3` (JSON + PNG `ccv3`) ([4-1-GoExporter.md](4-1-GoExporter.md))
+  - [x] 4-2 App Exporter Mirror ([4-2-AppExporterMirror.md](4-2-AppExporterMirror.md))
+  - [x] 4-3 App Character-Card Tag Filtering ([4-3-AppTagFiltering.md](4-3-AppTagFiltering.md))
+  - [x] 4-4 Export Affordance + Round-Trip Test ([4-4-ExportAffordanceAndRoundTripTest.md](4-4-ExportAffordanceAndRoundTripTest.md))
 
 ---
 

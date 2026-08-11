@@ -24,6 +24,7 @@ import { EmojiAutocomplete } from '../emoji/EmojiAutocomplete';
 import EmojiService from '../../services/EmojiService';
 import { EmojiEntry } from '../../types/emoji';
 import { EmojiActionInput } from './EmojiActionInput';
+import { EmptyChatCTA } from './EmptyChatCTA';
 
 const log = createLogger('[ChatInput]');
 
@@ -41,6 +42,10 @@ interface ChatInputProps {
   disabled?: boolean;
   theme: Theme;
   entityId?: string | null;
+  /** Show the ✨ scenario trigger on the right while the input is empty. P1: disabled. */
+  showScenarioButton?: boolean;
+  /** Called when the ✨ scenario trigger is tapped (P1: shows the "coming soon" state). */
+  onScenarioPress?: () => void;
 }
 
 export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
@@ -53,6 +58,8 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
   disabled = false,
   theme,
   entityId,
+  showScenarioButton = true,
+  onScenarioPress,
 }, ref) => {
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('chatDetail');
@@ -387,23 +394,37 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
             )}
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity
-            onPress={toggleRecording}
-            disabled={disabled || isProcessing}
-            style={styles.iconButton}
-          >
-            <Icon
-              name={hasRecordPermission === false ? "microphone-off" : "microphone"}
-              size={28}
-              color={
-                disabled
-                  ? theme.colors.text.disabled
-                  : hasRecordPermission === false
-                  ? theme.colors.status.error
-                  : theme.colors.accent.primary
-              }
-            />
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              onPress={toggleRecording}
+              disabled={disabled || isProcessing}
+              style={styles.iconButton}
+            >
+              <Icon
+                name={hasRecordPermission === false ? "microphone-off" : "microphone"}
+                size={28}
+                color={
+                  disabled
+                    ? theme.colors.text.disabled
+                    : hasRecordPermission === false
+                    ? theme.colors.status.error
+                    : theme.colors.accent.primary
+                }
+              />
+            </TouchableOpacity>
+
+            {/* ✨ Scenario trigger — shown while the input is empty, vanishes on
+                typing. Enabled in P2 (opens ScenarioGeneratorSheet); disabled
+                only while the session is inactive. */}
+            {showScenarioButton && (
+              <EmptyChatCTA
+                variant="icon"
+                disabled={disabled}
+                onPress={onScenarioPress}
+                theme={theme}
+              />
+            )}
+          </>
         )}
       </View>
     </ThemedView>

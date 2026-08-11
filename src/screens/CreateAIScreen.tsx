@@ -320,7 +320,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const pickerItems = useMemo(
     () =>
       [
-        { id: '', name: t('createNewProfile'), description: null } as ProfilePickerItem,
+        { id: '', name: t('createNewProfile'), description: '' } as ProfilePickerItem,
         ...allProfiles,
       ] as ProfilePickerItem[],
     [allProfiles, t],
@@ -368,15 +368,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       } else {
         profileId = uuidv4();
 
-        // Note: description, personality, appearance, backstory, voice_characteristics
-        // are NOT NULL in the schema — use empty string fallback, never null.
+        // Note: description, personality, voice_characteristics are NOT NULL in the
+        // schema — use empty string fallback, never null.
         await createCharacterProfile({
           id: profileId,
           name: name.trim(),
           description: personality.trim() || '',
           personality: personality.trim() || '',
-          appearance: '',
-          backstory: '',
           voice_characteristics: '',
           typing_speed_wpm: 60,
           audio_response_chance_percent: 50,
@@ -384,7 +382,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           lifecycle_config: '{}',
           base_prompt: '',
           scenario: '',
-          example_dialogues: '',
         });
 
         // 2. Add avatar image if selected (only for newly created profiles)
