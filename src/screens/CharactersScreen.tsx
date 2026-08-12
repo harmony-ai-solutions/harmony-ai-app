@@ -8,14 +8,13 @@ import {
   RefreshControl,
   Animated,
   TouchableOpacity,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { pick } from '@react-native-documents/picker';
-import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { useBiometricLock } from '../contexts/BiometricLockContext';
@@ -35,6 +34,9 @@ import { useReducedMotion } from '../hooks/useReducedMotion';
 
 const log = createLogger('[CharactersScreen]');
 import { CharacterProfileCard } from '../components/characters/CharacterProfileCard';
+import { ManageCategoriesModal } from '../components/characters/ManageCategoriesModal';
+import { CharacterCardMenuModal } from '../components/characters/CharacterCardMenuModal';
+import { AddToCategoryModal } from '../components/characters/AddToCategoryModal';
 import {
   getAllCharacterProfiles,
   getCharacterImages,
@@ -42,6 +44,16 @@ import {
   deleteCharacterProfile,
   createCharacterProfile,
   createCharacterImage,
+  getFavoriteCharacterProfileIds,
+  toggleCharacterFavorite,
+  getCharacterCategories,
+  createCharacterCategory,
+  renameCharacterCategory,
+  deleteCharacterCategory,
+  getCharacterCategoryMembers,
+  addCharacterToCategory,
+  removeCharacterFromCategory,
+  CharacterCategory,
 } from '../database/repositories/characters';
 import { createDataURL, base64ToUint8Array } from '../database/base64';
 import RNFS from 'react-native-fs';
@@ -72,11 +84,6 @@ import { resolvePersonaId } from '../database/repositories/personas';
 import { CharacterProfile } from '../database/models';
 import { CharacterCardImportError } from '../services/CharacterCardImportService';
 import syncService from '../services/SyncService';
-
-// Tab-screen navigation: routes are dispatched to the parent root stack.
-// Using 'any' here avoids CompositeNavigationProp boilerplate while
-// React Navigation v7 resolves routes across nested navigators at runtime.
-type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 function importMessageKey(code?: string): string {
   switch (code) {
@@ -192,11 +199,61 @@ export const CharactersScreen: React.FC = () => {
     }).start();
   }, [hasActiveFilters, reduceMotion, filterBannerAnim]);
 
+  // ── Favorites + categories ─────────────────────────────────────────────
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [categories, setCategories] = useState<CharacterCategory[]>([]);
+  // activeFilter: 'all' | 'favorites' | category id
+  const [activeFilter, setActiveFilter] = useState<string>('all');
+  // Which profile is currently being assigned to categories (null = none)
+  // Per-category membership cache: categoryId → Set<profileId>
+  const [categoryMembers, setCategoryMembers] = useState<
+    Record<string, Set<string>>
+  >({});
+  const [manageVisible, setManageVisible] = useState(false);
+  // Which profile the long-press context menu is open for (null = closed)
+  const [menuProfile, setMenuProfile] = useState<CharacterProfile | null>(null);
+  // Which profile the "Add to category" picker is open for (null = closed)
+  const [categoryPickProfile, setCategoryPickProfile] = useState<CharacterProfile | null>(null);
+
+  /**
+   * Load favorites + categories + per-category membership in parallel.
+   * Membership is lazy — only the active category's member set is needed for
+   * filtering, but we load all members so the category-assign modal can show
+   * every profile's current assignment instantly.
+   */
+  const loadFavoritesAndCategories = useCallback(async () => {
+    try {
+      const [favIds, cats] = await Promise.all([
+        getFavoriteCharacterProfileIds(),
+        getCharacterCategories(),
+      ]);
+      setFavoriteIds(new Set(favIds));
+      setCategories(cats);
+
+      // Load membership for every category in parallel.
+      const memberMap: Record<string, Set<string>> = {};
+      await Promise.all(
+        cats.map(async cat => {
+          try {
+            const ids = await getCharacterCategoryMembers(cat.id);
+            memberMap[cat.id] = new Set(ids);
+          } catch {
+            memberMap[cat.id] = new Set();
+          }
+        }),
+      );
+      setCategoryMembers(memberMap);
+    } catch (err) {
+      log.error('Failed to load favorites/categories:', err);
+    }
+  }, []);
+
   // Reload on focus (handles return from edit screen)
   useFocusEffect(
     useCallback(() => {
       loadProfiles();
-    }, []),
+      loadFavoritesAndCategories();
+    }, [loadFavoritesAndCategories]),
   );
 
   const loadProfiles = async () => {
@@ -247,7 +304,7 @@ export const CharactersScreen: React.FC = () => {
     setRefreshing(false);
   }, []);
 
-  /** Search + tag (multi-select OR) + creator filter (4-3). */
+/** Search + activeFilter (all/favorites/category) + tag (multi-OR) + creator filter. */
   const filteredProfiles = profiles.filter(p => {
     const q = searchQuery.trim().toLowerCase();
     const matchesSearch =
@@ -255,6 +312,10 @@ export const CharactersScreen: React.FC = () => {
       p.name.toLowerCase().includes(q) ||
       (p.description?.toLowerCase().includes(q) ?? false);
     if (!matchesSearch) return false;
+
+    // Active filter: all / favorites / category id (AND-composed with the filters below)
+    if (activeFilter === 'favorites' && !favoriteIds.has(p.id)) return false;
+    if (activeFilter !== 'all' && !(categoryMembers[activeFilter]?.has(p.id) ?? false)) return false;
 
     if (selectedTags.length > 0) {
       const tags = parseJsonColumn<string[]>(p.tags) ?? [];
@@ -280,6 +341,66 @@ export const CharactersScreen: React.FC = () => {
     setSelectedTags([]);
     setCreatorFilter(null);
   }, []);
+
+  /**
+   * Filter chips: first two are "All" and "Favorites", then each user
+   * category, then a gear button to manage categories.
+   */
+  interface FilterChipItem {
+    key: string;
+    label: string;
+    icon?: string;
+    isManage?: boolean;
+  }
+  const filterChips: FilterChipItem[] = [
+    { key: 'all', label: t('filterAll'), icon: 'view-grid-outline' },
+    { key: 'favorites', label: t('filterFavorites'), icon: 'heart-outline' },
+    ...categories.map(cat => ({ key: cat.id, label: cat.name, icon: 'shape-outline' })),
+    { key: 'manage', label: '', isManage: true },
+  ];
+
+  const handleToggleFavorite = async (profile: CharacterProfile) => {
+    try {
+      const nowFav = await toggleCharacterFavorite(profile.id);
+      setFavoriteIds(prev => {
+        const next = new Set(prev);
+        if (nowFav) next.add(profile.id);
+        else next.delete(profile.id);
+        return next;
+      });
+    } catch (err) {
+      log.error('Failed to toggle favorite:', err);
+    }
+  };
+
+  /**
+   * Toggle a profile's membership in a category (used by the manage-categories
+   * sheet's member editor).
+   */
+  const handleAssignToggle = async (profileId: string, categoryId: string, assign: boolean) => {
+    try {
+      if (assign) {
+        await addCharacterToCategory(profileId, categoryId);
+      } else {
+        await removeCharacterFromCategory(profileId, categoryId);
+      }
+      // Update membership cache
+      setCategoryMembers(prev => {
+        const next = { ...prev };
+        const current = new Set(next[categoryId] ?? []);
+        if (assign) current.add(profileId);
+        else current.delete(profileId);
+        next[categoryId] = current;
+        return next;
+      });
+    } catch (err) {
+      log.error('Failed to update category membership:', err);
+    }
+  };
+
+  const handleCategoriesChanged = useCallback(() => {
+    loadFavoritesAndCategories();
+  }, [loadFavoritesAndCategories]);
 
   const handleEdit = (profile: CharacterProfile) => {
     navigation.navigate('CharacterProfileEdit', { profileId: profile.id });
@@ -362,6 +483,16 @@ export const CharactersScreen: React.FC = () => {
   };
 
   const handleLongPress = (profile: CharacterProfile) => {
+    setMenuProfile(profile);
+  };
+
+  const closeMenu = () => setMenuProfile(null);
+
+  /**
+   * Delete a profile (from the long-press context menu). Keeps the delete
+   * confirmation dialog so the destructive action is never accidental.
+   */
+  const handleDeleteProfile = (profile: CharacterProfile) => {
     showAlert(
       t('deleteConfirmTitle'),
       t('deleteConfirmMessage', { name: profile.name }),
@@ -392,6 +523,47 @@ export const CharactersScreen: React.FC = () => {
       ],
     );
   };
+
+  const handleMenuAddToCategory = (profile: CharacterProfile) => {
+    setCategoryPickProfile(profile);
+  };
+
+  const closeCategoryPick = () => setCategoryPickProfile(null);
+
+  /**
+   * Toggle a profile's membership in a category (from the "Add to category"
+   * picker). Persists and updates the membership cache.
+   */
+  const handleCategoryPickToggle = async (categoryId: string, assign: boolean) => {
+    const profile = categoryPickProfile;
+    if (!profile) return;
+    try {
+      if (assign) {
+        await addCharacterToCategory(profile.id, categoryId);
+      } else {
+        await removeCharacterFromCategory(profile.id, categoryId);
+      }
+      setCategoryMembers(prev => {
+        const next = { ...prev };
+        const current = new Set(next[categoryId] ?? []);
+        if (assign) current.add(profile.id);
+        else current.delete(profile.id);
+        next[categoryId] = current;
+        return next;
+      });
+    } catch (err) {
+      log.error('Failed to update category membership:', err);
+    }
+  };
+
+  /** Assigned categories for the profile in the "Add to category" picker. */
+  const categoryPickState: Record<string, boolean> = {};
+  if (categoryPickProfile) {
+    for (const cat of categories) {
+      categoryPickState[cat.id] =
+        categoryMembers[cat.id]?.has(categoryPickProfile.id) ?? false;
+    }
+  }
 
   const handleCreateNew = () => {
     navigation.navigate('CharacterProfileEdit', {}); // no profileId = create mode
@@ -561,6 +733,81 @@ export const CharactersScreen: React.FC = () => {
             />
           )}
         </View>
+
+        {/* Filter chips — All / Favorites / categories + manage */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}
+          keyboardShouldPersistTaps="handled"
+        >
+          {filterChips.map(chip => {
+            if (chip.isManage) {
+              return (
+                <TouchableOpacity
+                  key="manage"
+                  onPress={() => setManageVisible(true)}
+                  style={[
+                    styles.chip,
+                    styles.manageChip,
+                    {
+                      backgroundColor: hexToRgba(theme.colors.background.base, 0.55),
+                      borderColor: hexToRgba(accent, 0.25),
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('manageCategories')}
+                  testID="manage-categories-button"
+                >
+                  <MaterialCommunityIcons
+                    name="plus-box-outline"
+                    size={15}
+                    color={accent}
+                  />
+                  <ThemedText size={13} weight="medium" variant="accent">
+                    {t('manageCategories')}
+                  </ThemedText>
+                </TouchableOpacity>
+              );
+            }
+            const isActive = activeFilter === chip.key;
+            return (
+              <TouchableOpacity
+                key={chip.key}
+                onPress={() => setActiveFilter(chip.key)}
+                style={[
+                  styles.chip,
+                  isActive && styles.chipActive,
+                  {
+                    backgroundColor: isActive
+                      ? hexToRgba(accent, 0.22)
+                      : hexToRgba(theme.colors.background.base, 0.55),
+                    borderColor: isActive ? accent : hexToRgba(accent, 0.25),
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isActive }}
+                accessibilityLabel={chip.label}
+                testID={`filter-chip-${chip.key}`}
+              >
+                {chip.icon && (
+                  <MaterialCommunityIcons
+                    name={chip.icon}
+                    size={14}
+                    color={isActive ? accent : theme.colors.text.muted}
+                  />
+                )}
+                <ThemedText
+                  size={13}
+                  variant={isActive ? 'accent' : 'primary'}
+                  weight={isActive ? 'bold' : 'normal'}
+                >
+                  {chip.label}
+                </ThemedText>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </ScreenHeader>
 
       {/* 4-3: tag filter row (multi-select OR) — TagChips in filter mode, fed
@@ -652,37 +899,61 @@ export const CharactersScreen: React.FC = () => {
             <View style={styles.centered}>
               <ActivityIndicator size="large" color={theme.colors.accent.primary} />
             </View>
-          ) : (
-<ThemedEmptyState
-              icon={
-                hasActiveFilters
-                  ? 'filter-remove-outline'
-                  : searchQuery
-                    ? 'file-search-outline'
-                    : 'account-group-outline'
-              }
-              title={hasActiveFilters || searchQuery ? t('noResults') : t('noProfiles')}
-              subtitle={
-                hasActiveFilters || searchQuery ? t('noResultsHint') : t('noProfilesHint')
-              }
+) : hasActiveFilters ? (
+            // Active tag/creator filters produced no results
+            <ThemedEmptyState
+              icon="filter-remove-outline"
+              title={t('noResults')}
+              subtitle={t('noResultsHint')}
               style={styles.emptyContainer}
               action={
-                hasActiveFilters ? (
-                  <ThemedButton
-                    variant="outline"
-                    label={t('clearFilters')}
-                    onPress={clearFilters}
-                    style={styles.emptyButton}
-                    testID="empty-clear-filters"
-                  />
-                ) : !searchQuery ? (
-                  <ThemedButton
-                    variant="primary"
-                    label={t('createFirst')}
-                    onPress={handleCreateNew}
-                    style={styles.emptyButton}
-                  />
-                ) : undefined
+                <ThemedButton
+                  variant="outline"
+                  label={t('clearFilters')}
+                  onPress={clearFilters}
+                  style={styles.emptyButton}
+                  testID="empty-clear-filters"
+                />
+              }
+            />
+          ) : searchQuery ? (
+            // Search produced no results
+            <ThemedEmptyState
+              icon="file-search-outline"
+              title={t('noResults')}
+              subtitle={t('noResultsHint')}
+              style={styles.emptyContainer}
+            />
+          ) : activeFilter === 'favorites' ? (
+            // No favorites yet
+            <ThemedEmptyState
+              icon="heart-outline"
+              title={t('noFavoritesTitle')}
+              subtitle={t('noFavoritesHint')}
+              style={styles.emptyContainer}
+            />
+          ) : activeFilter !== 'all' ? (
+            // A category has no characters
+            <ThemedEmptyState
+              icon="shape-outline"
+              title={t('categoryEmptyTitle')}
+              subtitle={t('categoryEmptyHint')}
+              style={styles.emptyContainer}
+            />
+          ) : (
+            // No profiles at all
+            <ThemedEmptyState
+              icon="account-group-outline"
+              title={t('noProfiles')}
+              subtitle={t('noProfilesHint')}
+              style={styles.emptyContainer}
+              action={
+                <ThemedButton
+                  variant="primary"
+                  label={t('createFirst')}
+                  onPress={handleCreateNew}
+                  style={styles.emptyButton}
+                />
               }
             />
           )
@@ -692,6 +963,8 @@ export const CharactersScreen: React.FC = () => {
             profile={item}
             imageUri={primaryImages[item.id] ?? null}
             imageCount={imageCounts[item.id] ?? 0}
+            isFavorite={favoriteIds.has(item.id)}
+            onFavoriteToggle={() => handleToggleFavorite(item)}
             onPress={() => handleEdit(item)}
             onLongPress={() => handleLongPress(item)}
             onChatPress={() => handleChatPress(item)}
@@ -773,7 +1046,7 @@ export const CharactersScreen: React.FC = () => {
         </>
       )}
 
-      {/* Post-import review (3-5) — opens after the card parses, before persist. */}
+{/* Post-import review (3-5) — opens after the card parses, before persist. */}
       <ImportReviewSheet
         open={pendingImport !== null}
         summary={pendingImport?.summary ?? null}
@@ -781,6 +1054,45 @@ export const CharactersScreen: React.FC = () => {
         onSave={handleImportSave}
         onReviewAndEdit={handleImportReviewAndEdit}
         onGenerateGreeting={handleImportGenerateGreeting}
+      />
+
+      {/* Manage categories bottom sheet */}
+      <ManageCategoriesModal
+        visible={manageVisible}
+        categories={categories}
+        profiles={profiles}
+        categoryMembers={categoryMembers}
+        onClose={() => setManageVisible(false)}
+        onChange={handleCategoriesChanged}
+        onCreate={async name => {
+          await createCharacterCategory(name);
+        }}
+        onRename={async (categoryId, name) => {
+          await renameCharacterCategory(categoryId, name);
+        }}
+        onDelete={async categoryId => {
+          await deleteCharacterCategory(categoryId);
+        }}
+        onToggleMember={handleAssignToggle}
+      />
+
+      {/* Long-press context menu */}
+      <CharacterCardMenuModal
+        visible={!!menuProfile}
+        characterName={menuProfile?.name ?? ''}
+        onClose={closeMenu}
+        onDelete={() => menuProfile && handleDeleteProfile(menuProfile)}
+        onAddToCategory={() => menuProfile && handleMenuAddToCategory(menuProfile)}
+      />
+
+      {/* Add-to-category picker (from long-press menu) */}
+      <AddToCategoryModal
+        visible={!!categoryPickProfile}
+        characterName={categoryPickProfile?.name ?? ''}
+        categories={categories}
+        assigned={categoryPickState}
+        onToggle={handleCategoryPickToggle}
+        onClose={closeCategoryPick}
       />
     </ThemedView>
   );
@@ -826,6 +1138,29 @@ const styles = StyleSheet.create({
     height: 48,
     marginTop: 12,
     marginBottom: 8,
+  },
+  // ── Filter chips ──
+  chipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 2,
+    paddingBottom: 8,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  chipActive: {
+    borderWidth: 1.5,
+  },
+  manageChip: {
+    borderStyle: 'dashed',
   },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15, paddingVertical: 0 },

@@ -59,7 +59,7 @@ const TAB_ICONS: Record<string, { default: string; focused: string }> = {
 const FALLBACK_LABELS: Record<string, string> = {
   Discover: 'Discover',
   Chat: 'Chat',
-  Characters: 'My Characters',
+  Characters: 'Characters',
   Market: 'Market',
   MyProfile: 'My Profile',
 };

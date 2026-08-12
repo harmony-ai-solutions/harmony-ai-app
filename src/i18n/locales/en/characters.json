@@ -256,5 +256,33 @@
         "hint": "How many memories are kept 'core' — pinned at the top of recall regardless of age, so the formative moments always shape the character's responses."
       }
     }
+  },
+  "filterAll": "All",
+  "filterFavorites": "Favorites",
+  "manageCategories": "Manage categories",
+  "createCategory": "Create category",
+  "categoryNamePlaceholder": "Category name",
+  "categoryCreateFailed": "Failed to create category.",
+  "categoryRenameFailed": "Failed to rename category.",
+  "categoryDeleteFailed": "Failed to delete category.",
+  "categoryNameRequired": "Please enter a category name.",
+  "deleteCategoryTitle": "Delete category",
+  "deleteCategoryMessage": "Delete \"{{name}}\"? Characters in it will not be deleted.",
+  "categoryEmptyTitle": "No characters in this category yet",
+  "categoryEmptyHint": "Add characters to this category in Manage categories.",
+  "noFavoritesTitle": "No favorites yet",
+  "noFavoritesHint": "Tap the heart on a character to keep it close.",
+  "favoriteAdded": "Added to favorites",
+  "favoriteRemoved": "Removed from favorites",
+  "categoryAssigned": "Added to {{name}}",
+  "categoryUnassigned": "Removed from {{name}}",
+  "categoryEditTitle": "Edit category",
+  "categoryMemberCount_one": "{{count}} character",
+  "categoryMemberCount_other": "{{count}} characters",
+  "filterNoResultsTitle": "Nothing here",
+  "filterNoResultsHint": "No characters match this filter.",
+  "cardMenuAddToCategory": "Add to category",
+  "cardMenuDelete": "Delete",
+  "addToCategoryTitle": "Add to category",
+"addToCategoryNoCategories": "No categories yet. Create one in \"Manage categories\"."
   }
-}

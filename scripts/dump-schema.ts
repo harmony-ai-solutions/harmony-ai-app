@@ -40,6 +40,9 @@ import {dumpSchema} from '../src/database/__test_utils__/dumpSchema';
  */
 const CLIENT_ONLY_TABLES = new Set<string>([
   'character_profile_sources',
+  'character_categories',
+  'character_category_members',
+  'character_favorites',
   'personas',
 ]);
 

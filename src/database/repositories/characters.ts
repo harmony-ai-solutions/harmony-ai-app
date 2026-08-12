@@ -887,3 +887,217 @@ export async function getCommunityCharacterProfiles(
 
   return profiles;
 }
+
+// ============================================================================
+// Character Favorites + Categories (client-only)
+// ============================================================================
+//
+// Both features are stored in CLIENT-ONLY sidecar tables (never synced to the
+// engine — strict schema parity, see docs/schema-parity.md), mirroring the
+// `character_profile_sources` and `personas` pattern. A profile with no rows
+// is simply "not favorited / in no category".
+
+export interface CharacterCategory {
+  id: string;
+  name: string;
+  displayOrder: number;
+}
+
+/**
+ * True when a character profile is favorited.
+ */
+export async function isCharacterFavorite(profileId: string): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT 1 FROM character_favorites WHERE profile_id = ?',
+    [profileId],
+  );
+  return results.rows.length > 0;
+}
+
+/**
+ * Favorite a character profile (idempotent).
+ */
+export async function addCharacterFavorite(profileId: string): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql(
+    `INSERT OR IGNORE INTO character_favorites (profile_id, favorited_at)
+     VALUES (?, ?)`,
+    [profileId, new Date().toISOString()],
+  );
+}
+
+/**
+ * Remove a character profile from favorites (idempotent).
+ */
+export async function removeCharacterFavorite(profileId: string): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql(
+    'DELETE FROM character_favorites WHERE profile_id = ?',
+    [profileId],
+  );
+}
+
+/**
+ * Toggle favorite state and return the new state.
+ */
+export async function toggleCharacterFavorite(profileId: string): Promise<boolean> {
+  const isFav = await isCharacterFavorite(profileId);
+  if (isFav) {
+    await removeCharacterFavorite(profileId);
+    return false;
+  }
+  await addCharacterFavorite(profileId);
+  return true;
+}
+
+/**
+ * All favorite profile IDs, most-recently-favorited first.
+ */
+export async function getFavoriteCharacterProfileIds(): Promise<string[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT profile_id FROM character_favorites ORDER BY favorited_at DESC',
+  );
+  const ids: string[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    ids.push(results.rows.item(i).profile_id);
+  }
+  return ids;
+}
+
+/**
+ * All user-defined categories ordered by display_order then name.
+ */
+export async function getCharacterCategories(): Promise<CharacterCategory[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT id, name, display_order FROM character_categories ORDER BY display_order ASC, name ASC',
+  );
+  const categories: CharacterCategory[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    const row = results.rows.item(i);
+    categories.push({
+      id: row.id,
+      name: row.name,
+      displayOrder: row.display_order,
+    });
+  }
+  return categories;
+}
+
+/**
+ * Create a new category. Returns the created category.
+ */
+export async function createCharacterCategory(name: string): Promise<CharacterCategory> {
+  const db = getDatabase();
+  const id = generateId();
+  const now = new Date().toISOString();
+  // Place new categories after existing ones.
+  const [countResults] = await db.executeSql(
+    'SELECT COUNT(*) as count FROM character_categories',
+  );
+  const displayOrder = countResults.rows.item(0).count;
+  await db.executeSql(
+    `INSERT INTO character_categories (id, name, display_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [id, name.trim(), displayOrder, now, now],
+  );
+  return { id, name: name.trim(), displayOrder };
+}
+
+/**
+ * Rename a category.
+ */
+export async function renameCharacterCategory(
+  categoryId: string,
+  name: string,
+): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql(
+    `UPDATE character_categories SET name = ?, updated_at = ? WHERE id = ?`,
+    [name.trim(), new Date().toISOString(), categoryId],
+  );
+}
+
+/**
+ * Delete a category (and its member rows — FK ON DELETE CASCADE).
+ */
+export async function deleteCharacterCategory(categoryId: string): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql('DELETE FROM character_categories WHERE id = ?', [categoryId]);
+}
+
+/**
+ * Profile IDs that belong to a given category.
+ */
+export async function getCharacterCategoryMembers(
+  categoryId: string,
+): Promise<string[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT profile_id FROM character_category_members WHERE category_id = ? ORDER BY created_at DESC',
+    [categoryId],
+  );
+  const ids: string[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    ids.push(results.rows.item(i).profile_id);
+  }
+  return ids;
+}
+
+/**
+ * Add a profile to a category (idempotent).
+ */
+export async function addCharacterToCategory(
+  profileId: string,
+  categoryId: string,
+): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql(
+    `INSERT OR IGNORE INTO character_category_members (profile_id, category_id, created_at)
+     VALUES (?, ?, ?)`,
+    [profileId, categoryId, new Date().toISOString()],
+  );
+}
+
+/**
+ * Remove a profile from a category (idempotent).
+ */
+export async function removeCharacterFromCategory(
+  profileId: string,
+  categoryId: string,
+): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql(
+    'DELETE FROM character_category_members WHERE profile_id = ? AND category_id = ?',
+    [profileId, categoryId],
+  );
+}
+
+/**
+ * All categories a given profile belongs to.
+ */
+export async function getCharacterProfileCategories(
+  profileId: string,
+): Promise<CharacterCategory[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    `SELECT c.id, c.name, c.display_order
+     FROM character_categories c
+     INNER JOIN character_category_members m ON m.category_id = c.id
+     WHERE m.profile_id = ?
+     ORDER BY c.display_order ASC, c.name ASC`,
+    [profileId],
+  );
+  const categories: CharacterCategory[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    const row = results.rows.item(i);
+    categories.push({
+      id: row.id,
+      name: row.name,
+      displayOrder: row.display_order,
+    });
+  }
+  return categories;
+}

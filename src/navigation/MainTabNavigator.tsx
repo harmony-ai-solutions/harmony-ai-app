@@ -60,7 +60,7 @@ export const MainTabNavigator: React.FC = () => {
         name="Characters"
         component={CharactersScreen}
         options={{
-          tabBarLabel: 'My Characters',
+          tabBarLabel: 'Characters',
           tabBarButtonTestID: 'tab-characters',
         }}
       />

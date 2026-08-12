@@ -55,6 +55,15 @@ CREATE INDEX idx_provider_config_xai_name ON provider_config_xai(name);
 -- table: backend_configs
 CREATE TABLE "backend_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
 
+-- table: character_categories
+CREATE TABLE character_categories ( id TEXT PRIMARY KEY, name TEXT NOT NULL, display_order INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
+-- table: character_category_members
+CREATE TABLE character_category_members ( profile_id TEXT NOT NULL REFERENCES character_profiles(id) ON DELETE CASCADE, category_id TEXT NOT NULL REFERENCES character_categories(id) ON DELETE CASCADE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (profile_id, category_id) );
+
+-- table: character_favorites
+CREATE TABLE character_favorites ( profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE, favorited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
 -- table: character_image
 CREATE TABLE "character_image" ( id TEXT PRIMARY KEY, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
 

@@ -27,6 +27,10 @@ interface CharacterProfileCardProps {
    * creator filter. Optional — cards render the row read-only without it.
    */
   onCreatorPress?: (creator: string) => void;
+  /** True when this profile is in the user's favorites */
+  isFavorite?: boolean;
+  /** Toggle favorite state for this profile */
+  onFavoriteToggle?: () => void;
 }
 
 /**
@@ -56,6 +60,8 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
   onLongPress,
   onChatPress,
   onCreatorPress,
+  isFavorite = false,
+  onFavoriteToggle,
 }) => {
   const { theme } = useAppTheme();
   const { t } = useTranslation('characters');
@@ -181,6 +187,33 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
                   <Icon name="chat-processing-outline" size={16} color="#fff" />
                 </LinearGradient>
               </TouchableOpacity>
+
+              {/* Favorite button — floating heart over the image, shown when
+                  onFavoriteToggle is provided. Captures the touch so it does
+                  NOT trigger the parent card's onPress/onLongPress. */}
+              {onFavoriteToggle && (
+                <TouchableOpacity
+                  onPress={onFavoriteToggle}
+                  onPressIn={e => e.stopPropagation()}
+                  onPressOut={e => e.stopPropagation()}
+                  activeOpacity={0.82}
+                  style={styles.favButton}
+                  testID="character-favorite-button"
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isFavorite
+                      ? `Remove ${profile.name} from favorites`
+                      : `Add ${profile.name} to favorites`
+                  }
+                >
+                  <Icon
+                    name={isFavorite ? 'heart' : 'heart-outline'}
+                    size={22}
+                    color={isFavorite ? accent.primary : '#fff'}
+                    style={styles.favIcon}
+                  />
+                </TouchableOpacity>
+              )}
 
               {/* Dark fade overlay — blends image into glass text area */}
               <LinearGradient
@@ -358,6 +391,20 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  // ── Favorite button (floating heart over the image, bottom-left) ──
+  // Clean icon only — no circle backdrop. A soft shadow keeps the heart
+  // readable over any portrait.
+  favButton: {
+    position: 'absolute',
+    bottom: 6,
+    left: 8,
+    padding: 4,
+  },
+  favIcon: {
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 1.5 },
+    textShadowRadius: 3,
   },
   // ── Text area ──
   textContainer: {

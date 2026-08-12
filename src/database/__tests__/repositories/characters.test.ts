@@ -24,6 +24,19 @@ import {
   setCharacterProfileSource,
   getCharacterProfileSource,
   getCommunityCharacterProfiles,
+  isCharacterFavorite,
+  addCharacterFavorite,
+  removeCharacterFavorite,
+  toggleCharacterFavorite,
+  getFavoriteCharacterProfileIds,
+  getCharacterCategories,
+  createCharacterCategory,
+  renameCharacterCategory,
+  deleteCharacterCategory,
+  getCharacterCategoryMembers,
+  addCharacterToCategory,
+  removeCharacterFromCategory,
+  getCharacterProfileCategories,
 } from '../../repositories/characters';
 import type {CharacterImage} from '../../models';
 
@@ -443,6 +456,113 @@ describe('characters repository', () => {
       await deleteCharacterProfile('src-del-1');
       const community = await getCommunityCharacterProfiles();
       expect(community.some(p => p.id === 'src-del-1')).toBe(false);
+    });
+  });
+
+  describe('character favorites', () => {
+    it('is not favorited by default', async () => {
+      await createMinimalProfile('fav-default');
+      expect(await isCharacterFavorite('fav-default')).toBe(false);
+    });
+
+    it('addCharacterFavorite then isCharacterFavorite is true', async () => {
+      await createMinimalProfile('fav-add');
+      await addCharacterFavorite('fav-add');
+      expect(await isCharacterFavorite('fav-add')).toBe(true);
+    });
+
+    it('removeCharacterFavorite is idempotent', async () => {
+      await createMinimalProfile('fav-remove');
+      await addCharacterFavorite('fav-remove');
+      await removeCharacterFavorite('fav-remove');
+      expect(await isCharacterFavorite('fav-remove')).toBe(false);
+      // Removing again is a no-op
+      await removeCharacterFavorite('fav-remove');
+      expect(await isCharacterFavorite('fav-remove')).toBe(false);
+    });
+
+    it('toggleCharacterFavorite flips state and returns new state', async () => {
+      await createMinimalProfile('fav-toggle');
+      expect(await toggleCharacterFavorite('fav-toggle')).toBe(true);
+      expect(await isCharacterFavorite('fav-toggle')).toBe(true);
+      expect(await toggleCharacterFavorite('fav-toggle')).toBe(false);
+      expect(await isCharacterFavorite('fav-toggle')).toBe(false);
+    });
+
+    it('getFavoriteCharacterProfileIds returns most-recent first', async () => {
+      await createMinimalProfile('fav-list-1');
+      await createMinimalProfile('fav-list-2');
+      await addCharacterFavorite('fav-list-1');
+      // Small delay so ordering by favorited_at is deterministic.
+      await new Promise(r => setTimeout(r, 5));
+      await addCharacterFavorite('fav-list-2');
+
+      const ids = await getFavoriteCharacterProfileIds();
+      expect(ids).toContain('fav-list-1');
+      expect(ids).toContain('fav-list-2');
+      // fav-list-2 was favorited last → newest first
+      expect(ids.indexOf('fav-list-2')).toBeLessThan(ids.indexOf('fav-list-1'));
+    });
+  });
+
+  describe('character categories', () => {
+    it('createCharacterCategory returns the created category and lists it', async () => {
+      const cat = await createCharacterCategory('  My Group  ');
+      expect(cat.name).toBe('My Group');
+      expect(cat.id).toBeTruthy();
+
+      const cats = await getCharacterCategories();
+      expect(cats.map(c => c.id)).toContain(cat.id);
+    });
+
+    it('renameCharacterCategory updates the name', async () => {
+      const cat = await createCharacterCategory('Old');
+      await renameCharacterCategory(cat.id, 'New Name');
+      const cats = await getCharacterCategories();
+      const updated = cats.find(c => c.id === cat.id);
+      expect(updated?.name).toBe('New Name');
+    });
+
+    it('deleteCharacterCategory removes it and its memberships', async () => {
+      await createMinimalProfile('cat-del-prof');
+      const cat = await createCharacterCategory('To Delete');
+      await addCharacterToCategory('cat-del-prof', cat.id);
+      expect(await getCharacterCategoryMembers(cat.id)).toContain('cat-del-prof');
+
+      await deleteCharacterCategory(cat.id);
+      expect((await getCharacterCategories()).some(c => c.id === cat.id)).toBe(false);
+      // Member rows cascade away (querying the deleted category returns nothing)
+      expect(await getCharacterCategoryMembers(cat.id)).toEqual([]);
+    });
+
+    it('addCharacterToCategory then members and profile categories reflect it', async () => {
+      await createMinimalProfile('cat-mem-prof');
+      const cat = await createCharacterCategory('Members');
+      await addCharacterToCategory('cat-mem-prof', cat.id);
+
+      expect(await getCharacterCategoryMembers(cat.id)).toContain('cat-mem-prof');
+      const profileCats = await getCharacterProfileCategories('cat-mem-prof');
+      expect(profileCats.map(c => c.id)).toContain(cat.id);
+    });
+
+    it('addCharacterToCategory is idempotent (no duplicate rows)', async () => {
+      await createMinimalProfile('cat-idem-prof');
+      const cat = await createCharacterCategory('Idempotent');
+      await addCharacterToCategory('cat-idem-prof', cat.id);
+      await addCharacterToCategory('cat-idem-prof', cat.id);
+
+      const members = await getCharacterCategoryMembers(cat.id);
+      expect(members.filter(m => m === 'cat-idem-prof')).toHaveLength(1);
+    });
+
+    it('removeCharacterFromCategory detaches the profile', async () => {
+      await createMinimalProfile('cat-unassign-prof');
+      const cat = await createCharacterCategory('Unassign');
+      await addCharacterToCategory('cat-unassign-prof', cat.id);
+      await removeCharacterFromCategory('cat-unassign-prof', cat.id);
+
+      expect(await getCharacterCategoryMembers(cat.id)).not.toContain('cat-unassign-prof');
+      expect(await getCharacterProfileCategories('cat-unassign-prof')).toEqual([]);
     });
   });
 });
