@@ -17,6 +17,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { hapticLightPress } from '../../utils/haptics';
 import { EntityModuleSelector, ModuleConfigOption } from './EntityModuleSelector';
 
 type RootStackParamList = {
@@ -90,7 +91,10 @@ export const EntityModuleSelectorWithActions: React.FC<
 
         {selectedId && selectedId !== '' ? (
           <TouchableOpacity
-            onPress={handleEdit}
+            onPress={() => {
+              hapticLightPress();
+              handleEdit();
+            }}
             style={styles.actionButton}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityLabel={`Edit ${label} configuration`}

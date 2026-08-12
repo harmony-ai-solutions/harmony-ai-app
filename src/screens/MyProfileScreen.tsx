@@ -39,6 +39,7 @@ import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
+import { hapticLightPress } from '../utils/haptics';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { ProfileTabs, ProfileTabKey, ProfileTabDef } from '../components/profile/ProfileTabs';
 import { getUserCharacterProfiles } from '../database/repositories/characters';
@@ -277,7 +278,10 @@ export const MyProfileScreen: React.FC = () => {
 
             {/* Compact Edit Profile pill */}
             <TouchableOpacity
-              onPress={handleOpenEditProfile}
+              onPress={() => {
+                hapticLightPress();
+                handleOpenEditProfile();
+              }}
               activeOpacity={0.7}
               style={styles.editPill}
               testID="profile-edit-button"
@@ -400,7 +404,10 @@ export const MyProfileScreen: React.FC = () => {
                     return (
                       <TouchableOpacity
                         key={p.id}
-                        onPress={() => handleOpenPersonaEdit(p.id)}
+                        onPress={() => {
+                          hapticLightPress();
+                          handleOpenPersonaEdit(p.id);
+                        }}
                         onLongPress={() => handleSetActivePersona(p.id)}
                         activeOpacity={0.75}
                         style={styles.gridItem}
@@ -440,7 +447,10 @@ export const MyProfileScreen: React.FC = () => {
                 </View>
 
                 <TouchableOpacity
-                  onPress={() => handleOpenPersonaEdit()}
+                  onPress={() => {
+                    hapticLightPress();
+                    handleOpenPersonaEdit();
+                  }}
                   activeOpacity={0.7}
                   style={styles.newPersonaPill}
                   testID="new-persona-button"

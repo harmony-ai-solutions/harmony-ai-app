@@ -32,6 +32,7 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
+import { hapticLightPress } from '../utils/haptics';
 import { ChatBubble, isPartnerMessage } from '../components/chat/ChatBubble';
 import { ChatInput, ChatInputRef } from '../components/chat/ChatInput';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
@@ -1582,7 +1583,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               </ThemedText>
             )}
             <TouchableOpacity
-              onPress={handleToggleReplyMode}
+              onPress={() => {
+                hapticLightPress();
+                handleToggleReplyMode();
+              }}
               style={styles.replyModeButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               disabled={!isSessionActive(currentInteractionIdRef.current)}
@@ -1601,7 +1605,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               </ThemedText>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={handleEntityContextMenu}
+              onPress={() => {
+                hapticLightPress();
+                handleEntityContextMenu();
+              }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Icon
@@ -1862,7 +1869,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               styles.scrollToBottomButton,
               { backgroundColor: theme?.colors.accent.primary },
             ]}
-            onPress={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            onPress={() => {
+              hapticLightPress();
+              flatListRef.current?.scrollToEnd({ animated: true });
+            }}
             activeOpacity={0.8}
           >
             <Icon

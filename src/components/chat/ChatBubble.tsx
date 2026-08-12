@@ -9,6 +9,7 @@ import { Theme } from '../../theme/types';
 import { ConversationMessage } from '../../database/models';
 import { EmojiAwareText } from '../emoji/EmojiAwareText';
 import EmojiService from '../../services/EmojiService';
+import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[ChatBubble]');
@@ -339,7 +340,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {t('transcriptionFailed')}
             </ThemedText>
             <TouchableOpacity
-              onPress={() => onRetryTranscription && onRetryTranscription(message.id)}
+              onPress={() => {
+                hapticLightPress();
+                onRetryTranscription && onRetryTranscription(message.id);
+              }}
               style={[styles.retryButton, { backgroundColor: theme.colors.accent.primary }]}
             >
               <IconButton icon="refresh" size={14} iconColor="#fff" style={styles.retryIcon} />
@@ -402,13 +406,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         {isEditing && !isPendingSend && (
           <View style={styles.actionButtons}>
             <TouchableOpacity
-              onPress={handleEditCancel}
+              onPress={() => {
+                hapticLightPress();
+                handleEditCancel();
+              }}
               style={styles.actionButton}
             >
               <ThemedText variant="muted" size={12}>{t('cancel')}</ThemedText>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={handleEditSave}
+              onPress={() => {
+                hapticLightPress();
+                handleEditSave();
+              }}
               style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
             >
               <ThemedText style={{ color: '#fff' }} size={12}>{t('save')}</ThemedText>
@@ -421,13 +431,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {isEditing ? (
               <>
                 <TouchableOpacity
-                  onPress={handleEditCancel}
+                  onPress={() => {
+                    hapticLightPress();
+                    handleEditCancel();
+                  }}
                   style={styles.actionButton}
                 >
                   <ThemedText variant="muted" size={12}>{t('cancel')}</ThemedText>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={handleEditSave}
+                  onPress={() => {
+                    hapticLightPress();
+                    handleEditSave();
+                  }}
                   style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
                 >
                   <ThemedText style={{ color: '#fff' }} size={12}>{t('save')}</ThemedText>
@@ -436,14 +452,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             ) : (
               <>
                 <TouchableOpacity
-                  onPress={() => setIsEditing(true)}
+                  onPress={() => {
+                    hapticLightPress();
+                    setIsEditing(true);
+                  }}
                   style={styles.actionButton}
                 >
                   <IconButton icon="pencil" size={16} iconColor={theme.colors.text.muted} />
                   <ThemedText variant="muted" size={12}>{t('edit')}</ThemedText>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => onSendMessage && onSendMessage(message.id, editedText)}
+                  onPress={() => {
+                    hapticLightPress();
+                    onSendMessage && onSendMessage(message.id, editedText);
+                  }}
                   style={[styles.actionButton, styles.primaryActionButton, { backgroundColor: theme.colors.accent.primary }]}
                 >
                   <IconButton icon="send" size={16} iconColor="#fff" />

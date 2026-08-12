@@ -29,6 +29,7 @@ import { ThemedCard } from '../../components/themed/ThemedCard';
 import { SectionHeader } from '../../components/themed/SectionHeader';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
+import { hapticLightPress } from '../../utils/haptics';
 import { useAppAlert } from '../../contexts/AppAlertContext';
 import { FormField } from '../../components/config/FormField';
 import { AdvancedSamplingParams } from '../../components/config/AdvancedSamplingParams';
@@ -916,7 +917,10 @@ export const ModuleConfigEditScreen: React.FC = () => {
             />
           ) : (
             <TouchableOpacity
-              onPress={handleSave}
+              onPress={() => {
+                hapticLightPress();
+                handleSave();
+              }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel="Save configuration"
               accessibilityRole="button"
@@ -984,7 +988,10 @@ export const ModuleConfigEditScreen: React.FC = () => {
                       { backgroundColor: theme.colors.accent.primary },
                     ],
                   ]}
-                  onPress={() => setShowAdvanced(false)}
+                  onPress={() => {
+                    hapticLightPress();
+                    setShowAdvanced(false);
+                  }}
                   activeOpacity={0.8}
                   accessibilityRole="button"
                   accessibilityLabel={t('modeSimple')}
@@ -1008,7 +1015,10 @@ export const ModuleConfigEditScreen: React.FC = () => {
                       { backgroundColor: theme.colors.accent.primary },
                     ],
                   ]}
-                  onPress={() => setShowAdvanced(true)}
+                  onPress={() => {
+                    hapticLightPress();
+                    setShowAdvanced(true);
+                  }}
                   activeOpacity={0.8}
                   accessibilityRole="button"
                   accessibilityLabel={t('modeAdvanced')}

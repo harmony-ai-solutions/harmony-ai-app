@@ -33,6 +33,7 @@ import { SoulIcon } from '../components/market/SoulIcon';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
+import { hapticLightPress } from '../utils/haptics';
 
 interface MarketFeature {
   key: 'databases' | 'prompts' | 'buy' | 'sell' | 'imageGen' | 'videoGen' | 'callTime';
@@ -133,7 +134,10 @@ export const MarketScreen: React.FC = () => {
               name="close-circle"
               size={18}
               color={theme.colors.text.muted}
-              onPress={() => setQuery('')}
+              onPress={() => {
+                hapticLightPress();
+                setQuery('');
+              }}
               style={styles.clearIcon}
             />
           )}

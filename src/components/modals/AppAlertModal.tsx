@@ -19,6 +19,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
+import { hapticLightPress } from '../../utils/haptics';
 import { useAppTheme } from '../../contexts/ThemeContext';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -272,6 +273,7 @@ export const AppAlertModal: React.FC<AppAlertModalProps> = ({
                   {cancelBtn && (
                     <TouchableOpacity
                       onPress={() => {
+                        hapticLightPress();
                         onDismiss();
                         cancelBtn.onPress?.(checkboxChecked);
                       }}
@@ -310,6 +312,7 @@ export const AppAlertModal: React.FC<AppAlertModalProps> = ({
                       <TouchableOpacity
                         key={idx}
                         onPress={() => {
+                          hapticLightPress();
                           onDismiss();
                           btn.onPress?.(checkboxChecked);
                         }}

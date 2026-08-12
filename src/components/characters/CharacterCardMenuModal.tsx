@@ -25,6 +25,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { hapticLightPress } from '../../utils/haptics';
 
 interface CharacterCardMenuModalProps {
   visible: boolean;
@@ -109,6 +110,7 @@ export const CharacterCardMenuModal: React.FC<CharacterCardMenuModalProps> = ({
               <View style={styles.actions}>
                 <TouchableOpacity
                   onPress={() => {
+                    hapticLightPress();
                     onClose();
                     onAddToCategory();
                   }}
@@ -128,6 +130,7 @@ export const CharacterCardMenuModal: React.FC<CharacterCardMenuModalProps> = ({
 
                 <TouchableOpacity
                   onPress={() => {
+                    hapticLightPress();
                     onClose();
                     onDelete();
                   }}

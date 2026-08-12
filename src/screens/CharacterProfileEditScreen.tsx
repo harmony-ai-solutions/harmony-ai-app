@@ -29,6 +29,7 @@ import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
+import { hapticLightPress } from '../utils/haptics';
 import { ProfileImagePicker } from '../components/characters/ProfileImagePicker';
 import { GreetingBubble } from '../components/chat/GreetingBubble';
 import { GreetingEditor } from '../components/character-card/GreetingEditor';
@@ -625,7 +626,10 @@ export const CharacterProfileEditScreen: React.FC = () => {
             />
           ) : (
             <TouchableOpacity
-              onPress={handleSave}
+              onPress={() => {
+                hapticLightPress();
+                handleSave();
+              }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel="Save profile"
               accessibilityRole="button"

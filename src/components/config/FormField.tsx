@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, TextInput, Switch, TouchableOpacity, StyleSheet } from 'react-native';
 import { FieldDefinition } from '../../constants/providerFieldSchemas';
+import { hapticLightPress } from '../../utils/haptics';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -82,7 +83,10 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
             />
             <TouchableOpacity
               style={styles.eyeButton}
-              onPress={() => setShowPassword(!showPassword)}
+              onPress={() => {
+                hapticLightPress();
+                setShowPassword(!showPassword);
+              }}
             >
               <Icon
                 name={showPassword ? 'eye-off' : 'eye'}

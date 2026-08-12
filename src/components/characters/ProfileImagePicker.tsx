@@ -23,6 +23,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { useAppAlert } from '../../contexts/AppAlertContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ImageViewerModal } from '../modals/ImageViewerModal';
+import { hapticLightPress } from '../../utils/haptics';
 import { CharacterImage } from '../../database/models';
 
 interface ProfileImagePickerProps {
@@ -136,7 +137,10 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
               backgroundColor: theme?.colors.background.elevated,
             },
           ]}
-          onPress={onAddImage}
+          onPress={() => {
+            hapticLightPress();
+            onAddImage();
+          }}
           activeOpacity={0.7}
         >
           <Icon name="plus" size={28} color={theme?.colors.accent.primary} />
@@ -219,7 +223,10 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
                   styles.sheetAction,
                   { borderBottomColor: (theme?.colors.border.default ?? '#333') + '55' },
                 ]}
-                onPress={handleSetPrimary}
+                onPress={() => {
+                  hapticLightPress();
+                  handleSetPrimary();
+                }}
                 activeOpacity={0.65}
               >
                 <View
@@ -244,7 +251,10 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
                 styles.sheetAction,
                 { borderBottomColor: (theme?.colors.border.default ?? '#333') + '55' },
               ]}
-              onPress={handleDelete}
+              onPress={() => {
+                hapticLightPress();
+                handleDelete();
+              }}
               activeOpacity={0.65}
             >
               <View

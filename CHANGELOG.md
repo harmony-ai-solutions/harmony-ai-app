@@ -39,11 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The "Create AI Partner" flow now picks an existing character profile from a visual card carousel instead of a text dropdown. Each card shows the character's portrait, name, and description up front, styled to match the character cards on the Character Profile Management screen. Selecting "Create new profile" resets the identity fields.
 - Character cards on the Characters screen now have a chat button that opens a direct chat with that character. If no AI entity exists for the profile yet, one is created and synced automatically before the chat opens.
 - AI Lifecycle editor on the character profile: configure the autonomous-beat defaults (autonomy, beat schedule, sleep & exhaustion, emotion decay, crystallization, memory) that new AI characters inherit from the profile. Each section has a tap-to-expand explanation, and a banner notes these are profile defaults that can be overridden per character.
-- The Characters screen now supports **favorites** and **custom categories** for organizing AI characters. A filter chip row under the search bar offers **All**, **Favorites**, and any user-created categories; a **"Manage categories"** chip opens a sheet to create, rename, or delete categories and to toggle which characters belong to each one (each category has a plus button that expands its member list). **Long-pressing a character card** now opens a quick-action sheet with **Add to category** and **Delete** (delete keeps the confirmation dialog). Each character card also has a heart button to toggle favorites. The organization data lives in client-only tables and is never synced to the engine.
+- The Characters screen now supports **favorites** and **custom categories** for organizing AI characters. A filter chip row under the search bar offers **All**, **Favorites**, and any user-created categories; a **"Manage categories"** chip opens a sheet to create, rename, or delete categories. **Long-pressing a character card** now opens a quick-action sheet with **Add to category** and **Delete** (delete keeps the confirmation dialog). Each character card also has a heart button to toggle favorites. The organization data lives in client-only tables and is never synced to the engine.
 #### Changed
 - Character profile editor section order now matches the desktop UI: Images appear right after the identity/persona basics, the AI Lifecycle section sits after the Lorebook, and Attribution is last.
 - The lorebook entry editor no longer shows the Advanced (export-only) fields; name and comment now appear above the content. Existing advanced data is still preserved when saving and exporting.
 - The "Advanced" profile section is now labelled "AI Behaviour".
+- The "Manage categories" sheet no longer shows a per-category plus button that expanded a character-member list. Assigning characters to categories is now done exclusively from a character card's **Add to category** action.
 
 ### Profile
 #### Added
@@ -54,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Navigation
 #### Changed
+- The **Haptic feedback** Settings toggle now actually controls tactile feedback: when turned off, button presses across the app no longer vibrate. The preference is applied at startup and takes effect immediately when toggled.
+- Haptic feedback (a light double-tap pulse) is now triggered on all primary buttons across the app, including the new profile pills (Edit Profile / New Persona), the Characters speed-dial actions (Create Profile / Import Character Card), character-card chat and favorite buttons, chat send/mic/stop controls, save buttons on edit screens, and modal action buttons.
 - The Characters tab is now labeled **Characters** on the bottom navigation bar (was "My Characters").
 - The Settings screen is no longer a bottom tab. It is now opened from a "three lines" (☰) menu button in the header of every primary screen, which opens the full Settings screen. The bottom tab bar now contains Chat, Discover, Characters, and Market only.
 - The "Chatting as" persona pill and its adjacent identity-settings (⚙) button were removed from the Chat list header. The underlying persona selection feature and its components are preserved for reuse on another screen; the selected persona still determines which conversations appear in the Chat list.

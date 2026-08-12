@@ -18,6 +18,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { hapticLightPress } from '../../utils/haptics';
 import { ProfileAvatar } from './ProfileAvatar';
 
 interface PersonaRowProps {
@@ -107,7 +108,10 @@ export const PersonaRow: React.FC<PersonaRowProps> = ({
       <View style={styles.actions}>
         {onChatPress && (
           <TouchableOpacity
-            onPress={onChatPress}
+            onPress={() => {
+              hapticLightPress();
+              onChatPress();
+            }}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={styles.chatButton}
             testID="persona-chat-button"

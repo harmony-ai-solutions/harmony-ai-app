@@ -7,6 +7,7 @@ import { EmojiSet } from '../../types/emoji';
 import EmojiText from '../emoji/EmojiText';
 import EmojiService from '../../services/EmojiService';
 import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 
 interface EmojiStyleCardProps {
   emojiSet: EmojiSet;
@@ -55,7 +56,10 @@ export const EmojiStyleCard: React.FC<EmojiStyleCardProps> = memo(({
 
   return (
     <TouchableOpacity
-      onPress={onPress}
+      onPress={() => {
+        hapticLightPress();
+        onPress();
+      }}
       activeOpacity={0.7}
       style={[
         styles.shadowHost,

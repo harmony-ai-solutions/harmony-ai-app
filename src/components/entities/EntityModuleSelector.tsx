@@ -10,6 +10,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { hapticLightPress } from '../../utils/haptics';
 
 export interface ModuleConfigOption {
   id: string;
@@ -70,7 +71,11 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
             opacity: isLoading ? 0.5 : 1,
           },
         ]}
-        onPress={() => !isLoading && setModalVisible(true)}
+        onPress={() => {
+          if (isLoading) return;
+          hapticLightPress();
+          setModalVisible(true);
+        }}
         activeOpacity={0.7}
         disabled={isLoading}
       >

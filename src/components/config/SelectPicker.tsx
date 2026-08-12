@@ -11,6 +11,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { hapticLightPress } from '../../utils/haptics';
 
 interface SelectPickerProps {
   label: string;
@@ -55,7 +56,10 @@ export const SelectPicker: React.FC<SelectPickerProps> = ({
             backgroundColor: theme.colors.background.base,
           },
         ]}
-        onPress={() => setOpen(true)}
+        onPress={() => {
+          hapticLightPress();
+          setOpen(true);
+        }}
         accessibilityRole="button"
         accessibilityLabel={label}
         activeOpacity={0.65}

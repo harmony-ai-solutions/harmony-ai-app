@@ -5,6 +5,7 @@ import React, { memo } from 'react';
 import { ScrollView, TouchableOpacity, StyleSheet, View, Text } from 'react-native';
 import { Theme } from '../../theme/types';
 import { EmojiCategory } from '../../types/emoji';
+import { hapticLightPress } from '../../utils/haptics';
 
 interface CategoryTabBarProps {
   categories: EmojiCategory[];
@@ -42,7 +43,10 @@ export const CategoryTabBar: React.FC<CategoryTabBarProps> = memo(({
                   borderBottomColor: theme.colors.accent.primary,
                 },
               ]}
-              onPress={() => onSelectCategory(category.id)}
+              onPress={() => {
+                hapticLightPress();
+                onSelectCategory(category.id);
+              }}
               activeOpacity={0.7}
             >
               <Text style={[styles.icon, { fontSize: 18 }]}>

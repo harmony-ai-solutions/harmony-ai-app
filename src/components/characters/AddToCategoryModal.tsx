@@ -24,6 +24,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 import type { CharacterCategory } from '../../database/repositories/characters';
 
 interface AddToCategoryModalProps {
@@ -145,7 +146,10 @@ export const AddToCategoryModal: React.FC<AddToCategoryModalProps> = ({
                     return (
                       <TouchableOpacity
                         key={category.id}
-                        onPress={() => handleToggle(category.id)}
+                        onPress={() => {
+                          hapticLightPress();
+                          handleToggle(category.id);
+                        }}
                         activeOpacity={0.7}
                         style={[
                           styles.row,

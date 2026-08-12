@@ -28,6 +28,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
+import { hapticLightPress } from '../utils/haptics';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -408,11 +409,12 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
           </ThemedText>
         </View>
         <TouchableOpacity
-          onPress={() =>
+          onPress={() => {
+            hapticLightPress();
             navigation.navigate('CharacterProfileEdit', {
               profileId: selectedProfile.id,
-            })
-          }
+            });
+          }}
           style={styles.editProfileButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -456,7 +458,10 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
             />
           ) : (
             <TouchableOpacity
-              onPress={handleSave}
+              onPress={() => {
+                hapticLightPress();
+                handleSave();
+              }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel="Save entity settings"
               accessibilityRole="button"
@@ -529,7 +534,10 @@ export const EntityConfigEditScreen: React.FC<Props> = ({
                   backgroundColor: theme.colors.background.base,
                 },
               ]}
-              onPress={() => setProfilePickerVisible(true)}
+              onPress={() => {
+                hapticLightPress();
+                setProfilePickerVisible(true);
+              }}
               activeOpacity={0.7}
             >
               <ThemedText

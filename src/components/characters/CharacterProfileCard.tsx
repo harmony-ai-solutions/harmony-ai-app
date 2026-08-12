@@ -12,6 +12,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
 import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 import { CharacterProfile } from '../../database/models';
 
 interface CharacterProfileCardProps {
@@ -169,7 +170,10 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
                   TouchableOpacity captures the touch so tapping it does NOT
                   trigger the parent card's onPress/onLongPress. */}
               <TouchableOpacity
-                onPress={onChatPress}
+                onPress={() => {
+                  hapticLightPress();
+                  onChatPress();
+                }}
                 onPressIn={e => e.stopPropagation()}
                 onPressOut={e => e.stopPropagation()}
                 activeOpacity={0.82}
@@ -193,7 +197,10 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
                   NOT trigger the parent card's onPress/onLongPress. */}
               {onFavoriteToggle && (
                 <TouchableOpacity
-                  onPress={onFavoriteToggle}
+                  onPress={() => {
+                    hapticLightPress();
+                    onFavoriteToggle();
+                  }}
                   onPressIn={e => e.stopPropagation()}
                   onPressOut={e => e.stopPropagation()}
                   activeOpacity={0.82}

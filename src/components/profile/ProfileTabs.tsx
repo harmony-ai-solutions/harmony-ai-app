@@ -10,6 +10,7 @@ import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { hapticLightPress } from '../../utils/haptics';
 
 export type ProfileTabKey = 'posts' | 'favorites' | 'personas';
 
@@ -49,7 +50,10 @@ export const ProfileTabs: React.FC<ProfileTabsProps> = ({
         return (
           <TouchableOpacity
             key={tab.key}
-            onPress={() => onChange(tab.key)}
+            onPress={() => {
+              hapticLightPress();
+              onChange(tab.key);
+            }}
             activeOpacity={0.7}
             style={styles.tab}
             testID={`${testIDPrefix}-${tab.key}`}

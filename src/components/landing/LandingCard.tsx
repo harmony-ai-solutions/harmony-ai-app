@@ -4,6 +4,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 
 interface LandingCardProps {
   icon: string;
@@ -44,7 +45,10 @@ export const LandingCard: React.FC<LandingCardProps> = ({
         },
         style,
       ]}
-      onPress={onPress}
+      onPress={() => {
+        hapticLightPress();
+        onPress();
+      }}
       activeOpacity={0.82}
     >
       {/* Left accent stripe — shown on hero */}

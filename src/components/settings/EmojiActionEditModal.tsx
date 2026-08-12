@@ -15,6 +15,7 @@ import { ThemedText } from '../themed/ThemedText';
 import { ThemedView } from '../themed/ThemedView';
 import { EmojiPickerInline } from '../emoji/EmojiPickerInline';
 import { EmojiText } from '../emoji/EmojiText';
+import { hapticLightPress } from '../../utils/haptics';
 import { EntityEmojiActionService } from '../../services/EntityEmojiActionService';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { EmojiAction } from '../../database/models';
@@ -185,7 +186,10 @@ export const EmojiActionEditModal: React.FC<EmojiActionEditModalProps> = ({
               {existingAction ? 'Edit Action' : 'New Action'}
             </ThemedText>
             <TouchableOpacity
-              onPress={handleSave}
+              onPress={() => {
+                hapticLightPress();
+                handleSave();
+              }}
               disabled={!selectedEmoji || duplicateError}
             >
               <ThemedText

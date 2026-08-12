@@ -28,6 +28,7 @@ import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
+import { hapticLightPress } from '../utils/haptics';
 import { createLogger } from '../utils/logger';
 import { CharacterProfileCard } from '../components/characters/CharacterProfileCard';
 import {
@@ -254,7 +255,10 @@ export const DiscoverScreen: React.FC = () => {
                 name="close-circle"
                 size={18}
                 color={theme.colors.text.muted}
-                onPress={() => setQuery('')}
+                onPress={() => {
+                  hapticLightPress();
+                  setQuery('');
+                }}
                 style={styles.clearIcon}
               />
             )}

@@ -12,6 +12,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { hapticLightPress } from '../../utils/haptics';
 
 // The EntityListItem type (matches definition in EntityConfigScreen)
 export interface EntityListItem {
@@ -47,7 +48,10 @@ export const EntityCard: React.FC<EntityCardProps> = ({
   return (
     <TouchableOpacity
       style={styles.cardOuter}
-      onPress={onPress}
+      onPress={() => {
+        hapticLightPress();
+        onPress();
+      }}
       activeOpacity={0.82}
     >
       <LinearGradient

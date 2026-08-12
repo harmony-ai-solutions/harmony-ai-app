@@ -23,6 +23,7 @@ import { createLogger } from '../../utils/logger';
 import { EmojiAutocomplete } from '../emoji/EmojiAutocomplete';
 import EmojiService from '../../services/EmojiService';
 import { EmojiEntry } from '../../types/emoji';
+import { hapticLightPress } from '../../utils/haptics';
 import { EmojiActionInput } from './EmojiActionInput';
 import { EmptyChatCTA } from './EmptyChatCTA';
 
@@ -179,6 +180,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
 
   const handleSend = () => {
     if (text.trim() && !disabled) {
+      hapticLightPress();
       onSendText(text.trim());
       setText('');
     }
@@ -187,6 +189,8 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
   const toggleRecording = useCallback(async () => {
     if (disabled) return;
     
+    hapticLightPress();
+
     if (!isRecording) {
       // Start recording
       try {

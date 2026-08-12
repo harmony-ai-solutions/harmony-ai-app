@@ -18,6 +18,7 @@ import { ThemedEmptyState } from '../../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedButton } from '../../components/themed/ThemedButton';
 import { ThemedFab } from '../../components/themed/ThemedFab';
+import { hapticLightPress } from '../../utils/haptics';
 import { EmojiActionCard } from '../../components/settings/EmojiActionCard';
 import { EmojiActionEditModal } from '../../components/settings/EmojiActionEditModal';
 import { EntityEmojiActionService } from '../../services/EntityEmojiActionService';
@@ -208,7 +209,10 @@ export const EmojiActionEditorScreen: React.FC = () => {
       {actions.length > 0 && (
         <TouchableOpacity
           style={[styles.fab, { backgroundColor: colors.accent.primary }]}
-          onPress={handleAddNew}
+          onPress={() => {
+            hapticLightPress();
+            handleAddNew();
+          }}
         >
           <Icon name="plus" size={28} color={colors.background.base} />
         </TouchableOpacity>

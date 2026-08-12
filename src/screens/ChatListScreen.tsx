@@ -18,6 +18,7 @@ import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ThemedFab } from '../components/themed/ThemedFab';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
+import { hapticLightPress } from '../utils/haptics';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { getAllEntities } from '../database/repositories/entities';
 import { resolvePersonaId } from '../database/repositories/personas';
@@ -399,7 +400,10 @@ export const ChatListScreen: React.FC = () => {
 
   const renderItem = ({ item }: { item: ChatListItem }) => (
     <TouchableOpacity
-      onPress={() => handleChatPress(item)}
+      onPress={() => {
+        hapticLightPress();
+        handleChatPress(item);
+      }}
       activeOpacity={0.65}
       style={styles.rowWrapper}
       testID="chat-list-item"
@@ -482,7 +486,10 @@ export const ChatListScreen: React.FC = () => {
         title={t('title')}
         titleRight={
           <TouchableOpacity
-            onPress={() => setInfoModalVisible(true)}
+            onPress={() => {
+              hapticLightPress();
+              setInfoModalVisible(true);
+            }}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={[
               styles.infoGlassIcon,

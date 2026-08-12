@@ -27,6 +27,7 @@ import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
+import { hapticLightPress } from '../utils/haptics';
 import { createLogger } from '../utils/logger';
 import { TagChips } from '../components/character-card/TagChips';
 import { parseJsonColumn } from '../components/character-card/lorebook';
@@ -370,31 +371,6 @@ export const CharactersScreen: React.FC = () => {
       });
     } catch (err) {
       log.error('Failed to toggle favorite:', err);
-    }
-  };
-
-  /**
-   * Toggle a profile's membership in a category (used by the manage-categories
-   * sheet's member editor).
-   */
-  const handleAssignToggle = async (profileId: string, categoryId: string, assign: boolean) => {
-    try {
-      if (assign) {
-        await addCharacterToCategory(profileId, categoryId);
-      } else {
-        await removeCharacterFromCategory(profileId, categoryId);
-      }
-      // Update membership cache
-      setCategoryMembers(prev => {
-        const next = { ...prev };
-        const current = new Set(next[categoryId] ?? []);
-        if (assign) current.add(profileId);
-        else current.delete(profileId);
-        next[categoryId] = current;
-        return next;
-      });
-    } catch (err) {
-      log.error('Failed to update category membership:', err);
     }
   };
 
@@ -746,7 +722,10 @@ export const CharactersScreen: React.FC = () => {
               return (
                 <TouchableOpacity
                   key="manage"
-                  onPress={() => setManageVisible(true)}
+                  onPress={() => {
+                    hapticLightPress();
+                    setManageVisible(true);
+                  }}
                   style={[
                     styles.chip,
                     styles.manageChip,
@@ -774,7 +753,10 @@ export const CharactersScreen: React.FC = () => {
             return (
               <TouchableOpacity
                 key={chip.key}
-                onPress={() => setActiveFilter(chip.key)}
+                onPress={() => {
+                  hapticLightPress();
+                  setActiveFilter(chip.key);
+                }}
                 style={[
                   styles.chip,
                   isActive && styles.chipActive,
@@ -998,6 +980,7 @@ export const CharactersScreen: React.FC = () => {
               <TouchableOpacity
                 style={[styles.speedActionTouch, { backgroundColor: speedActionBg, borderColor: speedActionBorder }]}
                 onPress={() => {
+                  hapticLightPress();
                   closeSheet();
                   handleImportCard();
                 }}
@@ -1024,6 +1007,7 @@ export const CharactersScreen: React.FC = () => {
               <TouchableOpacity
                 style={[styles.speedActionTouch, { backgroundColor: speedActionBg, borderColor: speedActionBorder }]}
                 onPress={() => {
+                  hapticLightPress();
                   closeSheet();
                   handleCreateNew();
                 }}
@@ -1060,8 +1044,6 @@ export const CharactersScreen: React.FC = () => {
       <ManageCategoriesModal
         visible={manageVisible}
         categories={categories}
-        profiles={profiles}
-        categoryMembers={categoryMembers}
         onClose={() => setManageVisible(false)}
         onChange={handleCategoriesChanged}
         onCreate={async name => {
@@ -1073,7 +1055,6 @@ export const CharactersScreen: React.FC = () => {
         onDelete={async categoryId => {
           await deleteCharacterCategory(categoryId);
         }}
-        onToggleMember={handleAssignToggle}
       />
 
       {/* Long-press context menu */}

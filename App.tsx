@@ -26,6 +26,7 @@ import { LockScreen } from './src/components/lock/LockScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { DynamicBackground } from './src/components/background/DynamicBackground';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { loadHapticPreference } from './src/utils/haptics';
 
 /**
  * Inner app shell — has access to BiometricLockContext for lock screen overlay.
@@ -56,6 +57,12 @@ function AppShell() {
       }, 100);
     }
   }, [signInVersion]);
+
+  useEffect(() => {
+    // Apply the persisted "Haptic feedback" Settings toggle once at startup
+    // so the very first button press respects the user's preference.
+    loadHapticPreference();
+  }, []);
 
   useEffect(() => {
     const checkFirstLaunch = async () => {

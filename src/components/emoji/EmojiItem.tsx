@@ -8,6 +8,7 @@ import { EmojiEntry } from '../../types/emoji';
 import { EmojiAction } from '../../database/models';
 import { Theme } from '../../theme/types';
 import EmojiText from './EmojiText';
+import { hapticLightPress } from '../../utils/haptics';
 
 // ActionPreviewPopup sub-component
 interface ActionPreviewPopupProps {
@@ -136,7 +137,10 @@ export const EmojiItem: React.FC<EmojiItemProps> = memo(({ emoji, size, onPress,
     <>
       <TouchableOpacity
         style={[styles.container, { width: size, height: size }]}
-        onPress={handlePress}
+        onPress={() => {
+          hapticLightPress();
+          handlePress();
+        }}
         onLongPress={handleLongPress}
         activeOpacity={0.7}
         delayLongPress={300}

@@ -12,6 +12,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Switch } from 'react-native-paper';
 import { ThemedText } from '../themed/ThemedText';
 import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 
 /** Shared icon pill — used by all settings rows for visual consistency. */
 export const SettingsIconPill: React.FC<{
@@ -48,7 +49,10 @@ export const SettingsLinkRow: React.FC<SettingsRowProps> = ({
         style={[styles.linkSeparator, { backgroundColor: hexToRgba(theme.colors.border.default, 0.3) }]}
       />
     )}
-    <TouchableOpacity style={styles.linkRow} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity style={styles.linkRow} onPress={() => {
+      hapticLightPress();
+      onPress?.();
+    }} activeOpacity={0.7}>
       <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={20} />
       <ThemedText style={styles.linkLabel}>{label}</ThemedText>
       {badge && (

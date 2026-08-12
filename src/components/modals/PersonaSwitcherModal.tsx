@@ -25,6 +25,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
 import { getAllPersonas, Persona } from '../../database/repositories/personas';
+import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[PersonaSwitcherModal]');
@@ -122,7 +123,10 @@ export const PersonaSwitcherModal: React.FC<PersonaSwitcherModalProps> = ({
                     backgroundColor: theme.colors.accent.primary + '14',
                   },
                 ]}
-                onPress={handleSelectUser}
+                onPress={() => {
+                  hapticLightPress();
+                  handleSelectUser();
+                }}
                 activeOpacity={0.7}
                 testID="persona-switcher-user"
               >
@@ -174,7 +178,10 @@ export const PersonaSwitcherModal: React.FC<PersonaSwitcherModalProps> = ({
                     return (
                       <TouchableOpacity
                         style={[styles.row, isActive && { backgroundColor: theme.colors.accent.primary + '14' }]}
-                        onPress={() => handleSelect(item)}
+                        onPress={() => {
+                          hapticLightPress();
+                          handleSelect(item);
+                        }}
                         activeOpacity={0.7}
                         testID="persona-switcher-row"
                       >
@@ -201,7 +208,10 @@ export const PersonaSwitcherModal: React.FC<PersonaSwitcherModalProps> = ({
               {/* Create new */}
               <TouchableOpacity
                 style={[styles.newRow, { borderColor: theme.colors.border.default + '66' }]}
-                onPress={handleCreateNew}
+                onPress={() => {
+                  hapticLightPress();
+                  handleCreateNew();
+                }}
                 activeOpacity={0.7}
                 testID="persona-switcher-create"
               >

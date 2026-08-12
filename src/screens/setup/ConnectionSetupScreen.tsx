@@ -31,6 +31,7 @@ import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { shouldShowConnectionErrorToastForConnection } from '../../contexts/syncSettlementHelper';
 import { useAuth } from '../../contexts/AuthContext';
 import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 const log = createLogger('ConnectionSetupScreen');
@@ -122,7 +123,10 @@ const ModeSelectorCard: React.FC<ModeSelectorCardProps> = ({
 }) => (
   <TouchableOpacity
     style={[styles.modeCard, { flex: 1 }]}
-    onPress={onPress}
+    onPress={() => {
+      hapticLightPress();
+      onPress();
+    }}
     activeOpacity={0.7}
   >
     <View style={[styles.modeCardBody, { flex: 1, backgroundColor: selected ? selectedBgColor : bgColor }]}>

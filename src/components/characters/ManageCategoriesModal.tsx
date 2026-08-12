@@ -1,14 +1,12 @@
 /**
- * ManageCategoriesModal — create / rename / delete character categories and
- * manage which characters belong to each one.
+ * ManageCategoriesModal — create / rename / delete character categories.
  *
  * Opens as an obsidian-glass bottom sheet over the Characters screen. Used by
  * the "Manage categories" chip next to the category filter chips.
  *
  * The modal is intentionally UI-only: every mutation calls straight into the
  * client-only category repository and reports back via `onChange` so the
- * screen can refresh its chip row. Each category row can be expanded to
- * toggle which character profiles are members.
+ * screen can refresh its chip row.
  */
 
 import React, { useState, useCallback, useRef } from 'react';
@@ -29,37 +27,28 @@ import { useAppAlert } from '../../contexts/AppAlertContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
 import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 import type { CharacterCategory } from '../../database/repositories/characters';
-import type { CharacterProfile } from '../../database/models';
 
 interface ManageCategoriesModalProps {
   visible: boolean;
   categories: CharacterCategory[];
-  /** All character profiles that can be assigned to categories */
-  profiles: CharacterProfile[];
-  /** Map of categoryId → Set(profileId) for current memberships */
-  categoryMembers: Record<string, Set<string>>;
   onClose: () => void;
   /** Fired after any category create/rename/delete succeeds */
   onChange: () => void;
   onCreate: (name: string) => Promise<void>;
   onRename: (categoryId: string, name: string) => Promise<void>;
   onDelete: (categoryId: string) => Promise<void>;
-  /** Toggle a profile's membership in a category */
-  onToggleMember: (profileId: string, categoryId: string, assign: boolean) => Promise<void>;
 }
 
 export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
   visible,
   categories,
-  profiles,
-  categoryMembers,
   onClose,
   onChange,
   onCreate,
   onRename,
   onDelete,
-  onToggleMember,
 }) => {
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
@@ -69,10 +58,6 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [busy, setBusy] = useState(false);
-  // Which category's member list is expanded (null = none)
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  // Profile ids currently being toggled (prevents double-fire)
-  const [busyMemberIds, setBusyMemberIds] = useState<Set<string>>(new Set());
 
   const inputRef = useRef<TextInput>(null);
 
@@ -81,8 +66,6 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
     setEditingId(null);
     setEditingName('');
     setBusy(false);
-    setExpandedId(null);
-    setBusyMemberIds(new Set());
   }, []);
 
   const handleClose = () => {
@@ -154,24 +137,6 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
     setEditingId(category.id);
     setEditingName(category.name);
     setTimeout(() => inputRef.current?.focus(), 50);
-  };
-
-  const toggleExpanded = (categoryId: string) => {
-    setExpandedId(prev => (prev === categoryId ? null : categoryId));
-  };
-
-  const handleToggleMember = async (profileId: string, categoryId: string, assign: boolean) => {
-    if (busyMemberIds.has(profileId)) return;
-    setBusyMemberIds(prev => new Set(prev).add(profileId));
-    try {
-      await onToggleMember(profileId, categoryId, assign);
-    } finally {
-      setBusyMemberIds(prev => {
-        const next = new Set(prev);
-        next.delete(profileId);
-        return next;
-      });
-    }
   };
 
   const inputBg = hexToRgba(theme.colors.background.base, 0.6);
@@ -293,7 +258,10 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
                             />
                           </View>
                           <TouchableOpacity
-                            onPress={() => handleRename(item.id)}
+                            onPress={() => {
+                              hapticLightPress();
+                              handleRename(item.id);
+                            }}
                             disabled={!editingName.trim() || busy}
                             accessibilityRole="button"
                             accessibilityLabel="Save"
@@ -307,27 +275,10 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
                             {item.name}
                           </ThemedText>
                           <TouchableOpacity
-                            onPress={() => toggleExpanded(item.id)}
-                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                            accessibilityRole="button"
-                            accessibilityLabel={
-                              expandedId === item.id
-                                ? `Hide members of ${item.name}`
-                                : `Add characters to ${item.name}`
-                            }
-                          >
-                            <Icon
-                              name={
-                                expandedId === item.id
-                                  ? 'minus-circle-outline'
-                                  : 'plus-circle-outline'
-                              }
-                              size={20}
-                              color={accent}
-                            />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={() => startEdit(item)}
+                            onPress={() => {
+                              hapticLightPress();
+                              startEdit(item);
+                            }}
                             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                             accessibilityRole="button"
                             accessibilityLabel={`Rename ${item.name}`}
@@ -335,7 +286,10 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
                             <Icon name="pencil-outline" size={18} color={theme.colors.text.muted} />
                           </TouchableOpacity>
                           <TouchableOpacity
-                            onPress={() => handleDelete(item)}
+                            onPress={() => {
+                              hapticLightPress();
+                              handleDelete(item);
+                            }}
                             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                             accessibilityRole="button"
                             accessibilityLabel={`Delete ${item.name}`}
@@ -343,52 +297,6 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
                             <Icon name="delete-outline" size={18} color={theme.colors.status.error} />
                           </TouchableOpacity>
                         </>
-                      )}
-
-                      {/* Expanded member list — toggle each character's membership */}
-                      {expandedId === item.id && (
-                        <View style={styles.memberList}>
-                          {profiles.length === 0 ? (
-                            <ThemedText variant="muted" size={13} style={styles.memberEmpty}>
-                              No characters to assign.
-                            </ThemedText>
-                          ) : (
-                            profiles.map(profile => {
-                              const isMember = categoryMembers[item.id]?.has(profile.id) ?? false;
-                              const isBusy = busyMemberIds.has(profile.id);
-                              return (
-                                <TouchableOpacity
-                                  key={profile.id}
-                                  onPress={() => handleToggleMember(profile.id, item.id, !isMember)}
-                                  activeOpacity={0.7}
-                                  style={styles.memberRow}
-                                  accessibilityRole="checkbox"
-                                  accessibilityState={{ checked: isMember }}
-                                >
-                                  <Icon
-                                    name="account-outline"
-                                    size={16}
-                                    color={theme.colors.text.muted}
-                                  />
-                                  <ThemedText
-                                    size={14}
-                                    variant={isMember ? 'accent' : 'primary'}
-                                    weight={isMember ? 'bold' : 'normal'}
-                                    numberOfLines={1}
-                                    style={styles.memberName}
-                                  >
-                                    {profile.name}
-                                  </ThemedText>
-                                  <Icon
-                                    name={isBusy ? 'progress-clock' : isMember ? 'check-circle' : 'circle-outline'}
-                                    size={20}
-                                    color={isMember ? accent : theme.colors.text.disabled}
-                                  />
-                                </TouchableOpacity>
-                              );
-                            })
-                          )}
-                        </View>
                       )}
                     </View>
                   );
@@ -492,28 +400,5 @@ const styles = StyleSheet.create({
   emptyText: {
     textAlign: 'center',
     paddingVertical: 20,
-  },
-  // ── Expanded member list ──
-  memberList: {
-    marginTop: 10,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.08)',
-    gap: 4,
-  },
-  memberEmpty: {
-    textAlign: 'center',
-    paddingVertical: 8,
-  },
-  memberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    borderRadius: 8,
-  },
-  memberName: {
-    flex: 1,
   },
 });

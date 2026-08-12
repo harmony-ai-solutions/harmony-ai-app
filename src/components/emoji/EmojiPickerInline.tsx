@@ -18,6 +18,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { useEmoji, RecentEmoji } from '../../contexts/EmojiContext';
 import { EmojiEntry, EmojiCategory } from '../../types/emoji';
 import { EmojiAction } from '../../database/models';
+import { hapticLightPress } from '../../utils/haptics';
 import { EntityEmojiActionService } from '../../services/EntityEmojiActionService';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
@@ -170,6 +171,7 @@ export const EmojiPickerInline: React.FC<EmojiPickerInlineProps> = memo(({
         <View style={styles.toolbarActions}>
           <TouchableOpacity
             onPress={() => {
+              hapticLightPress();
               if (showSearch) { setShowSearch(false); handleSearch(''); }
               else { setShowSearch(true); }
             }}
@@ -178,7 +180,10 @@ export const EmojiPickerInline: React.FC<EmojiPickerInlineProps> = memo(({
             <Icon name={showSearch ? 'close' : 'magnify'} size={20} color={theme.colors.text.secondary} />
           </TouchableOpacity>
           {onOpenActionEditor && (
-            <TouchableOpacity onPress={onOpenActionEditor} style={styles.toolBtn}>
+            <TouchableOpacity onPress={() => {
+              hapticLightPress();
+              onOpenActionEditor();
+            }} style={styles.toolBtn}>
               <Icon name="tune-variant" size={18} color={theme.colors.accent.primary} />
             </TouchableOpacity>
           )}

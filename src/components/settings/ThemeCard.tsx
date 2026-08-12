@@ -11,6 +11,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Theme } from '../../theme/types';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 
 interface ThemeCardProps {
   theme: Theme;
@@ -50,7 +51,10 @@ export const ThemeCard: React.FC<ThemeCardProps> = ({
           shadowRadius: glowRadius,
         },
       ]}
-      onPress={onPress}
+      onPress={() => {
+        hapticLightPress();
+        onPress();
+      }}
       activeOpacity={0.7}
     >
       {/* 1dp specular hairline gradient border */}

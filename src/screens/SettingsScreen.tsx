@@ -14,6 +14,7 @@ import { ThemedCard } from '../components/themed/ThemedCard';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
+import { setHapticFeedbackEnabled } from '../utils/haptics';
 import {
   SettingsLinkRow,
   SettingsToggleRow,
@@ -238,7 +239,10 @@ export const SettingsScreen: React.FC = () => {
             icon="vibrate"
             label={t('hapticFeedback')}
             value={hapticFeedback}
-            onValueChange={(v) => toggleAndStore(STORAGE_KEYS.HAPTIC_FEEDBACK, v, setHapticFeedback)}
+            onValueChange={(v) => {
+              toggleAndStore(STORAGE_KEYS.HAPTIC_FEEDBACK, v, setHapticFeedback);
+              setHapticFeedbackEnabled(v);
+            }}
             theme={theme}
             showSeparator
           />
