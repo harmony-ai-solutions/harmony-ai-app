@@ -480,33 +480,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           <ThemedText variant="muted" size={10} style={styles.timestamp}>
             {formatTime(message.created_at)}
           </ThemedText>
-          {isLastMessage && !isEditing && (
-            <Menu
-              visible={menuVisible}
-              onDismiss={() => setMenuVisible(false)}
-              anchor={
-                <IconButton
-                  icon="dots-vertical"
-                  size={16}
-                  iconColor={theme.colors.text.muted}
-                  onPress={() => setMenuVisible(true)}
-                  style={styles.menuButton}
-                />
-              }
-            >
-              {isOwn ? (
-                <>
-                  <Menu.Item onPress={handleEditStart} title={t('edit')} leadingIcon="pencil" />
-                  <Menu.Item onPress={handleDelete} title={t('delete')} leadingIcon="delete" />
-                </>
-              ) : (
-                <>
-                  <Menu.Item onPress={handleRegenerate} title={t('regenerate')} leadingIcon="refresh" />
-                  <Menu.Item onPress={handleDelete} title={t('delete')} leadingIcon="delete" />
-                </>
-              )}
-            </Menu>
-          )}
         </View>
       </>
     );
@@ -532,29 +505,61 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           </ThemedText>
         </LinearGradient>
       )}
-      
-      {isOwn ? (
-        // Own bubble: accent gradient at ~55-35% opacity — gives colour depth
-        // without washing out text or audio controls.
-        <LinearGradient
-          colors={[theme.colors.accent.primary + 'B3', (theme.colors.accent.secondary ?? theme.colors.accent.primaryHover) + '80']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.bubble, styles.ownBubble, { backgroundColor: theme.colors.background.surface }]}
-        >
-          {renderContent()}
-        </LinearGradient>
-      ) : (
-        // Partner bubble: subtle elevated→surface gradient
-        <LinearGradient
-          colors={[theme.colors.background.elevated, theme.colors.background.surface]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.bubble, styles.partnerBubble]}
-        >
-          {renderContent()}
-        </LinearGradient>
-      )}
+
+      {/* The Menu anchor wraps the bubble so the message actions
+          (edit/delete/regenerate) are reachable via a long-press —
+          no visible three-dots icon. */}
+      <Menu
+        visible={menuVisible}
+        onDismiss={() => setMenuVisible(false)}
+        anchor={
+          <TouchableOpacity
+            activeOpacity={1}
+            delayLongPress={400}
+            onLongPress={() => {
+              if (isLastMessage && !isEditing) {
+                hapticLightPress();
+                setMenuVisible(true);
+              }
+            }}
+          >
+            {isOwn ? (
+              // Own bubble: accent gradient at ~55-35% opacity — gives colour depth
+              // without washing out text or audio controls.
+              <LinearGradient
+                colors={[theme.colors.accent.primary + 'B3', (theme.colors.accent.secondary ?? theme.colors.accent.primaryHover) + '80']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.bubble, styles.ownBubble, { backgroundColor: theme.colors.background.surface }]}
+              >
+                {renderContent()}
+              </LinearGradient>
+            ) : (
+              // Partner bubble: subtle elevated→surface gradient
+              <LinearGradient
+                colors={[theme.colors.background.elevated, theme.colors.background.surface]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.bubble, styles.partnerBubble]}
+              >
+                {renderContent()}
+              </LinearGradient>
+            )}
+          </TouchableOpacity>
+        }
+      >
+        {isOwn ? (
+          <>
+            <Menu.Item onPress={handleEditStart} title={t('edit')} leadingIcon="pencil" />
+            <Menu.Item onPress={handleDelete} title={t('delete')} leadingIcon="delete" />
+          </>
+        ) : (
+          <>
+            <Menu.Item onPress={handleRegenerate} title={t('regenerate')} leadingIcon="refresh" />
+            <Menu.Item onPress={handleDelete} title={t('delete')} leadingIcon="delete" />
+          </>
+        )}
+      </Menu>
     </View>
   );
 };
@@ -594,7 +599,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   bubble: {
-    width: screenWidth * 0.75,
+    maxWidth: screenWidth * 0.75,
     borderRadius: 16,
     padding: 12,
   },
@@ -626,10 +631,6 @@ const styles = StyleSheet.create({
   },
   timestamp: {
     alignSelf: 'flex-end',
-  },
-  menuButton: {
-    margin: 0,
-    marginLeft: 4,
   },
   imageContainer: {
     marginBottom: 8,
