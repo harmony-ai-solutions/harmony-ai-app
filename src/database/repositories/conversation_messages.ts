@@ -18,8 +18,9 @@ export async function createConversationMessage(
       image_data, image_mime_type, vl_model, vl_model_interpretation,
       emotional_state_bits,
       is_recon_followup, is_edited, edit_of_message_id,
+      reactions_json, reply_to_message_id, is_pinned,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       message.id,
       message.entity_id,
@@ -38,6 +39,9 @@ export async function createConversationMessage(
       message.is_recon_followup ? 1 : 0,
       message.is_edited ? 1 : 0,
       message.edit_of_message_id ?? null,
+      message.reactions_json ?? null,
+      message.reply_to_message_id ?? null,
+      message.is_pinned ? 1 : 0,
       now,
       now,
     ]
@@ -68,6 +72,7 @@ export async function getConversationMessagesByParticipantKey(
            cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
            cm.emotional_state_bits,
            cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
+           cm.reactions_json, cm.reply_to_message_id, cm.is_pinned,
            cm.created_at, cm.updated_at, cm.deleted_at
     FROM conversation_messages cm
     JOIN interactions i ON cm.interaction_id = i.id
@@ -115,6 +120,9 @@ export async function getConversationMessagesByParticipantKey(
       is_recon_followup: row.is_recon_followup === 1,
       is_edited: row.is_edited === 1,
       edit_of_message_id: row.edit_of_message_id || null,
+      reactions_json: row.reactions_json || null,
+      reply_to_message_id: row.reply_to_message_id || null,
+      is_pinned: row.is_pinned === 1,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -168,6 +176,7 @@ export async function getRecentConversationMessages(
             cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
             cm.emotional_state_bits,
             cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
+            cm.reactions_json, cm.reply_to_message_id, cm.is_pinned,
             cm.created_at, cm.updated_at, cm.deleted_at
      FROM conversation_messages cm
      WHERE cm.id IN (${placeholders})
@@ -202,6 +211,9 @@ export async function getRecentConversationMessages(
       is_recon_followup: row.is_recon_followup === 1,
       is_edited: row.is_edited === 1,
       edit_of_message_id: row.edit_of_message_id || null,
+      reactions_json: row.reactions_json || null,
+      reply_to_message_id: row.reply_to_message_id || null,
+      is_pinned: row.is_pinned === 1,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -229,6 +241,7 @@ export async function getLastConversationMessage(
             cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
             cm.emotional_state_bits,
             cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
+            cm.reactions_json, cm.reply_to_message_id, cm.is_pinned,
             cm.created_at, cm.updated_at, cm.deleted_at
      FROM conversation_messages cm
      JOIN interactions i ON cm.interaction_id = i.id
@@ -266,6 +279,9 @@ export async function getLastConversationMessage(
     is_recon_followup: row.is_recon_followup === 1,
     is_edited: row.is_edited === 1,
     edit_of_message_id: row.edit_of_message_id || null,
+    reactions_json: row.reactions_json || null,
+    reply_to_message_id: row.reply_to_message_id || null,
+    is_pinned: row.is_pinned === 1,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -354,6 +370,21 @@ export async function updateConversationMessage(
     values.push(updates.edit_of_message_id ?? null);
   }
 
+  if (updates.reactions_json !== undefined) {
+    updateFields.push('reactions_json = ?');
+    values.push(updates.reactions_json ?? null);
+  }
+
+  if (updates.reply_to_message_id !== undefined) {
+    updateFields.push('reply_to_message_id = ?');
+    values.push(updates.reply_to_message_id ?? null);
+  }
+
+  if (updates.is_pinned !== undefined) {
+    updateFields.push('is_pinned = ?');
+    values.push(updates.is_pinned ? 1 : 0);
+  }
+
   if (updateFields.length === 0) {
     throw new Error('No fields to update');
   }
@@ -426,6 +457,9 @@ function mapRowToConversationMessage(row: any): ConversationMessage {
     is_recon_followup: row.is_recon_followup === 1,
     is_edited: row.is_edited === 1,
     edit_of_message_id: row.edit_of_message_id || null,
+    reactions_json: row.reactions_json || null,
+    reply_to_message_id: row.reply_to_message_id || null,
+    is_pinned: row.is_pinned === 1,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,

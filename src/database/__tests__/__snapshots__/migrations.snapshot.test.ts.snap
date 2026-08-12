@@ -13,6 +13,12 @@ CREATE INDEX idx_conversation_messages_entity ON conversation_messages(entity_id
 -- index: idx_conversation_messages_interaction_id
 CREATE INDEX idx_conversation_messages_interaction_id ON conversation_messages(interaction_id);
 
+-- index: idx_conversation_messages_pinned
+CREATE INDEX idx_conversation_messages_pinned ON conversation_messages(is_pinned);
+
+-- index: idx_conversation_messages_reply_to
+CREATE INDEX idx_conversation_messages_reply_to ON conversation_messages(reply_to_message_id);
+
 -- index: idx_emoji_actions_entity_id
 CREATE INDEX idx_emoji_actions_entity_id ON entity_emoji_actions(entity_id);
 
@@ -77,7 +83,7 @@ CREATE TABLE "character_profiles" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, des
 CREATE TABLE "cognition_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, max_cognition_events INTEGER NOT NULL DEFAULT 20, generate_expressions INTEGER NOT NULL DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
 
 -- table: conversation_messages
-CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT );
+CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT , reactions_json TEXT, reply_to_message_id TEXT, is_pinned INTEGER NOT NULL DEFAULT 0);
 
 -- table: emotion_state
 CREATE TABLE emotion_state ( entity_id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE, joy_intensity REAL NOT NULL DEFAULT 0.1, sadness_intensity REAL NOT NULL DEFAULT 0.1, trust_intensity REAL NOT NULL DEFAULT 0.1, disgust_intensity REAL NOT NULL DEFAULT 0.1, fear_intensity REAL NOT NULL DEFAULT 0.1, anger_intensity REAL NOT NULL DEFAULT 0.1, surprise_intensity REAL NOT NULL DEFAULT 0.1, anticipation_intensity REAL NOT NULL DEFAULT 0.1, joy_baseline REAL NOT NULL DEFAULT 0.1, sadness_baseline REAL NOT NULL DEFAULT 0.1, trust_baseline REAL NOT NULL DEFAULT 0.1, disgust_baseline REAL NOT NULL DEFAULT 0.1, fear_baseline REAL NOT NULL DEFAULT 0.1, anger_baseline REAL NOT NULL DEFAULT 0.1, surprise_baseline REAL NOT NULL DEFAULT 0.1, anticipation_baseline REAL NOT NULL DEFAULT 0.1, joy_crystallize_start TIMESTAMP NULL, sadness_crystallize_start TIMESTAMP NULL, trust_crystallize_start TIMESTAMP NULL, disgust_crystallize_start TIMESTAMP NULL, fear_crystallize_start TIMESTAMP NULL, anger_crystallize_start TIMESTAMP NULL, surprise_crystallize_start TIMESTAMP NULL, anticipation_crystallize_start TIMESTAMP NULL, last_update TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, decay_tau REAL NOT NULL DEFAULT 3600.0, high_threshold REAL NOT NULL DEFAULT 6.0, low_threshold REAL NOT NULL DEFAULT 1.0, crystallize_intensity REAL NOT NULL DEFAULT 7.0, crystallize_min_hours REAL NOT NULL DEFAULT 2.0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP , deleted_at TEXT DEFAULT NULL);

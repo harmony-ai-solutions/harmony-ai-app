@@ -20,6 +20,7 @@ import { EntitySessionProvider } from './src/contexts/EntitySessionContext';
 import { EmojiProvider } from './src/contexts/EmojiContext';
 import { I18nProvider } from './src/contexts/I18nContext';
 import { AppAlertProvider } from './src/contexts/AppAlertContext';
+import { AppToastProvider } from './src/contexts/AppToastContext';
 import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoadingScreen';
 import { InitialPairingModal } from './src/components/modals/InitialPairingModal';
 import { LockScreen } from './src/components/lock/LockScreen';
@@ -140,15 +141,17 @@ function App() {
             <DatabaseProvider>
               <AuthProvider>
                 <AppAlertProvider>
-                  <SyncConnectionProvider>
-                    <EntitySessionProvider>
-                      <EmojiProvider>
-                        <BiometricLockProvider>
-                          <AppShell />
-                        </BiometricLockProvider>
-                      </EmojiProvider>
-                    </EntitySessionProvider>
-                  </SyncConnectionProvider>
+                  <AppToastProvider>
+                    <SyncConnectionProvider>
+                      <EntitySessionProvider>
+                        <EmojiProvider>
+                          <BiometricLockProvider>
+                            <AppShell />
+                          </BiometricLockProvider>
+                        </EmojiProvider>
+                      </EntitySessionProvider>
+                    </SyncConnectionProvider>
+                  </AppToastProvider>
                 </AppAlertProvider>
               </AuthProvider>
             </DatabaseProvider>

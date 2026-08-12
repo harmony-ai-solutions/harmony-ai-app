@@ -56,6 +56,7 @@ import { migration036 as migration036s } from './migrations/000036_backfill_char
 import { migration037 as migration037s } from './migrations/000037_add_personas_table';
 import { migration038 as migration038s } from './migrations/000038_cleanup_leaked_persona_rows';
 import { migration039 as migration039s } from './migrations/000039_add_character_categories_and_favorites';
+import { migration040 as migration040s } from './migrations/000040_add_message_actions';
 
 // Migration definition
 export interface Migration {
@@ -294,6 +295,11 @@ export const MIGRATIONS: Migration[] = [
     version: 39,
     description: 'add_character_categories_and_favorites',
     sql: migration039s,
+   },
+   {
+    version: 40,
+    description: 'add_message_actions',
+    sql: migration040s,
    },
   ];
 

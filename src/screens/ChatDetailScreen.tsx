@@ -12,7 +12,6 @@ import {
   Platform,
   ActivityIndicator,
   RefreshControl,
-  ToastAndroid,
   NativeScrollEvent,
   NativeSyntheticEvent,
   TouchableOpacity,
@@ -21,6 +20,7 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import LinearGradient from 'react-native-linear-gradient';
 import { Avatar } from 'react-native-paper';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
@@ -30,6 +30,7 @@ import { useTranslation } from 'react-i18next';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useToast } from '../contexts/AppToastContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { hapticLightPress } from '../utils/haptics';
@@ -72,6 +73,14 @@ import {
   deriveParticipantKey,
   deriveScopeFromParticipants,
 } from '../database/repositories/interactions';
+import {
+  MessageActionSheet,
+  MessageAction,
+} from '../components/chat/MessageActionSheet';
+import {
+  ForwardPickerModal,
+  ForwardTarget,
+} from '../components/chat/ForwardPickerModal';
 
 const log = createLogger('[ChatDetailScreen]');
 
@@ -126,6 +135,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   } = route.params;
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
+  const { showToast } = useToast();
   const { isConnected } = useSyncConnection();
   const { isSessionActive, startInteractionSession, stopInteractionSession } =
     useEntitySession();
@@ -174,6 +184,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const chatInputRef = useRef<ChatInputRef>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [actionSheetMessage, setActionSheetMessage] =
+    useState<ConversationMessage | null>(null);
+  const [replyToMessage, setReplyToMessage] =
+    useState<ConversationMessage | null>(null);
+  const [forwardPickerVisible, setForwardPickerVisible] = useState(false);
+  const [forwardMessageText, setForwardMessageText] = useState('');
 
   // Track the canonical interactionId — starts as temp UUIDv7 from route params,
   // updated to the server-assigned canonical ID when INIT_ENTITY response arrives.
@@ -197,8 +213,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [personaSwitcherVisible, setPersonaSwitcherVisible] = useState(false);
   // In-chat persona switch confirmation (rendered like a date/divider row)
   const [personaChangeText, setPersonaChangeText] = useState<string | null>(null);
-  const [replyMode, setReplyMode] = useState<string>('realistic');
-  const replyModeRef = useRef<string>('realistic');
   const [isGroupChat, setIsGroupChat] = useState(false);
   const [headerName, setHeaderName] = useState<string>('Chat');
 
@@ -302,20 +316,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
     resolveHeaderName();
   }, [ownEntityId, participantIds, isGroupChat, routeEntityName]);
-
-  // Load reply mode preference using participantKey (stable across navigation).
-  // routeInteractionId changes every visit (new canonical ID per session), so it
-  // cannot be used as a persistence key — the mode would be "forgotten" each time.
-  useEffect(() => {
-    if (!participantKey) return;
-    const loadReplyMode = async () => {
-      const savedMode = await ChatPreferencesService.getReplyMode(participantKey);
-      const mode = savedMode || 'realistic';
-      setReplyMode(mode);
-      replyModeRef.current = mode;
-    };
-    loadReplyMode();
-  }, [participantKey]);
 
   // Load messages and last-read timestamp
   const loadMessagesAndTimestamp = useCallback(async () => {
@@ -444,12 +444,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const initializeSession = async () => {
       try {
         log.info(`Initializing interaction session for ${routeInteractionId}...`);
-        // Read reply mode fresh from storage to avoid race with loadReplyMode
-        // useEffect.  Uses participantKey (stable) — NOT routeInteractionId.
+        // Reply mode is read fresh from storage on every session init so the
+        // mode is not lost between navigations. Uses participantKey (stable).
         const savedMode = await ChatPreferencesService.getReplyMode(participantKey);
         const mode = savedMode || 'realistic';
-        setReplyMode(mode);
-        replyModeRef.current = mode;
         await startInteractionSession(ownEntityId, participantIds, mode);
       } catch (error: any) {
         if (!mounted) return;
@@ -457,18 +455,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         log.error('Failed to initialize entity session:', error);
 
         const errorMessage = error?.message || 'Unknown error';
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(
-            `${t('common:error')}: ${errorMessage}`,
-            ToastAndroid.LONG,
-          );
-        } else {
-          showAlert(
-            t('common:error'),
-            `${t('common:error')}: ${errorMessage}`,
-            [{ text: t('common:ok') }],
-          );
-        }
+        showToast(`${t('common:error')}: ${errorMessage}`);
       }
     };
 
@@ -614,11 +601,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       if (errorInteractionId === currentInteractionIdRef.current) {
         log.error(`Session error for ${currentInteractionIdRef.current}:`, error);
 
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(t('chatSessionError', { error }), ToastAndroid.LONG);
-        } else {
-          showAlert(t('common:error'), error, [{ text: t('common:ok') }]);
-        }
+        showToast(t('chatSessionError', { error }));
       }
     };
 
@@ -650,6 +633,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         // Resolve emoji actions
         let sendText = text.trim();
         let additionalEffects = null;
+        const replyId = replyToMessage?.id ?? null;
 
         const resolved = await EntityEmojiActionService.resolveMessageActions(
           currentInteractionIdRef.current,
@@ -662,11 +646,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           log.info(`Resolved emoji actions: ${resolved.effects.emotionEffects.length} effects`);
         }
 
+        // Store the reply reference (reply_to_message_id) instead of embedding
+        // a text quote — the UI renders a proper "Replying to" header.
         await EntitySessionService.sendTextMessage(
           currentInteractionIdRef.current,
           sendText,
           additionalEffects,
+          replyId,
         );
+
+        // Reply context consumed
+        if (replyToMessage) {
+          setReplyToMessage(null);
+        }
 
         // Optimistically reload from database
         if (participantKey) {
@@ -682,7 +674,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         log.error('Failed to send message:', error);
       }
     },
-    [routeInteractionId, ownEntityId, participantKey, isSessionActive],
+    [routeInteractionId, ownEntityId, participantKey, isSessionActive, replyToMessage],
   );
 
   const handleEmojiSelected = useCallback((emoji: EmojiEntry) => {
@@ -792,14 +784,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       } catch (error: any) {
         log.error('Failed to send message:', error);
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(
-            t('failedToSend', { message: error.message }),
-            ToastAndroid.LONG,
-          );
-        } else {
-          showAlert(t('common:error'), t('common:error') + `: ${error.message}`);
-        }
+        showToast(t('failedToSend', { message: error.message }));
       }
     },
     [routeInteractionId, ownEntityId, participantKey, isSessionActive],
@@ -832,6 +817,149 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     [routeInteractionId, isSessionActive, ownEntityId, participantKey],
   );
 
+  // ---------------------------------------------------------------------------
+  // Message action sheet (long-press a bubble)
+  // ---------------------------------------------------------------------------
+
+  const handleLongPressMessage = useCallback((message: ConversationMessage) => {
+    setActionSheetMessage(message);
+  }, []);
+
+  const closeActionSheet = useCallback(() => {
+    setActionSheetMessage(null);
+  }, []);
+
+  const handleReactToMessage = useCallback(
+    async (messageId: string, emoji: string) => {
+      try {
+        const msg = await getConversationMessage(messageId);
+        if (!msg) return;
+
+        // Parse existing reactions
+        let reactions: string[] = [];
+        if (msg.reactions_json) {
+          try {
+            const parsed = JSON.parse(msg.reactions_json);
+            if (Array.isArray(parsed)) {
+              reactions = parsed.filter((r): r is string => typeof r === 'string');
+            }
+          } catch {
+            reactions = [];
+          }
+        }
+
+        // Toggle: remove if already present, else add
+        const next = reactions.includes(emoji)
+          ? reactions.filter(r => r !== emoji)
+          : [...reactions, emoji];
+
+        await updateConversationMessage(messageId, {
+          reactions_json: JSON.stringify(next),
+        });
+
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          setMessages(updatedMessages);
+        }
+      } catch (error) {
+        log.error('Failed to toggle reaction:', error);
+      }
+    },
+    [ownEntityId, participantKey],
+  );
+
+  const handleCopyMessage = useCallback(async (message: ConversationMessage) => {
+    if (message.content) {
+      await Clipboard.setString(message.content);
+      showToast(t('toastCopied'));
+    }
+  }, [t]);
+
+  const handleForwardMessage = useCallback((message: ConversationMessage) => {
+    // Open the forward target picker — all characters the user has chatted with.
+    setForwardMessageText(message.content || '');
+    setForwardPickerVisible(true);
+  }, []);
+
+  const handleForwardSelect = useCallback(
+    (target: ForwardTarget) => {
+      setForwardPickerVisible(false);
+      showToast(t('forwarding'));
+
+      // Send the message directly to the target character's session in the
+      // background — no navigation, the user stays on the current chat.
+      EntitySessionService.forwardTextMessage(
+        ownEntityId,
+        target.participantIds,
+        forwardMessageText,
+      )
+        .then(() => {
+          showToast(t('toastForwarded'));
+        })
+        .catch(err => {
+          log.error('Failed to forward message:', err);
+          showToast(t('toastForwardFailed'));
+        });
+    },
+    [ownEntityId, forwardMessageText, t, showToast],
+  );
+
+  const handleTranslateMessage = useCallback(
+    async (message: ConversationMessage) => {
+      // NOTE: There is no translation backend available yet. We show a
+      // friendly confirmation so the action is not a dead button.
+      if (!message.content) return;
+      showAlert(
+        t('translateTitle'),
+        t('translateNotAvailable'),
+        [{ text: t('common:ok') }],
+      );
+    },
+    [showAlert, t],
+  );
+
+  const handleTogglePinMessage = useCallback(
+    async (message: ConversationMessage) => {
+      try {
+        const nextPinned = !message.is_pinned;
+        await updateConversationMessage(message.id, { is_pinned: nextPinned });
+        // Keep the sheet's label in sync with the live message state.
+        setActionSheetMessage(prev =>
+          prev && prev.id === message.id ? { ...prev, is_pinned: nextPinned } : prev,
+        );
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          setMessages(updatedMessages);
+        }
+        showToast(nextPinned ? t('toastPinned') : t('toastUnpinned'));
+      } catch (error) {
+        log.error('Failed to toggle pin:', error);
+      }
+    },
+    [ownEntityId, participantKey],
+  );
+
+  const handleReplyToMessage = useCallback((message: ConversationMessage) => {
+    closeActionSheet();
+    setReplyToMessage(message);
+    // Focus the input so the user can immediately type their reply
+    requestAnimationFrame(() => {
+      chatInputRef.current?.focus?.();
+    });
+  }, [closeActionSheet]);
+
+  const handleCancelReply = useCallback(() => {
+    setReplyToMessage(null);
+  }, []);
+
   const handleTypingStart = useCallback(() => {
     // Send typing indicator if session active
   }, [routeInteractionId, isSessionActive]);
@@ -859,9 +987,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   setMessages(updatedMessages);
                 }
 
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(t('toastMessageDeleted'), ToastAndroid.SHORT);
-                }
+                showToast(t('toastMessageDeleted'));
               } catch (error) {
                 log.error('Failed to delete message:', error);
               }
@@ -913,22 +1039,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   setMessages(updatedMessages);
                 }
 
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(
-                    t('toastRegenerating'),
-                    ToastAndroid.SHORT,
-                  );
-                }
+                showToast(t('toastRegenerating'));
               } catch (error: any) {
                 log.error('Failed to regenerate:', error);
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(
-                    t('toastFailed', { message: error.message }),
-                    ToastAndroid.LONG,
-                  );
-                } else {
-                  showAlert(t('errorTitle'), error.message);
-                }
+                showToast(t('toastFailed', { message: error.message }));
               }
             },
           },
@@ -967,22 +1081,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   setMessages(updatedMessages);
                 }
 
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(
-                    t('toastMessageUpdated'),
-                    ToastAndroid.SHORT,
-                  );
-                }
+                showToast(t('toastMessageUpdated'));
               } catch (error: any) {
                 log.error('Failed to edit message:', error);
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(
-                    t('toastFailed', { message: error.message }),
-                    ToastAndroid.LONG,
-                  );
-                } else {
-                  showAlert(t('errorTitle'), error.message);
-                }
+                showToast(t('toastFailed', { message: error.message }));
               }
             },
           },
@@ -1006,24 +1108,54 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           currentInteractionIdRef.current,
         );
 
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(t('toastRetryingTranscription'), ToastAndroid.SHORT);
-        }
+        showToast(t('toastRetryingTranscription'));
       } catch (error: any) {
         log.error('Failed to retry transcription:', error);
         setFailedTranscriptions(prev => new Set(prev).add(messageId));
-
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(
-            t('toastRetryFailed', { message: error.message }),
-            ToastAndroid.LONG,
-          );
-        } else {
-          showAlert(t('retryFailedTitle'), error.message);
-        }
+        showToast(t('toastRetryFailed', { message: error.message }));
       }
     },
     [routeInteractionId],
+  );
+
+  // Handle the message action sheet selection
+  const handleMessageAction = useCallback(
+    (action: MessageAction) => {
+      const message = actionSheetMessage;
+      if (!message) return;
+      closeActionSheet();
+
+      switch (action) {
+        case 'reply':
+          handleReplyToMessage(message);
+          break;
+        case 'delete':
+          handleDeleteMessage(message.id);
+          break;
+        case 'copy':
+          handleCopyMessage(message);
+          break;
+        case 'forward':
+          handleForwardMessage(message);
+          break;
+        case 'translate':
+          handleTranslateMessage(message);
+          break;
+        case 'pin':
+          handleTogglePinMessage(message);
+          break;
+      }
+    },
+    [
+      actionSheetMessage,
+      closeActionSheet,
+      handleReplyToMessage,
+      handleDeleteMessage,
+      handleCopyMessage,
+      handleForwardMessage,
+      handleTranslateMessage,
+      handleTogglePinMessage,
+    ],
   );
 
   // Entity context menu
@@ -1105,23 +1237,14 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [ownEntityId, participantIds, navigation]);
 
-  const handleToggleReplyMode = useCallback(async () => {
-    const newMode = replyMode === 'realistic' ? 'instant' : 'realistic';
-    setReplyMode(newMode);
-
-    // Persist locally using participantKey (stable across navigations)
-    await ChatPreferencesService.setReplyMode(participantKey, newMode);
-    replyModeRef.current = newMode;
-
-    // Send to Harmony Link if session is active
-    if (isSessionActive(currentInteractionIdRef.current)) {
-      try {
-        await EntitySessionService.setReplyMode(currentInteractionIdRef.current, newMode);
-      } catch (error) {
-        log.error('Failed to send reply mode update:', error);
-      }
+  // Index messages by id so reply headers can look up the quoted message.
+  const messageById = useMemo(() => {
+    const map = new Map<string, ConversationMessage>();
+    for (const m of messages) {
+      map.set(m.id, m);
     }
-  }, [replyMode, participantKey, isSessionActive]);
+    return map;
+  }, [messages]);
 
   // Calculate messages with divider AND compute the initial scroll target
   const { messagesWithDivider, initialScrollTarget } = useMemo(() => {
@@ -1421,7 +1544,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         return <PersonaChangeDivider personaName={item.personaName} theme={theme!} />;
       }
 
-      const isOwn = !isPartnerMessage(item, ownEntityId);
+const isOwn = !isPartnerMessage(item, ownEntityId);
 
       // Truly-new chat + has_first_mes → the delivered greeting is the opening:
       // render it wrapped in the authored AlternateGreetingSwiper, with the ✨
@@ -1461,34 +1584,37 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       const isLastMessage =
         messages.length > 0 && item.id === messages[messages.length - 1].id;
       const isTranscriptionFailed = failedTranscriptions.has(item.id);
+      const repliedMessage =
+        item.reply_to_message_id && messageById.has(item.reply_to_message_id)
+          ? messageById.get(item.reply_to_message_id)
+          : null;
 
       return (
         <ChatBubble
           message={item}
           isOwn={isOwn}
-          isLastMessage={isLastMessage}
           isTranscriptionFailed={isTranscriptionFailed}
           partnerAvatar={!isOwn ? partnerAvatar : null}
           partnerName={partnerName}
+          repliedMessage={repliedMessage}
           onImagePress={() => {}}
           onSendMessage={handleConfirmAndSendMessage}
-          onDelete={handleDeleteMessage}
-          onRegenerate={handleRegenerateMessage}
           onEdit={handleEditMessage}
           onRetryTranscription={handleRetryTranscription}
+          onLongPress={handleLongPressMessage}
+          onReact={handleReactToMessage}
           theme={theme!}
         />
       );
     },
     [
       messages,
+      messageById,
       partnerAvatar,
       theme,
       ownEntityId,
       failedTranscriptions,
       handleConfirmAndSendMessage,
-      handleDeleteMessage,
-      handleRegenerateMessage,
       handleEditMessage,
       handleRetryTranscription,
       greetingMessage,
@@ -1499,6 +1625,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       openScenarioSheet,
       canRegenerateGreeting,
       handleRegenerateGreeting,
+      handleLongPressMessage,
+      handleReactToMessage,
     ],
   );
 
@@ -1591,28 +1719,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
         right={
           <View style={styles.headerControlsRow}>
-            <TouchableOpacity
-              onPress={() => {
-                hapticLightPress();
-                handleToggleReplyMode();
-              }}
-              style={styles.replyModeButton}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              disabled={!isSessionActive(currentInteractionIdRef.current)}
-            >
-              <ThemedText
-                size={11}
-                weight="medium"
-                style={[
-                  styles.replyModeText,
-                  { color: replyMode === 'instant'
-                    ? theme?.colors.accent.primary
-                    : theme?.colors.text.muted },
-                ]}
-              >
-                {replyMode === 'instant' ? '⚡ Instant' : '💬 Realistic'}
-              </ThemedText>
-            </TouchableOpacity>
             <TouchableOpacity
               onPress={() => {
                 hapticLightPress();
@@ -1758,6 +1864,31 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         activePersonaId={ownEntityId === 'user' ? null : ownEntityId}
         onSelect={handleSwitchPersona}
         onClose={() => setPersonaSwitcherVisible(false)}
+      />
+
+      {/* Message action sheet — long-press a bubble */}
+      <MessageActionSheet
+        visible={actionSheetMessage !== null}
+        message={actionSheetMessage}
+        isOwn={actionSheetMessage?.sender_entity_id === ownEntityId}
+        partnerName={partnerName}
+        isPinned={actionSheetMessage?.is_pinned ?? false}
+        onAction={handleMessageAction}
+        onReact={(emoji) => {
+          if (actionSheetMessage) {
+            handleReactToMessage(actionSheetMessage.id, emoji);
+          }
+        }}
+        onClose={closeActionSheet}
+      />
+
+      {/* Forward picker — choose a character to forward the message to */}
+      <ForwardPickerModal
+        visible={forwardPickerVisible}
+        ownEntityId={ownEntityId}
+        messageText={forwardMessageText}
+        onSelect={handleForwardSelect}
+        onClose={() => setForwardPickerVisible(false)}
       />
 
       {/* Android: 'height' recomputes the container frame on every re-render
@@ -1908,6 +2039,18 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           showScenarioButton={true}
           onScenarioPress={openScenarioSheet}
           theme={theme!}
+          replyTo={
+            replyToMessage
+              ? {
+                  id: replyToMessage.id,
+                  senderName: replyToMessage.sender_entity_id === ownEntityId
+                    ? t('you')
+                    : partnerName,
+                  content: replyToMessage.content || '',
+                }
+              : null
+          }
+          onCancelReply={handleCancelReply}
         />
         {showEmojiPicker && (
           <EmojiPickerInline
@@ -2018,16 +2161,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-  },
-  replyModeButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  replyModeText: {
-    fontSize: 11,
   },
   scrollToBottomButton: {
     position: 'absolute',

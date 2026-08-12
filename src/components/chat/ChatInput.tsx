@@ -24,13 +24,14 @@ import { EmojiAutocomplete } from '../emoji/EmojiAutocomplete';
 import EmojiService from '../../services/EmojiService';
 import { EmojiEntry } from '../../types/emoji';
 import { hapticLightPress } from '../../utils/haptics';
-import { EmojiActionInput } from './EmojiActionInput';
+import { EmojiActionInput, EmojiActionInputRef } from './EmojiActionInput';
 import { EmptyChatCTA } from './EmptyChatCTA';
 
 const log = createLogger('[ChatInput]');
 
 export interface ChatInputRef {
   insertEmoji: (emoji: string) => void;
+  focus: () => void;
 }
 
 interface ChatInputProps {
@@ -47,6 +48,9 @@ interface ChatInputProps {
   showScenarioButton?: boolean;
   /** Called when the ✨ scenario trigger is tapped (P1: shows the "coming soon" state). */
   onScenarioPress?: () => void;
+  /** Message being replied to (shows a dismissible preview bar above the input). */
+  replyTo?: { id: string; senderName: string; content: string } | null;
+  onCancelReply?: () => void;
 }
 
 export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
@@ -61,6 +65,8 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
   entityId,
   showScenarioButton = true,
   onScenarioPress,
+  replyTo,
+  onCancelReply,
 }, ref) => {
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('chatDetail');
@@ -76,10 +82,14 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
 
   const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const emojiInputRef = useRef<EmojiActionInputRef | null>(null);
 
   useImperativeHandle(ref, () => ({
     insertEmoji: (emoji: string) => {
       setText(prev => prev + emoji);
+    },
+    focus: () => {
+      emojiInputRef.current?.focus();
     },
   }));
 
@@ -341,6 +351,27 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
         onDismiss={() => { setAutocompleteResults([]); setShortcodePrefix(''); }}
         theme={theme}
       />
+
+      {/* ── Reply preview bar ── */}
+      {replyTo && (
+        <View style={[styles.replyBar, { backgroundColor: theme.colors.accent.primary + '14', borderColor: theme.colors.accent.primary + '44' }]}>
+          <View style={[styles.replyAccent, { backgroundColor: theme.colors.accent.primary }]} />
+          <View style={styles.replyInfo}>
+            <ThemedText variant="accent" size={12} weight="medium" numberOfLines={1}>
+              {t('replyingTo', { name: replyTo.senderName })}
+            </ThemedText>
+            <ThemedText variant="muted" size={12} numberOfLines={2}>
+              {replyTo.content || t('mediaMessage')}
+            </ThemedText>
+          </View>
+          {onCancelReply && (
+            <TouchableOpacity onPress={onCancelReply} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={styles.replyClose}>
+              <Icon name="close" size={18} color={theme.colors.text.muted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
       <View style={styles.inputRow}>
         {showEmojiButton && onEmojiToggle && (
           <TouchableOpacity
@@ -370,6 +401,7 @@ export const ChatInput = React.forwardRef<ChatInputRef, ChatInputProps>(({
 
         <View style={[styles.inputContainer, { backgroundColor: inputGlassBg, borderColor: glassBorder }]}>
           <EmojiActionInput
+            ref={emojiInputRef}
             value={text}
             onChangeText={handleTextChange}
             placeholder={t('typeMessage')}
@@ -478,6 +510,28 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
+  },
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  replyAccent: {
+    width: 3,
+    alignSelf: 'stretch',
+    borderRadius: 2,
+    marginRight: 10,
+  },
+  replyInfo: {
+    flex: 1,
+  },
+  replyClose: {
+    marginLeft: 8,
+    padding: 2,
   },
   recordingContainer: {
     flexDirection: 'row',

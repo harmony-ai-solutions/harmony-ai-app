@@ -18,7 +18,7 @@
  * Cursor: because the TextInput cursor is hidden by opacity:0 we render a
  *   custom blinking "|" at the end of the display layer when focused.
  */
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { View, TextInput, Text, StyleSheet, Animated } from 'react-native';
 import { createLogger } from '../../utils/logger';
 import { EntityEmojiActionService } from '../../services/EntityEmojiActionService';
@@ -76,7 +76,11 @@ const BlinkingCursor: React.FC<{ color?: string }> = ({ color }) => {
   );
 };
 
-const EmojiActionInput: React.FC<EmojiActionInputProps> = React.memo(({
+export interface EmojiActionInputRef {
+  focus: () => void;
+}
+
+const EmojiActionInput = React.memo(forwardRef<EmojiActionInputRef, EmojiActionInputProps>(({
   value,
   onChangeText,
   onSubmitEditing,
@@ -90,7 +94,14 @@ const EmojiActionInput: React.FC<EmojiActionInputProps> = React.memo(({
   entityId,
   theme,
   style,
-}) => {
+}, ref) => {
+  const textInputRef = useRef<TextInput>(null);
+
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      textInputRef.current?.focus();
+    },
+  }));
   const [actionsMap, setActionsMap] = useState<Map<string, EmojiAction> | null>(null);
   const [isFocused, setIsFocused] = useState(false);
 
@@ -140,6 +151,7 @@ const EmojiActionInput: React.FC<EmojiActionInputProps> = React.memo(({
   if (!entityId || !actionsMap || actionsMap.size === 0) {
     return (
       <TextInput
+        ref={textInputRef}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
@@ -205,6 +217,7 @@ const EmojiActionInput: React.FC<EmojiActionInputProps> = React.memo(({
       {/* opacity:0 hides everything including emoji glyphs (color:'transparent' does not). */}
       {/* The view still receives all touch and keyboard events at opacity:0. */}
       <TextInput
+        ref={textInputRef}
         value={value}
         onChangeText={onChangeText}
         placeholder=""
@@ -220,7 +233,7 @@ const EmojiActionInput: React.FC<EmojiActionInputProps> = React.memo(({
       />
     </View>
   );
-});
+}));
 
 const styles = StyleSheet.create({
   container: {

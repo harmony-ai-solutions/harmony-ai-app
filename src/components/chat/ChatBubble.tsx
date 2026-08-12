@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, TouchableOpacity, Image, Dimensions, TextInput, ActivityIndicator, Text } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { Avatar, IconButton, Menu } from 'react-native-paper';
+import { Avatar, IconButton } from 'react-native-paper';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
@@ -11,6 +11,7 @@ import { EmojiAwareText } from '../emoji/EmojiAwareText';
 import EmojiService from '../../services/EmojiService';
 import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
+import { MessageReactionsBar } from './MessageReactionsBar';
 
 const log = createLogger('[ChatBubble]');
 const { width: screenWidth } = Dimensions.get('window');
@@ -31,16 +32,19 @@ export function isPartnerMessage(
 interface ChatBubbleProps {
   message: ConversationMessage;
   isOwn: boolean;
-  isLastMessage?: boolean;
   isTranscriptionFailed?: boolean;
   partnerAvatar?: string | null;
   partnerName?: string;
+  /** The message this one replies to (rendered as a "Replying to" header). */
+  repliedMessage?: ConversationMessage | null;
   onImagePress?: (imageBase64: string, mimeType: string) => void;
   onSendMessage?: (messageId: string, editedText: string) => void;
-  onDelete?: (messageId: string) => void;
-  onRegenerate?: (messageId: string) => void;
   onEdit?: (messageId: string, newText: string) => void;
   onRetryTranscription?: (messageId: string) => void;
+  /** Called when the user long-presses the bubble (opens the message action sheet). */
+  onLongPress?: (message: ConversationMessage) => void;
+  /** Called when the user taps a reaction chip below the bubble. */
+  onReact?: (messageId: string, emoji: string) => void;
   theme: Theme;
 }
 
@@ -95,23 +99,33 @@ const FormattedRPText: React.FC<{
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
   message,
   isOwn,
-  isLastMessage = false,
   isTranscriptionFailed = false,
   partnerAvatar,
   partnerName = 'AI',
+  repliedMessage,
   onImagePress,
   onSendMessage,
-  onDelete,
-  onRegenerate,
   onEdit,
   onRetryTranscription,
+  onLongPress,
+  onReact,
   theme,
 }) => {
   const { t } = useTranslation('chatDetail');
+
+  // When replying, size the bubble to at least the quoted message's width so
+  // the reply preview isn't squeezed into a tiny bubble. Estimate width from
+  // content length (≈6.5px/char at 12-14px font) capped at the max bubble width.
+  const replyMinWidth = repliedMessage?.content
+    ? Math.min(
+        screenWidth * 0.72,
+        Math.max(140, repliedMessage.content.length * 6.5),
+      )
+    : undefined;
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(message.content || '');
-  const [menuVisible, setMenuVisible] = useState(false);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
   const [currentPosition, setCurrentPosition] = useState<number>(0);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
@@ -224,25 +238,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     }
   };
 
-  const handleDelete = () => {
-    setMenuVisible(false);
-    if (onDelete) {
-      onDelete(message.id);
-    }
-  };
-
-  const handleRegenerate = () => {
-    setMenuVisible(false);
-    if (onRegenerate) {
-      onRegenerate(message.id);
-    }
-  };
-
-  const handleEditStart = () => {
-    setMenuVisible(false);
-    setIsEditing(true);
-  };
-
   const handleEditSave = () => {
     setIsEditing(false);
     if (onEdit && editedText !== message.content) {
@@ -269,6 +264,44 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
     return (
       <>
+        {/* ── Reply header: "Replying to X" with a snippet of the quoted message ── */}
+        {repliedMessage && (
+          <TouchableOpacity
+            style={[
+              styles.replyHeader,
+              {
+                backgroundColor: isOwn
+                  ? 'rgba(255,255,255,0.12)'
+                  : theme.colors.accent.primary + '12',
+                borderLeftColor: theme.colors.accent.primary,
+              },
+            ]}
+            activeOpacity={0.7}
+          >
+            <View style={styles.replyHeaderText}>
+              <ThemedText
+                size={12}
+                weight="bold"
+                numberOfLines={1}
+                style={{
+                  color: isOwn ? '#fff' : theme.colors.accent.primary,
+                }}
+              >
+                {t('replyingTo', { name: repliedMessage.sender_entity_id === message.entity_id ? partnerName : t('you') })}
+              </ThemedText>
+              <ThemedText
+                size={12}
+                numberOfLines={2}
+                style={{
+                  color: isOwn ? 'rgba(255,255,255,0.85)' : theme.colors.text.secondary,
+                }}
+              >
+                {repliedMessage.content || t('mediaMessage')}
+              </ThemedText>
+            </View>
+          </TouchableOpacity>
+        )}
+
         {hasImage && (
           <TouchableOpacity onPress={handleImagePress} style={styles.imageContainer}>
             <Image
@@ -506,60 +539,51 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         </LinearGradient>
       )}
 
-      {/* The Menu anchor wraps the bubble so the message actions
-          (edit/delete/regenerate) are reachable via a long-press —
-          no visible three-dots icon. */}
-      <Menu
-        visible={menuVisible}
-        onDismiss={() => setMenuVisible(false)}
-        anchor={
-          <TouchableOpacity
-            activeOpacity={1}
-            delayLongPress={400}
-            onLongPress={() => {
-              if (isLastMessage && !isEditing) {
-                hapticLightPress();
-                setMenuVisible(true);
-              }
-            }}
-          >
-            {isOwn ? (
-              // Own bubble: accent gradient at ~55-35% opacity — gives colour depth
-              // without washing out text or audio controls.
-              <LinearGradient
-                colors={[theme.colors.accent.primary + 'B3', (theme.colors.accent.secondary ?? theme.colors.accent.primaryHover) + '80']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.bubble, styles.ownBubble, { backgroundColor: theme.colors.background.surface }]}
-              >
-                {renderContent()}
-              </LinearGradient>
-            ) : (
-              // Partner bubble: subtle elevated→surface gradient
-              <LinearGradient
-                colors={[theme.colors.background.elevated, theme.colors.background.surface]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.bubble, styles.partnerBubble]}
-              >
-                {renderContent()}
-              </LinearGradient>
-            )}
-          </TouchableOpacity>
-        }
+      <TouchableOpacity
+        activeOpacity={1}
+        delayLongPress={400}
+        onLongPress={() => {
+          if (onLongPress && !isEditing) {
+            hapticLightPress();
+            onLongPress(message);
+          }
+        }}
       >
         {isOwn ? (
-          <>
-            <Menu.Item onPress={handleEditStart} title={t('edit')} leadingIcon="pencil" />
-            <Menu.Item onPress={handleDelete} title={t('delete')} leadingIcon="delete" />
-          </>
+          // Own bubble: accent gradient at ~55-35% opacity — gives colour depth
+          // without washing out text or audio controls.
+          <LinearGradient
+            colors={[theme.colors.accent.primary + 'B3', (theme.colors.accent.secondary ?? theme.colors.accent.primaryHover) + '80']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[
+              styles.bubble,
+              styles.ownBubble,
+              { backgroundColor: theme.colors.background.surface, minWidth: replyMinWidth },
+            ]}
+          >
+            {renderContent()}
+          </LinearGradient>
         ) : (
-          <>
-            <Menu.Item onPress={handleRegenerate} title={t('regenerate')} leadingIcon="refresh" />
-            <Menu.Item onPress={handleDelete} title={t('delete')} leadingIcon="delete" />
-          </>
+          // Partner bubble: subtle elevated→surface gradient
+          <LinearGradient
+            colors={[theme.colors.background.elevated, theme.colors.background.surface]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.bubble, styles.partnerBubble, { minWidth: replyMinWidth }]}
+          >
+            {renderContent()}
+          </LinearGradient>
         )}
-      </Menu>
+      </TouchableOpacity>
+
+      {/* Reactions float BELOW the bubble as separate chips, so they don't
+          blend into the bubble gradient. */}
+      <MessageReactionsBar
+        reactionsJson={message.reactions_json}
+        onReact={onReact ? (emoji) => onReact(message.id, emoji) : undefined}
+        align={isOwn ? 'right' : 'left'}
+      />
     </View>
   );
 };
@@ -608,6 +632,18 @@ const styles = StyleSheet.create({
   },
   partnerBubble: {
     borderBottomLeftRadius: 4,
+  },
+  replyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    borderLeftWidth: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 8,
+  },
+  replyHeaderText: {
+    flex: 1,
   },
   textContent: {
     fontSize: 16,

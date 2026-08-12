@@ -508,6 +508,11 @@ export interface ConversationMessage {
   is_edited: boolean;              // true if message was edited via recon
   edit_of_message_id?: string | null; // references original message for edits
 
+  // Message actions (Migration 40)
+  reactions_json?: string | null;   // JSON array of emoji reaction strings, e.g. '["❤️","👍"]'
+  reply_to_message_id?: string | null; // references the message this one replies to
+  is_pinned?: boolean;              // true if the message is pinned
+
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;

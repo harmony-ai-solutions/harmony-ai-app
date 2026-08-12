@@ -881,7 +881,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   async sendTextMessage(
     interactionId: string,
     text: string,
-    additionalEffects?: any | null
+    additionalEffects?: any | null,
+    replyToMessageId?: string | null
   ): Promise<void> {
     const session = this.sessions.get(interactionId);
     if (!session) {
@@ -915,18 +916,23 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       is_recon_followup: false,
       is_edited: false,
       edit_of_message_id: null,
+      reply_to_message_id: replyToMessageId ?? null,
     };
 
     await createConversationMessage(message);
     log.info(`Stored text message ${messageId} locally for interaction ${interactionId}`);
 
     // Send to ALL partner connections (participant-agnostic broadcast)
-    const utterance = {
+    const utterance: any = {
       message_id: messageId,
       entity_id: session.ownEntityId,
       content: text,
       type: 'UTTERANCE_COMBINED'
     };
+
+    if (replyToMessageId) {
+      utterance.reply_to_message_id = replyToMessageId;
+    }
 
     // Attach additional effects if present
     if (additionalEffects && additionalEffects.emotionEffects && additionalEffects.emotionEffects.length > 0) {
@@ -939,6 +945,79 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
 
     log.info(`Sent message ${messageId} to ${partnerConnectionIds.length} partner(s) for interaction ${interactionId}`);
+  }
+
+  /**
+   * Forward a text message to a DIFFERENT interaction (participant set)
+   * without navigating the UI to that chat.
+   *
+   * The engine keys sessions by participant set, so multiple sessions can
+   * coexist. This method either reuses an already-active session for the
+   * target participant set, or starts one in the background and waits for
+   * it to become active before sending the message.
+   *
+   * @param ownEntityId    - The impersonated entity
+   * @param participantIds - ALL participants of the target chat (incl. ownEntityId)
+   * @param text           - The message content to forward
+   */
+  async forwardTextMessage(
+    ownEntityId: string,
+    participantIds: string[],
+    text: string
+  ): Promise<void> {
+    const scope = deriveScopeFromParticipants(participantIds);
+    const targetKey = deriveParticipantKey(participantIds, ownEntityId, scope);
+
+    // 1) Reuse an existing ACTIVE session for this participant set.
+    for (const [id, session] of this.sessions.entries()) {
+      if (session.ownEntityId !== ownEntityId) continue;
+      const sessionScope = deriveScopeFromParticipants(session.participantIds);
+      const sessionKey = deriveParticipantKey(
+        session.participantIds,
+        ownEntityId,
+        sessionScope,
+      );
+      if (sessionKey !== targetKey) continue;
+
+      const allActive = Array.from(session.connections.values()).every(
+        c => c.status === 'active',
+      );
+      if (allActive) {
+        log.info(`Reusing active session ${id} to forward message`);
+        return this.sendTextMessage(id, text);
+      }
+    }
+
+    // 2) No active session — start one in the background and wait for
+    //    session:started (fires when all INIT_ENTITY round-trips complete).
+    log.info(`Starting background session to forward message to ${targetKey}`);
+    await this.startInteractionSession(ownEntityId, participantIds, 'realistic');
+
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.off('session:started', onStarted);
+        reject(new Error('Forward session initialization timed out'));
+      }, 25000);
+
+      const onStarted = (interactionId: string, session: InteractionSession) => {
+        if (session.ownEntityId !== ownEntityId) return;
+        const sessionScope = deriveScopeFromParticipants(session.participantIds);
+        const sessionKey = deriveParticipantKey(
+          session.participantIds,
+          ownEntityId,
+          sessionScope,
+        );
+        if (sessionKey !== targetKey) return;
+
+        clearTimeout(timeout);
+        this.off('session:started', onStarted);
+        this.sendTextMessage(interactionId, text)
+          .then(resolve)
+          .catch(reject);
+      };
+
+      this.on('session:started', onStarted);
+    });
   }
 
   // ---------------------------------------------------------------------------
