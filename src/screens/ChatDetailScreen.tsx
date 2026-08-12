@@ -1502,6 +1502,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     ],
   );
 
+  // The character is "online" when the sync connection is up AND a session
+  // with the partner is actively running.
+  const isOnline = isConnected && isSessionActive(currentInteractionIdRef.current);
 
   // In-flight generation affordance (§2-4): GreetingBubble `preparing` (shimmer
   // + TypingIndicator) plus the "Preparing the opening…" caption. No streaming —
@@ -1537,6 +1540,27 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       )}
       <ScreenHeader
         title={headerName}
+        titleRight={
+          <View
+            style={styles.statusDotWrap}
+            accessibilityRole="image"
+            accessibilityLabel={isOnline ? 'Online' : 'Offline'}
+          >
+            <LinearGradient
+              colors={
+                isOnline
+                  ? [
+                      (theme?.colors.accent.primary ?? '#7c3aed') + 'E6',
+                      ((theme?.colors.accent.secondary ?? theme?.colors.accent.primaryHover ?? '#7c3aed') + '80'),
+                    ]
+                  : ['#6b7280', '#9ca3af']
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.statusDot, isOnline ? styles.statusDotOnline : styles.statusDotOffline]}
+            />
+          </View>
+        }
         onBack={() => navigation.goBack()}
         left={
           partnerAvatar ? (
@@ -1567,21 +1591,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
         right={
           <View style={styles.headerControlsRow}>
-            {isConnected ? (
-              isSessionActive(currentInteractionIdRef.current) ? (
-                <ThemedText variant="success" size={12} style={styles.statusIndicator}>
-                  Connected
-                </ThemedText>
-              ) : (
-                <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
-                  Connecting...
-                </ThemedText>
-              )
-            ) : (
-              <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
-                Offline
-              </ThemedText>
-            )}
             <TouchableOpacity
               onPress={() => {
                 hapticLightPress();
@@ -1987,8 +1996,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 8,
   },
-  statusIndicator: {
-    marginRight: 6,
+  statusDotWrap: {
+    marginLeft: 2,
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  statusDotOnline: {
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  statusDotOffline: {
+    opacity: 0.85,
   },
   headerControlsRow: {
     flexDirection: 'row',
