@@ -21,7 +21,6 @@ import { ConversationMessage } from '../../database/models';
 export const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢'] as const;
 
 export type MessageAction =
-  | 'reply'
   | 'delete'
   | 'copy'
   | 'forward'
@@ -43,7 +42,7 @@ interface MessageActionSheetProps {
 /**
  * MessageActionSheet — bottom-sheet shown when the user long-presses a message
  * bubble. Contains a preview of the message, a row of 5 quick reactions, and
- * the action list: Reply, Delete, Copy, Forward, Translate, Pin/Unpin.
+ * the action list: Delete, Copy, Forward, Translate, Pin/Unpin.
  *
  * Styling follows the app's glass/gradient design language (see the chat
  * context menu in ChatDetailScreen for the shared visual vocabulary).
@@ -81,7 +80,6 @@ export const MessageActionSheet: React.FC<MessageActionSheetProps> = ({
     label: string;
     destructive?: boolean;
   }[] = [
-    { key: 'reply', icon: 'reply', label: t('reply') },
     { key: 'delete', icon: 'delete-outline', label: t('delete'), destructive: true },
     { key: 'copy', icon: 'content-copy', label: t('copy') },
     { key: 'forward', icon: 'share-variant', label: t('forward') },

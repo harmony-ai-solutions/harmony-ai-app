@@ -134,7 +134,7 @@ screens/
 components/
 ├── background/     (9)  — DynamicBackground, Aurora, Geodesic, GradientFlow, NeuralPulse, StardustParticles
 ├── characters/     (2)  — CharacterProfileCard, ProfileImagePicker
-├── chat/           (5)  — ChatBubble, ChatInput, EmojiActionInput, NewMessagesDivider, TypingIndicator
+├── chat/           (3)  — ChatBubble, NewMessagesDivider, TypingIndicator
 ├── cloud/          (3)  — CloudProvisioningCard, StatusPulseDot, __tests__
 ├── config/         (2)  — AdvancedSamplingParams, FormField
 ├── database/       (1)  — DatabaseLoadingScreen
@@ -571,7 +571,7 @@ Partner types → EntitySessionService receives MESSAGE event
   → Scroll to bottom (if user is at bottom)
   → TrackPlayer loads audio if audio message
 
-User types → ChatInput.onSend
+User sends message (via message action sheet re-send)
   → EntitySessionService.sendMessage(interactionId, text, ...)
   → EmojiService.resolveMessageActions(text) → AdditionalEffects payload
   → Saves to conversation_messages table (optimistic)

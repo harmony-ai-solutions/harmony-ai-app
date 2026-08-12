@@ -8,8 +8,6 @@ import React, {
 import {
   StyleSheet,
   FlatList,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
   RefreshControl,
   NativeScrollEvent,
@@ -18,7 +16,6 @@ import {
   Modal,
   View,
   TouchableWithoutFeedback,
-  Keyboard,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import LinearGradient from 'react-native-linear-gradient';
@@ -35,17 +32,15 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { hapticLightPress } from '../utils/haptics';
 import { ChatBubble, isPartnerMessage } from '../components/chat/ChatBubble';
-import { ChatInput, ChatInputRef } from '../components/chat/ChatInput';
+import { ChatInputBar, PickedImage } from '../components/chat/ChatInputBar';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewMessagesDivider } from '../components/chat/NewMessagesDivider';
 import { PersonaChangeDivider } from '../components/chat/PersonaChangeDivider';
-import { EmojiPickerInline } from '../components/emoji/EmojiPickerInline';
 import { AlternateGreetingSwiper, parseAlternateGreetings } from '../components/chat/AlternateGreetingSwiper';
 import { EmptyChatCTA } from '../components/chat/EmptyChatCTA';
 import { GreetingBubble } from '../components/chat/GreetingBubble';
 import { ScenarioGeneratorSheet, ScenarioGuidedInputs } from '../components/chat/ScenarioGeneratorSheet';
 import EntityEmojiActionService from '../services/EntityEmojiActionService';
-import { EmojiEntry } from '../types/emoji';
 import { useEntitySession } from '../contexts/EntitySessionContext';
 import EntitySessionService, { InteractionSession } from '../services/EntitySessionService'; // Still needed for event listeners
 import { SyncService } from '../services/SyncService';
@@ -182,11 +177,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     routeParticipantKey || ''
   );
 
-  const chatInputRef = useRef<ChatInputRef>(null);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [actionSheetMessage, setActionSheetMessage] =
-    useState<ConversationMessage | null>(null);
-  const [replyToMessage, setReplyToMessage] =
     useState<ConversationMessage | null>(null);
   const [forwardPickerVisible, setForwardPickerVisible] = useState(false);
   const [forwardMessageText, setForwardMessageText] = useState('');
@@ -622,95 +613,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [routeInteractionId, isSessionActive]);
 
-  const handleSendText = useCallback(
-    async (text: string) => {
-      if (!text.trim() || !isSessionActive(currentInteractionIdRef.current)) {
-        log.warn('Cannot send message: session not active');
-        return;
-      }
-
-      try {
-        // Resolve emoji actions
-        let sendText = text.trim();
-        let additionalEffects = null;
-        const replyId = replyToMessage?.id ?? null;
-
-        const resolved = await EntityEmojiActionService.resolveMessageActions(
-          currentInteractionIdRef.current,
-          sendText,
-        );
-
-        if (resolved.hasActions) {
-          sendText = resolved.substitutedText;
-          additionalEffects = resolved.effects;
-          log.info(`Resolved emoji actions: ${resolved.effects.emotionEffects.length} effects`);
-        }
-
-        // Store the reply reference (reply_to_message_id) instead of embedding
-        // a text quote — the UI renders a proper "Replying to" header.
-        await EntitySessionService.sendTextMessage(
-          currentInteractionIdRef.current,
-          sendText,
-          additionalEffects,
-          replyId,
-        );
-
-        // Reply context consumed
-        if (replyToMessage) {
-          setReplyToMessage(null);
-        }
-
-        // Optimistically reload from database
-        if (participantKey) {
-          const updatedMessages = await getRecentConversationMessages(
-            ownEntityId,
-            participantKey,
-            MESSAGES_PAGE_SIZE,
-          );
-          pendingOwnMessageScroll.current = true;
-          setMessages(updatedMessages);
-        }
-      } catch (error) {
-        log.error('Failed to send message:', error);
-      }
-    },
-    [routeInteractionId, ownEntityId, participantKey, isSessionActive, replyToMessage],
-  );
-
-  const handleEmojiSelected = useCallback((emoji: EmojiEntry) => {
-    chatInputRef.current?.insertEmoji(emoji.native);
-  }, []);
-
-  const handleSendAudio = useCallback(
-    async (audioData: string, duration: number) => {
-      if (!isSessionActive(currentInteractionIdRef.current)) return;
-
-      try {
-        await EntitySessionService.newAudioMessage(
-          currentInteractionIdRef.current,
-          audioData,
-          'audio/wav',
-          duration,
-        );
-
-        log.info('Audio message saved, awaiting transcription...');
-
-        if (participantKey) {
-          const updatedMessages = await getRecentConversationMessages(
-            ownEntityId,
-            participantKey,
-            MESSAGES_PAGE_SIZE,
-          );
-          pendingOwnMessageScroll.current = true;
-          setMessages(updatedMessages);
-        }
-      } catch (error) {
-        log.error('Failed to save audio message:', error);
-      }
-    },
-    [routeInteractionId, ownEntityId, participantKey, isSessionActive],
-  );
-
   const handleConfirmAndSendMessage = useCallback(
     async (messageId: string, finalText: string) => {
       if (!isSessionActive(currentInteractionIdRef.current)) {
@@ -788,33 +690,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     },
     [routeInteractionId, ownEntityId, participantKey, isSessionActive],
-  );
-
-  const handleSendImage = useCallback(
-    async (imageBase64: string, mimeType: string, caption?: string) => {
-      if (!isSessionActive(currentInteractionIdRef.current)) return;
-
-      try {
-        await EntitySessionService.sendImageMessage(
-          currentInteractionIdRef.current,
-          imageBase64,
-          mimeType,
-          caption,
-        );
-        if (participantKey) {
-          const updatedMessages = await getRecentConversationMessages(
-            ownEntityId,
-            participantKey,
-            MESSAGES_PAGE_SIZE,
-          );
-          pendingOwnMessageScroll.current = true;
-          setMessages(updatedMessages);
-        }
-      } catch (error) {
-        log.error('Failed to send image:', error);
-      }
-    },
-    [routeInteractionId, isSessionActive, ownEntityId, participantKey],
   );
 
   // ---------------------------------------------------------------------------
@@ -946,23 +821,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     },
     [ownEntityId, participantKey],
   );
-
-  const handleReplyToMessage = useCallback((message: ConversationMessage) => {
-    closeActionSheet();
-    setReplyToMessage(message);
-    // Focus the input so the user can immediately type their reply
-    requestAnimationFrame(() => {
-      chatInputRef.current?.focus?.();
-    });
-  }, [closeActionSheet]);
-
-  const handleCancelReply = useCallback(() => {
-    setReplyToMessage(null);
-  }, []);
-
-  const handleTypingStart = useCallback(() => {
-    // Send typing indicator if session active
-  }, [routeInteractionId, isSessionActive]);
 
   // Delete message handler
   const handleDeleteMessage = useCallback(
@@ -1118,6 +976,151 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     [routeInteractionId],
   );
 
+  // ---------------------------------------------------------------------------
+  // Message sending — text / audio / images (driven by ChatInputBar)
+  // ---------------------------------------------------------------------------
+
+  const handleSendTextMessage = useCallback(
+    async (text: string) => {
+      if (!isSessionActive(currentInteractionIdRef.current)) {
+        log.warn('Cannot send message: session not active');
+        showToast(t('failedToSend', { message: 'Session not active' }));
+        return;
+      }
+
+      try {
+        // Resolve emoji actions in the text
+        let sendText = text;
+        let additionalEffects = null;
+
+        const resolved = await EntityEmojiActionService.resolveMessageActions(
+          currentInteractionIdRef.current,
+          sendText,
+        );
+
+        if (resolved.hasActions) {
+          sendText = resolved.substitutedText;
+          additionalEffects = resolved.effects;
+        }
+
+        await EntitySessionService.sendTextMessage(
+          currentInteractionIdRef.current,
+          sendText,
+          additionalEffects,
+        );
+
+        log.info(`Text message sent for interaction ${routeInteractionId}`);
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          pendingOwnMessageScroll.current = true;
+          setMessages(updatedMessages);
+        }
+      } catch (error: any) {
+        log.error('Failed to send text message:', error);
+        showToast(t('failedToSend', { message: error.message }));
+      }
+    },
+    [
+      routeInteractionId,
+      ownEntityId,
+      participantKey,
+      isSessionActive,
+      showToast,
+      t,
+    ],
+  );
+
+  const handleSendAudioMessage = useCallback(
+    async (audioData: string, mimeType: string, duration: number) => {
+      if (!isSessionActive(currentInteractionIdRef.current)) {
+        log.warn('Cannot send audio: session not active');
+        showToast(t('failedToSend', { message: 'Session not active' }));
+        return;
+      }
+
+      try {
+        // newAudioMessage stores the message locally and requests transcription.
+        // Transcription completes server-side and fires 'transcription:completed'.
+        await EntitySessionService.newAudioMessage(
+          currentInteractionIdRef.current,
+          audioData,
+          mimeType,
+          duration,
+        );
+
+        log.info(`Audio message flow started for interaction ${routeInteractionId}`);
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          pendingOwnMessageScroll.current = true;
+          setMessages(updatedMessages);
+        }
+      } catch (error: any) {
+        log.error('Failed to send audio message:', error);
+        showToast(t('audioSendFailed', { message: error.message }));
+      }
+    },
+    [
+      routeInteractionId,
+      ownEntityId,
+      participantKey,
+      isSessionActive,
+      showToast,
+      t,
+    ],
+  );
+
+  const handleSendImages = useCallback(
+    async (images: PickedImage[]) => {
+      if (!isSessionActive(currentInteractionIdRef.current)) {
+        log.warn('Cannot send images: session not active');
+        showToast(t('failedToSend', { message: 'Session not active' }));
+        // Rethrow so the input bar keeps the previews for a retry.
+        throw new Error('Session not active');
+      }
+
+      try {
+        for (const image of images) {
+          await EntitySessionService.sendImageMessage(
+            currentInteractionIdRef.current,
+            image.base64,
+            image.mimeType,
+          );
+        }
+
+        log.info(`Sent ${images.length} image message(s) for interaction ${routeInteractionId}`);
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          pendingOwnMessageScroll.current = true;
+          setMessages(updatedMessages);
+        }
+      } catch (error: any) {
+        log.error('Failed to send image message:', error);
+        showToast(t('imageSendFailed', { message: error.message }));
+        throw error;
+      }
+    },
+    [
+      routeInteractionId,
+      ownEntityId,
+      participantKey,
+      isSessionActive,
+      showToast,
+      t,
+    ],
+  );
+
   // Handle the message action sheet selection
   const handleMessageAction = useCallback(
     (action: MessageAction) => {
@@ -1126,9 +1129,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       closeActionSheet();
 
       switch (action) {
-        case 'reply':
-          handleReplyToMessage(message);
-          break;
         case 'delete':
           handleDeleteMessage(message.id);
           break;
@@ -1149,7 +1149,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     [
       actionSheetMessage,
       closeActionSheet,
-      handleReplyToMessage,
       handleDeleteMessage,
       handleCopyMessage,
       handleForwardMessage,
@@ -1891,14 +1890,11 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         onClose={() => setForwardPickerVisible(false)}
       />
 
-      {/* Android: 'height' recomputes the container frame on every re-render
-          (e.g. during session/retry churn), which makes the bottom input flicker.
-          Leave behavior undefined on Android — the window resizes for the keyboard
-          by default and we avoid the re-layout feedback loop. */}
-      <KeyboardAvoidingView
+      <View
+        style={styles.keyboardAvoid}
+      >
+      <View
         style={[styles.content, !isReadyToShow && styles.hidden]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <FlatList
         style={{ flex: 1 }}
@@ -2023,49 +2019,21 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
           </TouchableOpacity>
         )}
 
-        <ChatInput
-          ref={chatInputRef}
-          onSendText={handleSendText}
-          onSendAudio={handleSendAudio}
-          onSendImage={handleSendImage}
-          onTypingStart={handleTypingStart}
-          onEmojiToggle={() => {
-            if (!showEmojiPicker) Keyboard.dismiss();
-            setShowEmojiPicker(prev => !prev);
-          }}
-          showEmojiButton={true}
-          disabled={!isSessionActive(currentInteractionIdRef.current)}
-          entityId={currentInteractionIdRef.current}
-          showScenarioButton={true}
-          onScenarioPress={openScenarioSheet}
-          theme={theme!}
-          replyTo={
-            replyToMessage
-              ? {
-                  id: replyToMessage.id,
-                  senderName: replyToMessage.sender_entity_id === ownEntityId
-                    ? t('you')
-                    : partnerName,
-                  content: replyToMessage.content || '',
-                }
-              : null
-          }
-          onCancelReply={handleCancelReply}
-        />
-        {showEmojiPicker && (
-          <EmojiPickerInline
-            onEmojiSelected={handleEmojiSelected}
-            entityId={currentInteractionIdRef.current}
-            onOpenActionEditor={() => {
-              setShowEmojiPicker(false);
-              navigation.navigate('EmojiActionEditor', {
-                entityId: currentInteractionIdRef.current,
-                entityName: headerName,
-              });
-            }}
-          />
-        )}
-      </KeyboardAvoidingView>
+</View>
+
+      <ChatInputBar
+        onSendText={handleSendTextMessage}
+        onSendAudio={handleSendAudioMessage}
+        onSendImages={handleSendImages}
+        disabled={!isOnline}
+        entityId={ownEntityId}
+        onOpenActionEditor={() => {
+          navigation.navigate('EmojiActionEditor', {
+            entityId: ownEntityId,
+            entityName: headerName,
+          });
+        }}
+      />
 
       {/* Scenario generator bottom sheet (§2-4) — paper Modal+Portal (§A18).
           Generate collapses the sheet and dispatches GENERATE_GREETING /
@@ -2075,12 +2043,16 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         onClose={closeScenarioSheet}
         onGenerate={handleScenarioGenerate}
       />
+      </View>
     </ThemedView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  keyboardAvoid: {
     flex: 1,
   },
   centered: {

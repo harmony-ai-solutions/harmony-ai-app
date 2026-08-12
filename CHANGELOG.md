@@ -142,6 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Force full database synchronization option in SyncSettingsScreen
 
 #### Changed
+- The chat screen's bottom input bar (text field with send, emoji, image, and microphone buttons) has been removed. The chat now displays messages only; the message long-press action sheet no longer includes the "Reply" action.
 - Refactored `DualEntitySession` to `InteractionSession` — session management is now interaction-scoped instead of entity-pair-scoped
   - `InteractionSession` interface: interactionId, interaction, participantIds, ownEntityId, per-connection status tracking
   - Events keyed by `interactionId` instead of `partnerEntityId`: `session:started`, `session:stopped`, `message:received`, etc.
@@ -165,6 +166,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chat list UI fixes for edge cases with interaction-based rendering
 - Message ID handling consistency across send and receive flows
 - Cleanup of deprecated methods from previous session management approach
+- The chat input bar and keyboard no longer overlap the Android system navigation buttons. On devices where the app runs edge-to-edge (React Native New Architecture), the input bar is now pushed above the on-screen keyboard while typing instead of being covered by it.
 
 ### Harmony Link Integration & Device Sync
 

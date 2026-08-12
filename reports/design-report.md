@@ -174,7 +174,7 @@ All themed components live in [`src/components/themed/`](../src/components/theme
 
 | Domain | Key Components |
 |--------|---------------|
-| **Chat** | `ChatBubble` (text/audio/emoji with context menu), `ChatInput` (tap-to-record, emoji autocomplete), `TypingIndicator` (3-dot staggered animation), `NewMessagesDivider` |
+| **Chat** | `ChatBubble` (text/audio/emoji with context menu), `TypingIndicator` (3-dot staggered animation), `NewMessagesDivider` |
 | **Characters** | `CharacterProfileCard` (hero card with avatar), `ProfileImagePicker` |
 | **Entities** | `EntityCard` (list item with accent stripe), `EntityModuleSelector` |
 | **Emoji** | `EmojiPickerModal` (full-screen), `EmojiPickerInline` (compact), `EmojiGrid`, `EmojiSearchBar`, `CategoryTabBar`, `SkinToneSelector`, `EmojiAwareText`, `EmojiText` |
@@ -371,14 +371,7 @@ The [`ChatBubble`](../src/components/chat/ChatBubble.tsx) supports multiple mess
 
 ### 10.2 Chat Input
 
-The [`ChatInput`](../src/components/chat/ChatInput.tsx) provides:
-
-- **Text input** with multi-line support
-- **Tap-to-record voice**: Tap mic icon to start, tap again to stop (not hold-to-record — better mobile UX, fewer accidental recordings)
-- **Emoji autocomplete**: Type `:` to trigger emoji search inline
-- **Permission recovery UI**: Clear error recovery if microphone permission denied
-- **Recording indicator**: Pulsing red dot animation during recording
-- **Android safe area padding**: Bottom inset for system navigation bar
+The chat screen is read-only: the bottom input bar (text field with send, emoji, image, and microphone buttons) has been removed. Messages are displayed only; there is no compose UI.
 
 ### 10.3 Realistic Timing
 
@@ -415,7 +408,6 @@ Three selectable emoji rendering styles via [`EmojiContext`](../src/contexts/Emo
 
 - **Modal picker** ([`EmojiPickerModal`](../src/components/emoji/EmojiPickerModal.tsx)): Full-screen with category tabs (Smileys, People, Animals, Food, Travel, Activities, Objects, Symbols, Flags), search bar, skin tone selector
 - **Inline picker** ([`EmojiPickerInline`](../src/components/emoji/EmojiPickerInline.tsx)): Compact horizontal strip for quick access in chat
-- **Autocomplete** ([`EmojiAutocomplete`](../src/components/emoji/EmojiAutocomplete.tsx)): Type `:` to trigger inline emoji search in ChatInput
 
 ### 11.3 Emoji Actions & Ekman8 Emotion Model
 

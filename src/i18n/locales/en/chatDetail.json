@@ -79,5 +79,7 @@
   "translateNotAvailable": "Translation is not available yet for this message.",
   "forwardTitle": "Forward to",
   "forwardCaption": "Choose a character to forward this message to",
-  "forwardEmpty": "No characters yet. Start a chat to forward messages."
+  "forwardEmpty": "No characters yet. Start a chat to forward messages.",
+  "audioSendFailed": "Failed to send voice message: {{message}}",
+  "imageSendFailed": "Failed to send image: {{message}}"
 }

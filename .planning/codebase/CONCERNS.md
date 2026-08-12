@@ -109,8 +109,8 @@ Branch: `fix/rr-hotfixes-2` (last 20 commits are almost entirely `fix:` commits 
 - Improvement path: Use `payloadJSON.length * 2` (UTF-16 estimate) or `Buffer.byteLength` in the Jest/Node test environment instead of allocating a Blob.
 
 **Heartbeat/interval proliferation:**
-- Problem: Heartbeat `setInterval`/`setTimeout` in `BaseWebSocketConnection.ts:30,62`; audio progress `setInterval` in `src/components/chat/ChatBubble.tsx:124`; recording timer in `src/components/chat/ChatInput.tsx:197`; cloud provisioning ticker in `src/components/cloud/CloudProvisioningCard.tsx:85`. None have `.unref()` (React Native ignores `unref`, so this is primarily a Jest-process concern).
-- Files: `src/services/websocket/BaseWebSocketConnection.ts`, `src/components/chat/ChatBubble.tsx`, `src/components/chat/ChatInput.tsx`, `src/components/cloud/CloudProvisioningCard.tsx`
+- Problem: Heartbeat `setInterval`/`setTimeout` in `BaseWebSocketConnection.ts:30,62`; audio progress `setInterval` in `src/components/chat/ChatBubble.tsx:124`; cloud provisioning ticker in `src/components/cloud/CloudProvisioningCard.tsx:85`. None have `.unref()` (React Native ignores `unref`, so this is primarily a Jest-process concern).
+- Files: `src/services/websocket/BaseWebSocketConnection.ts`, `src/components/chat/ChatBubble.tsx`, `src/components/cloud/CloudProvisioningCard.tsx`
 - Note: The known `setTimeout` without `.unref()` in `SyncService.sendSyncDataWithConfirmation` (line 1255) still produces the "worker process has failed to exit gracefully" Jest warning on every run (future-work item 17).
 
 ## Fragile Areas
