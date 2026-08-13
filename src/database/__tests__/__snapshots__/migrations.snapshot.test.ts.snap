@@ -1,7 +1,10 @@
 // Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`migration schema snapshot all migrations produce the expected schema 1`] = `
-"-- index: idx_character_image_primary
+"-- index: idx_character_image_comments_image
+CREATE INDEX idx_character_image_comments_image ON character_image_comments(image_id);
+
+-- index: idx_character_image_primary
 CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
 
 -- index: idx_character_image_profile
@@ -67,17 +70,32 @@ CREATE TABLE character_categories ( id TEXT PRIMARY KEY, name TEXT NOT NULL, dis
 -- table: character_category_members
 CREATE TABLE character_category_members ( profile_id TEXT NOT NULL REFERENCES character_profiles(id) ON DELETE CASCADE, category_id TEXT NOT NULL REFERENCES character_categories(id) ON DELETE CASCADE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (profile_id, category_id) );
 
+-- table: character_creators
+CREATE TABLE character_creators ( profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE, creator_user_id TEXT NOT NULL DEFAULT '', creator_display_name TEXT NOT NULL DEFAULT '', creator_avatar_url TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
 -- table: character_favorites
 CREATE TABLE character_favorites ( profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE, favorited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
 -- table: character_image
 CREATE TABLE "character_image" ( id TEXT PRIMARY KEY, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
 
+-- table: character_image_comments
+CREATE TABLE character_image_comments ( id TEXT PRIMARY KEY, image_id INTEGER NOT NULL REFERENCES character_image(id) ON DELETE CASCADE, author_user_id TEXT, author_display_name TEXT NOT NULL DEFAULT '', author_avatar_url TEXT, text TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
+-- table: character_image_likes
+CREATE TABLE character_image_likes ( image_id INTEGER PRIMARY KEY REFERENCES character_image(id) ON DELETE CASCADE, liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
+-- table: character_likes
+CREATE TABLE character_likes ( profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE, liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
 -- table: character_profile_sources
 CREATE TABLE character_profile_sources ( profile_id TEXT PRIMARY KEY, source TEXT NOT NULL DEFAULT 'community' CHECK (source IN ('user', 'community')), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
 -- table: character_profiles
 CREATE TABLE "character_profiles" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', base_prompt TEXT NOT NULL DEFAULT '', scenario TEXT NOT NULL DEFAULT '', typing_speed_wpm INTEGER NOT NULL DEFAULT 60, audio_response_chance_percent INTEGER NOT NULL DEFAULT 50, vision_config_id TEXT REFERENCES vision_configs(id) ON DELETE SET NULL, lifecycle_config TEXT NOT NULL DEFAULT '{}', deleted_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, first_mes TEXT NOT NULL DEFAULT '', mes_example TEXT NOT NULL DEFAULT '', alternate_greetings TEXT NOT NULL DEFAULT '', post_history_instructions TEXT NOT NULL DEFAULT '', creator_notes TEXT NOT NULL DEFAULT '', creator TEXT NOT NULL DEFAULT '', character_version TEXT NOT NULL DEFAULT '', nickname TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '', group_only_greetings TEXT NOT NULL DEFAULT '', extensions TEXT NOT NULL DEFAULT '', assets TEXT NOT NULL DEFAULT '', card_provenance TEXT NOT NULL DEFAULT '', character_book TEXT NOT NULL DEFAULT '' );
+
+-- table: character_saves
+CREATE TABLE character_saves ( profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE, saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
 -- table: cognition_configs
 CREATE TABLE "cognition_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, max_cognition_events INTEGER NOT NULL DEFAULT 20, generate_expressions INTEGER NOT NULL DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );

@@ -43,6 +43,11 @@ const CLIENT_ONLY_TABLES = new Set<string>([
   'character_categories',
   'character_category_members',
   'character_favorites',
+  'character_likes',
+  'character_saves',
+  'character_image_likes',
+  'character_image_comments',
+  'character_creators',
   'personas',
 ]);
 

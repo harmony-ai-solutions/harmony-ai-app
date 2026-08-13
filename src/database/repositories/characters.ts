@@ -12,6 +12,7 @@ import {CharacterProfile, CharacterImage, CharacterImageInfo} from '../models';
 import {uint8ArrayToBase64, createDataURL} from '../base64';
 import {loadTextColumn} from '../sync';
 import {generateId} from '../../utils/uuid';
+import {stripCopySuffix} from './entities';
 
 // ============================================================================
 // Character Profile CRUD Operations
@@ -977,14 +978,98 @@ export async function getCharacterCategories(): Promise<CharacterCategory[]> {
   const categories: CharacterCategory[] = [];
   for (let i = 0; i < results.rows.length; i++) {
     const row = results.rows.item(i);
-    categories.push({
-      id: row.id,
-      name: row.name,
-      displayOrder: row.display_order,
-    });
+      categories.push({
+        id: row.id,
+        name: row.name,
+        displayOrder: row.display_order,
+      });
+    }
+    return categories;
   }
-  return categories;
-}
+
+  // ============================================================================
+  // AI Profile helpers (copies + stats)
+  // ============================================================================
+
+  /**
+   * All character profiles that share the same copy base name as the given
+   * profile — i.e. "the other copies of the same AI character". Includes the
+   * profile itself (the screen filters it out). Groups "Max", "Max 2",
+   * "Max 3" together via stripCopySuffix.
+   */
+  export async function getSiblingCharacterProfiles(
+    profileName: string,
+  ): Promise<CharacterProfile[]> {
+    const base = stripCopySuffix(profileName).toLowerCase();
+    const all = await getAllCharacterProfiles();
+    return all.filter(
+      p => stripCopySuffix(p.name).toLowerCase() === base,
+    );
+  }
+
+  /** Aggregated social stats for an AI character. */
+  export interface CharacterStats {
+    /** Total emoji reactions received on messages sent by this character. */
+    likes: number;
+    /** Total phone interactions this character participates in. */
+    chats: number;
+  }
+
+  /**
+   * Compute "Likes" and "Chats" for an AI character entity.
+   *
+   *   - likes = sum of all reaction chips on messages SENT by this entity
+   *   - chats = how many chat sessions (interactions) were opened with this
+   *     character — one row per chat opened. The character always appears as a
+   *     PARTICIPANT (participant_ids contains its entity id); it is never the
+   *     interaction owner (entity_id is the user's impersonated identity). Each
+   *     distinct chat thread therefore counts once, regardless of how many text
+   *     messages were exchanged inside it.
+   */
+  export async function getCharacterStats(
+    entityId: string,
+  ): Promise<CharacterStats> {
+    const db = getDatabase();
+
+    // Count distinct chat sessions (interactions) this character participates
+    // in. participant_ids is a JSON array — parse it and require an EXACT
+    // element match so "Max" never counts chats that belong to "Max 2".
+    const [interactionResults] = await db.executeSql(
+      `SELECT participant_ids FROM interactions
+       WHERE presence_type = 'phone' AND deleted_at IS NULL`,
+    );
+    let chats = 0;
+    for (let i = 0; i < interactionResults.rows.length; i++) {
+      const raw = interactionResults.rows.item(i).participant_ids;
+      try {
+        const ids: unknown = JSON.parse(raw);
+        if (Array.isArray(ids) && ids.includes(entityId)) {
+          chats += 1;
+        }
+      } catch {
+        // Ignore malformed participant_ids
+      }
+    }
+
+    const [msgResults] = await db.executeSql(
+      `SELECT reactions_json FROM conversation_messages
+       WHERE sender_entity_id = ? AND deleted_at IS NULL
+         AND reactions_json IS NOT NULL AND reactions_json != ''`,
+      [entityId],
+    );
+    let likes = 0;
+    for (let i = 0; i < msgResults.rows.length; i++) {
+      const raw = msgResults.rows.item(i).reactions_json;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) likes += parsed.length;
+      } catch {
+        // Ignore malformed reactions_json
+      }
+    }
+
+    return { likes, chats };
+  }
 
 /**
  * Create a new category. Returns the created category.

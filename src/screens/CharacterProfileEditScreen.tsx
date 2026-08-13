@@ -25,6 +25,7 @@ import RNFS from 'react-native-fs';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
@@ -62,6 +63,7 @@ import { getActiveInteractionsByEntity } from '../database/repositories/interact
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
 import { CharacterProfile, CharacterImage } from '../database/models';
+import { setCharacterCreator } from '../database/repositories/characterSocial';
 import { createLogger } from '../utils/logger';
 import {
   exportProfileToCardV3,
@@ -82,6 +84,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
   const { withExternalFlow } = useBiometricLock();
+  const { user } = useAuth();
   const { t } = useTranslation('characters');
   const { bottom: safeBottom } = useSafeAreaInsets();
 
@@ -314,6 +317,21 @@ export const CharacterProfileEditScreen: React.FC = () => {
         });
         // Tag as user-created so it is hidden from the Discover community grid
         await setCharacterProfileSource(newId, 'user');
+
+        // Record the cloud user who created this AI (creator badge + the
+        // creator-only Edit Profile / Edit AI Settings buttons depend on it).
+        if (user?.id) {
+          try {
+            await setCharacterCreator({
+              profileId: newId,
+              creatorUserId: user.id,
+              creatorDisplayName: user.display_name || user.email?.split('@')[0] || 'Creator',
+              creatorAvatarUrl: user.avatar_url ?? null,
+            });
+          } catch (err) {
+            log.warn('Failed to record character creator:', err);
+          }
+        }
       }
       navigation.goBack();
     } catch (err) {

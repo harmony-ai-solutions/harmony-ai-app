@@ -178,25 +178,28 @@ export function stripCopySuffix(name: string): string {
 /**
  * Compute the next available "copy" alias for duplicating an AI partner.
  *
- * The copy number always reflects the count of copies: duplicating "Aria"
- * yields "Aria 02", duplicating that copy yields "Aria 03", and so on. Any
+ * The copy number always reflects the count of copies: duplicating "Max"
+ * yields "Max 2", duplicating that copy yields "Max 3", and so on. Any
  * copy-suffix on the input name is stripped first so the series continues from
- * the TRUE base name instead of producing "Aria 02 02".
+ * the TRUE base name instead of producing "Max 2 2".
  *
- * The original name itself is treated as the "01" slot, so the first copy is
- * always "<name> 02". Numbers are zero-padded to two digits.
+ * The original name itself is treated as the "1" slot, so the first copy is
+ * always "<name> 2". Numbers are NOT zero-padded — the user-visible copy name
+ * reads naturally ("Max 2"), even though older copies may still exist as
+ * "Max 02" (they are detected by the trailing-number regex and occupy their
+ * slot, so the series continues past them).
  *
  * Examples:
- *   - no copies yet                  → "Aria 02"
- *   - "Aria 02" exists               → "Aria 03"
- *   - duplicating "Aria 02"          → "Aria 03" (continues the series)
- *   - "Aria" + "Aria 05" exist       → "Aria 02" (holes are not re-used)
- *   - "Aria" + "Aria 2" exist        → "Aria 03"
+ *   - no copies yet                  → "Max 2"
+ *   - "Max 02" exists                → "Max 3"
+ *   - duplicating "Max 2"            → "Max 3" (continues the series)
+ *   - "Max" + "Max 05" exist         → "Max 2" (holes are not re-used)
+ *   - "Max" + "Max 2" exist          → "Max 3"
  */
 export async function getNextEntityAliasCopy(baseName: string): Promise<string> {
   const db = getDatabase();
 
-  // Recover the true base when the source is itself a copy ("Aria 02" → "Aria").
+  // Recover the true base when the source is itself a copy ("Max 02" → "Max").
   const base = stripCopySuffix(baseName);
   const lowerBase = base.toLowerCase();
 
@@ -210,13 +213,14 @@ export async function getNextEntityAliasCopy(baseName: string): Promise<string> 
     const alias = String(results.rows.item(i).alias ?? '').trim();
     const lowerAlias = alias.toLowerCase();
 
-    // Exact match (original) occupies slot 01.
+    // Exact match (original) occupies slot 1.
     if (lowerAlias === lowerBase) {
       takenNumbers.add(1);
       continue;
     }
 
-    // "Aria 02" / "aria-02" / "Aria 2" — capture the trailing number.
+    // "Aria 02" / "aria-02" / "Aria 2" — capture the trailing number
+    // (padded or not — both occupy their numeric slot).
     const prefix = lowerAlias.startsWith(lowerBase) ? lowerAlias.slice(lowerBase.length) : '';
     const match = prefix.match(/^[\s-_]+(\d+)$/);
     if (match) {
@@ -231,7 +235,7 @@ export async function getNextEntityAliasCopy(baseName: string): Promise<string> 
   while (takenNumbers.has(next)) {
     next += 1;
   }
-  return `${base} ${String(next).padStart(2, '0')}`;
+  return `${base} ${next}`;
 }
 
 /**

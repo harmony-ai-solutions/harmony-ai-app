@@ -1,9 +1,12 @@
 /**
- * ProfileTabs — icon-only tab bar for the My Profile screen.
+ * ProfileTabs — icon-only tab bar for profile screens.
  *
- * A horizontal bar with three icon-only tabs (no text labels). The active
- * tab is highlighted with an accent underline indicator beneath its icon.
- * Used to switch between the Posts / Favorites / Personas content grids.
+ * A horizontal bar with icon-only tabs (no text labels). The active tab is
+ * highlighted with an accent underline indicator beneath its icon.
+ *
+ * The tab key type is generic so the same component powers both the user's
+ * My Profile screen (Posts / Favorites / Personas) and the AI character
+ * profile screen (Images / Copies).
  */
 
 import React from 'react';
@@ -12,10 +15,11 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { hapticLightPress } from '../../utils/haptics';
 
-export type ProfileTabKey = 'posts' | 'favorites' | 'personas';
+/** Tab keys used by the user's My Profile screen. */
+export type ProfileTabKey = 'posts' | 'saved' | 'personas';
 
-export interface ProfileTabDef {
-  key: ProfileTabKey;
+export interface ProfileTabDef<T extends string = ProfileTabKey> {
+  key: T;
   /** MaterialCommunityIcons name when the tab is inactive */
   icon: string;
   /** MaterialCommunityIcons name when the tab is active (optional) */
@@ -24,21 +28,21 @@ export interface ProfileTabDef {
   label: string;
 }
 
-interface ProfileTabsProps {
-  active: ProfileTabKey;
-  onChange: (key: ProfileTabKey) => void;
+interface ProfileTabsProps<T extends string> {
+  active: T;
+  onChange: (key: T) => void;
   /** Ordered tab definitions — rendered left to right */
-  tabs: ProfileTabDef[];
+  tabs: ProfileTabDef<T>[];
   /** testID prefix for each tab button: `<prefix>-<key>` */
   testIDPrefix?: string;
 }
 
-export const ProfileTabs: React.FC<ProfileTabsProps> = ({
+export const ProfileTabs = <T extends string>({
   active,
   onChange,
   tabs,
   testIDPrefix = 'profile-tab',
-}) => {
+}: ProfileTabsProps<T>) => {
   const { theme } = useAppTheme();
 
   if (!theme) return null;

@@ -10,6 +10,7 @@ import { MainTabNavigator, MainTabParamList } from './MainTabNavigator';
 import { LandingScreen } from '../screens/LandingScreen';
 import { ChatDetailScreen } from '../screens/ChatDetailScreen';
 import { CharacterProfileEditScreen } from '../screens/CharacterProfileEditScreen';
+import { AIProfileScreen } from '../screens/AIProfileScreen';
 import { CreateAIScreen } from '../screens/CreateAIScreen';
 import { EntityConfigScreen } from '../screens/EntityConfigScreen';
 import { EntityConfigEditScreen } from '../screens/EntityConfigEditScreen';
@@ -53,6 +54,8 @@ export type RootStackParamList = {
     entityName?: string;
   };
   CharacterProfileEdit: { profileId?: string };
+  /** AI Profile — the AI character's own profile page (mirrors My Profile). */
+  AIProfile: { profileId: string };
   /** prefillProfileId = link an existing profile; duplicateProfileId = full copy (new profile + entity + settings) */
   CreateAI: { prefillProfileId?: string; duplicateProfileId?: string };
   EntityConfig: undefined;
@@ -135,6 +138,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           name="CharacterProfileEdit"
           component={CharacterProfileEditScreen}
         />
+        <Stack.Screen name="AIProfile" component={AIProfileScreen} />
         <Stack.Screen name="CreateAI" component={CreateAIScreen} />
         <Stack.Screen name="EntityConfig" component={EntityConfigScreen} />
         <Stack.Screen

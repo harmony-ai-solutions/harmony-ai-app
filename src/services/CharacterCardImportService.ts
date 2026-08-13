@@ -19,6 +19,7 @@ import {
   createCharacterImage,
   setCharacterProfileSource,
 } from '../database/repositories/characters';
+import { setCharacterCreator } from '../database/repositories/characterSocial';
 import { base64ToUint8Array } from '../database/base64';
 import { createLogger } from '../utils/logger';
 
@@ -125,12 +126,20 @@ const log = createLogger('[CharacterCardImportService]');
  *
  * @param uri  Local file URI (e.g. from a document picker).
  * @param mime MIME type of the picked file (may be empty).
+ * @param creator Optional cloud-user info to record as the character creator
+ *                (drives the creator badge + creator-only edit buttons). When
+ *                omitted, no creator is recorded for the imported card.
  * @throws CharacterCardImportError on known import failures.
  * @throws Database errors propagate directly (caller's catch handles them).
  */
 export async function importCharacterCardFromFile(
   uri: string,
   mime: string,
+  creator?: {
+    creatorUserId: string;
+    creatorDisplayName: string;
+    creatorAvatarUrl: string | null;
+  },
 ): Promise<ImportResult> {
   // Step 1: Validate URI
   if (!uri) {
@@ -208,6 +217,16 @@ export async function importCharacterCardFromFile(
     // 'user' so they do not appear on THIS user's Discover grid. They still
     // sync up to the engine and will appear on OTHER users' Discover grids.
     await setCharacterProfileSource(mapped.profile.id, 'user');
+    if (creator) {
+      try {
+        await setCharacterCreator({
+          profileId: mapped.profile.id,
+          ...creator,
+        });
+      } catch (err) {
+        log.warn('Failed to record character creator:', err);
+      }
+    }
     if (mapped.image) {
       await createCharacterImage(mapped.image);
     }

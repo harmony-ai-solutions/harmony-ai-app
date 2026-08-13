@@ -46,6 +46,7 @@ const log = createLogger('[CreateAIScreen]');
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
@@ -64,6 +65,7 @@ import {
   getCharacterImages,
   setCharacterProfileSource,
 } from '../database/repositories/characters';
+import { setCharacterCreator } from '../database/repositories/characterSocial';
 import {
   createEntity,
   createEntityModuleMapping,
@@ -101,6 +103,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
   const { withExternalFlow } = useBiometricLock();
+  const { user } = useAuth();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('createAI');
 
@@ -432,6 +435,21 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         // Tag as user-created so it is hidden from the Discover community grid
         await setCharacterProfileSource(profileId, 'user');
 
+        // Record the cloud user who created this AI (creator badge + the
+        // creator-only Edit Profile / Edit AI Settings buttons depend on it).
+        if (user?.id) {
+          try {
+            await setCharacterCreator({
+              profileId,
+              creatorUserId: user.id,
+              creatorDisplayName: user.display_name || user.email?.split('@')[0] || 'Creator',
+              creatorAvatarUrl: user.avatar_url ?? null,
+            });
+          } catch (err) {
+            log.warn('Failed to record character creator:', err);
+          }
+        }
+
         // 2. Add avatar image if selected (only for newly created profiles)
         if (avatarBase64 && avatarMimeType) {
           const now = new Date();
@@ -523,12 +541,22 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         deleted_at: null,
       });
 
-      // 6. Push the new entity (and its profile/mapping) to the engine and WAIT
-      //    for the sync to complete before navigating. Without this, the engine
-      //    doesn't know about the entity yet when ChatDetail sends INIT_ENTITY,
-      //    so it rejects with entity_not_defined (chat stuck on "Connecting...").
+      // 6. Push the new entity (and its profile/mapping) to the engine.
+      //    When starting a chat we wait briefly so INIT_ENTITY succeeds (the
+      //    engine rejects with entity_not_defined if it doesn't know the entity
+      //    yet). For save-only we fire-and-forget — a full syncAndWait here can
+      //    block the save for up to 45s (e.g. the engine waiting on a size-
+      //    estimate confirmation), which made saving feel like it "takes
+      //    forever". The entity is persisted locally either way; any leftover
+      //    engine state is picked up by the next opportunistic sync.
       try {
-        await syncService.syncAndWait({ timeoutMs: 45_000 });
+        if (navigateToChat) {
+          await syncService.syncAndWait({ timeoutMs: 12_000 });
+        } else {
+          syncService.initiateSync().catch(syncErr => {
+            log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
+          });
+        }
       } catch (syncErr) {
         log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
       }
@@ -915,6 +943,18 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
             {showAdvanced && (
               <View style={styles.sectionContent}>
+                {/* "No config selected — Soulbits Cloud defaults" — shown at the
+                    TOP of the Advanced section (before any module pickers) so the
+                    user sees it before choosing configs, not buried at the bottom. */}
+                {!anyConfigSelected() && hasAnyConfigs !== null && (
+                  <View style={styles.defaultHint}>
+                    <Icon name="creation" size={14} color={accent} />
+                    <ThemedText size={12} variant="muted" style={styles.defaultHintText}>
+                      {t('defaultConfigNote')}
+                    </ThemedText>
+                  </View>
+                )}
+
                 {/* Loading indicator (only while first load is in flight) */}
                 {hasAnyConfigs === null && (
                   <View style={styles.loadingRow}>
@@ -1005,14 +1045,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                   isLoading={hasAnyConfigs === null}
                 />
 
-                {!anyConfigSelected() && hasAnyConfigs !== null && (
-                  <View style={styles.defaultHint}>
-                    <Icon name="creation" size={14} color={accent} />
-                    <ThemedText size={12} variant="muted" style={styles.defaultHintText}>
-                      {t('defaultConfigNote')}
-                    </ThemedText>
-                  </View>
-                )}
               </View>
             )}
           </ThemedCard>

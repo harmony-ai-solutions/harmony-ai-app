@@ -37,6 +37,12 @@ interface CreatePartnerModalProps {
   onFromExisting: () => void;
   /** Import a character card (PNG / JSON) */
   onImport: () => void;
+  /**
+   * True when the user has at least one existing character profile. The
+   * "From an Existing One" action is hidden entirely when false — there is
+   * nothing to build on.
+   */
+  hasExistingProfiles?: boolean;
 }
 
 export const CreatePartnerModal: React.FC<CreatePartnerModalProps> = ({
@@ -45,6 +51,7 @@ export const CreatePartnerModal: React.FC<CreatePartnerModalProps> = ({
   onNewPartner,
   onFromExisting,
   onImport,
+  hasExistingProfiles = true,
 }) => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
@@ -154,38 +161,40 @@ export const CreatePartnerModal: React.FC<CreatePartnerModalProps> = ({
                   <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  onPress={() => handleAction(onFromExisting)}
-                  activeOpacity={0.7}
-                  style={[
-                    styles.actionRow,
-                    {
-                      backgroundColor: theme.colors.background.base + '55',
-                      borderColor: theme.colors.border.default + '66',
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('fromExistingProfile')}
-                  testID="from-existing-profile"
-                >
-                  <View
+                {hasExistingProfiles && (
+                  <TouchableOpacity
+                    onPress={() => handleAction(onFromExisting)}
+                    activeOpacity={0.7}
                     style={[
-                      styles.actionIcon,
-                      { backgroundColor: hexToRgba(accent, 0.15) },
+                      styles.actionRow,
+                      {
+                        backgroundColor: theme.colors.background.base + '55',
+                        borderColor: theme.colors.border.default + '66',
+                      },
                     ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('fromExistingProfile')}
+                    testID="from-existing-profile"
                   >
-                    <Icon name="account-multiple-outline" size={20} color={accent} />
-                  </View>
-                  <View style={styles.actionText}>
-                    <ThemedText size={15} variant="primary" weight="bold">
-                      {t('fromExistingProfile')}
-                    </ThemedText>
-                    <ThemedText size={12} variant="muted">
-                      {t('fromExistingProfileHint')}
-                    </ThemedText>
-                  </View>
-                  <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
-                </TouchableOpacity>
+                    <View
+                      style={[
+                        styles.actionIcon,
+                        { backgroundColor: hexToRgba(accent, 0.15) },
+                      ]}
+                    >
+                      <Icon name="account-multiple-outline" size={20} color={accent} />
+                    </View>
+                    <View style={styles.actionText}>
+                      <ThemedText size={15} variant="primary" weight="bold">
+                        {t('fromExistingProfile')}
+                      </ThemedText>
+                      <ThemedText size={12} variant="muted">
+                        {t('fromExistingProfileHint')}
+                      </ThemedText>
+                    </View>
+                    <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
                   onPress={() => handleAction(onImport)}

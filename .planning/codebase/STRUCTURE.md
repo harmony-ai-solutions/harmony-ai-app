@@ -53,11 +53,11 @@ harmony-ai-app/                        # React Native app (bare RN 0.86, TypeScr
 ## Directory Purposes
 
 **src/components:**
-- Purpose: Reusable, feature-sliced UI components. Subfolders: `themed/` (design-system primitives: `ThemedText.tsx`, `ThemedButton.tsx`, `ThemedCard.tsx`, `ThemedView.tsx`, `ThemedAppbar.tsx`, `ThemedFab.tsx`, `ScreenHeader.tsx`, `SectionHeader.tsx`), `chat/`, `emoji/`, `modals/`, `settings/`, `background/`, `characters/`, `cloud/`, `config/`, `entities/`, `landing/`, `lock/`, `navigation/` (`GlassTabBar.tsx`, `HeaderMenuButton.tsx`), `profile/` (`ProfileAvatar.tsx`, `PersonaRow.tsx`, `ProfileTabs.tsx`), `sync/`, `database/` (`DatabaseLoadingScreen.tsx`), plus `ErrorBoundary.tsx`.
+- Purpose: Reusable, feature-sliced UI components. Subfolders: `themed/` (design-system primitives: `ThemedText.tsx`, `ThemedButton.tsx`, `ThemedCard.tsx`, `ThemedView.tsx`, `ThemedAppbar.tsx`, `ThemedFab.tsx`, `ScreenHeader.tsx`, `SectionHeader.tsx`), `chat/`, `emoji/`, `modals/`, `settings/`, `background/`, `characters/` (incl. `ImageCommentModal.tsx` — comment sheet for AI image posts), `cloud/`, `config/`, `entities/`, `landing/`, `lock/`, `navigation/` (`GlassTabBar.tsx`, `HeaderMenuButton.tsx`), `profile/` (`ProfileAvatar.tsx`, `PersonaRow.tsx`, `ProfileTabs.tsx`), `sync/`, `database/` (`DatabaseLoadingScreen.tsx`), plus `ErrorBoundary.tsx`.
 - Key files: `src/components/themed/ThemedButton.tsx`, `src/components/navigation/GlassTabBar.tsx`, `src/components/modals/InitialPairingModal.tsx`, `src/components/background/DynamicBackground.tsx`, `src/components/ErrorBoundary.tsx`.
 
 **src/screens:**
-- Purpose: Route-level components. Top-level: `DiscoverScreen.tsx`, `ChatListScreen.tsx` (tab "Chat"), `CharactersScreen.tsx`, `MyProfileScreen.tsx` (tab "My Profile"), `SettingsScreen.tsx`, `ChatDetailScreen.tsx`, `CreateAIScreen.tsx`, `EntityConfigScreen.tsx`, `EntityConfigEditScreen.tsx`, `CharacterProfileEditScreen.tsx`, `EditProfileScreen.tsx`, `PersonaEditScreen.tsx`, `AIConfigScreen.tsx`, `LandingScreen.tsx` (legacy).
+- Purpose: Route-level components. Top-level: `DiscoverScreen.tsx`, `ChatListScreen.tsx` (tab "Chat"), `CharactersScreen.tsx`, `MyProfileScreen.tsx` (tab "My Profile"), `SettingsScreen.tsx`, `ChatDetailScreen.tsx`, `CreateAIScreen.tsx`, `EntityConfigScreen.tsx`, `EntityConfigEditScreen.tsx`, `CharacterProfileEditScreen.tsx`, `EditProfileScreen.tsx`, `PersonaEditScreen.tsx`, `AIConfigScreen.tsx`, `AIProfileScreen.tsx` (AI character profile with Chat/Like/Save + Images-as-posts), `LandingScreen.tsx` (legacy).
 - Subfolders: `auth/` (`LoginScreen.tsx`, `RegisterScreen.tsx`, `VerifyPrompt.tsx`), `settings/` (13 subpages incl. `SyncSettingsScreen.tsx`, `ThemeSettingsScreen.tsx`, `BiometricLockSettingsScreen.tsx`, `EmojiActionEditorScreen.tsx`, `ComingSoonScreen.tsx`), `setup/` (`ConnectionSetupScreen.tsx`), `config/` (`ModuleConfigEditScreen.tsx`), `development/` (`DatabaseTableViewerScreen.tsx` — DEV-only).
 
 **src/contexts:**
@@ -65,13 +65,13 @@ harmony-ai-app/                        # React Native app (bare RN 0.86, TypeScr
 - Key files: `src/contexts/SyncConnectionContext.tsx`, `src/contexts/ThemeContext.tsx`.
 
 **src/services:**
-- Purpose: Singleton business-logic services (EventEmitter-based). Root: `SyncService.ts` (1746 lines), `EntitySessionService.ts` (1449 lines), `ConnectionStateManager.ts`, `AudioPlayer.ts`, `AudioRecorder.ts`, `BiometricLockService.ts`, `CharacterCardImportService.ts`, `ChatPreferencesService.ts`, `EmojiService.ts`, `EntityEmojiActionService.ts`, `syncNameClash.ts`.
+- Purpose: Singleton business-logic services (EventEmitter-based). Root: `SyncService.ts` (1746 lines), `EntitySessionService.ts` (1449 lines), `ConnectionStateManager.ts`, `AudioPlayer.ts`, `AudioRecorder.ts`, `BiometricLockService.ts`, `CharacterCardImportService.ts`, `CharacterChatService.ts` (shared "open chat with character" helper), `ChatPreferencesService.ts`, `EmojiService.ts`, `EntityEmojiActionService.ts`, `syncNameClash.ts`.
 - Subfolders: `auth/` (`AuthService.ts`, `authFetch.ts`, `googleSignIn.ts`, `appleSignIn.ts`, `tokenStorage.ts`), `cloud/` (`CloudSessionService.ts`, `soulbitsClient.ts`, `soulbitsModelsCatalog.ts`, `soulbitsTokenSync.ts`), `connection/` (`ConnectionManager.ts`, `createWebSocket.ts`), `websocket/` (interface + factory + 4 mode implementations).
 - Key files: `src/services/SyncService.ts`, `src/services/connection/ConnectionManager.ts`, `src/services/auth/AuthService.ts`.
 
 **src/database:**
 - Purpose: Data layer. Root modules: `connection.ts` (open/close/WAL/secondary sync connection), `migrations.ts`, `models.ts` (TS interfaces mirroring Go structs), `sync.ts` (serialization/chunking), `transaction.ts`, `types.ts`, `reactNativeDatabase.ts`, `index.ts` (barrel).
-- Subfolders: `migrations/` (36 files `000001_…` → `000036_backfill_character_profile_source`), `repositories/` (per-table modules + `providers/` with 16 per-provider repos), `__tests__/`, `__test_utils__/` (`testDatabase.ts`, `nodeDatabase.ts`, `dumpSchema.ts`).
+- Subfolders: `migrations/` (41 files `000001_…` → `000041_add_character_social`), `repositories/` (per-table modules incl. `characterSocial.ts` — client-only likes/saves/image-comments/creators + `providers/` with 16 per-provider repos), `__tests__/`, `__test_utils__/` (`testDatabase.ts`, `nodeDatabase.ts`, `dumpSchema.ts`).
 - Key files: `src/database/connection.ts`, `src/database/index.ts`, `src/database/migrations.ts`, `src/database/repositories/interactions.ts`.
 
 **src/theme:**

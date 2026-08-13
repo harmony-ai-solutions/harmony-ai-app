@@ -1,0 +1,942 @@
+/**
+ * AIProfileScreen — profile page for an AI character.
+ *
+ * Mirrors the user's My Profile screen but for the AI partner itself:
+ *   - Header: AI name + description + avatar (top-right)
+ *   - Creator badge (creator avatar + name) under the AI name → opens the
+ *     creator's profile page (My Profile tab) when tapped
+ *   - Primary Chat button + small rounded Like / Save buttons
+ *   - Creator-only pill row: Edit Profile + Edit AI Settings (hidden from
+ *     other users — they are forbidden from editing characters they don't own)
+ *   - Stats row: Likes · Chats (Likes counts profile likes + image likes)
+ *   - Icon-only tab bar: Images | Copies
+ *   - Images tab: every gallery image (including the avatar) rendered as a
+ *     POST with like + comment buttons — any user can interact, read the
+ *     others' comments, and see the like count
+ *   - Copies tab: the other copies of the same AI character (same base name),
+ *     tappable to open their own profile
+ *
+ * Reached from the Characters screen by tapping an AI character card.
+ */
+
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  RefreshControl,
+  TouchableOpacity,
+  Image,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
+import { useTranslation } from 'react-i18next';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useAppTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/AppToastContext';
+import { ThemedView } from '../components/themed/ThemedView';
+import { ThemedText } from '../components/themed/ThemedText';
+import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
+import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
+import { hapticLightPress } from '../utils/haptics';
+import { ProfileAvatar } from '../components/profile/ProfileAvatar';
+import { ProfileTabs } from '../components/profile/ProfileTabs';
+import { ImageCommentModal } from '../components/characters/ImageCommentModal';
+import {
+  getCharacterProfile,
+  getCharacterImages,
+  getSiblingCharacterProfiles,
+  getCharacterStats,
+  CharacterStats,
+} from '../database/repositories/characters';
+import { getEntityByCharacterProfileId } from '../database/repositories/entities';
+import {
+  isCharacterLiked,
+  toggleCharacterLike,
+  getCharacterLikesCount,
+  isCharacterSaved,
+  toggleCharacterSave,
+  isImageLiked,
+  toggleImageLike,
+  getImageLikesCount,
+  getImageCommentsCount,
+  getCharacterCreator,
+  isCharacterCreator,
+  CharacterCreator,
+} from '../database/repositories/characterSocial';
+import { openCharacterChat } from '../services/CharacterChatService';
+import { createDataURL } from '../database/base64';
+import { CharacterProfile, CharacterImage } from '../database/models';
+import { RootStackParamList } from '../navigation/AppNavigator';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('[AIProfileScreen]');
+
+type Nav = NativeStackNavigationProp<RootStackParamList>;
+type Route = RouteProp<RootStackParamList, 'AIProfile'>;
+
+type AITabKey = 'images' | 'copies';
+
+/** Per-image interaction state for the Images posts tab. */
+interface ImagePostState {
+  liked: boolean;
+  likes: number;
+  commentCount: number;
+}
+
+export const AIProfileScreen: React.FC = () => {
+  const { theme } = useAppTheme();
+  const { bottom: safeBottom } = useSafeAreaInsets();
+  const navigation = useNavigation<Nav>();
+  const route = useRoute<Route>();
+  const { t } = useTranslation('profile');
+  const { user } = useAuth();
+  const { showToast } = useToast();
+
+  const { profileId } = route.params;
+
+  // ── Data state ─────────────────────────────────────────────────────────
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<AITabKey>('images');
+  const [profile, setProfile] = useState<CharacterProfile | null>(null);
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [images, setImages] = useState<CharacterImage[]>([]);
+  const [copies, setCopies] = useState<CharacterProfile[]>([]);
+  const [copiesAvatars, setCopiesAvatars] = useState<Record<string, string | null>>({});
+  const [stats, setStats] = useState<CharacterStats>({ likes: 0, chats: 0 });
+  const [loaded, setLoaded] = useState(false);
+
+  // ── Social state ───────────────────────────────────────────────────────
+  const [profileLiked, setProfileLiked] = useState(false);
+  const [profileLikes, setProfileLikes] = useState(0);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [creator, setCreator] = useState<CharacterCreator | null>(null);
+  const [isOwner, setIsOwner] = useState(false);
+  const [imagePosts, setImagePosts] = useState<Record<number, ImagePostState>>({});
+
+  // ── Comment modal state ────────────────────────────────────────────────
+  const [commentImageId, setCommentImageId] = useState<number | null>(null);
+  const [commentVisible, setCommentVisible] = useState(false);
+  const [chatting, setChatting] = useState(false);
+
+  // ── Loaders ────────────────────────────────────────────────────────────
+  const loadProfile = useCallback(async () => {
+    try {
+      const data = await getCharacterProfile(profileId);
+      setProfile(data);
+      if (!data) return;
+
+      // Primary avatar + full gallery
+      const imgs = await getCharacterImages(profileId);
+      setImages(imgs);
+      const primary = imgs.find(img => img.is_primary === true);
+      setAvatarUri(
+        primary ? createDataURL(primary.image_data, primary.mime_type) : null,
+      );
+
+      // Other copies of the same AI (same base name, e.g. Max 2 / Max 3)
+      const siblings = await getSiblingCharacterProfiles(data.name);
+      const siblingCopies = siblings.filter(s => s.id !== profileId);
+      setCopies(siblingCopies);
+
+      // Load each copy's primary avatar for the Copies rows
+      try {
+        const avatarMap: Record<string, string | null> = {};
+        await Promise.all(
+          siblingCopies.map(async copy => {
+            try {
+              const copyImgs = await getCharacterImages(copy.id);
+              const copyPrimary = copyImgs.find(img => img.is_primary === true);
+              avatarMap[copy.id] = copyPrimary
+                ? createDataURL(copyPrimary.image_data, copyPrimary.mime_type)
+                : null;
+            } catch {
+              avatarMap[copy.id] = null;
+            }
+          }),
+        );
+        setCopiesAvatars(avatarMap);
+      } catch (err) {
+        log.warn('Failed to load copy avatars:', err);
+      }
+
+      // Likes + Chats stats via this character's entity
+      try {
+        const entity = await getEntityByCharacterProfileId(profileId);
+        if (entity) {
+          const s = await getCharacterStats(entity.id);
+          setStats(s);
+        }
+      } catch (err) {
+        log.warn('Failed to load character stats:', err);
+      }
+
+      // ── Social layer ────────────────────────────────────────────────────
+      try {
+        const [liked, likes, saved, characterCreator, owner] =
+          await Promise.all([
+            isCharacterLiked(profileId),
+            getCharacterLikesCount(profileId),
+            isCharacterSaved(profileId),
+            getCharacterCreator(profileId),
+            isCharacterCreator(profileId, user?.id),
+          ]);
+        setProfileLiked(liked);
+        setProfileLikes(likes);
+        setProfileSaved(saved);
+        setCreator(characterCreator);
+        setIsOwner(owner);
+      } catch (err) {
+        log.warn('Failed to load character social state:', err);
+      }
+
+      // Per-image post state (likes + comments)
+      try {
+        const postMap: Record<number, ImagePostState> = {};
+        await Promise.all(
+          imgs.map(async img => {
+            try {
+              const [liked, likes, comments] = await Promise.all([
+                isImageLiked(img.id),
+                getImageLikesCount(img.id),
+                getImageCommentsCount(img.id),
+              ]);
+              postMap[img.id] = { liked, likes, commentCount: comments };
+            } catch {
+              postMap[img.id] = { liked: false, likes: 0, commentCount: 0 };
+            }
+          }),
+        );
+        setImagePosts(postMap);
+      } catch (err) {
+        log.warn('Failed to load image post state:', err);
+      }
+    } catch (err) {
+      log.error('Failed to load AI profile:', err);
+    } finally {
+      setLoaded(true);
+    }
+  }, [profileId, user?.id]);
+
+  // Reload on focus (edits to the profile reflect immediately)
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+    }, [loadProfile]),
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadProfile();
+    setRefreshing(false);
+  }, [loadProfile]);
+
+  // ── Actions ────────────────────────────────────────────────────────────
+  const handleOpenEditProfile = () => {
+    navigation.navigate('CharacterProfileEdit', { profileId });
+  };
+
+  const handleOpenEditSettings = async () => {
+    try {
+      const entity = await getEntityByCharacterProfileId(profileId);
+      if (entity) {
+        navigation.navigate('EntityConfigEdit', { entityId: entity.id });
+      } else {
+        navigation.navigate('EntityConfig');
+      }
+    } catch (err) {
+      log.warn('Failed to resolve entity for settings:', err);
+      navigation.navigate('EntityConfig');
+    }
+  };
+
+  const handleChat = async () => {
+    if (!profile || chatting) return;
+    setChatting(true);
+    try {
+      await openCharacterChat(profile, {
+        navigateToChat: params => navigation.navigate('ChatDetail', params),
+      });
+    } catch (err) {
+      log.error('Failed to open chat:', err);
+      showToast(t('common:error'));
+    } finally {
+      setChatting(false);
+    }
+  };
+
+  const handleToggleLike = async () => {
+    if (!profile) return;
+    try {
+      const nowLiked = await toggleCharacterLike(profileId);
+      const likes = await getCharacterLikesCount(profileId);
+      setProfileLiked(nowLiked);
+      setProfileLikes(likes);
+      showToast(
+        nowLiked
+          ? t('aiLikedToast', { name: profile.name })
+          : t('aiUnlikedToast', { name: profile.name }),
+      );
+    } catch (err) {
+      log.warn('Failed to toggle like:', err);
+    }
+  };
+
+  const handleToggleSave = async () => {
+    if (!profile) return;
+    try {
+      const nowSaved = await toggleCharacterSave(profileId);
+      setProfileSaved(nowSaved);
+      showToast(
+        nowSaved
+          ? t('aiSavedToast', { name: profile.name })
+          : t('aiUnsavedToast', { name: profile.name }),
+      );
+    } catch (err) {
+      log.warn('Failed to toggle save:', err);
+    }
+  };
+
+  const handleToggleImageLike = async (img: CharacterImage) => {
+    try {
+      const nowLiked = await toggleImageLike(img.id);
+      const likes = await getImageLikesCount(img.id);
+      setImagePosts(prev => ({
+        ...prev,
+        [img.id]: {
+          liked: nowLiked,
+          likes,
+          commentCount: prev[img.id]?.commentCount ?? 0,
+        },
+      }));
+    } catch (err) {
+      log.warn('Failed to toggle image like:', err);
+    }
+  };
+
+  const handleOpenComments = (img: CharacterImage) => {
+    setCommentImageId(img.id);
+    setCommentVisible(true);
+  };
+
+  const handleCommentsClosed = useCallback(() => {
+    setCommentVisible(false);
+    setCommentImageId(null);
+    // Refresh the comment counts after the modal closes.
+    if (commentImageId != null) {
+      getImageCommentsCount(commentImageId)
+        .then(count => {
+          setImagePosts(prev => ({
+            ...prev,
+            [commentImageId]: {
+              liked: prev[commentImageId]?.liked ?? false,
+              likes: prev[commentImageId]?.likes ?? 0,
+              commentCount: count,
+            },
+          }));
+        })
+        .catch(() => {});
+    }
+  }, [commentImageId]);
+
+  const handleOpenCreator = () => {
+    // The only user-profile surface today is the "My Profile" tab. Tapping the
+    // creator badge navigates there (the creator == the current user whenever
+    // a creator record exists on this device, because creation is recorded
+    // only for locally-created characters).
+    navigation.navigate('MainTabs', { screen: 'MyProfile' });
+  };
+
+  if (!theme) return null;
+
+  const accent = theme.colors.accent.primary;
+  const resolvedName = (profile?.name || 'AI Character').trim();
+  const bioText = (profile?.description ?? '').trim();
+
+  // ── Tabs: Images (gallery) | Copies (other copies of this AI) ─────────
+  const tabs = [
+    {
+      key: 'images' as AITabKey,
+      icon: 'image-multiple-outline',
+      iconFocused: 'image-multiple',
+      label: t('aiImages'),
+    },
+    {
+      key: 'copies' as AITabKey,
+      icon: 'content-copy',
+      iconFocused: 'content-copy',
+      label: t('aiCopies'),
+    },
+  ];
+
+  const displayedLikes = profileLikes + stats.likes;
+
+  return (
+    <ThemedView variant="base" style={styles.container}>
+      <ScreenHeader title={resolvedName} onBack={() => navigation.goBack()} />
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom },
+        ]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[theme.colors.accent.primary]}
+            tintColor={theme.colors.accent.primary}
+            progressBackgroundColor={theme.colors.background.surface}
+          />
+        }
+      >
+        {!loaded ? (
+          <View style={styles.centered}>
+            <Icon name="account-circle-outline" size={40} color={theme.colors.text.muted} />
+          </View>
+        ) : !profile ? (
+          <ThemedEmptyState
+            icon="account-off-outline"
+            title={t('aiNotFound')}
+            subtitle={t('aiNotFoundHint')}
+            style={styles.empty}
+          />
+        ) : (
+          <>
+            {/* ── Header: name + bio left, avatar right ── */}
+            <View style={styles.header}>
+              <View style={styles.headerInfo}>
+                <ThemedText
+                  variant="primary"
+                  size={26}
+                  weight="bold"
+                  hierarchy="header"
+                  style={styles.displayName}
+                  numberOfLines={2}
+                >
+                  {resolvedName}
+                </ThemedText>
+
+                {/* Creator badge — small pill with the creator's avatar + name */}
+                {creator ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      hapticLightPress();
+                      handleOpenCreator();
+                    }}
+                    activeOpacity={0.7}
+                    style={styles.creatorBadge}
+                    testID="ai-profile-creator-badge"
+                    accessibilityRole="button"
+                    accessibilityLabel={t('aiCreatorBadge', {
+                      name: creator.creatorDisplayName,
+                    })}
+                  >
+                    <ProfileAvatar
+                      name={creator.creatorDisplayName || '?'}
+                      uri={creator.creatorAvatarUrl}
+                      size={20}
+                      showRing={false}
+                    />
+                    <ThemedText
+                      size={11}
+                      weight="medium"
+                      style={{ color: theme.colors.text.secondary }}
+                      numberOfLines={1}
+                    >
+                      {t('aiCreatorBadge', { name: creator.creatorDisplayName })}
+                    </ThemedText>
+                    <Icon
+                      name="chevron-right"
+                      size={14}
+                      color={theme.colors.text.muted}
+                    />
+                  </TouchableOpacity>
+                ) : null}
+
+                {/* Bio — clean left-aligned floating text */}
+                {bioText ? (
+                  <ThemedText
+                    variant="secondary"
+                    size={14}
+                    hierarchy="subtext"
+                    style={styles.bioText}
+                  >
+                    {bioText}
+                  </ThemedText>
+                ) : null}
+              </View>
+
+              {/* Avatar — top-right corner */}
+              <ProfileAvatar
+                name={resolvedName}
+                uri={avatarUri}
+                size={96}
+                testID="ai-profile-avatar"
+              />
+            </View>
+
+            {/* ── Action row: primary Chat + Like / Save ── */}
+            <View style={styles.actionsRow}>
+              {/* Primary Chat button — full-width, gradient */}
+              <TouchableOpacity
+                onPress={() => {
+                  hapticLightPress();
+                  handleChat();
+                }}
+                activeOpacity={0.85}
+                disabled={chatting}
+                style={styles.chatButton}
+                testID="ai-profile-chat-button"
+                accessibilityRole="button"
+                accessibilityLabel={t('aiChatButton')}
+              >
+                <Icon name="chat-processing" size={18} color="#fff" />
+                <ThemedText
+                  size={15}
+                  weight="bold"
+                  style={{ color: '#fff', letterSpacing: 0.3 }}
+                >
+                  {t('aiChatButton')}
+                </ThemedText>
+              </TouchableOpacity>
+
+              {/* Rounded Like button */}
+              <TouchableOpacity
+                onPress={() => {
+                  hapticLightPress();
+                  handleToggleLike();
+                }}
+                activeOpacity={0.7}
+                style={[
+                  styles.roundButton,
+                  profileLiked && styles.roundButtonActive,
+                ]}
+                testID="ai-profile-like-button"
+                accessibilityRole="button"
+                accessibilityLabel={t('aiLike')}
+              >
+                <Icon
+                  name={profileLiked ? 'heart' : 'heart-outline'}
+                  size={22}
+                  color={profileLiked ? '#ff5a7a' : theme.colors.text.secondary}
+                />
+              </TouchableOpacity>
+
+              {/* Rounded Save button */}
+              <TouchableOpacity
+                onPress={() => {
+                  hapticLightPress();
+                  handleToggleSave();
+                }}
+                activeOpacity={0.7}
+                style={[
+                  styles.roundButton,
+                  profileSaved && styles.roundButtonActive,
+                ]}
+                testID="ai-profile-save-button"
+                accessibilityRole="button"
+                accessibilityLabel={t('aiSave')}
+              >
+                <Icon
+                  name={profileSaved ? 'bookmark' : 'bookmark-outline'}
+                  size={22}
+                  color={profileSaved ? accent : theme.colors.text.secondary}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* ── Creator-only pills: Edit Profile + Edit AI Settings ── */}
+            {isOwner && (
+              <View style={styles.ownerRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLightPress();
+                    handleOpenEditProfile();
+                  }}
+                  activeOpacity={0.7}
+                  style={styles.ownerPill}
+                  testID="ai-profile-edit-button"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('aiEditProfile')}
+                >
+                  <Icon name="account-edit-outline" size={14} color={accent} />
+                  <ThemedText size={12} weight="medium" style={{ color: accent }}>
+                    {t('aiEditProfile')}
+                  </ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLightPress();
+                    handleOpenEditSettings();
+                  }}
+                  activeOpacity={0.7}
+                  style={styles.ownerPill}
+                  testID="ai-profile-edit-settings-button"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('aiEditSettings')}
+                >
+                  <Icon name="cog-outline" size={14} color={accent} />
+                  <ThemedText size={12} weight="medium" style={{ color: accent }}>
+                    {t('aiEditSettings')}
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* ── Stats row: Likes · Chats ── */}
+            <View style={styles.statsRow}>
+              <View style={styles.statItem}>
+                <ThemedText variant="primary" size={18} weight="bold" hierarchy="header">
+                  {displayedLikes}
+                </ThemedText>
+                <ThemedText variant="muted" size={12} hierarchy="caption">
+                  {t('aiLikes')}
+                </ThemedText>
+              </View>
+              <View style={styles.statItem}>
+                <ThemedText variant="primary" size={18} weight="bold" hierarchy="header">
+                  {stats.chats}
+                </ThemedText>
+                <ThemedText variant="muted" size={12} hierarchy="caption">
+                  {t('aiChats')}
+                </ThemedText>
+              </View>
+            </View>
+
+            {/* ── Tab bar — icon-only with active underline ── */}
+            <ProfileTabs active={activeTab} onChange={setActiveTab} tabs={tabs} />
+
+            {/* ── Content ── */}
+            <View style={styles.gridContent}>
+              {activeTab === 'images' &&
+                (images.length === 0 ? (
+                  <ThemedEmptyState
+                    icon="image-multiple-outline"
+                    title={t('aiImagesEmpty')}
+                    subtitle={t('aiImagesEmptyHint')}
+                    compact
+                    style={styles.gridEmpty}
+                  />
+                ) : (
+                  <View style={styles.postsWrap}>
+                    {images.map(img => {
+                      const post = imagePosts[img.id] ?? {
+                        liked: false,
+                        likes: 0,
+                        commentCount: 0,
+                      };
+                      return (
+                        <View key={img.id} style={styles.postCard}>
+                          <Image
+                            source={{ uri: createDataURL(img.image_data, img.mime_type) }}
+                            style={styles.postImage}
+                            resizeMode="cover"
+                          />
+                          <View style={styles.postActions}>
+                            <TouchableOpacity
+                              onPress={() => {
+                                hapticLightPress();
+                                handleToggleImageLike(img);
+                              }}
+                              activeOpacity={0.7}
+                              style={styles.postActionBtn}
+                              testID="ai-image-like-button"
+                              accessibilityRole="button"
+                              accessibilityLabel={t('aiLike')}
+                            >
+                              <Icon
+                                name={post.liked ? 'heart' : 'heart-outline'}
+                                size={20}
+                                color={
+                                  post.liked
+                                    ? '#ff5a7a'
+                                    : theme.colors.text.secondary
+                                }
+                              />
+                              <ThemedText size={12} variant="muted">
+                                {post.likes}
+                              </ThemedText>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => {
+                                hapticLightPress();
+                                handleOpenComments(img);
+                              }}
+                              activeOpacity={0.7}
+                              style={styles.postActionBtn}
+                              testID="ai-image-comment-button"
+                              accessibilityRole="button"
+                              accessibilityLabel={t('aiImageComments')}
+                            >
+                              <Icon
+                                name="comment-text-outline"
+                                size={20}
+                                color={theme.colors.text.secondary}
+                              />
+                              <ThemedText size={12} variant="muted">
+                                {post.commentCount}
+                              </ThemedText>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ))}
+
+              {activeTab === 'copies' &&
+                (copies.length === 0 ? (
+                  <ThemedEmptyState
+                    icon="content-copy"
+                    title={t('aiCopiesEmpty')}
+                    subtitle={t('aiCopiesEmptyHint')}
+                    compact
+                    style={styles.gridEmpty}
+                  />
+                ) : (
+                  <View style={styles.copiesWrap}>
+                    {copies.map(copy => (
+                      <TouchableOpacity
+                        key={copy.id}
+                        onPress={() => {
+                          hapticLightPress();
+                          // Updating the param re-runs useFocusEffect (the
+                          // loadProfile callback identity changes with profileId),
+                          // which reloads this screen for the chosen copy.
+                          navigation.setParams({ profileId: copy.id });
+                        }}
+                        activeOpacity={0.75}
+                        style={styles.copyRow}
+                        testID="ai-copy-row"
+                        accessibilityRole="button"
+                        accessibilityLabel={copy.name}
+                      >
+                        <ProfileAvatar
+                          name={copy.name}
+                          uri={copiesAvatars[copy.id] ?? null}
+                          size={40}
+                          showRing={false}
+                        />
+                        <ThemedText
+                          size={14}
+                          weight="medium"
+                          numberOfLines={1}
+                          style={styles.copyName}
+                        >
+                          {copy.name}
+                        </ThemedText>
+                        <Icon
+                          name="chevron-right"
+                          size={20}
+                          color={theme.colors.text.muted}
+                        />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ))}
+            </View>
+          </>
+        )}
+      </ScrollView>
+
+      {/* ── Image comment sheet ── */}
+      <ImageCommentModal
+        visible={commentVisible}
+        imageId={commentImageId}
+        characterName={resolvedName}
+        onClose={handleCommentsClosed}
+      />
+    </ThemedView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 16,
+  },
+  centered: {
+    paddingTop: 120,
+    alignItems: 'center',
+  },
+  empty: {
+    paddingTop: 120,
+  },
+  // ── Header ──
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingTop: 20,
+    paddingHorizontal: 16,
+    gap: 16,
+  },
+  headerInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  displayName: {
+    textAlign: 'left',
+  },
+  bioText: {
+    marginTop: 8,
+    lineHeight: 20,
+    textAlign: 'left',
+  },
+  // ── Creator badge ──
+  creatorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    maxWidth: '100%',
+  },
+  // ── Actions row ──
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 18,
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  chatButton: {
+    flex: 1,
+    height: 50,
+    borderRadius: 16,
+    backgroundColor: '#8f3ba7',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#8f3ba7',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 22,
+    elevation: 10,
+  },
+  roundButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roundButtonActive: {
+    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+  },
+  // ── Owner pills ──
+  ownerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 16,
+  },
+  ownerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#7c3aed' + '55',
+    backgroundColor: '#7c3aed' + '18',
+  },
+  // ── Stats ──
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    paddingHorizontal: 16,
+  },
+  statItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  // ── Grid ──
+  gridContent: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  gridEmpty: {
+    paddingTop: 40,
+  },
+  // ── Image posts ──
+  postsWrap: {
+    gap: 16,
+  },
+  postCard: {
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    overflow: 'hidden',
+  },
+  postImage: {
+    width: '100%',
+    aspectRatio: 1,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  postActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 4,
+  },
+  postActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  // ── Copies ──
+  copiesWrap: {
+    gap: 8,
+  },
+  copyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  copyName: {
+    flex: 1,
+  },
+});
+
+export default AIProfileScreen;

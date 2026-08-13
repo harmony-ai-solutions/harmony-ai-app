@@ -37,8 +37,13 @@ import {
   addCharacterToCategory,
   removeCharacterFromCategory,
   getCharacterProfileCategories,
+  getSiblingCharacterProfiles,
+  getCharacterStats,
 } from '../../repositories/characters';
-import type {CharacterImage} from '../../models';
+import {createEntity} from '../../repositories/entities';
+import {createInteraction} from '../../repositories/interactions';
+import {createConversationMessage} from '../../repositories/conversation_messages';
+import type {CharacterImage, Interaction} from '../../models';
 
 describe('characters repository', () => {
   const {getDb} = useFreshDatabase();
@@ -56,6 +61,26 @@ describe('characters repository', () => {
       voice_characteristics: '',
       base_prompt: '',
       scenario: '',
+      typing_speed_wpm: 60,
+      audio_response_chance_percent: 50,
+      vision_config_id: null,
+      lifecycle_config: '{}',
+    });
+  }
+
+  // Helper: create a profile with a specific name (for copy-grouping tests)
+  async function createNamedProfile(id: string, name: string) {
+    return createCharacterProfile({
+      id,
+      name,
+      description: '',
+      personality: '',
+      appearance: '',
+      backstory: '',
+      voice_characteristics: '',
+      base_prompt: null,
+      scenario: null,
+      example_dialogues: null,
       typing_speed_wpm: 60,
       audio_response_chance_percent: 50,
       vision_config_id: null,
@@ -563,6 +588,111 @@ describe('characters repository', () => {
 
       expect(await getCharacterCategoryMembers(cat.id)).not.toContain('cat-unassign-prof');
       expect(await getCharacterProfileCategories('cat-unassign-prof')).toEqual([]);
+    });
+  });
+
+  describe('getSiblingCharacterProfiles', () => {
+    it('groups copies of the same AI by base name', async () => {
+      await createNamedProfile('max', 'Max');
+      await createNamedProfile('max-2', 'Max 2');
+      await createNamedProfile('max-3', 'Max 3');
+      // Unrelated profile that merely starts with "Max"
+      await createNamedProfile('maximilian', 'Maximilian');
+
+      const siblings = await getSiblingCharacterProfiles('Max');
+      const names = siblings.map(s => s.name).sort();
+      expect(names).toEqual(['Max', 'Max 2', 'Max 3']);
+    });
+
+    it('returns only itself when no copies exist', async () => {
+      await createNamedProfile('luna', 'Luna');
+      const siblings = await getSiblingCharacterProfiles('Luna');
+      expect(siblings.map(s => s.name)).toEqual(['Luna']);
+    });
+  });
+
+  describe('getCharacterStats', () => {
+    function makeInteraction(id: string, entityId: string, participantIds: string[]): Interaction {
+      return {
+        id,
+        entity_id: entityId,
+        interaction_scope: 'private',
+        participant_key: `${entityId}+user`,
+        participant_ids: JSON.stringify(participantIds),
+        status: 'active',
+        started_at: '2026-01-01T00:00:00Z',
+        last_activity_at: '2026-01-01T00:00:00Z',
+        ended_at: null,
+        memory_id: null,
+        continued_interaction_id: null,
+        metadata: null,
+        summary: null,
+        presence_type: 'phone',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        deleted_at: null,
+      };
+    }
+
+    it('counts chat sessions the character participates in (exact element match)', async () => {
+      // Two chats opened WITH "Max" (Max + user)
+      await createInteraction(makeInteraction('i1', 'user', ['Max', 'user']));
+      await createInteraction(makeInteraction('i2', 'user', ['Max', 'user']));
+      // A chat with "Max 2" — must NOT count toward "Max"
+      await createInteraction(makeInteraction('i3', 'user', ['Max 2', 'user']));
+      // A chat with another partner — must not count
+      await createInteraction(makeInteraction('i4', 'user', ['Other', 'user']));
+
+      expect((await getCharacterStats('Max')).chats).toBe(2);
+    });
+
+    it('counts likes = total emoji reactions on messages sent by the character', async () => {
+      await createNamedProfile('max', 'Max');
+      await createEntity({
+        id: 'Max',
+        alias: 'Max',
+        character_profile_id: 'max',
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+      await createInteraction(makeInteraction('i5', 'user', ['Max', 'user']));
+
+      await createConversationMessage({
+        id: 'm1',
+        entity_id: 'Max',
+        sender_entity_id: 'Max',
+        interaction_id: 'i5',
+        content: 'hi',
+        audio_duration: null,
+        message_type: 'text',
+        emotional_state_bits: 0,
+        is_recon_followup: false,
+        is_edited: false,
+        edit_of_message_id: null,
+        reactions_json: '["❤️","👍"]',
+        reply_to_message_id: null,
+        is_pinned: false,
+      });
+      await createConversationMessage({
+        id: 'm2',
+        entity_id: 'Max',
+        sender_entity_id: 'Max',
+        interaction_id: 'i5',
+        content: 'again',
+        audio_duration: null,
+        message_type: 'text',
+        emotional_state_bits: 0,
+        is_recon_followup: false,
+        is_edited: false,
+        edit_of_message_id: null,
+        reactions_json: '["😂"]',
+        reply_to_message_id: null,
+        is_pinned: false,
+      });
+
+      const stats = await getCharacterStats('Max');
+      expect(stats.likes).toBe(3);
+      expect(stats.chats).toBe(1);
     });
   });
 });

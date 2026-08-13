@@ -43,6 +43,10 @@ import { hapticLightPress } from '../utils/haptics';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { ProfileTabs, ProfileTabKey, ProfileTabDef } from '../components/profile/ProfileTabs';
 import { getUserCharacterProfiles } from '../database/repositories/characters';
+import {
+  getSavedCharacterEntries,
+  SavedCharacterEntry,
+} from '../database/repositories/characterSocial';
 import { getAllPersonas, Persona } from '../database/repositories/personas';
 import { CharacterProfile } from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
@@ -77,6 +81,9 @@ export const MyProfileScreen: React.FC = () => {
   // Personas (entities linked to user-tagged profiles)
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [activePersonaId, setActivePersonaId] = useState<string | null>(null);
+
+  // Saved AI characters (My Profile > Saved tab)
+  const [savedCharacters, setSavedCharacters] = useState<SavedCharacterEntry[]>([]);
 
   const isAuthed = status === 'authenticated' && !!user;
 
@@ -115,6 +122,15 @@ export const MyProfileScreen: React.FC = () => {
     }
   }, []);
 
+  const loadSaved = useCallback(async () => {
+    try {
+      const entries = await getSavedCharacterEntries();
+      setSavedCharacters(entries);
+    } catch (err) {
+      log.error('Failed to load saved characters:', err);
+    }
+  }, []);
+
   // Reload on focus so edits (profile, persona, character) reflect immediately.
   // Also reset the tab back to Posts — the default — every time the screen is
   // focused, so returning to the profile never lands on a stale sub-tab.
@@ -124,14 +140,20 @@ export const MyProfileScreen: React.FC = () => {
       loadProfile();
       loadCharacters();
       loadPersonas();
-    }, [loadProfile, loadCharacters, loadPersonas]),
+      loadSaved();
+    }, [loadProfile, loadCharacters, loadPersonas, loadSaved]),
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([loadProfile(), loadCharacters(), loadPersonas()]);
+    await Promise.all([
+      loadProfile(),
+      loadCharacters(),
+      loadPersonas(),
+      loadSaved(),
+    ]);
     setRefreshing(false);
-  }, [loadProfile, loadCharacters, loadPersonas]);
+  }, [loadProfile, loadCharacters, loadPersonas, loadSaved]);
 
   // ── Persona actions ────────────────────────────────────────────────────
   const handleSetActivePersona = async (id: string) => {
@@ -164,7 +186,7 @@ export const MyProfileScreen: React.FC = () => {
 
   if (!theme) return null;
 
-  // Icon-only tabs — Posts (grid) | Favorites (bookmark) | Personas (user)
+  // Icon-only tabs — Posts (grid) | Saved (bookmark) | Personas (user)
   const tabs: ProfileTabDef[] = [
     {
       key: 'posts',
@@ -173,10 +195,10 @@ export const MyProfileScreen: React.FC = () => {
       label: t('tabPosts'),
     },
     {
-      key: 'favorites',
+      key: 'saved',
       icon: 'bookmark-outline',
       iconFocused: 'bookmark',
-      label: t('tabFavorites'),
+      label: t('tabSaved'),
     },
     {
       key: 'personas',
@@ -368,15 +390,52 @@ export const MyProfileScreen: React.FC = () => {
             />
           )}
 
-          {activeTab === 'favorites' && (
-            <ThemedEmptyState
-              icon="bookmark-outline"
-              title={t('tabFavoritesEmpty')}
-              subtitle={t('tabFavoritesEmptyHint')}
-              compact
-              style={styles.gridEmpty}
-            />
-          )}
+          {activeTab === 'saved' &&
+            (savedCharacters.length === 0 ? (
+              <ThemedEmptyState
+                icon="bookmark-outline"
+                title={t('tabFavoritesEmpty')}
+                subtitle={t('tabFavoritesEmptyHint')}
+                compact
+                style={styles.gridEmpty}
+              />
+            ) : (
+              <View style={styles.grid}>
+                {savedCharacters.map(entry => (
+                  <TouchableOpacity
+                    key={entry.profile.id}
+                    onPress={() => {
+                      hapticLightPress();
+                      navigation.navigate('AIProfile', {
+                        profileId: entry.profile.id,
+                      });
+                    }}
+                    activeOpacity={0.75}
+                    style={styles.gridItem}
+                    testID="profile-saved-ai-cell"
+                    accessibilityRole="button"
+                    accessibilityLabel={entry.profile.name}
+                  >
+                    <View style={styles.gridAvatarWrap}>
+                      <ProfileAvatar
+                        name={entry.profile.name}
+                        uri={entry.avatarUri}
+                        size={72}
+                        showRing={false}
+                      />
+                    </View>
+                    <ThemedText
+                      size={12}
+                      weight="medium"
+                      numberOfLines={1}
+                      style={styles.gridItemName}
+                    >
+                      {entry.profile.name}
+                    </ThemedText>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))}
 
           {activeTab === 'personas' &&
             (personas.length === 0 ? (

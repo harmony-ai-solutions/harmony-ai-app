@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { pick } from '@react-native-documents/picker';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
@@ -85,6 +86,7 @@ import ChatPreferencesService from '../services/ChatPreferencesService';
 import { resolvePersonaId } from '../database/repositories/personas';
 import { CharacterProfile } from '../database/models';
 import { CharacterCardImportError } from '../services/CharacterCardImportService';
+import { openCharacterChat } from '../services/CharacterChatService';
 import syncService from '../services/SyncService';
 
 function importMessageKey(code?: string): string {
@@ -163,6 +165,7 @@ export const CharactersScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
   const { withExternalFlow } = useBiometricLock();
+  const { user } = useAuth();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('characters');
 
@@ -400,65 +403,8 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
    */
   const handleChatPress = async (profile: CharacterProfile) => {
     try {
-      // 1. Resolve the persona we chat as (only personas — never AI
-      //    characters — are valid identities; falls back to 'user').
-      const storedId =
-        await ChatPreferencesService.getGlobalImpersonatedEntity();
-      const impersonatedEntityId = await resolvePersonaId(storedId);
-
-      // 2. Reuse an entity linked to this profile, or create one
-      let entity = await getEntityByCharacterProfileId(profile.id);
-      let createdNewEntity = false;
-      if (!entity) {
-        createdNewEntity = true;
-        const entityId = profile.name.trim();
-        entity = await createEntity({
-          id: entityId,
-          alias: profile.name.trim(),
-          character_profile_id: profile.id,
-          lifecycle_config: '{}',
-          rag_reindex_required: 1,
-        });
-        await createEntityModuleMapping({
-          entity_id: entityId,
-          backend_config_id: null,
-          cognition_config_id: null,
-          tts_config_id: null,
-          stt_config_id: null,
-          vision_config_id: null,
-          rag_config_id: null,
-          imagination_config_id: null,
-          movement_config_id: null,
-          deleted_at: null,
-        });
-      }
-
-      // 3. Push a NEWLY created entity to the engine BEFORE navigating.
-      //    ChatDetail sends INIT_ENTITY on mount; if the engine has not yet
-      //    ingested the entity it rejects with entity_not_defined and the chat
-      //    is stuck on "Connecting..." (same constraint documented in
-      //    CreateAIScreen). Existing entities are already known — no wait.
-      if (createdNewEntity) {
-        await syncService.syncAndWait({ timeoutMs: 15_000 }).catch(syncErr => {
-          log.warn('Auto-sync before chat failed (non-critical):', syncErr);
-        });
-      }
-
-      // 4. Derive chat params and navigate
-      const participantIds = [impersonatedEntityId ?? 'user', entity.id];
-      const scope = deriveScopeFromParticipants(participantIds);
-      const participantKey = deriveParticipantKey(
-        participantIds,
-        impersonatedEntityId ?? 'user',
-        scope,
-      );
-      const tempInteractionId = uuidv7();
-      navigation.navigate('ChatDetail', {
-        interactionId: tempInteractionId,
-        participantKey,
-        participantIds,
-        entityId: impersonatedEntityId ?? 'user',
-        entityName: profile.name,
+      await openCharacterChat(profile, {
+        navigateToChat: params => navigation.navigate('ChatDetail', params),
       });
     } catch (err) {
       log.error('Failed to open chat:', err);
@@ -574,13 +520,18 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   /** A profile was picked in the card picker. */
   const handlePickerSelect = (profile: CharacterProfile) => {
     setPickerVisible(false);
-    if (pickerMode === 'duplicate') {
-      // Full copy — new profile + entity + settings with an auto-numbered name.
-      navigation.navigate('CreateAI', { duplicateProfileId: profile.id });
-    } else {
-      // Link mode — reuse the existing character profile.
-      navigation.navigate('CreateAI', { prefillProfileId: profile.id });
-    }
+    // Both intents create a FULL COPY of the chosen character — same info,
+    // avatar and settings — with an auto-numbered name ("Max" → "Max 2").
+    navigation.navigate('CreateAI', { duplicateProfileId: profile.id });
+  };
+
+  /**
+   * Card tap → AI profile screen (the AI's own profile view, mirroring the
+   * user's My Profile screen: avatar, name, description, images / likes /
+   * chats tabs + other copies of the same AI).
+   */
+  const handleOpenAIProfile = (profile: CharacterProfile) => {
+    navigation.navigate('AIProfile', { profileId: profile.id });
   };
 
   const handleImportCard = async () => {
@@ -955,7 +906,7 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
             imageCount={imageCounts[item.id] ?? 0}
             isFavorite={favoriteIds.has(item.id)}
             onFavoriteToggle={() => handleToggleFavorite(item)}
-            onPress={() => openPicker('duplicate')}
+            onPress={() => handleOpenAIProfile(item)}
             onLongPress={() => handleLongPress(item)}
             onChatPress={() => handleChatPress(item)}
             onCreatorPress={handleCreatorPress}
@@ -992,6 +943,7 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
         onNewPartner={handleCreateNew}
         onFromExisting={handleFromExisting}
         onImport={handleImportCard}
+        hasExistingProfiles={profiles.length > 0}
       />
 
       {/* Card picker — duplicates an AI partner (card tap) or links one
