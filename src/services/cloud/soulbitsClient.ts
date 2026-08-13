@@ -23,7 +23,8 @@
  * the WebSocket layer — risking double-refreshes and, with rotating refresh
  * tokens, terminal logout. Keeping refresh in `AuthService` guarantees one
  * persisted, broadcast token. Consumers that receive a 401 must therefore call
- * `AuthService.refresh()` themselves (see `CloudSessionService._doConnect`).
+ * `AuthService.refresh()` themselves (see `CloudSessionService._runConnectLoop`,
+ * which re-builds the client with the freshest token before each connect).
  *
  * ── HOST RESOLUTION ───────────────────────────────────────────────────────
  * `cloudURL` is the **session-broker** host (`CLOUD_HOSTS.session`). In cloud

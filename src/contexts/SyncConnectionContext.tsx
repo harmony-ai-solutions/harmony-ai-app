@@ -564,24 +564,18 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
 
   // ── D-DEV-01: device-authorization gate ─────────────────────────────────
   // connect() 403 device_authorization_required → show the 6-digit email-code
-  // modal. Driven by the service event (emitted from any connect path: login
-  // bootstrap, auth:changed, reconnect) AND the 'deviceAuthRequired' status
-  // (belt and suspenders).
+  // modal. Driven solely by the 'deviceAuthRequired' status — the service sets
+  // it atomically in its catch block (single source of truth; the legacy
+  // service event was removed with the connect bypass).
   const [showDeviceAuth, setShowDeviceAuth] = useState(false);
   useEffect(() => {
-    const onDeviceAuthRequired = () => {
-      log.warn('Device authorization required — showing auth-code modal');
-      setShowDeviceAuth(true);
-    };
     const onStatus = (s: CloudSessionStatus) => {
       if (s === 'deviceAuthRequired') {
         setShowDeviceAuth(true);
       }
     };
-    cloudSessionService.on('device-auth-required', onDeviceAuthRequired);
     cloudSessionService.on('status', onStatus);
     return () => {
-      cloudSessionService.off('device-auth-required', onDeviceAuthRequired);
       cloudSessionService.off('status', onStatus);
     };
   }, []);

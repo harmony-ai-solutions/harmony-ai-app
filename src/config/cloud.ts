@@ -145,14 +145,12 @@ export const IS_DEV = IS_BETA;
 // Auth routes → auth-service; Session routes → session-broker.
 // In cloud both share the same hostname (API gateway routes by path).
 // In local dev they use separate ports.
-// ── Cloud session polling constants ────────────────────────────────────
-export const DEFAULT_CLOUD_RETRY_MS = 2000;
-export const MAX_PROVISIONING_ATTEMPTS = 95;
 
 // NOTE: Session-broker routes (/v1/session/connect, /disconnect) are no longer
 // listed here — they are reached via the first-party Soulbits API client
 // (createClient({ cloudURL: CLOUD_HOSTS.session })), which builds the URL from
-// its baseUrl. See src/services/cloud/CloudSessionService.ts.
+// its baseUrl. The provisioning poll budget lives in the client's
+// session.connectPoll (see src/services/cloud/CloudSessionService.ts).
 export const AUTH_ENDPOINTS = {
   login: `${AUTH_HOST}/v1/auth/login`,
   register: `${AUTH_HOST}/v1/auth/register`,
