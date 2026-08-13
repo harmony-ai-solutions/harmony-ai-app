@@ -396,7 +396,7 @@ export async function deleteEntity(
 /**
  * Normalize a module config ID for FK columns.
  *
- * Callers (CreateAIScreen / EntityConfigEditScreen) default their config
+ * Callers (CreateAIScreen — the single create + edit surface) default their config
  * selectors to '' ("Disabled") and pass `id ?? null`, which still yields ''
  * because '' is not nullish. Inserting '' into a column with a FOREIGN KEY to
  * a config table fails with SQLITE_CONSTRAINT_FOREIGNKEY (787). Coerce any

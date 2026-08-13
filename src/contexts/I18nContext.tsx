@@ -26,7 +26,6 @@ import settings from '../i18n/locales/en/settings.json';
 import connection from '../i18n/locales/en/connection.json';
 import theme from '../i18n/locales/en/theme.json';
 import profile from '../i18n/locales/en/profile.json';
-import entityConfig from '../i18n/locales/en/entityConfig.json';
 import modals from '../i18n/locales/en/modals.json';
 import database from '../i18n/locales/en/database.json';
 import config from '../i18n/locales/en/config.json';
@@ -80,7 +79,6 @@ const resources = {
     connection,
     theme,
     profile,
-    entityConfig,
     modals,
     database,
     config,
@@ -114,7 +112,6 @@ const i18nConfig: InitOptions = {
     'connection',
     'theme',
     'profile',
-    'entityConfig',
     'modals',
     'database',
     'config',

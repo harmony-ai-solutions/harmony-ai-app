@@ -20,8 +20,7 @@
   "following": "Following",
   "aiCharacters": "AI Characters",
 
-  "aiEditProfile": "Edit Profile",
-  "aiEditSettings": "Edit AI Settings",
+  "aiEditProfileAndSettings": "Edit AI Profile and Settings",
   "aiChatButton": "Chat",
   "aiChatHint": "Start a conversation with this AI",
   "aiLike": "Like",

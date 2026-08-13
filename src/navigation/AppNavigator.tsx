@@ -9,11 +9,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { MainTabNavigator, MainTabParamList } from './MainTabNavigator';
 import { LandingScreen } from '../screens/LandingScreen';
 import { ChatDetailScreen } from '../screens/ChatDetailScreen';
-import { CharacterProfileEditScreen } from '../screens/CharacterProfileEditScreen';
 import { AIProfileScreen } from '../screens/AIProfileScreen';
 import { CreateAIScreen } from '../screens/CreateAIScreen';
-import { EntityConfigScreen } from '../screens/EntityConfigScreen';
-import { EntityConfigEditScreen } from '../screens/EntityConfigEditScreen';
 import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
 import { EmojiActionEditorScreen } from '../screens/settings/EmojiActionEditorScreen';
@@ -53,13 +50,18 @@ export type RootStackParamList = {
     entityId: string;
     entityName?: string;
   };
-  CharacterProfileEdit: { profileId?: string };
   /** AI Profile — the AI character's own profile page (mirrors My Profile). */
   AIProfile: { profileId: string };
-  /** prefillProfileId = link an existing profile; duplicateProfileId = full copy (new profile + entity + settings) */
-  CreateAI: { prefillProfileId?: string; duplicateProfileId?: string };
-  EntityConfig: undefined;
-  EntityConfigEdit: { entityId?: string };
+  /**
+   * CreateAI — the single create AND edit surface for AI partners.
+   *   - (create) prefillProfileId = link an existing profile; duplicateProfileId = full copy
+   *   - (edit)   editProfileId = edit an existing AI partner (profile + entity + settings)
+   */
+  CreateAI: {
+    prefillProfileId?: string;
+    duplicateProfileId?: string;
+    editProfileId?: string;
+  };
   Login: undefined;
   Register: undefined;
   ConnectionSetup: undefined;
@@ -134,17 +136,8 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
 
         {/* ── Full-screen detail routes pushed over the tabs ─────────── */}
         <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
-        <Stack.Screen
-          name="CharacterProfileEdit"
-          component={CharacterProfileEditScreen}
-        />
         <Stack.Screen name="AIProfile" component={AIProfileScreen} />
         <Stack.Screen name="CreateAI" component={CreateAIScreen} />
-        <Stack.Screen name="EntityConfig" component={EntityConfigScreen} />
-        <Stack.Screen
-          name="EntityConfigEdit"
-          component={EntityConfigEditScreen}
-        />
 
         {/* ── Settings (pushed over tabs from the header hamburger menu) ── */}
         <Stack.Screen name="Settings" component={SettingsScreen} />

@@ -1011,7 +1011,7 @@ export async function getCharacterCategories(): Promise<CharacterCategory[]> {
   export interface CharacterStats {
     /** Total emoji reactions received on messages sent by this character. */
     likes: number;
-    /** Total phone interactions this character participates in. */
+    /** Total distinct users who have opened a chat with this character. */
     chats: number;
   }
 
@@ -1019,37 +1019,46 @@ export async function getCharacterCategories(): Promise<CharacterCategory[]> {
    * Compute "Likes" and "Chats" for an AI character entity.
    *
    *   - likes = sum of all reaction chips on messages SENT by this entity
-   *   - chats = how many chat sessions (interactions) were opened with this
-   *     character — one row per chat opened. The character always appears as a
-   *     PARTICIPANT (participant_ids contains its entity id); it is never the
-   *     interaction owner (entity_id is the user's impersonated identity). Each
-   *     distinct chat thread therefore counts once, regardless of how many text
-   *     messages were exchanged inside it.
+   *   - chats = number of DISTINCT users who have opened a chat with this
+   *     character — 1 per user, no matter how many chat sessions (interaction
+   *     rows) that user started. The character always appears as a PARTICIPANT
+   *     (participant_ids contains its entity id); it is never the interaction
+   *     owner (entity_id is the user's impersonated identity). Because every
+   *     chat open creates a fresh interaction row, counting rows would inflate
+   *     the number when the same user chats again — instead we count distinct
+   *     owners (entity_id).
+   *
+   *   Copies are independent: a duplicated character ("Max 2") is a new entity
+   *   whose entity id appears in none of the original's interactions, so its
+   *   chat count starts at 0.
    */
   export async function getCharacterStats(
     entityId: string,
   ): Promise<CharacterStats> {
     const db = getDatabase();
 
-    // Count distinct chat sessions (interactions) this character participates
-    // in. participant_ids is a JSON array — parse it and require an EXACT
+    // Count distinct users (interaction owners) this character participates
+    // with. participant_ids is a JSON array — parse it and require an EXACT
     // element match so "Max" never counts chats that belong to "Max 2".
     const [interactionResults] = await db.executeSql(
-      `SELECT participant_ids FROM interactions
+      `SELECT entity_id, participant_ids FROM interactions
        WHERE presence_type = 'phone' AND deleted_at IS NULL`,
     );
-    let chats = 0;
+    const chatUsers = new Set<string>();
     for (let i = 0; i < interactionResults.rows.length; i++) {
-      const raw = interactionResults.rows.item(i).participant_ids;
+      const row = interactionResults.rows.item(i);
+      const raw = row.participant_ids;
       try {
         const ids: unknown = JSON.parse(raw);
         if (Array.isArray(ids) && ids.includes(entityId)) {
-          chats += 1;
+          chatUsers.add(row.entity_id);
         }
       } catch {
         // Ignore malformed participant_ids
       }
     }
+
+    const chats = chatUsers.size;
 
     const [msgResults] = await db.executeSql(
       `SELECT reactions_json FROM conversation_messages

@@ -634,16 +634,45 @@ describe('characters repository', () => {
       };
     }
 
-    it('counts chat sessions the character participates in (exact element match)', async () => {
-      // Two chats opened WITH "Max" (Max + user)
+    it('counts 1 per distinct user even when the same user opens the chat multiple times', async () => {
+      // The same user ('user') opens the chat WITH "Max" three times — the
+      // stats must count ONE, not three, because it is 1 per user.
       await createInteraction(makeInteraction('i1', 'user', ['Max', 'user']));
       await createInteraction(makeInteraction('i2', 'user', ['Max', 'user']));
+      await createInteraction(makeInteraction('i3', 'user', ['Max', 'user']));
       // A chat with "Max 2" — must NOT count toward "Max"
-      await createInteraction(makeInteraction('i3', 'user', ['Max 2', 'user']));
+      await createInteraction(makeInteraction('i4', 'user', ['Max 2', 'user']));
       // A chat with another partner — must not count
-      await createInteraction(makeInteraction('i4', 'user', ['Other', 'user']));
+      await createInteraction(makeInteraction('i5', 'user', ['Other', 'user']));
+
+      expect((await getCharacterStats('Max')).chats).toBe(1);
+    });
+
+    it('counts each distinct user once (exact element match)', async () => {
+      // 'user' chatted with "Max" once, 'alice' twice — 2 distinct users.
+      await createInteraction(makeInteraction('i1', 'user', ['Max', 'user']));
+      await createInteraction(makeInteraction('i2', 'alice', ['Max', 'alice']));
+      await createInteraction(makeInteraction('i3', 'alice', ['Max', 'alice']));
+      // A chat with "Max 2" — must NOT count toward "Max"
+      await createInteraction(makeInteraction('i4', 'alice', ['Max 2', 'alice']));
 
       expect((await getCharacterStats('Max')).chats).toBe(2);
+    });
+
+    it('counts chats for a copy independently from the original (copy starts at 0)', async () => {
+      // "Max" has 2 distinct users chatting with it.
+      await createInteraction(makeInteraction('i1', 'user', ['Max', 'user']));
+      await createInteraction(makeInteraction('i2', 'alice', ['Max', 'alice']));
+      // "Max 2" (the copy) has its own entity id and its own chat — the copy's
+      // count must reflect ONLY the copy's interactions, starting from 0 if the
+      // copy has never been chatted with.
+      await createInteraction(makeInteraction('i3', 'user', ['Max 2', 'user']));
+
+      expect((await getCharacterStats('Max')).chats).toBe(2);
+      expect((await getCharacterStats('Max 2')).chats).toBe(1);
+
+      // A freshly duplicated character with NO interactions yet → 0 chats.
+      expect((await getCharacterStats('Max 3')).chats).toBe(0);
     });
 
     it('counts likes = total emoji reactions on messages sent by the character', async () => {

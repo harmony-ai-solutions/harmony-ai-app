@@ -711,7 +711,7 @@ describe('entities repository', () => {
     it('createOrUpdateEntityModuleMapping with empty-string config IDs does not throw FK error', async () => {
       const entityId = 'entity-mapping-empty-string-upsert';
       await createEntity({id: entityId, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
-      // EntityConfigEditScreen passes '' defaults the same way ('' ?? null == '').
+      // CreateAIScreen (create + edit surface) passes '' defaults the same way ('' ?? null == '').
       await expect(
         createOrUpdateEntityModuleMapping({
           entity_id: entityId,

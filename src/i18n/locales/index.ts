@@ -8,7 +8,6 @@ export { default as settings } from './en/settings.json';
 export { default as connection } from './en/connection.json';
 export { default as theme } from './en/theme.json';
 export { default as profile } from './en/profile.json';
-export { default as entityConfig } from './en/entityConfig.json';
 export { default as modals } from './en/modals.json';
 export { default as database } from './en/database.json';
 export { default as config } from './en/config.json';

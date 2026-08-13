@@ -390,7 +390,7 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   }, [loadFavoritesAndCategories]);
 
   const handleEdit = (profile: CharacterProfile) => {
-    navigation.navigate('CharacterProfileEdit', { profileId: profile.id });
+    navigation.navigate('CreateAI', { editProfileId: profile.id });
   };
 
   /**

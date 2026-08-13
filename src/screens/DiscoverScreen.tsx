@@ -136,7 +136,7 @@ export const DiscoverScreen: React.FC = () => {
 
   // ── Navigation handlers ───────────────────────────────────────────────
   const handleOpenProfile = (profile: CharacterProfile) => {
-    navigation.navigate('CharacterProfileEdit', { profileId: profile.id });
+    navigation.navigate('CreateAI', { editProfileId: profile.id });
   };
 
   /**

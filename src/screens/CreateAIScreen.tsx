@@ -61,17 +61,21 @@ import type { CharacterProfile } from '../database/models';
 import {
   createCharacterProfile,
   createCharacterImage,
+  deleteCharacterImage,
   getCharacterProfile,
   getCharacterImages,
   setCharacterProfileSource,
+  updateCharacterProfile,
 } from '../database/repositories/characters';
 import { setCharacterCreator } from '../database/repositories/characterSocial';
 import {
   createEntity,
   createEntityModuleMapping,
+  createOrUpdateEntityModuleMapping,
   getEntityByCharacterProfileId,
   getEntityModuleMapping,
   getNextEntityAliasCopy,
+  updateEntityFields,
 } from '../database/repositories/entities';
 import { createDataURL } from '../database/base64';
 import {
@@ -120,6 +124,16 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
   const [avatarMimeType, setAvatarMimeType] = useState<string>('image/jpeg');
 
+  // ── Prompts & Scenario (AI settings) ────────────────────────────────────────
+  const [basePrompt, setBasePrompt] = useState('');
+  const [scenario, setScenario] = useState('');
+  const [exampleDialogues, setExampleDialogues] = useState('');
+
+  // ── Gallery images (persisted after profile creation) ───────────────────────
+  const [galleryImages, setGalleryImages] = useState<
+    Array<{ base64: string; mimeType: string; description: string }>
+  >([]);
+
   // ── Collapsible section toggles ─────────────────────────────────────────────
   const [showDetails, setShowDetails] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -130,6 +144,9 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     | 'personality'
     | 'appearance'
     | 'backstory'
+    | 'basePrompt'
+    | 'scenario'
+    | 'exampleDialogues'
     | 'voice'
     | 'typing'
     | 'audio'
@@ -160,6 +177,14 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false);
+
+  // ── Edit mode — editProfileId edits an existing AI partner ──────────────────
+  // The single edit surface: profile (name/bio/prompts/images) + entity module
+  // mapping (AI model / voice / config) all edited right here.
+  const editProfileId = route.params?.editProfileId ?? null;
+  const [editLoaded, setEditLoaded] = useState(false);
+  const [editEntityId, setEditEntityId] = useState<string | null>(null);
+  const [editOriginalName, setEditOriginalName] = useState('');
 
   // ── "From an existing one" — prefillProfileId links an existing profile ──────
   const prefillProfileId = route.params?.prefillProfileId ?? null;
@@ -251,6 +276,9 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setVoiceCharacteristics(profile.voice_characteristics ?? '');
         setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
         setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
+        setBasePrompt(profile.base_prompt ?? '');
+        setScenario(profile.scenario ?? '');
+        setExampleDialogues(profile.example_dialogues ?? '');
       } catch (err) {
         log.error('Failed to prefill profile:', err);
       } finally {
@@ -288,6 +316,28 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setVoiceCharacteristics(profile.voice_characteristics ?? '');
         setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
         setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
+        setBasePrompt(profile.base_prompt ?? '');
+        setScenario(profile.scenario ?? '');
+        setExampleDialogues(profile.example_dialogues ?? '');
+
+        // Copy the source profile's gallery images (the primary avatar is
+        // already copied separately above — skip it to avoid a duplicate).
+        try {
+          const images = await getCharacterImages(profile.id);
+          if (!cancelled) {
+            setGalleryImages(
+              images
+                .filter(img => img.image_data && img.mime_type && !img.is_primary)
+                .map(img => ({
+                  base64: img.image_data,
+                  mimeType: img.mime_type,
+                  description: img.description ?? '',
+                })),
+            );
+          }
+        } catch (galleryErr) {
+          log.warn('Failed to copy gallery images:', galleryErr);
+        }
 
         // Copy the primary avatar image (base64 + mime) so the copy looks identical.
         try {
@@ -356,6 +406,89 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     setMovementConfigId(prefillModuleIds.movement ?? '');
   }, [prefillModuleIds, hasAnyConfigs]);
 
+  // ── Edit mode load (route param editProfileId) ───────────────────────────────
+  // Loads the existing AI partner (profile + entity + module mapping + avatar +
+  // gallery images) so the whole create wizard becomes the single edit surface.
+  useEffect(() => {
+    if (!editProfileId || editLoaded) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const profile = await getCharacterProfile(editProfileId);
+        if (!profile || cancelled) return;
+
+        setName(profile.name);
+        setDescription(profile.description ?? '');
+        setPersonality(profile.personality ?? '');
+        setAppearance(profile.appearance ?? '');
+        setBackstory(profile.backstory ?? '');
+        setVoiceCharacteristics(profile.voice_characteristics ?? '');
+        setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
+        setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
+        setBasePrompt(profile.base_prompt ?? '');
+        setScenario(profile.scenario ?? '');
+        setExampleDialogues(profile.example_dialogues ?? '');
+        setEditOriginalName(profile.name);
+
+        // Avatar (primary image)
+        try {
+          const images = await getCharacterImages(profile.id);
+          if (cancelled) return;
+          const primary = images.find(img => img.is_primary === true);
+          if (primary && primary.image_data && primary.mime_type) {
+            setAvatarBase64(primary.image_data);
+            setAvatarMimeType(primary.mime_type);
+            setAvatarUri(createDataURL(primary.image_data, primary.mime_type));
+          }
+          // Gallery images (all non-primary images)
+          setGalleryImages(
+            images
+              .filter(img => img.image_data && img.mime_type && !img.is_primary)
+              .map(img => ({
+                base64: img.image_data,
+                mimeType: img.mime_type,
+                description: img.description ?? '',
+              })),
+          );
+        } catch (imgErr) {
+          log.warn('Failed to load edit images:', imgErr);
+        }
+
+        // Entity + module mapping
+        try {
+          const entity = await getEntityByCharacterProfileId(profile.id);
+          if (entity && !cancelled) {
+            setEditEntityId(entity.id);
+            const mapping = await getEntityModuleMapping(entity.id);
+            if (mapping) {
+              setPrefillModuleIds({
+                backend: mapping.backend_config_id ?? null,
+                cognition: mapping.cognition_config_id ?? null,
+                tts: mapping.tts_config_id ?? null,
+                stt: mapping.stt_config_id ?? null,
+                vision: mapping.vision_config_id ?? null,
+                rag: mapping.rag_config_id ?? null,
+                imagination: mapping.imagination_config_id ?? null,
+                movement: mapping.movement_config_id ?? null,
+              });
+            }
+          }
+        } catch (entErr) {
+          log.warn('Failed to load edit entity:', entErr);
+        }
+      } catch (err) {
+        log.error('Failed to load profile for edit:', err);
+      } finally {
+        if (!cancelled) setEditLoaded(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editProfileId, editLoaded]);
+
   // ── Avatar picker ────────────────────────────────────────────────────────────
   const handlePickAvatar = async () => {
     try {
@@ -379,7 +512,38 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   };
 
-// ── Save & Create ────────────────────────────────────────────────────────────
+// ── Gallery image picker (adds to the Images tab) ───────────────────────────
+  const handleAddGalleryImage = async () => {
+    try {
+      const result = await withExternalFlow(() =>
+        launchImageLibrary({
+          mediaType: 'photo',
+          includeBase64: true,
+          quality: 0.8,
+        }),
+      );
+      if (result.assets?.[0]) {
+        const asset = result.assets[0];
+        if (!asset.base64) return;
+        setGalleryImages(prev => [
+          ...prev,
+          {
+            base64: asset.base64!,
+            mimeType: asset.type ?? 'image/jpeg',
+            description: '',
+          },
+        ]);
+      }
+    } catch (err) {
+      log.error('Failed to add gallery image:', err);
+    }
+  };
+
+  const handleRemoveGalleryImage = (index: number) => {
+    setGalleryImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // ── Save & Create ────────────────────────────────────────────────────────────
   /**
    * Persist the character profile + entity + module mapping, then either jump
    * straight into a chat with it (`navigateToChat`) or just go back to the
@@ -394,6 +558,117 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
     setIsSaving(true);
     try {
+      // ── EDIT MODE: update the existing AI partner in place ─────────────
+      if (editProfileId) {
+        const typingWpm = parseInt(typingSpeedWpm, 10);
+        const audioChance = parseInt(audioResponseChance, 10);
+
+        const current = await getCharacterProfile(editProfileId);
+        if (!current) throw new Error('Profile not found');
+
+        await updateCharacterProfile({
+          ...current,
+          name: trimmedName,
+          description: description.trim() || '',
+          personality: personality.trim() || '',
+          appearance: appearance.trim() || '',
+          backstory: backstory.trim() || '',
+          voice_characteristics: voiceCharacteristics.trim() || '',
+          typing_speed_wpm: Number.isFinite(typingWpm)
+            ? Math.min(200, Math.max(1, typingWpm))
+            : current.typing_speed_wpm,
+          audio_response_chance_percent: Number.isFinite(audioChance)
+            ? Math.min(100, Math.max(0, audioChance))
+            : current.audio_response_chance_percent,
+          base_prompt: basePrompt.trim() || '',
+          scenario: scenario.trim() || '',
+          example_dialogues: exampleDialogues.trim() || '',
+        });
+
+        // Reconcile images: delete the existing ones, then re-create from the
+        // current UI state (avatar + gallery). This keeps the DB in exact sync
+        // with what the user sees, whether they swapped the avatar, removed a
+        // gallery tile, or added new ones.
+        try {
+          const existingImages = await getCharacterImages(editProfileId);
+          for (const img of existingImages) {
+            try {
+              await deleteCharacterImage(img.id, true);
+            } catch (delErr) {
+              log.warn('Failed to delete edit image:', delErr);
+            }
+          }
+        } catch (imgErr) {
+          log.warn('Failed to load images for edit reconcile:', imgErr);
+        }
+
+        const hasAvatar = !!(avatarBase64 && avatarMimeType);
+        if (hasAvatar) {
+          await createCharacterImage({
+            character_profile_id: editProfileId,
+            image_data: avatarBase64!,
+            mime_type: avatarMimeType!,
+            description: '',
+            is_primary: true,
+            display_order: 0,
+            vl_model_interpretation: '',
+            vl_model: '',
+            updated_at: new Date(),
+          });
+        }
+        for (const [index, galleryImg] of galleryImages.entries()) {
+          await createCharacterImage({
+            character_profile_id: editProfileId,
+            image_data: galleryImg.base64,
+            mime_type: galleryImg.mimeType,
+            description: galleryImg.description,
+            is_primary: !hasAvatar && index === 0,
+            display_order: index + 1,
+            vl_model_interpretation: '',
+            vl_model: '',
+            updated_at: new Date(),
+          });
+        }
+
+        // Update the entity (alias rename if the name changed) + module mapping
+        if (editEntityId) {
+          if (trimmedName !== editOriginalName) {
+            try {
+              await updateEntityFields(editEntityId, { alias: trimmedName });
+            } catch (err: any) {
+              if (
+                err?.message?.includes('UNIQUE') ||
+                err?.message?.includes('alias')
+              ) {
+                showAlert(t('aliasConflictTitle'), t('aliasConflictMessage'));
+                setIsSaving(false);
+                return;
+              }
+              throw err;
+            }
+          }
+          await createOrUpdateEntityModuleMapping({
+            entity_id: editEntityId,
+            backend_config_id: backendConfigId || null,
+            cognition_config_id: cognitionConfigId || null,
+            tts_config_id: ttsConfigId || null,
+            stt_config_id: sttConfigId || null,
+            vision_config_id: visionConfigId || null,
+            rag_config_id: ragConfigId || null,
+            imagination_config_id: imaginationConfigId || null,
+            movement_config_id: movementConfigId || null,
+          });
+        }
+
+        // Fire-and-forget sync so the engine picks up the edits.
+        syncService.initiateSync().catch(syncErr => {
+          log.warn('Auto-sync after edit failed (non-critical):', syncErr);
+        });
+
+        navigation.goBack();
+        return;
+      }
+
       const entityId = trimmedName;
 
       // 1. Either link an existing character profile (from the "From an
@@ -421,16 +696,14 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           audio_response_chance_percent: Number.isFinite(audioChance)
             ? Math.min(100, Math.max(0, audioChance))
             : 50,
-          // When duplicating, carry over the source profile's system prompt /
-          // scenario / example dialogues / lifecycle config / vision config so
-          // the copy is a faithful replica (these fields aren't exposed in the
-          // Create AI wizard, so they can't be edited here — they match the
-          // source).
+          // When duplicating, the prompt fields are prefilled from the source
+          // profile — the editable state values carry over faithfully. Vision
+          // config + lifecycle config are carried over only from the source.
           vision_config_id: duplicateProfile?.vision_config_id ?? null,
           lifecycle_config: duplicateProfile?.lifecycle_config ?? '{}',
-          base_prompt: duplicateProfile?.base_prompt ?? '',
-          scenario: duplicateProfile?.scenario ?? '',
-          example_dialogues: duplicateProfile?.example_dialogues ?? '',
+          base_prompt: basePrompt.trim() || '',
+          scenario: scenario.trim() || '',
+          example_dialogues: exampleDialogues.trim() || '',
         });
         // Tag as user-created so it is hidden from the Discover community grid
         await setCharacterProfileSource(profileId, 'user');
@@ -451,15 +724,34 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         }
 
         // 2. Add avatar image if selected (only for newly created profiles)
-        if (avatarBase64 && avatarMimeType) {
+        const hasAvatar = !!(avatarBase64 && avatarMimeType);
+        if (hasAvatar) {
           const now = new Date();
           await createCharacterImage({
             character_profile_id: profileId,
-            image_data: avatarBase64,
-            mime_type: avatarMimeType,
+            image_data: avatarBase64!,
+            mime_type: avatarMimeType!,
             description: '',
             is_primary: true,
             display_order: 0,
+            vl_model_interpretation: '',
+            vl_model: '',
+            updated_at: now,
+          });
+        }
+
+        // 2b. Persist gallery images. When no avatar was picked, the first
+        // gallery image becomes the primary. display_order continues after the
+        // avatar (0 → 1, 2, …).
+        for (const [index, galleryImg] of galleryImages.entries()) {
+          const now = new Date();
+          await createCharacterImage({
+            character_profile_id: profileId,
+            image_data: galleryImg.base64,
+            mime_type: galleryImg.mimeType,
+            description: galleryImg.description,
+            is_primary: !hasAvatar && index === 0,
+            display_order: index + 1,
             vl_model_interpretation: '',
             vl_model: '',
             updated_at: now,
@@ -688,7 +980,9 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       {/* ── Header ── */}
       <ScreenHeader
         title={
-          duplicateProfile
+          editProfileId
+            ? t('editTitle', { name: editOriginalName || name })
+            : duplicateProfile
             ? t('duplicateTitle', { name: duplicateProfile.name })
             : t('title')
         }
@@ -919,6 +1213,93 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                     </View>
                   </View>
                 </View>
+
+                {/* ── Prompts & Scenario (AI settings) ── */}
+                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
+                  {t('promptsScenarioLabel')}
+                </ThemedText>
+
+                {/* Base Prompt (system prompt) */}
+                {renderField(
+                  'basePromptLabel',
+                  'basePromptPlaceholder',
+                  basePrompt,
+                  setBasePrompt,
+                  'basePrompt',
+                  true,
+                  'creation',
+                )}
+                {/* Scenario */}
+                {renderField(
+                  'scenarioLabel',
+                  'scenarioPlaceholder',
+                  scenario,
+                  setScenario,
+                  'scenario',
+                  true,
+                  'movie-open-outline',
+                )}
+                {/* Example Dialogues */}
+                {renderField(
+                  'exampleDialoguesLabel',
+                  'exampleDialoguesPlaceholder',
+                  exampleDialogues,
+                  setExampleDialogues,
+                  'exampleDialogues',
+                  true,
+                  'chat-processing-outline',
+                )}
+
+                {/* ── Images gallery ── */}
+                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
+                  {t('imagesLabel')}
+                </ThemedText>
+
+                <View style={styles.galleryWrap}>
+                  {galleryImages.map((img, index) => (
+                    <View key={`${index}-${img.base64.length}`} style={styles.galleryTile}>
+                      <Image
+                        source={{ uri: `data:${img.mimeType};base64,${img.base64}` }}
+                        style={styles.galleryTileImage}
+                        resizeMode="cover"
+                      />
+                      <TouchableOpacity
+                        onPress={() => {
+                          hapticLightPress();
+                          handleRemoveGalleryImage(index);
+                        }}
+                        activeOpacity={0.7}
+                        style={styles.galleryTileRemove}
+                        testID="create-ai-remove-gallery-image"
+                        accessibilityRole="button"
+                        accessibilityLabel={t('removeImage')}
+                      >
+                        <Icon name="close" size={14} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+
+                  {/* Add image tile */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      hapticLightPress();
+                      handleAddGalleryImage();
+                    }}
+                    activeOpacity={0.7}
+                    style={styles.galleryAddTile}
+                    testID="create-ai-add-gallery-image"
+                    accessibilityRole="button"
+                    accessibilityLabel={t('addImage')}
+                  >
+                    <Icon name="plus" size={26} color={accent} />
+                    <ThemedText size={11} variant="muted">
+                      {t('addImage')}
+                    </ThemedText>
+                  </TouchableOpacity>
+                </View>
+                <ThemedText size={11} variant="muted" style={styles.galleryHint}>
+                  {t('imagesHint')}
+                </ThemedText>
               </View>
             )}
           </ThemedCard>
@@ -948,8 +1329,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                     user sees it before choosing configs, not buried at the bottom. */}
                 {!anyConfigSelected() && hasAnyConfigs !== null && (
                   <View style={styles.defaultHint}>
-                    <Icon name="creation" size={14} color={accent} />
-                    <ThemedText size={12} variant="muted" style={styles.defaultHintText}>
+                    <Icon name="creation" size={16} color="#e2e8f0" />
+                    <ThemedText size={13} weight="medium" style={styles.defaultHintText}>
                       {t('defaultConfigNote')}
                     </ThemedText>
                   </View>
@@ -1049,10 +1430,19 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
             )}
           </ThemedCard>
 
-          {/* ── Action buttons: Save / Start Chatting ── */}
+          {/* ── Action buttons: Save / Start Chatting (create) — Save only (edit) ── */}
           <View style={styles.ctaSection}>
             {isSaving ? (
               <ActivityIndicator size="large" color={accent} />
+            ) : editProfileId ? (
+              <ThemedButton
+                label={t('save')}
+                onPress={handleSave}
+                variant="primary"
+                icon="content-save-outline"
+                disabled={isSaving}
+                style={styles.ctaButton}
+              />
             ) : (
               <View style={styles.ctaRow}>
                 <ThemedButton
@@ -1220,12 +1610,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   defaultHintText: {
     flex: 1,
+    color: '#e2e8f0',
   },
 
   // ── Numeric row (typing speed / audio chance) ──
@@ -1245,6 +1636,54 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 15,
     paddingVertical: 0,
+  },
+
+  // ── Gallery ──
+  galleryWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 4,
+  },
+  galleryTile: {
+    width: 92,
+    height: 92,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  galleryTileImage: {
+    width: '100%',
+    height: '100%',
+  },
+  galleryTileRemove: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  galleryAddTile: {
+    width: 92,
+    height: 92,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  galleryHint: {
+    marginTop: 8,
+    marginLeft: 2,
   },
 
   // ── CTA ──

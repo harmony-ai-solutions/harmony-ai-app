@@ -5,9 +5,10 @@
  *   - Header: AI name + description + avatar (top-right)
  *   - Creator badge (creator avatar + name) under the AI name → opens the
  *     creator's profile page (My Profile tab) when tapped
+ *   - Creator-only "Edit AI Profile and Settings" pill (above the action row,
+ *     hidden from other users — they are forbidden from editing characters
+ *     they don't own)
  *   - Primary Chat button + small rounded Like / Save buttons
- *   - Creator-only pill row: Edit Profile + Edit AI Settings (hidden from
- *     other users — they are forbidden from editing characters they don't own)
  *   - Stats row: Likes · Chats (Likes counts profile likes + image likes)
  *   - Icon-only tab bar: Images | Copies
  *   - Images tab: every gallery image (including the avatar) rendered as a
@@ -28,6 +29,7 @@ import {
   TouchableOpacity,
   Image,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
@@ -50,6 +52,7 @@ import {
   getCharacterImages,
   getSiblingCharacterProfiles,
   getCharacterStats,
+  getCharacterProfileSource,
   CharacterStats,
 } from '../database/repositories/characters';
 import { getEntityByCharacterProfileId } from '../database/repositories/entities';
@@ -69,11 +72,15 @@ import {
 } from '../database/repositories/characterSocial';
 import { openCharacterChat } from '../services/CharacterChatService';
 import { createDataURL } from '../database/base64';
+import { getLocalProfile } from '../services/profile/UserProfileStore';
 import { CharacterProfile, CharacterImage } from '../database/models';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[AIProfileScreen]');
+
+/** Purple brand gradient — neon magenta → violet (design palette). */
+const PURPLE_GRADIENT: [string, string] = ['#8f3ba7', '#7c3aed'];
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = RouteProp<RootStackParamList, 'AIProfile'>;
@@ -176,19 +183,53 @@ export const AIProfileScreen: React.FC = () => {
 
       // ── Social layer ────────────────────────────────────────────────────
       try {
-        const [liked, likes, saved, characterCreator, owner] =
+        const [liked, likes, saved, characterCreator, owner, source] =
           await Promise.all([
             isCharacterLiked(profileId),
             getCharacterLikesCount(profileId),
             isCharacterSaved(profileId),
             getCharacterCreator(profileId),
             isCharacterCreator(profileId, user?.id),
+            getCharacterProfileSource(profileId),
           ]);
         setProfileLiked(liked);
         setProfileLikes(likes);
         setProfileSaved(saved);
-        setCreator(characterCreator);
-        setIsOwner(owner);
+
+        // Ownership: the recorded cloud creator matches the current user, OR
+        // the profile is tagged user-created. The source tag is the reliable
+        // signal in self-hosted mode and for characters created before the
+        // creator feature, where no character_creators row exists.
+        setIsOwner(owner || source === 'user');
+
+        // Creator badge: prefer the recorded creator; otherwise synthesize
+        // one from the current user so user-created characters always show
+        // "Created by …" (with the locally-picked avatar when available).
+        if (characterCreator) {
+          setCreator(characterCreator);
+        } else if (source === 'user') {
+          let creatorName = '';
+          let creatorAvatar: string | null = null;
+          if (user?.id) {
+            try {
+              const local = await getLocalProfile(user.id);
+              creatorAvatar = local.avatar_data_url ?? user.avatar_url ?? null;
+              creatorName =
+                local.displayName ||
+                user.display_name ||
+                user.email?.split('@')[0] ||
+                '';
+            } catch {
+              creatorName = '';
+            }
+          }
+          setCreator({
+            profileId,
+            creatorUserId: user?.id ?? '',
+            creatorDisplayName: creatorName || 'Creator',
+            creatorAvatarUrl: creatorAvatar,
+          });
+        }
       } catch (err) {
         log.warn('Failed to load character social state:', err);
       }
@@ -235,22 +276,11 @@ export const AIProfileScreen: React.FC = () => {
   }, [loadProfile]);
 
   // ── Actions ────────────────────────────────────────────────────────────
+  // "Edit AI Profile and Settings" opens the single edit surface:
+  // the Create AI Partner screen in edit mode (profile fields + prompt/
+  // scenario + gallery + module configs all in one place).
   const handleOpenEditProfile = () => {
-    navigation.navigate('CharacterProfileEdit', { profileId });
-  };
-
-  const handleOpenEditSettings = async () => {
-    try {
-      const entity = await getEntityByCharacterProfileId(profileId);
-      if (entity) {
-        navigation.navigate('EntityConfigEdit', { entityId: entity.id });
-      } else {
-        navigation.navigate('EntityConfig');
-      }
-    } catch (err) {
-      log.warn('Failed to resolve entity for settings:', err);
-      navigation.navigate('EntityConfig');
-    }
+    navigation.navigate('CreateAI', { editProfileId: profileId });
   };
 
   const handleChat = async () => {
@@ -343,11 +373,13 @@ export const AIProfileScreen: React.FC = () => {
   }, [commentImageId]);
 
   const handleOpenCreator = () => {
-    // The only user-profile surface today is the "My Profile" tab. Tapping the
-    // creator badge navigates there (the creator == the current user whenever
-    // a creator record exists on this device, because creation is recorded
-    // only for locally-created characters).
-    navigation.navigate('MainTabs', { screen: 'MyProfile' });
+    // The only user-profile surface today is the "My Profile" tab. Push a NEW
+    // MainTabs instance (My Profile selected) on top of this AI profile so
+    // "back" returns here instead of popping the AI profile and landing on the
+    // previous tab (the creator == the current user whenever a creator record
+    // exists on this device, because creation is recorded only for
+    // locally-created characters).
+    navigation.push('MainTabs', { screen: 'MyProfile' });
   };
 
   if (!theme) return null;
@@ -481,9 +513,31 @@ export const AIProfileScreen: React.FC = () => {
               />
             </View>
 
+            {/* ── Creator-only: Edit AI Profile and Settings (before Chat) ── */}
+            {isOwner && (
+              <View style={styles.ownerRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLightPress();
+                    handleOpenEditProfile();
+                  }}
+                  activeOpacity={0.7}
+                  style={styles.ownerPill}
+                  testID="ai-profile-edit-button"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('aiEditProfileAndSettings')}
+                >
+                  <Icon name="account-edit-outline" size={14} color={accent} />
+                  <ThemedText size={12} weight="medium" style={{ color: accent }}>
+                    {t('aiEditProfileAndSettings')}
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* ── Action row: primary Chat + Like / Save ── */}
             <View style={styles.actionsRow}>
-              {/* Primary Chat button — full-width, gradient */}
+              {/* Primary Chat button — full-width, purple gradient */}
               <TouchableOpacity
                 onPress={() => {
                   hapticLightPress();
@@ -496,17 +550,24 @@ export const AIProfileScreen: React.FC = () => {
                 accessibilityRole="button"
                 accessibilityLabel={t('aiChatButton')}
               >
-                <Icon name="chat-processing" size={18} color="#fff" />
-                <ThemedText
-                  size={15}
-                  weight="bold"
-                  style={{ color: '#fff', letterSpacing: 0.3 }}
+                <LinearGradient
+                  colors={PURPLE_GRADIENT}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.chatButtonGradient}
                 >
-                  {t('aiChatButton')}
-                </ThemedText>
+                  <Icon name="chat-processing" size={18} color="#fff" />
+                  <ThemedText
+                    size={15}
+                    weight="bold"
+                    style={{ color: '#fff', letterSpacing: 0.3 }}
+                  >
+                    {t('aiChatButton')}
+                  </ThemedText>
+                </LinearGradient>
               </TouchableOpacity>
 
-              {/* Rounded Like button */}
+              {/* Rounded Like button — purple gradient when liked */}
               <TouchableOpacity
                 onPress={() => {
                   hapticLightPress();
@@ -521,11 +582,22 @@ export const AIProfileScreen: React.FC = () => {
                 accessibilityRole="button"
                 accessibilityLabel={t('aiLike')}
               >
-                <Icon
-                  name={profileLiked ? 'heart' : 'heart-outline'}
-                  size={22}
-                  color={profileLiked ? '#ff5a7a' : theme.colors.text.secondary}
-                />
+                {profileLiked ? (
+                  <LinearGradient
+                    colors={PURPLE_GRADIENT}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.roundButtonGradient}
+                  >
+                    <Icon name="heart" size={22} color="#fff" />
+                  </LinearGradient>
+                ) : (
+                  <Icon
+                    name="heart-outline"
+                    size={22}
+                    color={theme.colors.text.secondary}
+                  />
+                )}
               </TouchableOpacity>
 
               {/* Rounded Save button */}
@@ -550,45 +622,6 @@ export const AIProfileScreen: React.FC = () => {
                 />
               </TouchableOpacity>
             </View>
-
-            {/* ── Creator-only pills: Edit Profile + Edit AI Settings ── */}
-            {isOwner && (
-              <View style={styles.ownerRow}>
-                <TouchableOpacity
-                  onPress={() => {
-                    hapticLightPress();
-                    handleOpenEditProfile();
-                  }}
-                  activeOpacity={0.7}
-                  style={styles.ownerPill}
-                  testID="ai-profile-edit-button"
-                  accessibilityRole="button"
-                  accessibilityLabel={t('aiEditProfile')}
-                >
-                  <Icon name="account-edit-outline" size={14} color={accent} />
-                  <ThemedText size={12} weight="medium" style={{ color: accent }}>
-                    {t('aiEditProfile')}
-                  </ThemedText>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => {
-                    hapticLightPress();
-                    handleOpenEditSettings();
-                  }}
-                  activeOpacity={0.7}
-                  style={styles.ownerPill}
-                  testID="ai-profile-edit-settings-button"
-                  accessibilityRole="button"
-                  accessibilityLabel={t('aiEditSettings')}
-                >
-                  <Icon name="cog-outline" size={14} color={accent} />
-                  <ThemedText size={12} weight="medium" style={{ color: accent }}>
-                    {t('aiEditSettings')}
-                  </ThemedText>
-                </TouchableOpacity>
-              </View>
-            )}
 
             {/* ── Stats row: Likes · Chats ── */}
             <View style={styles.statsRow}>
@@ -651,16 +684,26 @@ export const AIProfileScreen: React.FC = () => {
                               accessibilityRole="button"
                               accessibilityLabel={t('aiLike')}
                             >
-                              <Icon
-                                name={post.liked ? 'heart' : 'heart-outline'}
-                                size={20}
-                                color={
-                                  post.liked
-                                    ? '#ff5a7a'
-                                    : theme.colors.text.secondary
-                                }
-                              />
-                              <ThemedText size={12} variant="muted">
+                              {post.liked ? (
+                                <LinearGradient
+                                  colors={PURPLE_GRADIENT}
+                                  start={{ x: 0, y: 0 }}
+                                  end={{ x: 1, y: 1 }}
+                                  style={styles.postLikeGradient}
+                                >
+                                  <Icon name="heart" size={20} color="#fff" />
+                                </LinearGradient>
+                              ) : (
+                                <Icon
+                                  name="heart-outline"
+                                  size={20}
+                                  color={theme.colors.text.secondary}
+                                />
+                              )}
+                              <ThemedText
+                                size={12}
+                                variant={post.liked ? 'primary' : 'muted'}
+                              >
                                 {post.likes}
                               </ThemedText>
                             </TouchableOpacity>
@@ -677,8 +720,8 @@ export const AIProfileScreen: React.FC = () => {
                               accessibilityLabel={t('aiImageComments')}
                             >
                               <Icon
-                                name="comment-text-outline"
-                                size={20}
+                                name="comment-outline"
+                                size={18}
                                 color={theme.colors.text.secondary}
                               />
                               <ThemedText size={12} variant="muted">
@@ -823,16 +866,24 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 50,
     borderRadius: 16,
-    backgroundColor: '#8f3ba7',
+    overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
     shadowColor: '#8f3ba7',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.35,
     shadowRadius: 22,
     elevation: 10,
+  },
+  chatButtonGradient: {
+    flex: 1,
+    height: '100%',
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   roundButton: {
     width: 50,
@@ -843,12 +894,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.05)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   roundButtonActive: {
     borderColor: 'rgba(255,255,255,0.28)',
-    backgroundColor: 'rgba(255,255,255,0.10)',
   },
-  // ── Owner pills ──
+  roundButtonGradient: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // ── Owner badge ──
   ownerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -860,11 +918,12 @@ const styles = StyleSheet.create({
   ownerPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    alignSelf: 'flex-start',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 999,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#7c3aed' + '55',
     backgroundColor: '#7c3aed' + '18',
   },
@@ -918,6 +977,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
+  },
+  postLikeGradient: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   // ── Copies ──
   copiesWrap: {

@@ -58,6 +58,7 @@ import {
 } from '../database/repositories/characters';
 import { getAllEntities } from '../database/repositories/entities';
 import { deleteEntity } from '../database/repositories/entities';
+import { getEntity } from '../database/repositories/entities';
 import { getPersona } from '../database/repositories/personas';
 import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
@@ -1224,16 +1225,26 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     [t],
   );
 
-  // Open settings/module configuration for the OTHER participant
-  // (partner/character) in this chat.
+  // Open settings for the OTHER participant (partner/character) in this chat.
+  // Resolves the partner entity → its character profile and opens the single
+  // edit surface (Create AI Partner screen in edit mode).
   const handlePartnerSettings = useCallback(() => {
     setMenuVisible(false);
-    // For entity settings, we need the partner entity ID
     const otherIds = participantIds.filter(id => id !== ownEntityId);
     const partnerEntityId = otherIds[0] || '';
-    if (partnerEntityId) {
-      navigation.navigate('EntityConfigEdit', { entityId: partnerEntityId });
-    }
+    if (!partnerEntityId) return;
+    (async () => {
+      try {
+        const entity = await getEntity(partnerEntityId);
+        if (entity?.character_profile_id) {
+          navigation.navigate('CreateAI', {
+            editProfileId: entity.character_profile_id,
+          });
+        }
+      } catch (err) {
+        log.warn('Failed to resolve partner entity for settings:', err);
+      }
+    })();
   }, [ownEntityId, participantIds, navigation]);
 
   // Index messages by id so reply headers can look up the quoted message.
