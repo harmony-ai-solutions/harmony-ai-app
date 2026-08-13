@@ -21,8 +21,10 @@
 
 import EventEmitter from 'eventemitter3';
 import type { components } from '@harmony-ai-solutions/soulbits-api-client';
-import AuthService, { AuthExpiredError } from '../auth/AuthService';
+import AuthService from '../auth/AuthService';
 import { buildSoulbitsClient } from './soulbitsClient';
+import { getDeviceId } from './DeviceIdProvider';
+import { CLOUD_HOSTS } from '../../config/cloud';
 import {
   DEFAULT_CLOUD_RETRY_MS,
   MAX_PROVISIONING_ATTEMPTS,
@@ -30,6 +32,20 @@ import {
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[CloudSession]');
+
+/**
+ * Thrown when POST /v1/session/connect returns 403
+ * {"error":"device_authorization_required"} (D-DEV-01). NOT a generic failure:
+ * the UI must prompt for the emailed 6-digit code (DeviceAuthModal), then
+ * retry connect. `CloudSessionService` emits `'device-auth-required'` before
+ * throwing so the UI layer can present the modal from any connect path.
+ */
+export class DeviceAuthRequiredError extends Error {
+  constructor() {
+    super('cloud session refused: device authorization required');
+    this.name = 'DeviceAuthRequiredError';
+  }
+}
 
 /**
  * Wire schema for POST /v1/session/connect — returned on 200 (ready|active),
@@ -53,6 +69,8 @@ export type CloudSessionStatus =
   | 'provisioning'  // broker returned 202 provisioning; polling
   | 'ready'         // broker returned ready; WS dial pending (WS connectivity
                     // tracked separately by useSyncConnection().isConnected)
+  | 'deviceAuthRequired' // broker returned 403 device_authorization_required;
+                         // the user must complete the email-code flow (D-DEV-01)
   | 'failed';       // broker returned 503 failed, or max polls exceeded
 
 /**
@@ -70,6 +88,12 @@ export interface CloudSessionInfo {
 
 interface CloudSessionEvents {
   'status': (status: CloudSessionStatus, info?: CloudSessionInfo) => void;
+  /**
+   * Emitted when connect returns 403 device_authorization_required (D-DEV-01).
+   * The UI shows the 6-digit email-code modal; on verify success it must call
+   * connect({ force: true }) again.
+   */
+  'device-auth-required': () => void;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────
@@ -207,6 +231,20 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
       const body = this._bodyOf(result);
 
       // ── Terminal response handling ──────────────────────────────────────
+      // D-DEV-01: 403 {"error":"device_authorization_required"} — the broker
+      // refuses to provision for an unauthorized device. Emit the event that
+      // drives the DeviceAuthModal and throw the typed error (NOT a generic
+      // failure). The catch below maps it to the 'deviceAuthRequired' status.
+      if (
+        result.response.status === 403 &&
+        (result.error as { error?: string } | undefined)?.error ===
+          'device_authorization_required'
+      ) {
+        log.warn('Cloud session refused: device authorization required');
+        this.emit('device-auth-required');
+        throw new DeviceAuthRequiredError();
+      }
+
       if (result.response.status === 503 || body.status === 'failed') {
         const reason = body.failure_reason ?? `HTTP ${result.response.status}`;
         this.setStatus('failed', { failureReason: reason, requestedAt });
@@ -236,6 +274,15 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
       // AuthExpiredError (terminal refresh failure) is surfaced as 'failed'
       // here — AuthService.invalidate() has already emitted 'auth:expired' so
       // the AuthContext logs out in parallel.
+      if (e instanceof DeviceAuthRequiredError) {
+        // 403 device_authorization_required — NOT a failure. The device must
+        // complete the emailed 6-digit code flow before the broker provisions
+        // a session (D-DEV-01). The 'device-auth-required' event (emitted by
+        // _doConnect) drives the DeviceAuthModal; after verify the caller
+        // retries connect({ force: true }).
+        this.setStatus('deviceAuthRequired');
+        throw e;
+      }
       if (!this._cancelled && this.status !== 'failed') {
         const reason = e instanceof Error ? e.message : String(e);
         this.setStatus('failed', { failureReason: reason, requestedAt });
@@ -249,35 +296,41 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
   }
 
   /**
-   * One `session.connect()` round-trip via the Soulbits client, with a single
-   * transparent PASETO refresh on 401.
+   * One `session.connect()` round-trip, with a single transparent PASETO
+   * refresh on 401 (handled inside `AuthService.fetch`).
    *
-   * The client is built PASETO-only (no refreshToken — see `soulbitsClient`),
-   * so it never auto-refreshes; a 401 therefore comes back as `{ error, response }`
-   * and is handled here exactly like `AuthService.fetch()`: refresh once via
-   * `AuthService.refresh()` (which persists the new pair to Keychain and emits
-   * `auth:changed`, so the WebSocket layer picks up the fresh token too), then
-   * retry the request once. A terminal refresh (`refresh()` → false) invalidates
-   * and throws `AuthExpiredError`; a transient refresh (`refresh()` throws)
-   * propagates for the caller to treat as a normal failure.
+   * The connect POST is issued via the app's existing authenticated HTTP
+   * client (AuthService.fetch — PASETO Bearer + 401-refresh-retry), NOT the
+   * published soulbits-api-client's `session.connect(version)` convenience,
+   * because the broker's device-authorization gate (D-DEV-04) reads
+   * `device_id` from the request body and the published client only sends
+   * `{version}`. The response is normalized to the openapi-fetch
+   * `{ data, error, response }` shape `_runConnectLoop` already consumes.
+   *
+   * A 403 `{"error":"device_authorization_required"}` is NOT a generic
+   * failure: `_runConnectLoop` emits `'device-auth-required'` and throws
+   * `DeviceAuthRequiredError` so the UI presents the 6-digit code modal
+   * (D-DEV-01).
    */
   private async _doConnect(): Promise<ConnectResult> {
-    const call = async (): Promise<ConnectResult> => {
-      const paseto = await AuthService.getToken();
-      return buildSoulbitsClient({ paseto }).session.connect();
+    const deviceId = await getDeviceId();
+    const res = await AuthService.fetch(`${CLOUD_HOSTS.session}/v1/session/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: deviceId }),
+    });
+
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      // Empty/non-JSON body — leave null; callers tolerate it.
+    }
+    return {
+      data: res.ok ? (body as SessionConnectResponse) : undefined,
+      error: res.ok ? undefined : body,
+      response: res,
     };
-
-    let result = await call();
-    if (result.response.status !== 401) {
-      return result;
-    }
-
-    const ok = await AuthService.refresh();
-    if (!ok) {
-      await AuthService.invalidate();
-      throw new AuthExpiredError();
-    }
-    return call();
   }
 
   /**

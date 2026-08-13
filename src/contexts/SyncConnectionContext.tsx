@@ -4,6 +4,7 @@ import ConnectionManager from '../services/connection/ConnectionManager';
 import SyncService, { SyncService as SyncServiceClass } from '../services/SyncService';
 import { cloudSessionService, type CloudSessionStatus, type CloudSessionInfo } from '../services/cloud/CloudSessionService';
 import AuthService from '../services/auth/AuthService';
+import { DeviceAuthModal } from '../components/cloud/DeviceAuthModal';
 import { ToastAndroid, Platform, Alert } from 'react-native';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
@@ -561,6 +562,43 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     return () => { cloudSessionService.off('status', onStatus); };
   }, []);
 
+  // ── D-DEV-01: device-authorization gate ─────────────────────────────────
+  // connect() 403 device_authorization_required → show the 6-digit email-code
+  // modal. Driven by the service event (emitted from any connect path: login
+  // bootstrap, auth:changed, reconnect) AND the 'deviceAuthRequired' status
+  // (belt and suspenders).
+  const [showDeviceAuth, setShowDeviceAuth] = useState(false);
+  useEffect(() => {
+    const onDeviceAuthRequired = () => {
+      log.warn('Device authorization required — showing auth-code modal');
+      setShowDeviceAuth(true);
+    };
+    const onStatus = (s: CloudSessionStatus) => {
+      if (s === 'deviceAuthRequired') {
+        setShowDeviceAuth(true);
+      }
+    };
+    cloudSessionService.on('device-auth-required', onDeviceAuthRequired);
+    cloudSessionService.on('status', onStatus);
+    return () => {
+      cloudSessionService.off('device-auth-required', onDeviceAuthRequired);
+      cloudSessionService.off('status', onStatus);
+    };
+  }, []);
+
+  // ── After the code is verified: re-provision the broker session. The
+  // device is now authorized; the 'ready' status handler auto-dials the WS.
+  // Plain function (file convention for closures over refs — no hook deps).
+  const handleDeviceAuthVerified = async () => {
+    setShowDeviceAuth(false);
+    try {
+      await cloudSessionService.connect({ force: true });
+    } catch (e) {
+      log.warn('Reconnect after device auth failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+      scheduleReconnect();
+    }
+  };
+
   useEffect(() => {
     const onCloudStatus = async (s: CloudSessionStatus, info?: CloudSessionInfo) => {
       const source = await ConnectionStateManager.getCurrentSource();
@@ -867,6 +905,13 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   return (
     <SyncConnectionContext.Provider value={value}>
       {children}
+      {/* D-DEV-01: shown when the broker refuses connect until the device is
+          authorized via the emailed 6-digit code. */}
+      <DeviceAuthModal
+        visible={showDeviceAuth}
+        onVerified={handleDeviceAuthVerified}
+        onDismiss={() => setShowDeviceAuth(false)}
+      />
     </SyncConnectionContext.Provider>
   );
 };

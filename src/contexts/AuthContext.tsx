@@ -24,10 +24,10 @@ import React, {
 } from 'react';
 import AuthService, {
   AuthExpiredError,
-  AuthError,
   type UserProfile,
 } from '../services/auth/AuthService';
 import { cloudSessionService } from '../services/cloud/CloudSessionService';
+import DeviceAuthService from '../services/cloud/DeviceAuthService';
 import { startSoulbitsTokenSync } from '../services/cloud/soulbitsTokenSync';
 import { createLogger } from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -152,6 +152,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // ── Listen for auth:changed events (login/refresh) ────────────────────
   useEffect(() => {
     const onChanged = async () => {
+      // D-DEV-01 first-run registration: upsert the per-install device row
+      // (authorized=false) so the broker's connect gate can find it. Best-
+      // effort — a registration failure must not block login.
+      DeviceAuthService.registerDevice().catch(e =>
+        log.warn('Device registration failed (non-fatal):', e instanceof Error ? e.message : String(e)),
+      );
       try {
         const profile = await AuthService.getProfile();
         setUser(profile);
