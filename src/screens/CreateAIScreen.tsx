@@ -1,15 +1,23 @@
 /**
  * CreateAIScreen
  *
- * Guided entity creation wizard. Creates a CharacterProfile + Entity
- * (with alias) + EntityModuleMapping in one flow, then navigates directly
- * to ChatDetailScreen via navigation.replace() so back-button goes to
- * ChatList rather than returning here.
+ * Create AI Partner wizard. Creates a CharacterProfile + Entity (with alias)
+ * + EntityModuleMapping in one flow, then navigates directly to
+ * ChatDetailScreen via navigation.replace() so back-button goes to ChatList
+ * rather than returning here.
  *
- * Route params: { prefillProfileId?: string }
+ * The screen is split into three sections:
+ *   1. General  — name (required), description, avatar
+ *   2. Details  — personality, appearance, backstory
+ *   3. Advanced — module configs (AI model / config / voice settings)
+ *
+ * The user can start chatting with just a name: when no module configs are
+ * selected, Soulbits Cloud default configs are created automatically in the
+ * background (see SoulbitsDefaultConfigService) so the partner is fully
+ * wired up out of the box.
  */
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -18,10 +26,8 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Image,
-  FlatList,
   KeyboardAvoidingView,
   Platform,
-  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedCard } from '../components/themed/ThemedCard';
@@ -29,7 +35,6 @@ import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useFocusEffect } from '@react-navigation/native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { v4 as uuidv4, v7 as uuidv7 } from 'uuid';
 import { useTranslation } from 'react-i18next';
@@ -47,7 +52,6 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
 import { EntityModuleSelectorWithActions } from '../components/entities/EntityModuleSelectorWithActions';
-import { ProfilePickerCard } from '../components/characters/ProfilePickerCard';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
@@ -55,11 +59,9 @@ import { ModuleConfigOption } from '../components/entities/EntityModuleSelector'
 import {
   createCharacterProfile,
   createCharacterImage,
-  getAllCharacterProfiles,
-  getCharacterImages,
+  getCharacterProfile,
   setCharacterProfileSource,
 } from '../database/repositories/characters';
-import { createDataURL } from '../database/base64';
 import {
   createEntity,
   createEntityModuleMapping,
@@ -74,24 +76,16 @@ import {
   getAllMovementConfigs,
   getAllBackendConfigs,
 } from '../database/repositories/modules';
-import {
-  CharacterProfile,
-} from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import syncService from '../services/SyncService';
 import { resolvePersonaId } from '../database/repositories/personas';
+import { ensureSoulbitsDefaultConfigs } from '../services/SoulbitsDefaultConfigService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateAI'>;
-
-/** Item rendered in the profile picker carousel ("create new" + existing). */
-type ProfilePickerItem = Pick<
-  CharacterProfile,
-  'id' | 'name' | 'description'
->;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CreateAIScreen
@@ -106,30 +100,32 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // ── Core fields ──────────────────────────────────────────────────────────────
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [personality, setPersonality] = useState('');
+  const [appearance, setAppearance] = useState('');
+  const [backstory, setBackstory] = useState('');
+  const [voiceCharacteristics, setVoiceCharacteristics] = useState('');
+  const [typingSpeedWpm, setTypingSpeedWpm] = useState('60');
+  const [audioResponseChance, setAudioResponseChance] = useState('50');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
   const [avatarMimeType, setAvatarMimeType] = useState<string>('image/jpeg');
 
-  // ── Existing profile selection ('' = create a new profile) ───────────────────
-  const [allProfiles, setAllProfiles] = useState<CharacterProfile[]>([]);
-  const [profileImages, setProfileImages] = useState<
-    Record<string, string | null>
-  >({});
-  const [selectedProfileId, setSelectedProfileId] = useState('');
-  const [selectedProfile, setSelectedProfile] =
-    useState<CharacterProfile | null>(null);
-  const [selectedProfileImageUri, setSelectedProfileImageUri] = useState<
-    string | null
-  >(null);
-
-  // Carousel ref — scrolls to the selected card when the picker opens
-  const pickerListRef = useRef<FlatList<ProfilePickerItem>>(null);
-
-  // ── Advanced toggle ──────────────────────────────────────────────────────────
+  // ── Collapsible section toggles ─────────────────────────────────────────────
+  const [showDetails, setShowDetails] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  // UI-only: tracks the currently focused identity field for accent highlighting
-  const [focusedField, setFocusedField] = useState<'name' | 'personality' | null>(null);
+  // UI-only: tracks the currently focused field for accent highlighting
+  const [focusedField, setFocusedField] = useState<
+    | 'name'
+    | 'description'
+    | 'personality'
+    | 'appearance'
+    | 'backstory'
+    | 'voice'
+    | 'typing'
+    | 'audio'
+    | null
+  >(null);
 
   // ── Module config selections (string IDs for picker; '' = disabled) ──────────
   const [cognitionConfigId, setCognitionConfigId] = useState('');
@@ -141,7 +137,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [movementConfigId, setMovementConfigId] = useState('');
   const [backendConfigId, setBackendConfigId] = useState('');
 
-  // ── Available module config lists (loaded lazily) ───────────────────────────
+  // ── Available module config lists (loaded on mount) ──────────────────────────
   const [cognitionConfigs, setCognitionConfigs] = useState<ModuleConfigOption[]>([]);
   const [ttsConfigs, setTtsConfigs] = useState<ModuleConfigOption[]>([]);
   const [sttConfigs, setSttConfigs] = useState<ModuleConfigOption[]>([]);
@@ -150,20 +146,20 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [imaginationConfigs, setImaginationConfigs] = useState<ModuleConfigOption[]>([]);
   const [movementConfigs, setMovementConfigs] = useState<ModuleConfigOption[]>([]);
   const [backendConfigs, setBackendConfigs] = useState<ModuleConfigOption[]>([]);
-  // null = not yet loaded, false = loaded but empty, true = has at least one
+  // null = loading, false = loaded but empty, true = has at least one
   const [hasAnyConfigs, setHasAnyConfigs] = useState<boolean | null>(null);
 
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 800);
-  }, []);
+  // ── "From an existing one" — prefillProfileId links an existing profile ──────
+  const prefillProfileId = route.params?.prefillProfileId ?? null;
+  const [prefilled, setPrefilled] = useState(false);
 
-  // ── Load module configs: on advanced-panel open AND when returning from
-  //    ModuleConfigEdit so freshly created configs appear immediately ──────────
+  /**
+   * Load all module configs up front so the Advanced section pickers are
+   * populated when the user expands them.
+   */
   const loadModuleConfigs = useCallback(async () => {
     try {
       const [cognition, tts, stt, vision, rag, imagination, movement, backend] = await Promise.all([
@@ -197,26 +193,44 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           movement.length > 0 ||
           backend.length > 0,
       );
-    } catch {
+    } catch (err) {
+      log.error('Failed to load module configs:', err);
       setHasAnyConfigs(false);
     }
   }, []);
 
-  // Load when advanced panel first opens
   useEffect(() => {
-    if (showAdvanced && hasAnyConfigs === null) {
-      loadModuleConfigs();
-    }
-  }, [showAdvanced, hasAnyConfigs, loadModuleConfigs]);
+    loadModuleConfigs();
+  }, [loadModuleConfigs]);
 
-  // Reload whenever the screen regains focus (e.g. returning from ModuleConfigEdit)
-  useFocusEffect(
-    useCallback(() => {
-      if (showAdvanced) {
-        loadModuleConfigs();
+  // ── Prefill from an existing profile (route param prefillProfileId) ─────────
+  useEffect(() => {
+    if (!prefillProfileId || prefilled) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const profile = await getCharacterProfile(prefillProfileId);
+        if (!profile || cancelled) return;
+        setName(profile.name);
+        setDescription(profile.description ?? '');
+        setPersonality(profile.personality ?? '');
+        setAppearance(profile.appearance ?? '');
+        setBackstory(profile.backstory ?? '');
+        setVoiceCharacteristics(profile.voice_characteristics ?? '');
+        setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
+        setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
+      } catch (err) {
+        log.error('Failed to prefill profile:', err);
+      } finally {
+        if (!cancelled) setPrefilled(true);
       }
-    }, [showAdvanced, loadModuleConfigs]),
-  );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [prefillProfileId, prefilled]);
 
   // ── Avatar picker ────────────────────────────────────────────────────────────
   const handlePickAvatar = async () => {
@@ -241,144 +255,48 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   };
 
-  // ── Load existing profiles + their primary images (for the picker carousel) ──
-  useEffect(() => {
-    let cancelled = false;
-    const loadProfiles = async () => {
-      try {
-        const profiles = await getAllCharacterProfiles();
-        if (cancelled) return;
-        setAllProfiles(profiles);
-
-        // Load the primary image for every profile so the carousel cards show
-        // a live avatar preview before the user confirms any selection.
-        const imageMap: Record<string, string | null> = {};
-        await Promise.all(
-          profiles.map(async profile => {
-            try {
-              const images = await getCharacterImages(profile.id);
-              const primary = images.find(img => img.is_primary === true);
-              imageMap[profile.id] = primary
-                ? createDataURL(primary.image_data, primary.mime_type)
-                : null;
-            } catch {
-              imageMap[profile.id] = null;
-            }
-          }),
-        );
-        if (cancelled) return;
-        setProfileImages(imageMap);
-
-        // Honor prefillProfileId route param (e.g. "create partner from this profile")
-        const prefillId = route.params?.prefillProfileId;
-        if (prefillId) {
-          const match = profiles.find(p => p.id === prefillId);
-          if (match) {
-            setSelectedProfileId(match.id);
-            setSelectedProfile(match);
-            setName(match.name);
-            setPersonality(match.personality ?? '');
-            setSelectedProfileImageUri(imageMap[match.id] ?? null);
-          }
-        }
-      } catch (err) {
-        log.error('Failed to load character profiles:', err);
-      }
-    };
-    loadProfiles();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleProfileSelect = async (profileId: string) => {
-    const profile = allProfiles.find(p => p.id === profileId) ?? null;
-    setSelectedProfileId(profileId);
-    setSelectedProfile(profile);
-    if (profile) {
-      // Prefill the identity fields from the selected profile
-      setName(profile.name);
-      setPersonality(profile.personality ?? '');
-      // Use the already-loaded carousel image (no extra DB round-trip)
-      setSelectedProfileImageUri(profileImages[profile.id] ?? null);
-    } else {
-      setSelectedProfileImageUri(null);
-    }
-  };
-
-  const handleProfileClear = () => {
-    setSelectedProfileId('');
-    setSelectedProfile(null);
-    setSelectedProfileImageUri(null);
-    // Reset the prefilled identity fields so the "create new profile" card
-    // doesn't keep the previous profile's name/personality.
-    setName('');
-    setPersonality('');
-  };
-
-  // ── Carousel data: "Create new profile" card + one card per existing profile ──
-  const pickerItems = useMemo(
-    () =>
-      [
-        { id: '', name: t('createNewProfile'), description: '' } as ProfilePickerItem,
-        ...allProfiles,
-      ] as ProfilePickerItem[],
-    [allProfiles, t],
-  );
-
-  const scrollToSelectedProfile = useCallback(
-    (index: number) => {
-      requestAnimationFrame(() => {
-        pickerListRef.current?.scrollToIndex({
-          index,
-          animated: true,
-          viewPosition: 0.5,
-        });
-      });
-    },
-    [],
-  );
-
-  // Whenever the picker list is ready, center the selected card
-  const handlePickerListReady = useCallback(() => {
-    const selectedIndex = pickerItems.findIndex(
-      item => (item.id === '' ? !selectedProfileId : item.id === selectedProfileId),
-    );
-    if (selectedIndex >= 0) {
-      scrollToSelectedProfile(selectedIndex);
-    }
-  }, [pickerItems, selectedProfileId, scrollToSelectedProfile]);
-
-  // ── Save & Create ────────────────────────────────────────────────────────────
-  const handleCreate = async () => {
-    if (!name.trim()) {
+// ── Save & Create ────────────────────────────────────────────────────────────
+  /**
+   * Persist the character profile + entity + module mapping, then either jump
+   * straight into a chat with it (`navigateToChat`) or just go back to the
+   * Characters list (`navigateToChat === false`).
+   */
+  const createPartner = async (navigateToChat: boolean) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
       showAlert(t('nameRequired'), t('nameRequiredMessage'));
       return;
     }
 
     setIsSaving(true);
     try {
-      const entityId = name.trim();
+      const entityId = trimmedName;
 
-      // 1. Either link an existing character profile or create a new one
+      // 1. Either link an existing character profile (from the "From an
+      //    Existing One" flow) or create a brand-new one.
       let profileId: string;
-      if (selectedProfileId) {
-        // Reuse the pre-existing profile — do NOT create a new persona
-        profileId = selectedProfileId;
+      if (prefillProfileId) {
+        // Reuse the pre-existing profile — do NOT create a new persona.
+        profileId = prefillProfileId;
       } else {
         profileId = uuidv4();
 
-        // Note: description, personality, voice_characteristics are NOT NULL in the
-        // schema — use empty string fallback, never null.
+        // The NOT NULL text fields use empty string fallbacks, never null.
+        const typingWpm = parseInt(typingSpeedWpm, 10);
+        const audioChance = parseInt(audioResponseChance, 10);
+
         await createCharacterProfile({
           id: profileId,
-          name: name.trim(),
-          description: personality.trim() || '',
+          name: trimmedName,
+          description: description.trim() || '',
           personality: personality.trim() || '',
-          voice_characteristics: '',
-          typing_speed_wpm: 60,
-          audio_response_chance_percent: 50,
+          appearance: appearance.trim() || '',
+          backstory: backstory.trim() || '',
+          voice_characteristics: voiceCharacteristics.trim() || '',
+          typing_speed_wpm: Number.isFinite(typingWpm) ? Math.min(200, Math.max(1, typingWpm)) : 60,
+          audio_response_chance_percent: Number.isFinite(audioChance)
+            ? Math.min(100, Math.max(0, audioChance))
+            : 50,
           vision_config_id: null,
           lifecycle_config: '{}',
           base_prompt: '',
@@ -408,7 +326,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       try {
         await createEntity({
           id: entityId,
-          alias: name.trim(),
+          alias: trimmedName,
           character_profile_id: profileId,
           lifecycle_config: '{}',
           rag_reindex_required: 1,
@@ -429,53 +347,94 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         throw err;
       }
 
-      // 4. Create entity module mapping
+      // 4. Resolve module config ids. When the user picked none, auto-create
+      //    the Soulbits Cloud default configs in the background so the
+      //    partner is chat-ready immediately.
+      let resolvedBackend = backendConfigId || null;
+      let resolvedCognition = cognitionConfigId || null;
+      let resolvedTts = ttsConfigId || null;
+      let resolvedStt = sttConfigId || null;
+      let resolvedVision = visionConfigId || null;
+      let resolvedRag = ragConfigId || null;
+      let resolvedImagination = imaginationConfigId || null;
+      let resolvedMovement = movementConfigId || null;
+
+      const anySelected =
+        resolvedBackend ||
+        resolvedCognition ||
+        resolvedTts ||
+        resolvedStt ||
+        resolvedVision ||
+        resolvedRag ||
+        resolvedImagination ||
+        resolvedMovement;
+
+      if (!anySelected) {
+        log.info('No module configs selected — applying Soulbits Cloud defaults.');
+        const defaults = await ensureSoulbitsDefaultConfigs();
+        resolvedBackend = defaults.backendConfigId;
+        resolvedCognition = defaults.cognitionConfigId;
+        resolvedTts = defaults.ttsConfigId;
+        resolvedStt = defaults.sttConfigId;
+        resolvedVision = defaults.visionConfigId;
+        resolvedRag = defaults.ragConfigId;
+        resolvedImagination = defaults.imaginationConfigId;
+        resolvedMovement = defaults.movementConfigId;
+      }
+
+      // 5. Create entity module mapping
       await createEntityModuleMapping({
         entity_id: entityId,
-        backend_config_id: backendConfigId ?? null,
-        cognition_config_id: cognitionConfigId ?? null,
-        tts_config_id: ttsConfigId ?? null,
-        stt_config_id: sttConfigId ?? null,
-        vision_config_id: visionConfigId ?? null,
-        rag_config_id: ragConfigId ?? null,
-        imagination_config_id: imaginationConfigId ?? null,
-        movement_config_id: movementConfigId ?? null,
+        backend_config_id: resolvedBackend,
+        cognition_config_id: resolvedCognition,
+        tts_config_id: resolvedTts,
+        stt_config_id: resolvedStt,
+        vision_config_id: resolvedVision,
+        rag_config_id: resolvedRag,
+        imagination_config_id: resolvedImagination,
+        movement_config_id: resolvedMovement,
         deleted_at: null,
       });
 
-      // 4b. Push the new entity (and its profile/mapping) to the engine and WAIT
-      // for the sync to complete before navigating. Without this, the engine
-      // doesn't know about the entity yet when ChatDetail sends INIT_ENTITY, so
-      // it rejects with entity_not_defined (chat stuck on "Connecting...").
-      // initiateSync() alone only resolves once SYNC_REQUEST is *sent*;
-      // syncAndWait resolves on SYNC_FINALIZE so the engine has actually
-      // ingested the data. Best-effort: resolves on completion, terminal failure,
-      // or timeout — never blocks navigation forever. isSaving stays true so the
-      // spinner shows during the wait.
+      // 6. Push the new entity (and its profile/mapping) to the engine and WAIT
+      //    for the sync to complete before navigating. Without this, the engine
+      //    doesn't know about the entity yet when ChatDetail sends INIT_ENTITY,
+      //    so it rejects with entity_not_defined (chat stuck on "Connecting...").
       try {
         await syncService.syncAndWait({ timeoutMs: 45_000 });
       } catch (syncErr) {
         log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
       }
 
-      // 5. Resolve the persona we chat as (only personas — never AI
-      //    characters — are valid identities; falls back to 'user').
-      const storedId =
-        await ChatPreferencesService.getGlobalImpersonatedEntity();
-      const impersonatedEntityId = await resolvePersonaId(storedId);
+      // 7. Either jump into a chat with the new partner, or just save and
+      //    return to the Characters list.
+      if (navigateToChat) {
+        // 7a. Resolve the persona we chat as (only personas — never AI
+        //     characters — are valid identities; falls back to 'user').
+        const storedId =
+          await ChatPreferencesService.getGlobalImpersonatedEntity();
+        const impersonatedEntityId = await resolvePersonaId(storedId);
 
-      // 6. Navigate to ChatDetail — replace so back goes to ChatList, not here
-      const participantIds = [impersonatedEntityId ?? 'user', entityId];
-      const scope = deriveScopeFromParticipants(participantIds);
-      const participantKey = deriveParticipantKey(participantIds, impersonatedEntityId ?? 'user', scope);
-      const tempInteractionId = uuidv7();
-      navigation.replace('ChatDetail', {
-        interactionId: tempInteractionId,
-        participantKey,
-        participantIds,
-        entityId: impersonatedEntityId ?? 'user',
-        entityName: name,
-      });
+        // 7b. Navigate to ChatDetail — replace so back goes to ChatList, not here
+        const participantIds = [impersonatedEntityId ?? 'user', entityId];
+        const scope = deriveScopeFromParticipants(participantIds);
+        const participantKey = deriveParticipantKey(
+          participantIds,
+          impersonatedEntityId ?? 'user',
+          scope,
+        );
+        const tempInteractionId = uuidv7();
+        navigation.replace('ChatDetail', {
+          interactionId: tempInteractionId,
+          participantKey,
+          participantIds,
+          entityId: impersonatedEntityId ?? 'user',
+          entityName: trimmedName,
+        });
+      } else {
+        // Save-only: go back to the screen we came from (Characters list).
+        navigation.goBack();
+      }
     } catch (err: any) {
       showAlert(
         t('common:error'),
@@ -486,25 +445,94 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   };
 
+  /** "Start Chatting" — save the partner and jump straight into a chat. */
+  const handleCreate = () => {
+    createPartner(true);
+  };
+
+  /** "Save" — save the partner without starting a chat. */
+  const handleSave = () => {
+    createPartner(false);
+  };
+
   // ── Render guard ─────────────────────────────────────────────────────────────
   if (!theme) return null;
 
   // ── Styles derived from theme ────────────────────────────────────────────────
   const accent = theme.colors.accent.primary;
-  const secondaryAccent = theme.colors.accent.secondary;
   const surfaceColor = theme.colors.background.surface;
-  const baseColor = theme.colors.background.base;
   const inputTextStyle = { color: theme.colors.text.primary };
 
-  const isNameFocused = focusedField === 'name';
-  const isPersonalityFocused = focusedField === 'personality';
+  const anyConfigSelected = () =>
+    !!(
+      backendConfigId ||
+      cognitionConfigId ||
+      ttsConfigId ||
+      sttConfigId ||
+      visionConfigId ||
+      ragConfigId ||
+      imaginationConfigId ||
+      movementConfigId
+    );
+
+  const renderField = (
+    labelKey: string,
+    placeholderKey: string,
+    value: string,
+    onChange: (v: string) => void,
+    field: typeof focusedField,
+    multiline = false,
+    icon: string,
+  ) => {
+    const focused = focusedField === field;
+    return (
+      <View style={styles.fieldGroup}>
+        <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
+          {t(labelKey)}
+        </ThemedText>
+        <View
+          style={[
+            styles.inputShell,
+            multiline && styles.multilineShell,
+            {
+              backgroundColor: hexToRgba(surfaceColor, 0.55),
+              borderColor: focused ? accent : theme.colors.border.default,
+            },
+          ]}
+        >
+          <Icon
+            name={icon}
+            size={20}
+            color={focused ? accent : theme.colors.text.muted}
+            style={multiline ? styles.multilineIcon : undefined}
+          />
+          <TextInput
+            style={[
+              styles.input,
+              multiline && styles.multilineInput,
+              inputTextStyle,
+            ]}
+            value={value}
+            onChangeText={onChange}
+            onFocus={() => setFocusedField(field)}
+            onBlur={() => setFocusedField(null)}
+            placeholder={t(placeholderKey)}
+            placeholderTextColor={theme.colors.text.muted}
+            multiline={multiline}
+            numberOfLines={multiline ? 3 : 1}
+            textAlignVertical={multiline ? 'top' : undefined}
+            autoCorrect={false}
+          />
+        </View>
+      </View>
+    );
+  };
 
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
       <ScreenHeader
         title={t('title')}
-        subtitle={t('profileHint')}
         onBack={() => navigation.goBack()}
       />
 
@@ -516,32 +544,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={[accent]}
-              tintColor={accent}
-              progressBackgroundColor={surfaceColor}
-            />
-          }
         >
-          {/* ── Hero: Avatar (only for new profiles) ── */}
-          {!selectedProfile && (
-            <View style={styles.hero}>
-              <Icon
-                name="creation"
-                size={16}
-                color={hexToRgba(secondaryAccent, 0.8)}
-                style={styles.heroSparkleL}
-              />
-              <Icon
-                name="star-four-points"
-                size={12}
-                color={hexToRgba(accent, 0.55)}
-                style={styles.heroSparkleR}
-              />
+          {/* ══════════════════ 1. GENERAL ══════════════════ */}
+          <ThemedCard elevated accentStripe style={styles.section}>
+            <SectionHeader title={t('sectionGeneral')} />
 
+            {/* Avatar */}
+            <View style={styles.avatarRow}>
               <TouchableOpacity
                 onPress={() => {
                   hapticLightPress();
@@ -567,231 +576,195 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                       <View style={styles.avatarPlaceholder}>
                         <Icon
                           name="account-outline"
-                          size={46}
+                          size={34}
                           color={hexToRgba(accent, 0.9)}
                         />
-                        <ThemedText size={12} variant="muted" style={styles.avatarHint}>
-                          {t('photo')}
-                        </ThemedText>
                       </View>
                     )}
                   </View>
                 </ThemedGradient>
-
                 {/* Camera badge */}
                 <View
                   style={[
                     styles.cameraBadge,
                     {
                       backgroundColor: surfaceColor,
-                      borderColor: baseColor,
+                      borderColor: theme.colors.background.base,
                     },
                   ]}
                 >
-                  <Icon name="camera" size={16} color={accent} />
+                  <Icon name="camera" size={14} color={accent} />
                 </View>
               </TouchableOpacity>
-
-              {avatarUri ? (
-                <TouchableOpacity
-                  onPress={() => {
-                    hapticLightPress();
-                    handlePickAvatar();
-                  }}
-                  style={styles.changePhotoLink}
-                >
-                  <ThemedText size={13} variant="accent">
-                    {t('changePhoto')}
-                  </ThemedText>
-                </TouchableOpacity>
-              ) : (
-                <ThemedText size={12} variant="muted" style={styles.heroCaption}>
-                  {t('common:optional')}
+              <View style={styles.avatarTextGroup}>
+                <ThemedText size={16} weight="bold" variant="primary">
+                  {t('avatarLabel')}
                 </ThemedText>
-              )}
+                <ThemedText size={12} variant="muted">
+                  {avatarUri ? t('changePhoto') : t('addPhotoHint')}
+                </ThemedText>
+              </View>
             </View>
-          )}
 
-          {/* ── Hero: Selected existing profile ── */}
-          {selectedProfile && (
-            <View style={styles.hero}>
-              <TouchableOpacity
-                onPress={() => {
-                  hapticLightPress();
-                  // Recenter the carousel on the currently selected card
-                  const index = pickerItems.findIndex(
-                    item => item.id === selectedProfileId,
-                  );
-                  if (index >= 0) scrollToSelectedProfile(index);
-                }}
-                activeOpacity={0.85}
-                style={styles.avatarPressable}
-              >
-                <ThemedGradient gradient="primary" style={styles.avatarRing}>
-                  <View
-                    style={[
-                      styles.avatarInner,
-                      { backgroundColor: theme.colors.background.elevated },
-                    ]}
-                  >
-                    {selectedProfileImageUri ? (
-                      <Image
-                        source={{ uri: selectedProfileImageUri }}
-                        style={styles.avatarImage}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <Icon name="account" size={46} color={hexToRgba(accent, 0.9)} />
-                    )}
-                  </View>
-                </ThemedGradient>
-              </TouchableOpacity>
-
-              <ThemedText
-                size={24}
-                weight="bold"
-                hierarchy="header"
-                style={styles.selectedName}
-              >
-                {selectedProfile.name}
-              </ThemedText>
-              <ThemedText
-                variant="muted"
-                size={13}
-                style={styles.selectedDescription}
-                numberOfLines={4}
-              >
-                {selectedProfile.description ?? t('noDescription')}
-              </ThemedText>
-
-            </View>
-          )}
-
-          {/* ── Character Profile card — visual picker carousel ── */}
-          <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title={t('profileLabel')} />
             <View style={styles.sectionContent}>
-              <FlatList
-                ref={pickerListRef}
-                data={pickerItems}
-                keyExtractor={item => item.id || 'new-profile'}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.pickerListContent}
-                onLayout={handlePickerListReady}
-                onScrollToIndexFailed={() => {
-                  // Scroll target may not be measured on first pass — the next
-                  // onLayout/selection change recenters it.
-                }}
-                initialNumToRender={8}
-                renderItem={({ item }) => {
-                  const isNew = item.id === '';
-                  const isSelected = isNew
-                    ? !selectedProfileId
-                    : item.id === selectedProfileId;
-                  return (
-                    <ProfilePickerCard
-                      title={isNew ? t('createNewProfile') : item.name}
-                      subtitle={
-                        isNew
-                          ? t('createNewProfileHint')
-                          : item.description ?? t('noDescription')
-                      }
-                      imageUri={isNew ? null : profileImages[item.id] ?? null}
-                      isNew={isNew}
-                      isSelected={isSelected}
-                      onPress={() => {
-                        hapticLightPress();
-                        if (isNew) {
-                          handleProfileClear();
-                        } else {
-                          handleProfileSelect(item.id);
-                        }
-                      }}
-                    />
-                  );
-                }}
-              />
+              {/* Name (required) */}
+              {renderField(
+                'nameLabel',
+                'namePlaceholder',
+                name,
+                setName,
+                'name',
+                false,
+                'account-edit',
+              )}
+
+              {/* Description */}
+              {renderField(
+                'descriptionLabel',
+                'descriptionPlaceholder',
+                description,
+                setDescription,
+                'description',
+                true,
+                'text-box-outline',
+              )}
             </View>
           </ThemedCard>
 
-          {/* ── Identity fields ── */}
-          <View style={styles.fieldsSection}>
-            {/* Name field (entity alias) */}
-            <View style={styles.fieldGroup}>
-              <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
-                {t('nameLabel')}
-              </ThemedText>
-              <View
-                style={[
-                  styles.inputShell,
-                  {
-                    backgroundColor: hexToRgba(surfaceColor, 0.55),
-                    borderColor: isNameFocused ? accent : theme.colors.border.default,
-                  },
-                ]}
-              >
-                <Icon
-                  name="account-edit"
-                  size={20}
-                  color={isNameFocused ? accent : theme.colors.text.muted}
-                />
-                <TextInput
-                  style={[styles.input, inputTextStyle]}
-                  value={name}
-                  onChangeText={setName}
-                  onFocus={() => setFocusedField('name')}
-                  onBlur={() => setFocusedField(null)}
-                  placeholder={t('namePlaceholder')}
-                  placeholderTextColor={theme.colors.text.muted}
-                  returnKeyType="next"
-                  autoCorrect={false}
-                />
-              </View>
-            </View>
-
-            {/* Personality field (only for new profiles) */}
-            {!selectedProfile && (
-              <View style={styles.fieldGroup}>
-                <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
-                  {t('personalityLabel')}
-                </ThemedText>
-                <View
-                  style={[
-                    styles.inputShell,
-                    styles.multilineShell,
-                    {
-                      backgroundColor: hexToRgba(surfaceColor, 0.55),
-                      borderColor: isPersonalityFocused
-                        ? accent
-                        : theme.colors.border.default,
-                    },
-                  ]}
-                >
+          {/* ══════════════════ 2. DETAILS ══════════════════ */}
+          <ThemedCard elevated accentStripe style={styles.section}>
+            <TouchableOpacity
+              onPress={() => setShowDetails(prev => !prev)}
+              activeOpacity={0.7}
+            >
+              <SectionHeader
+                title={t('sectionDetails')}
+                right={
                   <Icon
-                    name="message-text-outline"
-                    size={20}
-                    color={isPersonalityFocused ? accent : theme.colors.text.muted}
-                    style={styles.multilineIcon}
+                    name={showDetails ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={theme.colors.text.muted}
                   />
-                  <TextInput
-                    style={[styles.input, styles.multilineInput, inputTextStyle]}
-                    value={personality}
-                    onChangeText={setPersonality}
-                    onFocus={() => setFocusedField('personality')}
-                    onBlur={() => setFocusedField(null)}
-                    placeholder={t('personalityPlaceholder')}
-                    placeholderTextColor={theme.colors.text.muted}
-                    multiline
-                    numberOfLines={3}
-                    textAlignVertical="top"
-                  />
+                }
+              />
+            </TouchableOpacity>
+
+            {showDetails && (
+              <View style={styles.sectionContent}>
+                {/* Personality */}
+                {renderField(
+                  'personalityLabel',
+                  'personalityPlaceholder',
+                  personality,
+                  setPersonality,
+                  'personality',
+                  true,
+                  'message-text-outline',
+                )}
+                {/* Appearance */}
+                {renderField(
+                  'appearanceLabel',
+                  'appearancePlaceholder',
+                  appearance,
+                  setAppearance,
+                  'appearance',
+                  true,
+                  'human-handsup',
+                )}
+                {/* Backstory */}
+                {renderField(
+                  'backstoryLabel',
+                  'backstoryPlaceholder',
+                  backstory,
+                  setBackstory,
+                  'backstory',
+                  true,
+                  'book-open-page-variant-outline',
+                )}
+
+                {/* ── Voice & Behavior ── */}
+                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
+                  {t('voiceBehaviorLabel')}
+                </ThemedText>
+
+                {/* Voice characteristics */}
+                {renderField(
+                  'voiceLabel',
+                  'voicePlaceholder',
+                  voiceCharacteristics,
+                  setVoiceCharacteristics,
+                  'voice',
+                  true,
+                  'account-voice',
+                )}
+
+                {/* Typing speed + Audio chance (side-by-side numeric row) */}
+                <View style={styles.numericRow}>
+                  <View style={styles.numericField}>
+                    <ThemedText size={13} variant="secondary" numberOfLines={1} style={styles.numericFieldLabel}>
+                      {t('typingSpeedLabel')}
+                    </ThemedText>
+                    <View
+                      style={[
+                        styles.inputShell,
+                        {
+                          backgroundColor: hexToRgba(surfaceColor, 0.55),
+                          borderColor:
+                            focusedField === 'typing'
+                              ? accent
+                              : theme.colors.border.default,
+                        },
+                      ]}
+                    >
+                      <TextInput
+                        style={[styles.input, styles.numericInput, inputTextStyle]}
+                        value={typingSpeedWpm}
+                        onChangeText={setTypingSpeedWpm}
+                        onFocus={() => setFocusedField('typing')}
+                        onBlur={() => setFocusedField(null)}
+                        placeholder="60"
+                        placeholderTextColor={theme.colors.text.muted}
+                        keyboardType="numeric"
+                        returnKeyType="done"
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.numericField}>
+                    <ThemedText size={13} variant="secondary" numberOfLines={1} style={styles.numericFieldLabel}>
+                      {t('audioChanceLabel')}
+                    </ThemedText>
+                    <View
+                      style={[
+                        styles.inputShell,
+                        {
+                          backgroundColor: hexToRgba(surfaceColor, 0.55),
+                          borderColor:
+                            focusedField === 'audio'
+                              ? accent
+                              : theme.colors.border.default,
+                        },
+                      ]}
+                    >
+                      <TextInput
+                        style={[styles.input, styles.numericInput, inputTextStyle]}
+                        value={audioResponseChance}
+                        onChangeText={setAudioResponseChance}
+                        onFocus={() => setFocusedField('audio')}
+                        onBlur={() => setFocusedField(null)}
+                        placeholder="50"
+                        placeholderTextColor={theme.colors.text.muted}
+                        keyboardType="numeric"
+                        returnKeyType="done"
+                      />
+                    </View>
+                  </View>
                 </View>
               </View>
             )}
-          </View>
+          </ThemedCard>
 
-          {/* ── Advanced Settings card ── */}
+          {/* ══════════════════ 3. ADVANCED ══════════════════ */}
           <ThemedCard elevated accentStripe accentTint style={styles.section}>
             <TouchableOpacity
               onPress={() => setShowAdvanced(prev => !prev)}
@@ -814,20 +787,20 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 {/* Loading indicator (only while first load is in flight) */}
                 {hasAnyConfigs === null && (
                   <View style={styles.loadingRow}>
-                    <ActivityIndicator
-                      size="small"
-                      color={accent}
-                    />
-                    <ThemedText size={13} variant="muted" style={{ marginLeft: 8 }}>
+                    <ActivityIndicator size="small" color={accent} />
+                    <ThemedText size={13} variant="muted" style={styles.loadingLabel}>
                       {t('loadingConfigs')}
                     </ThemedText>
                   </View>
                 )}
 
-                {/* Module pickers — always visible so configs can be
-                    selected, created, or edited right here. The selector
-                    falls back to "Disabled" when no config exists yet, and
-                    the ＋ button opens ModuleConfigEdit to create one. */}
+                {/* Module pickers — always visible so configs can be selected,
+                    created, or edited right here. The selector falls back to
+                    "Disabled" when no config exists yet, and the ＋ button
+                    opens ModuleConfigEdit to create one. */}
+                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
+                  {t('aiModelSection')}
+                </ThemedText>
                 <EntityModuleSelectorWithActions
                   label={t('moduleBackend')}
                   moduleType="backend"
@@ -844,6 +817,10 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                   onChange={setCognitionConfigId}
                   isLoading={hasAnyConfigs === null}
                 />
+
+                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
+                  {t('voiceSection')}
+                </ThemedText>
                 <EntityModuleSelectorWithActions
                   label={t('moduleTTS')}
                   moduleType="tts"
@@ -860,6 +837,10 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                   onChange={setSttConfigId}
                   isLoading={hasAnyConfigs === null}
                 />
+
+                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
+                  {t('configSection')}
+                </ThemedText>
                 <EntityModuleSelectorWithActions
                   label={t('moduleRAG')}
                   moduleType="rag"
@@ -892,25 +873,42 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                   onChange={setImaginationConfigId}
                   isLoading={hasAnyConfigs === null}
                 />
+
+                {!anyConfigSelected() && hasAnyConfigs !== null && (
+                  <View style={styles.defaultHint}>
+                    <Icon name="creation" size={14} color={accent} />
+                    <ThemedText size={12} variant="muted" style={styles.defaultHintText}>
+                      {t('defaultConfigNote')}
+                    </ThemedText>
+                  </View>
+                )}
               </View>
             )}
           </ThemedCard>
 
-          {/* ── Create button ── */}
+          {/* ── Action buttons: Save / Start Chatting ── */}
           <View style={styles.ctaSection}>
             {isSaving ? (
-              <ActivityIndicator
-                size="large"
-                color={accent}
-              />
+              <ActivityIndicator size="large" color={accent} />
             ) : (
-              <ThemedButton
-                label={t('startChatting')}
-                onPress={handleCreate}
-                variant="primary"
-                icon="creation"
-                disabled={isSaving}
-              />
+              <View style={styles.ctaRow}>
+                <ThemedButton
+                  label={t('save')}
+                  onPress={handleSave}
+                  variant="secondary"
+                  icon="content-save-outline"
+                  disabled={isSaving}
+                  style={styles.ctaButton}
+                />
+                <ThemedButton
+                  label={t('startChatting')}
+                  onPress={handleCreate}
+                  variant="primary"
+                  icon="creation"
+                  disabled={isSaving}
+                  style={styles.ctaButton}
+                />
+              </View>
             )}
           </View>
         </ScrollView>
@@ -927,9 +925,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    elevation: 0,
-  },
   keyboardAvoid: {
     flex: 1,
   },
@@ -938,35 +933,39 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
 
-  // ── Hero avatar ──
-  hero: {
+  // ── Section card ──
+  section: {
+    padding: 0,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  sectionContent: {
+    padding: 16,
+    gap: 0,
+  },
+
+  // ── Avatar row ──
+  avatarRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 28,
-  },
-  heroSparkleL: {
-    position: 'absolute',
-    top: 8,
-    left: 36,
-  },
-  heroSparkleR: {
-    position: 'absolute',
-    top: 34,
-    right: 42,
+    gap: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 4,
   },
   avatarPressable: {
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarRing: {
-    width: 148,
-    height: 148,
-    borderRadius: 74,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     padding: 3,
   },
   avatarInner: {
     flex: 1,
-    borderRadius: 71,
+    borderRadius: 35,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -981,16 +980,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarHint: {
-    marginTop: 6,
-  },
   cameraBadge: {
     position: 'absolute',
     bottom: 2,
     right: 2,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1000,37 +996,12 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 4,
   },
-  changePhotoLink: {
-    marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-  heroCaption: {
-    marginTop: 10,
+  avatarTextGroup: {
+    flex: 1,
+    gap: 2,
   },
 
-  // ── Selected profile hero ──
-  selectedName: {
-    marginTop: 16,
-    textAlign: 'center',
-  },
-  selectedDescription: {
-    marginTop: 6,
-    textAlign: 'center',
-    lineHeight: 19,
-    paddingHorizontal: 24,
-  },
-
-  // ── Profile picker carousel ──
-  pickerListContent: {
-    paddingHorizontal: 4,
-    paddingVertical: 6,
-  },
-
-  // ── Identity fields ──
-  fieldsSection: {
-    marginBottom: 4,
-  },
+  // ── Fields ──
   fieldGroup: {
     marginBottom: 18,
   },
@@ -1064,20 +1035,53 @@ const styles = StyleSheet.create({
     minHeight: 88,
   },
 
-  // ── Section card ──
-  section: {
-    padding: 0,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  sectionContent: {
-    padding: 16,
-    gap: 0,
-  },
+  // ── Advanced ──
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
+  },
+  loadingLabel: {
+    marginLeft: 8,
+  },
+  groupLabel: {
+    marginTop: 8,
+    marginBottom: 10,
+    letterSpacing: 0.4,
+  },
+  defaultHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  defaultHintText: {
+    flex: 1,
+  },
+
+  // ── Numeric row (typing speed / audio chance) ──
+  numericRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  numericField: {
+    flex: 1,
+    marginBottom: 8,
+  },
+  numericFieldLabel: {
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  numericInput: {
+    textAlign: 'center',
+    fontSize: 15,
+    paddingVertical: 0,
   },
 
   // ── CTA ──
@@ -1085,5 +1089,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
     minHeight: 56,
     justifyContent: 'center',
+  },
+  ctaRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  ctaButton: {
+    flex: 1,
   },
 });

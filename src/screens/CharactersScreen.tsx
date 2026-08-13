@@ -6,7 +6,6 @@ import {
   TextInput,
   ActivityIndicator,
   RefreshControl,
-  Animated,
   TouchableOpacity,
   ScrollView,
 } from 'react-native';
@@ -38,6 +37,8 @@ import { CharacterProfileCard } from '../components/characters/CharacterProfileC
 import { ManageCategoriesModal } from '../components/characters/ManageCategoriesModal';
 import { CharacterCardMenuModal } from '../components/characters/CharacterCardMenuModal';
 import { AddToCategoryModal } from '../components/characters/AddToCategoryModal';
+import { CreatePartnerModal } from '../components/characters/CreatePartnerModal';
+import { ExistingProfilePickerModal } from '../components/characters/ExistingProfilePickerModal';
 import {
   getAllCharacterProfiles,
   getCharacterImages,
@@ -173,9 +174,7 @@ export const CharactersScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const expandAnim = useRef(new Animated.Value(0)).current;
-  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
 
   // ── 4-3: tag / creator filtering ──────────────────────────────────────────
   const [allTags, setAllTags] = useState<string[]>([]);
@@ -199,6 +198,11 @@ export const CharactersScreen: React.FC = () => {
       useNativeDriver: true,
     }).start();
   }, [hasActiveFilters, reduceMotion, filterBannerAnim]);
+
+  // Whether the "new AI partner?" bottom sheet is open (opened via ＋ FAB)
+  const [createVisible, setCreateVisible] = useState(false);
+  // Whether the "from an existing one" profile picker is open
+  const [existingPickVisible, setExistingPickVisible] = useState(false);
 
   // ── Favorites + categories ─────────────────────────────────────────────
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
@@ -541,8 +545,23 @@ export const CharactersScreen: React.FC = () => {
     }
   }
 
+  /**
+   * "New AI Partner" — opens the Create AI Partner wizard (fresh profile
+   * mode, the "Create new profile" card is selected by default).
+   */
   const handleCreateNew = () => {
-    navigation.navigate('CharacterProfileEdit', {}); // no profileId = create mode
+    navigation.navigate('CreateAI', {});
+  };
+
+  /** "From an Existing One" — open the profile picker sheet. */
+  const handleFromExisting = () => {
+    setExistingPickVisible(true);
+  };
+
+  /** A profile was picked — open CreateAI with that profile linked. */
+  const handleExistingProfileSelect = (profileId: string) => {
+    setExistingPickVisible(false);
+    navigation.navigate('CreateAI', { prefillProfileId: profileId });
   };
 
   const handleImportCard = async () => {
@@ -576,7 +595,7 @@ export const CharactersScreen: React.FC = () => {
     }
   };
 
-  /** Persist the already-mapped profile + optional embedded image (3-5). */
+/** Persist the already-mapped profile + optional embedded image (3-5). */
   const persistImported = async (mapped: ReturnType<typeof mapCardToProfile>) => {
     await createCharacterProfile(mapped.profile);
     if (mapped.image) {
@@ -639,41 +658,11 @@ export const CharactersScreen: React.FC = () => {
     }
   };
 
-  // ── FAB speed dial (create / import) ───────────────────────────────────
-  const openSheet = useCallback(() => {
-    setExpanded(true);
-    Animated.timing(expandAnim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
-  }, [expandAnim]);
-
-  const closeSheet = useCallback(() => {
-    Animated.timing(expandAnim, { toValue: 0, duration: 180, useNativeDriver: true }).start(
-      ({ finished }) => {
-        if (finished) setExpanded(false);
-      },
-    );
-  }, [expandAnim]);
-
-  const toggleSheet = useCallback(() => {
-    if (expanded) {
-      closeSheet();
-    } else {
-      openSheet();
-    }
-  }, [expanded, openSheet, closeSheet]);
-
-  const rotate = expandAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] });
-  const createOpacity = expandAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
-  const createTranslateY = expandAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] });
-  const importOpacity = expandAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
-  const importTranslateY = expandAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] });
-
   if (!theme) return null;
 
   const accent = theme.colors.accent.primary;
   const baseHex = theme.colors.background.base;
   const inputBg = hexToRgba(baseHex, 0.55);
-  const speedActionBg = hexToRgba(theme.colors.background.elevated, 0.94);
-  const speedActionBorder = hexToRgba(accent, 0.3);
 
   return (
     <ThemedView style={styles.container}>
@@ -955,79 +944,16 @@ export const CharactersScreen: React.FC = () => {
         )}
       />
 
-      {/* FAB speed dial — hide during initial load */}
+      {/* FAB — opens the "new AI partner?" sheet (hidden during initial load) */}
       {!isLoading && (
-        <>
-          {expanded && (
-            <TouchableOpacity
-              style={[StyleSheet.absoluteFill, styles.backdrop]}
-              activeOpacity={1}
-              onPress={closeSheet}
-              accessibilityLabel={t('common:cancel')}
-            />
-          )}
-
-          <View style={[styles.fabGroup, { bottom: TAB_BAR_FAB_OFFSET + safeBottom }]}>
-            {/* Import character card (PNG / JSON) */}
-            <Animated.View
-              style={[
-                styles.speedAction,
-                styles.speedActionImport,
-                { opacity: importOpacity, transform: [{ translateY: importTranslateY }] },
-              ]}
-              pointerEvents={expanded ? 'auto' : 'none'}
-            >
-              <TouchableOpacity
-                style={[styles.speedActionTouch, { backgroundColor: speedActionBg, borderColor: speedActionBorder }]}
-                onPress={() => {
-                  hapticLightPress();
-                  closeSheet();
-                  handleImportCard();
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={t('importCardButton')}
-                testID="import-character-card"
-              >
-                <MaterialCommunityIcons name="file-import-outline" size={18} color={accent} />
-                <ThemedText size={13} weight="bold">
-                  {t('importCardButton')}
-                </ThemedText>
-              </TouchableOpacity>
-            </Animated.View>
-
-            {/* Create new profile */}
-            <Animated.View
-              style={[
-                styles.speedAction,
-                styles.speedActionCreate,
-                { opacity: createOpacity, transform: [{ translateY: createTranslateY }] },
-              ]}
-              pointerEvents={expanded ? 'auto' : 'none'}
-            >
-              <TouchableOpacity
-                style={[styles.speedActionTouch, { backgroundColor: speedActionBg, borderColor: speedActionBorder }]}
-                onPress={() => {
-                  hapticLightPress();
-                  closeSheet();
-                  handleCreateNew();
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={t('createProfile')}
-                testID="create-profile-option"
-              >
-                <MaterialCommunityIcons name="account-plus-outline" size={18} color={accent} />
-                <ThemedText size={13} weight="bold">
-                  {t('createProfile')}
-                </ThemedText>
-              </TouchableOpacity>
-            </Animated.View>
-
-            {/* Main FAB — rotates into an ✕ when open */}
-            <Animated.View style={{ transform: [{ rotate }] }}>
-              <ThemedFab icon="plus" onPress={toggleSheet} style={styles.fabFab} />
-            </Animated.View>
-          </View>
-        </>
+        <View style={[styles.fabGroup, { bottom: TAB_BAR_FAB_OFFSET + safeBottom }]}>
+          <ThemedFab
+            icon="plus"
+            onPress={() => setCreateVisible(true)}
+            style={styles.fabFab}
+            testID="add-ai-partner"
+          />
+        </View>
       )}
 
 {/* Post-import review (3-5) — opens after the card parses, before persist. */}
@@ -1038,6 +964,22 @@ export const CharactersScreen: React.FC = () => {
         onSave={handleImportSave}
         onReviewAndEdit={handleImportReviewAndEdit}
         onGenerateGreeting={handleImportGenerateGreeting}
+      />
+
+      {/* "New AI partner?" bottom sheet (create / from existing / import) */}
+      <CreatePartnerModal
+        visible={createVisible}
+        onClose={() => setCreateVisible(false)}
+        onNewPartner={handleCreateNew}
+        onFromExisting={handleFromExisting}
+        onImport={handleImportCard}
+      />
+
+      {/* "From an existing one" — pick an existing profile */}
+      <ExistingProfilePickerModal
+        visible={existingPickVisible}
+        onClose={() => setExistingPickVisible(false)}
+        onSelect={handleExistingProfileSelect}
       />
 
       {/* Manage categories bottom sheet */}
@@ -1157,35 +1099,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     right: 0,
   },
-  backdrop: {
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
-    zIndex: 5,
-  },
-  speedAction: {
-    position: 'absolute',
-    right: 0,
-    zIndex: 10,
-  },
-  speedActionImport: {
-    bottom: 120,
-  },
-  speedActionCreate: {
-    bottom: 68,
-  },
-  speedActionTouch: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 6,
-  },
   listContent: { padding: 12, paddingBottom: 80 },
   emptyListContent: { flex: 1 },
   columnWrapper: { gap: 12, marginBottom: 12 },
@@ -1194,9 +1107,4 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   emptyButton: { width: '100%' },
-  fab: {
-    position: 'absolute',
-    bottom: 24,
-    right: 24,
-  },
 });

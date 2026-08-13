@@ -12,6 +12,7 @@ interface ThemedFabProps {
     iconSize?: number;
     iconColor?: string;
     disabled?: boolean;
+    testID?: string;
 }
 
 /**
@@ -25,6 +26,7 @@ export const ThemedFab: React.FC<ThemedFabProps> = ({
     iconSize = 24,
     iconColor = '#ffffff',
     disabled = false,
+    testID,
 }) => {
     const { theme } = useAppTheme();
 
@@ -40,6 +42,7 @@ export const ThemedFab: React.FC<ThemedFabProps> = ({
             }}
             disabled={disabled}
             activeOpacity={0.8}
+            testID={testID}
             style={[
                 styles.container,
                 styles.glowShadow,
