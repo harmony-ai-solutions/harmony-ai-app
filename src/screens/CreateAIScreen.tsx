@@ -17,7 +17,7 @@
  * wired up out of the box.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -55,17 +55,23 @@ import { EntityModuleSelectorWithActions } from '../components/entities/EntityMo
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
+import type { CharacterProfile } from '../database/models';
 
 import {
   createCharacterProfile,
   createCharacterImage,
   getCharacterProfile,
+  getCharacterImages,
   setCharacterProfileSource,
 } from '../database/repositories/characters';
 import {
   createEntity,
   createEntityModuleMapping,
+  getEntityByCharacterProfileId,
+  getEntityModuleMapping,
+  getNextEntityAliasCopy,
 } from '../database/repositories/entities';
+import { createDataURL } from '../database/base64';
 import {
   getAllCognitionConfigs,
   getAllTTSConfigs,
@@ -156,6 +162,28 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const prefillProfileId = route.params?.prefillProfileId ?? null;
   const [prefilled, setPrefilled] = useState(false);
 
+  // ── Duplicate flow — duplicateProfileId copies a profile into a NEW one ──────
+  // The source profile is fully copied: name gets an auto-numbered suffix
+  // (02, 03, …), all detail fields + voice settings carry over, the primary
+  // avatar image is copied, and any existing entity module mapping is re-used
+  // so the copy is chat-ready with the exact same settings.
+  const duplicateProfileId = route.params?.duplicateProfileId ?? null;
+  const [duplicateProfile, setDuplicateProfile] =
+    useState<CharacterProfile | null>(null);
+  const [duplicateLoaded, setDuplicateLoaded] = useState(false);
+  // Prefills from the copied profile — separate from the module-config
+  // selection below so pickers work after the copy lands.
+  const [prefillModuleIds, setPrefillModuleIds] = useState<{
+    backend: string | null;
+    cognition: string | null;
+    tts: string | null;
+    stt: string | null;
+    vision: string | null;
+    rag: string | null;
+    imagination: string | null;
+    movement: string | null;
+  } | null>(null);
+
   /**
    * Load all module configs up front so the Advanced section pickers are
    * populated when the user expands them.
@@ -232,6 +260,99 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [prefillProfileId, prefilled]);
 
+  // ── Duplicate prefill (route param duplicateProfileId) ───────────────────────
+  // Loads the source profile, copies its primary avatar + entity module mapping,
+  // computes an auto-numbered name (02, 03, …) and prefills every editable field
+  // so the user gets a full copy they can tweak, save, or chat with.
+  useEffect(() => {
+    if (!duplicateProfileId || duplicateLoaded) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const profile = await getCharacterProfile(duplicateProfileId);
+        if (!profile || cancelled) return;
+
+        // Compute the next free copy name — "Aria" → "Aria 02" → "Aria 03"…
+        const nextName = await getNextEntityAliasCopy(profile.name || 'Character');
+        if (cancelled) return;
+        setDuplicateProfile(profile);
+        setName(nextName);
+        setDescription(profile.description ?? '');
+        setPersonality(profile.personality ?? '');
+        setAppearance(profile.appearance ?? '');
+        setBackstory(profile.backstory ?? '');
+        setVoiceCharacteristics(profile.voice_characteristics ?? '');
+        setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
+        setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
+
+        // Copy the primary avatar image (base64 + mime) so the copy looks identical.
+        try {
+          const images = await getCharacterImages(profile.id);
+          const primary = images.find(img => img.is_primary === true);
+          if (primary && !cancelled) {
+            setAvatarBase64(primary.image_data || null);
+            setAvatarMimeType(primary.mime_type || 'image/jpeg');
+            setAvatarUri(createDataURL(primary.image_data, primary.mime_type));
+          }
+        } catch (imgErr) {
+          log.warn('Failed to copy primary avatar:', imgErr);
+        }
+
+        // Copy the source entity's module mapping (settings) so the copy is
+        // chat-ready with the exact same AI model / voice / config stack.
+        try {
+          const entity = await getEntityByCharacterProfileId(profile.id);
+          if (entity) {
+            const mapping = await getEntityModuleMapping(entity.id);
+            if (mapping && !cancelled) {
+              setPrefillModuleIds({
+                backend: mapping.backend_config_id ?? null,
+                cognition: mapping.cognition_config_id ?? null,
+                tts: mapping.tts_config_id ?? null,
+                stt: mapping.stt_config_id ?? null,
+                vision: mapping.vision_config_id ?? null,
+                rag: mapping.rag_config_id ?? null,
+                imagination: mapping.imagination_config_id ?? null,
+                movement: mapping.movement_config_id ?? null,
+              });
+            }
+          }
+        } catch (mapErr) {
+          log.warn('Failed to copy module mapping:', mapErr);
+        }
+      } catch (err) {
+        log.error('Failed to duplicate profile:', err);
+      } finally {
+        if (!cancelled) setDuplicateLoaded(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [duplicateProfileId, duplicateLoaded]);
+
+  // ── Apply copied module configs (from the duplicated partner) ────────────────
+  // Once both the copied mapping is available AND the module-config lists have
+  // loaded, pre-select the copied configs so the Advanced pickers reflect the
+  // source partner's exact settings (editable afterwards).
+  const prefillAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!prefillModuleIds || hasAnyConfigs === null || prefillAppliedRef.current) {
+      return;
+    }
+    prefillAppliedRef.current = true;
+    setBackendConfigId(prefillModuleIds.backend ?? '');
+    setCognitionConfigId(prefillModuleIds.cognition ?? '');
+    setTtsConfigId(prefillModuleIds.tts ?? '');
+    setSttConfigId(prefillModuleIds.stt ?? '');
+    setVisionConfigId(prefillModuleIds.vision ?? '');
+    setRagConfigId(prefillModuleIds.rag ?? '');
+    setImaginationConfigId(prefillModuleIds.imagination ?? '');
+    setMovementConfigId(prefillModuleIds.movement ?? '');
+  }, [prefillModuleIds, hasAnyConfigs]);
+
   // ── Avatar picker ────────────────────────────────────────────────────────────
   const handlePickAvatar = async () => {
     try {
@@ -297,10 +418,16 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           audio_response_chance_percent: Number.isFinite(audioChance)
             ? Math.min(100, Math.max(0, audioChance))
             : 50,
-          vision_config_id: null,
-          lifecycle_config: '{}',
-          base_prompt: '',
-          scenario: '',
+          // When duplicating, carry over the source profile's system prompt /
+          // scenario / example dialogues / lifecycle config / vision config so
+          // the copy is a faithful replica (these fields aren't exposed in the
+          // Create AI wizard, so they can't be edited here — they match the
+          // source).
+          vision_config_id: duplicateProfile?.vision_config_id ?? null,
+          lifecycle_config: duplicateProfile?.lifecycle_config ?? '{}',
+          base_prompt: duplicateProfile?.base_prompt ?? '',
+          scenario: duplicateProfile?.scenario ?? '',
+          example_dialogues: duplicateProfile?.example_dialogues ?? '',
         });
         // Tag as user-created so it is hidden from the Discover community grid
         await setCharacterProfileSource(profileId, 'user');
@@ -532,7 +659,11 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
       <ScreenHeader
-        title={t('title')}
+        title={
+          duplicateProfile
+            ? t('duplicateTitle', { name: duplicateProfile.name })
+            : t('title')
+        }
         onBack={() => navigation.goBack()}
       />
 

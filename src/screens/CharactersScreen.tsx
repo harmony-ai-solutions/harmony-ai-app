@@ -38,7 +38,7 @@ import { ManageCategoriesModal } from '../components/characters/ManageCategories
 import { CharacterCardMenuModal } from '../components/characters/CharacterCardMenuModal';
 import { AddToCategoryModal } from '../components/characters/AddToCategoryModal';
 import { CreatePartnerModal } from '../components/characters/CreatePartnerModal';
-import { ExistingProfilePickerModal } from '../components/characters/ExistingProfilePickerModal';
+import { AICardPickerModal } from '../components/characters/AICardPickerModal';
 import {
   getAllCharacterProfiles,
   getCharacterImages,
@@ -201,8 +201,12 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
 
   // Whether the "new AI partner?" bottom sheet is open (opened via ＋ FAB)
   const [createVisible, setCreateVisible] = useState(false);
-  // Whether the "from an existing one" profile picker is open
-  const [existingPickVisible, setExistingPickVisible] = useState(false);
+  // Whether the "duplicate an AI partner" card picker is open
+  const [pickerVisible, setPickerVisible] = useState(false);
+  // Whether the picker was opened from the FAB "From an Existing One" flow
+  const [pickerMode, setPickerMode] = useState<'duplicate' | 'fromExisting'>(
+    'duplicate',
+  );
 
   // ── Favorites + categories ─────────────────────────────────────────────
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
@@ -553,15 +557,30 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
     navigation.navigate('CreateAI', {});
   };
 
-  /** "From an Existing One" — open the profile picker sheet. */
-  const handleFromExisting = () => {
-    setExistingPickVisible(true);
+  /**
+   * Open the card picker. When opened from a card tap it duplicates; when
+   * opened from the FAB "From an Existing One" flow it links the profile.
+   */
+  const openPicker = (mode: 'duplicate' | 'fromExisting') => {
+    setPickerMode(mode);
+    setPickerVisible(true);
   };
 
-  /** A profile was picked — open CreateAI with that profile linked. */
-  const handleExistingProfileSelect = (profileId: string) => {
-    setExistingPickVisible(false);
-    navigation.navigate('CreateAI', { prefillProfileId: profileId });
+  /** "From an Existing One" — open the card picker sheet (link mode). */
+  const handleFromExisting = () => {
+    openPicker('fromExisting');
+  };
+
+  /** A profile was picked in the card picker. */
+  const handlePickerSelect = (profile: CharacterProfile) => {
+    setPickerVisible(false);
+    if (pickerMode === 'duplicate') {
+      // Full copy — new profile + entity + settings with an auto-numbered name.
+      navigation.navigate('CreateAI', { duplicateProfileId: profile.id });
+    } else {
+      // Link mode — reuse the existing character profile.
+      navigation.navigate('CreateAI', { prefillProfileId: profile.id });
+    }
   };
 
   const handleImportCard = async () => {
@@ -936,7 +955,7 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
             imageCount={imageCounts[item.id] ?? 0}
             isFavorite={favoriteIds.has(item.id)}
             onFavoriteToggle={() => handleToggleFavorite(item)}
-            onPress={() => handleEdit(item)}
+            onPress={() => openPicker('duplicate')}
             onLongPress={() => handleLongPress(item)}
             onChatPress={() => handleChatPress(item)}
             onCreatorPress={handleCreatorPress}
@@ -975,11 +994,13 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
         onImport={handleImportCard}
       />
 
-      {/* "From an existing one" — pick an existing profile */}
-      <ExistingProfilePickerModal
-        visible={existingPickVisible}
-        onClose={() => setExistingPickVisible(false)}
-        onSelect={handleExistingProfileSelect}
+      {/* Card picker — duplicates an AI partner (card tap) or links one
+          ("From an Existing One" FAB flow) */}
+      <AICardPickerModal
+        visible={pickerVisible}
+        mode={pickerMode}
+        onClose={() => setPickerVisible(false)}
+        onSelect={handlePickerSelect}
       />
 
       {/* Manage categories bottom sheet */}
@@ -1004,6 +1025,7 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
         visible={!!menuProfile}
         characterName={menuProfile?.name ?? ''}
         onClose={closeMenu}
+        onEdit={() => menuProfile && handleEdit(menuProfile)}
         onDelete={() => menuProfile && handleDeleteProfile(menuProfile)}
         onAddToCategory={() => menuProfile && handleMenuAddToCategory(menuProfile)}
       />

@@ -296,5 +296,13 @@
   "cardMenuAddToCategory": "Add to category",
   "cardMenuDelete": "Delete",
   "addToCategoryTitle": "Add to category",
-"addToCategoryNoCategories": "No categories yet. Create one in \"Manage categories\"."
-  }
+"addToCategoryNoCategories": "No categories yet. Create one in \"Manage categories\".",
+  "carouselSwipeHint": "Swipe to browse · Tap to select",
+  "duplicateTitle": "Duplicate an AI Partner",
+  "duplicateHint": "Pick a partner to copy — settings and avatar carry over",
+  "duplicateSearch": "Search partners...",
+  "duplicateEmpty": "No partners to duplicate",
+  "duplicateEmptyHint": "Create a partner first, then come back here.",
+  "duplicateCopied": "Copied as {{name}}",
+  "duplicateTitleScreen": "Copy of {{name}}"
+}

@@ -159,6 +159,82 @@ export async function getEntityByCharacterProfileId(
 }
 
 /**
+ * Strip a trailing copy-suffix (e.g. " 02", "-03", "_ 4") from a name to
+ * recover the true base name. Only strips when a separator precedes the
+ * number — real names without a separator (e.g. "B2") are left untouched.
+ *
+ *   stripCopySuffix("Aria")     → "Aria"
+ *   stripCopySuffix("Aria 02")  → "Aria"
+ *   stripCopySuffix("aria-05")  → "aria"
+ *   stripCopySuffix("B2")       → "B2"
+ */
+export function stripCopySuffix(name: string): string {
+  const trimmed = name.trim();
+  const match = trimmed.match(/^(.*?)[\s-_]+(\d+)$/);
+  if (!match) return trimmed;
+  return match[1].trim();
+}
+
+/**
+ * Compute the next available "copy" alias for duplicating an AI partner.
+ *
+ * The copy number always reflects the count of copies: duplicating "Aria"
+ * yields "Aria 02", duplicating that copy yields "Aria 03", and so on. Any
+ * copy-suffix on the input name is stripped first so the series continues from
+ * the TRUE base name instead of producing "Aria 02 02".
+ *
+ * The original name itself is treated as the "01" slot, so the first copy is
+ * always "<name> 02". Numbers are zero-padded to two digits.
+ *
+ * Examples:
+ *   - no copies yet                  → "Aria 02"
+ *   - "Aria 02" exists               → "Aria 03"
+ *   - duplicating "Aria 02"          → "Aria 03" (continues the series)
+ *   - "Aria" + "Aria 05" exist       → "Aria 02" (holes are not re-used)
+ *   - "Aria" + "Aria 2" exist        → "Aria 03"
+ */
+export async function getNextEntityAliasCopy(baseName: string): Promise<string> {
+  const db = getDatabase();
+
+  // Recover the true base when the source is itself a copy ("Aria 02" → "Aria").
+  const base = stripCopySuffix(baseName);
+  const lowerBase = base.toLowerCase();
+
+  const [results] = await db.executeSql(
+    `SELECT alias FROM entities WHERE deleted_at IS NULL`,
+  );
+
+  const takenNumbers = new Set<number>();
+
+  for (let i = 0; i < results.rows.length; i++) {
+    const alias = String(results.rows.item(i).alias ?? '').trim();
+    const lowerAlias = alias.toLowerCase();
+
+    // Exact match (original) occupies slot 01.
+    if (lowerAlias === lowerBase) {
+      takenNumbers.add(1);
+      continue;
+    }
+
+    // "Aria 02" / "aria-02" / "Aria 2" — capture the trailing number.
+    const prefix = lowerAlias.startsWith(lowerBase) ? lowerAlias.slice(lowerBase.length) : '';
+    const match = prefix.match(/^[\s-_]+(\d+)$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (Number.isFinite(n) && n >= 1) {
+        takenNumbers.add(n);
+      }
+    }
+  }
+
+  let next = 2;
+  while (takenNumbers.has(next)) {
+    next += 1;
+  }
+  return `${base} ${String(next).padStart(2, '0')}`;
+}
+
+/**
  * Update an existing entity
  * Throws error if entity not found
  */

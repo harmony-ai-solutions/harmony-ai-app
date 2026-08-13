@@ -2,13 +2,14 @@
  * CharacterCardMenuModal — context menu shown when the user long-presses a
  * character card on the Characters screen.
  *
- * Offers two actions:
- *   - Delete — removes the character profile (with a destructive confirm)
+ * Offers three actions:
+ *   - Edit Profile — opens the full profile editor for this character
  *   - Add to category — opens the category-picker sheet to assign this
  *     character to one or more categories
+ *   - Delete — removes the character profile (with a destructive confirm)
  *
- * Both are delegated to the parent via callbacks so the screen owns all
- * persistence (favorites/categories are client-only tables).
+ * All actions are delegated to the parent via callbacks so the screen owns
+ * all navigation and persistence.
  */
 
 import React from 'react';
@@ -31,6 +32,8 @@ interface CharacterCardMenuModalProps {
   visible: boolean;
   characterName: string;
   onClose: () => void;
+  /** Edit the character profile */
+  onEdit: () => void;
   /** Delete the character profile */
   onDelete: () => void;
   /** Open the "add to category" picker */
@@ -41,6 +44,7 @@ export const CharacterCardMenuModal: React.FC<CharacterCardMenuModalProps> = ({
   visible,
   characterName,
   onClose,
+  onEdit,
   onDelete,
   onAddToCategory,
 }) => {
@@ -108,6 +112,26 @@ export const CharacterCardMenuModal: React.FC<CharacterCardMenuModalProps> = ({
 
               {/* Actions */}
               <View style={styles.actions}>
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLightPress();
+                    onClose();
+                    onEdit();
+                  }}
+                  activeOpacity={0.7}
+                  style={[
+                    styles.actionRow,
+                    { backgroundColor: theme.colors.background.base + '55', borderColor: theme.colors.border.default + '66' },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${characterName}`}
+                >
+                  <Icon name="pencil-outline" size={20} color={accent} />
+                  <ThemedText size={15} variant="primary" weight="medium" style={styles.actionLabel}>
+                    {t('editProfile')}
+                  </ThemedText>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   onPress={() => {
                     hapticLightPress();

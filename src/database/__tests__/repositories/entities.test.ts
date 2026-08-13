@@ -13,6 +13,8 @@ import {
   getEntity,
   getAllEntities,
   getEntityByCharacterProfileId,
+  getNextEntityAliasCopy,
+  stripCopySuffix,
   updateEntity,
   deleteEntity,
   createEntityModuleMapping,
@@ -751,6 +753,60 @@ describe('entities repository', () => {
       expect(entity).toBeNull();
       const mapping = await getEntityModuleMapping(entityId, true);
       expect(mapping).toBeNull();
+    });
+  });
+
+  describe('getNextEntityAliasCopy', () => {
+    it('returns "<name> 02" when no copies exist yet', async () => {
+      await createEntity({id: 'aria', character_profile_id: null, alias: 'Aria', lifecycle_config: '{}', rag_reindex_required: 1});
+      expect(await getNextEntityAliasCopy('Aria')).toBe('Aria 02');
+    });
+
+    it('increments past an existing copy', async () => {
+      await createEntity({id: 'aria', character_profile_id: null, alias: 'Aria', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: 'aria-02', character_profile_id: null, alias: 'Aria 02', lifecycle_config: '{}', rag_reindex_required: 1});
+      expect(await getNextEntityAliasCopy('Aria')).toBe('Aria 03');
+    });
+
+    it('skips existing numbers and uses the next free one', async () => {
+      await createEntity({id: 'aria', character_profile_id: null, alias: 'Aria', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: 'aria-03', character_profile_id: null, alias: 'Aria 03', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: 'aria-05', character_profile_id: null, alias: 'Aria 05', lifecycle_config: '{}', rag_reindex_required: 1});
+      // Holes are not re-used: 02 is free but 03/05 are taken → next is 02.
+      expect(await getNextEntityAliasCopy('Aria')).toBe('Aria 02');
+    });
+
+    it('continues the series when duplicating an already-numbered copy', async () => {
+      await createEntity({id: 'aria', character_profile_id: null, alias: 'Aria', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: 'aria-02', character_profile_id: null, alias: 'Aria 02', lifecycle_config: '{}', rag_reindex_required: 1});
+      // Duplicating "Aria 02" must NOT yield "Aria 02 02" — it continues at "Aria 03".
+      expect(await getNextEntityAliasCopy('Aria 02')).toBe('Aria 03');
+    });
+
+    it('strips separator-prefixed copy suffixes but not names without separators', async () => {
+      expect(stripCopySuffix('Aria')).toBe('Aria');
+      expect(stripCopySuffix('Aria 02')).toBe('Aria');
+      expect(stripCopySuffix('aria-05')).toBe('aria');
+      expect(stripCopySuffix('B2')).toBe('B2');
+    });
+
+    it('handles case-insensitive collisions', async () => {
+      await createEntity({id: 'luna', character_profile_id: null, alias: 'LUNA', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: 'luna-02', character_profile_id: null, alias: 'luna 02', lifecycle_config: '{}', rag_reindex_required: 1});
+      expect(await getNextEntityAliasCopy('Luna')).toBe('Luna 03');
+    });
+
+    it('ignores soft-deleted entities', async () => {
+      await createEntity({id: 'kay', character_profile_id: null, alias: 'Kay', lifecycle_config: '{}', rag_reindex_required: 1});
+      const deleted = await createEntity({id: 'kay-02', character_profile_id: null, alias: 'Kay 02', lifecycle_config: '{}', rag_reindex_required: 1});
+      await deleteEntity(deleted.id);
+      expect(await getNextEntityAliasCopy('Kay')).toBe('Kay 02');
+    });
+
+    it('handles unrelated aliases that merely start with the base name', async () => {
+      await createEntity({id: 'aria2', character_profile_id: null, alias: 'Aria2', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: 'arianna', character_profile_id: null, alias: 'Arianna', lifecycle_config: '{}', rag_reindex_required: 1});
+      expect(await getNextEntityAliasCopy('Aria')).toBe('Aria 02');
     });
   });
 });

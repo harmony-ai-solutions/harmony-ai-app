@@ -53,7 +53,8 @@ export type RootStackParamList = {
     entityName?: string;
   };
   CharacterProfileEdit: { profileId?: string };
-  CreateAI: { prefillProfileId?: string };
+  /** prefillProfileId = link an existing profile; duplicateProfileId = full copy (new profile + entity + settings) */
+  CreateAI: { prefillProfileId?: string; duplicateProfileId?: string };
   EntityConfig: undefined;
   EntityConfigEdit: { entityId?: string };
   Login: undefined;
