@@ -274,7 +274,7 @@
 - Emoji Picker Components: EmojiPickerModal (full-screen with category tabs), EmojiPickerInline (compact for chat), EmojiGrid (virtualized grid), EmojiItem (single emoji with skin tone), EmojiSearchBar (keyword search), CategoryTabBar (swipeable category tabs), SkinToneSelector (5 skin tone modifiers), EmojiAutocomplete (inline text replacement).
 - Emoji Display: EmojiAwareText (intelligent emoji/text segmentation), EmojiText (renders emoji in chat bubbles), ChatBubble custom rendering for emoji-rich messages.
 - Emoji Services: EmojiService (data loading, search, skin tone variants), EmojiContext (style preferences, provider state management), EntityEmojiActionService (action CRUD + message resolution).
-- Emoji Actions: EmojiActionEditorScreen (entity-level action management), EmojiActionCard (action list item), EmojiActionEditModal (action editor), CustomEmojiActionInput (custom action mapping).
+- Emoji Actions: auto-resolved on send via EntityEmojiActionService (substitution + emotion effects); the per-entity editor UI (EmojiActionEditorScreen / EmojiActionCard / EmojiActionEditModal) was removed 2026-08-14.
 - DB Migrations: 000022 (entity_emoji_actions table with emoji, action_type, emotion_effects JSON, style/bubble_color, cooldown_seconds), 000023 (deleted_at for soft deletes).
 - Sync: emoji_actions synced via WebSocket pipeline, AdditionalEffects payload sent with SEND_MESSAGE events.
 @Implementation[SamplingPresets]:

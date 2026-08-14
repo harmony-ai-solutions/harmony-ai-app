@@ -144,7 +144,7 @@ components/
 ├── lock/           (2)  — LockScreen, PinSetupModal
 ├── modals/         (7)  — AppAlert, Certificate, ImageViewer, Impersonation, Info, InitialPairing
 ├── navigation/     (2)  — GlassTabBar, HeaderMenuButton
-├── settings/       (4)  — ConnectionStatusBadge, EmojiActionCard/Modal, EmojiStyleCard, ThemeCard
+├── settings/       (3)  — ConnectionStatusBadge, EmojiStyleCard, ThemeCard
 ├── sync/           (1)  — SyncProgressVisualizer
 └── themed/         (9)  — ThemedView, ThemedText, ThemedButton, ThemedCard, ThemedGradient, etc.
 ```
@@ -302,7 +302,6 @@ NavigationContainer (transparent theme, fade animations)
     ├── ConnectionSetup (pairing/cloud setup)
     ├── SyncSettings / BackgroundSettings
     ├── ThemeSettings / ThemeEditor
-    ├── EmojiActionEditor
     ├── BiometricLockSettings / ProfileSettings
     ├── ComingSoon
     └── DatabaseTableViewer (DEV-only, __DEV__ guard)

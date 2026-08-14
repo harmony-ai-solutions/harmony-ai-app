@@ -13,7 +13,6 @@ import { AIProfileScreen } from '../screens/AIProfileScreen';
 import { CreateAIScreen } from '../screens/CreateAIScreen';
 import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
-import { EmojiActionEditorScreen } from '../screens/settings/EmojiActionEditorScreen';
 import { ProfileSettingsScreen } from '../screens/settings/ProfileSettingsScreen';
 import { EditProfileScreen } from '../screens/EditProfileScreen';
 import { PersonaEditScreen } from '../screens/PersonaEditScreen';
@@ -70,10 +69,6 @@ export type RootStackParamList = {
   BackgroundSettings: undefined;
   ThemeSettings: undefined;
   ThemeEditor: { themeId?: string } | undefined;
-  EmojiActionEditor: {
-    entityId: string;
-    entityName: string;
-  };
   BiometricLockSettings: undefined;
   ProfileSettings: undefined;
   EditProfile: undefined;
@@ -156,10 +151,6 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen name="BackgroundSettings" component={BackgroundSettingsScreen} />
         <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
         <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />
-        <Stack.Screen
-          name="EmojiActionEditor"
-          component={EmojiActionEditorScreen}
-        />
         <Stack.Screen
           name="BiometricLockSettings"
           component={BiometricLockSettingsScreen}

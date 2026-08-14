@@ -85,7 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The "My Identity Settings" entry in the chat screen (which opened the AI module editor for the persona) has been replaced with **My Personas** — a switcher that lists the user's personas and lets them pick a different one or create a new one. Switching personas shows an in-chat confirmation row ("Now chatting as …") styled like the chat's divider text. Personas only carry identity fields; AI module configuration remains on the partner character.
 - Removed the dedicated Search tab. The Discover tab now includes a search bar and displays the user's AI characters in a two-column grid, so browsing and searching happen on one screen. Tapping a card opens its profile, and the chat button starts a conversation with that character.
 - Discover now shows **AI characters created by other users** (characters synced down from the engine). The current user's own characters — created through "Create AI", the profile editor, or imported character cards — are hidden from their own Discover grid (tracked via a client-only source tag that never affects engine sync), while remaining fully available on the Characters screen and still syncing up so other users can discover them.
-- All empty states across the app now share the Market screen's premium design — a gradient-ringed icon with a bold title and muted hint, consistently sized and positioned right below the header. This covers the "no conversations", "no characters/profiles", "no search results", "not paired / cloud preparing", "no entities", "no emoji actions", and emoji search empty states.
+- All empty states across the app now share the Market screen's premium design — a gradient-ringed icon with a bold title and muted hint, consistently sized and positioned right below the header. This covers the "no conversations", "no characters/profiles", "no search results", "not paired / cloud preparing", "no entities", and emoji search empty states.
+- Removed the dedicated "AI emoji actions" editor screen (and its "advanced emoji actions" button in the chat emoji picker). Emoji actions still resolve automatically when sending messages; only the per-entity editor UI was removed.
 
 ### Security & Privacy
 
@@ -162,6 +163,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ChatListScreen adapted to InteractionSession model with JOIN-based interaction queries
 - ChatDetailScreen refactored for InteractionSession lifecycle with reply mode toggle
 - Force full database synchronization option in SyncSettingsScreen
+- Tapping the AI partner's avatar or name in the chat header now opens the character's AI profile page
 
 #### Changed
 - The chat screen's bottom input bar (text field with send, emoji, image, and microphone buttons) has been removed. The chat now displays messages only; the message long-press action sheet no longer includes the "Reply" action.

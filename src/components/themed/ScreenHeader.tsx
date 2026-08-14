@@ -29,6 +29,8 @@ interface ScreenHeaderProps {
   style?: ViewStyle;
   /** Additional style for the inner content area (below accent stripe) */
   contentStyle?: ViewStyle;
+  /** If provided, the left avatar slot + title become a single tappable unit that calls this on press */
+  onTitlePress?: () => void;
 }
 
 /**
@@ -54,6 +56,7 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
   titleNumberOfLines,
   style,
   contentStyle,
+  onTitlePress,
 }) => {
   const { theme } = useAppTheme();
   const { top: safeTop } = useSafeAreaInsets();
@@ -84,20 +87,51 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
             </TouchableOpacity>
           )}
 
-          {left && <View style={styles.leftSlot}>{left}</View>}
-
-          <View style={styles.titleGroup}>
-            <ThemedText
-              variant="primary"
-              size={titleSize ?? 24}
-              weight="bold"
-              hierarchy="header"
-              numberOfLines={titleNumberOfLines}
+          {onTitlePress ? (
+            <TouchableOpacity
+              onPress={onTitlePress}
+              style={styles.titlePressable}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={title}
             >
-              {title}
-            </ThemedText>
-            {titleRight && <View style={styles.titleRightSlot}>{titleRight}</View>}
-          </View>
+              {left && <View style={styles.leftSlot}>{left}</View>}
+
+              <View style={styles.titleGroup}>
+                <ThemedText
+                  variant="primary"
+                  size={titleSize ?? 24}
+                  weight="bold"
+                  hierarchy="header"
+                  numberOfLines={titleNumberOfLines}
+                >
+                  {title}
+                </ThemedText>
+                {titleRight && (
+                  <View style={styles.titleRightSlot}>{titleRight}</View>
+                )}
+              </View>
+            </TouchableOpacity>
+          ) : (
+            <>
+              {left && <View style={styles.leftSlot}>{left}</View>}
+
+              <View style={styles.titleGroup}>
+                <ThemedText
+                  variant="primary"
+                  size={titleSize ?? 24}
+                  weight="bold"
+                  hierarchy="header"
+                  numberOfLines={titleNumberOfLines}
+                >
+                  {title}
+                </ThemedText>
+                {titleRight && (
+                  <View style={styles.titleRightSlot}>{titleRight}</View>
+                )}
+              </View>
+            </>
+          )}
 
           <View style={styles.spacer} />
 
@@ -149,6 +183,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 1,
+  },
+  titlePressable: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flexShrink: 1,
   },
   spacer: {

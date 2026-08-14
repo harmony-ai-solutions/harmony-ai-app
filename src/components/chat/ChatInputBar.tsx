@@ -56,10 +56,8 @@ interface ChatInputBarProps {
   onSendImages: (images: PickedImage[]) => void;
   /** When true, text sending is disabled (session offline) but photo/emoji/recording stay available. */
   disabled?: boolean;
-  /** Own entity ID — used for the emoji-action picker deep link. */
+  /** Own entity ID — used for the emoji picker action badges. */
   entityId?: string | null;
-  /** Called when the user taps the "advanced emoji actions" button in the picker. */
-  onOpenActionEditor?: () => void;
 }
 
 export const ChatInputBar: React.FC<ChatInputBarProps> = ({
@@ -68,7 +66,6 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   onSendImages,
   disabled = false,
   entityId,
-  onOpenActionEditor,
 }) => {
   const { t } = useTranslation('chatDetail');
   const { theme } = useAppTheme();
@@ -224,11 +221,6 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     },
     [inputText],
   );
-
-  const handleOpenActionEditor = useCallback(() => {
-    if (!entityId || !onOpenActionEditor) return;
-    onOpenActionEditor();
-  }, [entityId, onOpenActionEditor]);
 
   // ── Photo picking ────────────────────────────────────────────────────────
   const handlePickImages = useCallback(async () => {
@@ -729,7 +721,6 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
         <EmojiPickerInline
           onEmojiSelected={handleEmojiSelected}
           entityId={entityId}
-          onOpenActionEditor={handleOpenActionEditor}
         />
       )}
     </ThemedView>

@@ -179,7 +179,7 @@ All themed components live in [`src/components/themed/`](../src/components/theme
 | **Entities** | `EntityCard` (list item with accent stripe), `EntityModuleSelector` |
 | **Emoji** | `EmojiPickerModal` (full-screen), `EmojiPickerInline` (compact), `EmojiGrid`, `EmojiSearchBar`, `CategoryTabBar`, `SkinToneSelector`, `EmojiAwareText`, `EmojiText` |
 | **Navigation** | `GlassTabBar` (floating translucent tab bar), `HeaderMenuButton` (hamburger → Settings) |
-| **Settings** | `ThemeCard` (theme preview/selector), `ConnectionStatusBadge`, `EmojiActionCard`, `EmojiStyleCard` |
+| **Settings** | `ThemeCard` (theme preview/selector), `ConnectionStatusBadge`, `EmojiStyleCard` |
 | **Cloud** | `CloudProvisioningCard` (multi-stage provisioning with elapsed timer), `StatusPulseDot` |
 | **Modals** | `AppAlertModal`, `CertificateVerificationModal`, `ImageViewerModal`, `ImpersonationSelectorModal`, `InitialPairingModal` |
 | **Sync** | `SyncProgressVisualizer` |
@@ -299,7 +299,6 @@ RootStack (Native Stack, transparent, fade animations)
 ├── SyncSettings         — Sync control and status
 ├── ThemeSettings        — Theme browser and selector
 ├── ThemeEditor          — Custom theme RGB editor
-├── EmojiActionEditor    — Entity-level emoji action editor
 ├── BiometricLockSettings — PIN/biometric lock setup
 ├── ProfileSettings      — User profile
 ├── BackgroundSettings   — Atmospheric background style selector
@@ -343,7 +342,6 @@ RootStack (Native Stack, transparent, fade animations)
 | **SyncSettingsScreen** | Sync status, manual sync, force full sync |
 | **ThemeSettingsScreen** | Theme grid browser with live preview |
 | **ThemeEditorScreen** | RGB color picker for custom themes |
-| **EmojiActionEditorScreen** | Per-entity emoji→action mappings editor |
 | **BackgroundSettingsScreen** | Select background visual style (4 options) |
 | **BiometricLockSettingsScreen** | PIN/biometric lock configuration |
 | **ProfileSettingsScreen** | User profile editing |

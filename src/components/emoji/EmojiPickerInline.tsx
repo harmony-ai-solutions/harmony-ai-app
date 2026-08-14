@@ -31,10 +31,8 @@ const COMPACT_EMOJI_SIZE = 28;
 interface EmojiPickerInlineProps {
   /** Called when the user selects an emoji */
   onEmojiSelected: (emoji: EmojiEntry) => void;
-  /** Entity ID for action lookup + advanced editor nav */
+  /** Entity ID for action lookup */
   entityId?: string | null;
-  /** Navigate to the action editor screen */
-  onOpenActionEditor?: () => void;
   /** Optional theme override; uses useAppTheme() if omitted */
   theme?: any;
   /** Override the container style (e.g. remove maxHeight for use in modals) */
@@ -44,7 +42,6 @@ interface EmojiPickerInlineProps {
 export const EmojiPickerInline: React.FC<EmojiPickerInlineProps> = memo(({
   onEmojiSelected,
   entityId,
-  onOpenActionEditor,
   theme: themeProp,
   containerStyle,
 }) => {
@@ -179,14 +176,6 @@ export const EmojiPickerInline: React.FC<EmojiPickerInlineProps> = memo(({
           >
             <Icon name={showSearch ? 'close' : 'magnify'} size={20} color={theme.colors.text.secondary} />
           </TouchableOpacity>
-          {onOpenActionEditor && (
-            <TouchableOpacity onPress={() => {
-              hapticLightPress();
-              onOpenActionEditor();
-            }} style={styles.toolBtn}>
-              <Icon name="tune-variant" size={18} color={theme.colors.accent.primary} />
-            </TouchableOpacity>
-          )}
         </View>
       </View>
 

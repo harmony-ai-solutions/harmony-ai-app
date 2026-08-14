@@ -143,6 +143,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [partnerName, setPartnerName] = useState<string>('Chat');
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
+  const [partnerProfileId, setPartnerProfileId] = useState<string | null>(null);
   const [lastReadTimestamp, setLastReadTimestamp] = useState<number>(0);
   const [failedTranscriptions, setFailedTranscriptions] = useState<Set<string>>(
     new Set(),
@@ -236,6 +237,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         // Fall through to avatar loading below
       }
 
+      // Reset partner profile linkage each resolution pass; it is only set
+      // for a private chat with an AI character (not group chats).
+      setPartnerProfileId(null);
+
       if (isGroupChat) {
         // Group chat: show participant names inline per D-11
         const otherIds = participantIds.filter(id => id !== ownEntityId);
@@ -282,6 +287,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         const allEntities = await getAllEntities();
         const entity = allEntities.find(e => e.id === partnerEntityId);
         if (entity?.character_profile_id) {
+          // Link the header to the partner's AI profile (tap avatar/name →
+          // AIProfile). Skip in group chats — there is no single profile to open.
+          setPartnerProfileId(entity.character_profile_id);
           const profile = await getCharacterProfile(entity.character_profile_id);
           if (profile) {
             // Partner profile — drives authored alternate-greeting swipes and
@@ -1247,6 +1255,14 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     })();
   }, [ownEntityId, participantIds, navigation]);
 
+  // Open the AI partner's profile page (AIProfile) when the user taps the
+  // header avatar or character name in a private chat with an AI character.
+  const handleOpenPartnerProfile = useCallback(() => {
+    if (!partnerProfileId) return;
+    hapticLightPress();
+    navigation.navigate('AIProfile', { profileId: partnerProfileId });
+  }, [partnerProfileId, navigation]);
+
   // Index messages by id so reply headers can look up the quoted message.
   const messageById = useMemo(() => {
     const map = new Map<string, ConversationMessage>();
@@ -1678,6 +1694,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
       )}
       <ScreenHeader
         title={headerName}
+        onTitlePress={partnerProfileId ? handleOpenPartnerProfile : undefined}
         titleRight={
           <View
             style={styles.statusDotWrap}
@@ -2038,12 +2055,6 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         onSendImages={handleSendImages}
         disabled={!isOnline}
         entityId={ownEntityId}
-        onOpenActionEditor={() => {
-          navigation.navigate('EmojiActionEditor', {
-            entityId: ownEntityId,
-            entityName: headerName,
-          });
-        }}
       />
 
       {/* Scenario generator bottom sheet (§2-4) — paper Modal+Portal (§A18).

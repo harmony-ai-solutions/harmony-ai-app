@@ -8,7 +8,7 @@
 - Navigation: Stack (primary), Modal (future)
 - Build Flavors: Android productFlavors dev/prod via buildConfigField "boolean" IS_BETA; iOS dev/prod CI-driven (env regeneration + bundle ID override) — no scheme/xcconfig surgery
 @Components:
-- Screens: HomeScreen, ChatScreen, CharacterListScreen, EmojiActionEditorScreen
+- Screens: HomeScreen, ChatScreen, CharacterListScreen
 - Services: HarmonyLinkService (REST), WebSocketService (real-time), EmojiService, EntityEmojiActionService
 - Storage: SQLite (messages/characters/interactions/emoji_actions), AsyncStorage (settings/preferences/reply mode)
 - Theme: Centralized via React Native Paper, Harmony Link palette
