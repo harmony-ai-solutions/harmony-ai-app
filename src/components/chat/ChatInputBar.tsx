@@ -76,8 +76,15 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
 
   const inputRef = useRef<TextInput>(null);
   const selectionRef = useRef<number>(0);
+  // Keep the latest input text in a ref so handleEmojiSelected stays
+  // referentially stable (no picker re-renders when the user types).
+  const inputTextRef = useRef<string>('');
 
   const [inputText, setInputText] = useState('');
+  // Keep a ref mirror of inputText so stable callbacks never read stale values.
+  useEffect(() => {
+    inputTextRef.current = inputText;
+  }, [inputText]);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [selectedImages, setSelectedImages] = useState<PickedImage[]>([]);
   const [isPickingImages, setIsPickingImages] = useState(false);
@@ -206,21 +213,24 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     });
   }, []);
 
-  const handleEmojiSelected = useCallback(
-    (emoji: EmojiEntry) => {
-      const caret = selectionRef.current;
-      const next = inputText.slice(0, caret) + emoji.native + inputText.slice(caret);
-      setInputText(next);
-      requestAnimationFrame(() => {
-        const pos = caret + emoji.native.length;
-        inputRef.current?.setNativeProps({
-          selection: { start: pos, end: pos },
-        });
+  // Referentially stable: reads current text from inputTextRef, so the memoized
+  // EmojiPickerInline never re-renders just because the user typed in the box.
+  const handleEmojiSelected = useCallback((emoji: EmojiEntry) => {
+    const caret = selectionRef.current;
+    const current = inputTextRef.current;
+    const next = current.slice(0, caret) + emoji.native + current.slice(caret);
+    setInputText(next);
+    // Keep the ref mirror in sync immediately (avoids a stale read if the user
+    // taps another emoji before React re-renders).
+    inputTextRef.current = next;
+    requestAnimationFrame(() => {
+      const pos = caret + emoji.native.length;
+      inputRef.current?.setNativeProps({
+        selection: { start: pos, end: pos },
       });
-      selectionRef.current = caret + emoji.native.length;
-    },
-    [inputText],
-  );
+    });
+    selectionRef.current = caret + emoji.native.length;
+  }, []);
 
   // ── Photo picking ────────────────────────────────────────────────────────
   const handlePickImages = useCallback(async () => {

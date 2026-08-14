@@ -3,7 +3,7 @@
  */
 import React, { memo } from 'react';
 import { Text, Image, View, StyleSheet } from 'react-native';
-import { useEmoji } from '../../contexts/EmojiContext';
+import { useEmojiPreferences } from '../../contexts/EmojiContext';
 import { EmojiSet, EmojiEntry } from '../../types/emoji';
 import { getSpriteSheetSource, getEmojiCropStyle } from '../../utils/emojiSprite';
 
@@ -22,7 +22,7 @@ interface EmojiTextProps {
 const NATIVE_FONT_SCALE = 0.75;
 
 export const EmojiText: React.FC<EmojiTextProps> = memo(({ native, size = 16, emojiEntry, emojiSet: emojiSetProp }) => {
-  const { emojiSet: contextSet } = useEmoji();
+  const { emojiSet: contextSet } = useEmojiPreferences();
   const emojiSet = emojiSetProp ?? contextSet;
 
   // For 'native' set, render as Text

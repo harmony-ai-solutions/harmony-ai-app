@@ -15,7 +15,8 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import { useEmoji, RecentEmoji } from '../../contexts/EmojiContext';
+import { useEmojiPreferences, useEmojiRecents, RecentEmoji } from '../../contexts/EmojiContext';
+import EmojiService from '../../services/EmojiService';
 import { EmojiEntry, EmojiCategory } from '../../types/emoji';
 import { EmojiAction } from '../../database/models';
 import { hapticLightPress } from '../../utils/haptics';
@@ -47,7 +48,9 @@ export const EmojiPickerInline: React.FC<EmojiPickerInlineProps> = memo(({
 }) => {
   const { theme: contextTheme } = useAppTheme();
   const theme = themeProp ?? contextTheme;
-  const { emojiService, addRecentEmoji, recentEmojis, loading } = useEmoji();
+  const { loading } = useEmojiPreferences();
+  const { addRecentEmoji, recentEmojis } = useEmojiRecents();
+  const emojiService = EmojiService;
   const [activeCategory, setActiveCategory] = useState<string>('people');
   const [categories, setCategories] = useState<EmojiCategory[]>([]);
 
@@ -95,7 +98,7 @@ export const EmojiPickerInline: React.FC<EmojiPickerInlineProps> = memo(({
       result.push(...categories);
     }
     return result;
-  }, [categories, recentEmojis, isSearching, emojiService, loading]);
+  }, [categories, recentEmojis, isSearching, emojiService]);
 
   // Handle search
   const handleSearch = useCallback(async (query: string) => {

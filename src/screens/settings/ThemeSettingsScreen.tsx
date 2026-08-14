@@ -18,7 +18,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { hexToRgba } from '../../utils/colorUtils';
 import { useAppAlert } from '../../contexts/AppAlertContext';
 import { useBiometricLock } from '../../contexts/BiometricLockContext';
-import { useEmoji } from '../../contexts/EmojiContext';
+import { useEmojiPreferences } from '../../contexts/EmojiContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedView } from '../../components/themed/ThemedView';
@@ -49,7 +49,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
         syncStatus,
     } = useAppTheme();
 
-    const { emojiSet, setEmojiSet } = useEmoji();
+    const { emojiSet, setEmojiSet } = useEmojiPreferences();
     const { showAlert } = useAppAlert();
     const { withExternalFlow } = useBiometricLock();
 

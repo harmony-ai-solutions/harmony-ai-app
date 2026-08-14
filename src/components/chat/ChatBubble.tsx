@@ -595,7 +595,7 @@ function formatDuration(seconds: number): string {
 }
 
 function formatTime(date: Date): string {
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 const styles = StyleSheet.create({

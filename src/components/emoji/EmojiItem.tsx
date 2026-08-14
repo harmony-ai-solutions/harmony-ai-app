@@ -3,7 +3,7 @@
  */
 import React, { memo, useState } from 'react';
 import { TouchableOpacity, StyleSheet, View, Modal, Text } from 'react-native';
-import { useEmoji } from '../../contexts/EmojiContext';
+import { useEmojiPreferences } from '../../contexts/EmojiContext';
 import { EmojiEntry } from '../../types/emoji';
 import { EmojiAction } from '../../database/models';
 import { Theme } from '../../theme/types';
@@ -95,7 +95,7 @@ interface EmojiItemProps {
 }
 
 export const EmojiItem: React.FC<EmojiItemProps> = memo(({ emoji, size, onPress, onLongPress, action, theme }) => {
-  const { skinTone } = useEmoji();
+  const { skinTone } = useEmojiPreferences();
   const [popupVisible, setPopupVisible] = useState(false);
 
   const hasAction = action !== null && action !== undefined;

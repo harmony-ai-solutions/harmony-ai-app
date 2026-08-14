@@ -568,7 +568,7 @@ function formatTime(date: Date): string {
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
   if (days === 0) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
   } else if (days === 1) {
     return 'Yesterday';
   } else if (days < 7) {
