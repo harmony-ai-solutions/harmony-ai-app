@@ -32,6 +32,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useToast } from '../contexts/AppToastContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -63,6 +64,7 @@ import {
   togglePostLike,
   getPostLikesCount,
   getPostCommentsCount,
+  deleteUserPost,
 } from '../database/repositories/userSocial';
 
 const log = createLogger('[MyProfileScreen]');
@@ -74,6 +76,7 @@ export const MyProfileScreen: React.FC = () => {
   const { t } = useTranslation('profile');
   const { user, status } = useAuth();
   const { showAlert } = useAppAlert();
+  const { showToast } = useToast();
 
   // ── Data state ─────────────────────────────────────────────────────────
   const [refreshing, setRefreshing] = useState(false);
@@ -246,6 +249,23 @@ export const MyProfileScreen: React.FC = () => {
 
   const handleOpenPostComments = (postId: string) => {
     setCommentPostId(postId);
+  };
+
+  // Delete one of the user's own posts (owner only).
+  const handleDeletePost = (postId: string) => {
+    try {
+      deleteUserPost(postId)
+        .then(() => {
+          setPosts(prev => prev.filter(p => p.id !== postId));
+          showToast(t('postDeleteDone'));
+        })
+        .catch(err => {
+          log.warn('Failed to delete post:', err);
+          showAlert(t('common:error'), t('postDeleteFailed'));
+        });
+    } catch (err) {
+      log.warn('Failed to delete post:', err);
+    }
   };
 
   const handlePostCommentsClosed = () => {
@@ -527,6 +547,7 @@ export const MyProfileScreen: React.FC = () => {
                         onToggleLike={() => handleTogglePostLike(post.id)}
                         onOpenComments={() => handleOpenPostComments(post.id)}
                         showAuthor={false}
+                        onDeletePost={() => handleDeletePost(post.id)}
                       />
                     );
                   })}
@@ -689,6 +710,8 @@ export const MyProfileScreen: React.FC = () => {
         visible={commentPostId != null}
         postId={commentPostId}
         onClose={handlePostCommentsClosed}
+        // All posts here are the current user's own — they can moderate any comment.
+        canModerateAll
       />
     </ThemedView>
   );

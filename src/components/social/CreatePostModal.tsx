@@ -28,6 +28,7 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBiometricLock } from '../../contexts/BiometricLockContext';
+import { useInModalToast } from '../modals/InModalToast';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
 import { hexToRgba } from '../../utils/colorUtils';
@@ -54,6 +55,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
   const { t } = useTranslation('profile');
   const { user } = useAuth();
   const { withExternalFlow } = useBiometricLock();
+  const toast = useInModalToast();
 
   const [text, setText] = useState('');
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -146,6 +148,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
         imageMimeType: imageMime,
       });
       hapticLightPress();
+      toast.show(t('postPublished'));
       onClose();
       onPublished?.();
     } catch (err) {
@@ -288,6 +291,9 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
 
           {/* Keyboard spacer — keeps the publish button visible above the keyboard */}
           <View style={{ height: keyboardHeight }} />
+
+          {/* In-modal toast — visible above the modal window */}
+          {toast.view}
         </>
       </View>
     </Modal>

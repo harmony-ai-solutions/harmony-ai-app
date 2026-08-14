@@ -23,6 +23,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useToast } from '../contexts/AppToastContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
@@ -62,6 +63,7 @@ import {
   togglePostLike,
   getPostLikesCount,
   getPostCommentsCount,
+  deleteUserPost,
 } from '../database/repositories/userSocial';
 
 const log = createLogger('[DiscoverScreen]');
@@ -70,6 +72,7 @@ export const DiscoverScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
+  const { showToast } = useToast();
   const { t } = useTranslation('discover');
   const { top: safeTop, bottom: safeBottom } = useSafeAreaInsets();
 
@@ -168,6 +171,22 @@ export const DiscoverScreen: React.FC = () => {
       }));
     } catch (err) {
       log.error('Failed to toggle post like:', err);
+    }
+  };
+
+  // Delete a post (owner only — all client-local posts belong to the current user).
+  const handleDeletePost = (postId: string) => {
+    try {
+      deleteUserPost(postId)
+        .then(() => {
+          setPosts(prev => prev.filter(p => p.id !== postId));
+          showToast(t('profile:postDeleteDone'));
+        })
+        .catch(err => {
+          log.error('Failed to delete post:', err);
+        });
+    } catch (err) {
+      log.error('Failed to delete post:', err);
     }
   };
 
@@ -499,15 +518,18 @@ export const DiscoverScreen: React.FC = () => {
             renderItem={({ item }) => {
               const state = postState[item.id] ?? { liked: false, likes: 0, commentCount: 0 };
               return (
-                <PostCard
-                  post={item}
-                  liked={state.liked}
-                  likes={state.likes}
-                  commentCount={state.commentCount}
-                  onToggleLike={() => handleTogglePostLike(item.id)}
-                  onOpenComments={() => setCommentPostId(item.id)}
-                  onOpenAuthor={() => navigation.navigate('MainTabs', { screen: 'MyProfile' })}
-                />
+                <View style={styles.postItemWrap}>
+                  <PostCard
+                    post={item}
+                    liked={state.liked}
+                    likes={state.likes}
+                    commentCount={state.commentCount}
+                    onToggleLike={() => handleTogglePostLike(item.id)}
+                    onOpenComments={() => setCommentPostId(item.id)}
+                    onOpenAuthor={() => navigation.navigate('MainTabs', { screen: 'MyProfile' })}
+                    onDeletePost={() => handleDeletePost(item.id)}
+                  />
+                </View>
               );
             }}
           />
@@ -519,6 +541,8 @@ export const DiscoverScreen: React.FC = () => {
         visible={commentPostId != null}
         postId={commentPostId}
         onClose={handlePostCommentsClosed}
+        // All local posts belong to the current user — they can moderate any comment.
+        canModerateAll
       />
     </ThemedView>
   );
@@ -563,6 +587,9 @@ const styles = StyleSheet.create({
   },
   postsListContent: {
     padding: 16,
+  },
+  postItemWrap: {
+    marginBottom: 16,
   },
   centered: {
     paddingTop: 80,

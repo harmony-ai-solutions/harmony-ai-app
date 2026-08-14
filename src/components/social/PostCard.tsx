@@ -7,7 +7,7 @@
  * the client-only userSocial repository.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -16,6 +16,7 @@ import { ProfileAvatar } from '../profile/ProfileAvatar';
 import { hapticLightPress } from '../../utils/haptics';
 import { formatPostDate, formatPostDateTime } from '../../utils/dateFormat';
 import { UserPost } from '../../database/repositories/userSocial';
+import { hexToRgba } from '../../utils/colorUtils';
 
 interface PostCardProps {
   post: UserPost;
@@ -26,6 +27,8 @@ interface PostCardProps {
   onOpenComments: () => void;
   onOpenAuthor?: () => void;
   showAuthor?: boolean;
+  /** When set, a ⋮ menu with a Delete action is shown (post owner only). */
+  onDeletePost?: () => void;
 }
 
 export const PostCard: React.FC<PostCardProps> = ({
@@ -37,8 +40,11 @@ export const PostCard: React.FC<PostCardProps> = ({
   onOpenComments,
   onOpenAuthor,
   showAuthor = true,
+  onDeletePost,
 }) => {
   const { theme } = useAppTheme();
+  const [menuOpen, setMenuOpen] = useState(false);
+
   if (!theme) return null;
 
   const accent = theme.colors.accent.primary;
@@ -71,9 +77,66 @@ export const PostCard: React.FC<PostCardProps> = ({
       ) : (
         /* On the user's own profile the author row is hidden, but the
            date + time still needs to be visible. */
-        <ThemedText variant="muted" size={11} style={styles.timestampRow}>
-          {formatPostDateTime(post.createdAt)}
-        </ThemedText>
+        <View style={styles.timestampRow}>
+          <ThemedText variant="muted" size={11}>
+            {formatPostDateTime(post.createdAt)}
+          </ThemedText>
+        </View>
+      )}
+
+      {/* ⋮ Menu — shown when the post owner can delete it */}
+      {onDeletePost && (
+        <View style={styles.menuWrap}>
+          <TouchableOpacity
+            onPress={() => {
+              hapticLightPress();
+              setMenuOpen(prev => !prev);
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.menuBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Post options"
+          >
+            <Icon name="dots-vertical" size={18} color={theme.colors.text.muted} />
+          </TouchableOpacity>
+
+          {menuOpen && (
+            <View
+              style={[
+                styles.inlineMenu,
+                {
+                  backgroundColor: hexToRgba(theme.colors.background.surface, 0.95),
+                  borderColor: hexToRgba(accent, 0.2),
+                },
+              ]}
+            >
+              <TouchableOpacity
+                style={styles.inlineMenuItem}
+                onPress={() => {
+                  hapticLightPress();
+                  setMenuOpen(false);
+                  onDeletePost();
+                }}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Delete post"
+              >
+                <Icon
+                  name="delete-outline"
+                  size={16}
+                  color={theme.colors.status.error}
+                />
+                <ThemedText
+                  size={13}
+                  weight="medium"
+                  style={{ color: theme.colors.status.error }}
+                >
+                  Delete
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       )}
 
       {/* Body */}
@@ -179,6 +242,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 999,
+  },
+  // ── ⋮ menu (post owner) ──
+  menuWrap: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    zIndex: 10,
+  },
+  menuBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineMenu: {
+    position: 'absolute',
+    top: 32,
+    right: 0,
+    minWidth: 120,
+    borderRadius: 10,
+    borderWidth: 1,
+    overflow: 'hidden',
+    paddingVertical: 4,
+  },
+  inlineMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
   },
 });
 

@@ -989,6 +989,8 @@ export const AIProfileScreen: React.FC = () => {
         imageId={commentImageId}
         characterName={resolvedName}
         onClose={handleCommentsClosed}
+        // The character's owner can moderate (copy/delete) any comment.
+        canModerateAll={isOwner}
         onCommentPosted={async () => {
           // Notify the character's creator when someone comments on an AI image.
           if (creator && user?.id && creator.creatorUserId !== user.id) {
