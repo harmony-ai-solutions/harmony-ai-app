@@ -12,6 +12,7 @@ import {
   getAllCharacterProfiles,
   updateCharacterProfile,
   deleteCharacterProfile,
+  deleteCharacterProfileCascade,
   isCharacterProfileInUse,
   createCharacterImage,
   getCharacterImage,
@@ -24,6 +25,9 @@ import {
   setCharacterProfileSource,
   getCharacterProfileSource,
   getCommunityCharacterProfiles,
+  setCharacterProfileVisibility,
+  getCharacterProfileVisibility,
+  getPublicCharacterProfiles,
   isCharacterFavorite,
   addCharacterFavorite,
   removeCharacterFavorite,
@@ -40,7 +44,7 @@ import {
   getSiblingCharacterProfiles,
   getCharacterStats,
 } from '../../repositories/characters';
-import {createEntity} from '../../repositories/entities';
+import {createEntity, getEntity} from '../../repositories/entities';
 import {createInteraction} from '../../repositories/interactions';
 import {createConversationMessage} from '../../repositories/conversation_messages';
 import type {CharacterImage, Interaction} from '../../models';
@@ -352,6 +356,27 @@ describe('characters repository', () => {
       const image = await getCharacterImage(imageId, true);
       expect(image).toBeNull();
     });
+
+    it('deleteCharacterProfileCascade soft-deletes the profile and its linked entities', async () => {
+      const profileId = 'del-cascade-ui-1';
+      await createMinimalProfile(profileId);
+      // Create an entity referencing the profile (like the Create AI flow does)
+      await createEntity({id: 'del-cascade-ui-entity', character_profile_id: profileId, alias: 'Del Cascade', lifecycle_config: '{}', rag_reindex_required: 1});
+
+      // Plain soft-delete must fail (entity in use)
+      await expect(deleteCharacterProfile(profileId)).rejects.toThrow(/in use/);
+
+      // Cascade delete succeeds
+      await deleteCharacterProfileCascade(profileId);
+
+      const profile = await getCharacterProfile(profileId, true);
+      expect(profile).not.toBeNull();
+      expect(profile!.deleted_at).not.toBeNull();
+
+      const entity = await getEntity('del-cascade-ui-entity', true);
+      expect(entity).not.toBeNull();
+      expect(entity!.deleted_at).not.toBeNull();
+    });
   });
 
   describe('character card V3 standard fields (migration 000037)', () => {
@@ -481,6 +506,52 @@ describe('characters repository', () => {
       await deleteCharacterProfile('src-del-1');
       const community = await getCommunityCharacterProfiles();
       expect(community.some(p => p.id === 'src-del-1')).toBe(false);
+    });
+
+    it('getCharacterProfileVisibility defaults to public when no sidecar row', async () => {
+      await createMinimalProfile('vis-default');
+      expect(await getCharacterProfileVisibility('vis-default')).toBe('public');
+    });
+
+    it('setCharacterProfileVisibility upserts public/private', async () => {
+      await createMinimalProfile('vis-toggle');
+      // Defaults to public
+      expect(await getCharacterProfileVisibility('vis-toggle')).toBe('public');
+      // Set private
+      await setCharacterProfileVisibility('vis-toggle', 'private');
+      expect(await getCharacterProfileVisibility('vis-toggle')).toBe('private');
+      // Flip back to public
+      await setCharacterProfileVisibility('vis-toggle', 'public');
+      expect(await getCharacterProfileVisibility('vis-toggle')).toBe('public');
+    });
+
+    it('getCommunityCharacterProfiles excludes private community profiles', async () => {
+      await createMinimalProfile('vis-comm-pub');
+      await createMinimalProfile('vis-comm-priv');
+      await setCharacterProfileVisibility('vis-comm-priv', 'private');
+
+      const community = await getCommunityCharacterProfiles();
+      const ids = community.map(p => p.id);
+      expect(ids).toContain('vis-comm-pub');
+      expect(ids).not.toContain('vis-comm-priv');
+    });
+
+    it('getPublicCharacterProfiles includes public profiles of any source and excludes private ones', async () => {
+      // Community (untagged) public
+      await createMinimalProfile('vis-pub-comm');
+      // User-tagged public
+      await createMinimalProfile('vis-pub-user');
+      await setCharacterProfileSource('vis-pub-user', 'user');
+      // Private (user-tagged)
+      await createMinimalProfile('vis-priv');
+      await setCharacterProfileSource('vis-priv', 'user');
+      await setCharacterProfileVisibility('vis-priv', 'private');
+
+      const publicProfiles = await getPublicCharacterProfiles();
+      const ids = publicProfiles.map(p => p.id);
+      expect(ids).toContain('vis-pub-comm');
+      expect(ids).toContain('vis-pub-user');
+      expect(ids).not.toContain('vis-priv');
     });
   });
 

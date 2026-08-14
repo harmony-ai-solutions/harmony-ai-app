@@ -52,6 +52,7 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
+import { Switch } from 'react-native-paper';
 import { EntityModuleSelectorWithActions } from '../components/entities/EntityModuleSelectorWithActions';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
@@ -64,8 +65,11 @@ import {
   deleteCharacterImage,
   getCharacterProfile,
   getCharacterImages,
+  getCharacterProfileVisibility,
   setCharacterProfileSource,
+  setCharacterProfileVisibility,
   updateCharacterProfile,
+  type CharacterProfileVisibility,
 } from '../database/repositories/characters';
 import { setCharacterCreator } from '../database/repositories/characterSocial';
 import {
@@ -123,6 +127,12 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
   const [avatarMimeType, setAvatarMimeType] = useState<string>('image/jpeg');
+
+  // Public/private visibility — public AI partners are visible + searchable on
+  // the Discover screen; private ones are hidden from Discover/search. Stored
+  // in the client-only character_profile_sources sidecar (never synced).
+  const [isPublic, setIsPublic] = useState(true);
+  const [visibilityLoaded, setVisibilityLoaded] = useState(false);
 
   // ── Prompts & Scenario (AI settings) ────────────────────────────────────────
   const [basePrompt, setBasePrompt] = useState('');
@@ -320,6 +330,18 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setScenario(profile.scenario ?? '');
         setExampleDialogues(profile.example_dialogues ?? '');
 
+        // Carry over the source profile's visibility so the copy matches it.
+        try {
+          const visibility = await getCharacterProfileVisibility(profile.id);
+          if (!cancelled) {
+            setIsPublic(visibility === 'public');
+            setVisibilityLoaded(true);
+          }
+        } catch (visErr) {
+          log.warn('Failed to copy profile visibility:', visErr);
+          if (!cancelled) setVisibilityLoaded(true);
+        }
+
         // Copy the source profile's gallery images (the primary avatar is
         // already copied separately above — skip it to avoid a duplicate).
         try {
@@ -430,6 +452,18 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setScenario(profile.scenario ?? '');
         setExampleDialogues(profile.example_dialogues ?? '');
         setEditOriginalName(profile.name);
+
+        // Visibility (public/private) — loaded from the client-only sidecar
+        try {
+          const visibility = await getCharacterProfileVisibility(profile.id);
+          if (!cancelled) {
+            setIsPublic(visibility === 'public');
+            setVisibilityLoaded(true);
+          }
+        } catch (visErr) {
+          log.warn('Failed to load profile visibility:', visErr);
+          if (!cancelled) setVisibilityLoaded(true);
+        }
 
         // Avatar (primary image)
         try {
@@ -585,6 +619,12 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           example_dialogues: exampleDialogues.trim() || '',
         });
 
+        // Persist the chosen visibility (public/private) in the sidecar
+        await setCharacterProfileVisibility(
+          editProfileId,
+          (isPublic ? 'public' : 'private') as CharacterProfileVisibility,
+        );
+
         // Reconcile images: delete the existing ones, then re-create from the
         // current UI state (avatar + gallery). This keeps the DB in exact sync
         // with what the user sees, whether they swapped the avatar, removed a
@@ -707,6 +747,14 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         });
         // Tag as user-created so it is hidden from the Discover community grid
         await setCharacterProfileSource(profileId, 'user');
+
+        // Persist the chosen visibility (public/private). Public partners
+        // appear on the Discover screen; private ones stay hidden from
+        // Discover/search.
+        await setCharacterProfileVisibility(
+          profileId,
+          (isPublic ? 'public' : 'private') as CharacterProfileVisibility,
+        );
 
         // Record the cloud user who created this AI (creator badge + the
         // creator-only Edit Profile / Edit AI Settings buttons depend on it).
@@ -1081,6 +1129,54 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 true,
                 'text-box-outline',
               )}
+
+              {/* ── Visibility: Public AI / Private AI ── */}
+              <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
+                {t('visibilityLabel')}
+              </ThemedText>
+
+              <View
+                style={[
+                  styles.visibilityRow,
+                  {
+                    backgroundColor: hexToRgba(surfaceColor, 0.55),
+                    borderColor: hexToRgba(accent, 0.25),
+                  },
+                ]}
+              >
+                <View style={styles.visibilityIconWrap}>
+                  <Icon
+                    name={isPublic ? 'earth' : 'lock-outline'}
+                    size={22}
+                    color={accent}
+                  />
+                </View>
+                <View style={styles.visibilityLabelGroup}>
+                  <ThemedText size={15} weight="bold" variant="primary">
+                    {isPublic ? t('visibilityPublic') : t('visibilityPrivate')}
+                  </ThemedText>
+                  <ThemedText size={12} variant="muted">
+                    {isPublic
+                      ? t('visibilityPublicHint')
+                      : t('visibilityPrivateHint')}
+                  </ThemedText>
+                </View>
+                <Switch
+                  value={isPublic}
+                  onValueChange={(value) => {
+                    hapticLightPress();
+                    setIsPublic(value);
+                  }}
+                  color={accent}
+                  disabled={!visibilityLoaded && !!editProfileId}
+                  testID="create-ai-visibility-toggle"
+                  accessibilityLabel={
+                    isPublic
+                      ? t('visibilityPublic')
+                      : t('visibilityPrivate')
+                  }
+                />
+              </View>
             </View>
           </ThemedCard>
 
@@ -1636,6 +1732,32 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 15,
     paddingVertical: 0,
+  },
+
+  // ── Visibility toggle ──
+  visibilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  visibilityIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  visibilityLabelGroup: {
+    flex: 1,
+    gap: 2,
   },
 
   // ── Gallery ──

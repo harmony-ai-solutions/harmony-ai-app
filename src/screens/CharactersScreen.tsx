@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { pick } from '@react-native-documents/picker';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useToast } from '../contexts/AppToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
@@ -46,6 +47,7 @@ import {
   getCharacterImages,
   getDistinctTags,
   deleteCharacterProfile,
+  deleteCharacterProfileCascade,
   createCharacterProfile,
   createCharacterImage,
   getFavoriteCharacterProfileIds,
@@ -165,6 +167,7 @@ export const CharactersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
+  const { showToast } = useToast();
   const { withExternalFlow } = useBiometricLock();
   const { user } = useAuth();
   const { bottom: safeBottom } = useSafeAreaInsets();
@@ -452,8 +455,9 @@ export const CharactersScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteCharacterProfile(profile.id);
+              await deleteCharacterProfileCascade(profile.id);
               setProfiles(prev => prev.filter(p => p.id !== profile.id));
+              showToast(t('deletedToast', { name: profile.name }));
               setPrimaryImages(prev => {
                 const next = { ...prev };
                 delete next[profile.id];

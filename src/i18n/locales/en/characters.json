@@ -23,6 +23,7 @@
   "deleteConfirmTitle": "Delete Profile",
   "deleteConfirmMessage": "Delete \"{{name}}\"? This cannot be undone.",
   "deleteFailed": "Failed to delete profile.",
+  "deletedToast": "Deleted \"{{name}}\".",
   "namePlaceholder": "Character name",
   "descriptionPlaceholder": "Brief description of this character",
   "personalityPlaceholder": "Personality traits and demeanor",

@@ -36,7 +36,7 @@ import { hapticLightPress } from '../utils/haptics';
 import { createLogger } from '../utils/logger';
 import { CharacterProfileCard } from '../components/characters/CharacterProfileCard';
 import {
-  getCommunityCharacterProfiles,
+  getPublicCharacterProfiles,
   getCharacterImages,
 } from '../database/repositories/characters';
 import {
@@ -95,12 +95,12 @@ export const DiscoverScreen: React.FC = () => {
   // ── Data loading ─────────────────────────────────────────────────────
   const loadProfiles = useCallback(async () => {
     try {
-      // Only characters created by OTHER users (synced down from the engine)
-      // are shown in Discover. The current user's own characters — created via
-      // Create AI, the profile editor, or imported cards — are tagged 'user'
-      // in the client-only source sidecar and excluded from this grid. They
-      // still sync up to the engine and appear on other users' Discover grids.
-      const data = await getCommunityCharacterProfiles();
+      // Discover shows all PUBLICLY visible AI characters: community
+      // characters (synced down from the engine) AND the current user's own
+      // public AI characters. Characters tagged 'private' in the client-only
+      // visibility sidecar are excluded entirely — they never appear here and
+      // are never searchable.
+      const data = await getPublicCharacterProfiles();
       setProfiles(data);
 
       // Load primary image + count for every profile in parallel
@@ -234,7 +234,9 @@ export const DiscoverScreen: React.FC = () => {
 
   // ── Navigation handlers ───────────────────────────────────────────────
   const handleOpenProfile = (profile: CharacterProfile) => {
-    navigation.navigate('CreateAI', { editProfileId: profile.id });
+    // Tapping a Discover card opens the character's public AI profile page
+    // (viewing an AI you don't own should never open the editor).
+    navigation.navigate('AIProfile', { profileId: profile.id });
   };
 
   /**

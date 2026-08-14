@@ -12,7 +12,7 @@ import {CharacterProfile, CharacterImage, CharacterImageInfo} from '../models';
 import {uint8ArrayToBase64, createDataURL} from '../base64';
 import {loadTextColumn} from '../sync';
 import {generateId} from '../../utils/uuid';
-import {stripCopySuffix} from './entities';
+import {stripCopySuffix, deleteEntity} from './entities';
 
 // ============================================================================
 // Character Profile CRUD Operations
@@ -461,6 +461,42 @@ export async function deleteCharacterProfile(id: string, permanent = false): Pro
   });
 }
 
+/**
+ * Delete a character profile AND all entities linked to it (soft delete).
+ *
+ * The plain `deleteCharacterProfile` refuses to soft-delete a profile that is
+ * still referenced by a non-deleted entity (`isCharacterProfileInUse`), which
+ * is true for EVERY AI character created through the Create AI wizard — so the
+ * UI delete button could never remove a partner. This variant first soft-
+ * deletes every active entity referencing the profile (cascading through
+ * `deleteEntity` to module mappings, memories, emotion state, emoji actions,
+ * interactions and messages), then soft-deletes the profile itself. Used by
+ * the Characters screen "Delete" action.
+ */
+export async function deleteCharacterProfileCascade(
+  profileId: string,
+): Promise<void> {
+  const db = getDatabase();
+
+  // Collect every active entity referencing this profile
+  const [results] = await db.executeSql(
+    'SELECT id FROM entities WHERE character_profile_id = ? AND deleted_at IS NULL',
+    [profileId],
+  );
+  const entityIds: string[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    entityIds.push(results.rows.item(i).id);
+  }
+
+  // Soft-delete the entities first (cascades their child rows), then the
+  // profile is no longer "in use" and can be soft-deleted.
+  for (const entityId of entityIds) {
+    await deleteEntity(entityId);
+  }
+
+  await deleteCharacterProfile(profileId);
+}
+
 // ============================================================================
 // Character Image CRUD Operations
 // ============================================================================
@@ -782,19 +818,27 @@ export async function getCharacterImagesWithDataURLs(
 }
 
 // ============================================================================
-// Character Profile Source Tagging (client-only)
+// Character Profile Source + Visibility Tagging (client-only)
 // ============================================================================
 //
 // The source sidecar records whether a profile was created by the app user
-// ('user') or is a community/default character ('community'). Stored in a
-// separate CLIENT-ONLY table that is never synced, so the engine schema
-// (strict parity, docs/schema-parity.md) stays untouched. A profile with no
-// sidecar row defaults to 'community'.
+// ('user') or is a community/default character ('community'). The same sidecar
+// also records the profile's **visibility** ('public' | 'private') — public
+// profiles are visible + searchable on the Discover screen, private profiles
+// are hidden. Stored in a separate CLIENT-ONLY table that is never synced, so
+// the engine schema (strict parity, docs/schema-parity.md) stays untouched. A
+// profile with no sidecar row defaults to 'community' source and 'public'
+// visibility.
 
 export type CharacterProfileSource = 'user' | 'community';
 
 export const CHARACTER_PROFILE_SOURCE_USER = 'user' as const;
 export const CHARACTER_PROFILE_SOURCE_COMMUNITY = 'community' as const;
+
+export type CharacterProfileVisibility = 'public' | 'private';
+
+export const CHARACTER_PROFILE_VISIBILITY_PUBLIC = 'public' as const;
+export const CHARACTER_PROFILE_VISIBILITY_PRIVATE = 'private' as const;
 
 /**
  * Mark a character profile as user-created (via the app's Create AI / edit flows).
@@ -833,9 +877,47 @@ export async function getCharacterProfileSource(
 }
 
 /**
+ * Set the visibility of a character profile ('public' → visible + searchable on
+ * Discover; 'private' → hidden from Discover/search). Upserts the sidecar row so
+ * profiles without one get one. Never touches character_profiles itself.
+ */
+export async function setCharacterProfileVisibility(
+  profileId: string,
+  visibility: CharacterProfileVisibility,
+): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql(
+    `INSERT INTO character_profile_sources (profile_id, source, created_at, visibility)
+     VALUES (?, 'user', ?, ?)
+     ON CONFLICT(profile_id) DO UPDATE SET visibility = excluded.visibility`,
+    [profileId, new Date().toISOString(), visibility],
+  );
+}
+
+/**
+ * Get the visibility for a single profile. Returns 'public' when no sidecar
+ * row exists (default) or when the row predates the visibility column.
+ */
+export async function getCharacterProfileVisibility(
+  profileId: string,
+): Promise<CharacterProfileVisibility> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT visibility FROM character_profile_sources WHERE profile_id = ?',
+    [profileId],
+  );
+  if (results.rows.length === 0) {
+    return CHARACTER_PROFILE_VISIBILITY_PUBLIC;
+  }
+  const visibility = results.rows.item(0).visibility as CharacterProfileVisibility;
+  return visibility === 'private' ? visibility : CHARACTER_PROFILE_VISIBILITY_PUBLIC;
+}
+
+/**
  * Get all character profiles whose source is 'community' (imported cards,
- * synced from the engine, or legacy rows without a sidecar tag). Filters out
- * soft-deleted by default — identical semantics to getAllCharacterProfiles.
+ * synced from the engine, or legacy rows without a sidecar tag) AND are
+ * publicly visible. Filters out soft-deleted by default — identical semantics
+ * to getAllCharacterProfiles.
  */
 export async function getCommunityCharacterProfiles(
   includeDeleted = false,
@@ -848,7 +930,8 @@ export async function getCommunityCharacterProfiles(
               cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
        FROM character_profiles cp
        LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
-       WHERE cps.profile_id IS NULL OR cps.source = 'community'
+       WHERE (cps.profile_id IS NULL OR cps.source = 'community')
+         AND (cps.visibility IS NULL OR cps.visibility = 'public')
        ORDER BY cp.name`
     : `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
               cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
@@ -858,6 +941,66 @@ export async function getCommunityCharacterProfiles(
        LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
        WHERE cp.deleted_at IS NULL
          AND (cps.profile_id IS NULL OR cps.source = 'community')
+         AND (cps.visibility IS NULL OR cps.visibility = 'public')
+       ORDER BY cp.name`;
+
+  const [results] = await db.executeSql(query);
+
+  const profiles: CharacterProfile[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    const row = results.rows.item(i);
+    profiles.push({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      personality: row.personality,
+      appearance: row.appearance,
+      backstory: row.backstory,
+      voice_characteristics: row.voice_characteristics,
+      base_prompt: row.base_prompt,
+      scenario: row.scenario,
+      example_dialogues: row.example_dialogues,
+      typing_speed_wpm: row.typing_speed_wpm,
+      audio_response_chance_percent: row.audio_response_chance_percent,
+      vision_config_id: row.vision_config_id ?? null,
+      lifecycle_config: row.lifecycle_config ?? null,
+      created_at: new Date(row.created_at),
+      updated_at: new Date(row.updated_at),
+      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+    });
+  }
+
+  return profiles;
+}
+
+/**
+ * Get ALL publicly visible character profiles regardless of source — community
+ * characters AND the current user's own public AI characters. This is what the
+ * Discover screen uses so a user's public partners appear in their own Discover
+ * grid, while private partners are hidden from both Discover and search.
+ * Filters out soft-deleted by default.
+ */
+export async function getPublicCharacterProfiles(
+  includeDeleted = false,
+): Promise<CharacterProfile[]> {
+  const db = getDatabase();
+  const query = includeDeleted
+    ? `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
+              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+       FROM character_profiles cp
+       LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
+       WHERE cps.visibility IS NULL OR cps.visibility = 'public'
+       ORDER BY cp.name`
+    : `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
+              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+       FROM character_profiles cp
+       LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
+       WHERE cp.deleted_at IS NULL
+         AND (cps.visibility IS NULL OR cps.visibility = 'public')
        ORDER BY cp.name`;
 
   const [results] = await db.executeSql(query);
