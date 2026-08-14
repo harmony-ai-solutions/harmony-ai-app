@@ -5,7 +5,7 @@ import {
   FlatList,
   TouchableOpacity,
   RefreshControl,
-  Image,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -42,6 +42,7 @@ import { HeaderNotificationButton } from '../components/navigation/HeaderNotific
 import { ChatPartnerPickerModal } from '../components/chat/ChatPartnerPickerModal';
 import { openCharacterChat } from '../services/CharacterChatService';
 import { CharacterProfile } from '../database/models';
+import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[ChatListScreen]');
@@ -336,85 +337,13 @@ export const ChatListScreen: React.FC = () => {
   };
 
   const renderItem = ({ item }: { item: ChatListItem }) => (
-    <TouchableOpacity
+    <ChatRowCard
+      item={item}
       onPress={() => {
         hapticLightPress();
         handleChatPress(item);
       }}
-      activeOpacity={0.65}
-      style={styles.rowWrapper}
-      testID="chat-list-item"
-      accessibilityLabel={`Chat with ${item.characterName}`}
-    >
-      {/* Subtle prismatic tint from top-left */}
-      <LinearGradient
-        colors={[
-          (theme?.colors.accent.primary ?? '#7c3aed') + '18',
-          'transparent',
-        ]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0.6, y: 1 }}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
-
-      {/* Avatar */}
-      <View
-        style={[
-          styles.avatarContainer,
-          { borderColor: (theme?.colors.accent.primary ?? '#7c3aed') + '44' },
-        ]}
-      >
-        {item.avatarUri ? (
-          <Image
-            source={{ uri: item.avatarUri }}
-            style={styles.avatarImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <LinearGradient
-            colors={[
-              (theme?.colors.accent.primary ?? '#7c3aed') + '33',
-              theme?.colors.background.elevated ?? '#1e1e2e',
-            ]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.avatarFallback}
-          >
-            <ThemedText size={16} weight="bold" style={{ color: theme?.colors.accent.primary }}>
-              {item.characterName.substring(0, 2).toUpperCase()}
-            </ThemedText>
-          </LinearGradient>
-        )}
-      </View>
-
-      {/* Text */}
-      <View style={styles.rowText}>
-        <ThemedText size={15} weight="bold" numberOfLines={1}>
-          {item.characterName}
-        </ThemedText>
-        <ThemedText variant="muted" size={13} numberOfLines={1} style={styles.rowPreview}>
-          {item.lastMessageSender
-            ? `${item.lastMessageSender}: ${item.lastMessage}`
-            : item.lastMessage}
-        </ThemedText>
-      </View>
-
-      {/* Time */}
-      {item.lastMessageTime && (
-        <ThemedText variant="muted" size={12} style={styles.timeText}>
-          {formatTime(item.lastMessageTime)}
-        </ThemedText>
-      )}
-
-      {/* Full-width hairline separator */}
-      <View
-        style={[
-          styles.rowSeparator,
-          { backgroundColor: (theme?.colors.border.default ?? '#333') + '66' },
-        ]}
-      />
-    </TouchableOpacity>
+    />
   );
 
   return (
@@ -511,7 +440,10 @@ export const ChatListScreen: React.FC = () => {
           data={chatList}
           renderItem={renderItem}
           keyExtractor={item => item.interactionId}
-          contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom }}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom },
+          ]}
           alwaysBounceVertical
           overScrollMode="always"
           refreshControl={
@@ -578,49 +510,166 @@ function formatTime(date: Date): string {
   }
 }
 
+/**
+ * ChatRowCard — a single conversation rendered as an Obsidian Glass card.
+ *
+ * Anatomy (outside → in):
+ *   1. Hairline gradient border (silver top-left → faint indigo bottom-right)
+ *   2. Deep dark glass body (~45 % opacity surface) with a specular sweep
+ *   3. Prismatic accent tint from the top-left corner
+ *   4. Gradient-ring avatar (ProfileAvatar) + name / preview / time badge
+ *
+ * Pressing the card springs it down to 0.98 scale for tactile feedback.
+ */
+const ChatRowCard: React.FC<{
+  item: ChatListItem;
+  onPress: () => void;
+}> = ({ item, onPress }) => {
+  const { theme } = useAppTheme();
+  const scale = useRef(new Animated.Value(1)).current;
+
+  if (!theme) return null;
+
+  const handlePressIn = () => {
+    Animated.spring(scale, {
+      toValue: 0.98,
+      useNativeDriver: true,
+      speed: 40,
+      bounciness: 0,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scale, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 40,
+      bounciness: 0,
+    }).start();
+  };
+
+  const borderStart = 'rgba(255, 255, 255, 0.20)';
+  const borderEnd = hexToRgba(theme.colors.accent.secondary, 0.10);
+  const glassFill = hexToRgba(theme.colors.background.surface, 0.45);
+
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <TouchableOpacity
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        activeOpacity={0.85}
+        testID="chat-list-item"
+        accessibilityLabel={`Chat with ${item.characterName}`}
+      >
+        {/* ── 1dp hairline gradient border ── */}
+        <LinearGradient
+          colors={[borderStart, borderEnd]}
+          start={{ x: 0.15, y: 0 }}
+          end={{ x: 0.85, y: 1 }}
+          style={styles.cardBorder}
+        >
+          {/* ── Deep dark glass body ── */}
+          <View style={[styles.cardBody, { backgroundColor: glassFill }]}>
+            {/* Specular sweep — faint diagonal light across the glass surface */}
+            <LinearGradient
+              colors={['rgba(255, 255, 255, 0.08)', 'transparent']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0.7, y: 1 }}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+
+            {/* Prismatic accent tint from top-left */}
+            <LinearGradient
+              colors={[(theme.colors.accent.primary ?? '#7c3aed') + '14', 'transparent']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0.6, y: 1 }}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+
+            {/* Gradient-ring avatar */}
+            <ProfileAvatar name={item.characterName} uri={item.avatarUri} size={52} />
+
+            {/* Text */}
+            <View style={styles.cardText}>
+              <ThemedText size={15} weight="bold" numberOfLines={1} style={styles.cardName}>
+                {item.characterName}
+              </ThemedText>
+              <ThemedText variant="muted" size={13} numberOfLines={1} style={styles.cardPreview}>
+                {item.lastMessageSender ? (
+                  <>
+                    <ThemedText variant="secondary" size={13} weight="medium">
+                      {item.lastMessageSender}:{' '}
+                    </ThemedText>
+                    {item.lastMessage}
+                  </>
+                ) : (
+                  item.lastMessage
+                )}
+              </ThemedText>
+            </View>
+
+            {/* Time badge */}
+            {item.lastMessageTime && (
+              <View
+                style={[
+                  styles.timeBadge,
+                  { backgroundColor: hexToRgba(theme.colors.background.base, 0.5) },
+                ]}
+              >
+                <ThemedText variant="muted" size={11}>
+                  {formatTime(item.lastMessageTime)}
+                </ThemedText>
+              </View>
+            )}
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
-  // ── Chat row ──
-  rowWrapper: {
+  // ── List container ──
+  listContent: {
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    gap: 10,
+  },
+  // ── Chat row card ──
+  cardBorder: {
+    borderRadius: 18,
+    padding: StyleSheet.hairlineWidth,
+  },
+  cardBody: {
+    borderRadius: 17,
+    overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 12,
     gap: 12,
-    overflow: 'hidden',
   },
-  avatarContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 1,
-    overflow: 'hidden',
-    flexShrink: 0,
-  },
-  avatarImage: {
-    width: 48,
-    height: 48,
-  },
-  avatarFallback: {
-    width: 48,
-    height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  rowText: {
+  cardText: {
     flex: 1,
     gap: 3,
   },
-  rowPreview: {
+  cardName: {
+    flexShrink: 1,
+  },
+  cardPreview: {
     lineHeight: 18,
   },
-  rowSeparator: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: StyleSheet.hairlineWidth,
+  timeBadge: {
+    alignSelf: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 99,
+    overflow: 'hidden',
   },
   notPairedContainer: {
     flex: 1,
@@ -649,10 +698,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 6,
     elevation: 3,
-  },
-  timeText: {
-    alignSelf: 'center',
-    marginRight: 8,
   },
   fab: {
     position: 'absolute',
