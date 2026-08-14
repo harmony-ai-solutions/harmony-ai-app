@@ -58,6 +58,7 @@ import { migration038 as migration038s } from './migrations/000038_cleanup_leake
 import { migration039 as migration039s } from './migrations/000039_add_character_categories_and_favorites';
 import { migration040 as migration040s } from './migrations/000040_add_message_actions';
 import { migration041 as migration041s } from './migrations/000041_add_character_social';
+import { migration042 as migration042s } from './migrations/000042_add_user_posts_social';
 
 // Migration definition
 export interface Migration {
@@ -306,6 +307,11 @@ export const MIGRATIONS: Migration[] = [
     version: 41,
     description: 'add_character_social',
     sql: migration041s,
+   },
+   {
+    version: 42,
+    description: 'add_user_posts_social',
+    sql: migration042s,
    },
   ];
 

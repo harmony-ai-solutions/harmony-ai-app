@@ -31,6 +31,7 @@ import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SoulIcon } from '../components/market/SoulIcon';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
+import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
@@ -82,7 +83,12 @@ export const MarketScreen: React.FC = () => {
       <ScreenHeader
         title={t('title')}
         subtitle={t('subtitle')}
-        right={<HeaderMenuButton />}
+        right={
+          <View style={styles.headerRightRow}>
+            <HeaderNotificationButton />
+            <HeaderMenuButton />
+          </View>
+        }
         titleRight={
           <View style={styles.balanceBadge}>
             <SoulIcon size={18} />
@@ -277,6 +283,11 @@ export const MarketScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  headerRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   container: {
     flex: 1,
   },

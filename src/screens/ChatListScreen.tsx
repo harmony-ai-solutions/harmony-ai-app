@@ -38,6 +38,10 @@ import ChatPreferencesService from '../services/ChatPreferencesService';
 import { hexToRgba } from '../utils/colorUtils';
 import { InfoModal } from '../components/modals/InfoModal';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
+import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
+import { ChatPartnerPickerModal } from '../components/chat/ChatPartnerPickerModal';
+import { openCharacterChat } from '../services/CharacterChatService';
+import { CharacterProfile } from '../database/models';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[ChatListScreen]');
@@ -80,6 +84,8 @@ export const ChatListScreen: React.FC = () => {
   const [_loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [infoModalVisible, setInfoModalVisible] = useState(false);
+  // "Start a new chat" picker (＋ FAB) — lists AI characters with a chat icon
+  const [pickerVisible, setPickerVisible] = useState(false);
 
   // Global impersonation state (the persona the user is "chatting as").
   // The "Chatting as" pill selector was removed from this screen to be
@@ -297,6 +303,16 @@ export const ChatListScreen: React.FC = () => {
     setRefreshing(false);
   }, []);
 
+  const handleNewChat = async (profile: CharacterProfile) => {
+    try {
+      await openCharacterChat(profile, {
+        navigateToChat: params => navigation.navigate('ChatDetail', params),
+      });
+    } catch (err) {
+      log.error('Failed to open chat from picker:', err);
+    }
+  };
+
   const handleChatPress = (item: ChatListItem) => {
     if (item.isGroup) {
       // Group chat: navigate with interaction info
@@ -437,6 +453,8 @@ export const ChatListScreen: React.FC = () => {
         }
         right={
           <View style={styles.headerRightRow}>
+            {/* ── Bell — opens the Notifications feed ── */}
+            <HeaderNotificationButton />
             {/* ── "Three lines" menu — opens the Settings screen ── */}
             <HeaderMenuButton />
           </View>
@@ -519,7 +537,19 @@ export const ChatListScreen: React.FC = () => {
       )}
 
 
-      <ThemedFab icon="plus" onPress={() => navigation.navigate('CreateAI', {})} style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }} />
+      <ThemedFab
+        icon="plus"
+        onPress={() => setPickerVisible(true)}
+        style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }}
+        testID="new-chat-fab"
+      />
+
+      {/* "Start a new chat" picker — lists AI characters with a chat icon */}
+      <ChatPartnerPickerModal
+        visible={pickerVisible}
+        onClose={() => setPickerVisible(false)}
+        onChat={handleNewChat}
+      />
 
       <InfoModal
         visible={infoModalVisible}
@@ -606,7 +636,7 @@ const styles = StyleSheet.create({
   headerRightRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   infoGlassIcon: {
     width: 36,

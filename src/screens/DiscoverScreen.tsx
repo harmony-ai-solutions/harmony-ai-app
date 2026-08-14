@@ -14,18 +14,21 @@ import {
   TextInput,
   ActivityIndicator,
   RefreshControl,
+  TouchableOpacity,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTranslation } from 'react-i18next';
-import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
+import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
+import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
@@ -50,13 +53,18 @@ import { resolvePersonaId } from '../database/repositories/personas';
 import syncService from '../services/SyncService';
 import { createDataURL } from '../database/base64';
 import { CharacterProfile } from '../database/models';
+import { PostCard } from '../components/social/PostCard';
+import { PostCommentModal } from '../components/social/PostCommentModal';
+import {
+  getAllUserPosts,
+  UserPost,
+  isPostLiked,
+  togglePostLike,
+  getPostLikesCount,
+  getPostCommentsCount,
+} from '../database/repositories/userSocial';
 
 const log = createLogger('[DiscoverScreen]');
-
-// Tab-screen navigation: routes are dispatched to the parent root stack.
-// Using 'any' here avoids CompositeNavigationProp boilerplate while
-// React Navigation v7 resolves routes across nested navigators at runtime.
-type Nav = import('@react-navigation/native-stack').NativeStackNavigationProp<RootStackParamList>;
 
 export const DiscoverScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -71,6 +79,15 @@ export const DiscoverScreen: React.FC = () => {
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Active Discover tab: 'characters' (community AI characters) or 'posts'
+  const [tab, setTab] = useState<'characters' | 'posts'>('characters');
+
+  // Community posts (Discover feed)
+  const [posts, setPosts] = useState<UserPost[]>([]);
+  const [postState, setPostState] = useState<
+    Record<string, { liked: boolean; likes: number; commentCount: number }>
+  >({});
+  const [commentPostId, setCommentPostId] = useState<string | null>(null);
 
   // ── Data loading ─────────────────────────────────────────────────────
   const loadProfiles = useCallback(async () => {
@@ -111,27 +128,89 @@ export const DiscoverScreen: React.FC = () => {
     }
   }, []);
 
+  // ── Community posts loader ────────────────────────────────────────────
+  const loadPosts = useCallback(async () => {
+    try {
+      const list = await getAllUserPosts();
+      setPosts(list);
+      const stateMap: Record<string, { liked: boolean; likes: number; commentCount: number }> = {};
+      await Promise.all(
+        list.map(async post => {
+          try {
+            const [liked, likes, commentCount] = await Promise.all([
+              isPostLiked(post.id),
+              getPostLikesCount(post.id),
+              getPostCommentsCount(post.id),
+            ]);
+            stateMap[post.id] = { liked, likes, commentCount };
+          } catch {
+            stateMap[post.id] = { liked: false, likes: 0, commentCount: 0 };
+          }
+        }),
+      );
+      setPostState(stateMap);
+    } catch (err) {
+      log.error('Failed to load posts:', err);
+    }
+  }, []);
+
+  const handleTogglePostLike = async (postId: string) => {
+    try {
+      const nowLiked = await togglePostLike(postId);
+      const likes = await getPostLikesCount(postId);
+      setPostState(prev => ({
+        ...prev,
+        [postId]: {
+          liked: nowLiked,
+          likes,
+          commentCount: prev[postId]?.commentCount ?? 0,
+        },
+      }));
+    } catch (err) {
+      log.error('Failed to toggle post like:', err);
+    }
+  };
+
+  const handlePostCommentsClosed = () => {
+    if (commentPostId != null) {
+      const pid = commentPostId;
+      getPostCommentsCount(pid)
+        .then(count => {
+          setPostState(prev => ({
+            ...prev,
+            [pid]: {
+              liked: prev[pid]?.liked ?? false,
+              likes: prev[pid]?.likes ?? 0,
+              commentCount: count,
+            },
+          }));
+        })
+        .catch(() => {});
+    }
+    setCommentPostId(null);
+  };
+
   // Reload on focus so edits made elsewhere are reflected
   useFocusEffect(
     useCallback(() => {
       loadProfiles();
-    }, [loadProfiles]),
+      loadPosts();
+    }, [loadProfiles, loadPosts]),
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadProfiles();
+    await Promise.all([loadProfiles(), loadPosts()]);
     setRefreshing(false);
-  }, [loadProfiles]);
+  }, [loadProfiles, loadPosts]);
 
   if (!theme) return null;
 
   // ── Search filtering ──────────────────────────────────────────────────
-  // Name-only matching: the search bar targets AI characters by NAME. This
-  // avoids matching inside long character descriptions (which contain almost
-  // every common letter and would delay / hide the 0-results state).
+  // Prefix match on the character name ONLY (no description matching, no
+  // mid/end-of-name matches) — typing "Ma" finds "Max" but not "Samara".
   const filteredProfiles = profiles.filter(p =>
-    p.name.toLowerCase().includes(query.toLowerCase()),
+    p.name.toLowerCase().startsWith(query.trim().toLowerCase()),
   );
 
   // ── Navigation handlers ───────────────────────────────────────────────
@@ -216,6 +295,7 @@ export const DiscoverScreen: React.FC = () => {
   };
 
   const accent = theme.colors.accent.primary;
+  const accentSecondary = theme.colors.accent.secondary ?? theme.colors.accent.primaryHover ?? accent;
   const baseHex = theme.colors.background.base;
   const inputBg = hexToRgba(baseHex, 0.55);
 
@@ -227,112 +307,267 @@ export const DiscoverScreen: React.FC = () => {
           title={t('title')}
           subtitle={t('subtitle')}
           style={{ paddingTop: 0 }}
-          right={<HeaderMenuButton />}
+          right={
+            <View style={styles.headerRightRow}>
+              <HeaderNotificationButton />
+              <HeaderMenuButton />
+            </View>
+          }
         >
-          {/* Search bar */}
+          {/* ── Tab toggle: Characters | Posts — professional segmented control ── */}
           <View
             style={[
-              styles.searchBar,
-              { backgroundColor: inputBg, borderColor: hexToRgba(accent, 0.25) },
+              styles.tabRow,
+              { backgroundColor: hexToRgba(baseHex, 0.5), borderColor: hexToRgba(accent, 0.18) },
             ]}
           >
-            <MaterialCommunityIcons
-              name="magnify"
-              size={20}
-              color={theme.colors.text.muted}
-              style={styles.searchIcon}
-            />
-            <TextInput
-              style={[styles.searchInput, { color: theme.colors.text.primary }]}
-              placeholder={t('searchPlaceholder')}
-              placeholderTextColor={theme.colors.text.disabled}
-              value={query}
-              onChangeText={setQuery}
-              returnKeyType="search"
-            />
-            {query.length > 0 && (
-              <MaterialCommunityIcons
-                name="close-circle"
-                size={18}
-                color={theme.colors.text.muted}
-                onPress={() => {
-                  hapticLightPress();
-                  setQuery('');
-                }}
-                style={styles.clearIcon}
-              />
-            )}
+            {(
+              [
+                { key: 'characters' as const, icon: 'account-group-outline', label: t('tabCharacters') },
+                { key: 'posts' as const, icon: 'post-outline', label: t('tabPosts') },
+              ]
+            ).map(tabDef => {
+              const isActive = tab === tabDef.key;
+              return (
+                <TouchableOpacity
+                  key={tabDef.key}
+                  onPress={() => {
+                    hapticLightPress();
+                    setTab(tabDef.key);
+                  }}
+                  activeOpacity={0.85}
+                  style={[styles.tabBtn, isActive && styles.tabBtnActive]}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: isActive }}
+                  accessibilityLabel={tabDef.label}
+                  testID={`discover-tab-${tabDef.key}`}
+                >
+                  {isActive && (
+                    <LinearGradient
+                      colors={[accent, accentSecondary]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={StyleSheet.absoluteFill}
+                      pointerEvents="none"
+                    />
+                  )}
+                  <MaterialCommunityIcons
+                    name={tabDef.icon}
+                    size={15}
+                    color={isActive ? '#fff' : theme.colors.text.muted}
+                  />
+                  <ThemedText
+                    size={13}
+                    variant="primary"
+                    weight={isActive ? 'bold' : 'normal'}
+                    style={isActive ? styles.tabLabelActive : undefined}
+                  >
+                    {tabDef.label}
+                  </ThemedText>
+                </TouchableOpacity>
+              );
+            })}
           </View>
+
+          {/* Search bar — only for the Characters tab */}
+          {tab === 'characters' && (
+            <View
+              style={[
+                styles.searchBar,
+                { backgroundColor: inputBg, borderColor: hexToRgba(accent, 0.25) },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name="magnify"
+                size={20}
+                color={theme.colors.text.muted}
+                style={styles.searchIcon}
+              />
+              <TextInput
+                style={[styles.searchInput, { color: theme.colors.text.primary }]}
+                placeholder={t('searchPlaceholder')}
+                placeholderTextColor={theme.colors.text.disabled}
+                value={query}
+                onChangeText={setQuery}
+                returnKeyType="search"
+              />
+              {query.length > 0 && (
+                <MaterialCommunityIcons
+                  name="close-circle"
+                  size={18}
+                  color={theme.colors.text.muted}
+                  onPress={() => {
+                    hapticLightPress();
+                    setQuery('');
+                  }}
+                  style={styles.clearIcon}
+                />
+              )}
+            </View>
+          )}
         </ScreenHeader>
       </View>
 
-      {/* ── Character grid + empty-state overlay ──
-          The overlay is a plain sibling View (NOT ListEmptyComponent) because
-          FlatList with numColumns > 1 does not reliably render the empty
-          component — a guaranteed-visible overlay guarantees the "0 results"
-          state always appears when a search matches nothing. */}
+      {/* ── Tab content ── */}
       <View style={styles.contentArea}>
-        <FlatList
-          style={{ flex: 1 }}
-          data={filteredProfiles}
-          keyExtractor={item => item.id}
-          numColumns={2}
-          columnWrapperStyle={
-            filteredProfiles.length > 0 ? styles.columnWrapper : undefined
-          }
-          contentContainerStyle={[
-            styles.listContent,
-            { flexGrow: 1, paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom },
-          ]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={[theme.colors.accent.primary]}
-              tintColor={theme.colors.accent.primary}
-              progressBackgroundColor={theme.colors.background.surface}
+        {tab === 'characters' ? (
+          <>
+            {/* Character grid — the empty state is rendered via ListEmptyComponent
+                (inside the FlatList) so it can never overlay populated content.
+                key="characters-list" keeps this FlatList distinct from the posts
+                FlatList below — without it React reconciles them as the same
+                component and "Changing numColumns on the fly" crashes. */}
+            <FlatList
+              key="characters-list"
+              style={{ flex: 1 }}
+              data={filteredProfiles}
+              keyExtractor={item => item.id}
+              numColumns={2}
+              columnWrapperStyle={
+                filteredProfiles.length > 0 ? styles.columnWrapper : undefined
+              }
+              contentContainerStyle={[
+                styles.listContent,
+                { flexGrow: 1, paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom },
+              ]}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={[theme.colors.accent.primary]}
+                  tintColor={theme.colors.accent.primary}
+                  progressBackgroundColor={theme.colors.background.surface}
+                />
+              }
+              ListEmptyComponent={
+                isLoading ? (
+                  <View style={styles.centered}>
+                    <ActivityIndicator size="large" color={theme.colors.accent.primary} />
+                  </View>
+                ) : (
+                  <ThemedEmptyState
+                    icon={query ? 'file-search-outline' : 'compass-outline'}
+                    title={query ? t('noResults', { query }) : t('noCharacters')}
+                    subtitle={query ? t('noResultsHint') : t('noCharactersHint')}
+                    style={styles.emptyOverlay}
+                  />
+                )
+              }
+              renderItem={({ item }) => (
+                <CharacterProfileCard
+                  profile={item}
+                  imageUri={primaryImages[item.id] ?? null}
+                  imageCount={imageCounts[item.id] ?? 0}
+                  onPress={() => handleOpenProfile(item)}
+                  onLongPress={() => handleOpenProfile(item)}
+                  onChatPress={() => handleChat(item)}
+                />
+              )}
             />
-          }
-          renderItem={({ item }) => (
-            <CharacterProfileCard
-              profile={item}
-              imageUri={primaryImages[item.id] ?? null}
-              imageCount={imageCounts[item.id] ?? 0}
-              onPress={() => handleOpenProfile(item)}
-              onLongPress={() => handleOpenProfile(item)}
-              onChatPress={() => handleChat(item)}
-            />
-          )}
-        />
-
-        {/* Loading overlay */}
-        {isLoading && (
-          <View style={styles.overlay} pointerEvents="none">
-            <ActivityIndicator size="large" color={theme.colors.accent.primary} />
-          </View>
-        )}
-
-        {/* Empty / 0-results overlay */}
-        {!isLoading && filteredProfiles.length === 0 && (
-          <View style={styles.overlay} pointerEvents="none">
-            <ThemedEmptyState
-              icon={query ? 'file-search-outline' : 'compass-outline'}
-              title={query ? t('noResults', { query }) : t('noCharacters')}
-              subtitle={query ? t('noResultsHint') : t('noCharactersHint')}
-              style={styles.emptyOverlay}
-            />
-          </View>
+          </>
+        ) : (
+          <FlatList
+            key="posts-list"
+            style={{ flex: 1 }}
+            data={posts}
+            keyExtractor={item => item.id}
+            contentContainerStyle={[
+              styles.postsListContent,
+              { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom },
+            ]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={[theme.colors.accent.primary]}
+                tintColor={theme.colors.accent.primary}
+                progressBackgroundColor={theme.colors.background.surface}
+              />
+            }
+            ListEmptyComponent={
+              <ThemedEmptyState
+                icon="post-outline"
+                title={t('noPosts')}
+                subtitle={t('noPostsHint')}
+                style={styles.emptyOverlay}
+              />
+            }
+            renderItem={({ item }) => {
+              const state = postState[item.id] ?? { liked: false, likes: 0, commentCount: 0 };
+              return (
+                <PostCard
+                  post={item}
+                  liked={state.liked}
+                  likes={state.likes}
+                  commentCount={state.commentCount}
+                  onToggleLike={() => handleTogglePostLike(item.id)}
+                  onOpenComments={() => setCommentPostId(item.id)}
+                  onOpenAuthor={() => navigation.navigate('MainTabs', { screen: 'MyProfile' })}
+                />
+              );
+            }}
+          />
         )}
       </View>
+
+      {/* Post comments modal */}
+      <PostCommentModal
+        visible={commentPostId != null}
+        postId={commentPostId}
+        onClose={handlePostCommentsClosed}
+      />
     </ThemedView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  headerRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   contentArea: { flex: 1 },
+  tabRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    padding: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  tabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 36,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  tabBtnActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  tabLabelActive: {
+    color: '#fff',
+  },
+  postsListContent: {
+    padding: 16,
+  },
+  centered: {
+    paddingTop: 80,
+    alignItems: 'center',
+  },
   overlay: {
     position: 'absolute',
     top: 0,

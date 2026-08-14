@@ -1,9 +1,9 @@
 /**
- * ImageCommentModal — full-screen comment viewer for a character image post.
+ * PostCommentModal — full-screen comment viewer for a user post.
  *
  * Lists existing comments (author name + text), lets the current user add a
  * new comment, and lets the author of a comment delete it. Uses the client-only
- * `character_image_comments` repository (never synced to the engine).
+ * `user_post_comments` repository (never synced to the engine).
  *
  * Full-screen (not a bottom sheet) so the keyboard never hides the comment
  * composer — the whole screen is the feed with the input always reachable
@@ -29,40 +29,36 @@ import { ThemedText } from '../themed/ThemedText';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
 import {
-  getImageComments,
-  addImageComment,
-  deleteImageComment,
-  CharacterImageComment,
-} from '../../database/repositories/characterSocial';
+  getPostComments,
+  addPostComment,
+  deletePostComment,
+  UserPostComment,
+} from '../../database/repositories/userSocial';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
 import { useAuth } from '../../contexts/AuthContext';
 import UserProfileStore from '../../services/profile/UserProfileStore';
 import { createLogger } from '../../utils/logger';
+import { addNotification, getUserPost } from '../../database/repositories/userSocial';
 
-const log = createLogger('[ImageCommentModal]');
+const log = createLogger('[PostCommentModal]');
 
-interface ImageCommentModalProps {
+interface PostCommentModalProps {
   visible: boolean;
-  imageId: number | null;
-  characterName: string;
+  postId: string | null;
   onClose: () => void;
-  /** Fired after a comment is successfully posted (parent can notify the creator) */
-  onCommentPosted?: () => void;
 }
 
-export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
+export const PostCommentModal: React.FC<PostCommentModalProps> = ({
   visible,
-  imageId,
-  characterName,
+  postId,
   onClose,
-  onCommentPosted,
 }) => {
   const { theme } = useAppTheme();
   const { top: safeTop, bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('profile');
   const { user } = useAuth();
 
-  const [comments, setComments] = useState<CharacterImageComment[]>([]);
+  const [comments, setComments] = useState<UserPostComment[]>([]);
   const [draft, setDraft] = useState('');
   const [posting, setPosting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -86,24 +82,24 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
   }, []);
 
   const load = useCallback(async () => {
-    if (imageId == null) return;
+    if (!postId) return;
     setLoading(true);
     try {
-      const list = await getImageComments(imageId);
+      const list = await getPostComments(postId);
       setComments(list);
     } catch (err) {
       log.warn('Failed to load comments:', err);
     } finally {
       setLoading(false);
     }
-  }, [imageId]);
+  }, [postId]);
 
   useEffect(() => {
-    if (visible && imageId != null) {
+    if (visible && postId) {
       setDraft('');
       load();
     }
-  }, [visible, imageId, load]);
+  }, [visible, postId, load]);
 
   if (!theme) return null;
 
@@ -113,7 +109,7 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
 
   const handlePost = async () => {
     const text = draft.trim();
-    if (!text || posting || imageId == null) return;
+    if (!text || posting || !postId) return;
     setPosting(true);
     try {
       let authorUserId: string | null = null;
@@ -132,8 +128,8 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
           // keep cloud values
         }
       }
-      const created = await addImageComment({
-        imageId,
+      const created = await addPostComment({
+        postId,
         authorUserId,
         authorDisplayName: authorDisplayName || 'Guest',
         authorAvatarUrl,
@@ -141,7 +137,30 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
       });
       setComments(prev => [...prev, created]);
       setDraft('');
-      onCommentPosted?.();
+
+      // Notify the post author when someone comments on their post.
+      try {
+        const post = await getUserPost(postId);
+        if (
+          post &&
+          post.authorUserId &&
+          user?.id &&
+          post.authorUserId !== user.id
+        ) {
+          await addNotification({
+            recipientUserId: post.authorUserId,
+            actorUserId: user.id,
+            actorDisplayName: authorDisplayName || 'Someone',
+            actorAvatarUrl: authorAvatarUrl,
+            type: 'post_comment',
+            targetType: 'user_post',
+            targetId: postId,
+            targetLabel: post.text.slice(0, 40),
+          });
+        }
+      } catch (notifErr) {
+        log.warn('Failed to create post-comment notification:', notifErr);
+      }
     } catch (err) {
       log.warn('Failed to post comment:', err);
     } finally {
@@ -149,9 +168,9 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
     }
   };
 
-  const handleDelete = async (comment: CharacterImageComment) => {
+  const handleDelete = async (comment: UserPostComment) => {
     try {
-      await deleteImageComment(comment.id);
+      await deletePostComment(comment.id);
       setComments(prev => prev.filter(c => c.id !== comment.id));
     } catch (err) {
       log.warn('Failed to delete comment:', err);
@@ -194,16 +213,16 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
           <View style={[styles.header, { paddingTop: safeTop + 8 }]}>
             <View style={styles.headerText}>
               <ThemedText size={20} weight="bold" hierarchy="header">
-                {t('aiImageComments')}
+                {t('postCommentsTitle')}
               </ThemedText>
-              <ThemedText variant="muted" size={13} numberOfLines={1}>
-                {characterName}
+              <ThemedText variant="muted" size={13}>
+                {comments.length} · {t('aiCommentPlaceholder')}
               </ThemedText>
             </View>
             <TouchableOpacity
               onPress={onClose}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel="Close"
+              accessibilityLabel={t('common:close')}
               accessibilityRole="button"
               style={[
                 styles.closeBtn,
@@ -214,7 +233,7 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
             </TouchableOpacity>
           </View>
 
-          {/* ── Comment list ── */}
+          {/* ── Comments list ── */}
           <ScrollView
             style={styles.flex}
             contentContainerStyle={[
@@ -230,95 +249,84 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
               </ThemedText>
             ) : comments.length === 0 ? (
               <ThemedText variant="muted" size={13} style={styles.emptyText}>
-                {t('aiCommentEmpty')}
+                {t('postCommentEmpty')}
               </ThemedText>
             ) : (
-              comments.map(comment => {
-                const isMine =
-                  !!user &&
-                  comment.authorUserId != null &&
-                  comment.authorUserId === user.id;
-                return (
-                  <View key={comment.id} style={styles.commentRow}>
-                    <ProfileAvatar
-                      name={comment.authorDisplayName || '?'}
-                      uri={comment.authorAvatarUrl}
-                      size={34}
-                      showRing={false}
-                    />
-                    <View style={styles.commentBody}>
-                      <ThemedText size={13} weight="medium" numberOfLines={1}>
+              comments.map(comment => (
+                <View key={comment.id} style={styles.commentRow}>
+                  <ProfileAvatar
+                    name={comment.authorDisplayName || '?'}
+                    uri={comment.authorAvatarUrl}
+                    size={30}
+                    showRing={false}
+                  />
+                  <View style={styles.commentBody}>
+                    <View style={styles.commentHeader}>
+                      <ThemedText size={13} weight="bold" numberOfLines={1}>
                         {comment.authorDisplayName || 'Guest'}
                       </ThemedText>
-                      <ThemedText
-                        variant="secondary"
-                        size={14}
-                        style={styles.commentText}
-                      >
-                        {comment.text}
-                      </ThemedText>
+                      {user?.id &&
+                        comment.authorUserId === user.id && (
+                          <TouchableOpacity
+                            onPress={() => {
+                              hapticLightPress();
+                              handleDelete(comment);
+                            }}
+                            hitSlop={8}
+                            accessibilityLabel={t('postCommentDelete')}
+                          >
+                            <Icon
+                              name="trash-can-outline"
+                              size={14}
+                              color={theme.colors.text.muted}
+                            />
+                          </TouchableOpacity>
+                        )}
                     </View>
-                    {isMine && (
-                      <TouchableOpacity
-                        onPress={() => {
-                          hapticLightPress();
-                          handleDelete(comment);
-                        }}
-                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        accessibilityRole="button"
-                        accessibilityLabel={t('aiCommentDelete')}
-                        style={styles.deleteBtn}
-                      >
-                        <Icon
-                          name="delete-outline"
-                          size={18}
-                          color={theme.colors.text.muted}
-                        />
-                      </TouchableOpacity>
-                    )}
+                    <ThemedText variant="secondary" size={13}>
+                      {comment.text}
+                    </ThemedText>
                   </View>
-                );
-              })
+                </View>
+              ))
             )}
           </ScrollView>
 
-          {/* ── Comment composer ── */}
+          {/* ── Composer ── */}
           <View style={[styles.composer, { paddingBottom: safeBottom + 10 }]}>
             <TextInput
               style={[
                 styles.input,
                 {
                   color: theme.colors.text.primary,
-                  backgroundColor: hexToRgba(
-                    theme.colors.background.surface,
-                    0.6,
-                  ),
-                  borderColor: 'rgba(255,255,255,0.12)',
+                  backgroundColor: hexToRgba(theme.colors.background.base, 0.55),
+                  borderColor: hexToRgba(accent, 0.25),
                 },
               ]}
+              placeholder={t('postCommentPlaceholder')}
+              placeholderTextColor={theme.colors.text.disabled}
               value={draft}
               onChangeText={setDraft}
-              placeholder={t('aiCommentPlaceholder')}
-              placeholderTextColor={theme.colors.text.muted}
               multiline
               maxLength={500}
             />
             <TouchableOpacity
-              onPress={() => {
-                hapticLightPress();
-                handlePost();
-              }}
+              onPress={handlePost}
               disabled={!draft.trim() || posting}
-              activeOpacity={0.7}
               style={[
-                styles.postBtn,
-                { backgroundColor: accent },
-                (!draft.trim() || posting) && styles.postBtnDisabled,
+                styles.sendBtn,
+                {
+                  backgroundColor:
+                    draft.trim() && !posting
+                      ? accent
+                      : theme.colors.text.disabled,
+                },
               ]}
               accessibilityRole="button"
-              accessibilityLabel={t('aiCommentPost')}
+              accessibilityLabel={t('postCommentPost')}
+              testID="post-comment-send"
             >
-              <Icon name="send" size={18} color="#fff" />
+              <Icon name="send" size={16} color="#fff" />
             </TouchableOpacity>
           </View>
 
@@ -363,7 +371,6 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 20,
     paddingTop: 4,
-    gap: 14,
   },
   emptyText: {
     textAlign: 'center',
@@ -373,47 +380,43 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 10,
+    paddingVertical: 8,
   },
   commentBody: {
     flex: 1,
     gap: 2,
   },
-  commentText: {
-    lineHeight: 19,
-  },
-  deleteBtn: {
-    padding: 4,
+  commentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 10,
+    gap: 8,
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.10)',
   },
   input: {
     flex: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 10,
-    maxHeight: 110,
-    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    maxHeight: 90,
   },
-  postBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  sendBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,
-  },
-  postBtnDisabled: {
-    opacity: 0.4,
   },
 });
 
-export default ImageCommentModal;
+export default PostCommentModal;

@@ -25,6 +25,7 @@ import { ThemedFab } from '../components/themed/ThemedFab';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
+import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
@@ -177,7 +178,7 @@ export const CharactersScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
 
   // ── 4-3: tag / creator filtering ──────────────────────────────────────────
   const [allTags, setAllTags] = useState<string[]>([]);
@@ -202,6 +203,10 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
     }).start();
   }, [hasActiveFilters, reduceMotion, filterBannerAnim]);
 
+  // Sort mode: 'alpha' (A→Z), 'newest' (newest first), 'oldest' (oldest first)
+  const [sortMode, setSortMode] = useState<'alpha' | 'newest' | 'oldest'>(
+    'alpha',
+  );
   // Whether the "new AI partner?" bottom sheet is open (opened via ＋ FAB)
   const [createVisible, setCreateVisible] = useState(false);
   // Whether the "duplicate an AI partner" card picker is open
@@ -318,12 +323,12 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
 
 /** Search + activeFilter (all/favorites/category) + tag (multi-OR) + creator filter. */
   const filteredProfiles = profiles.filter(p => {
+    // Search query — prefix match on the character name ONLY (no description
+    // matching, no mid/end-of-name matches).
     const q = searchQuery.trim().toLowerCase();
-    const matchesSearch =
-      !q ||
-      p.name.toLowerCase().includes(q) ||
-      (p.description?.toLowerCase().includes(q) ?? false);
-    if (!matchesSearch) return false;
+    const matchesQuery =
+      q.length === 0 || p.name.toLowerCase().startsWith(q);
+    if (!matchesQuery) return false;
 
     // Active filter: all / favorites / category id (AND-composed with the filters below)
     if (activeFilter === 'favorites' && !favoriteIds.has(p.id)) return false;
@@ -353,6 +358,20 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
     setSelectedTags([]);
     setCreatorFilter(null);
   }, []);
+
+  // ── Sort ──────────────────────────────────────────────────────────────
+  // 'alpha'  — alphabetical by name (case-insensitive)
+  // 'newest' — newest created first (created_at desc)
+  // 'oldest' — oldest created first (created_at asc)
+  const sortedProfiles = [...filteredProfiles].sort((a, b) => {
+    if (sortMode === 'newest') {
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    }
+    if (sortMode === 'oldest') {
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    }
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+  });
 
   /**
    * Filter chips: first two are "All" and "Favorites", then each user
@@ -637,7 +656,52 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   return (
     <ThemedView style={styles.container}>
       {/* Header + search bar (child) */}
-      <ScreenHeader title={t('title')} right={<HeaderMenuButton />}>
+      <ScreenHeader
+        title={t('title')}
+        titleRight={
+          <>
+          {/* ── Sort button — cycles Alpha / Newest / Oldest ── */}
+          <TouchableOpacity
+            onPress={() => {
+              hapticLightPress();
+              setSortMode(prev =>
+                prev === 'alpha' ? 'newest' : prev === 'newest' ? 'oldest' : 'alpha',
+              );
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={[
+              styles.sortChip,
+              { backgroundColor: hexToRgba(baseHex, 0.55), borderColor: hexToRgba(accent, 0.25) },
+            ]}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={t('sortLabel', { mode: sortMode })}
+            testID="sort-button"
+          >
+            <MaterialCommunityIcons
+              name={
+                sortMode === 'alpha'
+                  ? 'sort-alphabetical-ascending'
+                  : sortMode === 'newest'
+                    ? 'sort-clock-descending-outline'
+                    : 'sort-clock-ascending-outline'
+              }
+              size={15}
+              color={accent}
+            />
+            <ThemedText size={12} weight="medium" variant="accent">
+              {t(`sortMode.${sortMode}`)}
+            </ThemedText>
+          </TouchableOpacity>
+          </>
+        }
+        right={
+          <View style={styles.headerRightRow}>
+            <HeaderNotificationButton />
+            <HeaderMenuButton />
+          </View>
+        }
+      >
         <View
           style={[
             styles.searchContainer,
@@ -817,10 +881,10 @@ const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
       {/* FlatList ALWAYS renders so RefreshControl is always reachable.
           Use ListEmptyComponent for empty state, loading overlay for initial load. */}
       <FlatList style={{ flex: 1 }}
-        data={filteredProfiles}
+        data={sortedProfiles}
         keyExtractor={item => item.id}
         numColumns={2}
-        columnWrapperStyle={filteredProfiles.length > 0 ? styles.columnWrapper : undefined}
+        columnWrapperStyle={sortedProfiles.length > 0 ? styles.columnWrapper : undefined}
         contentContainerStyle={[
           styles.listContent,
           { flexGrow: 1, paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom },
@@ -1025,6 +1089,21 @@ const styles = StyleSheet.create({
   },
   clearFiltersButton: {
     paddingVertical: 4,
+  },
+  headerRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sortChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    marginRight: 8,
   },
   searchContainer: {
     flexDirection: 'row',

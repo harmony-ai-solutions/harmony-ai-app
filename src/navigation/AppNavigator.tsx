@@ -30,6 +30,7 @@ import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen
 import { AppearanceSettingsScreen } from '../screens/settings/AppearanceSettingsScreen';
 import { HelpSupportSettingsScreen } from '../screens/settings/HelpSupportSettingsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { NotificationsScreen } from '../screens/NotificationsScreen';
 
 export type RootStackParamList = {
   /** Tab container — the primary navigation surface (5-tab layout) */
@@ -90,6 +91,8 @@ export type RootStackParamList = {
   AccountSettings: undefined;
   AppearanceSettings: undefined;
   HelpSupportSettings: undefined;
+  /** Notification feed — pushed over the tabs from the header bell */
+  Notifications: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -138,6 +141,9 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
         <Stack.Screen name="AIProfile" component={AIProfileScreen} />
         <Stack.Screen name="CreateAI" component={CreateAIScreen} />
+
+        {/* ── Notifications feed (pushed over tabs from the header bell) ── */}
+        <Stack.Screen name="Notifications" component={NotificationsScreen} />
 
         {/* ── Settings (pushed over tabs from the header hamburger menu) ── */}
         <Stack.Screen name="Settings" component={SettingsScreen} />

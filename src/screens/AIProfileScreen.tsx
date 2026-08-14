@@ -76,6 +76,13 @@ import { getLocalProfile } from '../services/profile/UserProfileStore';
 import { CharacterProfile, CharacterImage } from '../database/models';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
+import { formatPostDate } from '../utils/dateFormat';
+import {
+  addNotification,
+  isFollowing,
+  addFollow,
+  removeFollow,
+} from '../database/repositories/userSocial';
 
 const log = createLogger('[AIProfileScreen]');
 
@@ -123,6 +130,8 @@ export const AIProfileScreen: React.FC = () => {
   const [creator, setCreator] = useState<CharacterCreator | null>(null);
   const [isOwner, setIsOwner] = useState(false);
   const [imagePosts, setImagePosts] = useState<Record<number, ImagePostState>>({});
+  // Follow state for the character's creator
+  const [followingCreator, setFollowingCreator] = useState(false);
 
   // ── Comment modal state ────────────────────────────────────────────────
   const [commentImageId, setCommentImageId] = useState<number | null>(null);
@@ -206,7 +215,33 @@ export const AIProfileScreen: React.FC = () => {
         // one from the current user so user-created characters always show
         // "Created by …" (with the locally-picked avatar when available).
         if (characterCreator) {
-          setCreator(characterCreator);
+          // When the recorded creator is the current user, resolve their
+          // locally-picked avatar (UserProfileStore) so the badge shows the
+          // real avatar — the creator row only stores the cloud avatar_url,
+          // which is null for locally-picked avatars (this affects every
+          // user-created character AND its copies).
+          if (user?.id && characterCreator.creatorUserId === user.id) {
+            try {
+              const local = await getLocalProfile(user.id);
+              const resolvedAvatar =
+                local.avatar_data_url ?? characterCreator.creatorAvatarUrl ?? null;
+              const resolvedName =
+                local.displayName ||
+                characterCreator.creatorDisplayName ||
+                user.display_name ||
+                user.email?.split('@')[0] ||
+                'Creator';
+              setCreator({
+                ...characterCreator,
+                creatorDisplayName: resolvedName,
+                creatorAvatarUrl: resolvedAvatar,
+              });
+            } catch {
+              setCreator(characterCreator);
+            }
+          } else {
+            setCreator(characterCreator);
+          }
         } else if (source === 'user') {
           let creatorName = '';
           let creatorAvatar: string | null = null;
@@ -229,6 +264,20 @@ export const AIProfileScreen: React.FC = () => {
             creatorDisplayName: creatorName || 'Creator',
             creatorAvatarUrl: creatorAvatar,
           });
+        }
+
+        // Follow state — whether the local user follows the character's creator.
+        const resolvedCreator =
+          (await getCharacterCreator(profileId)) ?? null;
+        if (resolvedCreator && user?.id && resolvedCreator.creatorUserId !== user.id) {
+          try {
+            const following = await isFollowing(resolvedCreator.creatorUserId);
+            setFollowingCreator(following);
+          } catch (followErr) {
+            log.warn('Failed to load follow state:', followErr);
+          }
+        } else {
+          setFollowingCreator(false);
         }
       } catch (err) {
         log.warn('Failed to load character social state:', err);
@@ -310,6 +359,29 @@ export const AIProfileScreen: React.FC = () => {
           ? t('aiLikedToast', { name: profile.name })
           : t('aiUnlikedToast', { name: profile.name }),
       );
+
+      // Notify the creator when their AI profile is liked (not by themselves).
+      if (nowLiked && creator && user?.id && creator.creatorUserId !== user.id) {
+        try {
+          const local = await getLocalProfile(user.id);
+          await addNotification({
+            recipientUserId: creator.creatorUserId,
+            actorUserId: user.id,
+            actorDisplayName:
+              local.displayName ||
+              user.display_name ||
+              user.email?.split('@')[0] ||
+              'Someone',
+            actorAvatarUrl: local.avatar_data_url ?? user.avatar_url ?? null,
+            type: 'profile_like',
+            targetType: 'character_profile',
+            targetId: profileId,
+            targetLabel: profile.name,
+          });
+        } catch (notifErr) {
+          log.warn('Failed to create profile-like notification:', notifErr);
+        }
+      }
     } catch (err) {
       log.warn('Failed to toggle like:', err);
     }
@@ -342,6 +414,29 @@ export const AIProfileScreen: React.FC = () => {
           commentCount: prev[img.id]?.commentCount ?? 0,
         },
       }));
+
+      // Notify the creator when one of their AI images is liked.
+      if (nowLiked && creator && user?.id && creator.creatorUserId !== user.id) {
+        try {
+          const local = await getLocalProfile(user.id);
+          await addNotification({
+            recipientUserId: creator.creatorUserId,
+            actorUserId: user.id,
+            actorDisplayName:
+              local.displayName ||
+              user.display_name ||
+              user.email?.split('@')[0] ||
+              'Someone',
+            actorAvatarUrl: local.avatar_data_url ?? user.avatar_url ?? null,
+            type: 'image_like',
+            targetType: 'character_image',
+            targetId: String(img.id),
+            targetLabel: profile?.name ?? '',
+          });
+        } catch (notifErr) {
+          log.warn('Failed to create image-like notification:', notifErr);
+        }
+      }
     } catch (err) {
       log.warn('Failed to toggle image like:', err);
     }
@@ -380,6 +475,52 @@ export const AIProfileScreen: React.FC = () => {
     // exists on this device, because creation is recorded only for
     // locally-created characters).
     navigation.push('MainTabs', { screen: 'MyProfile' });
+  };
+
+  const handleToggleFollowCreator = async () => {
+    if (!creator || !user) return;
+    try {
+      if (followingCreator) {
+        await removeFollow(creator.creatorUserId);
+        setFollowingCreator(false);
+        showToast(
+          t('postUnfollowedToast', { name: creator.creatorDisplayName }),
+        );
+      } else {
+        await addFollow({
+          targetUserId: creator.creatorUserId,
+          targetDisplayName: creator.creatorDisplayName,
+          targetAvatarUrl: creator.creatorAvatarUrl,
+        });
+        setFollowingCreator(true);
+        showToast(
+          t('postFollowedToast', { name: creator.creatorDisplayName }),
+        );
+
+        // Notify the creator when they gain a new follower.
+        try {
+          const local = await getLocalProfile(user.id);
+          await addNotification({
+            recipientUserId: creator.creatorUserId,
+            actorUserId: user.id,
+            actorDisplayName:
+              local.displayName ||
+              user.display_name ||
+              user.email?.split('@')[0] ||
+              'Someone',
+            actorAvatarUrl: local.avatar_data_url ?? user.avatar_url ?? null,
+            type: 'follow',
+            targetType: 'user',
+            targetId: user.id,
+            targetLabel: local.displayName || user.display_name || '',
+          });
+        } catch (notifErr) {
+          log.warn('Failed to create follow notification:', notifErr);
+        }
+      }
+    } catch (err) {
+      log.warn('Failed to toggle follow:', err);
+    }
   };
 
   if (!theme) return null;
@@ -488,6 +629,47 @@ export const AIProfileScreen: React.FC = () => {
                       size={14}
                       color={theme.colors.text.muted}
                     />
+                  </TouchableOpacity>
+                ) : null}
+
+                {/* Follow button — shown when the creator is NOT the current user */}
+                {creator && user?.id && creator.creatorUserId !== user.id ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      hapticLightPress();
+                      handleToggleFollowCreator();
+                    }}
+                    activeOpacity={0.7}
+                    style={[
+                      styles.followPill,
+                      followingCreator && styles.followPillActive,
+                      {
+                        backgroundColor: followingCreator
+                          ? accent + '2E'
+                          : 'rgba(255,255,255,0.06)',
+                        borderColor: followingCreator
+                          ? accent
+                          : 'rgba(255,255,255,0.15)',
+                      },
+                    ]}
+                    testID="ai-profile-follow-button"
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      followingCreator ? t('postFollowing') : t('postFollow')
+                    }
+                  >
+                    <Icon
+                      name={followingCreator ? 'check' : 'account-plus-outline'}
+                      size={13}
+                      color={followingCreator ? accent : theme.colors.text.secondary}
+                    />
+                    <ThemedText
+                      size={12}
+                      weight="medium"
+                      variant={followingCreator ? 'accent' : 'primary'}
+                    >
+                      {followingCreator ? t('postFollowing') : t('postFollow')}
+                    </ThemedText>
                   </TouchableOpacity>
                 ) : null}
 
@@ -672,6 +854,17 @@ export const AIProfileScreen: React.FC = () => {
                             style={styles.postImage}
                             resizeMode="cover"
                           />
+                          {/* Date/time caption under the image */}
+                          <View style={styles.postDateRow}>
+                            <Icon
+                              name="clock-outline"
+                              size={12}
+                              color={theme.colors.text.muted}
+                            />
+                            <ThemedText variant="muted" size={11}>
+                              {formatPostDate(img.created_at)}
+                            </ThemedText>
+                          </View>
                           <View style={styles.postActions}>
                             <TouchableOpacity
                               onPress={() => {
@@ -796,6 +989,30 @@ export const AIProfileScreen: React.FC = () => {
         imageId={commentImageId}
         characterName={resolvedName}
         onClose={handleCommentsClosed}
+        onCommentPosted={async () => {
+          // Notify the character's creator when someone comments on an AI image.
+          if (creator && user?.id && creator.creatorUserId !== user.id) {
+            try {
+              const local = await getLocalProfile(user.id);
+              await addNotification({
+                recipientUserId: creator.creatorUserId,
+                actorUserId: user.id,
+                actorDisplayName:
+                  local.displayName ||
+                  user.display_name ||
+                  user.email?.split('@')[0] ||
+                  'Someone',
+                actorAvatarUrl: local.avatar_data_url ?? user.avatar_url ?? null,
+                type: 'image_comment',
+                targetType: 'character_image',
+                targetId: commentImageId != null ? String(commentImageId) : null,
+                targetLabel: profile?.name ?? '',
+              });
+            } catch (notifErr) {
+              log.warn('Failed to create image-comment notification:', notifErr);
+            }
+          }
+        }}
       />
     </ThemedView>
   );
@@ -853,6 +1070,20 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.14)',
     backgroundColor: 'rgba(255,255,255,0.05)',
     maxWidth: '100%',
+  },
+  followPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  followPillActive: {
+    borderWidth: 1,
   },
   // ── Actions row ──
   actionsRow: {
@@ -962,6 +1193,13 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 1,
     backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  postDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingTop: 8,
   },
   postActions: {
     flexDirection: 'row',

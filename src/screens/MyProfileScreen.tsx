@@ -38,6 +38,7 @@ import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
+import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hapticLightPress } from '../utils/haptics';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
@@ -52,6 +53,17 @@ import { CharacterProfile } from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import UserProfileStore from '../services/profile/UserProfileStore';
 import { createLogger } from '../utils/logger';
+import { CreatePostModal } from '../components/social/CreatePostModal';
+import { PostCommentModal } from '../components/social/PostCommentModal';
+import { PostCard } from '../components/social/PostCard';
+import {
+  getMyUserPosts,
+  UserPost,
+  isPostLiked,
+  togglePostLike,
+  getPostLikesCount,
+  getPostCommentsCount,
+} from '../database/repositories/userSocial';
 
 const log = createLogger('[MyProfileScreen]');
 
@@ -84,6 +96,14 @@ export const MyProfileScreen: React.FC = () => {
 
   // Saved AI characters (My Profile > Saved tab)
   const [savedCharacters, setSavedCharacters] = useState<SavedCharacterEntry[]>([]);
+
+  // User posts (My Profile > Posts tab) + interaction state
+  const [posts, setPosts] = useState<UserPost[]>([]);
+  const [createPostVisible, setCreatePostVisible] = useState(false);
+  const [commentPostId, setCommentPostId] = useState<string | null>(null);
+  const [postState, setPostState] = useState<
+    Record<string, { liked: boolean; likes: number; commentCount: number }>
+  >({});
 
   const isAuthed = status === 'authenticated' && !!user;
 
@@ -131,6 +151,33 @@ export const MyProfileScreen: React.FC = () => {
     }
   }, []);
 
+  const loadPosts = useCallback(async () => {
+    if (!user) return;
+    try {
+      const list = await getMyUserPosts(user.id);
+      setPosts(list);
+      // Load per-post like/comment state in parallel
+      const stateMap: Record<string, { liked: boolean; likes: number; commentCount: number }> = {};
+      await Promise.all(
+        list.map(async post => {
+          try {
+            const [liked, likes, commentCount] = await Promise.all([
+              isPostLiked(post.id),
+              getPostLikesCount(post.id),
+              getPostCommentsCount(post.id),
+            ]);
+            stateMap[post.id] = { liked, likes, commentCount };
+          } catch {
+            stateMap[post.id] = { liked: false, likes: 0, commentCount: 0 };
+          }
+        }),
+      );
+      setPostState(stateMap);
+    } catch (err) {
+      log.error('Failed to load posts:', err);
+    }
+  }, [user]);
+
   // Reload on focus so edits (profile, persona, character) reflect immediately.
   // Also reset the tab back to Posts — the default — every time the screen is
   // focused, so returning to the profile never lands on a stale sub-tab.
@@ -141,7 +188,8 @@ export const MyProfileScreen: React.FC = () => {
       loadCharacters();
       loadPersonas();
       loadSaved();
-    }, [loadProfile, loadCharacters, loadPersonas, loadSaved]),
+      loadPosts();
+    }, [loadProfile, loadCharacters, loadPersonas, loadSaved, loadPosts]),
   );
 
   const onRefresh = useCallback(async () => {
@@ -151,9 +199,10 @@ export const MyProfileScreen: React.FC = () => {
       loadCharacters(),
       loadPersonas(),
       loadSaved(),
+      loadPosts(),
     ]);
     setRefreshing(false);
-  }, [loadProfile, loadCharacters, loadPersonas, loadSaved]);
+  }, [loadProfile, loadCharacters, loadPersonas, loadSaved, loadPosts]);
 
   // ── Persona actions ────────────────────────────────────────────────────
   const handleSetActivePersona = async (id: string) => {
@@ -176,6 +225,46 @@ export const MyProfileScreen: React.FC = () => {
 
   const handleOpenEditProfile = () => {
     navigation.navigate('EditProfile');
+  };
+
+  const handleTogglePostLike = async (postId: string) => {
+    try {
+      const nowLiked = await togglePostLike(postId);
+      const likes = await getPostLikesCount(postId);
+      setPostState(prev => ({
+        ...prev,
+        [postId]: {
+          liked: nowLiked,
+          likes,
+          commentCount: prev[postId]?.commentCount ?? 0,
+        },
+      }));
+    } catch (err) {
+      log.error('Failed to toggle post like:', err);
+    }
+  };
+
+  const handleOpenPostComments = (postId: string) => {
+    setCommentPostId(postId);
+  };
+
+  const handlePostCommentsClosed = () => {
+    if (commentPostId != null) {
+      const pid = commentPostId;
+      getPostCommentsCount(pid)
+        .then(count => {
+          setPostState(prev => ({
+            ...prev,
+            [pid]: {
+              liked: prev[pid]?.liked ?? false,
+              likes: prev[pid]?.likes ?? 0,
+              commentCount: count,
+            },
+          }));
+        })
+        .catch(() => {});
+    }
+    setCommentPostId(null);
   };
 
   // ── Derived values ─────────────────────────────────────────────────────
@@ -212,7 +301,15 @@ export const MyProfileScreen: React.FC = () => {
   if (!isAuthed) {
     return (
       <ThemedView variant="base" style={styles.container}>
-        <ScreenHeader title={t('title')} right={<HeaderMenuButton />} />
+        <ScreenHeader
+          title={t('title')}
+          right={
+            <View style={styles.headerRightRow}>
+              <HeaderNotificationButton />
+              <HeaderMenuButton />
+            </View>
+          }
+        />
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
@@ -242,8 +339,16 @@ export const MyProfileScreen: React.FC = () => {
   // ── Authenticated profile ──────────────────────────────────────────────
   return (
     <ThemedView variant="base" style={styles.container}>
-      {/* Header (title + hamburger menu) */}
-      <ScreenHeader title={t('title')} right={<HeaderMenuButton />} />
+      {/* Header (title + bell + hamburger menu) */}
+      <ScreenHeader
+        title={t('title')}
+        right={
+          <View style={styles.headerRightRow}>
+            <HeaderNotificationButton />
+            <HeaderMenuButton />
+          </View>
+        }
+      />
 
       <ScrollView
         style={styles.scroll}
@@ -381,13 +486,53 @@ export const MyProfileScreen: React.FC = () => {
         {/* ── Content grid — 3-column media grid for the active tab ── */}
         <View style={styles.gridContent}>
           {activeTab === 'posts' && (
-            <ThemedEmptyState
-              icon="post-outline"
-              title={t('tabPostsEmpty')}
-              subtitle={t('tabPostsEmptyHint')}
-              compact
-              style={styles.gridEmpty}
-            />
+            <>
+              {/* "New Post" button */}
+              <TouchableOpacity
+                onPress={() => {
+                  hapticLightPress();
+                  setCreatePostVisible(true);
+                }}
+                activeOpacity={0.7}
+                style={styles.newPostPill}
+                testID="new-post-button"
+                accessibilityRole="button"
+                accessibilityLabel={t('newPost')}
+              >
+                <Icon name="plus" size={16} color={theme.colors.accent.primary} />
+                <ThemedText size={13} weight="medium" style={{ color: theme.colors.accent.primary }}>
+                  {t('newPost')}
+                </ThemedText>
+              </TouchableOpacity>
+
+              {posts.length === 0 ? (
+                <ThemedEmptyState
+                  icon="post-outline"
+                  title={t('tabPostsEmpty')}
+                  subtitle={t('tabPostsEmptyHint')}
+                  compact
+                  style={styles.gridEmpty}
+                />
+              ) : (
+                <View style={styles.postsFeed}>
+                  {posts.map(post => {
+                    const state = postState[post.id] ?? { liked: false, likes: 0, commentCount: 0 };
+                    return (
+                      <PostCard
+                        key={post.id}
+                        post={post}
+                        liked={state.liked}
+                        likes={state.likes}
+                        commentCount={state.commentCount}
+                        onToggleLike={() => handleTogglePostLike(post.id)}
+                        onOpenComments={() => handleOpenPostComments(post.id)}
+                        showAuthor={false}
+                      />
+                    );
+                  })}
+                </View>
+              )}
+            </>
           )}
 
           {activeTab === 'saved' &&
@@ -533,6 +678,18 @@ export const MyProfileScreen: React.FC = () => {
             ))}
         </View>
       </ScrollView>
+
+      {/* ── Post composer + comments ── */}
+      <CreatePostModal
+        visible={createPostVisible}
+        onClose={() => setCreatePostVisible(false)}
+        onPublished={() => loadPosts()}
+      />
+      <PostCommentModal
+        visible={commentPostId != null}
+        postId={commentPostId}
+        onClose={handlePostCommentsClosed}
+      />
     </ThemedView>
   );
 };
@@ -540,6 +697,11 @@ export const MyProfileScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  headerRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   scroll: {
     flex: 1,
@@ -601,6 +763,20 @@ const styles = StyleSheet.create({
   gridContent: {
     paddingHorizontal: 16,
     paddingTop: 16,
+  },
+  newPostPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 4,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  postsFeed: {
+    gap: 16,
+    paddingBottom: 24,
   },
   gridEmpty: {
     paddingTop: 40,

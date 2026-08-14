@@ -304,5 +304,11 @@
   "duplicateEmpty": "No partners to duplicate",
   "duplicateEmptyHint": "Create a partner first, then come back here.",
   "duplicateCopied": "Copied as {{name}}",
-  "duplicateTitleScreen": "Copy of {{name}}"
+  "duplicateTitleScreen": "Copy of {{name}}",
+  "sortLabel": "Sort: {{mode}}",
+  "sortMode": {
+    "alpha": "A-Z",
+    "newest": "Newest",
+    "oldest": "Oldest"
+  }
 }

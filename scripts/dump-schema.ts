@@ -49,6 +49,11 @@ const CLIENT_ONLY_TABLES = new Set<string>([
   'character_image_comments',
   'character_creators',
   'personas',
+  'user_posts',
+  'user_post_likes',
+  'user_post_comments',
+  'follows',
+  'notifications',
 ]);
 
 interface Args {

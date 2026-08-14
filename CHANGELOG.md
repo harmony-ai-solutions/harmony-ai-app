@@ -57,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The "No config selected — Soulbits Cloud defaults" hint on the Create AI Partner screen now appears at the **top** of the Advanced section (above the module pickers) instead of at the bottom.
 - The "Manage categories" sheet no longer shows a per-category plus button that expanded a character-member list. Assigning characters to categories is now done exclusively from a character card's **Add to category** action.
 - The AI profile **Chats** stat now counts **1 per distinct user** who has chatted with the character, instead of one per chat session. Re-opening a conversation with the same AI no longer inflates the count. A duplicated character (a copy) is fully independent and its chat count starts at 0.
+- The **My AI Characters** screen now has a **sort button** in the header to order characters alphabetically (A–Z), newest first, or oldest first.
+- The **Chats** screen **＋ button** now opens a character picker listing your AI characters (with search + a per-row chat icon) instead of jumping straight to the Create AI Partner wizard.
+- The AI profile now shows a **Follow / Following** button on the creator badge (for creators other than yourself).
+- AI character image posts now show a **date/time** caption under the image.
+- Added a **Notifications** bell to the header of the principal screens (Characters, Chat, Discover, Market, My Profile) with an unread badge. The feed shows follows, AI profile likes, AI image likes/comments, and post likes/comments.
+- **My Profile → Posts** now supports publishing **text and/or image posts** (via a ＋ button) with Like and Comment buttons; posts appear on the Discover screen as a "Recent Posts" section with the author's avatar + name, and tapping the author opens their profile.
 
 ### Profile
 #### Added

@@ -6,5 +6,10 @@
   "noResultsHint": "Try a different name or letter.",
   "noCharacters": "No characters to discover yet",
   "noCharactersHint": "Characters created by other users will show up here.",
-  "chatOpenFailed": "Could not open chat with this character."
+  "chatOpenFailed": "Could not open chat with this character.",
+  "recentPosts": "Recent Posts",
+  "tabCharacters": "Characters",
+  "tabPosts": "Posts",
+  "noPosts": "No posts yet",
+  "noPostsHint": "Posts shared by users will show up here."
 }

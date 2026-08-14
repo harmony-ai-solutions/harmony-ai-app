@@ -1021,12 +1021,13 @@ export async function getCharacterCategories(): Promise<CharacterCategory[]> {
    *   - likes = sum of all reaction chips on messages SENT by this entity
    *   - chats = number of DISTINCT users who have opened a chat with this
    *     character — 1 per user, no matter how many chat sessions (interaction
-   *     rows) that user started. The character always appears as a PARTICIPANT
-   *     (participant_ids contains its entity id); it is never the interaction
-   *     owner (entity_id is the user's impersonated identity). Because every
-   *     chat open creates a fresh interaction row, counting rows would inflate
-   *     the number when the same user chats again — instead we count distinct
-   *     owners (entity_id).
+   *     rows) that user started. The "user" side of a chat is identified by the
+   *     OTHER participants in the interaction (never the character itself), so
+   *     the count is correct even when the same single chat is recorded twice —
+   *     once locally (entity_id = the user's identity) and once when the engine
+   *     syncs the interaction back (entity_id = the character). Counting rows or
+   *     owners would inflate the number when the same user chats again, or when
+   *     a single chat is mirrored as two interaction rows.
    *
    *   Copies are independent: a duplicated character ("Max 2") is a new entity
    *   whose entity id appears in none of the original's interactions, so its
@@ -1037,21 +1038,23 @@ export async function getCharacterCategories(): Promise<CharacterCategory[]> {
   ): Promise<CharacterStats> {
     const db = getDatabase();
 
-    // Count distinct users (interaction owners) this character participates
-    // with. participant_ids is a JSON array — parse it and require an EXACT
-    // element match so "Max" never counts chats that belong to "Max 2".
+    // Count distinct "other participants" this character chatted with.
+    // participant_ids is a JSON array — require an EXACT element match so "Max"
+    // never counts chats that belong to "Max 2", then collect every participant
+    // EXCEPT the character itself (that is the human/user side of the chat).
     const [interactionResults] = await db.executeSql(
-      `SELECT entity_id, participant_ids FROM interactions
+      `SELECT participant_ids FROM interactions
        WHERE presence_type = 'phone' AND deleted_at IS NULL`,
     );
     const chatUsers = new Set<string>();
     for (let i = 0; i < interactionResults.rows.length; i++) {
-      const row = interactionResults.rows.item(i);
-      const raw = row.participant_ids;
+      const raw = interactionResults.rows.item(i).participant_ids;
       try {
         const ids: unknown = JSON.parse(raw);
         if (Array.isArray(ids) && ids.includes(entityId)) {
-          chatUsers.add(row.entity_id);
+          for (const id of ids) {
+            if (id !== entityId) chatUsers.add(id);
+          }
         }
       } catch {
         // Ignore malformed participant_ids

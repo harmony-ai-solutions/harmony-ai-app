@@ -49,6 +49,9 @@ CREATE INDEX idx_memories_entity_id ON memories(entity_id);
 -- index: idx_memories_entity_level
 CREATE INDEX idx_memories_entity_level ON memories(entity_id, compaction_level);
 
+-- index: idx_notifications_recipient
+CREATE INDEX idx_notifications_recipient ON notifications(recipient_user_id);
+
 -- index: idx_provider_config_anthropic_name
 CREATE INDEX idx_provider_config_anthropic_name ON provider_config_anthropic(name);
 
@@ -60,6 +63,9 @@ CREATE INDEX idx_provider_config_soulbitscloud_name ON provider_config_soulbitsc
 
 -- index: idx_provider_config_xai_name
 CREATE INDEX idx_provider_config_xai_name ON provider_config_xai(name);
+
+-- index: idx_user_post_comments_post
+CREATE INDEX idx_user_post_comments_post ON user_post_comments(post_id);
 
 -- table: backend_configs
 CREATE TABLE "backend_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
@@ -115,6 +121,9 @@ CREATE TABLE entity_emoji_actions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT
 -- table: entity_module_mappings
 CREATE TABLE "entity_module_mappings" ( entity_id TEXT PRIMARY KEY, backend_config_id TEXT, cognition_config_id TEXT, imagination_config_id TEXT, movement_config_id TEXT, rag_config_id TEXT, stt_config_id TEXT, tts_config_id TEXT, vision_config_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP, FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE, FOREIGN KEY (backend_config_id) REFERENCES backend_configs(id) ON DELETE SET NULL, FOREIGN KEY (cognition_config_id) REFERENCES cognition_configs(id) ON DELETE SET NULL, FOREIGN KEY (imagination_config_id) REFERENCES imagination_configs(id) ON DELETE SET NULL, FOREIGN KEY (movement_config_id) REFERENCES movement_configs(id) ON DELETE SET NULL, FOREIGN KEY (rag_config_id) REFERENCES rag_configs(id) ON DELETE SET NULL, FOREIGN KEY (stt_config_id) REFERENCES stt_configs(id) ON DELETE SET NULL, FOREIGN KEY (tts_config_id) REFERENCES tts_configs(id) ON DELETE SET NULL, FOREIGN KEY (vision_config_id) REFERENCES vision_configs(id) ON DELETE SET NULL );
 
+-- table: follows
+CREATE TABLE follows ( target_user_id TEXT PRIMARY KEY, target_display_name TEXT NOT NULL DEFAULT '', target_avatar_url TEXT, followed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
 -- table: imagination_configs
 CREATE TABLE "imagination_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
 
@@ -129,6 +138,9 @@ CREATE TABLE memories ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES 
 
 -- table: movement_configs
 CREATE TABLE "movement_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, startup_sync_timeout INTEGER NOT NULL DEFAULT 0, execution_threshold REAL NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: notifications
+CREATE TABLE notifications ( id TEXT PRIMARY KEY, recipient_user_id TEXT NOT NULL DEFAULT '', actor_user_id TEXT, actor_display_name TEXT NOT NULL DEFAULT '', actor_avatar_url TEXT, type TEXT NOT NULL, target_type TEXT NOT NULL DEFAULT '', target_id TEXT, target_label TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, is_read INTEGER NOT NULL DEFAULT 0 );
 
 -- table: personas
 CREATE TABLE personas ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', avatar_image_data TEXT, avatar_mime_type TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
@@ -198,6 +210,15 @@ CREATE TABLE "sync_history" ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TE
 
 -- table: tts_configs
 CREATE TABLE "tts_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: user_post_comments
+CREATE TABLE user_post_comments ( id TEXT PRIMARY KEY, post_id TEXT NOT NULL REFERENCES user_posts(id) ON DELETE CASCADE, author_user_id TEXT, author_display_name TEXT NOT NULL DEFAULT '', author_avatar_url TEXT, text TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
+-- table: user_post_likes
+CREATE TABLE user_post_likes ( post_id TEXT PRIMARY KEY REFERENCES user_posts(id) ON DELETE CASCADE, liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
+-- table: user_posts
+CREATE TABLE user_posts ( id TEXT PRIMARY KEY, author_user_id TEXT, author_display_name TEXT NOT NULL DEFAULT '', author_avatar_url TEXT, text TEXT NOT NULL DEFAULT '', image_data TEXT, image_mime_type TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
 -- table: vision_configs
 CREATE TABLE "vision_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, resolution_width INTEGER DEFAULT 640, resolution_height INTEGER DEFAULT 480, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );

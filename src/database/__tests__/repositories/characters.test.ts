@@ -634,6 +634,17 @@ describe('characters repository', () => {
       };
     }
 
+    it('counts 1 when a single chat is mirrored as two rows (local + sync)', async () => {
+      // One chat between "Max" and "user". The app stores it locally with
+      // entity_id = 'user', then the engine syncs the same interaction back
+      // with entity_id = 'Max' — two rows, ONE real chat. Counting distinct
+      // owners would wrongly report 2; the fix counts the OTHER participant.
+      await createInteraction(makeInteraction('i1', 'user', ['Max', 'user']));
+      await createInteraction(makeInteraction('i2', 'Max', ['Max', 'user']));
+
+      expect((await getCharacterStats('Max')).chats).toBe(1);
+    });
+
     it('counts 1 per distinct user even when the same user opens the chat multiple times', async () => {
       // The same user ('user') opens the chat WITH "Max" three times — the
       // stats must count ONE, not three, because it is 1 per user.
