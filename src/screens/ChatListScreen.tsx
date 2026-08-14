@@ -35,6 +35,7 @@ import {
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import EntitySessionService from '../services/EntitySessionService';
 import { hexToRgba } from '../utils/colorUtils';
 import { InfoModal } from '../components/modals/InfoModal';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
@@ -44,6 +45,28 @@ import { openCharacterChat } from '../services/CharacterChatService';
 import { CharacterProfile } from '../database/models';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { createLogger } from '../utils/logger';
+import {
+  getChatConversationSettingsBatch,
+  setConversationPinned,
+  setConversationArchived,
+  setConversationMuted,
+  setConversationBlocked,
+  incrementConversationUnread,
+  clearConversationUnread,
+  listConversationsByFlag,
+} from '../database/repositories/chatConversationSettings';
+import { deleteConversationByParticipantKey } from '../database/repositories/conversation_messages';
+import {
+  ChatConversationMenuModal,
+  ChatConversationMenuState,
+} from '../components/chat/ChatConversationMenuModal';
+import { useAppAlert } from '../contexts/AppAlertContext';
+import { useToast } from '../contexts/AppToastContext';
+import {
+  showBubble,
+  hasBubblePermission,
+  requestBubblePermission,
+} from '../services/ChatBubbleService';
 
 const log = createLogger('[ChatListScreen]');
 
@@ -59,6 +82,12 @@ interface ChatListItem {
   participantKey: string;
   participantIds: string[];
   isGroup: boolean;
+  // Conversation settings (pin / archive / mute / block / unread)
+  pinned: boolean;
+  archived: boolean;
+  muted: boolean;
+  blocked: boolean;
+  unreadCount: number;
 }
 
 const getEntityDisplayName = (
@@ -82,11 +111,24 @@ export const ChatListScreen: React.FC = () => {
   const { canUseChat, connectionStatus } = useSyncConnection();
   const { t } = useTranslation('chatList');
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
+  const [archivedList, setArchivedList] = useState<ChatListItem[]>([]);
   const [_loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [infoModalVisible, setInfoModalVisible] = useState(false);
   // "Start a new chat" picker (＋ FAB) — lists AI characters with a chat icon
   const [pickerVisible, setPickerVisible] = useState(false);
+
+  // Long-press context menu state
+  const [menuItem, setMenuItem] = useState<ChatListItem | null>(null);
+  const [menuSettings, setMenuSettings] = useState<ChatConversationMenuState>({
+    pinned: false,
+    archived: false,
+    muted: false,
+    blocked: false,
+    unreadCount: 0,
+  });
+  const { showAlert } = useAppAlert();
+  const { showToast } = useToast();
 
   // Global impersonation state (the persona the user is "chatting as").
   // The "Chatting as" pill selector was removed from this screen to be
@@ -194,6 +236,12 @@ export const ChatListScreen: React.FC = () => {
             participantKey,
             participantIds,
             isGroup: false,
+            // Filled in below from the settings batch
+            pinned: false,
+            archived: false,
+            muted: false,
+            blocked: false,
+            unreadCount: 0,
           });
         } else if (scope === 'group') {
           // Group interactions: show as separate entries per D-01
@@ -242,20 +290,46 @@ export const ChatListScreen: React.FC = () => {
             participantKey,
             participantIds,
             isGroup: true,
+            // Filled in below from the settings batch
+            pinned: false,
+            archived: false,
+            muted: false,
+            blocked: false,
+            unreadCount: 0,
           });
         }
       }
 
-      // Sort by last message time (newest first), entities without
-      // messages (null time) sort to the bottom
+      // Merge per-conversation settings (pin / archive / mute / block / unread)
+      const keys = listItems.map(item => item.participantKey);
+      const settingsMap = await getChatConversationSettingsBatch(keys);
+      for (const item of listItems) {
+        const settings = settingsMap.get(item.participantKey);
+        if (settings) {
+          item.pinned = settings.pinned;
+          item.archived = settings.archived;
+          item.muted = settings.muted;
+          item.blocked = settings.blocked;
+          item.unreadCount = settings.unreadCount;
+        }
+      }
+
+      // Sort: pinned first (by last message time), then the rest by last
+      // message time (newest first); entities without messages sort to bottom.
       listItems.sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
         if (!a.lastMessageTime && !b.lastMessageTime) return 0;
         if (!a.lastMessageTime) return 1;
         if (!b.lastMessageTime) return -1;
         return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
       });
 
-      setChatList(listItems);
+      // Blocked conversations STAY in the main list (with a shield indicator)
+      // — blocking only stops messaging. Archived conversations move to the
+      // separate archived section below the main list.
+      const mainList = listItems.filter(item => !item.archived);
+      setChatList(mainList);
+      setArchivedList(listItems.filter(item => item.archived));
     } catch (error) {
       log.error('Failed to load chat list:', error);
     } finally {
@@ -314,7 +388,17 @@ export const ChatListScreen: React.FC = () => {
     }
   };
 
-  const handleChatPress = (item: ChatListItem) => {
+  const handleChatPress = async (item: ChatListItem) => {
+    // Opening a conversation clears its unread counter.
+    try {
+      await clearConversationUnread(item.participantKey);
+      await ChatPreferencesService.markKeyAsRead(item.participantKey);
+    } catch (error) {
+      log.warn('Failed to clear unread on open:', error);
+    }
+    // Reload so the badge disappears immediately.
+    loadChatList(impersonatedEntityIdRef.current);
+
     if (item.isGroup) {
       // Group chat: navigate with interaction info
       navigation.navigate('ChatDetail', {
@@ -336,6 +420,175 @@ export const ChatListScreen: React.FC = () => {
     }
   };
 
+  // ── Long-press → context menu ──
+  const handleLongPress = (item: ChatListItem) => {
+    hapticLightPress();
+    setMenuSettings({
+      pinned: item.pinned,
+      archived: item.archived,
+      muted: item.muted,
+      blocked: item.blocked,
+      unreadCount: item.unreadCount,
+    });
+    setMenuItem(item);
+  };
+
+  const closeMenu = useCallback(() => setMenuItem(null), []);
+
+  // Reload the list after any context action.
+  const reloadAfterAction = useCallback(() => {
+    setMenuItem(null);
+    loadChatList(impersonatedEntityIdRef.current);
+  }, []);
+
+  // ── Context actions ──
+  const handleTogglePin = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    await setConversationPinned(
+      item.participantKey,
+      item.entityId || null,
+      !item.pinned,
+    );
+    showToast(item.pinned ? t('toastUnpinned') : t('toastPinned'));
+    reloadAfterAction();
+  }, [menuItem, reloadAfterAction, showToast, t]);
+
+  const handleToggleArchive = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    await setConversationArchived(
+      item.participantKey,
+      item.entityId || null,
+      !item.archived,
+    );
+    showToast(item.archived ? t('toastUnarchived') : t('toastArchived'));
+    reloadAfterAction();
+  }, [menuItem, reloadAfterAction, showToast, t]);
+
+  const handleToggleMute = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    await setConversationMuted(
+      item.participantKey,
+      item.entityId || null,
+      !item.muted,
+    );
+    showToast(item.muted ? t('toastUnmuted') : t('toastMuted'));
+    reloadAfterAction();
+  }, [menuItem, reloadAfterAction, showToast, t]);
+
+  const handleToggleRead = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    if (item.unreadCount > 0) {
+      await clearConversationUnread(item.participantKey);
+      await ChatPreferencesService.markKeyAsRead(item.participantKey);
+      showToast(t('toastMarkedRead'));
+    } else {
+      await incrementConversationUnread(item.participantKey, item.entityId || null);
+      await ChatPreferencesService.clearKeyLastRead(item.participantKey);
+      showToast(t('toastMarkedUnread'));
+    }
+    reloadAfterAction();
+  }, [menuItem, reloadAfterAction, showToast, t]);
+
+  const handleToggleBlock = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    const nowBlocked = !item.blocked;
+    if (nowBlocked) {
+      showAlert(
+        t('menuBlock'),
+        t('deleteConversationBody', { name: item.characterName }),
+        [
+          { text: t('common:cancel'), style: 'cancel' },
+          {
+            text: t('menuBlock'),
+            style: 'destructive',
+            onPress: async () => {
+              await setConversationBlocked(item.participantKey, item.entityId || null, true);
+              EntitySessionService.setBlockedOverride(item.participantKey, true);
+              showToast(t('toastBlocked'));
+              reloadAfterAction();
+            },
+          },
+        ],
+      );
+      return;
+    }
+    // Apply the override BEFORE the DB write resolves so the send guard
+    // allows messages immediately after unblocking.
+    EntitySessionService.setBlockedOverride(item.participantKey, false);
+    await setConversationBlocked(item.participantKey, item.entityId || null, false);
+    showToast(t('toastUnblocked'));
+    reloadAfterAction();
+  }, [menuItem, reloadAfterAction, showAlert, showToast, t]);
+
+  const handleOpenBubble = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    setMenuItem(null);
+
+    const conversation = {
+      participantKey: item.participantKey,
+      interactionId: item.interactionId,
+      entityId: item.entityId,
+      ownEntityId: impersonatedEntityIdRef.current,
+      entityName: item.characterName,
+      participantIds: item.participantIds,
+      avatar: item.avatarUri,
+    };
+
+    // showBubble remembers the conversation and auto-requests the overlay
+    // permission when missing. When the user grants it in the OS settings
+    // screen, the bubble auto-shows on return — no spurious "permission
+    // required" error.
+    const shown = await showBubble(conversation);
+    if (shown) {
+      showToast(t('toastBubbleShown'));
+      return;
+    }
+
+    // Permission not granted yet — request it. The service resolves true when
+    // the user grants and returns; the pending conversation auto-shows.
+    const accepted = await requestBubblePermission();
+    if (!accepted) {
+      showToast(t('bubblePermissionDenied'));
+    } else {
+      showToast(t('toastBubbleShown'));
+    }
+  }, [menuItem, showToast, t]);
+
+  const handleDelete = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    setMenuItem(null);
+    showAlert(
+      t('deleteConversationTitle'),
+      t('deleteConversationBody', { name: item.characterName }),
+      [
+        { text: t('common:cancel'), style: 'cancel' },
+        {
+          text: t('common:delete'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteConversationByParticipantKey(
+                impersonatedEntityIdRef.current,
+                item.participantKey,
+              );
+              showToast(t('toastDeleted'));
+              loadChatList(impersonatedEntityIdRef.current);
+            } catch (error) {
+              log.error('Failed to delete conversation:', error);
+            }
+          },
+        },
+      ],
+    );
+  }, [menuItem, showAlert, showToast, t]);
+
   const renderItem = ({ item }: { item: ChatListItem }) => (
     <ChatRowCard
       item={item}
@@ -343,6 +596,7 @@ export const ChatListScreen: React.FC = () => {
         hapticLightPress();
         handleChatPress(item);
       }}
+      onLongPress={() => handleLongPress(item)}
     />
   );
 
@@ -455,6 +709,25 @@ export const ChatListScreen: React.FC = () => {
               progressBackgroundColor={theme!.colors.background.surface}
             />
           }
+          ListHeaderComponent={
+            archivedList.length > 0 ? (
+              <TouchableOpacity
+                style={styles.archivedToggle}
+                onPress={() => {
+                  hapticLightPress();
+                  navigation.navigate('ArchivedChats');
+                }}
+                activeOpacity={0.7}
+                testID="chat-archived-toggle"
+              >
+                <Icon name="archive-outline" size={16} color={theme!.colors.text.muted} />
+                <ThemedText variant="muted" size={13} weight="medium">
+                  {t('archived')} ({archivedList.length})
+                </ThemedText>
+                <Icon name="chevron-right" size={16} color={theme!.colors.text.muted} />
+              </TouchableOpacity>
+            ) : null
+          }
           ListEmptyComponent={
             <ThemedEmptyState
               icon="chat-outline"
@@ -490,6 +763,22 @@ export const ChatListScreen: React.FC = () => {
         message={t('aboutMessage')}
         icon="chat-processing"
       />
+
+      {/* Long-press context menu — pin / archive / mute / bubble / read / block / delete */}
+      <ChatConversationMenuModal
+        visible={menuItem !== null}
+        conversationName={menuItem?.characterName ?? ''}
+        settings={menuSettings}
+        isBlocked={menuItem?.blocked ?? false}
+        onClose={closeMenu}
+        onTogglePin={handleTogglePin}
+        onToggleArchive={handleToggleArchive}
+        onToggleMute={handleToggleMute}
+        onOpenBubble={handleOpenBubble}
+        onToggleRead={handleToggleRead}
+        onToggleBlock={handleToggleBlock}
+        onDelete={handleDelete}
+      />
     </ThemedView>
   );
 };
@@ -524,7 +813,8 @@ function formatTime(date: Date): string {
 const ChatRowCard: React.FC<{
   item: ChatListItem;
   onPress: () => void;
-}> = ({ item, onPress }) => {
+  onLongPress: () => void;
+}> = ({ item, onPress, onLongPress }) => {
   const { theme } = useAppTheme();
   const scale = useRef(new Animated.Value(1)).current;
 
@@ -558,6 +848,8 @@ const ChatRowCard: React.FC<{
         onPress={onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
+        onLongPress={onLongPress}
+        delayLongPress={400}
         activeOpacity={0.85}
         testID="chat-list-item"
         accessibilityLabel={`Chat with ${item.characterName}`}
@@ -594,9 +886,11 @@ const ChatRowCard: React.FC<{
 
             {/* Text */}
             <View style={styles.cardText}>
-              <ThemedText size={15} weight="bold" numberOfLines={1} style={styles.cardName}>
-                {item.characterName}
-              </ThemedText>
+              <View style={styles.cardNameRow}>
+                <ThemedText size={15} weight="bold" numberOfLines={1} style={styles.cardName}>
+                  {item.characterName}
+                </ThemedText>
+              </View>
               <ThemedText variant="muted" size={13} numberOfLines={1} style={styles.cardPreview}>
                 {item.lastMessageSender ? (
                   <>
@@ -611,19 +905,37 @@ const ChatRowCard: React.FC<{
               </ThemedText>
             </View>
 
-            {/* Time badge */}
-            {item.lastMessageTime && (
-              <View
-                style={[
-                  styles.timeBadge,
-                  { backgroundColor: hexToRgba(theme.colors.background.base, 0.5) },
-                ]}
-              >
+            {/* Status column — time badge + status icons + unread */}
+            <View style={styles.statusColumn}>
+              {item.lastMessageTime && (
                 <ThemedText variant="muted" size={11}>
                   {formatTime(item.lastMessageTime)}
                 </ThemedText>
+              )}
+              <View style={styles.statusIconsRow}>
+                {item.pinned && (
+                  <Icon name="pin" size={13} color={theme.colors.accent.primary} />
+                )}
+                {item.muted && (
+                  <Icon name="volume-off" size={13} color={theme.colors.text.muted} />
+                )}
+                {item.blocked && (
+                  <Icon name="shield-off-outline" size={13} color={theme.colors.status.error} />
+                )}
               </View>
-            )}
+              {item.unreadCount > 0 && (
+                <View
+                  style={[
+                    styles.unreadBadge,
+                    { backgroundColor: theme.colors.accent.primary },
+                  ]}
+                >
+                  <ThemedText size={11} weight="bold" style={{ color: theme.colors.background.base }}>
+                    {item.unreadCount > 99 ? '99+' : item.unreadCount}
+                  </ThemedText>
+                </View>
+              )}
+            </View>
           </View>
         </LinearGradient>
       </TouchableOpacity>
@@ -658,11 +970,50 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 3,
   },
+  cardNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   cardName: {
     flexShrink: 1,
   },
+  unreadBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-end',
+  },
+  archivedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    marginBottom: 4,
+  },
   cardPreview: {
     lineHeight: 18,
+  },
+  statusColumn: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 4,
+    flexShrink: 0,
+    marginLeft: 6,
+  },
+  statusIconsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   timeBadge: {
     alignSelf: 'center',

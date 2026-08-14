@@ -20,6 +20,7 @@ import {
 import Clipboard from '@react-native-clipboard/clipboard';
 import LinearGradient from 'react-native-linear-gradient';
 import { Avatar } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -77,6 +78,15 @@ import {
   ForwardPickerModal,
   ForwardTarget,
 } from '../components/chat/ForwardPickerModal';
+import {
+  getChatConversationSettings,
+  setConversationBlocked,
+} from '../database/repositories/chatConversationSettings';
+import {
+  showBubble,
+  hasBubblePermission,
+  requestBubblePermission,
+} from '../services/ChatBubbleService';
 
 const log = createLogger('[ChatDetailScreen]');
 
@@ -122,6 +132,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
 export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { t } = useTranslation('chatDetail');
+  const { bottom: safeBottom } = useSafeAreaInsets();
   const {
     interactionId: routeInteractionId,
     participantKey: routeParticipantKey,
@@ -183,6 +194,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     useState<ConversationMessage | null>(null);
   const [forwardPickerVisible, setForwardPickerVisible] = useState(false);
   const [forwardMessageText, setForwardMessageText] = useState('');
+  const [isBlocked, setIsBlocked] = useState(false);
 
   // Track the canonical interactionId — starts as temp UUIDv7 from route params,
   // updated to the server-assigned canonical ID when INIT_ENTITY response arrives.
@@ -369,6 +381,32 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       log.error('Failed to load messages:', error);
     }
   }, [routeInteractionId, participantKey, ownEntityId]);
+
+  // Load blocked state + register the conversation as open (so incoming
+  // messages don't bump the unread counter while this chat is on screen).
+  useEffect(() => {
+    let mounted = true;
+    const loadBlocked = async () => {
+      try {
+        if (participantKey) {
+          const settings = await getChatConversationSettings(participantKey);
+          if (mounted) setIsBlocked(settings.blocked);
+        }
+      } catch (error) {
+        log.error('Failed to load blocked state:', error);
+      }
+    };
+    loadBlocked();
+    if (participantKey) {
+      EntitySessionService.registerOpenConversation(participantKey);
+    }
+    return () => {
+      mounted = false;
+      if (participantKey) {
+        EntitySessionService.unregisterOpenConversation(participantKey);
+      }
+    };
+  }, [participantKey]);
 
   // Load messages and last-read timestamp on mount
   useEffect(() => {
@@ -991,6 +1029,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleSendTextMessage = useCallback(
     async (text: string) => {
+      if (isBlocked) {
+        log.warn('Cannot send message: AI is blocked');
+        showToast(t('blockedBanner'));
+        return;
+      }
       if (!isSessionActive(currentInteractionIdRef.current)) {
         log.warn('Cannot send message: session not active');
         showToast(t('failedToSend', { message: 'Session not active' }));
@@ -1045,6 +1088,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleSendAudioMessage = useCallback(
     async (audioData: string, mimeType: string, duration: number) => {
+      if (isBlocked) {
+        log.warn('Cannot send audio: AI is blocked');
+        showToast(t('blockedBanner'));
+        return;
+      }
       if (!isSessionActive(currentInteractionIdRef.current)) {
         log.warn('Cannot send audio: session not active');
         showToast(t('failedToSend', { message: 'Session not active' }));
@@ -1088,6 +1136,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleSendImages = useCallback(
     async (images: PickedImage[]) => {
+      if (isBlocked) {
+        log.warn('Cannot send images: AI is blocked');
+        showToast(t('blockedBanner'));
+        return;
+      }
       if (!isSessionActive(currentInteractionIdRef.current)) {
         log.warn('Cannot send images: session not active');
         showToast(t('failedToSend', { message: 'Session not active' }));
@@ -1165,6 +1218,97 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       handleTogglePinMessage,
     ],
   );
+
+  // ── Block / unblock ──
+  const handleBlockToggle = useCallback(() => {
+    setMenuVisible(false);
+    if (!participantKey) return;
+    const otherIds = participantIds.filter(id => id !== ownEntityId);
+    const partnerEntityId = otherIds[0] || '';
+    const partnerName = headerName || t('partnerSettings');
+
+    if (!isBlocked) {
+      showAlert(
+        t('blockTitle', { name: partnerName }),
+        t('blockBody', { name: partnerName }),
+        [
+          { text: t('common:cancel'), style: 'cancel' },
+          {
+            text: t('blockTitle', { name: partnerName }),
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await setConversationBlocked(participantKey, partnerEntityId || null, true);
+                // Apply the in-memory override instantly so the send guard
+                // sees the block immediately.
+                EntitySessionService.setBlockedOverride(participantKey, true);
+                setIsBlocked(true);
+                showToast(t('toastBlocked'));
+              } catch (error) {
+                log.error('Failed to block:', error);
+              }
+            },
+          },
+        ],
+      );
+    } else {
+      // Unblock — no confirmation needed. Apply the in-memory override FIRST
+      // (before the DB write resolves) so the send guard allows messages
+      // immediately — no stale "AI blocked" on the next send.
+      EntitySessionService.setBlockedOverride(participantKey, false);
+      setIsBlocked(false);
+      showToast(t('toastUnblocked'));
+      setConversationBlocked(participantKey, partnerEntityId || null, false)
+        .catch(error => log.error('Failed to unblock:', error));
+    }
+  }, [
+    participantKey,
+    participantIds,
+    ownEntityId,
+    headerName,
+    isBlocked,
+    showAlert,
+    showToast,
+    t,
+  ]);
+
+  // ── Open chat bubble ──
+  const handleOpenBubble = useCallback(async () => {
+    setMenuVisible(false);
+    const conversation = {
+      participantKey,
+      interactionId: currentInteractionIdRef.current,
+      entityId: participantIds.filter(id => id !== ownEntityId)[0] || '',
+      ownEntityId,
+      entityName: headerName,
+      participantIds,
+      avatar: partnerAvatar,
+    };
+
+    // showBubble remembers the conversation and auto-requests the overlay
+    // permission when missing; the bubble auto-shows on return from settings.
+    const shown = await showBubble(conversation);
+    if (shown) {
+      showToast(t('openBubble'));
+      return;
+    }
+
+    // Permission not granted yet — request it; pending conversation auto-shows.
+    const accepted = await requestBubblePermission();
+    if (!accepted) {
+      showToast(t('common:error'));
+    } else {
+      showToast(t('openBubble'));
+    }
+  }, [
+    participantKey,
+    participantIds,
+    ownEntityId,
+    headerName,
+    partnerAvatar,
+    showToast,
+    t,
+  ]);
 
   // Entity context menu
   const handleEntityContextMenu = useCallback(() => {
@@ -1863,6 +2007,64 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                 />
                 <TouchableOpacity
                   style={styles.menuItem}
+                  onPress={handleOpenBubble}
+                  activeOpacity={0.65}
+                  testID="chat-open-bubble"
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: (theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover) + '1A' },
+                    ]}
+                  >
+                    <Icon
+                      name="chat-processing-outline"
+                      size={18}
+                      color={theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover}
+                    />
+                  </View>
+                  <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
+                    {t('openBubble')}
+                  </ThemedText>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
+                <View
+                  style={[
+                    styles.menuItemSeparator,
+                    { backgroundColor: theme!.colors.border.default + '44' },
+                  ]}
+                />
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleBlockToggle}
+                  activeOpacity={0.65}
+                  testID="chat-block-toggle"
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: theme!.colors.status.error + '1A' },
+                    ]}
+                  >
+                    <Icon
+                      name={isBlocked ? 'shield-account-outline' : 'shield-off-outline'}
+                      size={18}
+                      color={theme!.colors.status.error}
+                    />
+                  </View>
+                  <ThemedText size={15} weight="medium" style={{ flex: 1, color: theme!.colors.status.error }}>
+                    {isBlocked ? t('unblock') : t('blockTitle', { name: headerName })}
+                  </ThemedText>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
+                <View
+                  style={[
+                    styles.menuItemSeparator,
+                    { backgroundColor: theme!.colors.border.default + '44' },
+                  ]}
+                />
+                <TouchableOpacity
+                  style={styles.menuItem}
                   onPress={handleDeleteEntity}
                   activeOpacity={0.65}
                 >
@@ -2049,13 +2251,22 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
 
 </View>
 
-      <ChatInputBar
-        onSendText={handleSendTextMessage}
-        onSendAudio={handleSendAudioMessage}
-        onSendImages={handleSendImages}
-        disabled={!isOnline}
-        entityId={ownEntityId}
-      />
+{isBlocked ? (
+        <View style={[styles.blockedBanner, { paddingBottom: safeBottom + 14 }]}>
+          <Icon name="shield-off-outline" size={18} color={theme?.colors.status.error} />
+          <ThemedText variant="muted" size={13} style={styles.blockedBannerText}>
+            {t('blockedBanner')}
+          </ThemedText>
+        </View>
+      ) : (
+        <ChatInputBar
+          onSendText={handleSendTextMessage}
+          onSendAudio={handleSendAudioMessage}
+          onSendImages={handleSendImages}
+          disabled={!isOnline}
+          entityId={ownEntityId}
+        />
+      )}
 
       {/* Scenario generator bottom sheet (§2-4) — paper Modal+Portal (§A18).
           Generate collapses the sheet and dispatches GENERATE_GREETING /
@@ -2220,5 +2431,18 @@ const styles = StyleSheet.create({
     paddingTop: 0,
     marginTop: -4,
     marginLeft: 46,
+  },
+  blockedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(220, 38, 38, 0.12)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(220, 38, 38, 0.3)',
+  },
+  blockedBannerText: {
+    flex: 1,
   },
 });

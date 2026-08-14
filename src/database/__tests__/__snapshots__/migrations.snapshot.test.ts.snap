@@ -103,6 +103,9 @@ CREATE TABLE "character_profiles" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, des
 -- table: character_saves
 CREATE TABLE character_saves ( profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE, saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
+-- table: chat_conversation_settings
+CREATE TABLE chat_conversation_settings ( participant_key TEXT PRIMARY KEY, entity_id TEXT, pinned INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, muted INTEGER NOT NULL DEFAULT 0, blocked INTEGER NOT NULL DEFAULT 0, unread_count INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
 -- table: cognition_configs
 CREATE TABLE "cognition_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, max_cognition_events INTEGER NOT NULL DEFAULT 20, generate_expressions INTEGER NOT NULL DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
 

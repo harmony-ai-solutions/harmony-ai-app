@@ -60,6 +60,7 @@ import { migration040 as migration040s } from './migrations/000040_add_message_a
 import { migration041 as migration041s } from './migrations/000041_add_character_social';
 import { migration042 as migration042s } from './migrations/000042_add_user_posts_social';
 import { migration043 as migration043s } from './migrations/000043_add_character_profile_visibility';
+import { migration044 as migration044s } from './migrations/000044_add_chat_conversation_settings';
 
 // Migration definition
 export interface Migration {
@@ -318,6 +319,11 @@ export const MIGRATIONS: Migration[] = [
     version: 43,
     description: 'add_character_profile_visibility',
     sql: migration043s,
+   },
+   {
+    version: 44,
+    description: 'add_chat_conversation_settings',
+    sql: migration044s,
    },
   ];
 

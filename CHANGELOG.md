@@ -164,6 +164,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ChatDetailScreen refactored for InteractionSession lifecycle with reply mode toggle
 - Force full database synchronization option in SyncSettingsScreen
 - Tapping the AI partner's avatar or name in the chat header now opens the character's AI profile page
+- **Long-press conversation actions**: pressing and holding a chat row on the Chat list opens a quick-action sheet with **Pin/Unpin**, **Archive/Unarchive**, **Mute/Unmute**, **Open chat bubble**, **Mark as read / Mark as unread**, **Block/Unblock**, and **Delete**. All actions persist per conversation.
+- **Pinned chats** stay at the top of the Chat list (a pin icon shows next to the time); **muted chats** show a muted icon; **blocked chats** remain visible with a shield icon (blocking only stops messaging — the conversation is not hidden).
+- **Unread badges**: a per-conversation unread counter is incremented when a message arrives while that chat is not open, and cleared when the chat is opened or marked read. "Mark as read / unread" toggles correctly based on the current unread state.
+- **Archived chats** now live in a dedicated **Archived** screen (reached from the archive toggle in the Chat list header), fully separated from the main list. Long-pressing an archived chat offers the same actions, including Unarchive.
+- **Block / Unblock**: blocking an AI stops it from sending AND receiving messages. Unblock is available from the chat header menu, the chat-list long-press menu, and a new **Blocked AIs** screen (Settings → Account) that lists every blocked AI with avatar + name and a one-tap Unblock button. The block state is applied instantly (in-memory override) so unblocking immediately re-enables chatting — no stale "AI blocked" errors on the next send.
+- **Floating chat bubble**: the "Open chat bubble" action launches a draggable floating bubble (display-over-other-apps) showing the AI's avatar. Tapping the bubble brings the app to the foreground and opens that conversation. The overlay permission is requested automatically and the bubble auto-shows once granted — the permission flow never leaves the user stuck on a "permission required" error.
+- Status icons (pin / mute / blocked) are shown next to the time badge on each chat row for consistent alignment, and the unread badge is right-aligned to the same column.
+- When a chat is blocked, the input bar is replaced by a red "You blocked this AI" banner (with safe-area padding) instead of a disabled input.
 
 #### Changed
 - The chat screen's bottom input bar (text field with send, emoji, image, and microphone buttons) has been removed. The chat now displays messages only; the message long-press action sheet no longer includes the "Reply" action.

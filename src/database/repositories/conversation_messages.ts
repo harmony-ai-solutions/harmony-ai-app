@@ -437,6 +437,46 @@ export async function deleteConversationMessage(id: string): Promise<void> {
   );
 }
 
+/**
+ * Delete an entire conversation (soft delete) by participant_key + entity_id.
+ *
+ * Soft-deletes the messages AND the owning interaction row so the chat
+ * disappears from the chat list. Used by the chat-list "Delete" long-press
+ * action. Deleting the interaction's messages with the entity scope predicate
+ * matches the deleteEntity cascade convention (never touch conversations
+ * rooted at another entity).
+ */
+export async function deleteConversationByParticipantKey(
+  entityId: string,
+  participantKey: string,
+): Promise<void> {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const [interactions] = await db.executeSql(
+    'SELECT id FROM interactions WHERE entity_id = ? AND participant_key = ? AND deleted_at IS NULL',
+    [entityId, participantKey],
+  );
+
+  const interactionIds: string[] = [];
+  for (let i = 0; i < interactions.rows.length; i++) {
+    interactionIds.push(interactions.rows.item(i).id as string);
+  }
+
+  for (const interactionId of interactionIds) {
+    await db.executeSql(
+      `UPDATE conversation_messages SET deleted_at = ?, updated_at = ?
+       WHERE interaction_id = ? AND deleted_at IS NULL`,
+      [now, now, interactionId],
+    );
+    await db.executeSql(
+      `UPDATE interactions SET deleted_at = ?, updated_at = ?
+       WHERE id = ?`,
+      [now, now, interactionId],
+    );
+  }
+}
+
 // Helper function to map DB row to ConversationMessage
 function mapRowToConversationMessage(row: any): ConversationMessage {
   return {

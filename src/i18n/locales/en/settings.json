@@ -84,5 +84,10 @@
   "cancel": "Cancel",
   "next": "Next",
   "confirm": "Confirm",
-  "back": "Back"
+  "back": "Back",
+  "blockedAIsTitle": "Blocked AIs",
+  "blockedAIsEmpty": "No blocked AIs",
+  "blockedAIsEmptyHint": "AIs you block will appear here. You can unblock them anytime.",
+  "blockedAIsUnblock": "Unblock",
+  "blockedAIsUnblockedToast": "AI unblocked"
 }

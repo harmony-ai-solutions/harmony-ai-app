@@ -11,6 +11,7 @@ import { createLogger } from '../utils/logger';
 const log = createLogger('[ChatPreferencesService]');
 const STORAGE_KEY_PREFIX = 'chat_entity_pref_';
 const LAST_READ_PREFIX = 'chat_last_read_';
+const LAST_READ_KEY_PREFIX = 'chat_last_read_key_';
 const GLOBAL_ENTITY_KEY = 'chat_global_impersonated_entity';
 const REPLY_MODE_PREFIX = 'chat_reply_mode_';
 
@@ -125,6 +126,72 @@ async function markAllAsRead(partnerEntityId: string): Promise<void> {
   await setLastReadTimestamp(partnerEntityId, Date.now());
 }
 
+// ============================================================================
+// Key-based last-read (stable conversation identifier = participant_key)
+//
+// The existing entity-based helpers above key by partnerEntityId, which is
+// ambiguous when the user switches personas (the same partner appears under
+// different "own" entities). The key-based variants use the conversation's
+// participant_key (`${a}+${b}` sorted pair, or the sorted participant set for
+// groups), which is stable regardless of which persona is active — matching
+// how the chat list identifies conversations.
+// ============================================================================
+
+/**
+ * Get the last-read timestamp for a conversation by participant key.
+ * Returns 0 if no timestamp is stored.
+ * @param participantKey The stable conversation participant key
+ */
+async function getKeyLastRead(participantKey: string): Promise<number> {
+  try {
+    const key = `${LAST_READ_KEY_PREFIX}${participantKey}`;
+    const value = await AsyncStorage.getItem(key);
+    if (value === null) return 0;
+    const timestamp = parseInt(value, 10);
+    return isNaN(timestamp) ? 0 : timestamp;
+  } catch (error) {
+    log.error(`Failed to get key last-read for ${participantKey}:`, error);
+    return 0;
+  }
+}
+
+/**
+ * Set the last-read timestamp for a conversation by participant key.
+ * @param participantKey The stable conversation participant key
+ * @param timestamp Unix timestamp in milliseconds
+ */
+async function setKeyLastRead(participantKey: string, timestamp: number): Promise<void> {
+  try {
+    const key = `${LAST_READ_KEY_PREFIX}${participantKey}`;
+    await AsyncStorage.setItem(key, timestamp.toString());
+    log.debug(`Updated key last-read for ${participantKey}: ${timestamp}`);
+  } catch (error) {
+    log.error(`Failed to set key last-read for ${participantKey}:`, error);
+  }
+}
+
+/**
+ * Clear the last-read timestamp for a conversation by participant key.
+ * @param participantKey The stable conversation participant key
+ */
+async function clearKeyLastRead(participantKey: string): Promise<void> {
+  try {
+    const key = `${LAST_READ_KEY_PREFIX}${participantKey}`;
+    await AsyncStorage.removeItem(key);
+    log.debug(`Cleared key last-read for ${participantKey}`);
+  } catch (error) {
+    log.error(`Failed to clear key last-read for ${participantKey}:`, error);
+  }
+}
+
+/**
+ * Mark a conversation as read by participant key (timestamp = now).
+ * @param participantKey The stable conversation participant key
+ */
+async function markKeyAsRead(participantKey: string): Promise<void> {
+  await setKeyLastRead(participantKey, Date.now());
+}
+
 /**
  * Get the globally selected impersonated entity (used across all chats).
  * Falls back to null if no preference is set.
@@ -195,6 +262,10 @@ export default {
   setLastReadTimestamp,
   clearLastReadTimestamp,
   markAllAsRead,
+  getKeyLastRead,
+  setKeyLastRead,
+  clearKeyLastRead,
+  markKeyAsRead,
   getGlobalImpersonatedEntity,
   setGlobalImpersonatedEntity,
   getReplyMode,

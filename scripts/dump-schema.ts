@@ -54,6 +54,7 @@ const CLIENT_ONLY_TABLES = new Set<string>([
   'user_post_comments',
   'follows',
   'notifications',
+  'chat_conversation_settings',
 ]);
 
 interface Args {

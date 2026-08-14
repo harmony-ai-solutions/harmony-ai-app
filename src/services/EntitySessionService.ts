@@ -12,6 +12,10 @@ import {
   deriveScopeFromParticipants,
   deriveParticipantKey,
 } from '../database/repositories/interactions';
+import {
+  getChatConversationSettings,
+  incrementConversationUnread,
+} from '../database/repositories/chatConversationSettings';
 import { Interaction } from '../database/models';
 import { SyncService } from './SyncService';
 import AudioPlayer, { AudioPlayer as AudioPlayerClass } from './AudioPlayer';
@@ -132,6 +136,13 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     timer: ReturnType<typeof setTimeout>;
   }> = new Map();
   private appStateSubscription: any;
+  // Participant keys of conversations currently open on screen — incoming
+  // messages for these do NOT bump the unread counter.
+  private openConversationKeys: Set<string> = new Set();
+  // In-memory block-state overrides keyed by participant key. The UI updates
+  // this synchronously on block/unblock so the send/incoming guards see the
+  // new state IMMEDIATELY (no stale DB read while the write is in flight).
+  private blockedOverrides: Map<string, boolean> = new Map();
 
   private constructor() {
     super();
@@ -889,6 +900,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for interaction ${interactionId}`);
     }
 
+    // Blocked conversations cannot send messages.
+    await this.assertNotBlocked(session);
+
     const partnerConnectionIds = this.getPartnerConnectionIds(session);
     if (partnerConnectionIds.length === 0) {
       throw new Error(`No active partner connections for interaction ${interactionId}`);
@@ -1035,6 +1049,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for interaction ${interactionId}`);
     }
 
+    // Blocked conversations cannot send messages.
+    await this.assertNotBlocked(session);
+
     log.info(`Starting audio message flow for interaction ${interactionId}`);
 
     const base64Audio = audioData;
@@ -1146,6 +1163,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for interaction ${interactionId}`);
     }
 
+    // Blocked conversations cannot send messages.
+    await this.assertNotBlocked(session);
+
     const partnerConnectionIds = this.getPartnerConnectionIds(session);
     if (partnerConnectionIds.length === 0) {
       throw new Error(`No active partner connections for interaction ${interactionId}`);
@@ -1237,6 +1257,74 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
   getInteractionSession(interactionId: string): InteractionSession | null {
     return this.sessions.get(interactionId) || null;
+  }
+
+  /**
+   * Register a conversation as currently open on screen so incoming messages
+   * do NOT bump the unread counter (ChatDetailScreen calls this on mount and
+   * unregisters on unmount). Uses the participant key (stable identifier).
+   */
+  registerOpenConversation(participantKey: string): void {
+    if (participantKey) this.openConversationKeys.add(participantKey);
+  }
+
+  unregisterOpenConversation(participantKey: string): void {
+    if (participantKey) this.openConversationKeys.delete(participantKey);
+  }
+
+  isConversationOpen(participantKey: string): boolean {
+    return this.openConversationKeys.has(participantKey);
+  }
+
+  /**
+   * True when the conversation that `session` belongs to is blocked by the
+   * local user (see chat_conversation_settings.blocked). Blocked conversations
+   * cannot send OR receive messages.
+   */
+  async isSessionBlocked(session: InteractionSession): Promise<boolean> {
+    try {
+      const scope = deriveScopeFromParticipants(session.participantIds);
+      const key = deriveParticipantKey(
+        session.participantIds,
+        session.ownEntityId,
+        scope,
+      );
+      if (!key) return false;
+      // In-memory override wins — the UI writes it synchronously on
+      // block/unblock so sends react instantly (no stale DB read).
+      if (this.blockedOverrides.has(key)) {
+        return Boolean(this.blockedOverrides.get(key));
+      }
+      const settings = await getChatConversationSettings(key);
+      return settings.blocked;
+    } catch (error) {
+      log.error('Failed to check blocked state for session:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Synchronously update the in-memory block state for a participant key.
+   * Call this right after persisting the block/unblock so the send guard and
+   * the incoming handler see the new state immediately.
+   */
+  setBlockedOverride(participantKey: string, blocked: boolean): void {
+    if (!participantKey) return;
+    if (blocked) {
+      this.blockedOverrides.set(participantKey, true);
+    } else {
+      this.blockedOverrides.delete(participantKey);
+    }
+  }
+
+  /**
+   * Blocking guard for the outbound send paths. Throws a friendly error when
+   * the conversation is blocked so the UI can surface it without sending.
+   */
+  private async assertNotBlocked(session: InteractionSession): Promise<void> {
+    if (await this.isSessionBlocked(session)) {
+      throw new Error('This AI is blocked. Unblock it to chat again.');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1598,6 +1686,28 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   ): Promise<void> {
     try {
       log.info(`Incoming message from ${event.entity_id} in interaction ${interactionId}`);
+
+      // Blocked conversations cannot RECEIVE messages either — drop them
+      // before they reach the database.
+      if (await this.isSessionBlocked(interactionSession)) {
+        log.info(`Dropping incoming message from ${event.entity_id}: conversation is blocked`);
+        return;
+      }
+
+      // Bump the unread counter unless this conversation is open on screen.
+      const scope = deriveScopeFromParticipants(interactionSession.participantIds);
+      const participantKey = deriveParticipantKey(
+        interactionSession.participantIds,
+        interactionSession.ownEntityId,
+        scope,
+      );
+      if (participantKey && !this.openConversationKeys.has(participantKey)) {
+        try {
+          await incrementConversationUnread(participantKey, event.entity_id ?? null);
+        } catch (error) {
+          log.error('Failed to increment unread count:', error);
+        }
+      }
 
       // Save to database
       await this.handleIncomingUtterance(interactionSession, interactionId, event.payload, event.event_id);

@@ -28,6 +28,8 @@ import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { DynamicBackground } from './src/components/background/DynamicBackground';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadHapticPreference } from './src/utils/haptics';
+import { onBubbleOpen } from './src/services/ChatBubbleService';
+import type { BubbleConversation } from './src/services/ChatBubbleService';
 
 /**
  * Inner app shell — has access to BiometricLockContext for lock screen overlay.
@@ -63,6 +65,31 @@ function AppShell() {
     // Apply the persisted "Haptic feedback" Settings toggle once at startup
     // so the very first button press respects the user's preference.
     loadHapticPreference();
+  }, []);
+
+  // Floating chat bubble → when the user taps the bubble, bring the app to
+  // the foreground and navigate straight into that conversation.
+  useEffect(() => {
+    const handleBubbleOpen = (conversation: BubbleConversation | null) => {
+      if (!conversation) return;
+      setTimeout(() => {
+        if (navigationRef.current?.isReady()) {
+          navigationRef.current.navigate('ChatDetail', {
+            interactionId: conversation.interactionId,
+            participantKey: conversation.participantKey,
+            participantIds:
+              conversation.participantIds ?? [
+                conversation.ownEntityId ?? '',
+                conversation.entityId,
+              ],
+            // ChatDetail's `entityId` param is the OWN (impersonated) entity.
+            entityId: conversation.ownEntityId ?? conversation.entityId,
+            entityName: conversation.entityName,
+          });
+        }
+      }, 150);
+    };
+    return onBubbleOpen(handleBubbleOpen);
   }, []);
 
   useEffect(() => {
