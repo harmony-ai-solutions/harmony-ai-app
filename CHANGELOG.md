@@ -270,6 +270,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - EntityConfigEditScreen, EntityConfigScreen, LandingScreen, SettingsScreen, ModuleConfigEditScreen
 
 #### Changed
+- All toast notifications now use the app's branded themed toast (obsidian-glass pill) on every platform — the last remaining OS-native Android toast (used for connection/sync status) was replaced, so connection status, sync completion, message confirmations, and errors all share one consistent design
 - Settings menu reorganized into sub-menus to reduce clutter on the main Settings screen
   - Account & Security and Billing & Purchases grouped under an "Account" sub-menu
   - Appearance options (theme, language, font size, app icon) grouped under an "Appearance" sub-menu

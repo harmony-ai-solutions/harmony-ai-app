@@ -8,11 +8,12 @@ import AuthService from '../services/auth/AuthService';
 import DeviceAuthService from '../services/cloud/DeviceAuthService';
 import { parseDeviceDeepLink } from '../services/cloud/deviceDeepLink';
 import { DeviceAuthModal } from '../components/cloud/DeviceAuthModal';
-import { ToastAndroid, Platform, Alert, Linking } from 'react-native';
+import { Linking } from 'react-native';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
 import i18n from './I18nContext';
 import { useAppAlert } from './AppAlertContext';
+import { useToast } from './AppToastContext';
 import { shouldPromptForSyncEstimate } from './syncEstimateHelper';
 import {
   computeConnectionStatus,
@@ -100,7 +101,17 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   useEffect(() => {
     showAlertRef.current = showAlert;
   }, [showAlert]);
-  
+
+  // Themed toast (AppToastProvider is mounted ABOVE this provider in App.tsx).
+  // Captured in a ref for the same reason as showAlert: connection/sync event
+  // listeners are registered with `[]` deps and must never close over a stale
+  // showToast (which replaces the old OS-native ToastAndroid on Android).
+  const { showToast: showThemedToast } = useToast();
+  const showToastRef = useRef(showThemedToast);
+  useEffect(() => {
+    showToastRef.current = showThemedToast;
+  }, [showThemedToast]);
+
   const hasInitialized = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const connectionManager = ConnectionManager;
@@ -968,11 +979,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
 
   const showToast = (message: string) => {
     log.info('Toast:', message);
-    if (Platform.OS === 'android') {
-      ToastAndroid.show(message, ToastAndroid.SHORT);
-    } else {
-      Alert.alert(i18n.t('syncConnection:alertTitle'), message);
-    }
+    showToastRef.current(message);
   };
 
   // ── Phase 10: derived values ───────────────────────────────────────────
