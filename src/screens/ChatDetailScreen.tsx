@@ -2356,6 +2356,9 @@ const styles = StyleSheet.create({
   },
   keyboardAvoid: {
     flex: 1,
+    // Clip the translated-up message list at the header's bottom edge so the
+    // conversation never bleeds over the header when the keyboard is open.
+    overflow: 'hidden',
   },
   centered: {
     justifyContent: 'center',
