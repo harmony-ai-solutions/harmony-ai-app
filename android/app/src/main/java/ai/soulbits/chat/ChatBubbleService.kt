@@ -864,9 +864,13 @@ class ChatBubbleService : Service() {
       x = (anchorX - dp(8) - finalW).coerceIn(dp(8), metrics.widthPixels - finalW - dp(8))
       y = (anchorY + bubbleSize / 2 - finalH / 2)
         .coerceIn(dp(12), metrics.heightPixels - finalH - dp(12))
-      // Resize the panel above the keyboard so the input bar stays visible
-      // while typing.
-      softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+      // Keyboard handling: the chat screen's JS already lifts the input bar
+      // above the soft keyboard itself (ChatInputBar keyboardDidShow translate).
+      // We deliberately use SOFT_INPUT_ADJUST_NOTHING here: a system resize
+      // would also resize the ReactSurfaceView, which blanks the Fabric surface
+      // in RN 0.86 (see the animation comments below). The window stays
+      // fixed-size and anchored; the JS input bar handles keyboard avoidance.
+      softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
     }
     chatWindowParams = params
 
@@ -931,6 +935,8 @@ class ChatBubbleService : Service() {
       windowManager.addView(container, params)
       chatView = container
 
+      // Track the IME so the window can float above the keyboard.
+      //
       // The chat window is added AFTER the bubble, so it would cover it.
       // Windows added later sit above earlier windows — re-adding the bubble
       // (with a fresh LayoutParams) brings it back ON TOP of the chat panel so
@@ -1121,6 +1127,8 @@ class ChatBubbleService : Service() {
     restoreHostPauseAfterOverlay()
   }
 
+
+
   /**
    * Force the ReactHost back into the RESUMED state while the floating chat
    * window is open.
@@ -1255,7 +1263,6 @@ class ChatBubbleService : Service() {
     private const val CHAT_OPEN_MS = 220L
     /** Chat window fade/scale-out duration (collapsing back into the bubble). */
     private const val CHAT_CLOSE_MS = 180L
-
     /** Handoff slot for the bubble tap when JS is not attached at tap time. */
     @Volatile
     var pendingConversation: String? = null

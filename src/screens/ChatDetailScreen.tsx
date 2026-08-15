@@ -10,6 +10,8 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
+  Keyboard,
+  Platform,
   NativeScrollEvent,
   NativeSyntheticEvent,
   TouchableOpacity,
@@ -220,6 +222,43 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [personaChangeText, setPersonaChangeText] = useState<string | null>(null);
   const [isGroupChat, setIsGroupChat] = useState(false);
   const [headerName, setHeaderName] = useState<string>('Chat');
+
+  // ── Keyboard — keep the last messages visible & scrollable above the IME ──
+  // The input bar lifts itself above the keyboard (ChatInputBar translateY),
+  // so the message list must shrink by the same amount. Adding the keyboard
+  // height as bottom padding to the list's content makes the newest messages
+  // scroll into the space above the keyboard instead of being covered.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // True while the soft keyboard is up. Used to re-scroll after the keyboard
+  // padding applies so a just-sent message is never left behind the keyboard.
+  const keyboardVisibleRef = useRef(false);
+  useEffect(() => {
+    const onShow = (e: any) => {
+      const height =
+        e?.endCoordinates?.height ?? (Platform.OS === 'android' ? 300 : 336);
+      keyboardVisibleRef.current = true;
+      setKeyboardHeight(height);
+      // Reveal the latest message above the keyboard.
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      });
+    };
+    const onHide = () => {
+      keyboardVisibleRef.current = false;
+      setKeyboardHeight(0);
+      // Return to the true bottom once the keyboard is gone.
+      flatListRef.current?.scrollToEnd({ animated: true });
+    };
+    const subs = [
+      Keyboard.addListener('keyboardWillShow', onShow),
+      Keyboard.addListener('keyboardDidShow', onShow),
+      Keyboard.addListener('keyboardWillHide', onHide),
+      Keyboard.addListener('keyboardDidHide', onHide),
+    ];
+    return () => {
+      subs.forEach(s => s.remove());
+    };
+  }, []);
 
   // Derive participantKey if not provided (for group chats or new)
   useEffect(() => {
@@ -2124,7 +2163,17 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         style={styles.keyboardAvoid}
       >
       <View
-        style={[styles.content, !isReadyToShow && styles.hidden]}
+        style={[
+          styles.content,
+          !isReadyToShow && styles.hidden,
+          // The input bar floats above the keyboard via translateY (visual
+          // only). Translate the message list up by the SAME amount so both
+          // move together — the list keeps its full height/scroll range (no
+          // shrinking) and its bottom stays aligned with the input bar top.
+          // Sending a message then scrolls to the list's end, which now sits
+          // above the keyboard, making the new message the visible one.
+          keyboardHeight > 0 && { transform: [{ translateY: -keyboardHeight }] },
+        ]}
       >
         <FlatList
         style={{ flex: 1 }}
@@ -2213,12 +2262,32 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                 }, 200);
               }
             } else {
-              if (messagesWithDivider.length > messagesCountAtReveal.current) {
+              if (pendingOwnMessageScroll.current) {
+                // A message was just sent — always reveal it above the keyboard.
+                // (No `length > count` guard here: when the keyboard margin
+                // resizes the content AFTER the send, the count is unchanged
+                // but the viewport needs to re-scroll, and the guard would
+                // swallow that corrective scroll — hiding the sent message.)
+                pendingOwnMessageScroll.current = false;
+                isNearBottom.current = true;
+                flatListRef.current?.scrollToEnd({ animated: true });
+              } else if (
+                messagesWithDivider.length > messagesCountAtReveal.current
+              ) {
                 messagesCountAtReveal.current = messagesWithDivider.length;
-                if (pendingOwnMessageScroll.current || isNearBottom.current) {
-                  pendingOwnMessageScroll.current = false;
+                if (isNearBottom.current) {
                   isNearBottom.current = true;
-                  flatListRef.current?.scrollToEnd({ animated: true });
+                  // Wait for the keyboard margin to apply before scrolling so
+                  // the new message lands above the keyboard, not behind it.
+                  if (keyboardVisibleRef.current) {
+                    requestAnimationFrame(() => {
+                      requestAnimationFrame(() => {
+                        flatListRef.current?.scrollToEnd({ animated: true });
+                      });
+                    });
+                  } else {
+                    flatListRef.current?.scrollToEnd({ animated: true });
+                  }
                 }
               }
             }
