@@ -46,10 +46,15 @@ import java.lang.ref.WeakReference
  *  - Runs as a foreground service so the bubble survives app backgrounding.
  *  - Drag is implemented by mutating the WindowManager LayoutParams on
  *    ACTION_MOVE (the standard floating-widget pattern).
- *  - On tap: launches MainActivity with ACTION_MAIN / FLAG_ACTIVITY_NEW_TASK,
- *    stores the conversation params in a static holder, then emits a
- *    `ChatBubble.open` JS event (DeviceEventEmitter) so the app can navigate
- *    even if it was fully backgrounded.
+ *  - Tap (window closed): snaps the bubble to the vertical-middle of the right
+ *    screen edge, then opens the floating chat window anchored right next to
+ *    it. The bubble is LOCKED in place while the window is open. Tapping the
+ *    anchored bubble again collapses the window and the bubble returns to its
+ *    normal draggable floating state.
+ *  - Legacy fallback: when no conversation payload is available the tap brings
+ *    the app to the foreground (ACTION_MAIN / FLAG_ACTIVITY_NEW_TASK), stores
+ *    the conversation params in a static holder, then emits a `ChatBubble.open`
+ *    JS event (DeviceEventEmitter) so the app can navigate.
  */
 class ChatBubbleService : Service() {
 
@@ -98,6 +103,18 @@ class ChatBubbleService : Service() {
    * restores the real (paused) lifecycle state.
    */
   private var hostResumedForOverlay = false
+
+  /** True while the bubble is animating to the middle-right to open the window. */
+  private var isSnappingToOpen = false
+
+  /** Pending fade/slide-in runnable for the chat window (cancelled on close). */
+  private var openAnimationRunnable: Runnable? = null
+
+  /** In-flight ValueAnimator for the chat window (open/close). */
+  private var chatAnimator: android.animation.ValueAnimator? = null
+
+  /** True while the chat window is animating closed — guards re-entrant teardown. */
+  private var isClosingChat = false
 
   /** Last activity that was resumed — used to force-resume the host. */
   private var lastResumedActivity: Activity? = null
@@ -193,7 +210,9 @@ class ChatBubbleService : Service() {
     }
     lifecycleCallback = null
     removeBubble()
-    closeFloatingChat()
+    // Synchronous teardown — the service is dying, so deferring the removal
+    // (as the animated closeFloatingChat does) could leak the overlay window.
+    teardownFloatingChat()
     super.onDestroy()
   }
 
@@ -337,9 +356,16 @@ class ChatBubbleService : Service() {
     // Physics: the bubble follows the finger; on release it either
     //   1. flings toward the nearest edge and snaps to it, or
     //   2. if released over the bottom dismiss area, animates away (hide).
+    //
+    // While the floating chat window is open the bubble is LOCKED to its
+    // anchored position (see openFloatingChat) — no drag, no long-press, only
+    // the tap-to-collapse handled on ACTION_UP.
     view.setOnTouchListener { _, event ->
       when (event.action) {
         MotionEvent.ACTION_DOWN -> {
+          // While the bubble is gliding to the middle-right to open the
+          // window, ignore input entirely.
+          if (isSnappingToOpen) return@setOnTouchListener true
           initialX = params.x
           initialY = params.y
           initialTouchX = event.rawX
@@ -351,21 +377,27 @@ class ChatBubbleService : Service() {
           longPressTriggered = false
           snapAnimator?.cancel()
           dismissAnimator?.cancel()
-          // Long-press (hold) arms the removal mode: reveal the ✕ target at the
-          // bottom and give a haptic cue. Only then can the bubble be dragged
-          // onto the ✕ to permanently remove it.
-          longPressHandler.postDelayed(
-            {
-              longPressTriggered = true
-              showDismissArea()
-              view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-            },
-            LONG_PRESS_MS,
-          )
+          if (chatView == null) {
+            // Window closed — the bubble is in its normal floating state: arm
+            // the long-press (hold) removal mode — reveal the ✕ target at the
+            // bottom and give a haptic cue. Only then can the bubble be dragged
+            // onto the ✕ to permanently remove it.
+            longPressHandler.postDelayed(
+              {
+                longPressTriggered = true
+                showDismissArea()
+                view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+              },
+              LONG_PRESS_MS,
+            )
+          }
           true
         }
 
         MotionEvent.ACTION_MOVE -> {
+          // Window open — the bubble is anchored in place next to the window;
+          // never move it, so the window stays exactly where it opened.
+          if (chatView != null) return@setOnTouchListener true
           // Dragging must be able to start both BEFORE and AFTER the long-press
           // fires. If the user holds still (long-press triggers) and THEN starts
           // dragging, isDragging is set here. If the user drags immediately
@@ -414,7 +446,12 @@ class ChatBubbleService : Service() {
         MotionEvent.ACTION_UP -> {
           longPressHandler.removeCallbacksAndMessages(null)
           hideDismissArea()
-          if (isDragging || longPressTriggered) {
+          if (chatView != null) {
+            // Window open — a tap on the anchored bubble collapses it. The
+            // bubble stays exactly where it opened and returns to its normal
+            // draggable floating state.
+            closeFloatingChat()
+          } else if (isDragging || longPressTriggered) {
             // Hold + drop on the ✕ target → permanently remove the bubble.
             if (longPressTriggered && isOverDismissTarget(params.x, params.y)) {
               animateDismiss()
@@ -422,12 +459,9 @@ class ChatBubbleService : Service() {
               snapToEdge()
             }
           } else {
-            // Plain tap → toggle the floating chat window (open/close).
-            if (chatView != null) {
-              closeFloatingChat()
-            } else {
-              openFloatingChat()
-            }
+            // Plain tap on the floating bubble → snap it to the middle-right
+            // edge, then immediately open the chat window anchored right there.
+            snapBubbleToMiddleRightThenOpen()
           }
           isDragging = false
           longPressTriggered = false
@@ -437,7 +471,7 @@ class ChatBubbleService : Service() {
         MotionEvent.ACTION_CANCEL -> {
           longPressHandler.removeCallbacksAndMessages(null)
           hideDismissArea()
-          if (isDragging) snapToEdge()
+          if (isDragging && chatView == null) snapToEdge()
           isDragging = false
           longPressTriggered = false
           true
@@ -510,6 +544,71 @@ class ChatBubbleService : Service() {
           }
         }
       }
+    snapAnimator?.start()
+  }
+
+  /**
+   * Snap the bubble quickly to the vertical-middle of the RIGHT screen edge,
+   * then immediately open the floating chat window anchored right next to it.
+   *
+   * This gives the "direct launch from current position" feel: the bubble
+   * glides from wherever the user tapped it to the middle-right anchor and the
+   * window expands from there — the bubble never jumps to a default top/center
+   * spot while the window is opening.
+   */
+  private fun snapBubbleToMiddleRightThenOpen() {
+    if (isSnappingToOpen) return
+    // No conversation payload — fall back to launching the full app (the
+    // floating window has nothing to show). No point animating the bubble.
+    if (conversationJson.isNullOrEmpty()) {
+      openInApp()
+      return
+    }
+    val view = bubbleView ?: return
+    val p = bubbleParams ?: return
+    val bubbleSize = p.width
+    val targetX = metrics.widthPixels - bubbleSize + bubbleSize / 6 // right-edge overhang
+    val targetY = ((metrics.heightPixels - bubbleSize) / 2)
+      .coerceIn(0, metrics.heightPixels - bubbleSize)
+    val startX = p.x
+    val startY = p.y
+    isSnappingToOpen = true
+    snapAnimator?.cancel()
+    snapAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+      duration = SNAP_TO_OPEN_MS
+      interpolator = android.view.animation.DecelerateInterpolator()
+      addUpdateListener { a ->
+        val t = a.animatedFraction
+        val nx = startX + ((targetX - startX) * t).toInt()
+        val ny = startY + ((targetY - startY) * t).toInt()
+        p.x = nx
+        p.y = ny
+        try {
+          windowManager.updateViewLayout(view, p)
+        } catch (_: Exception) {
+          // ignore
+        }
+      }
+      addListener(object : android.animation.Animator.AnimatorListener {
+        override fun onAnimationStart(animation: android.animation.Animator) {}
+        override fun onAnimationCancel(animation: android.animation.Animator) {
+          isSnappingToOpen = false
+        }
+        override fun onAnimationRepeat(animation: android.animation.Animator) {}
+        override fun onAnimationEnd(animation: android.animation.Animator) {
+          isSnappingToOpen = false
+          // Land exactly on the anchor (floating-point drift safety).
+          p.x = targetX
+          p.y = targetY
+          try {
+            windowManager.updateViewLayout(view, p)
+          } catch (_: Exception) {
+            // ignore
+          }
+          openFloatingChat()
+        }
+      })
+    }
     snapAnimator?.start()
   }
 
@@ -676,14 +775,15 @@ class ChatBubbleService : Service() {
   // ---------------------------------------------------------------------------
 
   /**
-   * A compact, phone-width chat panel floating neatly in the CENTER of the
-   * screen. The bubble stays visible and draggable above it. The panel is
-   * ~88% screen width but only ~66% height, with a fade + scale-in animation
-   * (NO window resize animation — mutating WindowManager size during mount
-   * leaves the Fabric surface blank in RN 0.86 new architecture).
+   * A compact, phone-width chat panel that opens anchored to the bubble's
+   * middle-right position. The panel is ~82% screen width and ~56% height,
+   * with a fade + scale-in animation (NO window resize animation — mutating
+   * WindowManager size during mount leaves the Fabric surface blank in RN
+   * 0.86 new architecture).
    *
    * Sizing keeps the panel comfortably INSIDE the screen: it never reaches
-   * the top or bottom edge, and is centered both horizontally and vertically.
+   * the top or bottom edge. Its exact position is computed in openFloatingChat
+   * from the bubble's anchor (see there).
    */
   private fun floatingChatSize(): Pair<Int, Int> {
     val w = (metrics.widthPixels * 0.82f).toInt().coerceAtMost(dp(400))
@@ -693,7 +793,11 @@ class ChatBubbleService : Service() {
     return w to h
   }
 
-  /** Open the conversation as a floating window over other apps. */
+  /**
+   * Open the conversation as a floating window over other apps, anchored to
+   * the bubble's current position (the bubble was snapped to the middle-right
+   * edge just before this runs, so the window expands right there).
+   */
   private fun openFloatingChat() {
     if (chatView != null) {
       // Already open — bring it back in front.
@@ -748,10 +852,18 @@ class ChatBubbleService : Service() {
       PixelFormat.TRANSLUCENT,
     ).apply {
       gravity = Gravity.TOP or Gravity.START
-      // CENTERED on the phone (both axes) with comfortable margins so the
-      // panel never touches the top/bottom/left/right edges.
-      x = ((metrics.widthPixels - finalW) / 2).coerceAtLeast(dp(8))
-      y = ((metrics.heightPixels - finalH) / 2).coerceAtLeast(dp(12))
+      // Anchor the panel to the bubble's current (middle-right) position: it
+      // sits immediately LEFT of the bubble and is vertically centered on it,
+      // so the chat window expands exactly where the user tapped. The bubble
+      // is locked in place while the window is open, so the window is
+      // permanently anchored to the same spot.
+      val bubble = bubbleParams
+      val bubbleSize = bubble?.width ?: dp(64)
+      val anchorX = bubble?.x ?: 0
+      val anchorY = bubble?.y ?: 0
+      x = (anchorX - dp(8) - finalW).coerceIn(dp(8), metrics.widthPixels - finalW - dp(8))
+      y = (anchorY + bubbleSize / 2 - finalH / 2)
+        .coerceIn(dp(12), metrics.heightPixels - finalH - dp(12))
       // Resize the panel above the keyboard so the input bar stays visible
       // while typing.
       softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
@@ -761,25 +873,43 @@ class ChatBubbleService : Service() {
     // The ReactSurfaceView renders the JS chat UI.
     val surfaceView = surface.view
     if (surfaceView == null) {
-      closeFloatingChat()
+      // Nothing was added to the window manager — tear down synchronously
+      // (the animated close only applies to a visible window) and fall back.
+      teardownFloatingChat()
       openInApp()
       return
     }
-    // Rounded corners on the window.
+
+    // IMPORTANT — the ReactSurfaceView is a SurfaceView: its pixels live on a
+    // separate hardware surface, so alpha/scale animations applied to the view
+    // (or a wrapping FrameLayout) cannot composite the surface's pixels —
+    // they would pop in at full opacity while the wrapper fades (the glitch).
+    // The window's OWN LayoutParams (alpha + x) animate the entire layer —
+    // surface included — so the open/close animations below mutate the window
+    // params, never the view. The wrapper still exists to host rounded corners
+    // + the background (a SurfaceView can't draw them).
+    val container = android.widget.FrameLayout(this)
     val cornerRadius = dp(20).toFloat()
     val windowBg = android.graphics.drawable.GradientDrawable().apply {
       shape = android.graphics.drawable.GradientDrawable.RECTANGLE
       setColor(0xE61A1A2E.toInt())
       setCornerRadius(cornerRadius)
     }
-    surfaceView.setBackground(windowBg)
-    surfaceView.clipToOutline = true
-    surfaceView.outlineProvider =
+    container.setBackground(windowBg)
+    container.clipToOutline = true
+    container.outlineProvider =
       object : android.view.ViewOutlineProvider() {
         override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
           outline.setRoundRect(0, 0, view.width, view.height, cornerRadius)
         }
       }
+    container.addView(
+      surfaceView,
+      android.widget.FrameLayout.LayoutParams(
+        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+      ),
+    )
 
     try {
       // The floating window is a React surface on the SAME ReactHost as the
@@ -798,8 +928,8 @@ class ChatBubbleService : Service() {
       // Start the surface BEFORE adding the view so the first frame is ready
       // the moment the window appears (avoids a blank first paint).
       surface.start()
-      windowManager.addView(surfaceView, params)
-      chatView = surfaceView
+      windowManager.addView(container, params)
+      chatView = container
 
       // The chat window is added AFTER the bubble, so it would cover it.
       // Windows added later sit above earlier windows — re-adding the bubble
@@ -810,31 +940,68 @@ class ChatBubbleService : Service() {
       // When the chat window gains focus (e.g. tapping the input bar), the
       // system moves the focused window above not-focusable ones — re-assert
       // the bubble on top so it never hides behind the window while typing.
-      surfaceView.setOnFocusChangeListener { _, hasFocus ->
+      container.setOnFocusChangeListener { _, hasFocus ->
         if (hasFocus) bringBubbleToFront()
       }
 
-      // Fade + scale-in (visual only, no layout change). The panel appears
-      // centered, so the pivot stays at the panel center.
-      surfaceView.alpha = 0f
-      surfaceView.scaleX = 0.92f
-      surfaceView.scaleY = 0.92f
-      surfaceView.pivotX = finalW / 2f
-      surfaceView.pivotY = finalH / 2f
-      surfaceView.postDelayed(
-        {
-          surfaceView.animate()
-            .alpha(1f)
-            .scaleX(1f)
-            .scaleY(1f)
-            .setDuration(220)
-            .setInterpolator(android.view.animation.DecelerateInterpolator())
-            .start()
-        },
-        50,
-      )
+      // Fade + slide-in the WHOLE WINDOW via its LayoutParams. Animating view
+      // alpha/scale here (container or surface) can't composite a SurfaceView:
+      // the chat pixels live on a separate hardware layer, so they would pop
+      // in at full opacity while the wrapper fades → the glitch. Mutating the
+      // window's alpha + x animates the entire layer — surface included —
+      // cleanly and reliably. The window slides out of the bubble (starts
+      // slightly to the right, toward the anchored bubble) while fading in.
+      openAnimationRunnable?.let { container.removeCallbacks(it) }
+      openAnimationRunnable = null
+      chatAnimator?.cancel()
+      val openStartX = (params.x + dp(18)).coerceAtMost(metrics.widthPixels - finalW - dp(8))
+      val openEndX = params.x
+      params.alpha = 0f
+      params.x = openStartX
+      try {
+        windowManager.updateViewLayout(container, params)
+      } catch (_: Exception) {
+        // ignore
+      }
+      val openRunnable = Runnable {
+        openAnimationRunnable = null
+        val animator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+          duration = CHAT_OPEN_MS
+          interpolator = android.view.animation.DecelerateInterpolator()
+          addUpdateListener { a ->
+            val t = a.animatedFraction
+            params.alpha = t
+            params.x = openStartX + ((openEndX - openStartX) * t).toInt()
+            try {
+              windowManager.updateViewLayout(container, params)
+            } catch (_: Exception) {
+              // ignore
+            }
+          }
+          addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
+              params.alpha = 1f
+              params.x = openEndX
+              try {
+                windowManager.updateViewLayout(container, params)
+              } catch (_: Exception) {
+                // ignore
+              }
+            }
+            override fun onAnimationCancel(animation: android.animation.Animator) {
+              // Snap to final state so a cancelled open still looks settled.
+              params.alpha = 1f
+              params.x = openEndX
+            }
+          })
+        }
+        chatAnimator = animator
+        animator.start()
+      }
+      openAnimationRunnable = openRunnable
+      container.postDelayed(openRunnable, 30)
     } catch (_: Exception) {
-      closeFloatingChat()
+      teardownFloatingChat()
       openInApp()
     }
   }
@@ -872,8 +1039,74 @@ class ChatBubbleService : Service() {
     }
   }
 
-  /** Tear down the floating chat window (surface). The bubble stays. */
+  /**
+   * Close the floating chat window (surface). The bubble stays.
+   *
+   * Animates the panel sliding back toward the bubble and fading out (window
+   * LayoutParams alpha + x — see openFloatingChat for why the whole window is
+   * animated instead of the view), then tears the surface down. The bubble
+   * stays exactly where it opened and returns to its normal draggable floating
+   * state.
+   */
   private fun closeFloatingChat() {
+    if (isClosingChat) return
+    val view = chatView ?: run {
+      // Nothing open — tear down synchronously (idempotent).
+      teardownFloatingChat()
+      return
+    }
+    val p = chatWindowParams
+    if (p == null) {
+      teardownFloatingChat()
+      return
+    }
+    isClosingChat = true
+    openAnimationRunnable?.let { view.removeCallbacks(it) }
+    openAnimationRunnable = null
+    chatAnimator?.cancel()
+    // Fade + slide the WHOLE WINDOW back toward the bubble via LayoutParams
+    // (same rationale as the open animation — window-level animation is the
+    // only way a SurfaceView composites smoothly).
+    val startX = p.x
+    val startAlpha = p.alpha
+    val endX = (p.x + dp(18)).coerceAtMost(metrics.widthPixels - p.width - dp(8))
+    val animator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+      duration = CHAT_CLOSE_MS
+      interpolator = android.view.animation.AccelerateInterpolator()
+      addUpdateListener { a ->
+        val t = a.animatedFraction
+        p.alpha = startAlpha * (1f - t)
+        p.x = startX + ((endX - startX) * t).toInt()
+        try {
+          windowManager.updateViewLayout(view, p)
+        } catch (_: Exception) {
+          // ignore
+        }
+      }
+      addListener(object : android.animation.AnimatorListenerAdapter() {
+        override fun onAnimationEnd(animation: android.animation.Animator) {
+          teardownFloatingChat()
+        }
+        override fun onAnimationCancel(animation: android.animation.Animator) {
+          // Animation was interrupted (e.g. re-open) — tear down synchronously
+          // so the window never leaks.
+          teardownFloatingChat()
+        }
+      })
+    }
+    chatAnimator = animator
+    animator.start()
+  }
+
+  /**
+   * Synchronously remove the floating chat window and stop its React surface.
+   * The bubble stays. This is the final step of the close animation, and is
+   * also called directly during service teardown (onDestroy) where deferring
+   * the removal would risk leaking the overlay window.
+   */
+  private fun teardownFloatingChat() {
+    chatAnimator?.cancel()
+    chatAnimator = null
     try {
       chatView?.let { windowManager.removeView(it) }
     } catch (_: Exception) {
@@ -883,6 +1116,8 @@ class ChatBubbleService : Service() {
     chatWindowParams = null
     chatSurface?.stop()
     chatSurface = null
+    isClosingChat = false
+    openAnimationRunnable = null
     restoreHostPauseAfterOverlay()
   }
 
@@ -1014,6 +1249,12 @@ class ChatBubbleService : Service() {
     private const val NOTIFICATION_ID = 4201
     private const val LONG_PRESS_MS = 500L
     private const val TOUCH_SLOP = 8f
+    /** How long the bubble takes to glide to the middle-right before opening. */
+    private const val SNAP_TO_OPEN_MS = 180L
+    /** Chat window fade/scale-in duration (expanding out of the bubble). */
+    private const val CHAT_OPEN_MS = 220L
+    /** Chat window fade/scale-out duration (collapsing back into the bubble). */
+    private const val CHAT_CLOSE_MS = 180L
 
     /** Handoff slot for the bubble tap when JS is not attached at tap time. */
     @Volatile
