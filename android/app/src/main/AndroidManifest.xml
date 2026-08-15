@@ -31,6 +31,17 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+        <!-- D-DEV-01 device-auth deep link: fired from the portal device-approve
+             page's "Open in the app" button on mobile
+             (soulbits://device-auth?code=<6-digit>). Same scheme both flavors
+             (dev/prod) — the link originates from whichever portal the email
+             pointed at. -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="soulbits" android:host="device-auth" />
+        </intent-filter>
       </activity>
     </application>
 </manifest>

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Cloud Integration
 #### Added
+- Device authorization is now one click away: the emailed **Authorize device** button (or opening the link on the phone) authorizes a new device automatically, and the in-app verification screen continues on its own once it is approved. The manual 6-digit code entry remains as fallback.
 - Cloud connection now polls the session broker until the secure session is ready, showing a multi-stage progress indicator (Requesting → Preparing → Establishing → Connected ✓ / failed + retry). Chat list and settings correctly reflect cloud vs self-hosted connection state.
 - Soulbits Cloud login: email/password, Google Sign-In (Android), and Apple Sign-In (iOS).
 - Cloud connection via the Soulbits conduct proxy; switch between self-hosted Harmony Link and Soulbits Cloud.

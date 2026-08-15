@@ -4,8 +4,10 @@ import ConnectionManager from '../services/connection/ConnectionManager';
 import SyncService, { SyncService as SyncServiceClass } from '../services/SyncService';
 import { cloudSessionService, type CloudSessionStatus, type CloudSessionInfo } from '../services/cloud/CloudSessionService';
 import AuthService from '../services/auth/AuthService';
+import DeviceAuthService from '../services/cloud/DeviceAuthService';
+import { parseDeviceDeepLink } from '../services/cloud/deviceDeepLink';
 import { DeviceAuthModal } from '../components/cloud/DeviceAuthModal';
-import { ToastAndroid, Platform, Alert } from 'react-native';
+import { ToastAndroid, Platform, Alert, Linking } from 'react-native';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
 import i18n from './I18nContext';
@@ -592,6 +594,73 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       scheduleReconnect();
     }
   };
+
+  // ── D-DEV-01 deep link (Phase 4-1): soulbits://device-auth?code=<6-digit> ──
+  // Fired from the portal device-approve page's "Open in the app" button.
+  // Two sources, both registered ONCE (this effect has [] deps):
+  //   - cold start:  Linking.getInitialURL() — app launched via the link
+  //   - warm:        Linking.addEventListener('url') — app already running
+  // The listener is active regardless of modal visibility, but ONLY acts when a
+  // device-auth flow is pending (status 'deviceAuthRequired' or modal visible).
+  // A valid link verifies the code through the shared DeviceAuthService and then
+  // reuses handleDeviceAuthVerified() (the same path as the modal's onVerified)
+  // — the modal's verify logic is NOT duplicated here. Stale links (no pending
+  // flow) are a no-op.
+  const showDeviceAuthRef = useRef(showDeviceAuth);
+  useEffect(() => {
+    showDeviceAuthRef.current = showDeviceAuth;
+  }, [showDeviceAuth]);
+  const handleDeviceAuthVerifiedRef = useRef(handleDeviceAuthVerified);
+  useEffect(() => {
+    handleDeviceAuthVerifiedRef.current = handleDeviceAuthVerified;
+  }, [handleDeviceAuthVerified]);
+
+  useEffect(() => {
+    const handleDeepLink = async (url: string | null) => {
+      if (!url) {
+        return;
+      }
+      const parsed = parseDeviceDeepLink(url);
+      if (!parsed) {
+        log.info('Ignoring non device-auth deep link:', url);
+        return;
+      }
+      // Gate on a pending flow: the 403 status is the service's single source
+      // of truth; the modal ref covers the brief window where the status event
+      // has not re-emitted after a prior dismiss/re-show.
+      const flowPending =
+        cloudSessionService.getStatus() === 'deviceAuthRequired' ||
+        showDeviceAuthRef.current;
+      if (!flowPending) {
+        log.info('Device-auth deep link received but no flow pending — ignoring (stale link):', url);
+        return;
+      }
+      log.info('Device-auth deep link received — verifying code');
+      try {
+        await DeviceAuthService.verifyCode(parsed.code);
+        await handleDeviceAuthVerifiedRef.current();
+      } catch (e) {
+        log.warn(
+          'Device-auth deep link verify failed:',
+          e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+        );
+      }
+    };
+
+    // Cold start — a link that launched the app.
+    Linking.getInitialURL()
+      .then(url => handleDeepLink(url))
+      .catch(err => {
+        log.warn('getInitialURL failed:', err);
+      });
+
+    // Warm — link received while the app is foregrounded.
+    const subscription = Linking.addEventListener('url', event => {
+      handleDeepLink(event.url);
+    });
+
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     const onCloudStatus = async (s: CloudSessionStatus, info?: CloudSessionInfo) => {

@@ -8,10 +8,17 @@
  * via a 6-digit code emailed by SES. Flow:
  *
  *   1. requestCode()  → the auth-service mails the code (202)
- *   2. user enters the 6 digits
+ *   2. user enters the 6 digits — OR approves on the portal; the 5 s
+ *      auto-resolve poll (getStatus) detects it and closes the modal via
+ *      onVerified() without manual entry.
  *   3. verifyCode()   → 200: onVerified() (the caller retries /connect)
  *                       401: "invalid code"
  *                       429: "too many attempts, try later"
+ *
+ * Poll errors are non-fatal (network blips): only 404/400 (unknown device /
+ * bad request) surface as the existing error UI; transient 5xx/429 are
+ * ignored so the poll keeps running until the 10-min secret TTL expires.
+ * Manual code entry + resend stay fully functional as the fallback path.
  *
  * Matches the app's existing VerifyPrompt resend-cooldown pattern and the
  * themed design system (no new UI framework).
@@ -28,6 +35,9 @@ import DeviceAuthService, { DeviceAuthError } from '../../services/cloud/DeviceA
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[DeviceAuthModal]');
+
+/** Auto-resolve poll interval (ms) while the modal is visible. */
+const POLL_INTERVAL_MS = 5000;
 
 interface DeviceAuthModalProps {
   visible: boolean;
@@ -97,6 +107,37 @@ export const DeviceAuthModal: React.FC<DeviceAuthModalProps> = ({
       requestCode();
     }
   }, [visible, codeSent, isSending, requestCode]);
+
+  // ── Auto-resolve polling (Phase 4-2) ──────────────────────────────────
+  // While the modal is visible, poll the backend every 5 s for the device's
+  // authorization state. When the user approves on the portal (email button →
+  // "Open in the app", or directly on the portal page), `authorized` flips
+  // true and the modal closes itself via onVerified() — no manual code entry
+  // needed. Poll errors are NON-fatal: transient 5xx/429 keep the loop going;
+  // only 404/400 (unknown device / bad request) surface the existing error UI.
+  // Bounded implicitly by the backend's 10-min secret TTL, after which the
+  // resend button restarts the flow.
+  useEffect(() => {
+    if (!visible) return;
+    const interval = setInterval(async () => {
+      try {
+        const s = await DeviceAuthService.getStatus();
+        if (s.authorized) {
+          clearInterval(interval);
+          log.info('Device authorized via portal — auto-resolving');
+          onVerified();
+        }
+      } catch (err: unknown) {
+        if (err instanceof DeviceAuthError && (err.status === 404 || err.status === 400)) {
+          log.error('Device auth status poll failed:', err);
+          setError(t('deviceAuth_requestError'));
+        } else {
+          log.debug('Device auth status poll transient error — keeping polling:', err);
+        }
+      }
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [visible, onVerified, t]);
 
   // Cleanup the cooldown timer on unmount.
   useEffect(() => {
@@ -195,6 +236,15 @@ export const DeviceAuthModal: React.FC<DeviceAuthModalProps> = ({
           {codeSent && (
             <ThemedText variant="secondary" size={12} style={styles.hint}>
               {t('deviceAuth_codeSentHint')}
+            </ThemedText>
+          )}
+
+          {/* Auto-resolve hint (Phase 4-2): shown while the 5 s status poll
+              is active so the user knows the modal closes by itself once the
+              device is authorized on the portal. */}
+          {visible && codeSent && (
+            <ThemedText variant="secondary" size={12} style={styles.hint}>
+              {t('deviceAuth_waitingHint')}
             </ThemedText>
           )}
 
