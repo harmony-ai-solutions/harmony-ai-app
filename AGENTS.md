@@ -7,6 +7,10 @@ This project uses Roo Code with custom rules stored in `.roo/rules/`. Read these
 - **[implementation-plans.md](.roo/rules/implementation-plans.md)** - Creating and managing implementation plans (manual plans only, not GSD)
 - **[gsd-validation-notes.md](.roo/rules/gsd-validation-notes.md)** - Notes on GSD frontmatter validation quirks
 
+## Conventions (MUST follow)
+
+- **Stale index protocol:** If any GitNexus tool warns the index is stale or degraded (e.g. "FTS indexes missing — keyword search degraded", empty/unexpected query results), run `npx gitnexus analyze` in that repo's root first — use `npx gitnexus analyze --force` if the warning persists (this CLI build has no `--repair-fts` flag). Then **re-run the same GitNexus query** and confirm the warning is gone and results are sane before proceeding. Never continue a task on the back of degraded GitNexus results.
+
 ## Testing
 
 This project has a comprehensive test framework. See [`docs/TESTING.md`](docs/TESTING.md) for the full strategy, run commands, and architecture decisions.
@@ -19,7 +23,7 @@ Quick start:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **harmony-ai-app** (4643 symbols, 9547 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **harmony-ai-app** (5286 symbols, 10661 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
