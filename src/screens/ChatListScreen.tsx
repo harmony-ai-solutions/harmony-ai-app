@@ -66,9 +66,22 @@ import {
   showBubble,
   hasBubblePermission,
   requestBubblePermission,
+  getActiveBubbleConversation,
+  setBubbleUnreadCount,
 } from '../services/ChatBubbleService';
 
 const log = createLogger('[ChatListScreen]');
+
+/**
+ * Sync the floating bubble's unread badge to the conversation currently shown
+ * as a bubble (if any). No-op when no bubble conversation is active.
+ */
+function syncBubbleUnreadBadge(listItems: ChatListItem[]): void {
+  const active = getActiveBubbleConversation();
+  if (!active) return;
+  const match = listItems.find(item => item.participantKey === active.participantKey);
+  setBubbleUnreadCount(match?.unreadCount ?? 0);
+}
 
 interface ChatListItem {
   interactionId: string;
@@ -330,6 +343,10 @@ export const ChatListScreen: React.FC = () => {
       const mainList = listItems.filter(item => !item.archived);
       setChatList(mainList);
       setArchivedList(listItems.filter(item => item.archived));
+
+      // Keep the floating bubble's unread badge in sync with the conversation
+      // that currently has the bubble shown (if any).
+      syncBubbleUnreadBadge(listItems);
     } catch (error) {
       log.error('Failed to load chat list:', error);
     } finally {

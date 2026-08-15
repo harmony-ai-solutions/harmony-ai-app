@@ -5,7 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased - 0.1.0]
+### Security & Configuration
+=====
 
 ### Security & Configuration
 #### Added
@@ -182,6 +183,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Navigation adapted to use `interactionId` for session lookup
 
 #### Fixed
+- Fixed the floating chat window staying stuck on the loading spinner when opened while the app is in the background (tapping the bubble over another app)
+  - The window is a React surface on the same ReactHost as the main activity; when the app is backgrounded the host is paused and the JS timer pipeline is frozen, so the overlay could never finish loading until the user returned to the app
+  - The overlay now force-resumes the ReactHost for as long as the window is open (so the chat loads normally), and restores the real paused lifecycle state when the window closes
+- Fixed the floating chat bubble incorrectly reporting "Overlay permission is required" after the user enabled "display over other apps"
+  - The permission request now runs a fast grace poll for several seconds after the user returns from the OS settings screen, because many devices apply the overlay toggle asynchronously and a single check could miss a correctly-granted permission
+  - A transient bubble-show failure is no longer conflated with permission denial, so a correctly granted permission no longer surfaces a misleading error
 - Fixed audio messages loading incorrect audio data after reconnection
   - All audio bubbles now load their own audio only when explicitly tapped for playback
   - Eliminates race condition where concurrent mount-time preloads corrupted the shared audio queue

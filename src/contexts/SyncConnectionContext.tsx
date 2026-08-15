@@ -79,9 +79,16 @@ const SyncConnectionContext = createContext<SyncConnectionContextType | undefine
 
 interface SyncConnectionProviderProps {
   children: ReactNode;
+  /**
+   * Read-only mode: reflects shared connection state ONLY — never
+   * initializes, connects, reconnects, syncs, or toasts. Used by second
+   * React roots (e.g. the floating chat overlay) so they observe the main
+   * app's connection without tearing it down.
+   */
+  readOnly?: boolean;
 }
 
-export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ children }) => {
+export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ children, readOnly = false }) => {
   const [isPaired, setIsPaired] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -376,6 +383,28 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setIsPairedSync(state.isPaired || false);
       setIsConnectedSync(state.isConnected || false);
     };
+
+    // ── Read-only mode (second React root, e.g. floating chat overlay) ──
+    // The MAIN root owns the connection. A second SyncConnectionProvider must
+    // only OBSERVE the shared singletons — if it ran initializeConnection() /
+    // connect() it would re-create the 'sync' connection and tear down the
+    // main app's live WebSocket (→ "disconnected from cloud" + a floating
+    // window stuck on its loading gate). Mirror state, never mutate it.
+    if (readOnly) {
+      const onConnected = () => setIsConnectedSync(true);
+      const onDisconnected = () => setIsConnectedSync(false);
+      connectionManager.on('connected:sync', onConnected);
+      connectionManager.on('disconnected:sync', onDisconnected);
+      ConnectionStateManager.on('state:changed', handleStateChange);
+      const summary = ConnectionStateManager.getConnectionSummary();
+      setIsPairedSync(summary.isPaired || false);
+      setIsConnectedSync(summary.isConnected || false);
+      return () => {
+        connectionManager.off('connected:sync', onConnected);
+        connectionManager.off('disconnected:sync', onDisconnected);
+        ConnectionStateManager.off('state:changed', handleStateChange);
+      };
+    }
 
     const handleSyncCompleted = (session: any) => {
       log.info('Sync completed:', session);
@@ -675,6 +704,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   }, []);
 
   useEffect(() => {
+    if (readOnly) return; // second roots must never auto-connect
     const onCloudStatus = async (s: CloudSessionStatus, info?: CloudSessionInfo) => {
       const source = await ConnectionStateManager.getCurrentSource();
       if (source !== 'cloud') return;

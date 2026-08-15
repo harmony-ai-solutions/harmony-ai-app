@@ -14,9 +14,11 @@
  *  - handles the Android overlay permission flow robustly: when the user taps
  *    "Open chat bubble" before the SYSTEM_ALERT_WINDOW permission is granted,
  *    the conversation is remembered and the bubble auto-shows the moment the
- *    user returns from the OS settings screen. A poll fallback re-checks the
- *    permission every few seconds so the promise never hangs and never gives
- *    up early while the user is still inside the settings screen.
+ *    user returns from the OS settings screen. A fast grace poll keeps
+ *    re-checking the permission for several seconds after the user returns
+ *    (many devices apply the "display over other apps" toggle asynchronously),
+ *    and a slower poll fallback runs the whole time — so the promise never
+ *    hangs and never gives up early while the user is still inside settings.
  */
 
 import {
@@ -48,6 +50,17 @@ export interface BubbleConversation {
 
 const native = Platform.OS === 'android' ? NativeModules.ChatBubbleModule : null;
 
+/**
+ * The conversation currently shown as the floating bubble (set by showBubble,
+ * cleared by hideBubble). Used to sync the unread badge count.
+ */
+let activeBubbleConversation: BubbleConversation | null = null;
+
+/** Get the conversation currently shown as the floating bubble. */
+export function getActiveBubbleConversation(): BubbleConversation | null {
+  return activeBubbleConversation;
+}
+
 let emitter: NativeEventEmitter | null = null;
 if (Platform.OS === 'android' && native) {
   emitter = new NativeEventEmitter(native as any);
@@ -69,6 +82,26 @@ if (emitter) {
       }
     }
     openListeners.forEach(listener => listener(conversation));
+  });
+}
+
+// ── Background handling ────────────────────────────────────────────────
+// The floating chat window is a second React surface hosted by the SAME
+// ReactHost as the main activity. When the activity goes to background RN
+// pauses ALL surfaces on that host — including the overlay — freezing it on
+// whatever frame it shows (e.g. the loading spinner). It only resumes when
+// the user returns, which is why the window appears "stuck loading forever"
+// while the app is backgrounded.
+//
+// The correct UX: close the floating WINDOW when the app backgrounds. The
+// bubble itself stays visible (native overlay, independent of React) and can
+// be tapped again to reopen the window on return.
+if (Platform.OS === 'android') {
+  AppState.addEventListener('change', (state) => {
+    if (state === 'background') {
+      log.info('App backgrounded — closing floating chat window (bubble stays).');
+      closeBubbleWindow();
+    }
   });
 }
 
@@ -109,57 +142,102 @@ export async function hasBubblePermission(): Promise<boolean> {
 
 /** Pending conversation to show once the overlay permission is granted. */
 let pendingPermissionConversation: BubbleConversation | null = null;
-let permissionResolvers: Array<(granted: boolean) => void> = [];
-let appStateSubscriber: { remove(): void } | null = null;
-let permissionPoll: ReturnType<typeof setInterval> | null = null;
 
-function notifyPermissionChange(granted: boolean): void {
-  const resolvers = permissionResolvers;
-  permissionResolvers = [];
-  resolvers.forEach(resolve => resolve(granted));
+interface PermissionRequest {
+  promise: Promise<boolean>;
+  resolve: (granted: boolean) => void;
 }
 
-function cleanupAppStateSubscriber(): void {
+/**
+ * Single in-flight permission request. A new tap while one is pending reuses
+ * the same request instead of spawning duplicate flows/pollers.
+ */
+let activePermissionRequest: PermissionRequest | null = null;
+let appStateSubscriber: { remove(): void } | null = null;
+let permissionPoll: ReturnType<typeof setInterval> | null = null;
+/** Fast grace poll started when the user returns from the OS settings screen. */
+let permissionReturnPoll: ReturnType<typeof setInterval> | null = null;
+let permissionReturnPollElapsed = 0;
+
+const PERMISSION_POLL_INTERVAL_MS = 3000;
+const PERMISSION_TIMEOUT_MS = 60000;
+/** Fast re-check cadence while the user just returned from overlay settings. */
+const PERMISSION_RETURN_POLL_INTERVAL_MS = 300;
+/** How long the fast grace poll keeps checking after the user returns. */
+const PERMISSION_RETURN_GRACE_MS = 10000;
+
+function stopPermissionFlow(): void {
   if (appStateSubscriber) {
     appStateSubscriber.remove();
     appStateSubscriber = null;
   }
-}
-
-function stopPermissionPoll(): void {
   if (permissionPoll) {
     clearInterval(permissionPoll);
     permissionPoll = null;
   }
+  if (permissionReturnPoll) {
+    clearInterval(permissionReturnPoll);
+    permissionReturnPoll = null;
+    permissionReturnPollElapsed = 0;
+  }
 }
 
 /**
- * Resolve the pending permission request and tear down all fallback paths.
- * Every grant-detection path (native promise, AppState, poll) funnels here.
+ * Resolve the in-flight permission request and tear down all fallback paths.
+ * Every grant-detection path (native fast-path, AppState, poll) funnels here.
  */
-function resolvePermission(granted: boolean): void {
-  if (granted) {
-    // Auto-show the pending conversation (if any) — the user's "Open chat
-    // bubble" tap must always end with a visible bubble.
+function settlePermissionRequest(granted: boolean): void {
+  const request = activePermissionRequest;
+  activePermissionRequest = null;
+  stopPermissionFlow();
+  request?.resolve(granted);
+}
+
+/**
+ * Re-check the overlay permission. Called from every grant-detection path.
+ * When granted, the pending conversation (if any) is auto-shown and the
+ * request settles — the user's "Open chat bubble" tap must always end with
+ * a visible bubble.
+ *
+ * A transient bubble-show failure is deliberately decoupled from the
+ * permission verdict: it must NOT resolve the request false (which would
+ * surface the misleading "overlay permission required" toast). Instead the
+ * conversation stays pending and a later poll attempt retries the show.
+ */
+function recheckOverlayPermission(): void {
+  hasBubblePermission().then(granted => {
+    if (!activePermissionRequest) return;
+    if (!granted) return;
     const conversation = pendingPermissionConversation;
-    pendingPermissionConversation = null;
     if (conversation) {
       showBubble(conversation).then(shown => {
-        cleanupAppStateSubscriber();
-        stopPermissionPoll();
-        notifyPermissionChange(shown);
+        if (!activePermissionRequest) return;
+        if (shown) {
+          pendingPermissionConversation = null;
+          settlePermissionRequest(true);
+        } else {
+          log.warn(
+            'Bubble show failed even though overlay permission is granted; retrying on next poll.',
+          );
+        }
       });
-      return;
+    } else {
+      settlePermissionRequest(true);
     }
-  }
-  cleanupAppStateSubscriber();
-  stopPermissionPoll();
-  notifyPermissionChange(granted);
+  });
 }
 
 /**
  * Watch for the user returning from the OS overlay-permission settings
- * screen. Once they return, re-check the permission and resolve.
+ * screen. Once they return, run a fast grace poll that keeps re-checking the
+ * permission for a few seconds.
+ *
+ * Many devices apply the "display over other apps" toggle asynchronously, so
+ * a single post-return check can miss a correctly-granted permission and
+ * wrongly resolve the request false. As soon as the grant is observed, the
+ * pending conversation auto-shows and the request settles true. If the grace
+ * window elapses without a grant, the request settles false (no need to wait
+ * for the full 60s timeout).
  */
 function subscribeToPermissionReturn(): void {
   if (appStateSubscriber) return;
@@ -169,50 +247,72 @@ function subscribeToPermissionReturn(): void {
       wasBackgrounded = true;
     } else if (state === 'active' && wasBackgrounded) {
       wasBackgrounded = false;
-      // The user is back from the OS overlay-permission screen — wait a beat
-      // for the OS to finalize the toggle, then re-check.
-      setTimeout(() => {
-        hasBubblePermission().then(resolvePermission);
-      }, 400);
+      if (permissionReturnPoll) clearInterval(permissionReturnPoll);
+      permissionReturnPollElapsed = 0;
+      permissionReturnPoll = setInterval(() => {
+        permissionReturnPollElapsed += PERMISSION_RETURN_POLL_INTERVAL_MS;
+        recheckOverlayPermission();
+        if (permissionReturnPollElapsed >= PERMISSION_RETURN_GRACE_MS) {
+          // The user returned without granting (or the device never applied
+          // the toggle) — settle false instead of hanging forever.
+          settlePermissionRequest(false);
+        }
+      }, PERMISSION_RETURN_POLL_INTERVAL_MS);
     }
   });
 }
 
 /**
  * Request the overlay permission. Resolves true when already granted or when
- * the user grants it in the OS settings screen; resolves false when denied.
+ * the user grants it in the OS settings screen; resolves false when the user
+ * returns without granting (or the timeout elapses).
  *
- * Three independent resolution paths are raced so it NEVER hangs and NEVER
- * gives up while the user is still inside the settings screen:
- *   1. the native bridge promise (resolved by the module's onActivityResult)
- *   2. the AppState listener (fires when the user returns from settings)
+ * Resolution paths are raced so the promise NEVER hangs and NEVER resolves
+ * false while the user is still inside the settings screen:
+ *   1. native bridge promise — FAST PATH that only resolves TRUE (on some
+ *      devices onActivityResult fires — e.g. RESULT_CANCELED — before the OS
+ *      toggle is applied; resolving false from native would wrongly tear down
+ *      the recovery paths below while the user is still in settings)
+ *   2. AppState listener — fires when the user returns from settings
  *   3. a poll that re-checks every 3s until granted or 60s elapse
  */
 export async function requestBubblePermission(): Promise<boolean> {
-  if (!native) return false;
+  if (!native) {
+    log.error('ChatBubbleModule unavailable — cannot request overlay permission.');
+    return false;
+  }
   const already = await hasBubblePermission();
   if (already) return true;
+  // Reuse an in-flight request so rapid taps don't spawn duplicate flows.
+  if (activePermissionRequest) return activePermissionRequest.promise;
+
+  let resolveRequest!: (granted: boolean) => void;
+  const promise = new Promise<boolean>(resolve => {
+    resolveRequest = resolve;
+  });
+  activePermissionRequest = { promise, resolve: resolveRequest };
 
   subscribeToPermissionReturn();
 
-  return new Promise<boolean>(resolve => {
-    permissionResolvers.push(resolve);
+  // Path 1: native bridge (resolves true via onActivityResult on most devices).
+  native.requestPermission().then(
+    (granted: boolean) => {
+      if (granted) recheckOverlayPermission();
+    },
+    () => { /* the poll + AppState paths still cover this */ },
+  );
 
-    // Path 1: native bridge (resolves via onActivityResult on most devices).
-    native.requestPermission().then(
-      (granted: boolean) => resolvePermission(Boolean(granted)),
-      () => { /* the poll + AppState paths still cover this */ },
-    );
+  // Path 3: poll fallback — re-check every 3s until granted or 60s elapse.
+  let elapsed = 0;
+  permissionPoll = setInterval(() => {
+    elapsed += PERMISSION_POLL_INTERVAL_MS;
+    recheckOverlayPermission();
+    if (elapsed >= PERMISSION_TIMEOUT_MS) {
+      settlePermissionRequest(false);
+    }
+  }, PERMISSION_POLL_INTERVAL_MS);
 
-    // Path 3: poll fallback — re-check every 3s until granted or 60s elapse.
-    let elapsed = 0;
-    permissionPoll = setInterval(() => {
-      elapsed += 3000;
-      hasBubblePermission().then(granted => {
-        if (granted || elapsed >= 60000) resolvePermission(granted);
-      });
-    }, 3000);
-  });
+  return promise;
 }
 
 /**
@@ -224,18 +324,39 @@ export async function requestBubblePermission(): Promise<boolean> {
 export async function showBubble(
   conversation: BubbleConversation,
 ): Promise<boolean> {
-  if (!native) return false;
+  if (!native) {
+    log.error('ChatBubbleModule unavailable — cannot show the bubble.');
+    return false;
+  }
   const supported = await isBubbleSupported();
-  if (!supported) return false;
+  if (!supported) {
+    log.warn('Floating bubble is not supported on this platform/OS version.');
+    return false;
+  }
   const granted = await hasBubblePermission();
   if (!granted) {
     // Remember the conversation — the AppState listener re-shows it once the
     // user grants the overlay permission in the OS settings screen.
+    log.info(
+      `Overlay permission not granted for ${conversation.entityName ?? conversation.participantKey}; ` +
+        'conversation queued for auto-show on grant.',
+    );
     pendingPermissionConversation = conversation;
     return false;
   }
   try {
-    native.show(JSON.stringify(conversation));
+    activeBubbleConversation = conversation;
+    const result = native.show(JSON.stringify(conversation));
+    if (result === false) {
+      // Native refused to start the bubble service (e.g. foreground-service
+      // policy) — this is NOT a permission problem, so callers can retry
+      // without treating it as a permission denial.
+      log.warn(
+        `Native show() returned false for ${conversation.entityName ?? conversation.participantKey}; ` +
+          'bubble was not displayed (overlay permission IS granted).',
+      );
+      return false;
+    }
     log.info(`Bubble shown for ${conversation.entityName ?? conversation.participantKey}`);
     return true;
   } catch (e) {
@@ -247,17 +368,50 @@ export async function showBubble(
 /** Forget any pending bubble conversation (e.g. the user declined). */
 export function cancelPendingBubble(): void {
   pendingPermissionConversation = null;
-  cleanupAppStateSubscriber();
-  notifyPermissionChange(false);
+  settlePermissionRequest(false);
 }
 
 /** Hide/remove the floating bubble. */
 export async function hideBubble(): Promise<void> {
-  if (!native) return;
+  activeBubbleConversation = null;
+  if (!native) {
+    log.warn('ChatBubbleModule unavailable — nothing to hide.');
+    return;
+  }
   try {
     native.hide();
   } catch (e) {
     log.error('hideBubble failed:', e);
+  }
+}
+
+/**
+ * Close only the floating chat window — the bubble itself stays visible and
+ * can be tapped again to reopen the window. No-op when the window isn't open.
+ */
+export function closeBubbleWindow(): void {
+  if (!native || typeof (native as any).closeWindow !== 'function') {
+    return;
+  }
+  try {
+    (native as any).closeWindow();
+  } catch (e) {
+    log.error('closeWindow failed:', e);
+  }
+}
+
+/**
+ * Update the unread badge count shown on the floating bubble.
+ * Call this when new messages arrive while the bubble is visible.
+ */
+export async function setBubbleUnreadCount(count: number): Promise<void> {
+  if (!native || typeof (native as any).setUnreadCount !== 'function') {
+    return;
+  }
+  try {
+    (native as any).setUnreadCount(Math.max(0, count));
+  } catch (e) {
+    log.error('setUnreadCount failed:', e);
   }
 }
 
@@ -268,5 +422,8 @@ export default {
   requestBubblePermission,
   showBubble,
   hideBubble,
+  closeBubbleWindow,
   cancelPendingBubble,
+  setBubbleUnreadCount,
+  getActiveBubbleConversation,
 };

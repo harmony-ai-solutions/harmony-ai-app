@@ -3,7 +3,6 @@ import DeviceInfo from 'react-native-device-info';
 import { Platform, AppState } from 'react-native';
 import ConnectionManager from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
-import { cloudSessionService } from './cloud/CloudSessionService';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
 import { messageExists, createConversationMessage, updateConversationMessage, getConversationMessage } from '../database/repositories/conversation_messages';
@@ -199,12 +198,18 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
 
   private setupAppStateListener() {
-    // Close sessions when app goes to background
+    // Close entity sessions when the app goes to background (battery-friendly
+    // teardown of the per-entity WebSockets). The CLOUD session is deliberately
+    // NOT disconnected here: the floating chat overlay (ChatBubbleService) is a
+    // second React root sharing this same singleton and keeps running as a
+    // foreground service while the main activity is backgrounded. Tearing down
+    // the cloud session then makes the overlay report "offline / disconnected
+    // from cloud" and forces a slow broker re-provision on resume. Leaving the
+    // cloud session ready lets the sync WS reconnect instantly on foreground.
     this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'background') {
-        log.info('App going to background, closing all entity sessions');
+        log.info('App going to background, closing entity sessions (cloud session stays ready)');
         this.closeAllSessions();
-        cloudSessionService.disconnect().catch(() => {});
       }
     });
   }
