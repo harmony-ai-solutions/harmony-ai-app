@@ -19,7 +19,7 @@ import {createInMemoryDatabase} from '../../src/database/__test_utils__/testData
 import {runMigrations} from '../../src/database/migrations';
 import {resetSyncServiceSingleton} from './helpers/resetSyncService';
 import {HarmonyLinkMockServer} from './helpers/HarmonyLinkMockServer';
-import {sampleCharacter} from './helpers/fixtures';
+import {sampleCharacter, insertCharacterProfile} from './helpers/fixtures';
 
 // ---------------------------------------------------------------------------
 // Module-level mutable refs used by hoisted jest.mock calls
@@ -246,16 +246,7 @@ describe('SyncService integration', () => {
       created_at: new Date(Date.now() - 5000).toISOString(),
       updated_at: new Date(Date.now() - 5000).toISOString(),
     });
-    await db.executeSql(
-      `INSERT INTO character_profiles (id, name, description, personality, appearance, backstory, voice_characteristics, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        localChar.id, localChar.name, localChar.description,
-        localChar.personality, localChar.appearance, localChar.backstory,
-        localChar.voice_characteristics, localChar.created_at,
-        localChar.updated_at, localChar.deleted_at,
-      ],
-    );
+    await insertCharacterProfile(db, localChar);
 
     // Seed server with different data
     const serverChar = sampleCharacter({
@@ -307,16 +298,7 @@ describe('SyncService integration', () => {
       created_at: new Date(Date.now() - 20000).toISOString(),
       updated_at: new Date(Date.now() - 20000).toISOString(),
     });
-    await db.executeSql(
-      `INSERT INTO character_profiles (id, name, description, personality, appearance, backstory, voice_characteristics, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        oldChar.id, oldChar.name, oldChar.description,
-        oldChar.personality, oldChar.appearance, oldChar.backstory,
-        oldChar.voice_characteristics, oldChar.created_at,
-        oldChar.updated_at, oldChar.deleted_at,
-      ],
-    );
+    await insertCharacterProfile(db, oldChar);
 
     // Server has updated version
     mockServer.setServerData('character_profiles', [
@@ -364,16 +346,7 @@ describe('SyncService integration', () => {
       created_at: new Date(Date.now() - 20000).toISOString(),
       updated_at: new Date(Date.now() - 5000).toISOString(), // after last sync
     });
-    await db.executeSql(
-      `INSERT INTO character_profiles (id, name, description, personality, appearance, backstory, voice_characteristics, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        updatedChar.id, updatedChar.name, updatedChar.description,
-        updatedChar.personality, updatedChar.appearance, updatedChar.backstory,
-        updatedChar.voice_characteristics, updatedChar.created_at,
-        updatedChar.updated_at, updatedChar.deleted_at,
-      ],
-    );
+    await insertCharacterProfile(db, updatedChar);
 
     mockServer.startAutoResponder();
 

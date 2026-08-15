@@ -57,7 +57,10 @@ export type SyncPhase =
   | 'SYNC_FINALIZE';
 
 export interface ServerRecord {
-  id: string;
+  /** Primary key. Most tables use `id`; entity-scoped tables (emotion_state,
+   *  lifecycle_state) use `entity_id` instead. */
+  id?: string;
+  entity_id?: string;
   [key: string]: any;
 }
 
@@ -249,10 +252,15 @@ export class HarmonyLinkMockServer extends EventEmitter {
     return this._serverData.get(table) || [];
   }
 
-  /** Convenience: check server data for a record by ID. */
+  /** Convenience: check server data for a record by primary key (id or entity_id). */
   hasServerRecord(table: string, id: string): boolean {
     const records = this._serverData.get(table) || [];
-    return records.some(r => r.id === id);
+    return records.some(r => (r.id ?? r.entity_id) === id);
+  }
+
+  /** Resolve a record's primary key value (id-based tables or entity_id-based tables). */
+  private _recordKey(record: ServerRecord): string {
+    return String(record.id ?? record.entity_id ?? '');
   }
 
   // ---------------------------------------------------------------------------
@@ -405,7 +413,7 @@ export class HarmonyLinkMockServer extends EventEmitter {
           status: 'NEW',
           payload: {
             sync_session_id: this._sessionId,
-            event_id: `server_data_${record.id}`,
+            event_id: `server_data_${this._recordKey(record)}`,
             table,
             operation,
             record,
@@ -426,7 +434,8 @@ export class HarmonyLinkMockServer extends EventEmitter {
 
   private _storeReceivedData(table: string, record: ServerRecord): void {
     const existing = this._serverData.get(table) || [];
-    const idx = existing.findIndex(r => r.id === record.id);
+    const key = this._recordKey(record);
+    const idx = existing.findIndex(r => this._recordKey(r) === key);
     if (idx >= 0) {
       existing[idx] = record;
     } else {

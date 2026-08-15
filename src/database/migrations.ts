@@ -45,6 +45,9 @@ import { migration034 } from './migrations/000034_add_unique_name_constraint_vis
 import { migration035 } from './migrations/000035_character_image_uuid_primary_key';
 import { migration036 } from './migrations/000036_harmonyspeech_api_key';
 import { migration037 } from './migrations/000037_add_character_card_standard_fields';
+import { migration038 } from './migrations/000038_add_lifecycle_state';
+import { migration039 } from './migrations/000039_device_push_tokens_reserved';
+import { migration040 } from './migrations/000040_lifecycle_state_sync_columns';
 
 // Migration definition
 export interface Migration {
@@ -241,6 +244,21 @@ export const MIGRATIONS: Migration[] = [
     version: 37,
     description: 'Add character card standard fields (V3 fidelity, incl. character_book JSON)',
     sql: migration037,
+   },
+   {
+    version: 38,
+    description: 'add_lifecycle_state',
+    sql: migration038,
+   },
+   {
+    version: 39,
+    description: 'device_push_tokens_reserved (engine-only table; number placeholder)',
+    sql: migration039,
+   },
+   {
+    version: 40,
+    description: 'lifecycle_state sync columns (watermark contract)',
+    sql: migration040,
    },
   ];
 

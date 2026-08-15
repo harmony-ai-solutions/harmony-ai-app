@@ -789,7 +789,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     log.info(`Applying ${recordCount} buffered sync records in transaction`);
     log.info('Buffer contents:');
     this.incomingDataBuffer.forEach((item, index) => {
-      const pkField = (item.table === 'entity_module_mappings' || item.table === 'emotion_state') ? 'entity_id' : 'id';
+      const pkField = (item.table === 'entity_module_mappings' || item.table === 'emotion_state' || item.table === 'lifecycle_state') ? 'entity_id' : 'id';
       const pkValue = item.record[pkField];
       log.info(`  [${index + 1}/${recordCount}] ${item.table}.${item.operation} (${pkField}=${pkValue})`);
     });
@@ -880,6 +880,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'interactions': 7,
         'conversation_messages': 8,
         'emotion_state': 8,
+        'lifecycle_state': 8,
         'entity_emoji_actions': 8,
         'memories': 8,
       };
@@ -899,7 +900,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
           // Apply all buffered records synchronously within transaction (sorted by dependency order)
           for (const item of sortedBuffer) {
-            const pkField = (item.table === 'entity_module_mappings' || item.table === 'emotion_state') ? 'entity_id' : 'id';
+            const pkField = (item.table === 'entity_module_mappings' || item.table === 'emotion_state' || item.table === 'lifecycle_state') ? 'entity_id' : 'id';
             const pkValue = item.record[pkField];
 
             // ── Name-clash resolutions ────────────────────────────────────
@@ -1146,6 +1147,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         // Conversation and state data
         'conversation_messages',
         'emotion_state',
+        'lifecycle_state',
         'entity_emoji_actions',  // emoji action mappings
         'memories',
       ];
@@ -1160,7 +1162,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         // EXCEPTION: locally-deleted records must still be pushed so the server learns about
         // the deletion, even if the server sent the record back during the pull phase (LWW
         // would have kept the local version because its updated_at is newer).
-        const pkField = (table === 'entity_module_mappings' || table === 'emotion_state') ? 'entity_id' : 'id';
+        const pkField = (table === 'entity_module_mappings' || table === 'emotion_state' || table === 'lifecycle_state') ? 'entity_id' : 'id';
         const filteredRecords = records.filter(record => {
           const recordKey = `${table}:${record[pkField]}`;
           if (this.serverRecordIds.has(recordKey)) {
@@ -1548,6 +1550,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'vision_config_id'
       ],
       'interactions': ['entity_id', 'memory_id'],
+      'lifecycle_state': ['entity_id'],
       'backend_configs': ['provider_config_id'],
       'vision_configs': ['provider_config_id'],
       'imagination_configs': ['provider_config_id'],

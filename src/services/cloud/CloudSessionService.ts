@@ -32,9 +32,8 @@ const log = createLogger('[CloudSession]');
 
 /**
  * Absolute timeout bound for the client's `connectPoll` loop (ms).
- * Matches the old ~95-poll × 2s budget the service used to manage itself.
  */
-const CONNECT_POLL_TIMEOUT_MS = 190_000;
+const CONNECT_POLL_TIMEOUT_MS = 180_000;
 
 /**
  * Thrown when POST /v1/session/connect returns 403

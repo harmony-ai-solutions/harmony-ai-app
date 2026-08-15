@@ -602,6 +602,19 @@ export interface EmotionState {
   deleted_at: Date | null;
 }
 
+export interface LifecycleState {
+  entity_id: string;
+  exhaustion: number;
+  sleeping: boolean;
+  sleep_start_time: number | null; // unix seconds
+  last_beat_at: number | null; // unix seconds
+  last_outreach_at: number | null; // unix seconds (N1-A: outreach cooldown)
+  inner_monologue: string; // JSON array of last-N entries
+  created_at: Date;
+  updated_at: Date;
+  deleted_at: Date | null;
+}
+
 export interface Memory {
   id: string;
   entity_id: string;

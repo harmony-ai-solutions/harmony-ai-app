@@ -20,9 +20,64 @@ export function sampleCharacter(
     name: 'Test Character',
     description: 'A test character for integration tests',
     personality: 'Friendly',
-    appearance: '',
-    backstory: '',
     voice_characteristics: '',
+    // Character Card V3 standard fields (migration 000037 — NOT NULL DEFAULT '')
+    first_mes: 'Hello there!',
+    mes_example: '<START>\n{{user}}: Hi\n{{char}}: Hello!',
+    alternate_greetings: '[]',
+    post_history_instructions: '',
+    creator_notes: '',
+    creator: 'test-suite',
+    character_version: '1.0',
+    nickname: '',
+    tags: '["test"]',
+    group_only_greetings: '[]',
+    extensions: '{}',
+    assets: '[]',
+    card_provenance: '{}',
+    character_book: '{}',
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+    deleted_at: null,
+    ...overrides,
+  };
+}
+
+/**
+ * Insert a `sampleCharacter` record into character_profiles, building the
+ * INSERT dynamically from the record's keys. The legacy columns
+ * (appearance/backstory/example_dialogues) were dropped by migration 000037;
+ * seeding through this helper keeps the tests tracking the fixture shape
+ * instead of a hand-maintained column list.
+ */
+export async function insertCharacterProfile(
+  db: {executeSql: (sql: string, params?: any[]) => Promise<any>},
+  record: Record<string, any>,
+): Promise<void> {
+  const columns = Object.keys(record);
+  const placeholders = columns.map(() => '?').join(', ');
+  await db.executeSql(
+    `INSERT INTO character_profiles (${columns.join(', ')}) VALUES (${placeholders})`,
+    Object.values(record),
+  );
+}
+
+/**
+ * A `lifecycle_state` row (engine migration 000038 + 000040 sync columns).
+ * entity_id is the PRIMARY KEY — same entity_id-PK shape as emotion_state.
+ */
+export function sampleLifecycleState(
+  overrides: Partial<Record<string, any>> = {},
+): ServerRecord {
+  const now = new Date();
+  return {
+    entity_id: randomId('entity-'),
+    exhaustion: 0.25,
+    sleeping: false,
+    sleep_start_time: null,
+    last_beat_at: Math.floor(now.getTime() / 1000) - 600,
+    last_outreach_at: Math.floor(now.getTime() / 1000) - 3600,
+    inner_monologue: '["thinking about the weather"]',
     created_at: now.toISOString(),
     updated_at: now.toISOString(),
     deleted_at: null,

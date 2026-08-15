@@ -24,7 +24,7 @@ async function insertProfile(
   db: Database,
   id: string,
   name: string,
-  tags: string | null,
+  tags: string,
 ): Promise<void> {
   await db.executeSql(
     `INSERT INTO character_profiles (id, name, tags, created_at, updated_at)
@@ -59,7 +59,8 @@ describe('getDistinctTags (4-3)', () => {
 
   it('excludes profiles without tags and soft-deleted profiles', async () => {
     await insertProfile(db, 'p1', 'Aria', '["fantasy"]');
-    await insertProfile(db, 'p2', 'NoTags', null);
+    // Migration 000037 made tags NOT NULL DEFAULT '' — "no tags" is '' now.
+    await insertProfile(db, 'p2', 'NoTags', '');
     await insertProfile(db, 'p3', 'NullTags', 'null');
     await insertProfile(db, 'p4', 'Deleted', '["deleted-tag"]');
     await db.executeSql(

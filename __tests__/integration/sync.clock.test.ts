@@ -21,7 +21,7 @@ import {createInMemoryDatabase} from '../../src/database/__test_utils__/testData
 import {runMigrations} from '../../src/database/migrations';
 import {resetSyncServiceSingleton} from './helpers/resetSyncService';
 import {HarmonyLinkMockServer} from './helpers/HarmonyLinkMockServer';
-import {sampleCharacter} from './helpers/fixtures';
+import {sampleCharacter, insertCharacterProfile} from './helpers/fixtures';
 
 // ---------------------------------------------------------------------------
 // Module-level mutable refs
@@ -271,16 +271,7 @@ describe('sync clock drift handling', () => {
       created_at: new Date(Date.now() - 5000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ''),
       updated_at: new Date(Date.now() - 5000).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ''),
     });
-    await db.executeSql(
-      `INSERT INTO character_profiles (id, name, description, personality, appearance, backstory, voice_characteristics, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        localChar.id, localChar.name, localChar.description,
-        localChar.personality, localChar.appearance, localChar.backstory,
-        localChar.voice_characteristics, localChar.created_at,
-        localChar.updated_at, localChar.deleted_at,
-      ],
-    );
+    await insertCharacterProfile(db, localChar);
 
     // Verify the seed has space-separated timestamps
     const [seedResult] = await db.executeSql(
@@ -346,13 +337,7 @@ describe('sync clock drift handling', () => {
       created_at: new Date(Date.now() - 5000).toISOString(),
       updated_at: new Date(Date.now() - 5000).toISOString(),
     });
-    await db.executeSql(
-      `INSERT INTO character_profiles (id, name, description, personality, appearance, backstory, voice_characteristics, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [localChar.id, localChar.name, localChar.description, localChar.personality,
-       localChar.appearance, localChar.backstory, localChar.voice_characteristics,
-       localChar.created_at, localChar.updated_at, localChar.deleted_at],
-    );
+    await insertCharacterProfile(db, localChar);
 
     mockServer.setServerData('character_profiles', []);
 
@@ -385,13 +370,7 @@ describe('sync clock drift handling', () => {
       created_at: new Date(Date.now() - 5000).toISOString(),
       updated_at: new Date(Date.now() - 5000).toISOString(),
     });
-    await db.executeSql(
-      `INSERT INTO character_profiles (id, name, description, personality, appearance, backstory, voice_characteristics, created_at, updated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [localChar.id, localChar.name, localChar.description, localChar.personality,
-       localChar.appearance, localChar.backstory, localChar.voice_characteristics,
-       localChar.created_at, localChar.updated_at, localChar.deleted_at],
-    );
+    await insertCharacterProfile(db, localChar);
 
     mockServer.setServerData('character_profiles', []);
 

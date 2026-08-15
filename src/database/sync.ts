@@ -192,6 +192,7 @@ function normalizeBooleanFields(table: string, record: any): any {
     'character_image': ['is_primary'],
     'conversation_messages': ['is_recon_followup', 'is_edited'],
     'entity_emoji_actions': ['auto_generated', 'is_default'],
+    'lifecycle_state': ['sleeping'],
   };
 
   const fields = booleanFields[table];
