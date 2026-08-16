@@ -111,6 +111,24 @@ class ChatBubbleModule(private val reactContext: ReactApplicationContext) :
     reactContext.stopService(intent)
   }
 
+  /** Hide/remove a SINGLE bubble from the stack (the rest stay visible). */
+  @ReactMethod
+  fun hideOne(participantKey: String?) {
+    val intent = Intent(reactContext, ChatBubbleService::class.java).apply {
+      action = ChatBubbleService.ACTION_HIDE_ONE
+      putExtra(ChatBubbleService.EXTRA_PARTICIPANT_KEY, participantKey)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      try {
+        reactContext.startForegroundService(intent)
+      } catch (_: Exception) {
+        reactContext.startService(intent)
+      }
+    } else {
+      reactContext.startService(intent)
+    }
+  }
+
   /** Close only the floating chat window — the bubble stays visible. */
   @ReactMethod
   fun closeWindow() {
@@ -128,12 +146,13 @@ class ChatBubbleModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
-  /** Update the unread count on the bubble badge. */
+  /** Update the unread count on ONE bubble's badge (identified by participant key). */
   @ReactMethod
-  fun setUnreadCount(count: Int) {
+  fun setUnreadCount(count: Int, participantKey: String?) {
     val intent = Intent(reactContext, ChatBubbleService::class.java).apply {
       action = ChatBubbleService.ACTION_SET_UNREAD
       putExtra(ChatBubbleService.EXTRA_UNREAD_COUNT, count.coerceAtLeast(0))
+      putExtra(ChatBubbleService.EXTRA_PARTICIPANT_KEY, participantKey)
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       try {

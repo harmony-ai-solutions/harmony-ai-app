@@ -38,6 +38,7 @@ import { useReducedMotion } from '../hooks/useReducedMotion';
 const log = createLogger('[CharactersScreen]');
 import { CharacterProfileCard } from '../components/characters/CharacterProfileCard';
 import { ManageCategoriesModal } from '../components/characters/ManageCategoriesModal';
+import { CategoryFilterDropdown } from '../components/characters/CategoryFilterDropdown';
 import { CharacterCardMenuModal } from '../components/characters/CharacterCardMenuModal';
 import { AddToCategoryModal } from '../components/characters/AddToCategoryModal';
 import { CreatePartnerModal } from '../components/characters/CreatePartnerModal';
@@ -377,20 +378,18 @@ export const CharactersScreen: React.FC = () => {
   });
 
   /**
-   * Filter chips: first two are "All" and "Favorites", then each user
-   * category, then a gear button to manage categories.
+   * Filter chips: "All" and "Favorites" are always shown as quick chips.
+   * User categories are collapsed into the category dropdown (next to the
+   * manage chip) so a large category list stays manageable.
    */
   interface FilterChipItem {
     key: string;
     label: string;
     icon?: string;
-    isManage?: boolean;
   }
   const filterChips: FilterChipItem[] = [
     { key: 'all', label: t('filterAll'), icon: 'view-grid-outline' },
     { key: 'favorites', label: t('filterFavorites'), icon: 'heart-outline' },
-    ...categories.map(cat => ({ key: cat.id, label: cat.name, icon: 'shape-outline' })),
-    { key: 'manage', label: '', isManage: true },
   ];
 
   const handleToggleFavorite = async (profile: CharacterProfile) => {
@@ -516,6 +515,12 @@ export const CharactersScreen: React.FC = () => {
       categoryPickState[cat.id] =
         categoryMembers[cat.id]?.has(categoryPickProfile.id) ?? false;
     }
+  }
+
+  /** categoryId → member count, shown next to each category in the dropdown. */
+  const categoryMemberCounts: Record<string, number> = {};
+  for (const cat of categories) {
+    categoryMemberCounts[cat.id] = categoryMembers[cat.id]?.size ?? 0;
   }
 
   /**
@@ -737,7 +742,7 @@ export const CharactersScreen: React.FC = () => {
           )}
         </View>
 
-        {/* Filter chips — All / Favorites / categories + manage */}
+        {/* Filter chips — All / Favorites + category dropdown + manage */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -745,37 +750,6 @@ export const CharactersScreen: React.FC = () => {
           keyboardShouldPersistTaps="handled"
         >
           {filterChips.map(chip => {
-            if (chip.isManage) {
-              return (
-                <TouchableOpacity
-                  key="manage"
-                  onPress={() => {
-                    hapticLightPress();
-                    setManageVisible(true);
-                  }}
-                  style={[
-                    styles.chip,
-                    styles.manageChip,
-                    {
-                      backgroundColor: hexToRgba(theme.colors.background.base, 0.55),
-                      borderColor: hexToRgba(accent, 0.25),
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('manageCategories')}
-                  testID="manage-categories-button"
-                >
-                  <MaterialCommunityIcons
-                    name="plus-box-outline"
-                    size={15}
-                    color={accent}
-                  />
-                  <ThemedText size={13} weight="medium" variant="accent">
-                    {t('manageCategories')}
-                  </ThemedText>
-                </TouchableOpacity>
-              );
-            }
             const isActive = activeFilter === chip.key;
             return (
               <TouchableOpacity
@@ -816,6 +790,21 @@ export const CharactersScreen: React.FC = () => {
               </TouchableOpacity>
             );
           })}
+
+          {/* Category dropdown — collapses all user categories into one trigger
+              so a large category list stays manageable. Includes the
+              "Manage categories" action inside the sheet. */}
+          <CategoryFilterDropdown
+            selected={activeFilter}
+            categories={categories}
+            counts={categoryMemberCounts}
+            placeholder={t('categoryFilterPlaceholder')}
+            title={t('categoryFilterTitle')}
+            manageLabel={t('manageCategories')}
+            emptyLabel={t('categoryFilterEmpty')}
+            onSelect={setActiveFilter}
+            onManagePress={() => setManageVisible(true)}
+          />
         </ScrollView>
       </ScreenHeader>
 
@@ -1138,9 +1127,6 @@ const styles = StyleSheet.create({
   },
   chipActive: {
     borderWidth: 1.5,
-  },
-  manageChip: {
-    borderStyle: 'dashed',
   },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15, paddingVertical: 0 },

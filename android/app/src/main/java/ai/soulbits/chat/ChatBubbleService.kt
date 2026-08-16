@@ -59,13 +59,39 @@ import java.lang.ref.WeakReference
 class ChatBubbleService : Service() {
 
   private lateinit var windowManager: WindowManager
-  private var bubbleView: View? = null
-  private var bubbleParams: WindowManager.LayoutParams? = null
-  private var bubbleBadgeView: android.widget.TextView? = null
 
-  // Drag bookkeeping
-  private var initialX = 0
-  private var initialY = 0
+  /**
+   * One floating bubble per conversation, stacked vertically (Messenger-style).
+   * Insertion order = stack order (top → bottom). When the stack is full
+   * (MAX_BUBBLES) and a NEW conversation arrives, the oldest bubble is
+   * replaced automatically.
+   */
+  private val bubbles = LinkedHashMap<String, BubbleEntry>()
+
+  /** Conversation whose bubble is active (window open / last tapped). */
+  private var activeConversationKey: String? = null
+
+  /** Conversation currently shown in the floating chat window (if open). */
+  private var openConversationKey: String? = null
+
+  /** Bubble armed for removal while the long-press dismiss mode is on. */
+  private var armedDismissKey: String? = null
+
+  /** Bubble pressed at ACTION_DOWN — decides tap/collapse/switch targets. */
+  private var pressedKey: String? = null
+
+  private data class BubbleEntry(
+    val participantKey: String,
+    var conversationJson: String,
+    val view: View,
+    val params: WindowManager.LayoutParams,
+    val badgeView: android.widget.TextView,
+    var unreadCount: Int,
+  )
+
+  // Drag bookkeeping — the stack moves as ONE unit, so drag state is shared.
+  private var initialStackX = 0
+  private var initialStackY = 0
   private var initialTouchX = 0f
   private var initialTouchY = 0f
   private var isDragging = false
@@ -81,9 +107,22 @@ class ChatBubbleService : Service() {
 
   private var conversationJson: String? = null
 
-  /** Total unread messages shown on the badge. */
-  @Volatile
-  private var unreadCount = 0
+  /** Shared stack position (top-left of the top bubble). */
+  private var stackX = 0
+  private var stackY = 0
+
+  /** Vertical gap between stacked bubbles. */
+  private val bubbleStepPx: Int
+    get() = dp(BUBBLE_STEP_DP)
+
+  /** Height of the full stack (used to keep it on screen). */
+  private val stackHeightPx: Int
+    get() {
+      val count = bubbles.size
+      if (count == 0) return 0
+      val size = bubbles.values.first().params.width
+      return size + (count - 1) * bubbleStepPx
+    }
 
   // ── Floating chat window (ReactSurface overlay) ──
   private var chatSurface: ReactSurface? = null
@@ -183,11 +222,17 @@ class ChatBubbleService : Service() {
     when (intent?.action) {
       ACTION_SET_UNREAD -> {
         val count = intent.getIntExtra(EXTRA_UNREAD_COUNT, 0)
-        setUnreadCount(count)
+        val key = intent.getStringExtra(EXTRA_PARTICIPANT_KEY)
+        setUnreadCount(key, count)
+        return START_NOT_STICKY
+      }
+      ACTION_HIDE_ONE -> {
+        // Remove a single bubble from the stack (the rest stay).
+        intent.getStringExtra(EXTRA_PARTICIPANT_KEY)?.let { removeBubbleEntry(it) }
         return START_NOT_STICKY
       }
       ACTION_CLOSE_WINDOW -> {
-        // Close only the floating chat window — the bubble stays.
+        // Close only the floating chat window — the bubbles stay.
         closeFloatingChat()
         return START_NOT_STICKY
       }
@@ -263,25 +308,48 @@ class ChatBubbleService : Service() {
   // ---------------------------------------------------------------------------
 
   private fun showBubble() {
-    if (bubbleView != null) return
-
     windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+    val json = conversationJson ?: return
+    // participantKey is the stable bubble identity. Legacy payloads without
+    // one fall back to a fixed key so a single bubble still works.
+    val key = extractParticipantKey(json) ?: LEGACY_BUBBLE_KEY
+
+    val existing = bubbles[key]
+    if (existing != null) {
+      // Reopening an existing conversation — repaint its avatar and refresh the
+      // conversation payload (fixes the stale-avatar bug).
+      existing.conversationJson = json
+      paintAvatar(existing)
+      return
+    }
+
+    if (bubbles.isEmpty()) {
+      // First bubble — pick the initial stack position.
+      stackX = 0
+      stackY = metrics.heightPixels / 3
+    }
+
+    // New conversation. When the stack is full, replace the OLDEST bubble.
+    if (bubbles.size >= MAX_BUBBLES) {
+      val oldest = bubbles.entries.first().value
+      removeBubbleEntry(oldest.participantKey)
+    }
+
+    addBubble(key, json)
+    updateAllBubblePositions()
+  }
+
+  /** Create a single bubble entry (avatar + ring + badge) and add it to the stack. */
+  private fun addBubble(key: String, json: String) {
     val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
     val view = inflater.inflate(R.layout.chat_bubble, null)
     val avatarView = view.findViewById<ImageView>(R.id.chat_bubble_avatar)
     val ringView = view.findViewById<ImageView>(R.id.chat_bubble_ring)
 
-    val avatarBitmap = decodeAvatar(conversationJson)
-    if (avatarBitmap != null) {
-      avatarView.setImageBitmap(avatarBitmap)
-    } else {
-      avatarView.setImageResource(android.R.drawable.ic_dialog_email)
-    }
-
     // ── Round the bubble ──
     // Clip the avatar to a perfect circle (center-crop square → circle).
-    val bubbleSize = dp(64)
-    val radius = bubbleSize / 2f
+    val size = dp(64)
     val roundRect = android.graphics.drawable.GradientDrawable().apply {
       shape = android.graphics.drawable.GradientDrawable.OVAL
       setColor(0xFF000000.toInt())
@@ -290,7 +358,7 @@ class ChatBubbleService : Service() {
     avatarView.outlineProvider =
       object : android.view.ViewOutlineProvider() {
         override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
-          outline.setOval(0, 0, bubbleSize, bubbleSize)
+          outline.setOval(0, 0, size, size)
         }
       }
     avatarView.setBackground(roundRect)
@@ -306,7 +374,7 @@ class ChatBubbleService : Service() {
 
     // Unread badge — small red count dot at the top-right of the bubble.
     val badge = android.widget.TextView(this).apply {
-      text = if (unreadCount > 99) "99+" else unreadCount.toString()
+      text = "0"
       textSize = 11f
       setTextColor(0xFFFFFFFF.toInt())
       typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -318,8 +386,6 @@ class ChatBubbleService : Service() {
       // position at top-right corner of the bubble
       setPadding(dp(5), dp(2), dp(5), dp(2))
     }
-    // Layout the badge over the top-right of the avatar. We add it to the
-    // FrameLayout (chat_bubble) at ~top-right.
     val badgeLp = android.widget.FrameLayout.LayoutParams(
       android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
       android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -329,9 +395,8 @@ class ChatBubbleService : Service() {
       topMargin = dp(2)
       marginEnd = dp(2)
     }
-    badge.visibility = if (unreadCount > 0) android.view.View.VISIBLE else android.view.View.GONE
+    badge.visibility = android.view.View.GONE
     (view as android.widget.FrameLayout).addView(badge, badgeLp)
-    bubbleBadgeView = badge
 
     val wmType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -341,191 +406,272 @@ class ChatBubbleService : Service() {
     }
 
     val params = WindowManager.LayoutParams(
-      bubbleSize,
-      bubbleSize,
+      size,
+      size,
       wmType,
       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
       PixelFormat.TRANSLUCENT,
     ).apply {
       gravity = Gravity.TOP or Gravity.START
-      x = 0
-      y = metrics.heightPixels / 3
+      x = stackX
+      y = stackY
     }
 
     // ── Drag + tap handling ──
-    // Physics: the bubble follows the finger; on release it either
-    //   1. flings toward the nearest edge and snaps to it, or
-    //   2. if released over the bottom dismiss area, animates away (hide).
-    //
-    // While the floating chat window is open the bubble is LOCKED to its
-    // anchored position (see openFloatingChat) — no drag, no long-press, only
-    // the tap-to-collapse handled on ACTION_UP.
-    view.setOnTouchListener { _, event ->
-      when (event.action) {
-        MotionEvent.ACTION_DOWN -> {
-          // While the bubble is gliding to the middle-right to open the
-          // window, ignore input entirely.
-          if (isSnappingToOpen) return@setOnTouchListener true
-          initialX = params.x
-          initialY = params.y
-          initialTouchX = event.rawX
-          initialTouchY = event.rawY
-          lastVelocityX = 0f
-          lastVelocityY = 0f
-          lastMoveTime = 0L
-          isDragging = false
-          longPressTriggered = false
-          snapAnimator?.cancel()
-          dismissAnimator?.cancel()
-          if (chatView == null) {
-            // Window closed — the bubble is in its normal floating state: arm
-            // the long-press (hold) removal mode — reveal the ✕ target at the
-            // bottom and give a haptic cue. Only then can the bubble be dragged
-            // onto the ✕ to permanently remove it.
-            longPressHandler.postDelayed(
-              {
-                longPressTriggered = true
-                showDismissArea()
-                view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-              },
-              LONG_PRESS_MS,
-            )
-          }
-          true
-        }
-
-        MotionEvent.ACTION_MOVE -> {
-          // Window open — the bubble is anchored in place next to the window;
-          // never move it, so the window stays exactly where it opened.
-          if (chatView != null) return@setOnTouchListener true
-          // Dragging must be able to start both BEFORE and AFTER the long-press
-          // fires. If the user holds still (long-press triggers) and THEN starts
-          // dragging, isDragging is set here. If the user drags immediately
-          // (before the long-press), the long-press callback is cancelled.
-          if (!isDragging) {
-            val dx = event.rawX - initialTouchX
-            val dy = event.rawY - initialTouchY
-            if (Math.abs(dx) > TOUCH_SLOP || Math.abs(dy) > TOUCH_SLOP) {
-              isDragging = true
-              if (!longPressTriggered) {
-                longPressHandler.removeCallbacksAndMessages(null)
-              }
-            }
-          }
-          if (isDragging) {
-            params.x = initialX + (event.rawX - initialTouchX).toInt()
-            params.y = initialY + (event.rawY - initialTouchY).toInt()
-            // Clamp within screen bounds (leave a small margin). Y is allowed to
-            // reach the very bottom so the bubble can be dropped on the ✕ target.
-            params.x = params.x.coerceIn(-bubbleSize / 2, metrics.widthPixels - bubbleSize / 2)
-            params.y = params.y.coerceIn(0, metrics.heightPixels - bubbleSize / 2)
-            try {
-              windowManager.updateViewLayout(view, params)
-            } catch (_: IllegalArgumentException) {
-              // ignore
-            }
-            // Velocity tracking (px/ms).
-            val now = System.currentTimeMillis()
-            if (lastMoveTime != 0L) {
-              val dt = (now - lastMoveTime).coerceAtLeast(1L)
-              lastVelocityX = (event.rawX - initialTouchX) / dt
-              lastVelocityY = (event.rawY - initialTouchY) / dt
-              // Keep velocity normalized to px/s for the fling decision.
-              lastVelocityX *= 1000f
-              lastVelocityY *= 1000f
-            }
-            lastMoveTime = now
-            // Highlight the ✕ while the bubble hovers over it (hold-to-remove mode).
-            if (longPressTriggered) {
-              updateDismissHighlight(params.x + bubbleSize / 2f, params.y + bubbleSize / 2f)
-            }
-          }
-          true
-        }
-
-        MotionEvent.ACTION_UP -> {
-          longPressHandler.removeCallbacksAndMessages(null)
-          hideDismissArea()
-          if (chatView != null) {
-            // Window open — a tap on the anchored bubble collapses it. The
-            // bubble stays exactly where it opened and returns to its normal
-            // draggable floating state.
-            closeFloatingChat()
-          } else if (isDragging || longPressTriggered) {
-            // Hold + drop on the ✕ target → permanently remove the bubble.
-            if (longPressTriggered && isOverDismissTarget(params.x, params.y)) {
-              animateDismiss()
-            } else {
-              snapToEdge()
-            }
-          } else {
-            // Plain tap on the floating bubble → snap it to the middle-right
-            // edge, then immediately open the chat window anchored right there.
-            snapBubbleToMiddleRightThenOpen()
-          }
-          isDragging = false
-          longPressTriggered = false
-          true
-        }
-
-        MotionEvent.ACTION_CANCEL -> {
-          longPressHandler.removeCallbacksAndMessages(null)
-          hideDismissArea()
-          if (isDragging && chatView == null) snapToEdge()
-          isDragging = false
-          longPressTriggered = false
-          true
-        }
-
-        else -> true
-      }
-    }
+    // The whole stack moves as one unit (Messenger-style). Dragging any bubble
+    // translates the shared stackX/stackY. Taps open that bubble's conversation.
+    view.setOnTouchListener { _, event -> handleBubbleTouch(key, view, params, event) }
 
     try {
       windowManager.addView(view, params)
-      bubbleView = view
-      bubbleParams = params
     } catch (e: Exception) {
       // Missing SYSTEM_ALERT_WINDOW permission or overlay already present.
       stopSelf()
+      return
+    }
+
+    val entry = BubbleEntry(
+      participantKey = key,
+      conversationJson = json,
+      view = view,
+      params = params,
+      badgeView = badge,
+      unreadCount = 0,
+    )
+    bubbles[key] = entry
+    if (activeConversationKey == null) activeConversationKey = key
+    paintAvatar(entry)
+  }
+
+  /** Repaint a single bubble's avatar from its conversation payload. */
+  private fun paintAvatar(entry: BubbleEntry) {
+    val avatarView = entry.view.findViewById<ImageView>(R.id.chat_bubble_avatar)
+    val avatarBitmap = decodeAvatar(entry.conversationJson)
+    if (avatarBitmap != null) {
+      avatarView.setImageBitmap(avatarBitmap)
+    } else {
+      avatarView.setImageResource(android.R.drawable.ic_dialog_email)
     }
   }
 
+  /**
+   * Shared gesture handler for every bubble in the stack. Dragging moves the
+   * WHOLE stack (single shared position). Tapping opens the tapped bubble's
+   * conversation; tapping a different bubble while a window is open switches
+   * conversations; hold + drag to the ✕ removes that bubble from the stack.
+   */
+  private fun handleBubbleTouch(
+    key: String,
+    view: View,
+    params: WindowManager.LayoutParams,
+    event: MotionEvent,
+  ): Boolean {
+    when (event.action) {
+      MotionEvent.ACTION_DOWN -> {
+        // While the stack is gliding to the middle-right to open the window,
+        // ignore input entirely.
+        if (isSnappingToOpen) return true
+        pressedKey = key
+        initialStackX = stackX
+        initialStackY = stackY
+        initialTouchX = event.rawX
+        initialTouchY = event.rawY
+        lastVelocityX = 0f
+        lastVelocityY = 0f
+        lastMoveTime = 0L
+        isDragging = false
+        longPressTriggered = false
+        snapAnimator?.cancel()
+        dismissAnimator?.cancel()
+        if (chatView == null) {
+          // Window closed — arm the long-press (hold) removal mode: reveal the
+          // ✕ target at the bottom and give a haptic cue. Only then can the
+          // bubble be dragged onto the ✕ to remove it.
+          longPressHandler.postDelayed(
+            {
+              longPressTriggered = true
+              armedDismissKey = key
+              showDismissArea()
+              view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            },
+            LONG_PRESS_MS,
+          )
+        }
+        return true
+      }
+
+      MotionEvent.ACTION_MOVE -> {
+        // Window open — the stack is anchored next to the window; never move it.
+        if (chatView != null) return true
+        // Dragging can start both BEFORE and AFTER the long-press fires.
+        if (!isDragging) {
+          val dx = event.rawX - initialTouchX
+          val dy = event.rawY - initialTouchY
+          if (Math.abs(dx) > TOUCH_SLOP || Math.abs(dy) > TOUCH_SLOP) {
+            isDragging = true
+            if (!longPressTriggered) {
+              longPressHandler.removeCallbacksAndMessages(null)
+            }
+          }
+        }
+        if (isDragging) {
+          val size = params.width
+          stackX = initialStackX + (event.rawX - initialTouchX).toInt()
+          stackY = initialStackY + (event.rawY - initialTouchY).toInt()
+          // Clamp within screen bounds. Y is allowed to reach the very bottom
+          // so the stack can be dropped on the ✕ target.
+          stackX = stackX.coerceIn(-size / 2, metrics.widthPixels - size / 2)
+          stackY = stackY.coerceIn(0, metrics.heightPixels - size / 2)
+          updateAllBubblePositions()
+          // Velocity tracking (px/s).
+          val now = System.currentTimeMillis()
+          if (lastMoveTime != 0L) {
+            val dt = (now - lastMoveTime).coerceAtLeast(1L)
+            lastVelocityX = (event.rawX - initialTouchX) / dt * 1000f
+            lastVelocityY = (event.rawY - initialTouchY) / dt * 1000f
+          }
+          lastMoveTime = now
+          // Highlight the ✕ while the stack hovers over it (hold-to-remove).
+          if (longPressTriggered) {
+            updateDismissHighlight(stackX + size / 2f, stackY + size / 2f)
+          }
+        }
+        return true
+      }
+
+      MotionEvent.ACTION_UP -> {
+        longPressHandler.removeCallbacksAndMessages(null)
+        hideDismissArea()
+        if (chatView != null) {
+          // Window open — a tap on the active bubble collapses it; a tap on a
+          // different bubble switches to that conversation.
+          if (openConversationKey == key) {
+            closeFloatingChat()
+          } else {
+            switchOpenConversation(key)
+          }
+        } else if (isDragging || longPressTriggered) {
+          // Hold + drop on the ✕ target → remove that bubble from the stack.
+          if (longPressTriggered && isOverDismissTarget(stackX, stackY)) {
+            animateDismiss(armedDismissKey ?: key)
+          } else {
+            snapToEdge()
+          }
+        } else {
+          // Plain tap → snap the stack to the middle-right edge and open the
+          // tapped bubble's conversation anchored right there.
+          snapBubbleToMiddleRightThenOpen(key)
+        }
+        isDragging = false
+        longPressTriggered = false
+        armedDismissKey = null
+        pressedKey = null
+        return true
+      }
+
+      MotionEvent.ACTION_CANCEL -> {
+        longPressHandler.removeCallbacksAndMessages(null)
+        hideDismissArea()
+        if (isDragging && chatView == null) snapToEdge()
+        isDragging = false
+        longPressTriggered = false
+        armedDismissKey = null
+        pressedKey = null
+        return true
+      }
+
+      else -> return true
+    }
+  }
+
+  /**
+   * Recompute and apply every bubble's position from the shared stackX/stackY
+   * (each bubble sits BUBBLE_STEP px below the previous one).
+   */
+  private fun updateAllBubblePositions() {
+    var y = stackY
+    for (entry in bubbles.values) {
+      entry.params.x = stackX
+      entry.params.y = y
+      try {
+        windowManager.updateViewLayout(entry.view, entry.params)
+      } catch (_: Exception) {
+        // ignore
+      }
+      y += entry.params.width + bubbleStepPx
+    }
+  }
+
+  /** Remove one bubble from the stack; stops the service when the last is gone. */
+  private fun removeBubbleEntry(key: String) {
+    val entry = bubbles.remove(key) ?: return
+    if (openConversationKey == key) {
+      closeFloatingChat()
+    }
+    if (activeConversationKey == key) {
+      activeConversationKey = bubbles.keys.firstOrNull()
+    }
+    if (pressedKey == key) pressedKey = null
+    if (armedDismissKey == key) armedDismissKey = null
+    try {
+      windowManager.removeView(entry.view)
+    } catch (_: IllegalArgumentException) {
+      // Already removed — safe to ignore.
+    }
+    if (bubbles.isEmpty()) {
+      stopSelf()
+    } else {
+      updateAllBubblePositions()
+    }
+  }
+
+  /** Remove ALL bubbles (service teardown). */
   private fun removeBubble() {
     longPressHandler.removeCallbacksAndMessages(null)
     snapAnimator?.cancel()
     dismissAnimator?.cancel()
     hideDismissArea()
-    bubbleView?.let { view ->
+    for (entry in bubbles.values) {
       try {
-        windowManager.removeView(view)
+        windowManager.removeView(entry.view)
       } catch (_: IllegalArgumentException) {
         // Already removed — safe to ignore.
       }
     }
-    bubbleView = null
-    bubbleParams = null
-    bubbleBadgeView = null
+    bubbles.clear()
+    pressedKey = null
+    armedDismissKey = null
+    activeConversationKey = null
+    openConversationKey = null
+  }
+
+  /** Extract the participantKey from a conversation JSON payload. */
+  private fun extractParticipantKey(json: String?): String? {
+    if (json == null) return null
+    return try {
+      org.json.JSONObject(json).optString("participantKey").takeIf { it.isNotEmpty() }
+    } catch (_: Exception) {
+      null
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Bubble physics: edge snap, dismiss, dismiss-area overlay
   // ---------------------------------------------------------------------------
 
-  /** Smoothly move the bubble to the nearest horizontal edge, keeping its Y. */
+  /** Smoothly move the whole stack to the nearest horizontal edge, keeping its Y. */
   private fun snapToEdge() {
-    val view = bubbleView ?: return
-    val p = bubbleParams ?: return
-    val bubbleSize = p.width
+    if (bubbles.isEmpty()) return
+    val bubbleSize = bubbles.values.first().params.width
     val targetX =
-      if (p.x + bubbleSize / 2f < metrics.widthPixels / 2f) {
+      if (stackX + bubbleSize / 2f < metrics.widthPixels / 2f) {
         -bubbleSize / 6 // small overhang left (messenger-style)
       } else {
         metrics.widthPixels - bubbleSize + bubbleSize / 6
       }
-    val startX = p.x
-    val startY = p.y
-    val targetY = p.y.coerceIn(0, metrics.heightPixels - bubbleSize)
+    val startX = stackX
+    val startY = stackY
+    val targetY = stackY.coerceIn(0, metrics.heightPixels - stackHeightPx)
     snapAnimator?.cancel()
     snapAnimator =
       android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
@@ -533,45 +679,37 @@ class ChatBubbleService : Service() {
         interpolator = android.view.animation.DecelerateInterpolator()
         addUpdateListener { a ->
           val t = a.animatedFraction
-          val nx = startX + ((targetX - startX) * t).toInt()
-          val ny = startY + ((targetY - startY) * t).toInt()
-          p.x = nx
-          p.y = ny
-          try {
-            windowManager.updateViewLayout(view, p)
-          } catch (_: Exception) {
-            // ignore
-          }
+          stackX = startX + ((targetX - startX) * t).toInt()
+          stackY = startY + ((targetY - startY) * t).toInt()
+          updateAllBubblePositions()
         }
       }
     snapAnimator?.start()
   }
 
   /**
-   * Snap the bubble quickly to the vertical-middle of the RIGHT screen edge,
-   * then immediately open the floating chat window anchored right next to it.
-   *
-   * This gives the "direct launch from current position" feel: the bubble
-   * glides from wherever the user tapped it to the middle-right anchor and the
-   * window expands from there — the bubble never jumps to a default top/center
-   * spot while the window is opening.
+   * Snap the whole stack quickly to the vertical-middle of the RIGHT screen
+   * edge, then immediately open the tapped bubble's conversation in the
+   * floating chat window anchored right next to it.
    */
-  private fun snapBubbleToMiddleRightThenOpen() {
+  private fun snapBubbleToMiddleRightThenOpen(key: String) {
     if (isSnappingToOpen) return
-    // No conversation payload — fall back to launching the full app (the
-    // floating window has nothing to show). No point animating the bubble.
-    if (conversationJson.isNullOrEmpty()) {
+    val entry = bubbles[key] ?: run {
       openInApp()
       return
     }
-    val view = bubbleView ?: return
-    val p = bubbleParams ?: return
-    val bubbleSize = p.width
+    // No conversation payload — fall back to launching the full app (the
+    // floating window has nothing to show). No point animating the bubble.
+    if (entry.conversationJson.isNullOrEmpty()) {
+      openInApp()
+      return
+    }
+    val bubbleSize = entry.params.width
     val targetX = metrics.widthPixels - bubbleSize + bubbleSize / 6 // right-edge overhang
-    val targetY = ((metrics.heightPixels - bubbleSize) / 2)
-      .coerceIn(0, metrics.heightPixels - bubbleSize)
-    val startX = p.x
-    val startY = p.y
+    val targetY = ((metrics.heightPixels - stackHeightPx) / 2)
+      .coerceIn(0, metrics.heightPixels - stackHeightPx)
+    val startX = stackX
+    val startY = stackY
     isSnappingToOpen = true
     snapAnimator?.cancel()
     snapAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
@@ -579,15 +717,9 @@ class ChatBubbleService : Service() {
       interpolator = android.view.animation.DecelerateInterpolator()
       addUpdateListener { a ->
         val t = a.animatedFraction
-        val nx = startX + ((targetX - startX) * t).toInt()
-        val ny = startY + ((targetY - startY) * t).toInt()
-        p.x = nx
-        p.y = ny
-        try {
-          windowManager.updateViewLayout(view, p)
-        } catch (_: Exception) {
-          // ignore
-        }
+        stackX = startX + ((targetX - startX) * t).toInt()
+        stackY = startY + ((targetY - startY) * t).toInt()
+        updateAllBubblePositions()
       }
       addListener(object : android.animation.Animator.AnimatorListener {
         override fun onAnimationStart(animation: android.animation.Animator) {}
@@ -598,24 +730,23 @@ class ChatBubbleService : Service() {
         override fun onAnimationEnd(animation: android.animation.Animator) {
           isSnappingToOpen = false
           // Land exactly on the anchor (floating-point drift safety).
-          p.x = targetX
-          p.y = targetY
-          try {
-            windowManager.updateViewLayout(view, p)
-          } catch (_: Exception) {
-            // ignore
-          }
-          openFloatingChat()
+          stackX = targetX
+          stackY = targetY
+          updateAllBubblePositions()
+          activeConversationKey = key
+          openConversationKey = key
+          openFloatingChat(entry)
         }
       })
     }
     snapAnimator?.start()
   }
 
-  /** Animate the bubble shrinking away (dismissed). */
-  private fun animateDismiss() {
-    val view = bubbleView ?: return
-    val p = bubbleParams ?: return
+  /** Animate a single bubble shrinking away, then remove it from the stack. */
+  private fun animateDismiss(key: String) {
+    val entry = bubbles[key] ?: return
+    val view = entry.view
+    val p = entry.params
     val startX = p.x
     val startY = p.y
     val startW = p.width
@@ -650,11 +781,14 @@ class ChatBubbleService : Service() {
         }
         addListener(object : android.animation.Animator.AnimatorListener {
           override fun onAnimationStart(animation: android.animation.Animator) {}
-          override fun onAnimationCancel(animation: android.animation.Animator) {}
+          override fun onAnimationCancel(animation: android.animation.Animator) {
+            // Cancelled mid-dismiss — still remove the entry so the stack
+            // never leaks an orphaned bubble.
+            removeBubbleEntry(key)
+          }
           override fun onAnimationRepeat(animation: android.animation.Animator) {}
           override fun onAnimationEnd(animation: android.animation.Animator) {
-            // Bubble dismissed — stop the foreground service (kills overlay).
-            stopSelf()
+            removeBubbleEntry(key)
           }
         })
       }
@@ -740,11 +874,11 @@ class ChatBubbleService : Service() {
     dismissHighlighted = false
   }
 
-  /** Whether the bubble's center is inside the ✕ dismiss target. */
-  private fun isOverDismissTarget(bubbleX: Int, bubbleY: Int): Boolean {
+  /** Whether the stack's center is inside the ✕ dismiss target. */
+  private fun isOverDismissTarget(stackCenterX: Int, stackCenterY: Int): Boolean {
     val bounds = dismissAreaBounds ?: return false
-    val size = bubbleView?.width ?: dp(64)
-    return bounds.contains(bubbleX + size / 2, bubbleY + size / 2)
+    val size = bubbles.values.firstOrNull()?.params?.width ?: dp(64)
+    return bounds.contains(stackCenterX + size / 2, stackCenterY + size / 2)
   }
 
   /** Visually emphasize the ✕ target while the bubble hovers over it. */
@@ -761,13 +895,15 @@ class ChatBubbleService : Service() {
     }
   }
 
-  /** Update the unread badge (called from JS via ChatBubbleModule). */
-  fun setUnreadCount(count: Int) {
-    unreadCount = count.coerceAtLeast(0)
-    val badge = bubbleBadgeView
-    if (badge == null) return
-    badge.text = if (unreadCount > 99) "99+" else unreadCount.toString()
-    badge.visibility = if (unreadCount > 0) android.view.View.VISIBLE else android.view.View.GONE
+  /** Update one bubble's unread badge (called from JS via ChatBubbleModule). */
+  fun setUnreadCount(participantKey: String?, count: Int) {
+    val key = participantKey ?: LEGACY_BUBBLE_KEY
+    val entry = bubbles[key] ?: return
+    entry.unreadCount = count.coerceAtLeast(0)
+    val badge = entry.badgeView
+    badge.text = if (entry.unreadCount > 99) "99+" else entry.unreadCount.toString()
+    badge.visibility =
+      if (entry.unreadCount > 0) android.view.View.VISIBLE else android.view.View.GONE
   }
 
   // ---------------------------------------------------------------------------
@@ -798,18 +934,16 @@ class ChatBubbleService : Service() {
    * the bubble's current position (the bubble was snapped to the middle-right
    * edge just before this runs, so the window expands right there).
    */
-  private fun openFloatingChat() {
+  private fun openFloatingChat(entry: BubbleEntry) {
     if (chatView != null) {
-      // Already open — bring it back in front.
-      try {
-        windowManager.updateViewLayout(chatView, chatWindowParams)
-      } catch (_: Exception) {
-        // ignore
-      }
+      // A window is already open — switch to the tapped conversation instead
+      // of stacking a second window.
+      switchOpenConversation(entry.participantKey)
       return
     }
     // Don't open a window without a conversation payload.
-    if (conversationJson.isNullOrEmpty()) {
+    val conversation = entry.conversationJson
+    if (conversation.isNullOrEmpty()) {
       openInApp()
       return
     }
@@ -819,7 +953,7 @@ class ChatBubbleService : Service() {
 
     // Build the React surface that renders the FloatingChat JS component.
     val initialProps = android.os.Bundle().apply {
-      putString("conversation", conversationJson)
+      putString("conversation", conversation)
     }
     val surface = try {
       host.createSurface(this, FLOATING_CHAT_MODULE, initialProps)
@@ -857,10 +991,10 @@ class ChatBubbleService : Service() {
       // so the chat window expands exactly where the user tapped. The bubble
       // is locked in place while the window is open, so the window is
       // permanently anchored to the same spot.
-      val bubble = bubbleParams
-      val bubbleSize = bubble?.width ?: dp(64)
-      val anchorX = bubble?.x ?: 0
-      val anchorY = bubble?.y ?: 0
+      val bubble = entry.params
+      val bubbleSize = bubble.width
+      val anchorX = bubble.x
+      val anchorY = bubble.y
       x = (anchorX - dp(8) - finalW).coerceIn(dp(8), metrics.widthPixels - finalW - dp(8))
       y = (anchorY + bubbleSize / 2 - finalH / 2)
         .coerceIn(dp(12), metrics.heightPixels - finalH - dp(12))
@@ -1013,36 +1147,59 @@ class ChatBubbleService : Service() {
   }
 
   /**
-   * Re-assert the bubble ABOVE the floating chat window. Windows added later
-   * sit above earlier ones, so removing + re-adding the bubble (with a fresh
-   * LayoutParams) brings it back on top. Called when the chat window opens and
-   * again whenever it regains focus (tapping the input would otherwise put the
-   * focused window above the not-focusable bubble).
+   * Re-assert ALL bubbles ABOVE the floating chat window. Windows added later
+   * sit above earlier ones, so removing + re-adding each bubble (with a fresh
+   * LayoutParams) brings the whole stack back on top. Called when the chat
+   * window opens and again whenever it regains focus (tapping the input would
+   * otherwise put the focused window above the not-focusable bubbles).
    */
   private fun bringBubbleToFront() {
-    val bubble = bubbleView ?: return
-    val bp = bubbleParams ?: return
-    try {
-      windowManager.removeView(bubble)
-    } catch (_: Exception) {
-      // ignore
+    for (entry in bubbles.values) {
+      val bubble = entry.view
+      val bp = entry.params
+      try {
+        windowManager.removeView(bubble)
+      } catch (_: Exception) {
+        // ignore
+      }
+      val fresh = WindowManager.LayoutParams(
+        bp.width,
+        bp.height,
+        bp.type,
+        bp.flags,
+        bp.format,
+      ).apply {
+        gravity = bp.gravity
+        x = bp.x
+        y = bp.y
+      }
+      try {
+        windowManager.addView(bubble, fresh)
+      } catch (_: Exception) {
+        // ignore
+      }
     }
-    val fresh = WindowManager.LayoutParams(
-      bp.width,
-      bp.height,
-      bp.type,
-      bp.flags,
-      bp.format,
-    ).apply {
-      gravity = bp.gravity
-      x = bp.x
-      y = bp.y
+  }
+
+  /**
+   * Switch the already-open floating chat window to another conversation.
+   * Tears the current window down and reopens it anchored to the tapped
+   * bubble's position.
+   */
+  private fun switchOpenConversation(key: String) {
+    val entry = bubbles[key] ?: return
+    if (entry.conversationJson.isNullOrEmpty()) {
+      closeFloatingChat()
+      openInApp()
+      return
     }
-    try {
-      windowManager.addView(bubble, fresh)
-    } catch (_: Exception) {
-      // ignore
-    }
+    // Tear down the current window synchronously, then reopen with the new
+    // conversation. The stack is already anchored at the tapped bubble's
+    // position, so the window expands right next to it.
+    teardownFloatingChat()
+    activeConversationKey = key
+    openConversationKey = key
+    openFloatingChat(entry)
   }
 
   /**
@@ -1124,6 +1281,7 @@ class ChatBubbleService : Service() {
     chatSurface = null
     isClosingChat = false
     openAnimationRunnable = null
+    openConversationKey = null
     restoreHostPauseAfterOverlay()
   }
 
@@ -1191,15 +1349,16 @@ class ChatBubbleService : Service() {
     android.util.Log.i("ChatBubbleService", message)
   }
 
-  /** Launch the conversation in the full app (previous behavior). */
+  /** Launch the active conversation in the full app (previous behavior). */
   private fun openInApp() {
-    pendingConversation = conversationJson
+    val json = activeConversationKey?.let { bubbles[it]?.conversationJson } ?: conversationJson
+    pendingConversation = json
 
     // Bring the app to the foreground.
     val launchIntent = Intent(this, MainActivity::class.java).apply {
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
       action = Intent.ACTION_MAIN
-      putExtra(EXTRA_CONVERSATION, conversationJson)
+      putExtra(EXTRA_CONVERSATION, json)
     }
     startActivity(launchIntent)
 
@@ -1208,12 +1367,13 @@ class ChatBubbleService : Service() {
   }
 
   private fun emitOpenEvent() {
+    val json = activeConversationKey?.let { bubbles[it]?.conversationJson } ?: conversationJson
     try {
       val app = application as ReactApplication
       val host = app.reactHost ?: return
       val reactContext = host.currentReactContext ?: return
       val payload: WritableMap = Arguments.createMap()
-      payload.putString("conversation", conversationJson)
+      payload.putString("conversation", json)
       reactContext
         .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
         .emit("ChatBubble.open", payload)
@@ -1248,12 +1408,20 @@ class ChatBubbleService : Service() {
   companion object {
     const val ACTION_SHOW = "ai.soulbits.chat.action.SHOW_BUBBLE"
     const val ACTION_HIDE = "ai.soulbits.chat.action.HIDE_BUBBLE"
+    const val ACTION_HIDE_ONE = "ai.soulbits.chat.action.HIDE_BUBBLE_ONE"
     const val ACTION_SET_UNREAD = "ai.soulbits.chat.action.SET_UNREAD"
     const val ACTION_CLOSE_WINDOW = "ai.soulbits.chat.action.CLOSE_WINDOW"
     const val EXTRA_CONVERSATION = "conversation_json"
     const val EXTRA_UNREAD_COUNT = "unread_count"
+    const val EXTRA_PARTICIPANT_KEY = "participant_key"
     /** JS module registered for the floating chat surface. */
     const val FLOATING_CHAT_MODULE = "FloatingChat"
+    /** Maximum number of concurrent chat bubbles (Messenger-style stack). */
+    const val MAX_BUBBLES = 4
+    /** Vertical gap between stacked bubbles. */
+    const val BUBBLE_STEP_DP = 8
+    /** Fallback key when a conversation payload has no participantKey. */
+    const val LEGACY_BUBBLE_KEY = "__legacy_bubble__"
     private const val NOTIFICATION_ID = 4201
     private const val LONG_PRESS_MS = 500L
     private const val TOUCH_SLOP = 8f

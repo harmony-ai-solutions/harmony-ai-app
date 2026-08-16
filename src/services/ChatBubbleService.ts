@@ -51,14 +51,21 @@ export interface BubbleConversation {
 const native = Platform.OS === 'android' ? NativeModules.ChatBubbleModule : null;
 
 /**
- * The conversation currently shown as the floating bubble (set by showBubble,
- * cleared by hideBubble). Used to sync the unread badge count.
+ * Conversations currently shown as floating bubbles, keyed by participantKey
+ * (insertion order = stack order, top → bottom). The native side enforces a
+ * max of 4 — when the stack is full the oldest bubble is auto-replaced.
  */
-let activeBubbleConversation: BubbleConversation | null = null;
+const activeBubbleConversations = new Map<string, BubbleConversation>();
 
-/** Get the conversation currently shown as the floating bubble. */
+/** Get the most recently shown floating bubble conversation (legacy). */
 export function getActiveBubbleConversation(): BubbleConversation | null {
-  return activeBubbleConversation;
+  const values = [...activeBubbleConversations.values()];
+  return values.length > 0 ? values[values.length - 1] : null;
+}
+
+/** Get ALL conversations currently shown as floating bubbles (stack order). */
+export function getActiveBubbleConversations(): BubbleConversation[] {
+  return [...activeBubbleConversations.values()];
 }
 
 let emitter: NativeEventEmitter | null = null;
@@ -345,7 +352,7 @@ export async function showBubble(
     return false;
   }
   try {
-    activeBubbleConversation = conversation;
+    activeBubbleConversations.set(conversation.participantKey, conversation);
     const result = native.show(JSON.stringify(conversation));
     if (result === false) {
       // Native refused to start the bubble service (e.g. foreground-service
@@ -371,15 +378,24 @@ export function cancelPendingBubble(): void {
   settlePermissionRequest(false);
 }
 
-/** Hide/remove the floating bubble. */
-export async function hideBubble(): Promise<void> {
-  activeBubbleConversation = null;
+/**
+ * Hide/remove floating bubble(s). When a participantKey is given, only that
+ * bubble is removed; otherwise ALL bubbles are hidden (service stops).
+ */
+export async function hideBubble(participantKey?: string): Promise<void> {
   if (!native) {
     log.warn('ChatBubbleModule unavailable — nothing to hide.');
+    activeBubbleConversations.clear();
     return;
   }
   try {
-    native.hide();
+    if (participantKey) {
+      activeBubbleConversations.delete(participantKey);
+      (native as any).hideOne(participantKey);
+    } else {
+      activeBubbleConversations.clear();
+      native.hide();
+    }
   } catch (e) {
     log.error('hideBubble failed:', e);
   }
@@ -401,15 +417,19 @@ export function closeBubbleWindow(): void {
 }
 
 /**
- * Update the unread badge count shown on the floating bubble.
- * Call this when new messages arrive while the bubble is visible.
+ * Update the unread badge count shown on ONE floating bubble. Call this when
+ * new messages arrive while the bubble is visible. participantKey selects the
+ * bubble; when omitted the (legacy) single bubble is targeted.
  */
-export async function setBubbleUnreadCount(count: number): Promise<void> {
+export async function setBubbleUnreadCount(
+  count: number,
+  participantKey?: string,
+): Promise<void> {
   if (!native || typeof (native as any).setUnreadCount !== 'function') {
     return;
   }
   try {
-    (native as any).setUnreadCount(Math.max(0, count));
+    (native as any).setUnreadCount(Math.max(0, count), participantKey ?? null);
   } catch (e) {
     log.error('setUnreadCount failed:', e);
   }
@@ -426,4 +446,5 @@ export default {
   cancelPendingBubble,
   setBubbleUnreadCount,
   getActiveBubbleConversation,
+  getActiveBubbleConversations,
 };

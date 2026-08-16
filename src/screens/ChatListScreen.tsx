@@ -66,21 +66,24 @@ import {
   showBubble,
   hasBubblePermission,
   requestBubblePermission,
-  getActiveBubbleConversation,
+  getActiveBubbleConversations,
   setBubbleUnreadCount,
 } from '../services/ChatBubbleService';
 
 const log = createLogger('[ChatListScreen]');
 
 /**
- * Sync the floating bubble's unread badge to the conversation currently shown
- * as a bubble (if any). No-op when no bubble conversation is active.
+ * Sync every floating bubble's unread badge to its conversation's unread
+ * count (each bubble belongs to a different conversation). No-op when no
+ * bubble conversation is active.
  */
 function syncBubbleUnreadBadge(listItems: ChatListItem[]): void {
-  const active = getActiveBubbleConversation();
-  if (!active) return;
-  const match = listItems.find(item => item.participantKey === active.participantKey);
-  setBubbleUnreadCount(match?.unreadCount ?? 0);
+  const activeBubbles = getActiveBubbleConversations();
+  if (activeBubbles.length === 0) return;
+  for (const bubble of activeBubbles) {
+    const match = listItems.find(item => item.participantKey === bubble.participantKey);
+    setBubbleUnreadCount(match?.unreadCount ?? 0, bubble.participantKey);
+  }
 }
 
 interface ChatListItem {
