@@ -34,6 +34,10 @@ interface MessageActionSheetProps {
   partnerName?: string;
   /** The currently pinned state of the message (for the pin/unpin toggle label). */
   isPinned?: boolean;
+  /** Hide the quick emoji reaction row (still rendered internally, just not shown). */
+  hideReactions?: boolean;
+  /** Hide the "Forward" action from the list (still handled internally, just not shown). */
+  hideForward?: boolean;
   onAction: (action: MessageAction) => void;
   onReact: (emoji: string) => void;
   onClose: () => void;
@@ -53,6 +57,8 @@ export const MessageActionSheet: React.FC<MessageActionSheetProps> = ({
   isOwn,
   partnerName = 'AI',
   isPinned = false,
+  hideReactions = false,
+  hideForward = false,
   onAction,
   onReact,
   onClose,
@@ -82,7 +88,9 @@ export const MessageActionSheet: React.FC<MessageActionSheetProps> = ({
   }[] = [
     { key: 'delete', icon: 'delete-outline', label: t('delete'), destructive: true },
     { key: 'copy', icon: 'content-copy', label: t('copy') },
-    { key: 'forward', icon: 'share-variant', label: t('forward') },
+    ...(hideForward
+      ? []
+      : [{ key: 'forward' as MessageAction, icon: 'share-variant', label: t('forward') }]),
     { key: 'translate', icon: 'translate', label: t('translate') },
     {
       key: 'pin',
@@ -139,7 +147,7 @@ export const MessageActionSheet: React.FC<MessageActionSheetProps> = ({
               />
 
               {/* Message preview */}
-              <View style={styles.preview}>
+              <View style={[styles.preview, hideReactions && styles.previewCompact]}>
                 <View
                   style={[
                     styles.senderDot,
@@ -163,7 +171,8 @@ export const MessageActionSheet: React.FC<MessageActionSheetProps> = ({
               </View>
 
               {/* Quick reactions */}
-              <View style={styles.reactionsRow}>
+              {!hideReactions && (
+                <View style={styles.reactionsRow}>
                 {QUICK_REACTIONS.map(emoji => (
                   <TouchableOpacity
                     key={emoji}
@@ -180,11 +189,13 @@ export const MessageActionSheet: React.FC<MessageActionSheetProps> = ({
                     <ThemedText size={22}>{emoji}</ThemedText>
                   </TouchableOpacity>
                 ))}
-              </View>
+                </View>
+              )}
 
               <View
                 style={[
                   styles.separator,
+                  hideReactions && styles.separatorCompact,
                   { backgroundColor: theme.colors.border.default + '44' },
                 ]}
               />
@@ -310,6 +321,9 @@ const styles = StyleSheet.create({
   previewText: {
     marginTop: 2,
   },
+  previewCompact: {
+    paddingBottom: 4,
+  },
   reactionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -327,6 +341,9 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginHorizontal: 20,
     marginVertical: 14,
+  },
+  separatorCompact: {
+    marginVertical: 6,
   },
   actionList: {
     paddingBottom: 8,

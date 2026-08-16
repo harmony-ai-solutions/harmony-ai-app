@@ -2141,6 +2141,8 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         isOwn={actionSheetMessage?.sender_entity_id === ownEntityId}
         partnerName={partnerName}
         isPinned={actionSheetMessage?.is_pinned ?? false}
+        hideReactions
+        hideForward
         onAction={handleMessageAction}
         onReact={(emoji) => {
           if (actionSheetMessage) {
