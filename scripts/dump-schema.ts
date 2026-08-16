@@ -55,6 +55,9 @@ const CLIENT_ONLY_TABLES = new Set<string>([
   'follows',
   'notifications',
   'chat_conversation_settings',
+  'character_marketplace_listings',
+  'soul_wallet',
+  'soul_purchases',
 ]);
 
 interface Args {

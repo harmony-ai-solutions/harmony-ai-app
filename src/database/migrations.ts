@@ -61,6 +61,8 @@ import { migration041 as migration041s } from './migrations/000041_add_character
 import { migration042 as migration042s } from './migrations/000042_add_user_posts_social';
 import { migration043 as migration043s } from './migrations/000043_add_character_profile_visibility';
 import { migration044 as migration044s } from './migrations/000044_add_chat_conversation_settings';
+import { migration045 as migration045s } from './migrations/000045_add_marketplace_and_soul_wallet';
+import { migration046 as migration046s } from './migrations/000046_extend_visibility_check_marketplace';
 
 // Migration definition
 export interface Migration {
@@ -324,6 +326,16 @@ export const MIGRATIONS: Migration[] = [
     version: 44,
     description: 'add_chat_conversation_settings',
     sql: migration044s,
+   },
+   {
+    version: 45,
+    description: 'add_marketplace_and_soul_wallet',
+    sql: migration045s,
+   },
+   {
+    version: 46,
+    description: 'extend_visibility_check_marketplace',
+    sql: migration046s,
    },
   ];
 

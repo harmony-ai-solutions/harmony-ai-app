@@ -1,81 +1,170 @@
 /**
- * MarketScreen — Soul Market & Community Hub (Coming Soon)
+ * MarketScreen — SOUL Marketplace
  *
- * A premium glassmorphism marketplace hub. Because the marketplace content
- * isn't live yet, the screen shows a "Coming Soon" state with a search bar
- * and feature preview cards for:
- *   - Database search
- *   - Prompt search
- *   - Buying Souls
- *   - Selling Souls
- *   - Image generation
- *   - Video generation
- *   - Call time
+ * Browse AI characters that creators have listed for sale. Each listing shows
+ * the character's portrait + SOUL price. Tapping a card opens the character's
+ * public AI profile (viewing is always free); the Chat button runs the
+ * purchase gate — chatting with a marketplace character requires buying it
+ * with SOULs (one-time purchase, permanent access).
  *
- * The user's Soul balance is displayed as a badge at the top of the screen.
- * When the user types a query that matches nothing, a "no content yet"
- * state is shown (mirroring the Discover screen's 0-results overlay).
+ * The user's SOUL balance is shown in the header badge.
  */
 
 import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, TextInput, RefreshControl } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  FlatList,
+  TextInput,
+  RefreshControl,
+  ActivityIndicator,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useToast } from '../contexts/AppToastContext';
+import { useAuth } from '../contexts/AuthContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
-import { ThemedCard } from '../components/themed/ThemedCard';
-import { ThemedGradient } from '../components/themed/ThemedGradient';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SoulIcon } from '../components/market/SoulIcon';
+import { MarketListingCard } from '../components/market/MarketListingCard';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
+import { createLogger } from '../utils/logger';
+import {
+  getMarketplaceCharacterProfiles,
+  getSoulBalance,
+  type MarketplaceListingWithProfile,
+} from '../database/repositories/marketplace';
+import { getCharacterImages } from '../database/repositories/characters';
+import { createDataURL } from '../database/base64';
+import { openCharacterChat } from '../services/CharacterChatService';
+import {
+  isChatLocked,
+  canChatWithProfile,
+} from '../services/MarketplacePurchaseService';
 
-interface MarketFeature {
-  key: 'databases' | 'prompts' | 'buy' | 'sell' | 'imageGen' | 'videoGen' | 'callTime';
-  icon: string;
-}
-
-const MARKET_FEATURES: MarketFeature[] = [
-  { key: 'databases', icon: 'database-outline' },
-  { key: 'prompts', icon: 'text-box-search-outline' },
-  { key: 'buy', icon: 'plus-circle-outline' },
-  // Sell uses minus-circle-outline — mirrors the Buy plus-circle for a
-  // clean, professional +/− pairing.
-  { key: 'sell', icon: 'minus-circle-outline' },
-  { key: 'imageGen', icon: 'image-multiple-outline' },
-  { key: 'videoGen', icon: 'video-outline' },
-  { key: 'callTime', icon: 'phone-in-talk-outline' },
-];
+const log = createLogger('[MarketScreen]');
 
 export const MarketScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
+  const { showToast } = useToast();
+  const { user } = useAuth();
   const { t } = useTranslation('market');
   const { bottom: safeBottom } = useSafeAreaInsets();
+
+  const [listings, setListings] = useState<MarketplaceListingWithProfile[]>([]);
+  const [primaryImages, setPrimaryImages] = useState<Record<string, string | null>>({});
+  const [canChatMap, setCanChatMap] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState('');
+  const [balance, setBalance] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [chattingId, setChattingId] = useState<string | null>(null);
+
+  const loadMarketplace = useCallback(async () => {
+    try {
+      const data = await getMarketplaceCharacterProfiles();
+      setListings(data);
+
+      // Load primary image + chat-access per listing in parallel
+      const imageMap: Record<string, string | null> = {};
+      const chatMap: Record<string, boolean> = {};
+      await Promise.all(
+        data.map(async listing => {
+          try {
+            const images = await getCharacterImages(listing.profileId);
+            const primary = images.find(img => img.is_primary === true);
+            imageMap[listing.profileId] = primary
+              ? createDataURL(primary.image_data, primary.mime_type)
+              : null;
+          } catch {
+            imageMap[listing.profileId] = null;
+          }
+          try {
+            chatMap[listing.profileId] = await canChatWithProfile(
+              listing.profileId,
+              user?.id,
+            );
+          } catch {
+            chatMap[listing.profileId] = false;
+          }
+        }),
+      );
+      setPrimaryImages(imageMap);
+      setCanChatMap(chatMap);
+
+      const bal = await getSoulBalance();
+      setBalance(bal);
+    } catch (err) {
+      log.error('Failed to load marketplace:', err);
+    } finally {
+      setIsLoading(false);
+      setRefreshing(false);
+    }
+  }, [user?.id]);
+
+  // Reload on focus so new listings + balance reflect immediately
+  useFocusEffect(
+    useCallback(() => {
+      loadMarketplace();
+    }, [loadMarketplace]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // Market content isn't live yet — a short delay simulates a refresh.
-    setTimeout(() => setRefreshing(false), 800);
-  }, []);
+    await loadMarketplace();
+    setRefreshing(false);
+  }, [loadMarketplace]);
+
+  const handleOpenProfile = (profileId: string) => {
+    navigation.navigate('AIProfile', { profileId });
+  };
+
+  const handleChat = async (listing: MarketplaceListingWithProfile) => {
+    if (chattingId === listing.profileId) return;
+    setChattingId(listing.profileId);
+    try {
+      // HARD GATE (payment not implemented yet): marketplace-listed characters
+      // that the user has not purchased (and does not own) are locked — the
+      // Chat tap is silently ignored so the chat screen can never be reached.
+      if (await isChatLocked(listing.profileId, user?.id)) {
+        return;
+      }
+      await openCharacterChat(
+        listing.profile,
+        {
+          navigateToChat: params => navigation.navigate('ChatDetail', params),
+        },
+        user?.id,
+      );
+    } catch (err) {
+      log.error('Failed to open chat:', err);
+      showToast(t('chatOpenFailed'));
+    } finally {
+      setChattingId(null);
+    }
+  };
 
   if (!theme) return null;
-
-  // ── Search state ────────────────────────────────────────────────────────
-  // The market has no content yet, so ANY non-empty query always yields
-  // zero results → show the "nothing here yet" empty state.
-  const hasQuery = query.trim().length > 0;
 
   const accent = theme.colors.accent.primary;
   const baseHex = theme.colors.background.base;
   const inputBg = hexToRgba(baseHex, 0.55);
+
+  const filtered = query.trim()
+    ? listings.filter(l =>
+        l.profile.name.toLowerCase().includes(query.trim().toLowerCase()),
+      )
+    : listings;
 
   return (
     <ThemedView variant="base" style={styles.container}>
@@ -100,7 +189,7 @@ export const MarketScreen: React.FC = () => {
               numberOfLines={1}
               style={styles.balanceText}
             >
-              0
+              {Number.isInteger(balance) ? String(balance) : balance.toFixed(2)}
             </ThemedText>
             <ThemedText
               variant="muted"
@@ -135,7 +224,7 @@ export const MarketScreen: React.FC = () => {
             returnKeyType="search"
             autoCorrect={false}
           />
-          {hasQuery && (
+          {query.length > 0 && (
             <Icon
               name="close-circle"
               size={18}
@@ -150,11 +239,15 @@ export const MarketScreen: React.FC = () => {
         </View>
       </ScreenHeader>
 
-      <ScrollView
-        style={styles.scroll}
+      <FlatList
+        style={styles.list}
+        data={filtered}
+        keyExtractor={item => item.profileId}
+        numColumns={2}
+        columnWrapperStyle={filtered.length > 0 ? styles.columnWrapper : undefined}
         contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom },
+          styles.listContent,
+          { flexGrow: 1, paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -167,117 +260,31 @@ export const MarketScreen: React.FC = () => {
             progressBackgroundColor={theme.colors.background.surface}
           />
         }
-      >
-        {/* ── Search state: query with no content ─────────────────────────── */}
-        {hasQuery ? (
-          <ThemedEmptyState
-            icon="file-search-outline"
-            title={t('noResultsTitle')}
-            subtitle={t('noResultsHint', { query })}
-            style={styles.emptyState}
-          />
-        ) : (
-          <>
-            {/* ── Coming Soon hero card ── */}
-            <ThemedCard accentStripe style={styles.heroCard}>
-              <View style={styles.heroRow}>
-                <View style={styles.heroIconWrap}>
-                  <ThemedGradient gradient="primary" style={styles.heroIconRing}>
-                    <ThemedView variant="elevated" style={styles.heroIconInner}>
-                      <SoulIcon size={40} />
-                    </ThemedView>
-                  </ThemedGradient>
-                  <View style={styles.soonBadge}>
-                    <ThemedGradient gradient="primary" style={styles.soonBadgeBg}>
-                      <ThemedText
-                        variant="primary"
-                        size={9}
-                        weight="bold"
-                        style={styles.soonBadgeText}
-                      >
-                        {t('comingSoonBadge')}
-                      </ThemedText>
-                    </ThemedGradient>
-                  </View>
-                </View>
-
-                <View style={styles.heroText}>
-                  <ThemedText
-                    variant="primary"
-                    size={20}
-                    weight="bold"
-                    hierarchy="header"
-                  >
-                    {t('comingSoonTitle')}
-                  </ThemedText>
-                  <ThemedText
-                    variant="muted"
-                    size={13}
-                    hierarchy="subtext"
-                    style={styles.heroDesc}
-                  >
-                    {t('comingSoonDescription')}
-                  </ThemedText>
-                </View>
-              </View>
-            </ThemedCard>
-
-            {/* ── Feature preview cards ── */}
-            <View style={styles.featuresGrid}>
-              {MARKET_FEATURES.map(feature => (
-                <ThemedCard key={feature.key} accentTint style={styles.featureCard}>
-                  <View style={styles.featureTop}>
-                    <View
-                      style={[
-                        styles.featureIconWrap,
-                        { backgroundColor: hexToRgba(accent, 0.14) },
-                      ]}
-                    >
-                      <Icon
-                        name={feature.icon}
-                        size={22}
-                        color={theme.colors.accent.primary}
-                      />
-                    </View>
-                    <ThemedGradient
-                      gradient="primary"
-                      style={styles.featureBadge}
-                    >
-                      <ThemedText
-                        variant="primary"
-                        size={9}
-                        weight="bold"
-                        style={styles.featureBadgeText}
-                      >
-                        {t('comingSoonBadge')}
-                      </ThemedText>
-                    </ThemedGradient>
-                  </View>
-                  <ThemedText
-                    variant="primary"
-                    size={15}
-                    weight="bold"
-                    hierarchy="header"
-                    style={styles.featureTitle}
-                  >
-                    {t(`feature${feature.key.charAt(0).toUpperCase()}${feature.key.slice(1)}`)}
-                  </ThemedText>
-                  <ThemedText
-                    variant="muted"
-                    size={12}
-                    hierarchy="subtext"
-                    style={styles.featureDesc}
-                  >
-                    {t(
-                      `feature${feature.key.charAt(0).toUpperCase()}${feature.key.slice(1)}Desc`,
-                    )}
-                  </ThemedText>
-                </ThemedCard>
-              ))}
+        ListEmptyComponent={
+          isLoading ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color={theme.colors.accent.primary} />
             </View>
-          </>
+          ) : (
+            <ThemedEmptyState
+              icon={query ? 'file-search-outline' : 'storefront-outline'}
+              title={query ? t('noResultsTitle', { query }) : t('noListingsTitle')}
+              subtitle={query ? t('noResultsHint', { query }) : t('noListingsHint')}
+              style={styles.emptyOverlay}
+            />
+          )
+        }
+        renderItem={({ item }) => (
+          <MarketListingCard
+            profile={item.profile}
+            imageUri={primaryImages[item.profileId] ?? null}
+            priceSouls={item.priceSouls}
+            canChat={canChatMap[item.profileId] ?? false}
+            onPress={() => handleOpenProfile(item.profileId)}
+            onChatPress={() => handleChat(item)}
+          />
         )}
-      </ScrollView>
+      />
     </ThemedView>
   );
 };
@@ -291,12 +298,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scroll: {
+  list: {
     flex: 1,
   },
-  scrollContent: {
+  listContent: {
     paddingHorizontal: 20,
     paddingTop: 8,
+  },
+  columnWrapper: {
+    justifyContent: 'space-between',
+  },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyOverlay: {
+    width: '100%',
   },
   // ── Balance badge ─────────────────────────────────────────────────────
   balanceBadge: {
@@ -331,99 +350,6 @@ const styles = StyleSheet.create({
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15, paddingVertical: 0 },
   clearIcon: { marginLeft: 6 },
-  // ── Empty state (search with no content) ──────────────────────────────
-  emptyState: {
-    width: '100%',
-  },
-  // ── Hero "Coming Soon" card ───────────────────────────────────────────
-  heroCard: {
-    marginBottom: 16,
-  },
-  heroRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  heroIconWrap: {
-    width: 96,
-    height: 96,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroIconRing: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroIconInner: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  soonBadge: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-  },
-  soonBadgeBg: {
-    borderRadius: 10,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-  },
-  soonBadgeText: {
-    color: '#ffffff',
-  },
-  heroText: {
-    flex: 1,
-    gap: 6,
-  },
-  heroDesc: {
-    lineHeight: 19,
-  },
-  // ── Feature cards ─────────────────────────────────────────────────────
-  // NOTE: no `gap` here — two 48% cards + gap overflow 100% and force a
-  // wrap, breaking the 2×2 grid (Buy Souls / Sell Souls must share a row).
-  featuresGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  featureCard: {
-    width: '48%',
-    minHeight: 140,
-    marginBottom: 12,
-  },
-  featureTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  featureIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  featureBadge: {
-    borderRadius: 8,
-    paddingVertical: 2,
-    paddingHorizontal: 6,
-  },
-  featureBadgeText: {
-    color: '#ffffff',
-  },
-  featureTitle: {
-    marginBottom: 4,
-  },
-  featureDesc: {
-    lineHeight: 17,
-  },
 });
 
 export default MarketScreen;

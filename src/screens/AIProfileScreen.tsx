@@ -71,6 +71,11 @@ import {
   CharacterCreator,
 } from '../database/repositories/characterSocial';
 import { openCharacterChat } from '../services/CharacterChatService';
+import {
+  isChatLocked,
+  getListing,
+} from '../services/MarketplacePurchaseService';
+import type { MarketplaceListing } from '../database/repositories/marketplace';
 import { createDataURL } from '../database/base64';
 import { getLocalProfile } from '../services/profile/UserProfileStore';
 import { CharacterProfile, CharacterImage } from '../database/models';
@@ -132,6 +137,9 @@ export const AIProfileScreen: React.FC = () => {
   const [imagePosts, setImagePosts] = useState<Record<number, ImagePostState>>({});
   // Follow state for the character's creator
   const [followingCreator, setFollowingCreator] = useState(false);
+
+  // ── Marketplace state (paid listing → chat is pay-gated) ──────────────
+  const [listing, setListing] = useState<MarketplaceListing | null>(null);
 
   // ── Comment modal state ────────────────────────────────────────────────
   const [commentImageId, setCommentImageId] = useState<number | null>(null);
@@ -304,6 +312,14 @@ export const AIProfileScreen: React.FC = () => {
       } catch (err) {
         log.warn('Failed to load image post state:', err);
       }
+
+      // Marketplace listing (drives the paywall badge + chat gate)
+      try {
+        const l = await getListing(profileId);
+        setListing(l);
+      } catch (err) {
+        log.warn('Failed to load marketplace listing:', err);
+      }
     } catch (err) {
       log.error('Failed to load AI profile:', err);
     } finally {
@@ -336,9 +352,20 @@ export const AIProfileScreen: React.FC = () => {
     if (!profile || chatting) return;
     setChatting(true);
     try {
-      await openCharacterChat(profile, {
-        navigateToChat: params => navigation.navigate('ChatDetail', params),
-      });
+      // HARD GATE (payment not implemented yet): marketplace-listed characters
+      // that the user has not purchased (and does not own) are locked — the
+      // Chat tap is silently ignored so the chat screen can never be reached.
+      // When purchase support lands, replace this with the confirm dialog.
+      if (await isChatLocked(profile.id, user?.id)) {
+        return;
+      }
+      await openCharacterChat(
+        profile,
+        {
+          navigateToChat: params => navigation.navigate('ChatDetail', params),
+        },
+        user?.id,
+      );
     } catch (err) {
       log.error('Failed to open chat:', err);
       showToast(t('common:error'));
@@ -719,7 +746,9 @@ export const AIProfileScreen: React.FC = () => {
 
             {/* ── Action row: primary Chat + Like / Save ── */}
             <View style={styles.actionsRow}>
-              {/* Primary Chat button — full-width, purple gradient */}
+              {/* Primary Chat button — full-width, purple gradient. When the
+                  character is listed on the marketplace, the label shows the
+                  SOUL price (chat is pay-gated). */}
               <TouchableOpacity
                 onPress={() => {
                   hapticLightPress();
@@ -738,13 +767,23 @@ export const AIProfileScreen: React.FC = () => {
                   end={{ x: 1, y: 1 }}
                   style={styles.chatButtonGradient}
                 >
-                  <Icon name="chat-processing" size={18} color="#fff" />
+                  <Icon
+                    name={listing ? 'lock-clock' : 'chat-processing'}
+                    size={18}
+                    color="#fff"
+                  />
                   <ThemedText
                     size={15}
                     weight="bold"
                     style={{ color: '#fff', letterSpacing: 0.3 }}
                   >
-                    {t('aiChatButton')}
+                    {listing
+                      ? `${t('market:chatPriceLabel', {
+                          price: Number.isInteger(listing.priceSouls)
+                            ? String(listing.priceSouls)
+                            : listing.priceSouls.toFixed(2),
+                        })}`
+                      : t('aiChatButton')}
                   </ThemedText>
                 </LinearGradient>
               </TouchableOpacity>

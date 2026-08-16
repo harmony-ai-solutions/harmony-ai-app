@@ -24,12 +24,14 @@ import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { useToast } from '../contexts/AppToastContext';
+import { useAuth } from '../contexts/AuthContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
+import { getMarketplaceListing } from '../database/repositories/marketplace';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
@@ -52,6 +54,7 @@ import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { resolvePersonaId } from '../database/repositories/personas';
 import syncService from '../services/SyncService';
+import { isChatLocked } from '../services/MarketplacePurchaseService';
 import { createDataURL } from '../database/base64';
 import { CharacterProfile } from '../database/models';
 import { PostCard } from '../components/social/PostCard';
@@ -73,12 +76,14 @@ export const DiscoverScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
   const { showToast } = useToast();
+  const { user } = useAuth();
   const { t } = useTranslation('discover');
   const { top: safeTop, bottom: safeBottom } = useSafeAreaInsets();
 
   const [profiles, setProfiles] = useState<CharacterProfile[]>([]);
   const [primaryImages, setPrimaryImages] = useState<Record<string, string | null>>({});
   const [imageCounts, setImageCounts] = useState<Record<string, number>>({});
+  const [priceMap, setPriceMap] = useState<Record<string, number | null>>({});
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -103,9 +108,11 @@ export const DiscoverScreen: React.FC = () => {
       const data = await getPublicCharacterProfiles();
       setProfiles(data);
 
-      // Load primary image + count for every profile in parallel
+      // Load primary image + count + marketplace price for every profile in
+      // parallel (a price means the chat is pay-gated — shown as a pill).
       const imageMap: Record<string, string | null> = {};
       const countMap: Record<string, number> = {};
+      const prices: Record<string, number | null> = {};
       await Promise.all(
         data.map(async profile => {
           try {
@@ -119,10 +126,17 @@ export const DiscoverScreen: React.FC = () => {
             imageMap[profile.id] = null;
             countMap[profile.id] = 0;
           }
+          try {
+            const listing = await getMarketplaceListing(profile.id);
+            prices[profile.id] = listing ? listing.priceSouls : null;
+          } catch {
+            prices[profile.id] = null;
+          }
         }),
       );
       setPrimaryImages(imageMap);
       setImageCounts(countMap);
+      setPriceMap(prices);
     } catch (err) {
       log.error('Failed to load profiles:', err);
     } finally {
@@ -249,6 +263,13 @@ export const DiscoverScreen: React.FC = () => {
    */
   const handleChat = async (profile: CharacterProfile) => {
     try {
+      // HARD GATE (payment not implemented yet): marketplace-listed characters
+      // that the user has not purchased (and does not own) are locked — the
+      // Chat tap is silently ignored so the chat screen can never be reached.
+      if (await isChatLocked(profile.id, user?.id)) {
+        return;
+      }
+
       // 1. Resolve the persona we chat as (only personas — never AI
       //    characters — are valid identities; falls back to 'user').
       const storedId =
@@ -481,6 +502,7 @@ export const DiscoverScreen: React.FC = () => {
                   profile={item}
                   imageUri={primaryImages[item.id] ?? null}
                   imageCount={imageCounts[item.id] ?? 0}
+                  priceSouls={priceMap[item.id] ?? undefined}
                   onPress={() => handleOpenProfile(item)}
                   onLongPress={() => handleOpenProfile(item)}
                   onChatPress={() => handleChat(item)}

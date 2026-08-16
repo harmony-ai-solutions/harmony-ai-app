@@ -835,10 +835,11 @@ export type CharacterProfileSource = 'user' | 'community';
 export const CHARACTER_PROFILE_SOURCE_USER = 'user' as const;
 export const CHARACTER_PROFILE_SOURCE_COMMUNITY = 'community' as const;
 
-export type CharacterProfileVisibility = 'public' | 'private';
+export type CharacterProfileVisibility = 'public' | 'private' | 'marketplace';
 
 export const CHARACTER_PROFILE_VISIBILITY_PUBLIC = 'public' as const;
 export const CHARACTER_PROFILE_VISIBILITY_PRIVATE = 'private' as const;
+export const CHARACTER_PROFILE_VISIBILITY_MARKETPLACE = 'marketplace' as const;
 
 /**
  * Mark a character profile as user-created (via the app's Create AI / edit flows).
@@ -877,9 +878,12 @@ export async function getCharacterProfileSource(
 }
 
 /**
- * Set the visibility of a character profile ('public' → visible + searchable on
- * Discover; 'private' → hidden from Discover/search). Upserts the sidecar row so
- * profiles without one get one. Never touches character_profiles itself.
+ * Set the visibility of a character profile:
+ *   - 'public'       → visible + searchable on Discover, chat freely
+ *   - 'private'      → hidden from Discover/search + Market, only the creator
+ *   - 'marketplace'  → visible on Discover + Market, chat requires purchase
+ * Upserts the sidecar row so profiles without one get one. Never touches
+ * character_profiles itself.
  */
 export async function setCharacterProfileVisibility(
   profileId: string,
@@ -910,7 +914,12 @@ export async function getCharacterProfileVisibility(
     return CHARACTER_PROFILE_VISIBILITY_PUBLIC;
   }
   const visibility = results.rows.item(0).visibility as CharacterProfileVisibility;
-  return visibility === 'private' ? visibility : CHARACTER_PROFILE_VISIBILITY_PUBLIC;
+  // Validate: anything we don't recognize falls back to public (backwards
+  // compatible with pre-000043 rows).
+  return visibility === CHARACTER_PROFILE_VISIBILITY_PRIVATE ||
+    visibility === CHARACTER_PROFILE_VISIBILITY_MARKETPLACE
+    ? visibility
+    : CHARACTER_PROFILE_VISIBILITY_PUBLIC;
 }
 
 /**
@@ -991,7 +1000,7 @@ export async function getPublicCharacterProfiles(
               cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
        FROM character_profiles cp
        LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
-       WHERE cps.visibility IS NULL OR cps.visibility = 'public'
+       WHERE cps.visibility IS NULL OR cps.visibility IN ('public', 'marketplace')
        ORDER BY cp.name`
     : `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
               cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
@@ -1000,7 +1009,7 @@ export async function getPublicCharacterProfiles(
        FROM character_profiles cp
        LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
        WHERE cp.deleted_at IS NULL
-         AND (cps.visibility IS NULL OR cps.visibility = 'public')
+         AND (cps.visibility IS NULL OR cps.visibility IN ('public', 'marketplace'))
        ORDER BY cp.name`;
 
   const [results] = await db.executeSql(query);

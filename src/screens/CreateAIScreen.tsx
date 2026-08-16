@@ -33,6 +33,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
+import { SoulIcon } from '../components/market/SoulIcon';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
@@ -52,7 +53,6 @@ import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
-import { Switch } from 'react-native-paper';
 import { EntityModuleSelectorWithActions } from '../components/entities/EntityModuleSelectorWithActions';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
@@ -72,6 +72,11 @@ import {
   type CharacterProfileVisibility,
 } from '../database/repositories/characters';
 import { setCharacterCreator } from '../database/repositories/characterSocial';
+import {
+  getMarketplaceListing,
+  upsertMarketplaceListing,
+  removeMarketplaceListing,
+} from '../database/repositories/marketplace';
 import {
   createEntity,
   createEntityModuleMapping,
@@ -128,10 +133,17 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
   const [avatarMimeType, setAvatarMimeType] = useState<string>('image/jpeg');
 
-  // Public/private visibility — public AI partners are visible + searchable on
-  // the Discover screen; private ones are hidden from Discover/search. Stored
-  // in the client-only character_profile_sources sidecar (never synced).
-  const [isPublic, setIsPublic] = useState(true);
+  // Visibility / sharing:
+  //   - private      → only the creator can see/chat (DEFAULT)
+  //   - public       → visible + searchable on Discover, anyone can chat
+  //   - marketplace  → listed on the Market screen with a SOUL price; viewing
+  //                    the profile is free but chatting requires purchasing it
+  // Stored in the client-only character_profile_sources sidecar (never synced)
+  // + the client-only marketplace listings table (never synced).
+  const [visibility, setVisibility] = useState<'private' | 'public' | 'marketplace'>(
+    'private',
+  );
+  const [priceSouls, setPriceSouls] = useState('100');
   const [visibilityLoaded, setVisibilityLoaded] = useState(false);
 
   // ── Prompts & Scenario (AI settings) ────────────────────────────────────────
@@ -160,6 +172,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     | 'voice'
     | 'typing'
     | 'audio'
+    | 'price'
     | null
   >(null);
 
@@ -330,12 +343,21 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setScenario(profile.scenario ?? '');
         setExampleDialogues(profile.example_dialogues ?? '');
 
-        // Carry over the source profile's visibility so the copy matches it.
+        // Carry over the source profile's visibility + price so the copy
+        // matches it.
         try {
           const visibility = await getCharacterProfileVisibility(profile.id);
           if (!cancelled) {
-            setIsPublic(visibility === 'public');
+            setVisibility(visibility);
             setVisibilityLoaded(true);
+          }
+          try {
+            const listing = await getMarketplaceListing(profile.id);
+            if (listing && !cancelled) {
+              setPriceSouls(String(listing.priceSouls));
+            }
+          } catch (priceErr) {
+            log.warn('Failed to copy profile price:', priceErr);
           }
         } catch (visErr) {
           log.warn('Failed to copy profile visibility:', visErr);
@@ -453,12 +475,21 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setExampleDialogues(profile.example_dialogues ?? '');
         setEditOriginalName(profile.name);
 
-        // Visibility (public/private) — loaded from the client-only sidecar
+        // Visibility (private/public/marketplace) — loaded from the client-only
+        // sidecar + marketplace listing price.
         try {
           const visibility = await getCharacterProfileVisibility(profile.id);
           if (!cancelled) {
-            setIsPublic(visibility === 'public');
+            setVisibility(visibility);
             setVisibilityLoaded(true);
+          }
+          try {
+            const listing = await getMarketplaceListing(profile.id);
+            if (listing && !cancelled) {
+              setPriceSouls(String(listing.priceSouls));
+            }
+          } catch (priceErr) {
+            log.warn('Failed to load profile price:', priceErr);
           }
         } catch (visErr) {
           log.warn('Failed to load profile visibility:', visErr);
@@ -619,11 +650,21 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           example_dialogues: exampleDialogues.trim() || '',
         });
 
-        // Persist the chosen visibility (public/private) in the sidecar
+        // Persist the chosen visibility (private/public/marketplace) in the
+        // sidecar + upsert/remove the marketplace listing + price.
         await setCharacterProfileVisibility(
           editProfileId,
-          (isPublic ? 'public' : 'private') as CharacterProfileVisibility,
+          visibility as CharacterProfileVisibility,
         );
+        if (visibility === 'marketplace') {
+          const price = parseFloat(priceSouls);
+          await upsertMarketplaceListing(
+            editProfileId,
+            Number.isFinite(price) ? Math.max(0, price) : 0,
+          );
+        } else {
+          await removeMarketplaceListing(editProfileId);
+        }
 
         // Reconcile images: delete the existing ones, then re-create from the
         // current UI state (avatar + gallery). This keeps the DB in exact sync
@@ -748,13 +789,20 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         // Tag as user-created so it is hidden from the Discover community grid
         await setCharacterProfileSource(profileId, 'user');
 
-        // Persist the chosen visibility (public/private). Public partners
-        // appear on the Discover screen; private ones stay hidden from
-        // Discover/search.
+        // Persist the chosen visibility (private/public/marketplace). Public
+        // partners appear on Discover; private ones stay hidden; marketplace
+        // partners get listed on the Market screen with their SOUL price.
         await setCharacterProfileVisibility(
           profileId,
-          (isPublic ? 'public' : 'private') as CharacterProfileVisibility,
+          visibility as CharacterProfileVisibility,
         );
+        if (visibility === 'marketplace') {
+          const price = parseFloat(priceSouls);
+          await upsertMarketplaceListing(
+            profileId,
+            Number.isFinite(price) ? Math.max(0, price) : 0,
+          );
+        }
 
         // Record the cloud user who created this AI (creator badge + the
         // creator-only Edit Profile / Edit AI Settings buttons depend on it).
@@ -1130,53 +1178,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 'text-box-outline',
               )}
 
-              {/* ── Visibility: Public AI / Private AI ── */}
-              <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
-                {t('visibilityLabel')}
-              </ThemedText>
-
-              <View
-                style={[
-                  styles.visibilityRow,
-                  {
-                    backgroundColor: hexToRgba(surfaceColor, 0.55),
-                    borderColor: hexToRgba(accent, 0.25),
-                  },
-                ]}
-              >
-                <View style={styles.visibilityIconWrap}>
-                  <Icon
-                    name={isPublic ? 'earth' : 'lock-outline'}
-                    size={22}
-                    color={accent}
-                  />
-                </View>
-                <View style={styles.visibilityLabelGroup}>
-                  <ThemedText size={15} weight="bold" variant="primary">
-                    {isPublic ? t('visibilityPublic') : t('visibilityPrivate')}
-                  </ThemedText>
-                  <ThemedText size={12} variant="muted">
-                    {isPublic
-                      ? t('visibilityPublicHint')
-                      : t('visibilityPrivateHint')}
-                  </ThemedText>
-                </View>
-                <Switch
-                  value={isPublic}
-                  onValueChange={(value) => {
-                    hapticLightPress();
-                    setIsPublic(value);
-                  }}
-                  color={accent}
-                  disabled={!visibilityLoaded && !!editProfileId}
-                  testID="create-ai-visibility-toggle"
-                  accessibilityLabel={
-                    isPublic
-                      ? t('visibilityPublic')
-                      : t('visibilityPrivate')
-                  }
-                />
-              </View>
             </View>
           </ThemedCard>
 
@@ -1200,6 +1201,145 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
             {showDetails && (
               <View style={styles.sectionContent}>
+                {/* ── Visibility & Sharing ── */}
+                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
+                  {t('visibilityLabel')}
+                </ThemedText>
+
+                {/* 3-way selector: Private / Public / Marketplace */}
+                <View
+                  style={[
+                    styles.visibilityRow,
+                    {
+                      backgroundColor: hexToRgba(surfaceColor, 0.55),
+                      borderColor: hexToRgba(accent, 0.25),
+                    },
+                  ]}
+                >
+                  <View style={styles.visibilityIconWrap}>
+                    <Icon
+                      name={
+                        visibility === 'private'
+                          ? 'lock-outline'
+                          : visibility === 'public'
+                          ? 'earth'
+                          : 'storefront-outline'
+                      }
+                      size={22}
+                      color={accent}
+                    />
+                  </View>
+                  <View style={styles.visibilityLabelGroup}>
+                    <ThemedText size={15} weight="bold" variant="primary">
+                      {visibility === 'private'
+                        ? t('visibilityPrivate')
+                        : visibility === 'public'
+                        ? t('visibilityPublic')
+                        : t('visibilityMarketplace')}
+                    </ThemedText>
+                    <ThemedText size={12} variant="muted">
+                      {visibility === 'private'
+                        ? t('visibilityPrivateHint')
+                        : visibility === 'public'
+                        ? t('visibilityPublicHint')
+                        : t('visibilityMarketplaceHint')}
+                    </ThemedText>
+                  </View>
+                </View>
+
+                {/* Segment picker: Private | Public | Marketplace */}
+                <View style={styles.visibilitySegments}>
+                  {(
+                    [
+                      { key: 'private', icon: 'lock-outline', label: t('visibilityPrivate') },
+                      { key: 'public', icon: 'earth', label: t('visibilityPublic') },
+                      { key: 'marketplace', icon: 'storefront-outline', label: t('visibilityMarketplace') },
+                    ] as const
+                  ).map(seg => {
+                    const active = visibility === seg.key;
+                    return (
+                      <TouchableOpacity
+                        key={seg.key}
+                        onPress={() => {
+                          hapticLightPress();
+                          setVisibility(seg.key);
+                        }}
+                        activeOpacity={0.8}
+                        disabled={!visibilityLoaded && !!editProfileId}
+                        testID={`create-ai-visibility-${seg.key}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={seg.label}
+                        style={[
+                          styles.visibilitySegment,
+                          {
+                            backgroundColor: active
+                              ? hexToRgba(accent, 0.18)
+                              : hexToRgba(surfaceColor, 0.45),
+                            borderColor: active
+                              ? accent
+                              : theme.colors.border.default,
+                          },
+                        ]}
+                      >
+                        <Icon
+                          name={seg.icon}
+                          size={16}
+                          color={active ? accent : theme.colors.text.muted}
+                        />
+                        <ThemedText
+                          size={12}
+                          weight={active ? 'bold' : 'medium'}
+                          variant={active ? 'primary' : 'muted'}
+                          numberOfLines={1}
+                          style={styles.visibilitySegmentLabel}
+                        >
+                          {seg.label}
+                        </ThemedText>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* SOUL price (marketplace only) */}
+                {visibility === 'marketplace' && (
+                  <View style={styles.priceRow}>
+                    <View style={styles.priceInputWrap}>
+                      <ThemedText size={13} variant="secondary" numberOfLines={1} style={styles.numericFieldLabel}>
+                        {t('priceSoulsLabel')}
+                      </ThemedText>
+                      <View
+                        style={[
+                          styles.inputShell,
+                          {
+                            backgroundColor: hexToRgba(surfaceColor, 0.55),
+                            borderColor:
+                              focusedField === 'price'
+                                ? accent
+                                : theme.colors.border.default,
+                          },
+                        ]}
+                      >
+                        <SoulIcon size={18} />
+                        <TextInput
+                          style={[styles.input, styles.numericInput, inputTextStyle]}
+                          value={priceSouls}
+                          onChangeText={setPriceSouls}
+                          onFocus={() => setFocusedField('price')}
+                          onBlur={() => setFocusedField(null)}
+                          placeholder="100"
+                          placeholderTextColor={theme.colors.text.muted}
+                          keyboardType="numeric"
+                          returnKeyType="done"
+                          testID="create-ai-marketplace-price"
+                        />
+                      </View>
+                    </View>
+                    <ThemedText size={11} variant="muted" style={styles.priceHint}>
+                      {t('priceSoulsHint')}
+                    </ThemedText>
+                  </View>
+                )}
+
                 {/* Personality */}
                 {renderField(
                   'personalityLabel',
@@ -1734,7 +1874,7 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
 
-  // ── Visibility toggle ──
+  // ── Visibility & sharing (3-way selector) ──
   visibilityRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1758,6 +1898,38 @@ const styles = StyleSheet.create({
   visibilityLabelGroup: {
     flex: 1,
     gap: 2,
+  },
+  visibilitySegments: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 4,
+  },
+  visibilitySegment: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+  },
+  visibilitySegmentLabel: {
+    flexShrink: 1,
+  },
+
+  // ── SOUL price (marketplace only) ──
+  priceRow: {
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  priceInputWrap: {
+    marginBottom: 4,
+  },
+  priceHint: {
+    marginLeft: 4,
+    lineHeight: 15,
   },
 
   // ── Gallery ──

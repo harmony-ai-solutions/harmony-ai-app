@@ -11,6 +11,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
+import { SoulIcon } from '../market/SoulIcon';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
 import { CharacterProfile } from '../../database/models';
@@ -32,6 +33,12 @@ interface CharacterProfileCardProps {
   isFavorite?: boolean;
   /** Toggle favorite state for this profile */
   onFavoriteToggle?: () => void;
+  /**
+   * When set (> 0), this character is listed on the Marketplace with this
+   * SOUL price — renders a price pill over the portrait so Discover shows
+   * the paid state (chat requires a purchase).
+   */
+  priceSouls?: number;
 }
 
 /**
@@ -63,6 +70,7 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
   onCreatorPress,
   isFavorite = false,
   onFavoriteToggle,
+  priceSouls,
 }) => {
   const { theme } = useAppTheme();
   const { t } = useTranslation('characters');
@@ -162,6 +170,24 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
                     style={styles.imageBadgeText}
                   >
                     {imageCount}
+                  </ThemedText>
+                </View>
+              )}
+
+              {/* Marketplace price pill — shown when the character is listed
+                  for sale. The chat button on this card (and the AI profile)
+                  runs the purchase gate. */}
+              {priceSouls != null && priceSouls > 0 && (
+                <View style={styles.priceBadge}>
+                  <SoulIcon size={12} />
+                  <ThemedText
+                    size={11}
+                    weight="bold"
+                    style={styles.priceBadgeText}
+                  >
+                    {Number.isInteger(priceSouls)
+                      ? String(priceSouls)
+                      : priceSouls.toFixed(2)}
                   </ThemedText>
                 </View>
               )}
@@ -373,6 +399,24 @@ const styles = StyleSheet.create({
   },
   imageBadgeText: {
     color: '#fff',
+  },
+  // ── Marketplace price pill ──
+  priceBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 59, 167, 0.78)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    gap: 3,
+  },
+  priceBadgeText: {
+    color: '#ffffff',
   },
   // ── Chat button (floating over the image) ──
   chatButton: {

@@ -31,6 +31,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { useToast } from '../contexts/AppToastContext';
+import { useAuth } from '../contexts/AuthContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { hapticLightPress } from '../utils/haptics';
@@ -89,6 +90,7 @@ import {
   hasBubblePermission,
   requestBubblePermission,
 } from '../services/ChatBubbleService';
+import { isChatLocked } from '../services/MarketplacePurchaseService';
 
 const log = createLogger('[ChatDetailScreen]');
 
@@ -145,6 +147,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
   const { showToast } = useToast();
+  const { user } = useAuth();
   const { isConnected } = useSyncConnection();
   const { isSessionActive, startInteractionSession, stopInteractionSession } =
     useEntitySession();
@@ -204,6 +207,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // in event listeners that need the current ID at callback time.
   const currentInteractionIdRef = useRef(routeInteractionId);
 
+  // HARD GATE: once set, this chat is a locked marketplace conversation — the
+  // session must never start and any open is reverted. Guards the async race
+  // between the header-resolution lock check and session initialization.
+  const chatLockedRef = useRef(false);
   const flatListRef = useRef<FlatList<any>>(null);
   const sessionDividerTimestamp = useRef<number>(0);
   const isInitialScrollDone = useRef(false);
@@ -338,6 +345,26 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         const allEntities = await getAllEntities();
         const entity = allEntities.find(e => e.id === partnerEntityId);
         if (entity?.character_profile_id) {
+          // HARD GATE (payment not implemented yet): if the partner is a
+          // marketplace-listed AI the user has not purchased (and does not own),
+          // this chat must never open — navigate back immediately and stop the
+          // session before any message can be sent or received.
+          try {
+            if (await isChatLocked(entity.character_profile_id, user?.id)) {
+              log.warn(
+                `Chat locked for marketplace profile ${entity.character_profile_id} — closing chat.`,
+              );
+              // Never let a session start for this chat, stop any session the
+              // context may have started, then leave.
+              chatLockedRef.current = true;
+              stopInteractionSession(routeInteractionId).catch(() => {});
+              navigation.goBack();
+              return;
+            }
+          } catch (lockErr) {
+            log.warn('Failed to check chat lock, allowing:', lockErr);
+          }
+
           // Link the header to the partner's AI profile (tap avatar/name →
           // AIProfile). Skip in group chats — there is no single profile to open.
           setPartnerProfileId(entity.character_profile_id);
@@ -513,6 +540,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Session initialization – (re)start the session when sync connection becomes available
   useEffect(() => {
     let mounted = true;
+
+    // HARD GATE: never start a session for a locked marketplace conversation.
+    if (chatLockedRef.current) {
+      return;
+    }
 
     if (!isConnected || !participantKey) {
       return;

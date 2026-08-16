@@ -424,9 +424,13 @@ export const CharactersScreen: React.FC = () => {
    */
   const handleChatPress = async (profile: CharacterProfile) => {
     try {
-      await openCharacterChat(profile, {
-        navigateToChat: params => navigation.navigate('ChatDetail', params),
-      });
+      await openCharacterChat(
+        profile,
+        {
+          navigateToChat: params => navigation.navigate('ChatDetail', params),
+        },
+        user?.id,
+      );
     } catch (err) {
       log.error('Failed to open chat:', err);
       showAlert(t('common:error'), t('chatOpenFailed'));

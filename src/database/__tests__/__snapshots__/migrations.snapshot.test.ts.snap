@@ -64,6 +64,9 @@ CREATE INDEX idx_provider_config_soulbitscloud_name ON provider_config_soulbitsc
 -- index: idx_provider_config_xai_name
 CREATE INDEX idx_provider_config_xai_name ON provider_config_xai(name);
 
+-- index: idx_soul_purchases_profile
+CREATE INDEX idx_soul_purchases_profile ON soul_purchases(profile_id);
+
 -- index: idx_user_post_comments_post
 CREATE INDEX idx_user_post_comments_post ON user_post_comments(post_id);
 
@@ -94,8 +97,11 @@ CREATE TABLE character_image_likes ( image_id INTEGER PRIMARY KEY REFERENCES cha
 -- table: character_likes
 CREATE TABLE character_likes ( profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE, liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
+-- table: character_marketplace_listings
+CREATE TABLE character_marketplace_listings ( profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE, price_souls REAL NOT NULL DEFAULT 0 CHECK (price_souls >= 0), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
 -- table: character_profile_sources
-CREATE TABLE character_profile_sources ( profile_id TEXT PRIMARY KEY, source TEXT NOT NULL DEFAULT 'community' CHECK (source IN ('user', 'community')), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP , visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'private')));
+CREATE TABLE "character_profile_sources" ( profile_id TEXT PRIMARY KEY, source TEXT NOT NULL DEFAULT 'community' CHECK (source IN ('user', 'community')), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'private', 'marketplace')) );
 
 -- table: character_profiles
 CREATE TABLE "character_profiles" ( id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', personality TEXT NOT NULL DEFAULT '', voice_characteristics TEXT NOT NULL DEFAULT '', base_prompt TEXT NOT NULL DEFAULT '', scenario TEXT NOT NULL DEFAULT '', typing_speed_wpm INTEGER NOT NULL DEFAULT 60, audio_response_chance_percent INTEGER NOT NULL DEFAULT 50, vision_config_id TEXT REFERENCES vision_configs(id) ON DELETE SET NULL, lifecycle_config TEXT NOT NULL DEFAULT '{}', deleted_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, first_mes TEXT NOT NULL DEFAULT '', mes_example TEXT NOT NULL DEFAULT '', alternate_greetings TEXT NOT NULL DEFAULT '', post_history_instructions TEXT NOT NULL DEFAULT '', creator_notes TEXT NOT NULL DEFAULT '', creator TEXT NOT NULL DEFAULT '', character_version TEXT NOT NULL DEFAULT '', nickname TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '', group_only_greetings TEXT NOT NULL DEFAULT '', extensions TEXT NOT NULL DEFAULT '', assets TEXT NOT NULL DEFAULT '', card_provenance TEXT NOT NULL DEFAULT '', character_book TEXT NOT NULL DEFAULT '' );
@@ -201,6 +207,12 @@ CREATE TABLE "rag_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, pro
 
 -- table: schema_migrations
 CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, description TEXT );
+
+-- table: soul_purchases
+CREATE TABLE soul_purchases ( id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES character_profiles(id) ON DELETE CASCADE, price_souls REAL NOT NULL CHECK (price_souls >= 0), purchased_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
+-- table: soul_wallet
+CREATE TABLE soul_wallet ( id INTEGER PRIMARY KEY CHECK (id = 1), balance REAL NOT NULL DEFAULT 0 CHECK (balance >= 0), updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
 -- table: stt_configs
 CREATE TABLE "stt_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id TEXT NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
