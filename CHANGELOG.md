@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Characters
 #### Added
+- Tapping the **creator badge** on an AI character's profile now opens a dedicated profile page (that specific creator), instead of always jumping to your own profile tab. The public profile page shows only public info — name, avatar, bio, stats, and the creator's posts — with a Follow/Following button on other users' profiles so anyone can follow a specific creator (no follow button on your own profile). Private content (AI characters, saved characters, personas, copies) is never shown to others.
+- Tapping an author on a Discover post now opens that author's profile page instead of switching to your own My Profile tab.
 - Import Tavern Card V1/V2/V3 character cards from raw JSON or PNG-embedded (`chara`/`ccv3` `tEXt`/`iTXt` chunks) files. Imported cards are mapped to the existing character profile model (with the PNG used as the primary avatar) and persist locally, syncing through the normal pipeline. Reachable from the Characters screen header.
 - Character cards on the Characters screen now have a chat button that opens a direct chat with that character. If no AI entity exists for the profile yet, one is created and synced automatically before the chat opens.
 - AI Lifecycle editor on the character profile: configure the autonomous-beat defaults (autonomy, beat schedule, sleep & exhaustion, emotion decay, crystallization, memory) that new AI characters inherit from the profile. Each section has a tap-to-expand explanation, and a banner notes these are profile defaults that can be overridden per character.

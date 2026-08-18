@@ -495,13 +495,17 @@ export const AIProfileScreen: React.FC = () => {
   }, [commentImageId]);
 
   const handleOpenCreator = () => {
-    // The only user-profile surface today is the "My Profile" tab. Push a NEW
-    // MainTabs instance (My Profile selected) on top of this AI profile so
-    // "back" returns here instead of popping the AI profile and landing on the
-    // previous tab (the creator == the current user whenever a creator record
-    // exists on this device, because creation is recorded only for
-    // locally-created characters).
-    navigation.push('MainTabs', { screen: 'MyProfile' });
+    if (!creator) return;
+    // Open the creator's own profile page — a generic UserProfile pushed on
+    // top of this AI profile so "back" returns here instead of switching to
+    // the current user's "My Profile" tab. When the creator IS the current
+    // user (locally-created characters), UserProfile mirrors My Profile
+    // without changing tabs.
+    navigation.push('UserProfile', {
+      userId: creator.creatorUserId,
+      displayName: creator.creatorDisplayName,
+      avatarUrl: creator.creatorAvatarUrl,
+    });
   };
 
   const handleToggleFollowCreator = async () => {

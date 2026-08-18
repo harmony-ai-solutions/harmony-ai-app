@@ -10,6 +10,7 @@ import { MainTabNavigator, MainTabParamList } from './MainTabNavigator';
 import { LandingScreen } from '../screens/LandingScreen';
 import { ChatDetailScreen } from '../screens/ChatDetailScreen';
 import { AIProfileScreen } from '../screens/AIProfileScreen';
+import { UserProfileScreen } from '../screens/UserProfileScreen';
 import { CreateAIScreen } from '../screens/CreateAIScreen';
 import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
@@ -54,6 +55,19 @@ export type RootStackParamList = {
   };
   /** AI Profile — the AI character's own profile page (mirrors My Profile). */
   AIProfile: { profileId: string };
+  /**
+   * UserProfile — a generic profile page for any cloud user (e.g. an AI
+   * character's creator). Pushed from the creator badge on AI profiles.
+   * When the target user is the current user this mirrors My Profile without
+   * switching tabs (so "back" returns to the AI profile).
+   */
+  UserProfile: {
+    userId: string;
+    /** Fallback display name + avatar shown while local records load (e.g.
+     *  the creator's recorded name/avatar from the AI profile badge). */
+    displayName?: string;
+    avatarUrl?: string | null;
+  };
   /**
    * CreateAI — the single create AND edit surface for AI partners.
    *   - (create) prefillProfileId = link an existing profile; duplicateProfileId = full copy
@@ -141,6 +155,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         {/* ── Full-screen detail routes pushed over the tabs ─────────── */}
         <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
         <Stack.Screen name="AIProfile" component={AIProfileScreen} />
+        <Stack.Screen name="UserProfile" component={UserProfileScreen} />
         <Stack.Screen name="CreateAI" component={CreateAIScreen} />
 
         {/* ── Notifications feed (pushed over tabs from the header bell) ── */}

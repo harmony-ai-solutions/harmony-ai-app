@@ -550,7 +550,11 @@ export const DiscoverScreen: React.FC = () => {
                     commentCount={state.commentCount}
                     onToggleLike={() => handleTogglePostLike(item.id)}
                     onOpenComments={() => setCommentPostId(item.id)}
-                    onOpenAuthor={() => navigation.navigate('MainTabs', { screen: 'MyProfile' })}
+                    onOpenAuthor={() =>
+                      navigation.push('UserProfile', {
+                        userId: item.authorUserId ?? user?.id ?? '',
+                      })
+                    }
                     onDeletePost={() => handleDeletePost(item.id)}
                   />
                 </View>

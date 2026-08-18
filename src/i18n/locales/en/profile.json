@@ -61,6 +61,7 @@
   "tabFavoritesEmptyHint": "Bookmark characters and posts you like to find them here.",
   "tabPersonasEmpty": "No personas yet",
   "tabPersonasEmptyHint": "The identities you chat as will show up here.",
+  "noUsername": "No username set",
 
   "personas": "Personas",
   "personasHint": "The identities you chat as.",
