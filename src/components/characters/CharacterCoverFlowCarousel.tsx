@@ -57,30 +57,89 @@ interface CharacterCoverFlowCarouselProps {
   onSelect: (profile: CharacterProfile) => void;
 }
 
-// ── Card geometry ───────────────────────────────────────────────────────
-const CARD_WIDTH = 252;
-const CARD_HEIGHT = 336;
-const CARD_GAP = 16;
-/**
- * Width of each FlatList slot. Each slot is exactly this wide with the card
- * centered inside, so slot center == card center — this is what makes
- * `snapToInterval` land every card perfectly centered (the classic RN
- * carousel pattern). If the slots were only CARD_WIDTH wide while snapping
- * to this interval, every stop would drift off-center.
- */
-const ITEM_WIDTH = CARD_WIDTH + CARD_GAP;
-/** Camera distance — how strong the 3D depth effect is. */
-const PERSPECTIVE = 1100;
+// ── Card geometry (BASE sizes) ────────────────────────────────────────
+// The deck dimensions are derived from these in the component so every device
+// gets a card that keeps a TRUE 3:4 portrait shape and that fits inside the
+// 86%-height bottom sheet (header + search + hint + footer + deck). Fixed
+// pixel sizes here used to overflow small screens (cards clipped / squashed)
+// and leave huge dead space on large ones.
+const BASE_CARD_WIDTH = 252;
+const BASE_CARD_GAP = 16;
+/** Never shrink the card below this width. */
+const MIN_CARD_WIDTH = 190;
+/** Max fraction of the usable screen width the card may occupy (≤ BASE). */
+const CARD_WIDTH_RATIO = 0.62;
+/** Max deck height as a fraction of screen height (leaves room for UI above/below). */
+const MAX_DECK_HEIGHT_RATIO = 0.38;
+/** Portrait aspect ratio — width × this = height. */
+const CARD_HEIGHT_RATIO = 4 / 3;
+/** Camera distance factor — 3D depth strength, scaled to the card width. */
+const PERSPECTIVE_FACTOR = 4.4;
 /** Scale of non-focused neighbor cards. */
 const NEIGHBOR_SCALE = 0.85;
 /** Opacity of non-focused neighbor cards. */
 const NEIGHBOR_OPACITY = 0.55;
-/** How far neighbor cards sink vertically (stacked-deck feel). */
-const NEIGHBOR_DROP = 18;
-/** How far neighbor cards are pushed toward the center (cover-flow converge). */
-const NEIGHBOR_SLIDE = CARD_WIDTH * 0.18;
 /** Angle (deg) applied to neighbor cards along the Y axis. */
-const NEIGHBOR_ANGLE = 16;
+const NEIGHBOR_ANGLE = 12;
+/** Neighbor vertical sink as a fraction of card height. */
+const NEIGHBOR_DROP_RATIO = 0.045;
+/** Neighbor converge toward the center as a fraction of card width. */
+const NEIGHBOR_SLIDE_RATIO = 0.14;
+/** Halo headroom as a fraction of card height (with a floor). */
+const STAGE_PAD_RATIO = 0.05;
+const MIN_STAGE_PAD = 14;
+
+/**
+ * Resolved, screen-aware deck geometry. Everything the FlatList and the deck
+ * cards need is derived once per layout so the snapshot/scroll math always
+ * agrees with the rendered frame.
+ */
+interface DeckGeometry {
+  cardWidth: number;
+  cardHeight: number;
+  itemWidth: number; // cardWidth + gap — slot width AND snap step
+  deckHeight: number; // cardHeight + 2 × stagePad
+  stagePad: number;
+  neighborDrop: number;
+  neighborSlide: number;
+  perspective: number;
+}
+
+/**
+ * Derive the deck geometry from the current window size, always preserving a
+ * true 3:4 portrait shape and a total deck height that fits the sheet.
+ */
+function resolveDeckGeometry(
+  screenWidth: number,
+  screenHeight: number,
+): DeckGeometry {
+  let w = Math.min(BASE_CARD_WIDTH, Math.round(screenWidth * CARD_WIDTH_RATIO));
+  w = Math.max(MIN_CARD_WIDTH, w);
+  const hLimit = Math.round(screenHeight * MAX_DECK_HEIGHT_RATIO);
+  let h = Math.round(w * CARD_HEIGHT_RATIO);
+  if (h > hLimit) {
+    // Keep the 3:4 shape — shrink BOTH dimensions, never squash.
+    h = hLimit;
+    w = Math.round(h * (1 / CARD_HEIGHT_RATIO));
+  }
+  const gap = Math.max(8, Math.round(w * (BASE_CARD_GAP / BASE_CARD_WIDTH)));
+  const itemWidth = w + gap;
+  const stagePad = Math.max(MIN_STAGE_PAD, Math.round(h * STAGE_PAD_RATIO));
+  const deckHeight = h + stagePad * 2;
+  const neighborDrop = Math.round(h * NEIGHBOR_DROP_RATIO);
+  const neighborSlide = Math.round(w * NEIGHBOR_SLIDE_RATIO);
+  const perspective = Math.round(w * PERSPECTIVE_FACTOR);
+  return {
+    cardWidth: w,
+    cardHeight: h,
+    itemWidth,
+    deckHeight,
+    stagePad,
+    neighborDrop,
+    neighborSlide,
+    perspective,
+  };
+}
 
 interface CarouselCardProps {
   profile: CharacterProfile;
@@ -95,6 +154,8 @@ interface CarouselCardProps {
   borderStart: string;
   borderEnd: string;
   textMuted: string;
+  /** Resolved responsive deck geometry (derived once in the parent). */
+  geometry: DeckGeometry;
   onTap: (index: number, profile: CharacterProfile) => void;
 }
 
@@ -115,25 +176,30 @@ const DeckCard = React.memo(function DeckCardImpl({
   borderStart,
   borderEnd,
   textMuted,
+  geometry,
   onTap,
 }: CarouselCardProps) {
   // Input range in absolute scroll-offset units around this card's center.
   // Because the content padding centers card 0 at scrollX = 0, card `index`
-  // is perfectly centered at scrollX = index * ITEM_WIDTH — matching the
-  // native snap offsets exactly.
+  // is perfectly centered at scrollX = index * geometry.itemWidth — matching
+  // the native snap offsets exactly.
   const inputRange = useMemo(
-    () => [(index - 1) * ITEM_WIDTH, index * ITEM_WIDTH, (index + 1) * ITEM_WIDTH],
-    [index],
+    () => [
+      (index - 1) * geometry.itemWidth,
+      index * geometry.itemWidth,
+      (index + 1) * geometry.itemWidth,
+    ],
+    [index, geometry.itemWidth],
   );
 
   const translateX = scrollX.interpolate({
     inputRange,
-    outputRange: [NEIGHBOR_SLIDE, 0, -NEIGHBOR_SLIDE],
+    outputRange: [geometry.neighborSlide, 0, -geometry.neighborSlide],
     extrapolate: 'clamp',
   });
   const translateY = scrollX.interpolate({
     inputRange,
-    outputRange: [NEIGHBOR_DROP, 0, NEIGHBOR_DROP],
+    outputRange: [geometry.neighborDrop, 0, geometry.neighborDrop],
     extrapolate: 'clamp',
   });
   const scale = scrollX.interpolate({
@@ -166,12 +232,12 @@ const DeckCard = React.memo(function DeckCardImpl({
   return (
     <Animated.View
       style={{
-        width: CARD_WIDTH,
-        height: CARD_HEIGHT,
+        width: geometry.cardWidth,
+        height: geometry.cardHeight,
         zIndex,
         opacity,
         transform: [
-          { perspective: PERSPECTIVE },
+          { perspective: geometry.perspective },
           { translateX },
           { translateY },
           { rotateY },
@@ -179,15 +245,18 @@ const DeckCard = React.memo(function DeckCardImpl({
         ],
       }}
     >
-      {/* Neon glow halo — fades in on the focused card only */}
+      {/* Neon glow halo — soft ambient glow, no hard ring. A hard ring
+          (border) layered INSIDE the same transform, 10px larger than the
+          card, reads as a doubled, jagged border — especially on Android
+          where the shadow is ignored and only the thick colored ring
+          survives. */}
       <Animated.View
         pointerEvents="none"
         style={[
           styles.halo,
           {
             opacity: glow,
-            backgroundColor: hexToRgba(accent, 0.32),
-            borderColor: hexToRgba(accent, 0.6),
+            backgroundColor: hexToRgba(accent, 0.16),
             shadowColor: accent,
           },
         ]}
@@ -195,7 +264,7 @@ const DeckCard = React.memo(function DeckCardImpl({
 
       {/* Specular gradient border (glass hairline) */}
       <LinearGradient
-        colors={[borderStart, hexToRgba(accent, 0.25), borderEnd]}
+        colors={[borderStart, hexToRgba(accent, 0.16), borderEnd]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.gradientBorder}
@@ -283,8 +352,15 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
   onSelect,
 }) => {
   const { theme } = useAppTheme();
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const { t } = useTranslation('characters');
+
+  // Resolve the responsive geometry once per layout change. All scroll math,
+  // snap offsets, deck height and per-card transforms share this one source.
+  const geometry = useMemo(
+    () => resolveDeckGeometry(screenWidth, screenHeight),
+    [screenWidth, screenHeight],
+  );
 
   const listRef = useRef<FlatList<CharacterProfile>>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -295,10 +371,10 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
   );
 
   // Horizontal padding that lets the FIRST and LAST cards center too.
-  // The centered card sits at `edgePad + ITEM_WIDTH/2` from the list start, so
-  // the viewport center (screenWidth/2) must equal that when the list is at
-  // offset 0 → edgePad = (screenWidth - ITEM_WIDTH) / 2.
-  const edgePad = Math.max(0, (screenWidth - ITEM_WIDTH) / 2);
+  // The centered card sits at `edgePad + geometry.itemWidth/2` from the list
+  // start, so the viewport center (screenWidth/2) must equal that when the
+  // list is at offset 0 → edgePad = (screenWidth - itemWidth) / 2.
+  const edgePad = Math.max(0, (screenWidth - geometry.itemWidth) / 2);
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const currentIndexRef = useRef(initialIndex);
   const pendingSelectRef = useRef<{
@@ -306,6 +382,11 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
     profile: CharacterProfile;
     timeout: ReturnType<typeof setTimeout>;
   } | null>(null);
+  // True while the user is actively touching the deck (drag/momentum). While
+  // false, `snapToOffsets` is disabled so the programmatic animated glide to a
+  // tapped card isn't fought by the snap grid — which is what made tap-switching
+  // stutter. State (not ref) so the FlatList re-renders with the flag applied.
+  const [userScrolling, setUserScrolling] = useState(false);
 
   // Keep the pending-tap timer from firing after unmount.
   useEffect(
@@ -321,17 +402,24 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
   // filtered set changes). `initialScrollIndex` alone left-aligns the item, so
   // we drive the scroll to the exact centered offset ourselves. The content
   // padding already centers card 0 at scrollX = 0, so index N centers at
-  // scrollX = N * ITEM_WIDTH.
+  // scrollX = N * geometry.itemWidth.
+  //
+  // NOTE: we key this ONLY on the profile set changing (and the derived
+  // initialIndex). Re-deriving geometry on a window rotation does NOT reset the
+  // deck — it would yank the user away from the card they were looking at on
+  // every dimension change.
+  const profileSignature = profiles.map(p => p.id).join('|');
   useEffect(() => {
     if (profiles.length === 0) return;
     setCurrentIndex(initialIndex);
     currentIndexRef.current = initialIndex;
-    const target = initialIndex * ITEM_WIDTH;
+    const target = initialIndex * geometry.itemWidth;
     const raf = requestAnimationFrame(() => {
       listRef.current?.scrollToOffset({ offset: target, animated: false });
     });
     return () => cancelAnimationFrame(raf);
-  }, [profiles.length, initialIndex]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileSignature, initialIndex, profiles.length]);
 
   const commitPendingSelect = useCallback(
     (settledIndex?: number) => {
@@ -354,11 +442,13 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
         return;
       }
       // Smoothly bring the tapped card to the center focus, then select once
-      // it settles (momentum end → immediate; timer as a safety net).
+      // it settles (momentum end → immediate; timer as a safety net). Snap is
+      // disabled for the programmatic glide so the grid doesn't fight it.
       setCurrentIndex(index);
       currentIndexRef.current = index;
+      setUserScrolling(false);
       listRef.current?.scrollToOffset({
-        offset: index * ITEM_WIDTH,
+        offset: index * geometry.itemWidth,
         animated: true,
       });
 
@@ -377,30 +467,31 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
       }, 420);
       pendingSelectRef.current = { index, profile, timeout };
     },
-    [onSelect],
+    [onSelect, geometry.itemWidth],
   );
 
   const handleScrollEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const x = e.nativeEvent.contentOffset.x;
       const idx = clamp(
-        Math.round(x / ITEM_WIDTH),
+        Math.round(x / geometry.itemWidth),
         0,
         Math.max(0, profiles.length - 1),
       );
       setCurrentIndex(idx);
       currentIndexRef.current = idx;
       commitPendingSelect(idx);
+      // User gesture finished — re-enable snapping for the next touch.
+      setUserScrolling(false);
     },
-    [commitPendingSelect, profiles.length],
+    [commitPendingSelect, profiles.length, geometry.itemWidth],
   );
 
-  // JS-driver scroll event. We deliberately do NOT use `useNativeDriver: true`
-  // here: attaching a native animated event to a view inside a `<Modal>`
-  // (separate Android window/root) can throw a render error on the New
-  // Architecture, and this app has no other precedent for event-driven native
-  // animated values. The JS driver recomputes the card interpolations on the
-  // JS thread — perfectly fluid for a small deck.
+  // Scroll event — JS driver, deliberately. Attaching a NATIVE-driver
+  // Animated.event scroll listener to a view INSIDE a `<Modal>` (a separate
+  // Android window/root) throws a render error on the New Architecture — this
+  // was confirmed first-hand. The JS driver recomputes the interpolations on
+  // the JS thread, which is fine for this small deck, so we keep it.
   const onScroll = useMemo(
     () =>
       Animated.event(
@@ -425,20 +516,36 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
   // react-native/no-inline-styles rule stays happy.
   const activeDotStyle = useMemo(() => ({ backgroundColor: accent }), [accent]);
 
+  // Opaque hint-pill background — hoisted like the other theme-derived styles.
+  // The deck's transformed top corners overhang slightly; an opaque pill keeps
+  // them from bleeding through the chip as glitchy border fragments.
+  const hintPillStyle = useMemo(
+    () => ({
+      borderColor: hexToRgba(accent, 0.3),
+      backgroundColor: hexToRgba(theme?.colors.background.base ?? '#151d30', 0.94),
+    }),
+    [accent, theme],
+  );
+
   // Exact scroll offset at which each index is perfectly centered. Feeding
   // these to `snapToOffsets` makes the native snap points EXACTLY match the
   // interpolation peak for that index — no platform-dependent drift. Card 0 is
   // already centered at scrollX = 0 by the content padding, so offset i = i*W.
   const snapOffsets = useMemo(
-    () => profiles.map((_, index) => index * ITEM_WIDTH),
-    [profiles],
+    () => profiles.map((_, index) => index * geometry.itemWidth),
+    [profiles, geometry.itemWidth],
   );
 
   const renderCard = useCallback(
     ({ item, index }: { item: CharacterProfile; index: number }) => (
-      // Slot wrapper — ITEM_WIDTH wide with the card centered, so every
+      // Slot wrapper — itemWidth wide with the card centered, so every
       // snap offset lands a card dead-center.
-      <View style={styles.cardSlot}>
+      <View
+        style={[
+          styles.cardSlot,
+          { width: geometry.itemWidth },
+        ]}
+      >
         <DeckCard
           profile={item}
           imageUri={images[item.id] ?? null}
@@ -452,6 +559,7 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
           borderStart={borderStart}
           borderEnd={borderEnd}
           textMuted={textMuted}
+          geometry={geometry}
           onTap={handleTap}
         />
       </View>
@@ -467,6 +575,7 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
       borderStart,
       borderEnd,
       textMuted,
+      geometry,
       handleTap,
     ],
   );
@@ -478,7 +587,7 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
   return (
     <View style={styles.container}>
       {/* Swipe hint */}
-      <View style={[styles.hintPill, { borderColor: hexToRgba(accent, 0.3) }]}>
+      <View style={[styles.hintPill, hintPillStyle]}>
         <Icon name="gesture-swipe-horizontal" size={15} color={accent} />
         <ThemedText size={12} variant="muted">
           {t('carouselSwipeHint')}
@@ -492,21 +601,23 @@ export const CharacterCoverFlowCarousel: React.FC<CharacterCoverFlowCarouselProp
           keyExtractor={item => item.id}
           horizontal
           showsHorizontalScrollIndicator={false}
-          snapToOffsets={snapOffsets}
+          snapToOffsets={userScrolling ? snapOffsets : undefined}
           decelerationRate="fast"
           scrollEventThrottle={16}
           getItemLayout={(_, index) => ({
-            length: ITEM_WIDTH,
-            offset: ITEM_WIDTH * index,
+            length: geometry.itemWidth,
+            offset: geometry.itemWidth * index,
             index,
           })}
-          initialNumToRender={7}
-          windowSize={9}
-          maxToRenderPerBatch={7}
+          initialNumToRender={5}
+          windowSize={7}
+          maxToRenderPerBatch={5}
           onScroll={onScroll}
+          onScrollBeginDrag={() => setUserScrolling(true)}
           onMomentumScrollEnd={handleScrollEnd}
           onScrollEndDrag={handleScrollEnd}
           contentContainerStyle={{ paddingHorizontal: edgePad }}
+          style={{ height: geometry.deckHeight }}
           renderItem={renderCard}
           testID="cover-flow-carousel"
         />
@@ -543,7 +654,6 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   cardSlot: {
-    width: ITEM_WIDTH,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -555,20 +665,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 5,
-    marginBottom: 10,
-    backgroundColor: 'rgba(0,0,0,0.28)',
+    marginBottom: 6,
   },
+  // NOTE: `deck` height is applied inline as `geometry.deckHeight` — it is
+  // screen-dependent. The deck viewport needs vertical headroom for the 3D
+  // transform overflow (the halo + rotated neighbors), otherwise a horizontal
+  // FlatList clips them at its own bounds.
   halo: {
     position: 'absolute',
-    top: -10,
-    bottom: -10,
-    left: -10,
-    right: -10,
+    top: -12,
+    bottom: -12,
+    left: -12,
+    right: -12,
     borderRadius: 28,
-    borderWidth: 1.5,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 26,
+    shadowOpacity: 0.65,
+    shadowRadius: 30,
+    // elevation stays 0 — on Android an elevated shadow here would draw a
+    // flattened dark box instead of a glow.
     elevation: 0,
   },
   gradientBorder: {
@@ -628,7 +742,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.35,
     shadowRadius: 4,
-    elevation: 4,
+    // elevation must stay 0: inside the overflow-hidden glass body, Android
+    // clips the pip's elevation shadow against the rounded bounds, leaving a
+    // dark smudge on the card's top-right border.
+    elevation: 0,
   },
   bottomStripe: {
     position: 'absolute',
