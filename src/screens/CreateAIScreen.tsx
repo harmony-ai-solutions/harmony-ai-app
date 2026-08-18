@@ -2,19 +2,18 @@
  * CreateAIScreen
  *
  * Create AI Partner wizard. Creates a CharacterProfile + Entity (with alias)
- * + EntityModuleMapping in one flow, then navigates directly to
- * ChatDetailScreen via navigation.replace() so back-button goes to ChatList
- * rather than returning here.
+ * + EntityModuleMapping in one flow, then saves and returns to the previous
+ * screen (Characters list).
  *
  * The screen is split into three sections:
  *   1. General  — name (required), description, avatar
  *   2. Details  — personality, appearance, backstory
  *   3. Advanced — module configs (AI model / config / voice settings)
  *
- * The user can start chatting with just a name: when no module configs are
+ * The user can create a partner with just a name: when no module configs are
  * selected, Soulbits Cloud default configs are created automatically in the
  * background (see SoulbitsDefaultConfigService) so the partner is fully
- * wired up out of the box.
+ * wired up out of the box and chat-ready from the Characters list.
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -38,9 +37,8 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
-import { v4 as uuidv4, v7 as uuidv7 } from 'uuid';
+import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from 'react-i18next';
-import { deriveParticipantKey, deriveScopeFromParticipants } from '../database/repositories/interactions';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[CreateAIScreen]');
@@ -99,9 +97,7 @@ import {
   getAllMovementConfigs,
   getAllBackendConfigs,
 } from '../database/repositories/modules';
-import ChatPreferencesService from '../services/ChatPreferencesService';
 import syncService from '../services/SyncService';
-import { resolvePersonaId } from '../database/repositories/personas';
 import { ensureSoulbitsDefaultConfigs } from '../services/SoulbitsDefaultConfigService';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -678,13 +674,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     setGalleryImages(prev => prev.filter((_, i) => i !== index));
   };
 
-  // ── Save & Create ────────────────────────────────────────────────────────────
+  // ── Save ─────────────────────────────────────────────────────────────────────
   /**
-   * Persist the character profile + entity + module mapping, then either jump
-   * straight into a chat with it (`navigateToChat`) or just go back to the
-   * Characters list (`navigateToChat === false`).
+   * Persist the character profile + entity + module mapping, then go back to
+   * the screen we came from (Characters list). Chat is started from the
+   * Characters list after the partner has been saved.
    */
-  const createPartner = async (navigateToChat: boolean) => {
+  const createPartner = async () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
       showAlert(t('nameRequired'), t('nameRequiredMessage'));
@@ -1038,54 +1034,21 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       });
 
       // 6. Push the new entity (and its profile/mapping) to the engine.
-      //    When starting a chat we wait briefly so INIT_ENTITY succeeds (the
-      //    engine rejects with entity_not_defined if it doesn't know the entity
-      //    yet). For save-only we fire-and-forget — a full syncAndWait here can
-      //    block the save for up to 45s (e.g. the engine waiting on a size-
-      //    estimate confirmation), which made saving feel like it "takes
-      //    forever". The entity is persisted locally either way; any leftover
-      //    engine state is picked up by the next opportunistic sync.
+      //    Fire-and-forget — a full syncAndWait here can block the save for
+      //    up to 45s (e.g. the engine waiting on a size-estimate confirmation),
+      //    which made saving feel like it "takes forever". The entity is
+      //    persisted locally either way; any leftover engine state is picked
+      //    up by the next opportunistic sync.
       try {
-        if (navigateToChat) {
-          await syncService.syncAndWait({ timeoutMs: 12_000 });
-        } else {
-          syncService.initiateSync().catch(syncErr => {
-            log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
-          });
-        }
+        syncService.initiateSync().catch(syncErr => {
+          log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
+        });
       } catch (syncErr) {
         log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
       }
 
-      // 7. Either jump into a chat with the new partner, or just save and
-      //    return to the Characters list.
-      if (navigateToChat) {
-        // 7a. Resolve the persona we chat as (only personas — never AI
-        //     characters — are valid identities; falls back to 'user').
-        const storedId =
-          await ChatPreferencesService.getGlobalImpersonatedEntity();
-        const impersonatedEntityId = await resolvePersonaId(storedId);
-
-        // 7b. Navigate to ChatDetail — replace so back goes to ChatList, not here
-        const participantIds = [impersonatedEntityId ?? 'user', entityId];
-        const scope = deriveScopeFromParticipants(participantIds);
-        const participantKey = deriveParticipantKey(
-          participantIds,
-          impersonatedEntityId ?? 'user',
-          scope,
-        );
-        const tempInteractionId = uuidv7();
-        navigation.replace('ChatDetail', {
-          interactionId: tempInteractionId,
-          participantKey,
-          participantIds,
-          entityId: impersonatedEntityId ?? 'user',
-          entityName: effectiveName,
-        });
-      } else {
-        // Save-only: go back to the screen we came from (Characters list).
-        navigation.goBack();
-      }
+      // 7. Go back to the screen we came from (Characters list).
+      navigation.goBack();
     } catch (err: any) {
       showAlert(
         t('common:error'),
@@ -1096,14 +1059,9 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   };
 
-  /** "Start Chatting" — save the partner and jump straight into a chat. */
-  const handleCreate = () => {
-    createPartner(true);
-  };
-
-  /** "Save" — save the partner without starting a chat. */
+  /** "Save" — persist the partner and return to the Characters list. */
   const handleSave = () => {
-    createPartner(false);
+    createPartner();
   };
 
   // ── Render guard ─────────────────────────────────────────────────────────────
@@ -1774,11 +1732,12 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
             )}
           </ThemedCard>
 
-          {/* ── Action buttons: Save / Start Chatting (create) — Save only (edit) ── */}
+          {/* ── Action: Save only — partners are created and saved here, then
+              chatted with from the Characters list (create and edit). */}
           <View style={styles.ctaSection}>
             {isSaving ? (
               <ActivityIndicator size="large" color={accent} />
-            ) : editProfileId ? (
+            ) : (
               <ThemedButton
                 label={t('save')}
                 onPress={handleSave}
@@ -1787,25 +1746,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 disabled={isSaving}
                 style={styles.ctaButton}
               />
-            ) : (
-              <View style={styles.ctaRow}>
-                <ThemedButton
-                  label={t('save')}
-                  onPress={handleSave}
-                  variant="secondary"
-                  icon="content-save-outline"
-                  disabled={isSaving}
-                  style={styles.ctaButton}
-                />
-                <ThemedButton
-                  label={t('startChatting')}
-                  onPress={handleCreate}
-                  variant="primary"
-                  icon="creation"
-                  disabled={isSaving}
-                  style={styles.ctaButton}
-                />
-              </View>
             )}
           </View>
         </ScrollView>
@@ -2093,10 +2033,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     minHeight: 56,
     justifyContent: 'center',
-  },
-  ctaRow: {
-    flexDirection: 'row',
-    gap: 12,
   },
   ctaButton: {
     flex: 1,
