@@ -377,6 +377,27 @@ describe('characters repository', () => {
       expect(entity).not.toBeNull();
       expect(entity!.deleted_at).not.toBeNull();
     });
+
+    // Regression: the reported bug — a duplicate-save that fails on the entity
+    // alias UNIQUE constraint (name already in use) left an ORPHANED duplicate
+    // profile in the Characters list. CreateAIScreen now rolls the brand-new
+    // profile back via deleteCharacterProfileCascade, which must work even when
+    // NO entity was ever created (the entity insert is what failed).
+    it('deleteCharacterProfileCascade cleans up an orphaned profile with no entity (duplicate-save rollback)', async () => {
+      const profileId = 'del-cascade-orphan-1';
+      await createMinimalProfile(profileId);
+
+      // Simulate the failed duplicate save: profile exists, entity insert never
+      // happened (alias conflict) → no entity rows reference the profile.
+      await deleteCharacterProfileCascade(profileId);
+
+      const profile = await getCharacterProfile(profileId, true);
+      expect(profile).not.toBeNull();
+      expect(profile!.deleted_at).not.toBeNull();
+      // getAllCharacterProfiles (what the Characters list uses) no longer shows it
+      const visible = await getAllCharacterProfiles();
+      expect(visible.some(p => p.id === profileId)).toBe(false);
+    });
   });
 
   describe('character card V3 standard fields (migration 000037)', () => {

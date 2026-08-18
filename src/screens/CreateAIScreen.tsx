@@ -35,6 +35,7 @@ import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { SoulIcon } from '../components/market/SoulIcon';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { v4 as uuidv4, v7 as uuidv7 } from 'uuid';
@@ -63,6 +64,7 @@ import {
   createCharacterProfile,
   createCharacterImage,
   deleteCharacterImage,
+  deleteCharacterProfileCascade,
   getCharacterProfile,
   getCharacterImages,
   getCharacterProfileVisibility,
@@ -222,6 +224,15 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [duplicateProfile, setDuplicateProfile] =
     useState<CharacterProfile | null>(null);
   const [duplicateLoaded, setDuplicateLoaded] = useState(false);
+  // Tracks the last auto-assigned copy name so the focus-time name re-derivation
+  // can distinguish "the auto name is still in the field" (safe to advance to
+  // the next free number) from "the user manually edited the field" (leave it).
+  const lastAutoNameRef = useRef<string | null>(null);
+  // Live mirror of `name` so focus callbacks never read a stale closure.
+  const nameRef = useRef(name);
+  useEffect(() => {
+    nameRef.current = name;
+  }, [name]);
   // Prefills from the copied profile — separate from the module-config
   // selection below so pickers work after the copy lands.
   const [prefillModuleIds, setPrefillModuleIds] = useState<{
@@ -318,6 +329,28 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // Loads the source profile, copies its primary avatar + entity module mapping,
   // computes an auto-numbered name (02, 03, …) and prefills every editable field
   // so the user gets a full copy they can tweak, save, or chat with.
+  //
+  // NOTE on screen reuse: CreateAI is a single Stack.Screen that the user can
+  // return to repeatedly ("Max" → "Max 2" → save → "Max" again → "Max 3").
+  // Because stack navigation reuses the mounted component, React state survives
+  // the round-trip and the `duplicateLoaded` latch below would otherwise stay
+  // `true`, so re-entering the duplicate flow would KEEP the stale "Max 2" name
+  // instead of recomputing "Max 3". This was the reported bug: creating a 3rd
+  // copy of the same AI stayed named "Name 2", collided with the existing
+  // "Name 2", and the save spilled an orphaned duplicate profile.
+  //
+  // Two guards fix it:
+  //   1. `duplicateLoaded` is reset whenever the duplication TARGET changes, and
+  //   2. a focus-time re-derivation (below) advances the auto-name even when the
+  //      same target is duplicated twice in a row — after saving "Max 2" and
+  //      returning to duplicate "Max" again, the field still holds "Max 2"
+  //      (from the previous visit); we recompute the next free number and bump
+  //      it to "Max 3" so the user never saves a duplicate name.
+  useEffect(() => {
+    if (!duplicateProfileId) return;
+    setDuplicateLoaded(false);
+  }, [duplicateProfileId]);
+
   useEffect(() => {
     if (!duplicateProfileId || duplicateLoaded) return;
     let cancelled = false;
@@ -332,6 +365,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         if (cancelled) return;
         setDuplicateProfile(profile);
         setName(nextName);
+        lastAutoNameRef.current = nextName;
         setDescription(profile.description ?? '');
         setPersonality(profile.personality ?? '');
         setAppearance(profile.appearance ?? '');
@@ -429,6 +463,42 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       cancelled = true;
     };
   }, [duplicateProfileId, duplicateLoaded]);
+
+  // ── Focus-time auto-name re-derivation (duplicate flow) ─────────────────────
+  // Guards against the reported bug: duplicating the SAME source AI twice in a
+  // row. Stack navigation reuses this component, so after saving "Max 2" and
+  // re-entering the duplicate flow for "Max", the name field still holds the
+  // previous visit's "Max 2". If the field still contains the auto-assigned
+  // name (not manually edited), recompute the next free copy number and bump it
+  // ("Max 2" → "Max 3") so the user can never save a duplicate name.
+  useFocusEffect(
+    useCallback(() => {
+      if (!duplicateProfileId || !duplicateProfile || !lastAutoNameRef.current) {
+        return;
+      }
+      // Respect manual edits: only advance when the field still shows the name
+      // we auto-assigned (compared via the live ref, avoiding stale closures).
+      const current = nameRef.current?.trim() ?? '';
+      const lastAuto = lastAutoNameRef.current.trim();
+      if (current === '' || current !== lastAuto) {
+        return;
+      }
+      let cancelled = false;
+      (async () => {
+        try {
+          const nextName = await getNextEntityAliasCopy(duplicateProfile.name || 'Character');
+          if (cancelled || nextName === lastAuto) return;
+          lastAutoNameRef.current = nextName;
+          setName(nextName);
+        } catch (err) {
+          log.warn('Failed to re-derive duplicate copy name on focus:', err);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [duplicateProfileId, duplicateProfile]),
+  );
 
   // ── Apply copied module configs (from the duplicated partner) ────────────────
   // Once both the copied mapping is available AND the module-config lists have
@@ -750,7 +820,30 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      const entityId = trimmedName;
+      // ── Duplicate-flow save-time name guard ─────────────────────────────
+      // The screen-level focus re-derivation normally keeps the auto-name in
+      // sync, but a stale name can still reach the save (e.g. the CreateAI
+      // component was remounted or the user opened the copy flow straight from
+      // a context menu). Rather than fail with the "name already in use" alert
+      // AND leave an orphaned profile, the DUPLICATE flow transparently
+      // advances the auto-name to the next free copy number ("Max 2" → "Max 3")
+      // so the 3rd copy of an AI is always named correctly — the reported bug.
+      // Manual names (the user typed something) are NEVER rewritten; only the
+      // auto-assigned copy name is bumped.
+      let effectiveName = trimmedName;
+      if (
+        duplicateProfile &&
+        lastAutoNameRef.current &&
+        trimmedName === lastAutoNameRef.current.trim()
+      ) {
+        const autoName = await getNextEntityAliasCopy(duplicateProfile.name || 'Character');
+        if (autoName && autoName !== trimmedName) {
+          effectiveName = autoName;
+          lastAutoNameRef.current = autoName;
+          setName(autoName);
+        }
+      }
+      const entityId = effectiveName;
 
       // 1. Either link an existing character profile (from the "From an
       //    Existing One" flow) or create a brand-new one.
@@ -767,7 +860,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
         await createCharacterProfile({
           id: profileId,
-          name: trimmedName,
+          name: effectiveName,
           description: description.trim() || '',
           personality: personality.trim() || '',
           appearance: appearance.trim() || '',
@@ -859,7 +952,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       try {
         await createEntity({
           id: entityId,
-          alias: trimmedName,
+          alias: effectiveName,
           character_profile_id: profileId,
           lifecycle_config: '{}',
           rag_reindex_required: 1,
@@ -870,6 +963,21 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           err?.message?.includes('UNIQUE') ||
           err?.message?.includes('alias')
         ) {
+          // Roll back ONLY the brand-new profile created in step 1 so a failed
+          // attempt cannot leave an orphaned "Name 2" duplicate in the
+          // Characters list — the reported bug showed a "name already in use"
+          // alert AND the copy still appearing. The prefill-link flow
+          // (prefillProfileId, no duplicate) reuses an EXISTING profile, so
+          // nothing needs rolling back there — the entity insert simply fails.
+          // For a fresh duplicate the entity insert failed, so the cascade
+          // soft-deletes just the profile (+ any created images/sidecars).
+          if (!prefillProfileId) {
+            try {
+              await deleteCharacterProfileCascade(profileId);
+            } catch (rollbackErr) {
+              log.warn('Failed to roll back orphaned profile after alias conflict:', rollbackErr);
+            }
+          }
           showAlert(
             t('aliasConflictTitle'),
             t('aliasConflictMessage'),
@@ -972,7 +1080,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           participantKey,
           participantIds,
           entityId: impersonatedEntityId ?? 'user',
-          entityName: trimmedName,
+          entityName: effectiveName,
         });
       } else {
         // Save-only: go back to the screen we came from (Characters list).

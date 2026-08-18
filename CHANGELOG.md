@@ -68,6 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AI character image posts now show a **date/time** caption under the image.
 - Added a **Notifications** bell to the header of the principal screens (Characters, Chat, Discover, Market, My Profile) with an unread badge. The feed shows follows, AI profile likes, AI image likes/comments, and post likes/comments.
 - **My Profile → Posts** now supports publishing **text and/or image posts** (via a ＋ button) with Like and Comment buttons; posts appear on the Discover screen as a "Recent Posts" section with the author's avatar + name, and tapping the author opens their profile.
+#### Fixed
+- Fixed creating a 3rd (or later) copy of an existing AI partner staying named like the previous copy (e.g. "Max 2") instead of auto-advancing to the next free number ("Max 3"). The 3rd copy is now always named correctly, and a failed duplicate save no longer leaves an orphaned partner in the Characters list.
 
 ### Profile
 #### Added

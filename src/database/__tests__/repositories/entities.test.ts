@@ -808,5 +808,27 @@ describe('entities repository', () => {
       await createEntity({id: 'arianna', character_profile_id: null, alias: 'Arianna', lifecycle_config: '{}', rag_reindex_required: 1});
       expect(await getNextEntityAliasCopy('Aria')).toBe('Aria 2');
     });
+
+    // Regression: the reported bug — creating a 3rd copy of the same AI stayed
+    // named "Name 2". The repository is called fresh each time the screen is
+    // (re)opened for duplication, so it must account for the already-saved
+    // "Max 2" AND "Max 3" and return "Max 4", never a stale/duplicate number.
+    it('resolves the NEXT free copy number when multiple copies already exist (3rd-copy regression)', async () => {
+      await createEntity({id: 'aria', character_profile_id: null, alias: 'Aria', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: 'aria-02', character_profile_id: null, alias: 'Aria 02', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: 'aria-03', character_profile_id: null, alias: 'Aria 03', lifecycle_config: '{}', rag_reindex_required: 1});
+      expect(await getNextEntityAliasCopy('Aria')).toBe('Aria 4');
+    });
+
+    // Same, but duplicating one of the copies ("Aria 02") must ALSO continue the
+    // series from the true base — never yield "Aria 02 2" and never re-use
+    // "Aria 2".
+    it('resolves the next free copy number when duplicating an existing copy that is NOT the highest', async () => {
+      await createEntity({id: 'aria', character_profile_id: null, alias: 'Aria', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: 'aria-02', character_profile_id: null, alias: 'Aria 02', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: 'aria-04', character_profile_id: null, alias: 'Aria 04', lifecycle_config: '{}', rag_reindex_required: 1});
+      // Aria 3 is free, Aria 2 + Aria 4 are taken → next free is 3.
+      expect(await getNextEntityAliasCopy('Aria 02')).toBe('Aria 3');
+    });
   });
 });
