@@ -1,5 +1,5 @@
 /**
- * AICardPickerModal — "duplicate an existing AI partner?"
+ * AICardPickerModal — "fork an existing AI partner?"
  *
  * Opens as a smooth obsidian-glass bottom sheet when the user taps an existing
  * AI character card on the Characters screen. Presents every existing character
@@ -17,7 +17,7 @@
  *
  * Picking a card fires `onSelect(profile)` — the parent navigates to the
  * Create AI Partner screen with `duplicateProfileId` so the new partner is a
- * full copy (profile fields + avatar + module settings) with an auto-numbered
+ * full fork (profile fields + avatar + module settings) with an auto-numbered
  * name (02, 03, …).
  */
 

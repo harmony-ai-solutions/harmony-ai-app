@@ -6,7 +6,7 @@
  *
  * The tab key type is generic so the same component powers both the user's
  * My Profile screen (Posts / Favorites / Personas) and the AI character
- * profile screen (Images / Copies).
+ * profile screen (Images / Forks).
  */
 
 import React from 'react';

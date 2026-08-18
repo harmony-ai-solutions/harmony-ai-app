@@ -70,7 +70,7 @@ export type RootStackParamList = {
   };
   /**
    * CreateAI — the single create AND edit surface for AI partners.
-   *   - (create) prefillProfileId = link an existing profile; duplicateProfileId = full copy
+   *   - (create) prefillProfileId = link an existing profile; duplicateProfileId = full fork
    *   - (edit)   editProfileId = edit an existing AI partner (profile + entity + settings)
    */
   CreateAI: {

@@ -552,7 +552,7 @@ export const CharactersScreen: React.FC = () => {
   /** A profile was picked in the card picker. */
   const handlePickerSelect = (profile: CharacterProfile) => {
     setPickerVisible(false);
-    // Both intents create a FULL COPY of the chosen character — same info,
+    // Both intents create a FULL FORK of the chosen character — same info,
     // avatar and settings — with an auto-numbered name ("Max" → "Max 2").
     navigation.navigate('CreateAI', { duplicateProfileId: profile.id });
   };
@@ -560,7 +560,7 @@ export const CharactersScreen: React.FC = () => {
   /**
    * Card tap → AI profile screen (the AI's own profile view, mirroring the
    * user's My Profile screen: avatar, name, description, images / likes /
-   * chats tabs + other copies of the same AI).
+   * chats tabs + other forks of the same AI).
    */
   const handleOpenAIProfile = (profile: CharacterProfile) => {
     navigation.navigate('AIProfile', { profileId: profile.id });

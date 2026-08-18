@@ -51,7 +51,7 @@ interface CharacterCoverFlowCarouselProps {
   profiles: CharacterProfile[];
   /** profileId → primary-avatar data URL (or null when the profile has none). */
   images: Record<string, string | null>;
-  /** Which intent opened the carousel — controls the copy-pip icon. */
+  /** Which intent opened the carousel — controls the fork-pip icon. */
   mode: 'duplicate' | 'fromExisting';
   /** Fired when the user taps a card and it settles into the center focus. */
   onSelect: (profile: CharacterProfile) => void;
@@ -309,7 +309,7 @@ const DeckCard = React.memo(function DeckCardImpl({
             </ThemedText>
           </View>
 
-          {/* Mode pip — copy badge for duplication, arrow for linking */}
+          {/* Mode pip — fork badge for duplication, arrow for linking */}
           <LinearGradient
             colors={[accent, accentSecondary]}
             start={{ x: 0, y: 0 }}

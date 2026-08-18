@@ -214,16 +214,16 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const prefillProfileId = route.params?.prefillProfileId ?? null;
   const [prefilled, setPrefilled] = useState(false);
 
-  // ── Duplicate flow — duplicateProfileId copies a profile into a NEW one ──────
-  // The source profile is fully copied: name gets an auto-numbered suffix
+  // ── Fork flow — duplicateProfileId forks a profile into a NEW one ────────────
+  // The source profile is fully forked: name gets an auto-numbered suffix
   // (02, 03, …), all detail fields + voice settings carry over, the primary
   // avatar image is copied, and any existing entity module mapping is re-used
-  // so the copy is chat-ready with the exact same settings.
+  // so the fork is chat-ready with the exact same settings.
   const duplicateProfileId = route.params?.duplicateProfileId ?? null;
   const [duplicateProfile, setDuplicateProfile] =
     useState<CharacterProfile | null>(null);
   const [duplicateLoaded, setDuplicateLoaded] = useState(false);
-  // Tracks the last auto-assigned copy name so the focus-time name re-derivation
+  // Tracks the last auto-assigned fork name so the focus-time name re-derivation
   // can distinguish "the auto name is still in the field" (safe to advance to
   // the next free number) from "the user manually edited the field" (leave it).
   const lastAutoNameRef = useRef<string | null>(null);
@@ -232,8 +232,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   useEffect(() => {
     nameRef.current = name;
   }, [name]);
-  // Prefills from the copied profile — separate from the module-config
-  // selection below so pickers work after the copy lands.
+  // Prefills from the forked profile — separate from the module-config
+  // selection below so pickers work after the fork lands.
   const [prefillModuleIds, setPrefillModuleIds] = useState<{
     backend: string | null;
     cognition: string | null;
@@ -452,9 +452,9 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   }, [prefillProfileId, prefilled]);
 
   // ── Duplicate prefill (route param duplicateProfileId) ───────────────────────
-  // Loads the source profile, copies its primary avatar + entity module mapping,
+  // Loads the source profile, forks its primary avatar + entity module mapping,
   // computes an auto-numbered name (02, 03, …) and prefills every editable field
-  // so the user gets a full copy they can tweak, save, or chat with.
+  // so the user gets a full fork they can tweak, save, or chat with.
   //
   // NOTE on screen reuse: CreateAI is a single Stack.Screen that the user can
   // return to repeatedly ("Max" → "Max 2" → save → "Max" again → "Max 3").
@@ -462,7 +462,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // the round-trip and the `duplicateLoaded` latch below would otherwise stay
   // `true`, so re-entering the duplicate flow would KEEP the stale "Max 2" name
   // instead of recomputing "Max 3". This was the reported bug: creating a 3rd
-  // copy of the same AI stayed named "Name 2", collided with the existing
+  // fork of the same AI stayed named "Name 2", collided with the existing
   // "Name 2", and the save spilled an orphaned duplicate profile.
   //
   // Two guards fix it:
@@ -486,7 +486,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         const profile = await getCharacterProfile(duplicateProfileId);
         if (!profile || cancelled) return;
 
-        // Compute the next free copy name — "Aria" → "Aria 02" → "Aria 03"…
+        // Compute the next free fork name — "Aria" → "Aria 02" → "Aria 03"…
         const nextName = await getNextEntityAliasCopy(profile.name || 'Character');
         if (cancelled) return;
         setDuplicateProfile(profile);
@@ -503,7 +503,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setScenario(profile.scenario ?? '');
         setExampleDialogues(profile.example_dialogues ?? '');
 
-        // Carry over the source profile's visibility + price so the copy
+        // Carry over the source profile's visibility + price so the fork
         // matches it.
         try {
           const visibility = await getCharacterProfileVisibility(profile.id);
@@ -543,7 +543,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           log.warn('Failed to copy gallery images:', galleryErr);
         }
 
-        // Copy the primary avatar image (base64 + mime) so the copy looks identical.
+        // Copy the primary avatar image (base64 + mime) so the fork looks identical.
         try {
           const images = await getCharacterImages(profile.id);
           const primary = images.find(img => img.is_primary === true);
@@ -556,7 +556,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           log.warn('Failed to copy primary avatar:', imgErr);
         }
 
-        // Copy the source entity's module mapping (settings) so the copy is
+        // Copy the source entity's module mapping (settings) so the fork is
         // chat-ready with the exact same AI model / voice / config stack.
         try {
           const entity = await getEntityByCharacterProfileId(profile.id);
@@ -595,7 +595,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // row. Stack navigation reuses this component, so after saving "Max 2" and
   // re-entering the duplicate flow for "Max", the name field still holds the
   // previous visit's "Max 2". If the field still contains the auto-assigned
-  // name (not manually edited), recompute the next free copy number and bump it
+  // name (not manually edited), recompute the next free fork number and bump it
   // ("Max 2" → "Max 3") so the user can never save a duplicate name.
   useFocusEffect(
     useCallback(() => {
@@ -617,7 +617,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           lastAutoNameRef.current = nextName;
           setName(nextName);
         } catch (err) {
-          log.warn('Failed to re-derive duplicate copy name on focus:', err);
+          log.warn('Failed to re-derive duplicate fork name on focus:', err);
         }
       })();
       return () => {
@@ -949,13 +949,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       // ── Duplicate-flow save-time name guard ─────────────────────────────
       // The screen-level focus re-derivation normally keeps the auto-name in
       // sync, but a stale name can still reach the save (e.g. the CreateAI
-      // component was remounted or the user opened the copy flow straight from
+      // component was remounted or the user opened the fork flow straight from
       // a context menu). Rather than fail with the "name already in use" alert
       // AND leave an orphaned profile, the DUPLICATE flow transparently
-      // advances the auto-name to the next free copy number ("Max 2" → "Max 3")
-      // so the 3rd copy of an AI is always named correctly — the reported bug.
+      // advances the auto-name to the next free fork number ("Max 2" → "Max 3")
+      // so the 3rd fork of an AI is always named correctly — the reported bug.
       // Manual names (the user typed something) are NEVER rewritten; only the
-      // auto-assigned copy name is bumped.
+      // auto-assigned fork name is bumped.
       let effectiveName = trimmedName;
       if (
         duplicateProfile &&
@@ -1092,7 +1092,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           // Roll back ONLY the brand-new profile created in step 1 so a failed
           // attempt cannot leave an orphaned "Name 2" duplicate in the
           // Characters list — the reported bug showed a "name already in use"
-          // alert AND the copy still appearing. The prefill-link flow
+          // alert AND the fork still appearing. The prefill-link flow
           // (prefillProfileId, no duplicate) reuses an EXISTING profile, so
           // nothing needs rolling back there — the entity insert simply fails.
           // For a fresh duplicate the entity insert failed, so the cascade

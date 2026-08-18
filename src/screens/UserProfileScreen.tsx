@@ -13,7 +13,7 @@
  *   - The user's published posts
  *
  * PRIVACY: private content — the user's AI characters, saved characters,
- * personas (and character copies) — is NEVER rendered here, even when the
+ * personas (and character forks) — is NEVER rendered here, even when the
  * target is the current user. That content lives only on the "My Profile"
  * tab. This screen is a read-only, public-facing view.
  */

@@ -10,11 +10,11 @@
  *     they don't own)
  *   - Primary Chat button + small rounded Like / Save buttons
  *   - Stats row: Likes · Chats (Likes counts profile likes + image likes)
- *   - Icon-only tab bar: Images | Copies
+ *   - Icon-only tab bar: Images | Forks
  *   - Images tab: every gallery image (including the avatar) rendered as a
  *     POST with like + comment buttons — any user can interact, read the
  *     others' comments, and see the like count
- *   - Copies tab: the other copies of the same AI character (same base name),
+ *   - Forks tab: the other forks of the same AI character (same base name),
  *     tappable to open their own profile
  *
  * Reached from the Characters screen by tapping an AI character card.
@@ -161,12 +161,12 @@ export const AIProfileScreen: React.FC = () => {
         primary ? createDataURL(primary.image_data, primary.mime_type) : null,
       );
 
-      // Other copies of the same AI (same base name, e.g. Max 2 / Max 3)
+      // Other forks of the same AI (same base name, e.g. Max 2 / Max 3)
       const siblings = await getSiblingCharacterProfiles(data.name);
       const siblingCopies = siblings.filter(s => s.id !== profileId);
       setCopies(siblingCopies);
 
-      // Load each copy's primary avatar for the Copies rows
+      // Load each fork's primary avatar for the Forks rows
       try {
         const avatarMap: Record<string, string | null> = {};
         await Promise.all(
@@ -184,7 +184,7 @@ export const AIProfileScreen: React.FC = () => {
         );
         setCopiesAvatars(avatarMap);
       } catch (err) {
-        log.warn('Failed to load copy avatars:', err);
+        log.warn('Failed to load fork avatars:', err);
       }
 
       // Likes + Chats stats via this character's entity
@@ -227,7 +227,7 @@ export const AIProfileScreen: React.FC = () => {
           // locally-picked avatar (UserProfileStore) so the badge shows the
           // real avatar — the creator row only stores the cloud avatar_url,
           // which is null for locally-picked avatars (this affects every
-          // user-created character AND its copies).
+          // user-created character AND its forks).
           if (user?.id && characterCreator.creatorUserId === user.id) {
             try {
               const local = await getLocalProfile(user.id);
@@ -560,7 +560,7 @@ export const AIProfileScreen: React.FC = () => {
   const resolvedName = (profile?.name || 'AI Character').trim();
   const bioText = (profile?.description ?? '').trim();
 
-  // ── Tabs: Images (gallery) | Copies (other copies of this AI) ─────────
+  // ── Tabs: Images (gallery) | Forks (other forks of this AI) ────────────
   const tabs = [
     {
       key: 'images' as AITabKey,
@@ -989,7 +989,7 @@ export const AIProfileScreen: React.FC = () => {
                           hapticLightPress();
                           // Updating the param re-runs useFocusEffect (the
                           // loadProfile callback identity changes with profileId),
-                          // which reloads this screen for the chosen copy.
+                          // which reloads this screen for the chosen fork.
                           navigation.setParams({ profileId: copy.id });
                         }}
                         activeOpacity={0.75}
@@ -1268,7 +1268,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // ── Copies ──
+  // ── Forks ──
   copiesWrap: {
     gap: 8,
   },

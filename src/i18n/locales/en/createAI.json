@@ -61,5 +61,5 @@
   "aliasConflictTitle": "Name already in use",
   "aliasConflictMessage": "Another AI partner already uses this name. Please choose a different name.",
   "createFailed": "Failed to create AI partner: {{message}}",
-  "duplicateTitle": "Copy of {{name}}"
+  "duplicateTitle": "Fork of {{name}}"
 }

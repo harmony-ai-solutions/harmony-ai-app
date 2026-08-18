@@ -1140,12 +1140,12 @@ export async function getCharacterCategories(): Promise<CharacterCategory[]> {
   }
 
   // ============================================================================
-  // AI Profile helpers (copies + stats)
+  // AI Profile helpers (forks + stats)
   // ============================================================================
 
   /**
-   * All character profiles that share the same copy base name as the given
-   * profile — i.e. "the other copies of the same AI character". Includes the
+   * All character profiles that share the same fork base name as the given
+   * profile — i.e. "the other forks of the same AI character". Includes the
    * profile itself (the screen filters it out). Groups "Max", "Max 2",
    * "Max 3" together via stripCopySuffix.
    */
@@ -1181,7 +1181,7 @@ export async function getCharacterCategories(): Promise<CharacterCategory[]> {
    *     owners would inflate the number when the same user chats again, or when
    *     a single chat is mirrored as two interaction rows.
    *
-   *   Copies are independent: a duplicated character ("Max 2") is a new entity
+   *   Forks are independent: a duplicated character ("Max 2") is a new entity
    *   whose entity id appears in none of the original's interactions, so its
    *   chat count starts at 0.
    */
