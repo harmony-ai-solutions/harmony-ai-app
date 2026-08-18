@@ -3,6 +3,7 @@ import ConnectionStateManager, { type SyncSource } from '../services/ConnectionS
 import ConnectionManager from '../services/connection/ConnectionManager';
 import SyncService, { SyncService as SyncServiceClass } from '../services/SyncService';
 import { cloudSessionService, type CloudSessionStatus, type CloudSessionInfo } from '../services/cloud/CloudSessionService';
+import { PurgeInProgressError } from '@harmony-ai-solutions/soulbits-api-client';
 import AuthService from '../services/auth/AuthService';
 import DeviceAuthService from '../services/cloud/DeviceAuthService';
 import { parseDeviceDeepLink } from '../services/cloud/deviceDeepLink';
@@ -697,12 +698,43 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     return () => { cloudSessionService.off('status', onCloudStatus); };
   }, []);
 
+  // ── Purge re-evaluation (Phase 6) ──────────────────────────────────────
+  // When a user-initiated cloud purge finishes (success OR failure), clear any
+  // in-flight reconnect scheduling so the UI isn't left ticking a reconnect
+  // timer against a session that no longer exists. We deliberately do NOT
+  // auto-connect here — the success dialog explicitly guides the user to
+  // reconnect and Force full re-sync afterwards.
+  useEffect(() => {
+    const reEvaluateAfterPurge = () => {
+      log.info('Cloud data purge settled — resetting reconnect state (no auto-connect)');
+      cancelReconnect();
+      setIsReconnectingSync(false);
+      setIsConnectingSync(false);
+      setNextReconnectIn(0);
+    };
+    cloudSessionService.on('purge:done', reEvaluateAfterPurge);
+    cloudSessionService.on('purge:failed', reEvaluateAfterPurge);
+    return () => {
+      cloudSessionService.off('purge:done', reEvaluateAfterPurge);
+      cloudSessionService.off('purge:failed', reEvaluateAfterPurge);
+    };
+  }, []);
+
   // ---------------------------------------------------------------------------
   // Connection actions
   // ---------------------------------------------------------------------------
   const connect = async (): Promise<void> => {
     if (isConnectingRef.current) {
       log.info('Already connecting');
+      return;
+    }
+
+    // Suppress every auto-connect / reconnect / foreground / WS-failure
+    // re-provision entry while a user-initiated cloud purge is in flight.
+    // The broker 409s connects mid-purge anyway; this guard keeps the app from
+    // dialing a WS (and toasting connection errors) during the purge window.
+    if (cloudSessionService.isPurging()) {
+      log.info('Cloud data purge in progress — skipping connect');
       return;
     }
 
@@ -760,6 +792,22 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       
       log.info('Sync connection established');
     } catch (error: any) {
+      // A 409 purge_in_progress from connectPoll means ANOTHER device is
+      // currently resetting its cloud data. This is expected — do NOT treat it
+      // as a connection failure or schedule a reconnect (the reconnect loop
+      // would spin uselessly until the other purge finishes). Drop to a
+      // non-reconnecting state and toast so the user knows to wait.
+      if (error instanceof PurgeInProgressError) {
+        log.info('Cloud connect blocked: purge in progress on another device');
+        cancelReconnect();
+        setIsReconnectingSync(false);
+        setIsConnectingSync(false);
+        setIsConnectedSync(false);
+        setNextReconnectIn(0);
+        showToast(i18n.t('syncSettings:purgeInProgressOtherDevice'));
+        return;
+      }
+
       log.error('Connect failed:', error);
       setIsConnectingSync(false);
       setIsConnectedSync(false);

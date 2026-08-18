@@ -22,7 +22,10 @@
  */
 
 import EventEmitter from 'eventemitter3';
-import { DeviceAuthRequiredError as ClientDeviceAuthRequiredError } from '@harmony-ai-solutions/soulbits-api-client';
+import {
+  DeviceAuthRequiredError as ClientDeviceAuthRequiredError,
+  SnapshotBusyError,
+} from '@harmony-ai-solutions/soulbits-api-client';
 import AuthService from '../auth/AuthService';
 import { buildSoulbitsClient } from './soulbitsClient';
 import { getDeviceId } from './DeviceIdProvider';
@@ -34,6 +37,14 @@ const log = createLogger('[CloudSession]');
  * Absolute timeout bound for the client's `connectPoll` loop (ms).
  */
 const CONNECT_POLL_TIMEOUT_MS = 180_000;
+
+/**
+ * Bounded retry budgets for `purgeCloudData` (see the method docstring).
+ */
+const SNAPSHOT_BUSY_MAX_TRIES = 10; // SnapshotBusyError → 3s wait between tries
+const SNAPSHOT_BUSY_RETRY_WAIT_MS = 3_000;
+const IN_PROGRESS_MAX_TRIES = 40;   // another device purging → ~2min budget
+const IN_PROGRESS_RETRY_WAIT_MS = 3_000;
 
 /**
  * Thrown when POST /v1/session/connect returns 403
@@ -59,7 +70,9 @@ export type CloudSessionStatus =
                     // tracked separately by useSyncConnection().isConnected)
   | 'deviceAuthRequired' // broker returned 403 device_authorization_required;
                          // the user must complete the email-code flow (D-DEV-01)
-  | 'failed';       // broker returned 503 failed, or max polls exceeded
+  | 'failed'       // broker returned 503 failed, or max polls exceeded
+  | 'purging';     // user-initiated cloud data purge in flight (Phase 6); no
+                   // session can be requested while this is active.
 
 /**
  * Richer event payload so the UI (Phase 9) can show failure reason + elapsed.
@@ -76,6 +89,11 @@ export interface CloudSessionInfo {
 
 interface CloudSessionEvents {
   'status': (status: CloudSessionStatus, info?: CloudSessionInfo) => void;
+  /** Emitted when `purgeCloudData` completes successfully (cloud data deleted). */
+  'purge:done': () => void;
+  /** Emitted when `purgeCloudData` exhausts its retries or hits a terminal error.
+   *  The session state is `idle`, NOT `failed` (the session itself didn't fail). */
+  'purge:failed': (reason: string) => void;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────
@@ -116,6 +134,16 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
     return this.status;
   }
 
+  /**
+   * Whether a user-initiated cloud data purge is currently in flight
+   * (`status === 'purging'`). While true, auto-connect/reconnect must be
+   * suppressed so nothing dials a session mid-purge (broker 409 is the
+   * backstop; this flag is the app-side UX gate).
+   */
+  isPurging(): boolean {
+    return this.status === 'purging';
+  }
+
   getSessionId(): string | null {
     return this.sessionId;
   }
@@ -148,6 +176,11 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
    *   the user must complete the email-code flow, then retry with force.
    */
   async connect(opts?: { force?: boolean }): Promise<void> {
+    // Belt-and-braces gate: never request a session while a purge is running.
+    // The broker would 409 anyway; this keeps app-internal callers honest.
+    if (this.isPurging()) {
+      throw new Error('purge in progress');
+    }
     if (!opts?.force && this.status === 'ready') {
       return;
     }
@@ -321,6 +354,94 @@ export class CloudSessionService extends EventEmitter<CloudSessionEvents> {
       } catch (e) {
         log.warn('Cloud disconnect failed (best-effort)', e);
       }
+    }
+  }
+
+  // ── Purge cloud data ────────────────────────────────────────────────────
+
+  /**
+   * Purge all cloud-side engine data for the signed-in user.
+   *
+   * 1. `disconnect()` locally first (best-effort broker notify — the broker
+   *    hard-kills the live session anyway once the purge runs).
+   * 2. POST /v1/session/data/delete with bounded retries:
+   *    - `SnapshotBusyError` → wait 3s, retry (max 10 attempts).
+   *    - 200 `status: 'in_progress'` (ANOTHER device running the purge) →
+   *      wait 3s and re-call (max 40 attempts / ~2min). Re-calling is safe and
+   *      idempotent: when the other purge completes, our call re-runs the (now
+   *      empty) purge and returns `deleted`.
+   * 3. On success: status → 'idle', emit `'purge:done'`.
+   *
+   * On retry exhaustion or a terminal error: emit `'purge:failed'` with a
+   * reason and leave status → 'idle' (NOT 'failed' — the session itself did
+   * not fail; the user can retry the purge manually).
+   *
+   * Never auto-reconnects (the UI explicitly guides the user to reconnect and
+   * Force full re-sync afterwards).
+   */
+  async purgeCloudData(): Promise<void> {
+    this.setStatus('purging');
+
+    try {
+      // 1. Release the current session locally + best-effort broker notify.
+      //    disconnect() resets the status to 'idle' — re-assert 'purging'
+      //    afterwards so isPurging() stays true for the whole retry window
+      //    (the SyncConnectionContext suppression depends on it).
+      await this.disconnect();
+      this.setStatus('purging');
+
+      // 2. Bounded retry loop against the broker.
+      let snapshotBusyTries = 0;
+      let inProgressTries = 0;
+      const paseto = await AuthService.getToken();
+      const client = buildSoulbitsClient({ paseto });
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        let result: Awaited<ReturnType<typeof client.session.deleteDataOrThrow>>;
+        try {
+          result = await client.session.deleteDataOrThrow('DELETE');
+        } catch (e) {
+          if (e instanceof SnapshotBusyError) {
+            snapshotBusyTries += 1;
+            if (snapshotBusyTries >= SNAPSHOT_BUSY_MAX_TRIES) {
+              throw new Error(
+                `cloud data purge aborted: snapshot busy after ${snapshotBusyTries} attempts`,
+              );
+            }
+            log.info(`Purge snapshot busy (${snapshotBusyTries}/${SNAPSHOT_BUSY_MAX_TRIES}) — retrying in ${SNAPSHOT_BUSY_RETRY_WAIT_MS}ms`);
+            await new Promise(resolve => setTimeout(resolve, SNAPSHOT_BUSY_RETRY_WAIT_MS));
+            continue;
+          }
+          // ConfirmationRequiredError, APIError (4xx/5xx), etc. — terminal.
+          throw e;
+        }
+
+        if (result.status === 'deleted') {
+          break;
+        }
+        // status === 'in_progress' → another device is purging; re-call.
+        inProgressTries += 1;
+        if (inProgressTries >= IN_PROGRESS_MAX_TRIES) {
+          throw new Error(
+            `cloud data purge timed out: purge in progress on another device after ${inProgressTries} attempts`,
+          );
+        }
+        log.info(`Purge in progress on another device (${inProgressTries}/${IN_PROGRESS_MAX_TRIES}) — re-calling in ${IN_PROGRESS_RETRY_WAIT_MS}ms`);
+        await new Promise(resolve => setTimeout(resolve, IN_PROGRESS_RETRY_WAIT_MS));
+      }
+
+      // 3. Success — leave the service idle (no session, nothing scheduled)
+      //    and tell the UI the cloud-side data is gone.
+      log.info('Cloud data purge complete');
+      this.setStatus('idle');
+      this.emit('purge:done');
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      log.warn(`Cloud data purge failed: ${reason}`);
+      // Session itself did NOT fail — leave idle so the user can retry.
+      this.setStatus('idle');
+      this.emit('purge:failed', reason);
     }
   }
 }

@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
-    "@harmony-ai-solutions/soulbits-api-client": "git+ssh://git@github.com:harmony-ai-solutions/soulbits-api-client-js.git#cb85ec94e775e8e429e87b4545296d68e874a584",
+    "@harmony-ai-solutions/soulbits-api-client": "git+ssh://git@github.com:harmony-ai-solutions/soulbits-api-client-js.git#f38e6115a013522f24e8e42d34547318a23a95fb",
     "@invertase/react-native-apple-authentication": "^2.5.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-clipboard/clipboard": "^1.16.3",

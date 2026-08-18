@@ -25,6 +25,7 @@ import { SelectPicker } from '../../components/config/SelectPicker';
 import { SyncProgressVisualizer } from '../../components/sync/SyncProgressVisualizer';
 import SyncService, { SyncSession } from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
+import { cloudSessionService, type CloudSessionStatus } from '../../services/cloud/CloudSessionService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../../utils/logger';
 import { hexToRgba } from '../../utils/colorUtils';
@@ -59,6 +60,9 @@ export const SyncSettingsScreen: React.FC = () => {
   const [estimateLimit, setEstimateLimit] = useState<string>('5');
   const [countdown, setCountdown] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Phase 6: whether the user-initiated cloud data purge is currently running.
+  const [isPurging, setIsPurging] = useState(cloudSessionService.isPurging());
 
   const loadSettings = useCallback(async () => {
     // Read the per-source sync watermark (legacy global key was removed).
@@ -173,6 +177,34 @@ export const SyncSettingsScreen: React.FC = () => {
     return () => clearInterval(interval);
   }, [isReconnecting, nextReconnectIn]);
 
+  // ── Purge state tracking (Phase 6) ────────────────────────────────────────
+  // Mirrors the CloudSessionService purge lifecycle so the destructive card can
+  // disable its button + show progress while a purge is in flight, then surface
+  // a success alert or failure toast when it settles. This effect also listens
+  // for the `status` event so a purge started from another screen keeps this
+  // screen's button state in sync.
+  useEffect(() => {
+    const onStatus = (s: CloudSessionStatus) => {
+      setIsPurging(s === 'purging');
+    };
+    const onPurgeDone = () => {
+      setIsPurging(false);
+      showAlert(t('resetCloudDataSuccessTitle'), t('resetCloudDataSuccessMessage'));
+    };
+    const onPurgeFailed = (reason: string) => {
+      setIsPurging(false);
+      showToast(t('resetCloudDataFailed', { message: reason }));
+    };
+    cloudSessionService.on('status', onStatus);
+    cloudSessionService.on('purge:done', onPurgeDone);
+    cloudSessionService.on('purge:failed', onPurgeFailed);
+    return () => {
+      cloudSessionService.off('status', onStatus);
+      cloudSessionService.off('purge:done', onPurgeDone);
+      cloudSessionService.off('purge:failed', onPurgeFailed);
+    };
+  }, []);
+
   // ── Handlers (preserved from original) ─────────────────────────────────────
   const handleSyncNow = async () => {
     if (!isConnected) {
@@ -228,6 +260,36 @@ export const SyncSettingsScreen: React.FC = () => {
               log.error('Force full sync initiation failed:', errorMsg);
               showToast(t('failedToStartFullResync', { message: errorMsg }));
             }
+          },
+        },
+      ],
+    );
+  };
+
+  // ── Phase 6: Reset Cloud Data (user-initiated purge) ─────────────────────
+  // Destructive, cloud-mode-only action. Confirms the scope, then delegates to
+  // CloudSessionService.purgeCloudData() (which disconnects, POSTs the delete
+  // with bounded retries, and emits purge:done / purge:failed). This screen
+  // reacts to those events (progress / success alert / failure toast) via the
+  // effect above.
+  const handleResetCloudData = () => {
+    showAlert(
+      t('resetCloudDataTitle'),
+      t('resetCloudDataMessage'),
+      [
+        { text: t('common:cancel'), style: 'cancel' },
+        {
+          text: t('resetCloudDataConfirm'),
+          style: 'destructive',
+          onPress: () => {
+            cloudSessionService.purgeCloudData().catch((err: any) => {
+              // purgeCloudData resolves normally and emits purge:failed on
+              // retry-exhaustion; a rejection here is an unexpected internal
+              // error the service didn't swallow.
+              log.error('PurgeCloudData threw:', err?.message || err);
+              setIsPurging(false);
+              showToast(t('resetCloudDataFailed', { message: err?.message || 'Unknown error' }));
+            });
           },
         },
       ],
@@ -489,6 +551,41 @@ export const SyncSettingsScreen: React.FC = () => {
           accessibilityLabel="Force full re-sync"
         />
 
+        {/* ── Reset Cloud Data (destructive, cloud-mode only) ───────────── */}
+
+        {connectionStatus.mode === 'cloud' && (
+          <ThemedCard style={styles.resetCloudDataCard}>
+            <View style={styles.cardHeader}>
+              <Icon name="cloud-remove-outline" size={18} color={theme.colors.status.error} />
+              <ThemedText weight="medium" size={15} style={styles.cardTitle}>
+                {t('resetCloudDataTitle')}
+              </ThemedText>
+            </View>
+
+            <ThemedText variant="secondary" size={13} style={styles.resetCloudDataDescription}>
+              {t('resetCloudDataCardDescription')}
+            </ThemedText>
+
+            <ThemedButton
+              label={isPurging ? t('resetCloudDataInProgress') : t('resetCloudDataConfirm')}
+              icon="cloud-remove-outline"
+              onPress={handleResetCloudData}
+              disabled={isPurging}
+              variant="outline"
+              iconColor={theme.colors.status.error}
+              style={styles.resetCloudDataButton}
+              testID="reset-cloud-data-button"
+              accessibilityLabel="Reset cloud data"
+            />
+
+            {isPurging && (
+              <ThemedText variant="muted" size={12} style={styles.resetCloudDataHint}>
+                {t('resetCloudDataProgressHint')}
+              </ThemedText>
+            )}
+          </ThemedCard>
+        )}
+
         {/* ── Warning / Info messages ───────────────────────────────────── */}
 
         {connectionStatus.mode === 'cloud' && !canUseChat && (
@@ -669,6 +766,22 @@ const styles = StyleSheet.create({
   // ── Buttons ─────────────────────────────────────────────────────────────────
   actionButton: {
     marginBottom: 12,
+  },
+
+  // ── Reset Cloud Data card ───────────────────────────────────────────────────
+  resetCloudDataCard: {
+    marginBottom: 12,
+  },
+  resetCloudDataDescription: {
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  resetCloudDataButton: {
+    marginBottom: 4,
+  },
+  resetCloudDataHint: {
+    textAlign: 'center',
+    marginTop: 6,
   },
 
   // ── Warning / Info Cards ────────────────────────────────────────────────────

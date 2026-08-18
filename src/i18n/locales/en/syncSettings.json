@@ -33,5 +33,15 @@
   "reconnectingInfo": "Auto-reconnect in progress. The connection will be restored automatically.",
   "estimateConfirmLimit": "Sync confirmation limit",
   "estimateConfirmLimitHint": "Ask before syncing when the download is larger than this.",
-  "unlimited": "Unlimited"
+  "unlimited": "Unlimited",
+  "resetCloudDataTitle": "Reset cloud data?",
+  "resetCloudDataCardDescription": "Permanently deletes ALL soulbits-engine data in the cloud: characters, memories, chats, and autonomy state. Your data on this device is NOT deleted.",
+  "resetCloudDataMessage": "This permanently deletes ALL soulbits-engine data in the cloud — characters, memories, chats, and autonomy state. Your data on this device is NOT deleted and can be re-uploaded afterwards. This cannot be undone.",
+  "resetCloudDataConfirm": "Delete cloud data",
+  "resetCloudDataInProgress": "Deleting…",
+  "resetCloudDataProgressHint": "Deleting cloud data… this can take up to a minute.",
+  "resetCloudDataSuccessTitle": "Cloud data deleted",
+  "resetCloudDataSuccessMessage": "Your cloud data was deleted. Reconnect, then use Force full re-sync to push your local data back to the cloud.",
+  "resetCloudDataFailed": "Cloud data reset failed: {{message}}",
+  "purgeInProgressOtherDevice": "Cloud data is being reset on another device. Try again once it completes."
 }
