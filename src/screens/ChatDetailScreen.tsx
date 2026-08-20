@@ -2198,7 +2198,8 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         onClose={() => setPersonaSwitcherVisible(false)}
       />
 
-      {/* Message action sheet — long-press a bubble */}
+      {/* Message action sheet — long-press a bubble. Only the last message of
+          the conversation may be deleted, so deletion is hidden otherwise. */}
       <MessageActionSheet
         visible={actionSheetMessage !== null}
         message={actionSheetMessage}
@@ -2207,6 +2208,11 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         isPinned={actionSheetMessage?.is_pinned ?? false}
         hideReactions
         hideForward
+        canDelete={
+          actionSheetMessage !== null &&
+          messages.length > 0 &&
+          messages[messages.length - 1].id === actionSheetMessage.id
+        }
         onAction={handleMessageAction}
         onReact={(emoji) => {
           if (actionSheetMessage) {

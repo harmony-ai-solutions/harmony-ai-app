@@ -38,6 +38,11 @@ interface MessageActionSheetProps {
   hideReactions?: boolean;
   /** Hide the "Forward" action from the list (still handled internally, just not shown). */
   hideForward?: boolean;
+  /**
+   * When false, the "Delete" action is hidden. Used to restrict deletion to
+   * only the last message of a conversation.
+   */
+  canDelete?: boolean;
   onAction: (action: MessageAction) => void;
   onReact: (emoji: string) => void;
   onClose: () => void;
@@ -59,6 +64,7 @@ export const MessageActionSheet: React.FC<MessageActionSheetProps> = ({
   isPinned = false,
   hideReactions = false,
   hideForward = false,
+  canDelete = true,
   onAction,
   onReact,
   onClose,
@@ -86,7 +92,9 @@ export const MessageActionSheet: React.FC<MessageActionSheetProps> = ({
     label: string;
     destructive?: boolean;
   }[] = [
-    { key: 'delete', icon: 'delete-outline', label: t('delete'), destructive: true },
+    ...(canDelete
+      ? [{ key: 'delete' as MessageAction, icon: 'delete-outline', label: t('delete'), destructive: true }]
+      : []),
     { key: 'copy', icon: 'content-copy', label: t('copy') },
     ...(hideForward
       ? []
