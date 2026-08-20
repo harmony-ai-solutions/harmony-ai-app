@@ -89,5 +89,6 @@
   "blockedAIsEmpty": "No blocked AIs",
   "blockedAIsEmptyHint": "AIs you block will appear here. You can unblock them anytime.",
   "blockedAIsUnblock": "Unblock",
-  "blockedAIsUnblockedToast": "AI unblocked"
+  "blockedAIsUnblockedToast": "AI unblocked",
+  "blockedUsersTitle": "Blocked Users"
 }

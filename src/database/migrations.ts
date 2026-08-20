@@ -63,6 +63,7 @@ import { migration043 as migration043s } from './migrations/000043_add_character
 import { migration044 as migration044s } from './migrations/000044_add_chat_conversation_settings';
 import { migration045 as migration045s } from './migrations/000045_add_marketplace_and_soul_wallet';
 import { migration046 as migration046s } from './migrations/000046_extend_visibility_check_marketplace';
+import { migration047 as migration047s } from './migrations/000047_add_blocked_users';
 
 // Migration definition
 export interface Migration {
@@ -336,6 +337,11 @@ export const MIGRATIONS: Migration[] = [
     version: 46,
     description: 'extend_visibility_check_marketplace',
     sql: migration046s,
+   },
+   {
+    version: 47,
+    description: 'add_blocked_users',
+    sql: migration047s,
    },
   ];
 

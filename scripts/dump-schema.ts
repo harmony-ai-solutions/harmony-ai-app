@@ -53,6 +53,7 @@ const CLIENT_ONLY_TABLES = new Set<string>([
   'user_post_likes',
   'user_post_comments',
   'follows',
+  'blocked_users',
   'notifications',
   'chat_conversation_settings',
   'character_marketplace_listings',

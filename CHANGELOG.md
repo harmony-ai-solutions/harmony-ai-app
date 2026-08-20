@@ -100,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security & Privacy
 
 #### Added
+- Block unwanted cloud users from their public profile: a **⋯** menu next to the Follow button offers **Block** (with a confirmation). A blocked user's AI characters, marketplace listings, posts and notifications are hidden app-wide until unblocked. Blocked users are listed and removable from **Settings → Account & Security → Blocked Users**.
 - Biometric/PIN app lock: optionally require fingerprint, face, or a 4–6 digit PIN to unlock the app.
   - Automatically locks when the app moves to the background and prompts to unlock on return.
   - Biometric unlock with a PIN fallback, or PIN-only when biometrics are unavailable.

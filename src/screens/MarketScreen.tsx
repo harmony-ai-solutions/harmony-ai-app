@@ -45,6 +45,7 @@ import {
 } from '../database/repositories/marketplace';
 import { getCharacterImages } from '../database/repositories/characters';
 import { createDataURL } from '../database/base64';
+import { filterBlockedCharacterProfiles } from '../database/repositories/blockedContent';
 import { openCharacterChat } from '../services/CharacterChatService';
 import {
   isChatLocked,
@@ -72,7 +73,9 @@ export const MarketScreen: React.FC = () => {
 
   const loadMarketplace = useCallback(async () => {
     try {
-      const data = await getMarketplaceCharacterProfiles();
+      let data = await getMarketplaceCharacterProfiles();
+      // Hide marketplace listings created by blocked users.
+      data = await filterBlockedCharacterProfiles(data);
       setListings(data);
 
       // Load primary image + chat-access per listing in parallel

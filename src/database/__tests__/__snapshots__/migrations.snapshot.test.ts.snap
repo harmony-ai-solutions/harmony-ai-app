@@ -73,6 +73,9 @@ CREATE INDEX idx_user_post_comments_post ON user_post_comments(post_id);
 -- table: backend_configs
 CREATE TABLE "backend_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
 
+-- table: blocked_users
+CREATE TABLE blocked_users ( blocked_user_id TEXT PRIMARY KEY, blocked_display_name TEXT NOT NULL DEFAULT '', blocked_avatar_url TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
 -- table: character_categories
 CREATE TABLE character_categories ( id TEXT PRIMARY KEY, name TEXT NOT NULL, display_order INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 

@@ -381,6 +381,103 @@ export async function getFollowedUsers(): Promise<FollowEntry[]> {
 }
 
 // ============================================================================
+// Blocked Users
+// ============================================================================
+
+export interface BlockedUserEntry {
+  blockedUserId: string;
+  blockedDisplayName: string;
+  blockedAvatarUrl: string | null;
+  blockedAt: Date;
+}
+
+/**
+ * The raw set of blocked cloud user ids (used by `blockedContent` filtering).
+ */
+export async function getBlockedUserIds(): Promise<string[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT blocked_user_id FROM blocked_users ORDER BY created_at DESC',
+  );
+  const ids: string[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    ids.push(results.rows.item(i).blocked_user_id);
+  }
+  return ids;
+}
+
+/**
+ * True when the local user has blocked the given cloud user.
+ */
+export async function isUserBlocked(blockedUserId: string): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT 1 FROM blocked_users WHERE blocked_user_id = ?',
+    [blockedUserId],
+  );
+  return results.rows.length > 0;
+}
+
+/**
+ * Block a cloud user (idempotent). Also drops any existing follow — you can't
+ * follow someone you've blocked.
+ */
+export async function addBlockedUser(input: {
+  blockedUserId: string;
+  blockedDisplayName: string;
+  blockedAvatarUrl?: string | null;
+}): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql(
+    `INSERT OR IGNORE INTO blocked_users (
+       blocked_user_id, blocked_display_name, blocked_avatar_url, created_at
+     ) VALUES (?, ?, ?, ?)`,
+    [
+      input.blockedUserId,
+      input.blockedDisplayName.trim() || '',
+      input.blockedAvatarUrl ?? null,
+      new Date().toISOString(),
+    ],
+  );
+  // Can't follow a blocked user.
+  await db.executeSql('DELETE FROM follows WHERE target_user_id = ?', [
+    input.blockedUserId,
+  ]);
+}
+
+/**
+ * Blocked cloud users, most recently blocked first.
+ */
+export async function getBlockedUsers(): Promise<BlockedUserEntry[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    `SELECT blocked_user_id, blocked_display_name, blocked_avatar_url, created_at
+     FROM blocked_users ORDER BY created_at DESC`,
+  );
+  const entries: BlockedUserEntry[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    const row = results.rows.item(i);
+    entries.push({
+      blockedUserId: row.blocked_user_id,
+      blockedDisplayName: row.blocked_display_name,
+      blockedAvatarUrl: row.blocked_avatar_url ?? null,
+      blockedAt: new Date(row.created_at),
+    });
+  }
+  return entries;
+}
+
+/**
+ * Unblock a cloud user (idempotent) — restores their AIs, posts and profile.
+ */
+export async function removeBlockedUser(blockedUserId: string): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql('DELETE FROM blocked_users WHERE blocked_user_id = ?', [
+    blockedUserId,
+  ]);
+}
+
+// ============================================================================
 // Notifications
 // ============================================================================
 
@@ -604,6 +701,11 @@ export default {
   addFollow,
   removeFollow,
   getFollowedUsers,
+  getBlockedUserIds,
+  isUserBlocked,
+  addBlockedUser,
+  getBlockedUsers,
+  removeBlockedUser,
   addNotification,
   getNotifications,
   getUnreadNotificationCount,

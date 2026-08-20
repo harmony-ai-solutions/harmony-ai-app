@@ -73,6 +73,13 @@ export const AccountSettingsScreen: React.FC = () => {
             theme={theme}
             showSeparator
           />
+          <SettingsLinkRow
+            icon="account-remove-outline"
+            label={t('blockedUsersTitle')}
+            onPress={() => navigation.navigate('BlockedUsers')}
+            theme={theme}
+            showSeparator
+          />
         </ThemedCard>
 
         {/* ── Billing & Purchases ── */}

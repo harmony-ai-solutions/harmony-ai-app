@@ -34,6 +34,7 @@ import {
   AppNotification,
   NotificationType,
 } from '../database/repositories/userSocial';
+import { filterBlockedUserNotifications } from '../database/repositories/blockedContent';
 
 const log = createLogger('[NotificationsScreen]');
 
@@ -69,7 +70,9 @@ export const NotificationsScreen: React.FC = () => {
   const load = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const data = await getNotifications(user.id);
+      const data = await filterBlockedUserNotifications(
+        await getNotifications(user.id),
+      );
       setItems(data);
     } catch (err) {
       log.error('Failed to load notifications:', err);

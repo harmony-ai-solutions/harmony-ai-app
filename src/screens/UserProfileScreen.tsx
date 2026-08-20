@@ -34,12 +34,14 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/AppToastContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hapticLightPress } from '../utils/haptics';
+import { hexToRgba } from '../utils/colorUtils';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { PostCard } from '../components/social/PostCard';
 import { PostCommentModal } from '../components/social/PostCommentModal';
@@ -53,7 +55,11 @@ import {
   isFollowing,
   addFollow,
   removeFollow,
+  isUserBlocked,
+  addBlockedUser,
+  removeBlockedUser,
 } from '../database/repositories/userSocial';
+import { filterBlockedUserPosts } from '../database/repositories/blockedContent';
 import UserProfileStore from '../services/profile/UserProfileStore';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
@@ -71,11 +77,14 @@ export const UserProfileScreen: React.FC = () => {
   const { t } = useTranslation('profile');
   const { user: currentUser } = useAuth();
   const { showToast } = useToast();
+  const { showAlert } = useAppAlert();
 
   const { userId, displayName: paramName, avatarUrl: paramAvatar } = route.params;
 
   const [refreshing, setRefreshing] = useState(false);
   const [followingCreator, setFollowingCreator] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
 
   // ── Target user resolution ─────────────────────────────────────────────
   const [displayName, setDisplayName] = useState<string>('');
@@ -116,7 +125,8 @@ export const UserProfileScreen: React.FC = () => {
 
   const loadPosts = useCallback(async () => {
     try {
-      const list = await getUserPostsByAuthor(userId);
+      let list = await getUserPostsByAuthor(userId);
+      list = await filterBlockedUserPosts(list);
       setPosts(list);
       const stateMap: Record<string, { liked: boolean; likes: number; commentCount: number }> = {};
       await Promise.all(
@@ -144,6 +154,8 @@ export const UserProfileScreen: React.FC = () => {
     try {
       const following = await isFollowing(userId);
       setFollowingCreator(following);
+      const isBlocked = await isUserBlocked(userId);
+      setBlocked(isBlocked);
     } catch (err) {
       log.error('Failed to load follow state:', err);
     }
@@ -181,6 +193,52 @@ export const UserProfileScreen: React.FC = () => {
       }
     } catch (err) {
       log.error('Failed to toggle follow:', err);
+    }
+  };
+
+  const performBlock = async () => {
+    if (!currentUser || isSelf) return;
+    try {
+      await addBlockedUser({
+        blockedUserId: userId,
+        blockedDisplayName: resolvedDisplayName,
+        blockedAvatarUrl: avatarUri,
+      });
+      setBlocked(true);
+      setFollowingCreator(false);
+      setPosts([]);
+      showToast(t('userBlockedToast', { name: resolvedDisplayName }));
+    } catch (err) {
+      log.error('Failed to block user:', err);
+    }
+  };
+
+  const handleToggleBlock = () => {
+    if (!currentUser || isSelf) return;
+    setMenuVisible(false);
+    hapticLightPress();
+    if (blocked) {
+      removeBlockedUser(userId)
+        .then(() => {
+          setBlocked(false);
+          showToast(t('userUnblockedToast', { name: resolvedDisplayName }));
+          loadFollowState();
+        })
+        .catch(err => log.error('Failed to unblock user:', err));
+    } else {
+      showAlert(
+        t('blockUserConfirmTitle', { name: resolvedDisplayName }),
+        t('blockUserConfirmMessage'),
+        [
+          { text: t('cancel'), style: 'cancel' },
+          {
+            text: t('blockUserConfirmAction'),
+            style: 'destructive',
+            onPress: performBlock,
+          },
+        ],
+        { icon: 'shield-off-outline' },
+      );
     }
   };
 
@@ -286,44 +344,111 @@ export const UserProfileScreen: React.FC = () => {
               </ThemedText>
             )}
 
-            {/* Follow / Following pill — shown only on another user's profile.
-                Your own profile has no follow button (you can't follow yourself). */}
+            {/* Follow / Following pill + ⋮ menu — shown only on another user's
+                profile. Your own profile has no follow button (you can't follow
+                yourself). The ⋮ dropdown holds the Block / Unblock action. */}
             {!isSelf && currentUser && (
               <View style={styles.followPillWrap}>
-                <TouchableOpacity
-                  onPress={() => {
-                    hapticLightPress();
-                    handleToggleFollow();
-                  }}
-                  activeOpacity={0.7}
-                  style={[
-                    styles.followPill,
-                    {
-                      borderColor: theme.colors.accent.primary + '55',
-                      backgroundColor: followingCreator
-                        ? theme.colors.accent.primary + '78'
-                        : theme.colors.accent.primary + '18',
-                    },
-                  ]}
-                  testID="user-profile-follow-button"
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    followingCreator ? t('postFollowing') : t('postFollow')
-                  }
-                >
-                  <Icon
-                    name={followingCreator ? 'account-check-outline' : 'account-plus-outline'}
-                    size={14}
-                    color={theme.colors.accent.primary}
-                  />
-                  <ThemedText
-                    size={12}
-                    weight="medium"
-                    style={{ color: theme.colors.accent.primary }}
+                <View style={styles.followRow}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      hapticLightPress();
+                      handleToggleFollow();
+                    }}
+                    activeOpacity={0.7}
+                    style={[
+                      styles.followPill,
+                      {
+                        borderColor: theme.colors.accent.primary + '55',
+                        backgroundColor: followingCreator
+                          ? theme.colors.accent.primary + '78'
+                          : theme.colors.accent.primary + '18',
+                      },
+                    ]}
+                    testID="user-profile-follow-button"
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      followingCreator ? t('postFollowing') : t('postFollow')
+                    }
                   >
-                    {followingCreator ? t('postFollowing') : t('postFollow')}
-                  </ThemedText>
-                </TouchableOpacity>
+                    <Icon
+                      name={followingCreator ? 'account-check-outline' : 'account-plus-outline'}
+                      size={14}
+                      color={theme.colors.accent.primary}
+                    />
+                    <ThemedText
+                      size={12}
+                      weight="medium"
+                      style={{ color: theme.colors.accent.primary }}
+                    >
+                      {followingCreator ? t('postFollowing') : t('postFollow')}
+                    </ThemedText>
+                  </TouchableOpacity>
+
+                  {/* ⋮ menu trigger */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      hapticLightPress();
+                      setMenuVisible(v => !v);
+                    }}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={[
+                      styles.menuButton,
+                      { backgroundColor: menuVisible ? theme.colors.accent.primary + '22' : hexToRgba(theme.colors.border.default, 0.25) },
+                    ]}
+                    testID="user-profile-more-button"
+                    accessibilityRole="button"
+                    accessibilityLabel={t('moreActions')}
+                  >
+                    <Icon
+                      name="dots-horizontal"
+                      size={18}
+                      color={theme.colors.text.primary}
+                    />
+                  </TouchableOpacity>
+
+                  {/* Dropdown menu */}
+                  {menuVisible && (
+                    <>
+                      <TouchableOpacity
+                        style={styles.menuBackdrop}
+                        activeOpacity={1}
+                        onPress={() => setMenuVisible(false)}
+                      />
+                      <View
+                        style={[
+                          styles.dropdown,
+                          {
+                            backgroundColor: theme.colors.background.surface,
+                            borderColor: hexToRgba(theme.colors.border.default, 0.4),
+                          },
+                        ]}
+                        testID="user-profile-dropdown"
+                      >
+                        <TouchableOpacity
+                          onPress={handleToggleBlock}
+                          activeOpacity={0.7}
+                          style={styles.dropdownItem}
+                          testID="user-profile-block-button"
+                        >
+                          <Icon
+                            name={blocked ? 'shield-remove-outline' : 'shield-off-outline'}
+                            size={16}
+                            color={theme.colors.status.error}
+                          />
+                          <ThemedText
+                            size={14}
+                            weight="medium"
+                            style={{ color: theme.colors.status.error }}
+                          >
+                            {blocked ? t('unblockUser') : t('blockUser')}
+                          </ThemedText>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
+                </View>
               </View>
             )}
 
@@ -446,6 +571,11 @@ const styles = StyleSheet.create({
   followPillWrap: {
     marginTop: 8,
   },
+  followRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   followPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -455,6 +585,44 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
     borderWidth: 1,
+  },
+  menuButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
+  },
+  dropdown: {
+    position: 'absolute',
+    top: 34,
+    left: 0,
+    zIndex: 30,
+    minWidth: 150,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 4,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
   },
   // ── Stats (floating text, no card) ──
   statsRow: {

@@ -68,6 +68,10 @@ import {
   getPostCommentsCount,
   deleteUserPost,
 } from '../database/repositories/userSocial';
+import {
+  filterBlockedCharacterProfiles,
+  filterBlockedUserPosts,
+} from '../database/repositories/blockedContent';
 
 const log = createLogger('[DiscoverScreen]');
 
@@ -105,7 +109,9 @@ export const DiscoverScreen: React.FC = () => {
       // public AI characters. Characters tagged 'private' in the client-only
       // visibility sidecar are excluded entirely — they never appear here and
       // are never searchable.
-      const data = await getPublicCharacterProfiles();
+      let data = await getPublicCharacterProfiles();
+      // Hide AI characters created by blocked users app-wide.
+      data = await filterBlockedCharacterProfiles(data);
       setProfiles(data);
 
       // Load primary image + count + marketplace price for every profile in
@@ -148,7 +154,9 @@ export const DiscoverScreen: React.FC = () => {
   // ── Community posts loader ────────────────────────────────────────────
   const loadPosts = useCallback(async () => {
     try {
-      const list = await getAllUserPosts();
+      let list = await getAllUserPosts();
+      // Hide posts authored by blocked users.
+      list = await filterBlockedUserPosts(list);
       setPosts(list);
       const stateMap: Record<string, { liked: boolean; likes: number; commentCount: number }> = {};
       await Promise.all(

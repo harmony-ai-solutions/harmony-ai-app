@@ -133,5 +133,20 @@
   "postFollow": "Follow",
   "postFollowing": "Following",
   "postFollowedToast": "You are now following {{name}}",
-  "postUnfollowedToast": "You unfollowed {{name}}"
+  "postUnfollowedToast": "You unfollowed {{name}}",
+
+  "moreActions": "More actions",
+  "blockUser": "Block",
+  "unblockUser": "Unblock",
+  "blockUserConfirmTitle": "Block {{name}}?",
+  "blockUserConfirmMessage": "Their AI characters, posts and profile will be hidden from you. You can unblock them anytime from Settings.",
+  "blockUserConfirmAction": "Block",
+  "cancel": "Cancel",
+  "userBlockedToast": "You blocked {{name}}",
+  "userUnblockedToast": "You unblocked {{name}}",
+
+  "blockedUsersTitle": "Blocked Users",
+  "blockedUsersEmpty": "No blocked users",
+  "blockedUsersEmptyHint": "Users you block will appear here. You can unblock them anytime.",
+  "blockedUsersUnblock": "Unblock"
 }

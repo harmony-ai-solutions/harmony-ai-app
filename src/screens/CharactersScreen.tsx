@@ -88,6 +88,7 @@ import {
 import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { resolvePersonaId } from '../database/repositories/personas';
+import { filterBlockedCharacterProfiles } from '../database/repositories/blockedContent';
 import { CharacterProfile } from '../database/models';
 import { CharacterCardImportError } from '../services/CharacterCardImportService';
 import { openCharacterChat } from '../services/CharacterChatService';
@@ -279,7 +280,9 @@ export const CharactersScreen: React.FC = () => {
 
   const loadProfiles = async () => {
     try {
-      const data = await getAllCharacterProfiles();
+      let data = await getAllCharacterProfiles();
+      // Hide AI characters created by blocked users app-wide.
+      data = await filterBlockedCharacterProfiles(data);
       setProfiles(data);
 
       // Distinct library tags for the filter chip row (4-3) — isolated so a
