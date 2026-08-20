@@ -8,7 +8,7 @@
  *   - Mute / Unmute      — suppress incoming-message alerts for this chat
  *   - Open chat bubble   — launch the floating bubble for this AI
  *   - Mark as read / Unread — reset / bump the unread state
- *   - Block / Unblock    — stop the AI from sending AND receiving messages
+ *   - Disable / Enable   — stop the AI from sending AND receiving messages
  *   - Delete             — delete the conversation (messages + interaction)
  *
  * All actions are delegated to the parent via callbacks so the screen owns
@@ -38,7 +38,7 @@ export interface ChatConversationMenuState {
   pinned: boolean;
   archived: boolean;
   muted: boolean;
-  blocked: boolean;
+  disabled: boolean;
   unreadCount: number;
 }
 
@@ -47,15 +47,15 @@ interface ChatConversationMenuModalProps {
   conversationName: string;
   /** Current settings snapshot — drives state-aware labels (Pin vs Unpin…). */
   settings: ChatConversationMenuState;
-  /** Blocked conversations also get the "Unblock" action; others "Block". */
-  isBlocked: boolean;
+  /** Disabled conversations also get the "Enable" action; others "Disable". */
+  isDisabled: boolean;
   onClose: () => void;
   onTogglePin: () => void;
   onToggleArchive: () => void;
   onToggleMute: () => void;
   onOpenBubble: () => void;
   onToggleRead: () => void;
-  onToggleBlock: () => void;
+  onToggleDisable: () => void;
   onDelete: () => void;
 }
 
@@ -70,14 +70,14 @@ export const ChatConversationMenuModal: React.FC<ChatConversationMenuModalProps>
   visible,
   conversationName,
   settings,
-  isBlocked,
+  isDisabled,
   onClose,
   onTogglePin,
   onToggleArchive,
   onToggleMute,
   onOpenBubble,
   onToggleRead,
-  onToggleBlock,
+  onToggleDisable,
   onDelete,
 }) => {
   const { theme } = useAppTheme();
@@ -124,10 +124,10 @@ export const ChatConversationMenuModal: React.FC<ChatConversationMenuModalProps>
       onPress: onToggleRead,
     },
     {
-      icon: isBlocked ? 'shield-account-outline' : 'shield-off-outline',
-      label: isBlocked ? t('menuUnblock') : t('menuBlock'),
+      icon: isDisabled ? 'shield-account-outline' : 'shield-off-outline',
+      label: isDisabled ? t('menuEnable') : t('menuDisable'),
       color: errorColor,
-      onPress: onToggleBlock,
+      onPress: onToggleDisable,
     },
     {
       icon: 'delete-outline',

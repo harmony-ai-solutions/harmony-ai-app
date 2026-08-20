@@ -1,9 +1,9 @@
 /**
- * BlockedAIsScreen — the "Blocked AIs" settings sub-screen.
+ * DisabledAIsScreen — the "Disabled AIs" settings sub-screen.
  *
- * Lists every AI the user has blocked (from the chat-list long-press menu or
- * the chat header menu) with avatar + name + a one-tap Unblock action.
- * Unblocking restores messaging for that conversation immediately.
+ * Lists every AI the user has disabled (from the chat-list long-press menu or
+ * the chat header menu) with avatar + name + a one-tap Enable action.
+ * Enabling restores messaging for that conversation immediately.
  */
 
 import React, { useCallback, useState } from 'react';
@@ -24,32 +24,32 @@ import { getEntity } from '../../database/repositories/entities';
 import { getCharacterProfile, getPrimaryImage, imageToDataURL } from '../../database/repositories/characters';
 import {
   listConversationsByFlag,
-  setConversationBlocked,
+  setConversationDisabled,
 } from '../../database/repositories/chatConversationSettings';
 import { hexToRgba } from '../../utils/colorUtils';
 import EntitySessionService from '../../services/EntitySessionService';
 
-interface BlockedEntry {
+interface DisabledEntry {
   participantKey: string;
   entityId: string | null;
   name: string;
   avatarUri: string | null;
 }
 
-export const BlockedAIsScreen: React.FC = () => {
+export const DisabledAIsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { t } = useTranslation('settings');
   const { showToast } = useToast();
-  const [entries, setEntries] = useState<BlockedEntry[]>([]);
+  const [entries, setEntries] = useState<DisabledEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const loadBlocked = useCallback(async () => {
+  const loadDisabled = useCallback(async () => {
     try {
       setLoading(true);
-      const blocked = await listConversationsByFlag('blocked');
-      const resolved: BlockedEntry[] = [];
-      for (const settings of blocked) {
+      const disabled = await listConversationsByFlag('blocked');
+      const resolved: DisabledEntry[] = [];
+      for (const settings of disabled) {
         let name = settings.participantKey;
         let avatarUri: string | null = null;
         if (settings.entityId) {
@@ -80,19 +80,19 @@ export const BlockedAIsScreen: React.FC = () => {
 
   useFocusEffect(
     useCallback(() => {
-      loadBlocked();
-    }, [loadBlocked]),
+      loadDisabled();
+    }, [loadDisabled]),
   );
 
-  const handleUnblock = async (entry: BlockedEntry) => {
+  const handleEnable = async (entry: DisabledEntry) => {
     hapticLightPress();
     try {
       // Apply the in-memory override instantly so the send guard allows
       // messages immediately (no stale DB read delay).
-      EntitySessionService.setBlockedOverride(entry.participantKey, false);
-      await setConversationBlocked(entry.participantKey, entry.entityId, false);
-      showToast(t('blockedAIsUnblockedToast'));
-      await loadBlocked();
+      EntitySessionService.setDisabledOverride(entry.participantKey, false);
+      await setConversationDisabled(entry.participantKey, entry.entityId, false);
+      showToast(t('disabledAIsEnabledToast'));
+      await loadDisabled();
     } catch (error) {
       // ignore
     }
@@ -102,7 +102,7 @@ export const BlockedAIsScreen: React.FC = () => {
 
   return (
     <ThemedView style={styles.container}>
-      <ScreenHeader title={t('blockedAIsTitle')} onBack={() => navigation.goBack()} />
+      <ScreenHeader title={t('disabledAIsTitle')} onBack={() => navigation.goBack()} />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -111,8 +111,8 @@ export const BlockedAIsScreen: React.FC = () => {
         {!loading && entries.length === 0 ? (
           <ThemedEmptyState
             icon="shield-off-outline"
-            title={t('blockedAIsEmpty')}
-            subtitle={t('blockedAIsEmptyHint')}
+            title={t('disabledAIsEmpty')}
+            subtitle={t('disabledAIsEmptyHint')}
           />
         ) : (
           <ThemedCard elevated accentStripe style={styles.card}>
@@ -134,20 +134,20 @@ export const BlockedAIsScreen: React.FC = () => {
                     </ThemedText>
                   </View>
                   <TouchableOpacity
-                    onPress={() => handleUnblock(entry)}
+                    onPress={() => handleEnable(entry)}
                     activeOpacity={0.7}
                     style={[
-                      styles.unblockButton,
+                      styles.enableButton,
                       {
                         backgroundColor: hexToRgba(theme.colors.accent.primary, 0.15),
                         borderColor: hexToRgba(theme.colors.accent.primary, 0.4),
                       },
                     ]}
-                    testID={`unblock-${entry.entityId ?? entry.participantKey}`}
+                    testID={`enable-${entry.entityId ?? entry.participantKey}`}
                   >
                     <Icon name="shield-account-outline" size={16} color={theme.colors.accent.primary} />
                     <ThemedText variant="accent" size={13} weight="medium">
-                      {t('blockedAIsUnblock')}
+                      {t('disabledAIsEnable')}
                     </ThemedText>
                   </TouchableOpacity>
                 </View>
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginLeft: 72,
   },
-  unblockButton: {
+  enableButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -198,4 +198,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default BlockedAIsScreen;
+export default DisabledAIsScreen;

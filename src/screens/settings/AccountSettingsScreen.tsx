@@ -68,8 +68,8 @@ export const AccountSettingsScreen: React.FC = () => {
           />
           <SettingsLinkRow
             icon="account-cancel"
-            label={t('blockedAIsTitle')}
-            onPress={() => navigation.navigate('BlockedAIs')}
+            label={t('disabledAIsTitle')}
+            onPress={() => navigation.navigate('DisabledAIs')}
             theme={theme}
             showSeparator
           />

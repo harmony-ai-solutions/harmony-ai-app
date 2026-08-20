@@ -138,10 +138,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   // Participant keys of conversations currently open on screen — incoming
   // messages for these do NOT bump the unread counter.
   private openConversationKeys: Set<string> = new Set();
-  // In-memory block-state overrides keyed by participant key. The UI updates
-  // this synchronously on block/unblock so the send/incoming guards see the
+  // In-memory disable-state overrides keyed by participant key. The UI updates
+  // this synchronously on disable/enable so the send/incoming guards see the
   // new state IMMEDIATELY (no stale DB read while the write is in flight).
-  private blockedOverrides: Map<string, boolean> = new Map();
+  private disabledOverrides: Map<string, boolean> = new Map();
 
   private constructor() {
     super();
@@ -905,8 +905,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for interaction ${interactionId}`);
     }
 
-    // Blocked conversations cannot send messages.
-    await this.assertNotBlocked(session);
+    // Disabled conversations cannot send messages.
+    await this.assertNotDisabled(session);
 
     const partnerConnectionIds = this.getPartnerConnectionIds(session);
     if (partnerConnectionIds.length === 0) {
@@ -1054,8 +1054,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for interaction ${interactionId}`);
     }
 
-    // Blocked conversations cannot send messages.
-    await this.assertNotBlocked(session);
+    // Disabled conversations cannot send messages.
+    await this.assertNotDisabled(session);
 
     log.info(`Starting audio message flow for interaction ${interactionId}`);
 
@@ -1168,8 +1168,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for interaction ${interactionId}`);
     }
 
-    // Blocked conversations cannot send messages.
-    await this.assertNotBlocked(session);
+    // Disabled conversations cannot send messages.
+    await this.assertNotDisabled(session);
 
     const partnerConnectionIds = this.getPartnerConnectionIds(session);
     if (partnerConnectionIds.length === 0) {
@@ -1282,11 +1282,11 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
 
   /**
-   * True when the conversation that `session` belongs to is blocked by the
-   * local user (see chat_conversation_settings.blocked). Blocked conversations
+   * True when the conversation that `session` belongs to is disabled by the
+   * local user (see chat_conversation_settings). Disabled conversations
    * cannot send OR receive messages.
    */
-  async isSessionBlocked(session: InteractionSession): Promise<boolean> {
+  async isSessionDisabled(session: InteractionSession): Promise<boolean> {
     try {
       const scope = deriveScopeFromParticipants(session.participantIds);
       const key = deriveParticipantKey(
@@ -1296,39 +1296,39 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       );
       if (!key) return false;
       // In-memory override wins — the UI writes it synchronously on
-      // block/unblock so sends react instantly (no stale DB read).
-      if (this.blockedOverrides.has(key)) {
-        return Boolean(this.blockedOverrides.get(key));
+      // disable/enable so sends react instantly (no stale DB read).
+      if (this.disabledOverrides.has(key)) {
+        return Boolean(this.disabledOverrides.get(key));
       }
       const settings = await getChatConversationSettings(key);
-      return settings.blocked;
+      return settings.disabled;
     } catch (error) {
-      log.error('Failed to check blocked state for session:', error);
+      log.error('Failed to check disabled state for session:', error);
       return false;
     }
   }
 
   /**
-   * Synchronously update the in-memory block state for a participant key.
-   * Call this right after persisting the block/unblock so the send guard and
+   * Synchronously update the in-memory disabled state for a participant key.
+   * Call this right after persisting the disable/enable so the send guard and
    * the incoming handler see the new state immediately.
    */
-  setBlockedOverride(participantKey: string, blocked: boolean): void {
+  setDisabledOverride(participantKey: string, disabled: boolean): void {
     if (!participantKey) return;
-    if (blocked) {
-      this.blockedOverrides.set(participantKey, true);
+    if (disabled) {
+      this.disabledOverrides.set(participantKey, true);
     } else {
-      this.blockedOverrides.delete(participantKey);
+      this.disabledOverrides.delete(participantKey);
     }
   }
 
   /**
-   * Blocking guard for the outbound send paths. Throws a friendly error when
-   * the conversation is blocked so the UI can surface it without sending.
+   * Disable guard for the outbound send paths. Throws a friendly error when
+   * the conversation is disabled so the UI can surface it without sending.
    */
-  private async assertNotBlocked(session: InteractionSession): Promise<void> {
-    if (await this.isSessionBlocked(session)) {
-      throw new Error('This AI is blocked. Unblock it to chat again.');
+  private async assertNotDisabled(session: InteractionSession): Promise<void> {
+    if (await this.isSessionDisabled(session)) {
+      throw new Error('This AI is disabled. Enable it to chat again.');
     }
   }
 
@@ -1692,10 +1692,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     try {
       log.info(`Incoming message from ${event.entity_id} in interaction ${interactionId}`);
 
-      // Blocked conversations cannot RECEIVE messages either — drop them
+      // Disabled conversations cannot RECEIVE messages either — drop them
       // before they reach the database.
-      if (await this.isSessionBlocked(interactionSession)) {
-        log.info(`Dropping incoming message from ${event.entity_id}: conversation is blocked`);
+      if (await this.isSessionDisabled(interactionSession)) {
+        log.info(`Dropping incoming message from ${event.entity_id}: conversation is disabled`);
         return;
       }
 

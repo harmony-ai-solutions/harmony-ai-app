@@ -31,7 +31,7 @@ import { AppearanceSettingsScreen } from '../screens/settings/AppearanceSettings
 import { HelpSupportSettingsScreen } from '../screens/settings/HelpSupportSettingsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
-import { BlockedAIsScreen } from '../screens/settings/BlockedAIsScreen';
+import { DisabledAIsScreen } from '../screens/settings/DisabledAIsScreen';
 import { BlockedUsersScreen } from '../screens/settings/BlockedUsersScreen';
 import { ArchivedChatsScreen } from '../screens/settings/ArchivedChatsScreen';
 
@@ -105,8 +105,8 @@ export type RootStackParamList = {
   HelpSupportSettings: undefined;
   /** Notification feed — pushed over the tabs from the header bell */
   Notifications: undefined;
-  /** Blocked AIs — settings sub-screen listing blocked conversations */
-  BlockedAIs: undefined;
+  /** Disabled AIs — settings sub-screen listing disabled conversations */
+  DisabledAIs: undefined;
   /** Blocked Users — settings sub-screen listing blocked cloud users */
   BlockedUsers: undefined;
   /** Archived chats — dedicated list of archived conversations */
@@ -188,7 +188,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
         <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
         <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />
-        <Stack.Screen name="BlockedAIs" component={BlockedAIsScreen} />
+        <Stack.Screen name="DisabledAIs" component={DisabledAIsScreen} />
         <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
         <Stack.Screen name="ArchivedChats" component={ArchivedChatsScreen} />
         <Stack.Screen

@@ -2,17 +2,19 @@
  * Migration 000044: Chat conversation settings (client-only)
  *
  * Adds client-only per-conversation state so the chat list can offer the
- * standard messaging-app actions (pin / archive / mute / block / unread):
+ * standard messaging-app actions (pin / archive / mute / disable / unread):
  *
  *   chat_conversation_settings — one row per conversation, keyed by the
  *   interaction participant_key (the stable identifier used across the app:
  *   `${entityA}+${entityB}` sorted, or the sorted participant set for groups):
  *     - entity_id       partner entity id (NULL for group chats) — lets the
- *       Blocked AIs screen resolve names/avatars without re-parsing the key
+ *       Disabled AIs screen resolve names/avatars without re-parsing the key
  *     - pinned          1 → conversation is pinned to the top of the chat list
  *     - archived        1 → conversation is hidden from the main list
  *     - muted           1 → incoming messages do not surface alerts
- *     - blocked         1 → the AI can no longer send OR receive messages
+ *     - blocked         1 → the AI is disabled (can no longer send OR receive
+ *                           messages). Physical column name kept for migration
+ *                           safety; surfaced to the user as "disabled".
  *     - unread_count    incremented on incoming messages while the chat is
  *                       not open, reset to 0 when the chat is opened/read
  *

@@ -83,7 +83,7 @@ import {
 } from '../components/chat/ForwardPickerModal';
 import {
   getChatConversationSettings,
-  setConversationBlocked,
+  setConversationDisabled,
 } from '../database/repositories/chatConversationSettings';
 import {
   showBubble,
@@ -199,7 +199,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     useState<ConversationMessage | null>(null);
   const [forwardPickerVisible, setForwardPickerVisible] = useState(false);
   const [forwardMessageText, setForwardMessageText] = useState('');
-  const [isBlocked, setIsBlocked] = useState(false);
+  const [isDisabled, setIsDisabled] = useState(false);
 
   // Track the canonical interactionId — starts as temp UUIDv7 from route params,
   // updated to the server-assigned canonical ID when INIT_ENTITY response arrives.
@@ -452,17 +452,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // messages don't bump the unread counter while this chat is on screen).
   useEffect(() => {
     let mounted = true;
-    const loadBlocked = async () => {
+    const loadDisabled = async () => {
       try {
         if (participantKey) {
           const settings = await getChatConversationSettings(participantKey);
-          if (mounted) setIsBlocked(settings.blocked);
+          if (mounted) setIsDisabled(settings.disabled);
         }
       } catch (error) {
-        log.error('Failed to load blocked state:', error);
+        log.error('Failed to load disabled state:', error);
       }
     };
-    loadBlocked();
+    loadDisabled();
     if (participantKey) {
       EntitySessionService.registerOpenConversation(participantKey);
     }
@@ -1100,9 +1100,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleSendTextMessage = useCallback(
     async (text: string) => {
-      if (isBlocked) {
-        log.warn('Cannot send message: AI is blocked');
-        showToast(t('blockedBanner'));
+      if (isDisabled) {
+        log.warn('Cannot send message: AI is disabled');
+        showToast(t('disabledBanner'));
         return;
       }
       if (!isSessionActive(currentInteractionIdRef.current)) {
@@ -1159,9 +1159,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleSendAudioMessage = useCallback(
     async (audioData: string, mimeType: string, duration: number) => {
-      if (isBlocked) {
-        log.warn('Cannot send audio: AI is blocked');
-        showToast(t('blockedBanner'));
+      if (isDisabled) {
+        log.warn('Cannot send audio: AI is disabled');
+        showToast(t('disabledBanner'));
         return;
       }
       if (!isSessionActive(currentInteractionIdRef.current)) {
@@ -1207,9 +1207,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const handleSendImages = useCallback(
     async (images: PickedImage[]) => {
-      if (isBlocked) {
-        log.warn('Cannot send images: AI is blocked');
-        showToast(t('blockedBanner'));
+      if (isDisabled) {
+        log.warn('Cannot send images: AI is disabled');
+        showToast(t('disabledBanner'));
         return;
       }
       if (!isSessionActive(currentInteractionIdRef.current)) {
@@ -1290,54 +1290,54 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     ],
   );
 
-  // ── Block / unblock ──
-  const handleBlockToggle = useCallback(() => {
+  // ── Disable / enable ──
+  const handleDisableToggle = useCallback(() => {
     setMenuVisible(false);
     if (!participantKey) return;
     const otherIds = participantIds.filter(id => id !== ownEntityId);
     const partnerEntityId = otherIds[0] || '';
     const partnerName = headerName || t('partnerSettings');
 
-    if (!isBlocked) {
+    if (!isDisabled) {
       showAlert(
-        t('blockTitle', { name: partnerName }),
-        t('blockBody', { name: partnerName }),
+        t('disableTitle', { name: partnerName }),
+        t('disableBody', { name: partnerName }),
         [
           { text: t('common:cancel'), style: 'cancel' },
           {
-            text: t('blockTitle', { name: partnerName }),
+            text: t('disableTitle', { name: partnerName }),
             style: 'destructive',
             onPress: async () => {
               try {
-                await setConversationBlocked(participantKey, partnerEntityId || null, true);
+                await setConversationDisabled(participantKey, partnerEntityId || null, true);
                 // Apply the in-memory override instantly so the send guard
-                // sees the block immediately.
-                EntitySessionService.setBlockedOverride(participantKey, true);
-                setIsBlocked(true);
-                showToast(t('toastBlocked'));
+                // sees the disabled state immediately.
+                EntitySessionService.setDisabledOverride(participantKey, true);
+                setIsDisabled(true);
+                showToast(t('toastDisabled'));
               } catch (error) {
-                log.error('Failed to block:', error);
+                log.error('Failed to disable:', error);
               }
             },
           },
         ],
       );
     } else {
-      // Unblock — no confirmation needed. Apply the in-memory override FIRST
+      // Enable — no confirmation needed. Apply the in-memory override FIRST
       // (before the DB write resolves) so the send guard allows messages
-      // immediately — no stale "AI blocked" on the next send.
-      EntitySessionService.setBlockedOverride(participantKey, false);
-      setIsBlocked(false);
-      showToast(t('toastUnblocked'));
-      setConversationBlocked(participantKey, partnerEntityId || null, false)
-        .catch(error => log.error('Failed to unblock:', error));
+      // immediately — no stale "AI disabled" on the next send.
+      EntitySessionService.setDisabledOverride(participantKey, false);
+      setIsDisabled(false);
+      showToast(t('toastEnabled'));
+      setConversationDisabled(participantKey, partnerEntityId || null, false)
+        .catch(error => log.error('Failed to enable:', error));
     }
   }, [
     participantKey,
     participantIds,
     ownEntityId,
     headerName,
-    isBlocked,
+    isDisabled,
     showAlert,
     showToast,
     t,
@@ -2107,9 +2107,9 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                 />
                 <TouchableOpacity
                   style={styles.menuItem}
-                  onPress={handleBlockToggle}
+                  onPress={handleDisableToggle}
                   activeOpacity={0.65}
-                  testID="chat-block-toggle"
+                  testID="chat-disable-toggle"
                 >
                   <View
                     style={[
@@ -2118,13 +2118,13 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                     ]}
                   >
                     <Icon
-                      name={isBlocked ? 'shield-account-outline' : 'shield-off-outline'}
+                      name={isDisabled ? 'shield-account-outline' : 'shield-off-outline'}
                       size={18}
                       color={theme!.colors.status.error}
                     />
                   </View>
                   <ThemedText size={15} weight="medium" style={{ flex: 1, color: theme!.colors.status.error }}>
-                    {isBlocked ? t('unblock') : t('blockTitle', { name: headerName })}
+                    {isDisabled ? t('enable') : t('disableTitle', { name: headerName })}
                   </ThemedText>
                   <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
@@ -2354,11 +2354,11 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
 
 </View>
 
-{isBlocked ? (
-        <View style={[styles.blockedBanner, { paddingBottom: safeBottom + 14 }]}>
+{isDisabled ? (
+        <View style={[styles.disabledBanner, { paddingBottom: safeBottom + 14 }]}>
           <Icon name="shield-off-outline" size={18} color={theme?.colors.status.error} />
-          <ThemedText variant="muted" size={13} style={styles.blockedBannerText}>
-            {t('blockedBanner')}
+          <ThemedText variant="muted" size={13} style={styles.disabledBannerText}>
+            {t('disabledBanner')}
           </ThemedText>
         </View>
       ) : (
@@ -2538,7 +2538,7 @@ const styles = StyleSheet.create({
     marginTop: -4,
     marginLeft: 46,
   },
-  blockedBanner: {
+  disabledBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -2548,7 +2548,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(220, 38, 38, 0.3)',
   },
-  blockedBannerText: {
+  disabledBannerText: {
     flex: 1,
   },
 });

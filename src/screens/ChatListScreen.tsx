@@ -52,7 +52,7 @@ import {
   setConversationPinned,
   setConversationArchived,
   setConversationMuted,
-  setConversationBlocked,
+  setConversationDisabled,
   incrementConversationUnread,
   clearConversationUnread,
   listConversationsByFlag,
@@ -104,7 +104,7 @@ interface ChatListItem {
   pinned: boolean;
   archived: boolean;
   muted: boolean;
-  blocked: boolean;
+  disabled: boolean;
   unreadCount: number;
 }
 
@@ -143,7 +143,7 @@ export const ChatListScreen: React.FC = () => {
     pinned: false,
     archived: false,
     muted: false,
-    blocked: false,
+    disabled: false,
     unreadCount: 0,
   });
   const { showAlert } = useAppAlert();
@@ -259,7 +259,7 @@ export const ChatListScreen: React.FC = () => {
             pinned: false,
             archived: false,
             muted: false,
-            blocked: false,
+            disabled: false,
             unreadCount: 0,
           });
         } else if (scope === 'group') {
@@ -313,7 +313,7 @@ export const ChatListScreen: React.FC = () => {
             pinned: false,
             archived: false,
             muted: false,
-            blocked: false,
+            disabled: false,
             unreadCount: 0,
           });
         }
@@ -328,7 +328,7 @@ export const ChatListScreen: React.FC = () => {
           item.pinned = settings.pinned;
           item.archived = settings.archived;
           item.muted = settings.muted;
-          item.blocked = settings.blocked;
+          item.disabled = settings.disabled;
           item.unreadCount = settings.unreadCount;
         }
       }
@@ -343,8 +343,8 @@ export const ChatListScreen: React.FC = () => {
         return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
       });
 
-      // Blocked conversations STAY in the main list (with a shield indicator)
-      // — blocking only stops messaging. Archived conversations move to the
+      // Disabled conversations STAY in the main list (with a shield indicator)
+      // — disabling only stops messaging. Archived conversations move to the
       // separate archived section below the main list.
       const mainList = listItems.filter(item => !item.archived);
       setChatList(mainList);
@@ -466,7 +466,7 @@ export const ChatListScreen: React.FC = () => {
       pinned: item.pinned,
       archived: item.archived,
       muted: item.muted,
-      blocked: item.blocked,
+      disabled: item.disabled,
       unreadCount: item.unreadCount,
     });
     setMenuItem(item);
@@ -532,23 +532,23 @@ export const ChatListScreen: React.FC = () => {
     reloadAfterAction();
   }, [menuItem, reloadAfterAction, showToast, t]);
 
-  const handleToggleBlock = useCallback(async () => {
+  const handleToggleDisable = useCallback(async () => {
     const item = menuItem;
     if (!item) return;
-    const nowBlocked = !item.blocked;
-    if (nowBlocked) {
+    const nowDisabled = !item.disabled;
+    if (nowDisabled) {
       showAlert(
-        t('menuBlock'),
-        t('deleteConversationBody', { name: item.characterName }),
+        t('menuDisable'),
+        t('disableConversationBody', { name: item.characterName }),
         [
           { text: t('common:cancel'), style: 'cancel' },
           {
-            text: t('menuBlock'),
+            text: t('menuDisable'),
             style: 'destructive',
             onPress: async () => {
-              await setConversationBlocked(item.participantKey, item.entityId || null, true);
-              EntitySessionService.setBlockedOverride(item.participantKey, true);
-              showToast(t('toastBlocked'));
+              await setConversationDisabled(item.participantKey, item.entityId || null, true);
+              EntitySessionService.setDisabledOverride(item.participantKey, true);
+              showToast(t('toastDisabled'));
               reloadAfterAction();
             },
           },
@@ -557,10 +557,10 @@ export const ChatListScreen: React.FC = () => {
       return;
     }
     // Apply the override BEFORE the DB write resolves so the send guard
-    // allows messages immediately after unblocking.
-    EntitySessionService.setBlockedOverride(item.participantKey, false);
-    await setConversationBlocked(item.participantKey, item.entityId || null, false);
-    showToast(t('toastUnblocked'));
+    // allows messages immediately after enabling.
+    EntitySessionService.setDisabledOverride(item.participantKey, false);
+    await setConversationDisabled(item.participantKey, item.entityId || null, false);
+    showToast(t('toastEnabled'));
     reloadAfterAction();
   }, [menuItem, reloadAfterAction, showAlert, showToast, t]);
 
@@ -808,14 +808,14 @@ export const ChatListScreen: React.FC = () => {
         visible={menuItem !== null}
         conversationName={menuItem?.characterName ?? ''}
         settings={menuSettings}
-        isBlocked={menuItem?.blocked ?? false}
+        isDisabled={menuItem?.disabled ?? false}
         onClose={closeMenu}
         onTogglePin={handleTogglePin}
         onToggleArchive={handleToggleArchive}
         onToggleMute={handleToggleMute}
         onOpenBubble={handleOpenBubble}
         onToggleRead={handleToggleRead}
-        onToggleBlock={handleToggleBlock}
+        onToggleDisable={handleToggleDisable}
         onDelete={handleDelete}
       />
     </ThemedView>
@@ -958,7 +958,7 @@ const ChatRowCard: React.FC<{
                 {item.muted && (
                   <Icon name="volume-off" size={13} color={theme.colors.text.muted} />
                 )}
-                {item.blocked && (
+                {item.disabled && (
                   <Icon name="shield-off-outline" size={13} color={theme.colors.status.error} />
                 )}
               </View>

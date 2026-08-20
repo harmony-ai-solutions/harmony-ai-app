@@ -12,13 +12,13 @@ import {
   setConversationPinned,
   setConversationArchived,
   setConversationMuted,
-  setConversationBlocked,
+  setConversationDisabled,
   incrementConversationUnread,
   clearConversationUnread,
   conversationSettingsExistForEntity,
   listConversationsByFlag,
-  getBlockedConversation,
-  getBlockedEntityIds,
+  getDisabledConversation,
+  getDisabledEntityIds,
 } from '../../repositories/chatConversationSettings';
 
 describe('chat conversation settings repository', () => {
@@ -32,7 +32,7 @@ describe('chat conversation settings repository', () => {
       pinned: false,
       archived: false,
       muted: false,
-      blocked: false,
+      disabled: false,
       unreadCount: 0,
     });
   });
@@ -41,13 +41,13 @@ describe('chat conversation settings repository', () => {
     await setConversationPinned('user+e1', 'e1', true);
     await setConversationArchived('user+e1', 'e1', false);
     await setConversationMuted('user+e1', 'e1', true);
-    await setConversationBlocked('user+e1', 'e1', false);
+    await setConversationDisabled('user+e1', 'e1', false);
 
     let s = await getChatConversationSettings('user+e1');
     expect(s.pinned).toBe(true);
     expect(s.archived).toBe(false);
     expect(s.muted).toBe(true);
-    expect(s.blocked).toBe(false);
+    expect(s.disabled).toBe(false);
     expect(s.entityId).toBe('e1');
 
     // Toggle off pin, keep the rest.
@@ -69,7 +69,7 @@ describe('chat conversation settings repository', () => {
     s = await getChatConversationSettings('user+e2');
     expect(s.unreadCount).toBe(0);
     // Flags survive the clear.
-    expect(s.blocked).toBe(false);
+    expect(s.disabled).toBe(false);
   });
 
   it('incrementConversationUnread creates the row for a brand-new key', async () => {
@@ -96,8 +96,8 @@ describe('chat conversation settings repository', () => {
   });
 
   it('lists conversations by flag', async () => {
-    await setConversationBlocked('user+e7', 'e7', true);
-    await setConversationBlocked('user+e8', 'e8', true);
+    await setConversationDisabled('user+e7', 'e7', true);
+    await setConversationDisabled('user+e8', 'e8', true);
     await setConversationMuted('user+e9', 'e9', true);
 
     const blocked = await listConversationsByFlag('blocked');
@@ -108,21 +108,21 @@ describe('chat conversation settings repository', () => {
     expect(muted.map(m => m.participantKey)).toEqual(['user+e9']);
   });
 
-  it('getBlockedConversation returns the row only when blocked', async () => {
-    await setConversationBlocked('user+e10', 'e10', true);
-    const blocked = await getBlockedConversation('user+e10');
-    expect(blocked?.participantKey).toBe('user+e10');
+  it('getDisabledConversation returns the row only when disabled', async () => {
+    await setConversationDisabled('user+e10', 'e10', true);
+    const disabled = await getDisabledConversation('user+e10');
+    expect(disabled?.participantKey).toBe('user+e10');
 
-    // Not blocked yet → null even though a row exists.
+    // Not disabled yet → null even though a row exists.
     await setConversationMuted('user+e11', 'e11', true);
-    const notBlocked = await getBlockedConversation('user+e11');
-    expect(notBlocked).toBeNull();
+    const notDisabled = await getDisabledConversation('user+e11');
+    expect(notDisabled).toBeNull();
   });
 
-  it('getBlockedEntityIds returns only non-null entity ids of blocked conversations', async () => {
-    await setConversationBlocked('user+e12', 'e12', true);
-    await setConversationBlocked('group:1+2+3', null, true);
-    const ids = await getBlockedEntityIds();
+  it('getDisabledEntityIds returns only non-null entity ids of disabled conversations', async () => {
+    await setConversationDisabled('user+e12', 'e12', true);
+    await setConversationDisabled('group:1+2+3', null, true);
+    const ids = await getDisabledEntityIds();
     expect(ids).toEqual(['e12']);
   });
 

@@ -185,6 +185,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When a chat is blocked, the input bar is replaced by a red "You blocked this AI" banner (with safe-area padding) instead of a disabled input.
 
 #### Changed
+- **"Block AI" renamed to "Disable AI"**: the per-AI block action (available from the chat header menu, the chat-list long-press menu, and the archived-chats menu) is now labeled **Disable**, and the **Blocked AIs** settings screen is now **Disabled AIs** (Settings → Account). The behavior is unchanged — a disabled AI can neither send nor receive messages until re-enabled via **Enable**. The disabled state is applied instantly so enabling immediately restores chatting. Existing blocked conversations remain intact.
 - The chat screen's bottom input bar (text field with send, emoji, image, and microphone buttons) has been removed. The chat now displays messages only; the message long-press action sheet no longer includes the "Reply" action.
 - Refactored `DualEntitySession` to `InteractionSession` — session management is now interaction-scoped instead of entity-pair-scoped
   - `InteractionSession` interface: interactionId, interaction, participantIds, ownEntityId, per-connection status tracking

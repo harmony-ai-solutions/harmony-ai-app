@@ -85,10 +85,10 @@
   "next": "Next",
   "confirm": "Confirm",
   "back": "Back",
-  "blockedAIsTitle": "Blocked AIs",
-  "blockedAIsEmpty": "No blocked AIs",
-  "blockedAIsEmptyHint": "AIs you block will appear here. You can unblock them anytime.",
-  "blockedAIsUnblock": "Unblock",
-  "blockedAIsUnblockedToast": "AI unblocked",
+  "disabledAIsTitle": "Disabled AIs",
+  "disabledAIsEmpty": "No disabled AIs",
+  "disabledAIsEmptyHint": "AIs you disable will appear here. You can enable them anytime.",
+  "disabledAIsEnable": "Enable",
+  "disabledAIsEnabledToast": "AI enabled",
   "blockedUsersTitle": "Blocked Users"
 }

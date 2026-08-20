@@ -82,11 +82,11 @@
   "forwardEmpty": "No characters yet. Start a chat to forward messages.",
   "audioSendFailed": "Failed to send voice message: {{message}}",
   "imageSendFailed": "Failed to send image: {{message}}",
-  "blockTitle": "Block {{name}}",
-  "blockBody": "Block {{name}}? You will no longer send or receive messages with this AI. You can unblock anytime.",
-  "blockedBanner": "You blocked this AI. You can't send or receive messages until you unblock.",
-  "unblock": "Unblock",
+  "disableTitle": "Disable {{name}}",
+  "disableBody": "Disable {{name}}? You will no longer send or receive messages with this AI. You can enable anytime.",
+  "disabledBanner": "You disabled this AI. You can't send or receive messages until you enable it.",
+  "enable": "Enable",
   "openBubble": "Open chat bubble",
-  "toastBlocked": "AI blocked",
-  "toastUnblocked": "AI unblocked"
+  "toastDisabled": "AI disabled",
+  "toastEnabled": "AI enabled"
 }

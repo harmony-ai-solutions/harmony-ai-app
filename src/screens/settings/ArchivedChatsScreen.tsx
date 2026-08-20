@@ -34,7 +34,7 @@ import {
   setConversationPinned,
   setConversationArchived,
   setConversationMuted,
-  setConversationBlocked,
+  setConversationDisabled,
   incrementConversationUnread,
   clearConversationUnread,
 } from '../../database/repositories/chatConversationSettings';
@@ -65,7 +65,7 @@ interface ArchivedItem {
   isGroup: boolean;
   pinned: boolean;
   muted: boolean;
-  blocked: boolean;
+  disabled: boolean;
   unreadCount: number;
 }
 
@@ -143,7 +143,7 @@ export const ArchivedChatsScreen: React.FC = () => {
           isGroup: false,
           pinned: false,
           muted: false,
-          blocked: false,
+          disabled: false,
           unreadCount: 0,
         });
       }
@@ -157,7 +157,7 @@ export const ArchivedChatsScreen: React.FC = () => {
         if (s) {
           item.pinned = s.pinned;
           item.muted = s.muted;
-          item.blocked = s.blocked;
+          item.disabled = s.disabled;
           item.unreadCount = s.unreadCount;
         }
       }
@@ -262,23 +262,23 @@ export const ArchivedChatsScreen: React.FC = () => {
     reload();
   }, [menuItem, reload, showToast, t]);
 
-  const handleToggleBlock = useCallback(async () => {
+  const handleToggleDisable = useCallback(async () => {
     const item = menuItem;
     if (!item) return;
-    const nowBlocked = !item.blocked;
-    if (nowBlocked) {
+    const nowDisabled = !item.disabled;
+    if (nowDisabled) {
       showAlert(
-        t('menuBlock'),
-        t('deleteConversationBody', { name: item.characterName }),
+        t('menuDisable'),
+        t('disableConversationBody', { name: item.characterName }),
         [
           { text: t('common:cancel'), style: 'cancel' },
           {
-            text: t('menuBlock'),
+            text: t('menuDisable'),
             style: 'destructive',
             onPress: async () => {
-              await setConversationBlocked(item.participantKey, item.entityId || null, true);
-              EntitySessionService.setBlockedOverride(item.participantKey, true);
-              showToast(t('toastBlocked'));
+              await setConversationDisabled(item.participantKey, item.entityId || null, true);
+              EntitySessionService.setDisabledOverride(item.participantKey, true);
+              showToast(t('toastDisabled'));
               reload();
             },
           },
@@ -287,10 +287,10 @@ export const ArchivedChatsScreen: React.FC = () => {
       return;
     }
     // Apply the override BEFORE the DB write resolves so the send guard
-    // allows messages immediately after unblocking.
-    EntitySessionService.setBlockedOverride(item.participantKey, false);
-    await setConversationBlocked(item.participantKey, item.entityId || null, false);
-    showToast(t('toastUnblocked'));
+    // allows messages immediately after enabling.
+    EntitySessionService.setDisabledOverride(item.participantKey, false);
+    await setConversationDisabled(item.participantKey, item.entityId || null, false);
+    showToast(t('toastEnabled'));
     reload();
   }, [menuItem, reload, showAlert, showToast, t]);
 
@@ -374,17 +374,17 @@ export const ArchivedChatsScreen: React.FC = () => {
           pinned: menuItem?.pinned ?? false,
           archived: true,
           muted: menuItem?.muted ?? false,
-          blocked: menuItem?.blocked ?? false,
+          disabled: menuItem?.disabled ?? false,
           unreadCount: menuItem?.unreadCount ?? 0,
         }}
-        isBlocked={menuItem?.blocked ?? false}
+        isDisabled={menuItem?.disabled ?? false}
         onClose={() => setMenuItem(null)}
         onTogglePin={handleTogglePin}
         onToggleArchive={handleUnarchive}
         onToggleMute={handleToggleMute}
         onOpenBubble={handleOpenBubble}
         onToggleRead={handleToggleRead}
-        onToggleBlock={handleToggleBlock}
+        onToggleDisable={handleToggleDisable}
         onDelete={handleDelete}
       />
     </ThemedView>

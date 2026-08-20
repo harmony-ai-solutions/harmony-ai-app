@@ -1,8 +1,8 @@
 /**
  * Chat Conversation Settings Repository — client-only per-conversation state.
  *
- * Backs the chat-list long-press actions (pin / archive / mute / block) plus
- * per-conversation unread counters, mirroring the `character_favorites` /
+ * Backs the chat-list long-press actions (pin / archive / mute / disable)
+ * plus per-conversation unread counters, mirroring the `character_favorites` /
  * `character_profile_sources` / `personas` sidecar pattern: everything here
  * lives in CLIENT-ONLY tables (never synced to the engine — strict schema
  * parity, see docs/schema-parity.md).
@@ -12,13 +12,14 @@
  *     (sorted `${entityA}+${entityB}` pair, or the sorted participant set for
  *     groups — same value as `interactions.participant_key`)
  *   entity_id       TEXT — partner entity id (NULL for group chats); lets the
- *     Blocked AIs screen resolve names/avatars without re-parsing the key
- *   pinned / archived / muted / blocked — 0/1 flags
+ *     Disabled AIs screen resolve names/avatars without re-parsing the key
+ *   pinned / archived / muted / blocked — 0/1 flags (blocked persists the
+ *     "disabled" state; the physical column name is kept for migration safety)
  *   unread_count    INTEGER — incremented on incoming messages while the chat
  *     is not open, reset to 0 on open
  *
  * A conversation with no row simply means "not pinned / not archived / not
- * muted / not blocked / zero unread".
+ * muted / not disabled / zero unread".
  */
 
 import { getDatabase } from '../connection';
@@ -29,7 +30,7 @@ export interface ChatConversationSettings {
   pinned: boolean;
   archived: boolean;
   muted: boolean;
-  blocked: boolean;
+  disabled: boolean;
   unreadCount: number;
 }
 
@@ -50,7 +51,7 @@ function mapRow(row: SettingsRow): ChatConversationSettings {
     pinned: row.pinned === 1,
     archived: row.archived === 1,
     muted: row.muted === 1,
-    blocked: row.blocked === 1,
+    disabled: row.blocked === 1,
     unreadCount: row.unread_count ?? 0,
   };
 }
@@ -74,7 +75,7 @@ export async function getChatConversationSettings(
       pinned: false,
       archived: false,
       muted: false,
-      blocked: false,
+      disabled: false,
       unreadCount: 0,
     };
   }
@@ -114,7 +115,7 @@ export async function getChatConversationSettingsBatch(
 async function upsertSettings(
   participantKey: string,
   entityId: string | null,
-  patch: Partial<Pick<ChatConversationSettings, 'pinned' | 'archived' | 'muted' | 'blocked' | 'unreadCount'>>,
+  patch: Partial<Pick<ChatConversationSettings, 'pinned' | 'archived' | 'muted' | 'disabled' | 'unreadCount'>>,
 ): Promise<void> {
   const db = getDatabase();
   const existing = await getChatConversationSettings(participantKey);
@@ -122,7 +123,7 @@ async function upsertSettings(
     pinned: patch.pinned ?? existing.pinned,
     archived: patch.archived ?? existing.archived,
     muted: patch.muted ?? existing.muted,
-    blocked: patch.blocked ?? existing.blocked,
+    disabled: patch.disabled ?? existing.disabled,
     unreadCount: patch.unreadCount ?? existing.unreadCount,
   };
   const now = new Date().toISOString();
@@ -145,7 +146,7 @@ async function upsertSettings(
       next.pinned ? 1 : 0,
       next.archived ? 1 : 0,
       next.muted ? 1 : 0,
-      next.blocked ? 1 : 0,
+      next.disabled ? 1 : 0,
       next.unreadCount,
       now,
       now,
@@ -181,12 +182,12 @@ export async function setConversationMuted(
   await upsertSettings(participantKey, entityId, { muted });
 }
 
-export async function setConversationBlocked(
+export async function setConversationDisabled(
   participantKey: string,
   entityId: string | null,
-  blocked: boolean,
+  disabled: boolean,
 ): Promise<void> {
-  await upsertSettings(participantKey, entityId, { blocked });
+  await upsertSettings(participantKey, entityId, { disabled });
 }
 
 // ============================================================================
@@ -241,7 +242,7 @@ export async function conversationSettingsExistForEntity(
 }
 
 /**
- * List conversations matching a predicate on flags (used by the Blocked AIs
+ * List conversations matching a predicate on flags (used by the Disabled AIs
  * screen — `blocked = 1` — and the archived section of the chat list).
  */
 export async function listConversationsByFlag(
@@ -259,8 +260,8 @@ export async function listConversationsByFlag(
   return list;
 }
 
-/** Get a single blocked conversation (or null). */
-export async function getBlockedConversation(
+/** Get a single disabled conversation (or null). */
+export async function getDisabledConversation(
   participantKey: string,
 ): Promise<ChatConversationSettings | null> {
   const db = getDatabase();
@@ -274,10 +275,10 @@ export async function getBlockedConversation(
 }
 
 /**
- * All blocked conversations that reference a known partner entity — used by
- * the Blocked AIs screen to render names/avatars.
+ * All disabled conversations that reference a known partner entity — used by
+ * the Disabled AIs screen to render names/avatars.
  */
-export async function getBlockedEntityIds(): Promise<string[]> {
+export async function getDisabledEntityIds(): Promise<string[]> {
   const settings = await listConversationsByFlag('blocked');
   return settings
     .map(s => s.entityId)
