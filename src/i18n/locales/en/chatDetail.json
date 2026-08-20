@@ -88,5 +88,7 @@
   "enable": "Enable",
   "openBubble": "Open chat bubble",
   "toastDisabled": "AI disabled",
-  "toastEnabled": "AI enabled"
+  "toastEnabled": "AI enabled",
+  "today": "Today",
+  "yesterday": "Yesterday"
 }

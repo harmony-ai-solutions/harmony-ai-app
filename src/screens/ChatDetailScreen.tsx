@@ -44,6 +44,7 @@ import { AlternateGreetingSwiper, parseAlternateGreetings } from '../components/
 import { EmptyChatCTA } from '../components/chat/EmptyChatCTA';
 import { GreetingBubble } from '../components/chat/GreetingBubble';
 import { ScenarioGeneratorSheet, ScenarioGuidedInputs } from '../components/chat/ScenarioGeneratorSheet';
+import { DayDivider } from '../components/chat/DayDivider';
 import EntityEmojiActionService from '../services/EntityEmojiActionService';
 import { useEntitySession } from '../contexts/EntitySessionContext';
 import EntitySessionService, { InteractionSession } from '../services/EntitySessionService'; // Still needed for event listeners
@@ -131,6 +132,13 @@ export function shouldUseGenerateGreeting(
     (messages.length === 1 && messages[0].message_type === 'greeting')
   );
 }
+
+/** Returns true when the two timestamps fall on the same local calendar day. */
+function isSameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
@@ -1493,7 +1501,23 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       return { messagesWithDivider: messages, initialScrollTarget: 'bottom' as const };
     }
 
-    let withDivider: any[] = messages;
+    // Insert a calendar-day divider before the first message of each new day.
+    // This runs on the raw messages so dividers stay stable regardless of the
+    // session/persona divider insertion below.
+    let withDivider: any[] = [];
+    for (let i = 0; i < messages.length; i++) {
+      if (
+        i > 0 &&
+        !isSameCalendarDay(messages[i - 1].created_at, messages[i].created_at)
+      ) {
+        withDivider.push({
+          id: `day-divider-${messages[i].id}`,
+          type: 'day',
+          date: messages[i].created_at,
+        });
+      }
+      withDivider.push(messages[i]);
+    }
 
     if (sessionDividerTimestamp.current !== 0 && showDivider) {
       const firstNewPartnerIndex = messages.findIndex(
@@ -1503,14 +1527,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       );
 
       if (firstNewPartnerIndex > 0) {
-        const newMessageCount = messages.length - firstNewPartnerIndex;
-        const result: any[] = [...messages];
-        result.splice(firstNewPartnerIndex, 0, {
-          id: 'new-messages-divider',
-          type: 'divider',
-          count: newMessageCount,
-        });
-        withDivider = result;
+        // Map the raw-message index to the corresponding index in the
+        // day-augmented array (each message has one preceding day-divider).
+        const insertionIndex = withDivider.findIndex(
+          (m: any) => m.id === messages[firstNewPartnerIndex].id,
+        );
+        if (insertionIndex !== -1) {
+          const newMessageCount = messages.length - firstNewPartnerIndex;
+          withDivider.splice(insertionIndex, 0, {
+            id: 'new-messages-divider',
+            type: 'divider',
+            count: newMessageCount,
+          });
+        }
       }
     }
 
@@ -1783,6 +1812,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
       if (item.type === 'personaChange') {
         return <PersonaChangeDivider personaName={item.personaName} theme={theme!} />;
+      }
+      if (item.type === 'day') {
+        return <DayDivider date={item.date} theme={theme!} />;
       }
 
 const isOwn = !isPartnerMessage(item, ownEntityId);
