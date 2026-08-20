@@ -133,12 +133,21 @@ export function shouldUseGenerateGreeting(
   );
 }
 
+// After revealing the conversation (list made visible), keep re-pinning to the
+// bottom for this long so async content growth (message images decoding, rows
+// rendering in later batches) doesn't leave the viewport stranded partway up
+// the conversation. The list opens at the latest message and stays there until
+// these late sizes settle.
+const INITIAL_SCROLL_SETTLE_MS = 1200;
+
 /** Returns true when the two timestamps fall on the same local calendar day. */
 function isSameCalendarDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
+  );
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
@@ -222,12 +231,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const flatListRef = useRef<FlatList<any>>(null);
   const sessionDividerTimestamp = useRef<number>(0);
   const isInitialScrollDone = useRef(false);
+  const isArmRevealScheduled = useRef(false);
   const isNearBottom = useRef(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isReadyToShow, setIsReadyToShow] = useState(false);
   const isReadyToShowRef = useRef(false);
   const messagesCountAtReveal = useRef(0);
   const pendingOwnMessageScroll = useRef(false);
+  // While this is non-zero (timestamp of the scheduled settle check), the list
+  // keeps re-pinning to the bottom on every onContentSizeChange. This absorbs
+  // async content growth (images loading, rows rendering in batches) that would
+  // otherwise leave the viewport stranded partway up the conversation, so we
+  // only stop re-pinning once everything has settled.
+  const settleUntilRef = useRef(0);
   const loadedMessagesRef = useRef<ConversationMessage[]>([]);
   const lastReadTimestampRef = useRef<number>(0);
   const [showDivider, setShowDivider] = useState(true);
@@ -1556,18 +1572,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       ];
     }
 
-    const dividerIndex = withDivider.findIndex(
-      (m: any) => m.type === 'divider' || m.type === 'personaChange',
-    );
-    let target: 'bottom' | number = 'bottom';
-    if (dividerIndex !== -1) {
-      const messagesAfterDivider = withDivider.length - dividerIndex - 1;
-      if (messagesAfterDivider >= 3) {
-        target = dividerIndex;
-      }
-    }
-
-    return { messagesWithDivider: withDivider, initialScrollTarget: target };
+    // ALWAYS open the conversation at the most recent (bottom) message. The
+    // "new messages" divider is still inserted above so it stays visible for
+    // context when the user scrolls up, but the initial viewport must land on
+    // the latest message — starting mid-conversation (on the divider) was the
+    // reported bug, so the scroll target is never a divider index.
+    return { messagesWithDivider: withDivider, initialScrollTarget: 'bottom' as const };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, showDivider, ownEntityId, personaChangeText]);
 
@@ -1576,6 +1586,51 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       isNearBottom.current = initialScrollTarget === 'bottom';
     }
   }, [initialScrollTarget]);
+
+  // Authority for the initial reveal + bottom-pin. This is driven by DATA
+  // (messages / persona-change row) instead of onContentSizeChange, so it is
+  // reliable regardless of when/whether the list reports size changes — the
+  // first onContentSizeChange fires while the list is empty, which would
+  // otherwise arm (and expire) the reveal before a slow, chunked message load
+  // finishes, stranding the viewport on the very first message.
+  //
+  // When real content first arrives: arm a short settle window during which we
+  // keep snapping to the bottom (absorbing async image decode / late batches),
+  // then reveal the screen. Re-runs whenever the message list grows during
+  // init so a late-arriving message still re-anchors the viewport to the bottom.
+  useEffect(() => {
+    const hasRealContent =
+      messages.length > 0 || Boolean(personaChangeText);
+    if (
+      !isReadyToShowRef.current &&
+      !isInitialScrollDone.current &&
+      initialScrollTarget === 'bottom' &&
+      hasRealContent
+    ) {
+      const scroll = () => flatListRef.current?.scrollToEnd({ animated: false });
+      // First snap immediately, then keep re-snapping on a few frames so rows
+      // get a chance to render (images decode async → content grows).
+      requestAnimationFrame(scroll);
+
+      if (!isArmRevealScheduled.current) {
+        isArmRevealScheduled.current = true;
+        isInitialScrollDone.current = true;
+        settleUntilRef.current = Date.now() + INITIAL_SCROLL_SETTLE_MS;
+
+        const begin = Date.now();
+        const interval = setInterval(() => {
+          scroll();
+          if (Date.now() - begin >= INITIAL_SCROLL_SETTLE_MS) {
+            clearInterval(interval);
+            settleUntilRef.current = 0;
+            messagesCountAtReveal.current = messagesWithDivider.length;
+            isReadyToShowRef.current = true;
+            setIsReadyToShow(true);
+          }
+        }, 60);
+      }
+    }
+  }, [messages, personaChangeText, messagesWithDivider, initialScrollTarget]);
 
   const persistMarkAsRead = useCallback(() => {
     const msgs = loadedMessagesRef.current;
@@ -2297,43 +2352,33 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
           }}
           onContentSizeChange={() => {
             if (!isReadyToShowRef.current) {
+              // Initial load (data-driven effect owns the reveal). While not yet
+              // revealed, keep re-pinning to the bottom on EVERY content-size
+              // change: messages are chronological (oldest→newest) in a
+              // non-inverted list and rows have variable height (images decode
+              // async, later batches render after the first pass), so contentSize
+              // grows several times before it's stable. Re-pinning each change
+              // keeps the viewport anchored at the latest message.
               if (initialScrollTarget === 'bottom') {
                 flatListRef.current?.scrollToEnd({ animated: false });
-              } else if (typeof initialScrollTarget === 'number') {
-                try {
-                  flatListRef.current?.scrollToIndex({
-                    index: initialScrollTarget,
-                    animated: false,
-                    viewPosition: 0,
-                  });
-                } catch {
-                  flatListRef.current?.scrollToEnd({ animated: false });
-                }
-              }
-
-              if (!isInitialScrollDone.current) {
-                isInitialScrollDone.current = true;
-                const revealTarget = initialScrollTarget;
-                setTimeout(() => {
-                  if (revealTarget === 'bottom') {
-                    flatListRef.current?.scrollToEnd({ animated: false });
-                  } else if (typeof revealTarget === 'number') {
-                    try {
-                      flatListRef.current?.scrollToIndex({
-                        index: revealTarget,
-                        animated: false,
-                        viewPosition: 0,
-                      });
-                    } catch {
-                      flatListRef.current?.scrollToEnd({ animated: false });
-                    }
-                  }
-                  messagesCountAtReveal.current = messagesWithDivider.length;
-                  isReadyToShowRef.current = true;
-                  setIsReadyToShow(true);
-                }, 200);
               }
             } else {
+              // Post-reveal. Keep re-pinning to the bottom through the settle
+              // window too — late image decoding / row rendering can still grow
+              // contentSize right after reveal, which would otherwise push the
+              // bottom out from under the viewport and leave it mid-conversation.
+              if (
+                settleUntilRef.current !== 0 &&
+                Date.now() < settleUntilRef.current
+              ) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+                return;
+              }
+              // Settle window done — clear it.
+              if (settleUntilRef.current !== 0) {
+                settleUntilRef.current = 0;
+              }
+
               if (pendingOwnMessageScroll.current) {
                 // A message was just sent — always reveal it above the keyboard.
                 // (No `length > count` guard here: when the keyboard margin
