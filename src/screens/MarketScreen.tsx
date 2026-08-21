@@ -27,10 +27,9 @@ import { useAppTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/AppToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ThemedView } from '../components/themed/ThemedView';
-import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
-import { SoulIcon } from '../components/market/SoulIcon';
+import { SoulBalanceDropdown } from '../components/market/SoulBalanceDropdown';
 import { MarketListingCard } from '../components/market/MarketListingCard';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
@@ -181,30 +180,7 @@ export const MarketScreen: React.FC = () => {
             <HeaderMenuButton />
           </View>
         }
-        titleRight={
-          <View style={styles.balanceBadge}>
-            <SoulIcon size={18} />
-            <ThemedText
-              variant="primary"
-              size={14}
-              weight="bold"
-              hierarchy="header"
-              numberOfLines={1}
-              style={styles.balanceText}
-            >
-              {Number.isInteger(balance) ? String(balance) : balance.toFixed(2)}
-            </ThemedText>
-            <ThemedText
-              variant="muted"
-              size={12}
-              hierarchy="subtext"
-              numberOfLines={1}
-              style={styles.balanceLabel}
-            >
-              {t('souls')}
-            </ThemedText>
-          </View>
-        }
+        titleRight={<SoulBalanceDropdown balance={balance} />}
       >
         <View
           style={[
@@ -319,25 +295,6 @@ const styles = StyleSheet.create({
   },
   emptyOverlay: {
     width: '100%',
-  },
-  // ── Balance badge ─────────────────────────────────────────────────────
-  balanceBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    backgroundColor: 'rgba(0,0,0,0.22)',
-    alignSelf: 'flex-start',
-  },
-  balanceText: {
-    minWidth: 14,
-  },
-  balanceLabel: {
-    opacity: 0.85,
   },
   // ── Search bar ─────────────────────────────────────────────────────────
   searchBar: {

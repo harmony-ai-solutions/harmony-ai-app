@@ -11,6 +11,14 @@
   "souls": "Souls",
   "chatPriceLabel": "Chat · {{price}} Souls",
 
+  "walletTitle": "Soul Wallet",
+  "walletAccessibilityLabel": "Soul balance. Opens wallet actions",
+  "buySouls": "Buy Souls",
+  "sellSouls": "Sell Souls",
+  "comingSoonTitle": "Coming Soon",
+  "buySoulsComingSoon": "Buying Souls will be available soon.\nYou'll be able to top up your balance right here.",
+  "sellSoulsComingSoon": "Selling Souls will be available soon.\nYou'll be able to cash out your balance right here.",
+
   "buyTitle": "Purchase {{name}}",
   "buyMessage": "Chatting with {{name}} costs {{price}} Souls. Buy it once and chat forever.",
   "buyConfirm": "Pay {{price}} Souls",
