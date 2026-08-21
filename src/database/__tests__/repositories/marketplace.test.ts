@@ -21,6 +21,8 @@ import {
   removeMarketplaceListing,
   getMarketplaceCharacterProfiles,
   getSoulBalance,
+  hasClaimedSignupBonus,
+  claimSignupBonus,
   creditSouls,
   debitSouls,
   hasPurchased,
@@ -222,5 +224,45 @@ describe('marketplace repository', () => {
     });
     expect(await canChatWithCharacter('p1', 'creator-123')).toBe(true);
     expect(await canChatWithCharacter('p1', 'other-user')).toBe(false);
+  });
+
+  // ── Signup bonus ───────────────────────────────────────────────────────
+
+  it('hasClaimedSignupBonus defaults to false', async () => {
+    expect(await hasClaimedSignupBonus()).toBe(false);
+  });
+
+  it('claimSignupBonus grants 50 SOUL on the first call only', async () => {
+    const first = await claimSignupBonus();
+    expect(first.claimed).toBe(true);
+    expect(first.balance).toBe(50);
+    expect(await getSoulBalance()).toBe(50);
+    expect(await hasClaimedSignupBonus()).toBe(true);
+
+    // Second call must be a no-op — the bonus is one-time only.
+    const second = await claimSignupBonus();
+    expect(second.claimed).toBe(false);
+    expect(second.balance).toBe(50);
+    expect(await getSoulBalance()).toBe(50);
+  });
+
+  it('claimSignupBonus keeps already-earned souls intact', async () => {
+    await creditSouls(120);
+    const result = await claimSignupBonus();
+    expect(result.claimed).toBe(true);
+    expect(result.balance).toBe(170);
+    // A second claim adds nothing.
+    const again = await claimSignupBonus();
+    expect(again.claimed).toBe(false);
+    expect(await getSoulBalance()).toBe(170);
+  });
+
+  it('claimSignupBonus never double-grants after a fresh wallet row', async () => {
+    // Simulate a pristine wallet (migration default 0) → first claim works.
+    expect(await getSoulBalance()).toBe(0);
+    expect(await claimSignupBonus()).toEqual({ claimed: true, balance: 50 });
+    // Recap: subsequent claims are no-ops even after direct balance moves.
+    await creditSouls(25);
+    expect(await claimSignupBonus()).toEqual({ claimed: false, balance: 75 });
   });
 });

@@ -161,6 +161,8 @@ export async function getMarketplaceCharacterProfiles(): Promise<
 // SOUL Wallet (local balance)
 // ============================================================================
 
+const SIGNUP_BONUS_SOULS = 50;
+
 /**
  * Ensure the single-row wallet exists and return the current balance.
  */
@@ -176,6 +178,63 @@ export async function getSoulBalance(): Promise<number> {
   );
   if (results.rows.length === 0) return 0;
   return Number(results.rows.item(0).balance);
+}
+
+/**
+ * True when the one-time signup soul bonus has already been claimed on this
+ * install. The flag lives on the single-row wallet, so it survives restarts.
+ */
+export async function hasClaimedSignupBonus(): Promise<boolean> {
+  const db = getDatabase();
+  // Ensure the wallet row exists (INSERT OR IGNORE applies the default 0).
+  await db.executeSql(
+    `INSERT OR IGNORE INTO soul_wallet (id, balance, updated_at) VALUES (?, 0, ?)`,
+    [WALLET_ROW_ID, new Date().toISOString()],
+  );
+  const [results] = await db.executeSql(
+    'SELECT signup_bonus_claimed FROM soul_wallet WHERE id = ?',
+    [WALLET_ROW_ID],
+  );
+  if (results.rows.length === 0) return false;
+  return Number(results.rows.item(0).signup_bonus_claimed) === 1;
+}
+
+/**
+ * Claim the one-time first-signup bonus (50 SOUL). Idempotent and atomic:
+ * only the FIRST call on an install credits the wallet; every later call is a
+ * no-op that returns `{ claimed: false, balance }`. Returns whether this call
+ * actually granted the bonus and the resulting balance.
+ */
+export async function claimSignupBonus(): Promise<{
+  claimed: boolean;
+  balance: number;
+}> {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  // The transaction's compare-and-set (0 → 1 while crediting) is atomic and
+  // serialised by the DB, so concurrent calls can never double-grant. The
+  // callback returns whether THIS call performed the credit.
+  const granted = await withTransaction(db, async tx => {
+    // Ensure the wallet row exists before reading the flag.
+    await tx.executeSql(
+      `INSERT OR IGNORE INTO soul_wallet (id, balance, updated_at) VALUES (?, 0, ?)`,
+      [WALLET_ROW_ID, now],
+    );
+    // Atomic compare-and-set: only transition 0 → 1 while crediting.
+    const [result] = await tx.executeSql(
+      `UPDATE soul_wallet
+         SET balance = balance + ?,
+             signup_bonus_claimed = 1,
+             updated_at = ?
+       WHERE id = ? AND signup_bonus_claimed = 0`,
+      [SIGNUP_BONUS_SOULS, now, WALLET_ROW_ID],
+    );
+    return result.rowsAffected > 0;
+  });
+
+  const balance = await getSoulBalance();
+  return { claimed: granted, balance };
 }
 
 /**
@@ -364,6 +423,8 @@ export default {
   removeMarketplaceListing,
   getMarketplaceCharacterProfiles,
   getSoulBalance,
+  hasClaimedSignupBonus,
+  claimSignupBonus,
   creditSouls,
   debitSouls,
   hasPurchased,

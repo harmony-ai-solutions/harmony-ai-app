@@ -29,6 +29,7 @@ import AuthService, {
 import { cloudSessionService } from '../services/cloud/CloudSessionService';
 import DeviceAuthService from '../services/cloud/DeviceAuthService';
 import { startSoulbitsTokenSync } from '../services/cloud/soulbitsTokenSync';
+import { claimSignupBonus } from '../database/repositories/marketplace';
 import { createLogger } from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -210,6 +211,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
     async (email: string, password: string, displayName: string) => {
       await AuthService.register(email, password, displayName);
       // Registration does NOT return a token — user must verify email.
+      //
+      // One-time first-signup gift: 50 free SOUL, granted exactly once per
+      // install. The claim is atomic + idempotent (soul_wallet compares-and-
+      // sets a flag inside a transaction), so a repeated submit or a second
+      // registration on the same device can never double-grant.
+      try {
+        const { claimed, balance } = await claimSignupBonus();
+        log.info(
+          claimed
+            ? `First-signup bonus granted. New SOUL balance: ${balance}`
+            : `Signup bonus already claimed. SOUL balance: ${balance}`,
+        );
+      } catch (err) {
+        // The gift is best-effort — never fail the registration because of it.
+        log.warn('Failed to claim signup soul bonus:', err);
+      }
     },
     [],
   );

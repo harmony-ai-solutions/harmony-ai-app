@@ -215,7 +215,7 @@ CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTA
 CREATE TABLE soul_purchases ( id TEXT PRIMARY KEY, profile_id TEXT NOT NULL REFERENCES character_profiles(id) ON DELETE CASCADE, price_souls REAL NOT NULL CHECK (price_souls >= 0), purchased_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
 -- table: soul_wallet
-CREATE TABLE soul_wallet ( id INTEGER PRIMARY KEY CHECK (id = 1), balance REAL NOT NULL DEFAULT 0 CHECK (balance >= 0), updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+CREATE TABLE soul_wallet ( id INTEGER PRIMARY KEY CHECK (id = 1), balance REAL NOT NULL DEFAULT 0 CHECK (balance >= 0), updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP , signup_bonus_claimed INTEGER NOT NULL DEFAULT 0);
 
 -- table: stt_configs
 CREATE TABLE "stt_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id TEXT NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
