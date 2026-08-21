@@ -22,7 +22,23 @@ import { withTransaction } from '../transaction';
 import { generateId } from '../../utils/uuid';
 import { getCharacterProfile, getCharacterProfileVisibility } from './characters';
 import { getCharacterCreator } from './characterSocial';
+import {
+  getSoulBalance,
+  hasClaimedSignupBonus,
+  claimSignupBonus,
+  creditSouls,
+  debitSouls,
+} from './soulWallet';
 import type { CharacterProfile } from '../models';
+
+// Backward-compatible re-exports — wallet functions now live in soulWallet.ts
+export {
+  getSoulBalance,
+  hasClaimedSignupBonus,
+  claimSignupBonus,
+  creditSouls,
+  debitSouls,
+};
 
 // ============================================================================
 // Types
@@ -155,122 +171,6 @@ export async function getMarketplaceCharacterProfiles(): Promise<
     });
   }
   return listings;
-}
-
-// ============================================================================
-// SOUL Wallet (local balance)
-// ============================================================================
-
-const SIGNUP_BONUS_SOULS = 50;
-
-/**
- * Ensure the single-row wallet exists and return the current balance.
- */
-export async function getSoulBalance(): Promise<number> {
-  const db = getDatabase();
-  await db.executeSql(
-    `INSERT OR IGNORE INTO soul_wallet (id, balance, updated_at) VALUES (?, 0, ?)`,
-    [WALLET_ROW_ID, new Date().toISOString()],
-  );
-  const [results] = await db.executeSql(
-    'SELECT balance FROM soul_wallet WHERE id = ?',
-    [WALLET_ROW_ID],
-  );
-  if (results.rows.length === 0) return 0;
-  return Number(results.rows.item(0).balance);
-}
-
-/**
- * True when the one-time signup soul bonus has already been claimed on this
- * install. The flag lives on the single-row wallet, so it survives restarts.
- */
-export async function hasClaimedSignupBonus(): Promise<boolean> {
-  const db = getDatabase();
-  // Ensure the wallet row exists (INSERT OR IGNORE applies the default 0).
-  await db.executeSql(
-    `INSERT OR IGNORE INTO soul_wallet (id, balance, updated_at) VALUES (?, 0, ?)`,
-    [WALLET_ROW_ID, new Date().toISOString()],
-  );
-  const [results] = await db.executeSql(
-    'SELECT signup_bonus_claimed FROM soul_wallet WHERE id = ?',
-    [WALLET_ROW_ID],
-  );
-  if (results.rows.length === 0) return false;
-  return Number(results.rows.item(0).signup_bonus_claimed) === 1;
-}
-
-/**
- * Claim the one-time first-signup bonus (50 SOUL). Idempotent and atomic:
- * only the FIRST call on an install credits the wallet; every later call is a
- * no-op that returns `{ claimed: false, balance }`. Returns whether this call
- * actually granted the bonus and the resulting balance.
- */
-export async function claimSignupBonus(): Promise<{
-  claimed: boolean;
-  balance: number;
-}> {
-  const db = getDatabase();
-  const now = new Date().toISOString();
-
-  // The transaction's compare-and-set (0 → 1 while crediting) is atomic and
-  // serialised by the DB, so concurrent calls can never double-grant. The
-  // callback returns whether THIS call performed the credit.
-  const granted = await withTransaction(db, async tx => {
-    // Ensure the wallet row exists before reading the flag.
-    await tx.executeSql(
-      `INSERT OR IGNORE INTO soul_wallet (id, balance, updated_at) VALUES (?, 0, ?)`,
-      [WALLET_ROW_ID, now],
-    );
-    // Atomic compare-and-set: only transition 0 → 1 while crediting.
-    const [result] = await tx.executeSql(
-      `UPDATE soul_wallet
-         SET balance = balance + ?,
-             signup_bonus_claimed = 1,
-             updated_at = ?
-       WHERE id = ? AND signup_bonus_claimed = 0`,
-      [SIGNUP_BONUS_SOULS, now, WALLET_ROW_ID],
-    );
-    return result.rowsAffected > 0;
-  });
-
-  const balance = await getSoulBalance();
-  return { claimed: granted, balance };
-}
-
-/**
- * Credit the local wallet (e.g. a marketplace sale proceeds for the creator).
- * Returns the new balance.
- */
-export async function creditSouls(amount: number): Promise<number> {
-  const db = getDatabase();
-  const value = Math.max(0, Number(amount) || 0);
-  await db.executeSql(
-    `INSERT INTO soul_wallet (id, balance, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       balance = soul_wallet.balance + excluded.balance,
-       updated_at = excluded.updated_at`,
-    [WALLET_ROW_ID, value, new Date().toISOString()],
-  );
-  return getSoulBalance();
-}
-
-/**
- * Debit the local wallet. Throws when the balance is insufficient.
- * Returns the new balance.
- */
-export async function debitSouls(amount: number): Promise<number> {
-  const db = getDatabase();
-  const value = Math.max(0, Number(amount) || 0);
-  const balance = await getSoulBalance();
-  if (balance < value) {
-    throw new Error('insufficient_soul_balance');
-  }
-  await db.executeSql(
-    `UPDATE soul_wallet SET balance = balance - ?, updated_at = ?
-     WHERE id = ?`,
-    [value, new Date().toISOString(), WALLET_ROW_ID],
-  );
-  return balance - value;
 }
 
 // ============================================================================
@@ -416,6 +316,317 @@ export async function canChatWithCharacter(
   return false;
 }
 
+// ============================================================================
+// Generic marketplace cache (account-backed marketplace)
+// ============================================================================
+
+/**
+ * What can be listed for sale (or given away free). Mirrors the backend enum.
+ */
+export type MarketplaceItemType =
+  | 'character'
+  | 'backstory'
+  | 'description'
+  | 'personality'
+  | 'prompt'
+  | 'dialogue'
+  | 'theme';
+
+export interface CachedListing {
+  id: string;
+  itemType: MarketplaceItemType;
+  title: string;
+  summary: string | null;
+  tags: string[];
+  priceSouls: number;
+  status: 'active' | 'delisted';
+  salesCount: number;
+  sellerUserId: string | null;
+  previewText: string | null;
+  previewImageData: string | null;
+  previewMimeType: string | null;
+  payloadJson: unknown;
+  cachedAt: Date;
+  updatedAt: Date;
+}
+
+export interface OwnedAsset {
+  id: string;
+  listingId: string;
+  itemType: MarketplaceItemType;
+  title: string;
+  assetJson: unknown;
+  kind: 'purchase' | 'free' | 'own';
+  acquiredAt: Date;
+  imageData: string | null;
+  imageMime: string | null;
+}
+
+/**
+ * Upsert a catalog listing row from an API DTO (or a migration).
+ */
+export async function cacheListing(dto: {
+  id: string;
+  itemType: MarketplaceItemType;
+  title: string;
+  summary?: string | null;
+  tags?: string[];
+  priceSouls: number;
+  status?: 'active' | 'delisted';
+  salesCount?: number;
+  sellerUserId?: string | null;
+  previewText?: string | null;
+  previewImageData?: string | null;
+  previewMimeType?: string | null;
+  payloadJson: unknown;
+}): Promise<void> {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  await db.executeSql(
+    `INSERT INTO marketplace_listings_cache
+       (id, item_type, title, summary, tags, price_souls, status, sales_count,
+        seller_user_id, preview_text, preview_image_data, preview_mime_type,
+        payload_json, cached_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       item_type = excluded.item_type,
+       title = excluded.title,
+       summary = excluded.summary,
+       tags = excluded.tags,
+       price_souls = excluded.price_souls,
+       status = excluded.status,
+       sales_count = excluded.sales_count,
+       seller_user_id = excluded.seller_user_id,
+       preview_text = excluded.preview_text,
+       preview_image_data = excluded.preview_image_data,
+       preview_mime_type = excluded.preview_mime_type,
+       payload_json = excluded.payload_json,
+       updated_at = excluded.updated_at`,
+    [
+      dto.id,
+      dto.itemType,
+      dto.title,
+      dto.summary ?? null,
+      dto.tags ? JSON.stringify(dto.tags) : null,
+      dto.priceSouls,
+      dto.status ?? 'active',
+      dto.salesCount ?? 0,
+      dto.sellerUserId ?? null,
+      dto.previewText ?? null,
+      dto.previewImageData ?? null,
+      dto.previewMimeType ?? null,
+      JSON.stringify(dto.payloadJson ?? null),
+      now,
+      now,
+    ],
+  );
+}
+
+function rowToCachedListing(row: any): CachedListing {
+  let tags: string[] = [];
+  try {
+    const parsed = JSON.parse(row.tags || '[]');
+    if (Array.isArray(parsed)) tags = parsed.filter((t): t is string => typeof t === 'string');
+  } catch {
+    // ignore malformed tags
+  }
+  return {
+    id: row.id,
+    itemType: row.item_type as MarketplaceItemType,
+    title: row.title,
+    summary: row.summary ?? null,
+    tags,
+    priceSouls: Number(row.price_souls),
+    status: row.status as 'active' | 'delisted',
+    salesCount: Number(row.sales_count),
+    sellerUserId: row.seller_user_id ?? null,
+    previewText: row.preview_text ?? null,
+    previewImageData: row.preview_image_data ?? null,
+    previewMimeType: row.preview_mime_type ?? null,
+    payloadJson: JSON.parse(row.payload_json || 'null'),
+    cachedAt: new Date(row.cached_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+/**
+ * Offline browse of the cached catalog. Filters by type, free-only, and a
+ * text query across title/summary/tags.
+ */
+export async function getCachedListings(opts?: {
+  itemType?: MarketplaceItemType | 'free';
+  freeOnly?: boolean;
+  query?: string;
+}): Promise<CachedListing[]> {
+  const db = getDatabase();
+  const clauses: string[] = ["status = 'active'"];
+  const params: string[] = [];
+  if (opts?.itemType && opts.itemType !== 'free') {
+    clauses.push('item_type = ?');
+    params.push(opts.itemType);
+  }
+  if (opts?.freeOnly || opts?.itemType === 'free') {
+    clauses.push('price_souls = 0');
+  }
+  if (opts?.query?.trim()) {
+    clauses.push(`(title LIKE ? OR summary LIKE ? OR tags LIKE ?)`);
+    const like = `%${opts.query.trim()}%`;
+    params.push(like, like, like);
+  }
+  const [results] = await db.executeSql(
+    `SELECT * FROM marketplace_listings_cache
+     WHERE ${clauses.join(' AND ')}
+     ORDER BY updated_at DESC`,
+    params,
+  );
+  const out: CachedListing[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    out.push(rowToCachedListing(results.rows.item(i)));
+  }
+  return out;
+}
+
+/**
+ * Get a single cached listing by id (null when not present).
+ */
+export async function getCachedListing(id: string): Promise<CachedListing | null> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT * FROM marketplace_listings_cache WHERE id = ?',
+    [id],
+  );
+  if (results.rows.length === 0) return null;
+  return rowToCachedListing(results.rows.item(0));
+}
+
+/**
+ * The current user's locally-published listings (cached from a local publish
+ * fallback or previously synced mine data), newest first. Includes both
+ * active and delisted so My Listings can show the full set.
+ */
+export async function getCachedMyListings(
+  sellerUserId: string,
+): Promise<CachedListing[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    `SELECT * FROM marketplace_listings_cache
+     WHERE seller_user_id = ?
+     ORDER BY updated_at DESC`,
+    [sellerUserId],
+  );
+  const out: CachedListing[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    out.push(rowToCachedListing(results.rows.item(i)));
+  }
+  return out;
+}
+
+/**
+ * Update the status of a cached listing (delist / re-list). No-op when the
+ * listing doesn't exist locally.
+ */
+export async function setCachedListingStatus(
+  listingId: string,
+  status: 'active' | 'delisted',
+): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql(
+    `UPDATE marketplace_listings_cache
+     SET status = ?, updated_at = ?
+     WHERE id = ?`,
+    [status, new Date().toISOString(), listingId],
+  );
+}
+
+/**
+ * Store an owned asset (purchase / free / own) locally. Idempotent — an
+ * existing row for the same listing is updated rather than duplicated.
+ */
+export async function saveOwnedAsset(asset: {
+  id: string;
+  listingId: string;
+  itemType: MarketplaceItemType;
+  title: string;
+  assetJson: unknown;
+  kind: 'purchase' | 'free' | 'own';
+  imageData?: string | null;
+  imageMime?: string | null;
+}): Promise<void> {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  await db.executeSql(
+    `INSERT INTO marketplace_ownership_cache
+       (id, listing_id, item_type, title, asset_json, kind, acquired_at, image_data, image_mime)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       item_type = excluded.item_type,
+       title = excluded.title,
+       asset_json = excluded.asset_json,
+       kind = excluded.kind`,
+    [
+      asset.id,
+      asset.listingId,
+      asset.itemType,
+      asset.title,
+      JSON.stringify(asset.assetJson ?? null),
+      asset.kind,
+      now,
+      asset.imageData ?? null,
+      asset.imageMime ?? null,
+    ],
+  );
+}
+
+/**
+ * Everything the local user has acquired (purchases + free + own).
+ */
+export async function getOwnedAssets(): Promise<OwnedAsset[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    `SELECT * FROM marketplace_ownership_cache ORDER BY acquired_at DESC`,
+  );
+  const out: OwnedAsset[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    const row = results.rows.item(i);
+    out.push({
+      id: row.id,
+      listingId: row.listing_id,
+      itemType: row.item_type as MarketplaceItemType,
+      title: row.title,
+      assetJson: JSON.parse(row.asset_json || 'null'),
+      kind: row.kind as 'purchase' | 'free' | 'own',
+      acquiredAt: new Date(row.acquired_at),
+      imageData: row.image_data ?? null,
+      imageMime: row.image_mime ?? null,
+    });
+  }
+  return out;
+}
+
+/**
+ * True when the local user owns an asset for a given listing id.
+ */
+export async function hasOwnedAsset(listingId: string): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT 1 FROM marketplace_ownership_cache WHERE listing_id = ?',
+    [listingId],
+  );
+  return results.rows.length > 0;
+}
+
+/**
+ * Clear all cached catalog + ownership + library data (e.g. on logout /
+ * account switch). Keeps the wallet intact — the balance is re-fetched on
+ * the next login.
+ */
+export async function clearMarketplaceCache(): Promise<void> {
+  const db = getDatabase();
+  await db.executeSql('DELETE FROM content_library');
+  await db.executeSql('DELETE FROM marketplace_ownership_cache');
+  await db.executeSql('DELETE FROM marketplace_listings_cache');
+}
+
 export default {
   isMarketplaceListed,
   getMarketplaceListing,
@@ -431,4 +642,13 @@ export default {
   getSoulPurchases,
   purchaseCharacter,
   canChatWithCharacter,
+  cacheListing,
+  getCachedListings,
+  getCachedListing,
+  getCachedMyListings,
+  setCachedListingStatus,
+  saveOwnedAsset,
+  getOwnedAssets,
+  hasOwnedAsset,
+  clearMarketplaceCache,
 };

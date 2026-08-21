@@ -164,6 +164,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return startSoulbitsTokenSync();
   }, []);
 
+  // ── Marketplace library hydration (non-blocking) ─────────────────────
+  // When the user is authenticated, fetch their account-bound marketplace
+  // library (everything purchased / grabbed free) and cache it locally so it
+  // follows them on any device. Never blocks authentication or the UI.
+  useEffect(() => {
+    if (status !== 'authenticated' || !user?.id) return;
+    import('../services/marketplace/librarySync').then(({ syncLibraryToLocal }) =>
+      syncLibraryToLocal(user.id).catch(() => {}),
+    );
+  }, [status, user?.id]);
+
   // ── Listen for auth:changed events (login/refresh) ────────────────────
   useEffect(() => {
     const onChanged = async () => {

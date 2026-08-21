@@ -34,6 +34,11 @@ import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { DisabledAIsScreen } from '../screens/settings/DisabledAIsScreen';
 import { BlockedUsersScreen } from '../screens/settings/BlockedUsersScreen';
 import { ArchivedChatsScreen } from '../screens/settings/ArchivedChatsScreen';
+import { MarketplacePublishScreen } from '../screens/MarketplacePublishScreen';
+import { MarketplaceItemDetailScreen } from '../screens/MarketplaceItemDetailScreen';
+import { MyLibraryScreen } from '../screens/MyLibraryScreen';
+import { MyListingsScreen } from '../screens/MyListingsScreen';
+import { ContentAssetScreen } from '../screens/ContentAssetScreen';
 
 export type RootStackParamList = {
   /** Tab container — the primary navigation surface (5-tab layout) */
@@ -111,6 +116,16 @@ export type RootStackParamList = {
   BlockedUsers: undefined;
   /** Archived chats — dedicated list of archived conversations */
   ArchivedChats: undefined;
+  /** Marketplace — publish any content (price or free) */
+  MarketplacePublish: { profileId?: string; listingId?: string } | undefined;
+  /** Marketplace — item detail + acquire */
+  MarketplaceItemDetail: { listingId: string };
+  /** Marketplace — everything the user collected (cross-device) */
+  MyLibrary: undefined;
+  /** Marketplace — the user's published items */
+  MyListings: undefined;
+  /** Content asset viewer (read / copy / apply / remove) */
+  ContentAsset: { entryId: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -191,6 +206,11 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen name="DisabledAIs" component={DisabledAIsScreen} />
         <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
         <Stack.Screen name="ArchivedChats" component={ArchivedChatsScreen} />
+        <Stack.Screen name="MarketplacePublish" component={MarketplacePublishScreen} />
+        <Stack.Screen name="MarketplaceItemDetail" component={MarketplaceItemDetailScreen} />
+        <Stack.Screen name="MyLibrary" component={MyLibraryScreen} />
+        <Stack.Screen name="MyListings" component={MyListingsScreen} />
+        <Stack.Screen name="ContentAsset" component={ContentAssetScreen} />
         <Stack.Screen
           name="ComingSoon"
           component={ComingSoonScreen}

@@ -65,6 +65,7 @@ import { migration045 as migration045s } from './migrations/000045_add_marketpla
 import { migration046 as migration046s } from './migrations/000046_extend_visibility_check_marketplace';
 import { migration047 as migration047s } from './migrations/000047_add_blocked_users';
 import { migration048 as migration048s } from './migrations/000048_add_signup_bonus_flag';
+import { migration049 as migration049s } from './migrations/000049_add_marketplace_cache';
 
 // Migration definition
 export interface Migration {
@@ -348,6 +349,11 @@ export const MIGRATIONS: Migration[] = [
     version: 48,
     description: 'add_signup_bonus_flag',
     sql: migration048s,
+   },
+   {
+    version: 49,
+    description: 'add_marketplace_cache',
+    sql: migration049s,
    },
   ];
 

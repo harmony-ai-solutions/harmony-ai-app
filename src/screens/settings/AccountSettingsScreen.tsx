@@ -80,6 +80,12 @@ export const AccountSettingsScreen: React.FC = () => {
             theme={theme}
             showSeparator
           />
+          <SettingsLinkRow
+            icon="bookmark-outline"
+            label={t('marketLibraryTitle')}
+            onPress={() => navigation.navigate('MyLibrary')}
+            theme={theme}
+          />
         </ThemedCard>
 
         {/* ── Billing & Purchases ── */}

@@ -59,6 +59,9 @@ const CLIENT_ONLY_TABLES = new Set<string>([
   'character_marketplace_listings',
   'soul_wallet',
   'soul_purchases',
+  'marketplace_listings_cache',
+  'marketplace_ownership_cache',
+  'content_library',
 ]);
 
 interface Args {
