@@ -8,11 +8,19 @@ export const migration037 = `
 --   * example_dialogues       ->  mes_example
 --
 -- SQLite cannot DROP COLUMN on RN's older Android build, so this uses the
--- established _new-table rebuild pattern (see migration 000031). FKs are disabled
--- for the migration session, so the DROP TABLE on the parent does not fire FK
--- cascades. Baseline note: at the 000036 schema the V3 columns do not exist yet,
--- so the SELECT seeds them with '' (description/mes_example excepted — those
--- receive the folded legacy content).
+-- established _new-table rebuild pattern (see migration 000031). The migration
+-- runner does NOT disable FKs around migrations, so this migration must do it
+-- itself: entities.character_profile_id references character_profiles with
+-- ON DELETE RESTRICT, so with PRAGMA foreign_keys = ON the DROP TABLE below
+-- fires the FK action on every existing entity row and throws
+-- SQLITE_CONSTRAINT_TRIGGER (1811) — observed on-device as "Failed to apply
+-- migration 37", which left the app with an uninitialized database. Disabling
+-- FKs for the migration session mirrors migration 000034 (which also rebuilds a
+-- referenced table). Baseline note: at the 000036 schema the V3 columns do not
+-- exist yet, so the SELECT seeds them with '' (description/mes_example excepted
+-- — those receive the folded legacy content).
+
+PRAGMA foreign_keys = OFF;
 
 CREATE TABLE IF NOT EXISTS character_profiles_new (
     id TEXT PRIMARY KEY,
@@ -88,4 +96,6 @@ FROM character_profiles t;
 
 DROP TABLE character_profiles;
 ALTER TABLE character_profiles_new RENAME TO character_profiles;
+
+PRAGMA foreign_keys = ON;
 `;

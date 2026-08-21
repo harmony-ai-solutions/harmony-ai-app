@@ -1390,6 +1390,26 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         log.error('Failed to apply server data:', error);
         this.incomingDataBuffer = []; // Clear buffer on error
         this.serverRecordIds.clear(); // Clear server record tracking
+
+        // Reset the session state completely. Leaving currentSession with
+        // status 'in_progress' (or syncPhase stuck at 'SERVER_SENDING') makes
+        // the initiateSync guard reject every future sync with "Sync already
+        // in progress (or awaiting acceptance), skipping" — the app is
+        // permanently bricked until a process restart. Mirrors
+        // handleSyncReject / abortSync cleanup.
+        if (this.pendingNameClash) {
+          const pending = this.pendingNameClash;
+          this.pendingNameClash = null;
+          pending.reject(new Error('Failed to apply server data'));
+        }
+        this.nameClashApplyToAllResolution = null;
+        this.syncPhase = 'IDLE';
+        if (this.currentSession) {
+          this.currentSession.status = 'failed';
+          this.currentSession = null;
+        }
+        this.keepCascadedProviderKeys.clear();
+
         this.emit('sync:error', 'Failed to apply server data');
         return;
       }
