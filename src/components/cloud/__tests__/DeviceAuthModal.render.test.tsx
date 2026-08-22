@@ -123,6 +123,7 @@ jest.mock('../../../services/cloud/DeviceAuthService', () => {
 import DeviceAuthService from '../../../services/cloud/DeviceAuthService';
 
 const mockGetStatus = DeviceAuthService.getStatus as jest.Mock;
+const mockRequestCode = DeviceAuthService.requestCode as jest.Mock;
 
 // Real Modal renders children when visible in the RN jest preset — good enough
 // for the poll assertions. useAppTheme is mocked, so theme is never null.
@@ -135,6 +136,10 @@ const baseProps = {
 beforeEach(() => {
   jest.clearAllMocks();
   jest.useFakeTimers();
+  // clearAllMocks does NOT remove implementations — restore the default
+  // successful requestCode so a test that overrides it (mockRejectedValue*)
+  // cannot leak a failure into later tests.
+  mockRequestCode.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -142,6 +147,38 @@ afterEach(() => {
 });
 
 describe('DeviceAuthModal — Phase 4-2 auto-resolve polling', () => {
+  it('auto-requests the code exactly once per show — a persistent failure must not spin a retry loop', async () => {
+    // Regression (flicker bug): requestCode failing with a 5xx leaves codeSent
+    // false, and requestCode's identity changes as isSending flips. Without the
+    // one-shot guard the auto-request effect re-fires on every render at ~10 Hz.
+    mockRequestCode.mockRejectedValueOnce(
+      new DeviceAuthError('requestCode', 'upstream down', 503),
+    );
+
+    await render(<DeviceAuthModal {...baseProps} />);
+
+    // Fired once on show; the failure must NOT re-trigger it.
+    expect(mockRequestCode).toHaveBeenCalledTimes(1);
+
+    // Cooldown ticks + poll cycles keep re-rendering — still no retry.
+    await jest.advanceTimersByTimeAsync(15_000);
+    expect(mockRequestCode).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-requests the code on the next show after a failure', async () => {
+    mockRequestCode
+      .mockRejectedValueOnce(new DeviceAuthError('requestCode', 'upstream down', 503))
+      .mockRejectedValueOnce(new DeviceAuthError('requestCode', 'upstream down', 503));
+
+    const { rerender } = await render(<DeviceAuthModal {...baseProps} />);
+    expect(mockRequestCode).toHaveBeenCalledTimes(1);
+
+    // Dismiss, then show again — the guard resets and a new code is requested.
+    await rerender(<DeviceAuthModal {...baseProps} visible={false} />);
+    await rerender(<DeviceAuthModal {...baseProps} visible={true} />);
+    expect(mockRequestCode).toHaveBeenCalledTimes(2);
+  });
+
   it('polls every 5 s and closes via onVerified once the device is authorized', async () => {
     mockGetStatus
       .mockResolvedValueOnce({ authorized: false, authorizationPending: true })

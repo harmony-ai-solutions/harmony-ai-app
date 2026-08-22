@@ -32,11 +32,18 @@ const log = createLogger('[DeviceAuth]');
 
 // ── Error type ──────────────────────────────────────────────────────────────
 
+/** Structured error code the auth-service returns (HTTP 404) when the device
+ *  row is missing — the app re-registers (idempotent upsert) and retries once. */
+const DEVICE_NOT_REGISTERED = 'device_not_registered';
+
 export class DeviceAuthError extends Error {
   constructor(
     public readonly action: string,
     message: string,
     public readonly status?: number,
+    /** Machine-readable backend error code, when present (e.g.
+     *  `device_not_registered`). Undefined for legacy/plain messages. */
+    public readonly code?: string,
   ) {
     super(`Device auth ${action} failed: ${message}`);
     this.name = 'DeviceAuthError';
@@ -58,7 +65,7 @@ function devicePlatform(): 'android' | 'ios' | 'web' {
  */
 function toDeviceAuthError(action: string, e: unknown): DeviceAuthError {
   if (e instanceof APIError) {
-    return new DeviceAuthError(action, e.code ?? e.message, e.status);
+    return new DeviceAuthError(action, e.code ?? e.message, e.status, e.code);
   }
   if (e instanceof DeviceAuthError) {
     return e;
@@ -70,6 +77,38 @@ function toDeviceAuthError(action: string, e: unknown): DeviceAuthError {
 // ── Service ─────────────────────────────────────────────────────────────────
 
 class DeviceAuthServiceClass {
+  /**
+   * Auto-heal a missing device row. The auth-service returns 404 with the
+   * structured code `device_not_registered` when the per-install device row
+   * does not exist — e.g. registration failed during an outage (it is only
+   * retried on `auth:changed`), or the row was revoked. registerDevice() is an
+   * idempotent upsert, so run it and retry the original operation exactly once.
+   * Any other error (including a plain 404 from an older backend) propagates
+   * unchanged — the retry is bounded, never a loop.
+   */
+  private async withDeviceReRegistration<T>(
+    action: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await fn();
+    } catch (e) {
+      const err = toDeviceAuthError(action, e);
+      if (
+        err instanceof DeviceAuthError &&
+        err.status === 404 &&
+        err.code === DEVICE_NOT_REGISTERED
+      ) {
+        log.info(
+          `Device row missing (${DEVICE_NOT_REGISTERED}) — re-registering and retrying ${action}`,
+        );
+        await this.registerDevice();
+        return await fn();
+      }
+      throw err;
+    }
+  }
+
   /**
    * Register the per-install device row (client.devices.registerDevice).
    * First-run flow: the device registers on login with authorized=false and the
@@ -101,13 +140,15 @@ class DeviceAuthServiceClass {
    */
   async requestCode(): Promise<void> {
     const deviceId = await getDeviceId();
-    try {
-      const paseto = await AuthService.getToken();
-      await buildSoulbitsClient({ paseto }).devices.requestDeviceAuthCode(deviceId);
-      log.info('Device auth code requested for:', deviceId);
-    } catch (e) {
-      throw toDeviceAuthError('requestCode', e);
-    }
+    return this.withDeviceReRegistration('requestCode', async () => {
+      try {
+        const paseto = await AuthService.getToken();
+        await buildSoulbitsClient({ paseto }).devices.requestDeviceAuthCode(deviceId);
+        log.info('Device auth code requested for:', deviceId);
+      } catch (e) {
+        throw toDeviceAuthError('requestCode', e);
+      }
+    });
   }
 
   /**
@@ -118,16 +159,18 @@ class DeviceAuthServiceClass {
    */
   async verifyCode(code: string): Promise<void> {
     const deviceId = await getDeviceId();
-    try {
-      const paseto = await AuthService.getToken();
-      await buildSoulbitsClient({ paseto }).devices.verifyDeviceAuthCode(
-        deviceId,
-        code.trim(),
-      );
-      log.info('Device authorized:', deviceId);
-    } catch (e) {
-      throw toDeviceAuthError('verifyCode', e);
-    }
+    return this.withDeviceReRegistration('verifyCode', async () => {
+      try {
+        const paseto = await AuthService.getToken();
+        await buildSoulbitsClient({ paseto }).devices.verifyDeviceAuthCode(
+          deviceId,
+          code.trim(),
+        );
+        log.info('Device authorized:', deviceId);
+      } catch (e) {
+        throw toDeviceAuthError('verifyCode', e);
+      }
+    });
   }
 
   /**
@@ -147,16 +190,18 @@ class DeviceAuthServiceClass {
     authorizationPending: boolean;
   }> {
     const id = deviceId ?? (await getDeviceId());
-    try {
-      const paseto = await AuthService.getToken();
-      const status = await buildSoulbitsClient({ paseto }).devices.getDeviceAuthorizationStatus(id);
-      return {
-        authorized: status.authorized,
-        authorizationPending: status.authorizationPending,
-      };
-    } catch (e) {
-      throw toDeviceAuthError('getStatus', e);
-    }
+    return this.withDeviceReRegistration('getStatus', async () => {
+      try {
+        const paseto = await AuthService.getToken();
+        const status = await buildSoulbitsClient({ paseto }).devices.getDeviceAuthorizationStatus(id);
+        return {
+          authorized: status.authorized,
+          authorizationPending: status.authorizationPending,
+        };
+      } catch (e) {
+        throw toDeviceAuthError('getStatus', e);
+      }
+    });
   }
 }
 

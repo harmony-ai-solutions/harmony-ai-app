@@ -263,5 +263,80 @@ describe('DeviceAuthService.getStatus (Phase 4-2)', () => {
       name: 'DeviceAuthError',
       status: 404,
     });
+    // Plain-message 404 (pre-structured-code backend) must NOT trigger a
+    // re-registration — only the explicit device_not_registered code does.
+    expect(mockRegisterDevice).not.toHaveBeenCalled();
+  });
+});
+
+describe('DeviceAuthService — device_not_registered auto-heal', () => {
+  const notRegistered = (): MockAPIError =>
+    new MockAPIError(404, { error: 'device_not_registered', message: 'device not found' });
+
+  it('re-registers and retries requestCode once on device_not_registered', async () => {
+    mockRegisterDevice.mockResolvedValue({ deviceId: 'dev-1', authorized: false });
+    mockRequestDeviceAuthCode
+      .mockRejectedValueOnce(notRegistered())
+      .mockResolvedValueOnce({ message: 'code sent' });
+
+    await expect(DeviceAuthService.requestCode()).resolves.toBeUndefined();
+
+    expect(mockRegisterDevice).toHaveBeenCalledTimes(1);
+    expect(mockRequestDeviceAuthCode).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-registers and retries getStatus once on device_not_registered', async () => {
+    mockRegisterDevice.mockResolvedValue({ deviceId: 'dev-1', authorized: false });
+    mockGetDeviceAuthorizationStatus
+      .mockRejectedValueOnce(notRegistered())
+      .mockResolvedValueOnce({
+        deviceId: 'dev-1',
+        authorized: false,
+        authorizationPending: false,
+      });
+
+    await expect(DeviceAuthService.getStatus()).resolves.toEqual({
+      authorized: false,
+      authorizationPending: false,
+    });
+
+    expect(mockRegisterDevice).toHaveBeenCalledTimes(1);
+    expect(mockGetDeviceAuthorizationStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-registers and retries verifyCode once on device_not_registered', async () => {
+    mockRegisterDevice.mockResolvedValue({ deviceId: 'dev-1', authorized: false });
+    mockVerifyDeviceAuthCode
+      .mockRejectedValueOnce(notRegistered())
+      .mockResolvedValueOnce({ message: 'device authorized' });
+
+    await expect(DeviceAuthService.verifyCode('123456')).resolves.toBeUndefined();
+
+    expect(mockRegisterDevice).toHaveBeenCalledTimes(1);
+    expect(mockVerifyDeviceAuthCode).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates the 404 when the retry after re-registration still fails (bounded — no loop)', async () => {
+    mockRegisterDevice.mockResolvedValue({ deviceId: 'dev-1', authorized: false });
+    mockGetDeviceAuthorizationStatus.mockRejectedValue(notRegistered());
+
+    await expect(DeviceAuthService.getStatus()).rejects.toMatchObject({
+      name: 'DeviceAuthError',
+      status: 404,
+    });
+
+    // Exactly one re-register and exactly two attempts — never a spin.
+    expect(mockRegisterDevice).toHaveBeenCalledTimes(1);
+    expect(mockGetDeviceAuthorizationStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates the registration failure when re-registering itself fails', async () => {
+    mockRegisterDevice.mockRejectedValue(new MockAPIError(503, { error: 'upstream down' }));
+    mockRequestDeviceAuthCode.mockRejectedValue(notRegistered());
+
+    await expect(DeviceAuthService.requestCode()).rejects.toMatchObject({
+      status: 503,
+    });
+    expect(mockRequestDeviceAuthCode).toHaveBeenCalledTimes(1);
   });
 });

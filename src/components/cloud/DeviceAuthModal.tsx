@@ -101,9 +101,22 @@ export const DeviceAuthModal: React.FC<DeviceAuthModalProps> = ({
     }
   }, [isSending, startCooldown, t]);
 
-  // Auto-request the code the first time the modal is shown.
+  // Auto-request the code once per show. A ref (not state) is used so a
+  // persistent failure (5xx/429/offline) cannot re-trigger requestCode on
+  // every render: requestCode's identity changes whenever isSending flips and
+  // codeSent stays false on failure, which previously spun an infinite retry
+  // loop (the flicker bug). The manual Resend button is the retry path.
+  const hasAutoRequestedRef = useRef(false);
+
+  // Auto-request the code the first time the modal is shown. The guard resets
+  // when the modal is hidden so the next show re-requests.
   useEffect(() => {
-    if (visible && !codeSent && !isSending) {
+    if (!visible) {
+      hasAutoRequestedRef.current = false;
+      return;
+    }
+    if (!hasAutoRequestedRef.current && !codeSent && !isSending) {
+      hasAutoRequestedRef.current = true;
       requestCode();
     }
   }, [visible, codeSent, isSending, requestCode]);
