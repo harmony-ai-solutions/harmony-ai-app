@@ -51,6 +51,18 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
+// CharactersScreen shows themed toasts (favorites/categories feedback) —
+// mock the toast context so renders don't require AppToastProvider.
+jest.mock('../../contexts/AppToastContext', () => ({
+  useToast: () => ({ showToast: jest.fn() }),
+}));
+
+// The screen reads the signed-in user (senju's creator/profile features) —
+// mock auth so renders don't require AuthProvider (null user is handled).
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: null }),
+}));
+
 jest.mock('@react-navigation/native', () => {
   const React = require('react');
   return {
@@ -68,6 +80,11 @@ jest.mock('../../contexts/ThemeContext', () => ({
         border: { default: '#333333' },
         text: { primary: '#ffffff', secondary: '#cccccc', muted: '#aaaaaa', disabled: '#555555' },
         status: { success: '#22c55e', warning: '#f59e0b', error: '#ef4444' },
+        gradients: {
+          primary: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)',
+          secondary: 'linear-gradient(135deg, #33334d 0%, #4a4a6a 100%)',
+          surface: 'linear-gradient(135deg, rgba(124, 58, 237, 0.05) 0%, rgba(167, 139, 250, 0.05) 100%)',
+        },
         glass: {
           cardOpacity: 0.5,
           glowOpacity: 0.08,
@@ -104,6 +121,19 @@ jest.mock('../../database/repositories/characters', () => ({
   deleteCharacterProfile: jest.fn(),
   createCharacterProfile: jest.fn(),
   createCharacterImage: jest.fn(),
+  // Senju's load-path additions — empty results so loadFavoritesAndCategories
+  // completes without favorites/category data.
+  getFavoriteCharacterProfileIds: jest.fn().mockResolvedValue([]),
+  getCharacterCategories: jest.fn().mockResolvedValue([]),
+  getCharacterCategoryMembers: jest.fn().mockResolvedValue([]),
+}));
+
+// filterBlockedCharacterProfiles (senju's blocked-users repo) is called at the
+// top of loadProfiles — pass-through so profiles load unchanged in tests.
+jest.mock('../../database/repositories/blockedContent', () => ({
+  filterBlockedCharacterProfiles: jest
+    .fn()
+    .mockImplementation(async (profiles: unknown[]) => profiles),
 }));
 
 jest.mock('../../database/repositories/entities', () => ({
@@ -310,9 +340,14 @@ const PROFILES = [
 const ALL_TAGS = ['fantasy', 'mage', 'music', 'rogue'];
 
 async function flush() {
-  await act(async () => {
-    await Promise.resolve();
-  });
+  // Drain the full async load chain: loadProfiles has multiple sequential
+  // awaits (getAll → filterBlocked → getDistinctTags → image loop) plus the
+  // concurrent favorites/categories load — a single tick is not enough.
+  for (let i = 0; i < 10; i++) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
 }
 
 async function renderScreen() {

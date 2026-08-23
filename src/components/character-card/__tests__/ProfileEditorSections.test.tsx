@@ -61,6 +61,12 @@ jest.mock('../../../contexts/AppAlertContext', () => ({
   useAppAlert: () => ({ showAlert: mockShowAlert }),
 }));
 
+// The screen records the creating user on save (senju's creator badge) —
+// mock auth so renders don't require AuthProvider (null user skips the write).
+jest.mock('../../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: null }),
+}));
+
 jest.mock('../../../contexts/BiometricLockContext', () => ({
   useBiometricLock: () => ({ withExternalFlow: (fn: any) => fn() }),
 }));

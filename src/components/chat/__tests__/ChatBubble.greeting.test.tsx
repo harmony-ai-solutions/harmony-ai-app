@@ -27,6 +27,24 @@ jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
+// ChatBubble renders via ThemedText (senju's restyle), which resolves colors
+// through useAppTheme — mock the theme context (fixture pattern shared with
+// ScenarioGeneratorSheet.test / chatDetailScenarioGenerate.test).
+jest.mock('../../../contexts/ThemeContext', () => ({
+  useAppTheme: () => ({
+    theme: {
+      colors: {
+        accent: { primary: '#7c3aed', secondary: '#a78bfa' },
+        background: { base: '#0f0f1a', surface: '#151d30', elevated: '#1e1e2e' },
+        border: { default: '#333333' },
+        text: { primary: '#ffffff', secondary: '#cccccc', muted: '#aaaaaa' },
+        status: { success: '#22c55e' },
+        typography: { headerOpacity: 1, subtextOpacity: 0.7, captionOpacity: 0.5 },
+      },
+    },
+  }),
+}));
+
 jest.mock('react-native-linear-gradient', () => {
   const React = require('react');
   const { View } = require('react-native');

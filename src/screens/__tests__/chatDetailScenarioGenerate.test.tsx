@@ -45,6 +45,34 @@ jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
+// ChatInputBar (senju's replacement for ChatInput) uses safe-area insets
+// for the keyboard lift — mock the module like the other screen tests do.
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
+
+// ChatDetailScreen shows themed toasts (senju's refactor) — mock the toast
+// context so renders don't require AppToastProvider.
+jest.mock('../../contexts/AppToastContext', () => ({
+  useToast: () => ({ showToast: jest.fn() }),
+}));
+
+// The screen reads the signed-in user (senju's additions) — mock auth so
+// renders don't require AuthProvider (null user is handled).
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: null }),
+}));
+
+// PersonaSwitcherModal (rendered by the screen) resolves navigation via
+// useNavigation — mock the module like CharactersScreen.test does.
+jest.mock('@react-navigation/native', () => {
+  const React = require('react');
+  return {
+    useNavigation: () => ({ navigate: jest.fn() }),
+    useFocusEffect: (cb: () => void) => React.useEffect(cb, [cb]),
+  };
+});
+
 jest.mock('../../utils/logger', () => ({
   createLogger: () => ({
     info: jest.fn(),
@@ -98,6 +126,9 @@ jest.mock('../../services/EntitySessionService', () => {
   svc.startNewScenario = jest.fn();
   svc.getInteractionSession = jest.fn().mockReturnValue(null);
   svc.isTranscriptionFailed = jest.fn().mockReturnValue(false);
+  // Open-conversation registry (senju's unread tracking) — no-ops for tests.
+  svc.registerOpenConversation = jest.fn();
+  svc.unregisterOpenConversation = jest.fn();
   return { __esModule: true, EntitySessionService: svc, default: svc };
 });
 

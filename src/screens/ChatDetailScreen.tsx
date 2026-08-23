@@ -12,6 +12,7 @@ import {
   RefreshControl,
   Keyboard,
   Platform,
+  ToastAndroid,
   NativeScrollEvent,
   NativeSyntheticEvent,
   TouchableOpacity,
