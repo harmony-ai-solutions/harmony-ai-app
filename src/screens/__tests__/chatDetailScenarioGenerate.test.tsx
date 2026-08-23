@@ -183,10 +183,10 @@ jest.mock('../../components/chat/ChatBubble', () => ({
   isPartnerMessage: (m: any, own: string) => m.sender_entity_id !== own,
 }));
 
-jest.mock('../../components/chat/ChatInput', () => {
+jest.mock('../../components/chat/ChatInputBar', () => {
   const React = require('react');
   const { View } = require('react-native');
-  return { __esModule: true, ChatInput: (props: any) => React.createElement(View, { testID: 'chat-input-mock', ...props }) };
+  return { __esModule: true, ChatInputBar: (props: any) => React.createElement(View, { testID: 'chat-input-mock', ...props }) };
 });
 
 jest.mock('../../components/chat/TypingIndicator', () => {

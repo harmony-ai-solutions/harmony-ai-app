@@ -12,6 +12,7 @@ import { ChatDetailScreen } from '../screens/ChatDetailScreen';
 import { AIProfileScreen } from '../screens/AIProfileScreen';
 import { UserProfileScreen } from '../screens/UserProfileScreen';
 import { CreateAIScreen } from '../screens/CreateAIScreen';
+import { CharacterProfileEditScreen } from '../screens/CharacterProfileEditScreen';
 import { ThemeSettingsScreen } from '../screens/settings/ThemeSettingsScreen';
 import { ThemeEditorScreen } from '../screens/settings/ThemeEditorScreen';
 import { ProfileSettingsScreen } from '../screens/settings/ProfileSettingsScreen';
@@ -84,6 +85,8 @@ export type RootStackParamList = {
     duplicateProfileId?: string;
     editProfileId?: string;
   };
+  // D4: comparison-only, unlinked from primary UX
+  CharacterProfileEdit: { profileId?: string };
   Login: undefined;
   Register: undefined;
   ConnectionSetup: undefined;
@@ -175,6 +178,11 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen name="AIProfile" component={AIProfileScreen} />
         <Stack.Screen name="UserProfile" component={UserProfileScreen} />
         <Stack.Screen name="CreateAI" component={CreateAIScreen} />
+        {/* D4: comparison-only, unlinked from primary UX */}
+        <Stack.Screen
+          name="CharacterProfileEdit"
+          component={CharacterProfileEditScreen}
+        />
 
         {/* ── Notifications feed (pushed over tabs from the header bell) ── */}
         <Stack.Screen name="Notifications" component={NotificationsScreen} />

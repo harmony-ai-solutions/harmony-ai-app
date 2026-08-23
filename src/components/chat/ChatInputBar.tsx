@@ -27,6 +27,7 @@ import { useAppAlert } from '../../contexts/AppAlertContext';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
 import EmojiPickerInline from '../emoji/EmojiPickerInline';
+import { EmptyChatCTA } from './EmptyChatCTA';
 import { EmojiEntry } from '../../types/emoji';
 import AudioRecorder from '../../services/AudioRecorder';
 import { hapticLightPress, hapticPulse } from '../../utils/haptics';
@@ -58,6 +59,10 @@ interface ChatInputBarProps {
   disabled?: boolean;
   /** Own entity ID — used for the emoji picker action badges. */
   entityId?: string | null;
+  /** Show the ✨ scenario trigger on the right while the input is empty. */
+  showScenarioButton?: boolean;
+  /** Called when the ✨ scenario trigger is tapped (opens ScenarioGeneratorSheet). */
+  onScenarioPress?: () => void;
 }
 
 export const ChatInputBar: React.FC<ChatInputBarProps> = ({
@@ -66,6 +71,8 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   onSendImages,
   disabled = false,
   entityId,
+  showScenarioButton = true,
+  onScenarioPress,
 }) => {
   const { t } = useTranslation('chatDetail');
   const { theme } = useAppTheme();
@@ -722,6 +729,17 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
                 color={theme!.colors.text.secondary}
               />
             </TouchableOpacity>
+          )}
+
+          {/* ✨ Scenario trigger — shown beside the mic while the input is
+              empty, vanishes on typing. Opens ScenarioGeneratorSheet. */}
+          {!showSendButton && showScenarioButton && (
+            <EmptyChatCTA
+              variant="icon"
+              disabled={disabled}
+              onPress={onScenarioPress}
+              theme={theme}
+            />
           )}
         </View>
       )}

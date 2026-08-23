@@ -193,7 +193,7 @@ export async function getSavedCharacterEntries(): Promise<SavedCharacterEntry[]>
 /**
  * True when the local user has liked a character image (post).
  */
-export async function isImageLiked(imageId: number): Promise<boolean> {
+export async function isImageLiked(imageId: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT 1 FROM character_image_likes WHERE image_id = ?',
@@ -205,7 +205,7 @@ export async function isImageLiked(imageId: number): Promise<boolean> {
 /**
  * Like a character image (idempotent).
  */
-export async function addImageLike(imageId: number): Promise<void> {
+export async function addImageLike(imageId: string): Promise<void> {
   const db = getDatabase();
   await db.executeSql(
     `INSERT OR IGNORE INTO character_image_likes (image_id, liked_at)
@@ -217,7 +217,7 @@ export async function addImageLike(imageId: number): Promise<void> {
 /**
  * Remove a character image like (idempotent).
  */
-export async function removeImageLike(imageId: number): Promise<void> {
+export async function removeImageLike(imageId: string): Promise<void> {
   const db = getDatabase();
   await db.executeSql('DELETE FROM character_image_likes WHERE image_id = ?', [
     imageId,
@@ -227,7 +227,7 @@ export async function removeImageLike(imageId: number): Promise<void> {
 /**
  * Toggle an image like and return the new state.
  */
-export async function toggleImageLike(imageId: number): Promise<boolean> {
+export async function toggleImageLike(imageId: string): Promise<boolean> {
   const liked = await isImageLiked(imageId);
   if (liked) {
     await removeImageLike(imageId);
@@ -240,7 +240,7 @@ export async function toggleImageLike(imageId: number): Promise<boolean> {
 /**
  * Total number of likes on a character image (post).
  */
-export async function getImageLikesCount(imageId: number): Promise<number> {
+export async function getImageLikesCount(imageId: string): Promise<number> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT COUNT(*) as count FROM character_image_likes WHERE image_id = ?',
@@ -255,7 +255,7 @@ export async function getImageLikesCount(imageId: number): Promise<number> {
 
 export interface CharacterImageComment {
   id: string;
-  imageId: number;
+  imageId: string;
   authorUserId: string | null;
   authorDisplayName: string;
   authorAvatarUrl: string | null;
@@ -267,7 +267,7 @@ export interface CharacterImageComment {
  * Add a comment to a character image. Returns the created comment.
  */
 export async function addImageComment(input: {
-  imageId: number;
+  imageId: string;
   authorUserId: string | null;
   authorDisplayName: string;
   authorAvatarUrl: string | null;
@@ -306,7 +306,7 @@ export async function addImageComment(input: {
  * All comments on a character image, oldest first.
  */
 export async function getImageComments(
-  imageId: number,
+  imageId: string,
 ): Promise<CharacterImageComment[]> {
   const db = getDatabase();
   const [results] = await db.executeSql(
@@ -340,7 +340,7 @@ export async function deleteImageComment(id: string): Promise<void> {
 /**
  * Total number of comments on a character image (post).
  */
-export async function getImageCommentsCount(imageId: number): Promise<number> {
+export async function getImageCommentsCount(imageId: string): Promise<number> {
   const db = getDatabase();
   const [results] = await db.executeSql(
     'SELECT COUNT(*) as count FROM character_image_comments WHERE image_id = ?',

@@ -2451,6 +2451,8 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
           onSendImages={handleSendImages}
           disabled={!isOnline}
           entityId={ownEntityId}
+          showScenarioButton={!hasFirstMes}
+          onScenarioPress={openScenarioSheet}
         />
       )}
 

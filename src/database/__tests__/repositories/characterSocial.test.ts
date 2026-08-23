@@ -50,12 +50,9 @@ describe('character social repository', () => {
       name: 'Test Character',
       description: '',
       personality: '',
-      appearance: '',
-      backstory: '',
       voice_characteristics: '',
-      base_prompt: null,
-      scenario: null,
-      example_dialogues: null,
+      base_prompt: '',
+      scenario: '',
       typing_speed_wpm: 60,
       audio_response_chance_percent: 50,
       vision_config_id: null,
@@ -65,7 +62,7 @@ describe('character social repository', () => {
 
   const PNG_MAGIC_BASE64 = 'iVBORw0KGgo';
 
-  async function createMinimalImage(profileId: string): Promise<number> {
+  async function createMinimalImage(profileId: string): Promise<string> {
     const now = new Date();
     return createCharacterImage({
       character_profile_id: profileId,

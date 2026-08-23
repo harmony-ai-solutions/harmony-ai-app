@@ -134,7 +134,7 @@ export const AIProfileScreen: React.FC = () => {
   const [profileSaved, setProfileSaved] = useState(false);
   const [creator, setCreator] = useState<CharacterCreator | null>(null);
   const [isOwner, setIsOwner] = useState(false);
-  const [imagePosts, setImagePosts] = useState<Record<number, ImagePostState>>({});
+  const [imagePosts, setImagePosts] = useState<Record<string, ImagePostState>>({});
   // Follow state for the character's creator
   const [followingCreator, setFollowingCreator] = useState(false);
 
@@ -142,7 +142,7 @@ export const AIProfileScreen: React.FC = () => {
   const [listing, setListing] = useState<MarketplaceListing | null>(null);
 
   // ── Comment modal state ────────────────────────────────────────────────
-  const [commentImageId, setCommentImageId] = useState<number | null>(null);
+  const [commentImageId, setCommentImageId] = useState<string | null>(null);
   const [commentVisible, setCommentVisible] = useState(false);
   const [chatting, setChatting] = useState(false);
 
@@ -293,7 +293,7 @@ export const AIProfileScreen: React.FC = () => {
 
       // Per-image post state (likes + comments)
       try {
-        const postMap: Record<number, ImagePostState> = {};
+        const postMap: Record<string, ImagePostState> = {};
         await Promise.all(
           imgs.map(async img => {
             try {

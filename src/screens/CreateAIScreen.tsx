@@ -7,7 +7,7 @@
  *
  * The screen is split into three sections:
  *   1. General  — name (required), description, avatar
- *   2. Details  — personality, appearance, backstory
+ *   2. Details  — personality, voice/behavior, prompts & scenario
  *   3. Advanced — module configs (AI model / config / voice settings)
  *
  * The user can create a partner with just a name: when no module configs are
@@ -125,8 +125,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [personality, setPersonality] = useState('');
-  const [appearance, setAppearance] = useState('');
-  const [backstory, setBackstory] = useState('');
   const [voiceCharacteristics, setVoiceCharacteristics] = useState('');
   const [typingSpeedWpm, setTypingSpeedWpm] = useState('60');
   const [audioResponseChance, setAudioResponseChance] = useState('50');
@@ -165,8 +163,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     | 'name'
     | 'description'
     | 'personality'
-    | 'appearance'
-    | 'backstory'
     | 'basePrompt'
     | 'scenario'
     | 'exampleDialogues'
@@ -431,14 +427,12 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setName(profile.name);
         setDescription(profile.description ?? '');
         setPersonality(profile.personality ?? '');
-        setAppearance(profile.appearance ?? '');
-        setBackstory(profile.backstory ?? '');
         setVoiceCharacteristics(profile.voice_characteristics ?? '');
         setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
         setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
         setBasePrompt(profile.base_prompt ?? '');
         setScenario(profile.scenario ?? '');
-        setExampleDialogues(profile.example_dialogues ?? '');
+        setExampleDialogues(profile.mes_example ?? '');
       } catch (err) {
         log.error('Failed to prefill profile:', err);
       } finally {
@@ -494,14 +488,12 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         lastAutoNameRef.current = nextName;
         setDescription(profile.description ?? '');
         setPersonality(profile.personality ?? '');
-        setAppearance(profile.appearance ?? '');
-        setBackstory(profile.backstory ?? '');
         setVoiceCharacteristics(profile.voice_characteristics ?? '');
         setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
         setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
         setBasePrompt(profile.base_prompt ?? '');
         setScenario(profile.scenario ?? '');
-        setExampleDialogues(profile.example_dialogues ?? '');
+        setExampleDialogues(profile.mes_example ?? '');
 
         // Carry over the source profile's visibility + price so the fork
         // matches it.
@@ -661,14 +653,12 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setName(profile.name);
         setDescription(profile.description ?? '');
         setPersonality(profile.personality ?? '');
-        setAppearance(profile.appearance ?? '');
-        setBackstory(profile.backstory ?? '');
         setVoiceCharacteristics(profile.voice_characteristics ?? '');
         setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
         setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
         setBasePrompt(profile.base_prompt ?? '');
         setScenario(profile.scenario ?? '');
-        setExampleDialogues(profile.example_dialogues ?? '');
+        setExampleDialogues(profile.mes_example ?? '');
         setEditOriginalName(profile.name);
 
         // Visibility (private/public/marketplace) — loaded from the client-only
@@ -832,8 +822,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           name: trimmedName,
           description: description.trim() || '',
           personality: personality.trim() || '',
-          appearance: appearance.trim() || '',
-          backstory: backstory.trim() || '',
           voice_characteristics: voiceCharacteristics.trim() || '',
           typing_speed_wpm: Number.isFinite(typingWpm)
             ? Math.min(200, Math.max(1, typingWpm))
@@ -843,7 +831,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
             : current.audio_response_chance_percent,
           base_prompt: basePrompt.trim() || '',
           scenario: scenario.trim() || '',
-          example_dialogues: exampleDialogues.trim() || '',
+          mes_example: exampleDialogues.trim() || '',
         });
 
         // Persist the chosen visibility (private/public/marketplace) in the
@@ -989,8 +977,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           name: effectiveName,
           description: description.trim() || '',
           personality: personality.trim() || '',
-          appearance: appearance.trim() || '',
-          backstory: backstory.trim() || '',
           voice_characteristics: voiceCharacteristics.trim() || '',
           typing_speed_wpm: Number.isFinite(typingWpm) ? Math.min(200, Math.max(1, typingWpm)) : 60,
           audio_response_chance_percent: Number.isFinite(audioChance)
@@ -1003,7 +989,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           lifecycle_config: duplicateProfile?.lifecycle_config ?? '{}',
           base_prompt: basePrompt.trim() || '',
           scenario: scenario.trim() || '',
-          example_dialogues: exampleDialogues.trim() || '',
+          mes_example: exampleDialogues.trim() || '',
         });
         // Tag as user-created so it is hidden from the Discover community grid
         await setCharacterProfileSource(profileId, 'user');
@@ -1545,26 +1531,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                   'personality',
                   true,
                   'message-text-outline',
-                )}
-                {/* Appearance */}
-                {renderField(
-                  'appearanceLabel',
-                  'appearancePlaceholder',
-                  appearance,
-                  setAppearance,
-                  'appearance',
-                  true,
-                  'human-handsup',
-                )}
-                {/* Backstory */}
-                {renderField(
-                  'backstoryLabel',
-                  'backstoryPlaceholder',
-                  backstory,
-                  setBackstory,
-                  'backstory',
-                  true,
-                  'book-open-page-variant-outline',
                 )}
 
                 {/* ── Voice & Behavior ── */}

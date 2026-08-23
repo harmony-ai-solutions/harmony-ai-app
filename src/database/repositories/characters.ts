@@ -304,18 +304,28 @@ export async function getUserCharacterProfiles(
 ): Promise<CharacterProfile[]> {
   const db = getDatabase();
   const query = includeDeleted
-    ? `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+    ? `SELECT cp.id, cp.name, cp.description, cp.personality,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario,
               cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+              cp.lifecycle_config,
+              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
+              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
+              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
+              cp.card_provenance, cp.character_book,
+              cp.created_at, cp.updated_at, cp.deleted_at
        FROM character_profiles cp
        INNER JOIN character_profile_sources cps ON cps.profile_id = cp.id
        WHERE cps.source = 'user'
        ORDER BY cp.name`
-    : `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+    : `SELECT cp.id, cp.name, cp.description, cp.personality,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario,
               cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+              cp.lifecycle_config,
+              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
+              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
+              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
+              cp.card_provenance, cp.character_book,
+              cp.created_at, cp.updated_at, cp.deleted_at
        FROM character_profiles cp
        INNER JOIN character_profile_sources cps ON cps.profile_id = cp.id
        WHERE cp.deleted_at IS NULL
@@ -332,16 +342,27 @@ export async function getUserCharacterProfiles(
       name: row.name,
       description: row.description,
       personality: row.personality,
-      appearance: row.appearance,
-      backstory: row.backstory,
       voice_characteristics: row.voice_characteristics,
       base_prompt: row.base_prompt,
       scenario: row.scenario,
-      example_dialogues: row.example_dialogues,
       typing_speed_wpm: row.typing_speed_wpm,
       audio_response_chance_percent: row.audio_response_chance_percent,
       vision_config_id: row.vision_config_id ?? null,
       lifecycle_config: row.lifecycle_config ?? null,
+      first_mes: row.first_mes ?? '',
+      mes_example: row.mes_example ?? '',
+      alternate_greetings: row.alternate_greetings ?? '',
+      post_history_instructions: row.post_history_instructions ?? '',
+      creator_notes: row.creator_notes ?? '',
+      creator: row.creator ?? '',
+      character_version: row.character_version ?? '',
+      nickname: row.nickname ?? '',
+      tags: row.tags ?? '',
+      group_only_greetings: row.group_only_greetings ?? '',
+      extensions: row.extensions ?? '',
+      assets: row.assets ?? '',
+      card_provenance: row.card_provenance ?? '',
+      character_book: row.character_book ?? '',
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -933,19 +954,29 @@ export async function getCommunityCharacterProfiles(
 ): Promise<CharacterProfile[]> {
   const db = getDatabase();
   const query = includeDeleted
-    ? `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+    ? `SELECT cp.id, cp.name, cp.description, cp.personality,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario,
               cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+              cp.lifecycle_config,
+              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
+              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
+              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
+              cp.card_provenance, cp.character_book,
+              cp.created_at, cp.updated_at, cp.deleted_at
        FROM character_profiles cp
        LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
        WHERE (cps.profile_id IS NULL OR cps.source = 'community')
          AND (cps.visibility IS NULL OR cps.visibility = 'public')
        ORDER BY cp.name`
-    : `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+    : `SELECT cp.id, cp.name, cp.description, cp.personality,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario,
               cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+              cp.lifecycle_config,
+              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
+              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
+              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
+              cp.card_provenance, cp.character_book,
+              cp.created_at, cp.updated_at, cp.deleted_at
        FROM character_profiles cp
        LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
        WHERE cp.deleted_at IS NULL
@@ -963,16 +994,27 @@ export async function getCommunityCharacterProfiles(
       name: row.name,
       description: row.description,
       personality: row.personality,
-      appearance: row.appearance,
-      backstory: row.backstory,
       voice_characteristics: row.voice_characteristics,
       base_prompt: row.base_prompt,
       scenario: row.scenario,
-      example_dialogues: row.example_dialogues,
       typing_speed_wpm: row.typing_speed_wpm,
       audio_response_chance_percent: row.audio_response_chance_percent,
       vision_config_id: row.vision_config_id ?? null,
       lifecycle_config: row.lifecycle_config ?? null,
+      first_mes: row.first_mes ?? '',
+      mes_example: row.mes_example ?? '',
+      alternate_greetings: row.alternate_greetings ?? '',
+      post_history_instructions: row.post_history_instructions ?? '',
+      creator_notes: row.creator_notes ?? '',
+      creator: row.creator ?? '',
+      character_version: row.character_version ?? '',
+      nickname: row.nickname ?? '',
+      tags: row.tags ?? '',
+      group_only_greetings: row.group_only_greetings ?? '',
+      extensions: row.extensions ?? '',
+      assets: row.assets ?? '',
+      card_provenance: row.card_provenance ?? '',
+      character_book: row.character_book ?? '',
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -994,18 +1036,28 @@ export async function getPublicCharacterProfiles(
 ): Promise<CharacterProfile[]> {
   const db = getDatabase();
   const query = includeDeleted
-    ? `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+    ? `SELECT cp.id, cp.name, cp.description, cp.personality,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario,
               cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+              cp.lifecycle_config,
+              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
+              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
+              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
+              cp.card_provenance, cp.character_book,
+              cp.created_at, cp.updated_at, cp.deleted_at
        FROM character_profiles cp
        LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
        WHERE cps.visibility IS NULL OR cps.visibility IN ('public', 'marketplace')
        ORDER BY cp.name`
-    : `SELECT cp.id, cp.name, cp.description, cp.personality, cp.appearance, cp.backstory,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario, cp.example_dialogues,
+    : `SELECT cp.id, cp.name, cp.description, cp.personality,
+              cp.voice_characteristics, cp.base_prompt, cp.scenario,
               cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config, cp.created_at, cp.updated_at, cp.deleted_at
+              cp.lifecycle_config,
+              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
+              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
+              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
+              cp.card_provenance, cp.character_book,
+              cp.created_at, cp.updated_at, cp.deleted_at
        FROM character_profiles cp
        LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
        WHERE cp.deleted_at IS NULL
@@ -1022,16 +1074,27 @@ export async function getPublicCharacterProfiles(
       name: row.name,
       description: row.description,
       personality: row.personality,
-      appearance: row.appearance,
-      backstory: row.backstory,
       voice_characteristics: row.voice_characteristics,
       base_prompt: row.base_prompt,
       scenario: row.scenario,
-      example_dialogues: row.example_dialogues,
       typing_speed_wpm: row.typing_speed_wpm,
       audio_response_chance_percent: row.audio_response_chance_percent,
       vision_config_id: row.vision_config_id ?? null,
       lifecycle_config: row.lifecycle_config ?? null,
+      first_mes: row.first_mes ?? '',
+      mes_example: row.mes_example ?? '',
+      alternate_greetings: row.alternate_greetings ?? '',
+      post_history_instructions: row.post_history_instructions ?? '',
+      creator_notes: row.creator_notes ?? '',
+      creator: row.creator ?? '',
+      character_version: row.character_version ?? '',
+      nickname: row.nickname ?? '',
+      tags: row.tags ?? '',
+      group_only_greetings: row.group_only_greetings ?? '',
+      extensions: row.extensions ?? '',
+      assets: row.assets ?? '',
+      card_provenance: row.card_provenance ?? '',
+      character_book: row.character_book ?? '',
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,

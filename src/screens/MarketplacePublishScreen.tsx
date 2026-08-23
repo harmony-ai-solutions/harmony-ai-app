@@ -782,8 +782,6 @@ async function getProfileField(
   const profile = await getCharacterProfile(profileId);
   if (!profile) return '';
   switch (itemType) {
-    case 'backstory':
-      return profile.backstory ?? '';
     case 'description':
       return profile.description ?? '';
     case 'personality':
@@ -791,7 +789,7 @@ async function getProfileField(
     case 'prompt':
       return profile.base_prompt ?? '';
     case 'dialogue':
-      return profile.example_dialogues ?? '';
+      return profile.mes_example ?? '';
     default:
       return '';
   }

@@ -45,14 +45,14 @@ CREATE TABLE IF NOT EXISTS character_saves (
 
 -- AI character image likes (client-only)
 CREATE TABLE IF NOT EXISTS character_image_likes (
-    image_id INTEGER PRIMARY KEY REFERENCES character_image(id) ON DELETE CASCADE,
+    image_id TEXT PRIMARY KEY REFERENCES character_image(id) ON DELETE CASCADE,
     liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- AI character image comments (client-only)
 CREATE TABLE IF NOT EXISTS character_image_comments (
     id TEXT PRIMARY KEY,
-    image_id INTEGER NOT NULL REFERENCES character_image(id) ON DELETE CASCADE,
+    image_id TEXT NOT NULL REFERENCES character_image(id) ON DELETE CASCADE,
     author_user_id TEXT,
     author_display_name TEXT NOT NULL DEFAULT '',
     author_avatar_url TEXT,

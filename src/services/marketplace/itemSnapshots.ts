@@ -19,11 +19,9 @@ export interface CharacterSnapshot {
   name: string;
   description: string | null;
   personality: string | null;
-  appearance: string | null;
-  backstory: string | null;
   base_prompt: string | null;
   scenario: string | null;
-  example_dialogues: string | null;
+  mes_example: string | null;
   voice_characteristics: string | null;
   typing_speed_wpm: number | null;
   audio_response_chance_percent: number | null;
@@ -74,11 +72,9 @@ export async function buildCharacterSnapshot(
     name: profile.name,
     description: profile.description,
     personality: profile.personality,
-    appearance: profile.appearance,
-    backstory: profile.backstory,
     base_prompt: profile.base_prompt,
     scenario: profile.scenario,
-    example_dialogues: profile.example_dialogues,
+    mes_example: profile.mes_example ?? '',
     voice_characteristics: profile.voice_characteristics,
     typing_speed_wpm: profile.typing_speed_wpm,
     audio_response_chance_percent: profile.audio_response_chance_percent,
@@ -100,8 +96,6 @@ export async function buildTextSnapshot(
     throw new Error('character_profile_not_found');
   }
   switch (field) {
-    case 'backstory':
-      return profile.backstory ?? '';
     case 'description':
       return profile.description ?? '';
     case 'personality':
@@ -109,7 +103,7 @@ export async function buildTextSnapshot(
     case 'prompt':
       return profile.base_prompt ?? '';
     case 'dialogue':
-      return profile.example_dialogues ?? '';
+      return profile.mes_example ?? '';
     default:
       return '';
   }

@@ -46,7 +46,7 @@ const log = createLogger('[ImageCommentModal]');
 
 interface ImageCommentModalProps {
   visible: boolean;
-  imageId: number | null;
+  imageId: string | null;
   characterName: string;
   onClose: () => void;
   /** Fired after a comment is successfully posted (parent can notify the creator) */

@@ -39,12 +39,9 @@ async function createCharacter(id: string, name: string) {
     name,
     description: '',
     personality: '',
-    appearance: '',
-    backstory: '',
     voice_characteristics: '',
-    base_prompt: null,
-    scenario: null,
-    example_dialogues: null,
+    base_prompt: '',
+    scenario: '',
     typing_speed_wpm: 60,
     audio_response_chance_percent: 50,
     vision_config_id: null,
@@ -227,15 +224,15 @@ describe('content library', () => {
   it('applyTextToCharacter maps fields by item type', async () => {
     await createCharacter('p1', 'Aria');
     const entry = await addContentEntry({
-      itemType: 'backstory',
-      title: 'Lore',
-      body: 'A dark tale',
+      itemType: 'dialogue',
+      title: 'Dialogue',
+      body: 'A sample dialogue line',
     });
 
     const updated = await applyTextToCharacter(entry.id, 'p1');
     const prof = await getCharacterProfile('p1');
-    expect(prof?.backstory).toBe('A dark tale');
-    expect(updated.backstory).toBe('A dark tale');
+    expect(prof?.mes_example).toBe('A sample dialogue line');
+    expect(updated.mes_example).toBe('A sample dialogue line');
   });
 
   it('applyTextToCharacter maps prompt to base_prompt + scenario', async () => {

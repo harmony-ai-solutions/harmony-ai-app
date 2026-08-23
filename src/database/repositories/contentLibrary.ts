@@ -140,12 +140,12 @@ export async function deleteContentEntry(id: string): Promise<void> {
 
 /**
  * Apply a text-based content entry's fields onto an existing character
- * profile. Maps by item type:
- *   - backstory   → backstory
+ * profile. Maps by item type (V3 column set — `backstory` has no V3
+ * equivalent and is dropped):
  *   - description → description
  *   - personality → personality
  *   - prompt      → base_prompt + scenario
- *   - dialogue    → example_dialogues
+ *   - dialogue    → mes_example
  *
  * Returns the updated profile.
  *
@@ -166,26 +166,23 @@ export async function applyTextToCharacter(
 
   const patch: Partial<CharacterProfile> = {};
   switch (entry.itemType) {
-    case 'backstory':
-      patch.backstory = entry.body ?? null;
-      break;
     case 'description':
-      patch.description = entry.body ?? null;
+      patch.description = entry.body ?? '';
       break;
     case 'personality':
-      patch.personality = entry.body ?? null;
+      patch.personality = entry.body ?? '';
       break;
     case 'prompt': {
       const parsed = (entry.payloadJson ?? {}) as {
         base_prompt?: string;
         scenario?: string;
       };
-      patch.base_prompt = entry.body ?? parsed.base_prompt ?? null;
-      patch.scenario = parsed.scenario ?? null;
+      patch.base_prompt = entry.body ?? parsed.base_prompt ?? '';
+      patch.scenario = parsed.scenario ?? '';
       break;
     }
     case 'dialogue':
-      patch.example_dialogues = entry.body ?? null;
+      patch.mes_example = entry.body ?? '';
       break;
     default:
       throw new Error('not_a_text_asset');
