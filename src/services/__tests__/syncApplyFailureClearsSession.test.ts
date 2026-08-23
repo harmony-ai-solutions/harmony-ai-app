@@ -159,7 +159,10 @@ describe('SyncService apply-failure session cleanup', () => {
     const sentEvents = mockConnectionManager.sendEvent.mock.calls.map(c => c[1]);
     const syncRequests = sentEvents.filter(e => e.event_type === 'SYNC_REQUEST');
     expect(syncRequests.length).toBe(1);
-    expect(svc.currentSession).not.toBeNull();
-    expect(svc.currentSession!.status).toBe('pending');
+    // Test-only inspection of private session state (the suite asserts the
+    // guard's view of the session, which is not exposed publicly).
+    const session = (svc as any).currentSession as {status: string} | null;
+    expect(session).not.toBeNull();
+    expect(session!.status).toBe('pending');
   });
 });

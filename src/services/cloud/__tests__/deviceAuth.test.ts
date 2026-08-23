@@ -96,6 +96,7 @@ const MockAPIError = (SoulbitsClient as any).__APIError as new (
   status: number,
   body: Record<string, unknown>,
 ) => Error;
+type MockAPIErrorInstance = InstanceType<typeof MockAPIError>;
 
 beforeEach(() => {
   mockRegisterDevice.mockReset();
@@ -270,7 +271,7 @@ describe('DeviceAuthService.getStatus (Phase 4-2)', () => {
 });
 
 describe('DeviceAuthService — device_not_registered auto-heal', () => {
-  const notRegistered = (): MockAPIError =>
+  const notRegistered = (): MockAPIErrorInstance =>
     new MockAPIError(404, { error: 'device_not_registered', message: 'device not found' });
 
   it('re-registers and retries requestCode once on device_not_registered', async () => {
