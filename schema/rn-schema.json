@@ -1,6 +1,11 @@
 [
   {
     "type": "index",
+    "name": "idx_character_image_comments_image",
+    "sql": "CREATE INDEX idx_character_image_comments_image ON character_image_comments(image_id)"
+  },
+  {
+    "type": "index",
     "name": "idx_character_image_primary",
     "sql": "CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary)"
   },
@@ -18,6 +23,16 @@
     "type": "index",
     "name": "idx_conversation_messages_interaction_id",
     "sql": "CREATE INDEX idx_conversation_messages_interaction_id ON conversation_messages(interaction_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_conversation_messages_pinned",
+    "sql": "CREATE INDEX idx_conversation_messages_pinned ON conversation_messages(is_pinned)"
+  },
+  {
+    "type": "index",
+    "name": "idx_conversation_messages_reply_to",
+    "sql": "CREATE INDEX idx_conversation_messages_reply_to ON conversation_messages(reply_to_message_id)"
   },
   {
     "type": "index",
@@ -46,6 +61,11 @@
   },
   {
     "type": "index",
+    "name": "idx_marketplace_ownership_listing",
+    "sql": "CREATE INDEX idx_marketplace_ownership_listing ON marketplace_ownership_cache(listing_id)"
+  },
+  {
+    "type": "index",
     "name": "idx_memories_deleted_at",
     "sql": "CREATE INDEX idx_memories_deleted_at ON memories(entity_id, deleted_at)"
   },
@@ -66,6 +86,11 @@
   },
   {
     "type": "index",
+    "name": "idx_notifications_recipient",
+    "sql": "CREATE INDEX idx_notifications_recipient ON notifications(recipient_user_id)"
+  },
+  {
+    "type": "index",
     "name": "idx_provider_config_anthropic_name",
     "sql": "CREATE INDEX idx_provider_config_anthropic_name ON provider_config_anthropic(name)"
   },
@@ -83,6 +108,16 @@
     "type": "index",
     "name": "idx_provider_config_xai_name",
     "sql": "CREATE INDEX idx_provider_config_xai_name ON provider_config_xai(name)"
+  },
+  {
+    "type": "index",
+    "name": "idx_soul_purchases_profile",
+    "sql": "CREATE INDEX idx_soul_purchases_profile ON soul_purchases(profile_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_user_post_comments_post",
+    "sql": "CREATE INDEX idx_user_post_comments_post ON user_post_comments(post_id)"
   },
   {
     "type": "table",
@@ -107,7 +142,7 @@
   {
     "type": "table",
     "name": "conversation_messages",
-    "sql": "CREATE TABLE \"conversation_messages\" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT )"
+    "sql": "CREATE TABLE \"conversation_messages\" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT , reactions_json TEXT, reply_to_message_id TEXT, is_pinned INTEGER NOT NULL DEFAULT 0)"
   },
   {
     "type": "table",
@@ -138,6 +173,11 @@
     "type": "table",
     "name": "interactions",
     "sql": "CREATE TABLE interactions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, interaction_scope TEXT NOT NULL, participant_key TEXT, participant_ids TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', started_at TEXT NOT NULL, last_activity_at TEXT NOT NULL, ended_at TEXT, metadata TEXT, deleted_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP , summary TEXT DEFAULT '', memory_id TEXT, continued_interaction_id TEXT, presence_type TEXT NOT NULL DEFAULT 'unknown')"
+  },
+  {
+    "type": "table",
+    "name": "lifecycle_state",
+    "sql": "CREATE TABLE \"lifecycle_state\" ( entity_id TEXT PRIMARY KEY REFERENCES entities(id), exhaustion REAL NOT NULL DEFAULT 0, sleeping BOOLEAN NOT NULL DEFAULT false, sleep_start_time INTEGER, last_beat_at INTEGER, last_outreach_at INTEGER, inner_monologue TEXT NOT NULL DEFAULT '[]', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP )"
   },
   {
     "type": "table",

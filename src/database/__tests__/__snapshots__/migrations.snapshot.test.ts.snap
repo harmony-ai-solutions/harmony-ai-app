@@ -37,6 +37,9 @@ CREATE INDEX idx_interactions_active ON interactions(entity_id, status, last_act
 -- index: idx_interactions_lookup
 CREATE INDEX idx_interactions_lookup ON interactions(entity_id, interaction_scope, participant_key);
 
+-- index: idx_marketplace_ownership_listing
+CREATE INDEX idx_marketplace_ownership_listing ON marketplace_ownership_cache(listing_id);
+
 -- index: idx_memories_deleted_at
 CREATE INDEX idx_memories_deleted_at ON memories(entity_id, deleted_at);
 
@@ -92,10 +95,10 @@ CREATE TABLE character_favorites ( profile_id TEXT PRIMARY KEY REFERENCES charac
 CREATE TABLE "character_image" ( id TEXT PRIMARY KEY, character_profile_id TEXT NOT NULL, image_data BLOB NOT NULL, mime_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_primary BOOLEAN NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 0, vl_model_interpretation TEXT NOT NULL DEFAULT '', vl_model TEXT NOT NULL DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, FOREIGN KEY (character_profile_id) REFERENCES character_profiles(id) ON DELETE CASCADE );
 
 -- table: character_image_comments
-CREATE TABLE character_image_comments ( id TEXT PRIMARY KEY, image_id INTEGER NOT NULL REFERENCES character_image(id) ON DELETE CASCADE, author_user_id TEXT, author_display_name TEXT NOT NULL DEFAULT '', author_avatar_url TEXT, text TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+CREATE TABLE character_image_comments ( id TEXT PRIMARY KEY, image_id TEXT NOT NULL REFERENCES character_image(id) ON DELETE CASCADE, author_user_id TEXT, author_display_name TEXT NOT NULL DEFAULT '', author_avatar_url TEXT, text TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
 -- table: character_image_likes
-CREATE TABLE character_image_likes ( image_id INTEGER PRIMARY KEY REFERENCES character_image(id) ON DELETE CASCADE, liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+CREATE TABLE character_image_likes ( image_id TEXT PRIMARY KEY REFERENCES character_image(id) ON DELETE CASCADE, liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
 -- table: character_likes
 CREATE TABLE character_likes ( profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE, liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
@@ -117,6 +120,9 @@ CREATE TABLE chat_conversation_settings ( participant_key TEXT PRIMARY KEY, enti
 
 -- table: cognition_configs
 CREATE TABLE "cognition_configs" ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, max_cognition_events INTEGER NOT NULL DEFAULT 20, generate_expressions INTEGER NOT NULL DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
+
+-- table: content_library
+CREATE TABLE content_library ( id TEXT PRIMARY KEY, item_type TEXT NOT NULL, title TEXT NOT NULL, body TEXT, payload_json TEXT, image_data TEXT, image_mime TEXT, source_listing_id TEXT REFERENCES marketplace_listings_cache(id) ON DELETE SET NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
 
 -- table: conversation_messages
 CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT , reactions_json TEXT, reply_to_message_id TEXT, is_pinned INTEGER NOT NULL DEFAULT 0);
@@ -144,6 +150,12 @@ CREATE TABLE interactions ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NUL
 
 -- table: lifecycle_state
 CREATE TABLE "lifecycle_state" ( entity_id TEXT PRIMARY KEY REFERENCES entities(id), exhaustion REAL NOT NULL DEFAULT 0, sleeping BOOLEAN NOT NULL DEFAULT false, sleep_start_time INTEGER, last_beat_at INTEGER, last_outreach_at INTEGER, inner_monologue TEXT NOT NULL DEFAULT '[]', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP );
+
+-- table: marketplace_listings_cache
+CREATE TABLE marketplace_listings_cache ( id TEXT PRIMARY KEY, item_type TEXT NOT NULL CHECK (item_type IN ( 'character','backstory','description','personality', 'prompt','dialogue','theme')), title TEXT NOT NULL, summary TEXT, tags TEXT, price_souls REAL NOT NULL DEFAULT 0 CHECK (price_souls >= 0), status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','delisted')), sales_count INTEGER NOT NULL DEFAULT 0, seller_user_id TEXT, preview_text TEXT, preview_image_data TEXT, preview_mime_type TEXT, payload_json TEXT NOT NULL, cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP );
+
+-- table: marketplace_ownership_cache
+CREATE TABLE marketplace_ownership_cache ( id TEXT PRIMARY KEY, listing_id TEXT NOT NULL REFERENCES marketplace_listings_cache(id) ON DELETE CASCADE, item_type TEXT NOT NULL, title TEXT NOT NULL, asset_json TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'purchase' CHECK (kind IN ('purchase','free','own')), acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, image_data TEXT, image_mime TEXT );
 
 -- table: memories
 CREATE TABLE memories ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE, compaction_level INTEGER NOT NULL DEFAULT 1, content TEXT NOT NULL, emotional_state_bits INTEGER NOT NULL DEFAULT 0, start_date TIMESTAMP NULL, end_date TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP , deleted_at TIMESTAMP NULL);
