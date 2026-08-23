@@ -1,3 +1,4 @@
+// TODO(followup Track E): implement INIT_ENTITY recovery per this spec; re-enable by renaming back. See .current_work/senju-rebase-integration/02-Followup-Stub-Plan.md §Track E.
 /**
  * EntitySessionService — INIT_ENTITY engine-rejection recovery tests.
  *
