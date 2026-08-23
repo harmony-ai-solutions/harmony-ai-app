@@ -2,6 +2,12 @@
 
 > Post-rebase work, organized in five tracks. Binding design directives from the senior dev are marked **[directive]**. Open questions for discussion are marked **[Q]**. Nothing here is implemented yet.
 
+> **Close-out notes (post-Phase-4 mends, commits E/F/G on `senju-design-updates-rebase`):**
+> - **CLIENT_ONLY_TABLES** — now ruled interim-only (D6); deleted in B5. See B5 below.
+> - **Rebase-artifact tsc/test failures** — fixed in commit E (`53b445e`): `Animated`/`ToastAndroid` imports, test-harness provider mocks (ThemeContext/AppToastContext/AuthContext/safe-area/blockedContent/navigation), `flush()` drain, `EntitySessionService` registry mocks. All 84 unit suites green.
+> - **Pre-existing tsc errors** on `feat/cloud-lifecycle` (syncApplyFailureClearsSession private access, deviceAuth `MockAPIError` type) — fixed in commit G (`fe1408f`). Note: `feat/cloud-lifecycle` itself still carries them; `senju-design-updates-rebase` supersedes it.
+> - **Parity** is back to exactly D3 (conversation_messages) + known-pre-existing drift; the 5 client-only index leaks are closed (commit F). D3 stays open until Track B1 lands the engine-side Go migration.
+
 ---
 
 ## Track A — Backend-Stub Layer (marketplace, wallet, social, notifications)
@@ -83,6 +89,8 @@ Tables: `character_favorites`, `chat_conversation_settings`, `character_profile_
 
 ### B5 Migration mechanics for Track A/B removals **[APPROVED — senior dev, proof-read round: no clarification needed]**
 Her migrations (renumbered 41–55) have never shipped beyond dev devices → cleanest: **fold removals into the renumbered files themselves before merge to a shared mainline** (edit pre-release migrations rather than adding inverse migrations). Decide per item: drop table from migration file + drop repo + drop tests. Timing: do removals in one dedicated pass immediately after rebase verification, before anything merges to main.
+
+**B5 also removes `CLIENT_ONLY_TABLES` (decision D6, summary.md).** The mechanism dies with the last sidecar table drop: as each table leaves the exclusion list, delete its entry; when the set is empty, delete the `isClientOnlyEntry` filter + the D6 comment in `scripts/dump-schema.ts` entirely. End state: the parity dump has **no exclusion list** — "app-only SQLite table" is not an allowed category in this architecture. Until then the mechanism stays functional (index-leak fix landed as commit F).
 
 ---
 

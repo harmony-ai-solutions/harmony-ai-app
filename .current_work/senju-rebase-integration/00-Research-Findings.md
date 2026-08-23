@@ -226,7 +226,7 @@ Tabs: `Characters | Chat | Discover [center] | Market | MyProfile`, `initialRout
 | `UserProfileStore` (AsyncStorage) | **Cloud-first** | Drop shadow store; `PATCH /v1/auth/me` + avatar upload in backend concept; optional read-through cache, cloud-wins |
 | `MarketplaceApiService` | **Stub → backend concept** | Real transport, wrong pattern (bypasses first-party client, reintroduces orphaned `authFetch` style); pre-match `soulbits-api-client` shapes in stub |
 | `SoulbitsDefaultConfigService` (f45540a) | **Revert** | Engine seeds defaults; app-side parallel set is wrong direction |
-| `CLIENT_ONLY_TABLES` in `dump-schema.ts` | **Keep mechanism** | Good idea; the excluded tables mostly vanish in follow-ups anyway |
+| `CLIENT_ONLY_TABLES` in `dump-schema.ts` | **Interim-only (D6 — supersedes earlier "keep")** | Scaffolding for senju's sidecar tables; **deleted in the B5 pass with the last sidecar table drop**. End state: zero dump exclusions — "app-only SQLite table" is not a category (local state = AsyncStorage; engine-appropriate data = mirrored migrations both sides). Index leak on the mechanism fixed in commit F (`isClientOnlyEntry` also matches indexes by `ON <table>`). |
 
 ## 12. Canonical Patterns (summary — full sheet in 03-Pattern-Cheat-Sheet.md)
 

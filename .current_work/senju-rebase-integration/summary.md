@@ -88,6 +88,14 @@ During execution, per-step record docs will be added (`10-…`, `11-…`, …) d
 | O11 | **Unify on last-message `created_at`**; replace LIMIT-50 with proper pagination. |
 | — | A1, A2, A5, A7–A14 **ratified without comment** (read-flag synced; backfill all-read; drop per-partner persona pref; no local blocked-list fix; event-subscription F1 fix; repo-level cascade F3; audit findings follow-up-only; shim-row `'user'` classification; recovery spec verbatim; stub-visible UI; minor behaviors kept). |
 
+### Post-rebase execution rulings (added during Phase 3/4 execution)
+
+| # | Ruling |
+|---|---|
+| D6 | **`CLIENT_ONLY_TABLES` is interim-only scaffolding, not a design category.** Never approved; invented by senju (0cd9423) to keep the parity gate green for her sidecar tables. End state = zero dump exclusions ("app-only SQLite table" is not an allowed category — local state = AsyncStorage, engine-appropriate data = mirrored migrations both sides). **Deleted in the B5 pass** with the last sidecar-table drop. The 5-index leak was fixed immediately in commit F (`isClientOnlyEntry` matches indexes by `ON <table>`) so the gate returns to exactly D3 + known-pre-existing. |
+| R7 | **Rebase-artifact fixes landed as commit E** (`53b445e`): our surviving code + her import lines lost `Animated`/`ToastAndroid`; our tests rendered her-augmented components without the now-required providers (ThemeContext, AppToastContext, AuthContext, safe-area, blockedContent repo, navigation). All 4 previously-failing suites green. These were Phase-2 integration damage — correctly in commit B's charter, not her code. |
+| R8 | **3 pre-existing tsc errors on `feat/cloud-lifecycle` fixed as commit G** (`fe1408f`): `syncApplyFailureClearsSession` private `currentSession` access + `deviceAuth` `MockAPIError` used as a type. Pre-existing on our own branch (verified via worktree tsc) — fixed so tsc is clean before follow-up implementation begins. Note: the same errors remain on `feat/cloud-lifecycle` itself (fix applies to `senju-design-updates-rebase`, which supersedes it). |
+
 ### Deferred open questions
 
 - **O1 (=P3):** `entity_type` enum naming/values, default backfill, Go migration details.
@@ -102,10 +110,12 @@ During execution, per-step record docs will be added (`10-…`, `11-…`, …) d
 | Step | Status |
 |---|---|
 | Analysis (survey, conflict simulation, 10 deep-dive investigations) | ✅ complete |
-| Decision record (D1–D5, P1–P4, design directives) | ✅ complete |
-| Documentation (this set) | ✅ complete — **awaiting proof-read** |
-| Phase 0: backups + rerere | ⬜ not started |
-| Phase 1: rebase replay | ⬜ |
-| Phase 2: conflict resolution | ⬜ |
-| Phase 3: integration commits A/B/C + D2 skip | ⬜ |
-| Phase 4: verification gates | ⬜ |
+| Decision record (D1–D5, P1–P4, design directives + D6/R7/R8) | ✅ complete |
+| Documentation (this set) | ✅ complete |
+| Phase 0: backups + rerere | ✅ complete (rerere left disabled — see 10-Record) |
+| Phase 1: rebase replay | ✅ complete — 52/52, branch `senju-design-updates-rebase` |
+| Phase 2: conflict resolution | ✅ complete — 29 rounds, record 10 |
+| Phase 3: integration commits A/B/C + D2 skip | ✅ complete — `790357c`/`e494fdb`/`add5062`/`55d1fcd`, record 11 |
+| Phase 4: verification gates | ✅ complete — tsc 0, unit 84/84, integration 10/10, parity = D3 only; record 12 |
+| Post-gate mends (E/F/G) | ✅ complete — `53b445e`/`ca9d867`/`fe1408f`; see 12-Record appendix |
+| Branch state | `senju-design-updates-rebase` @ `fe1408f` — awaiting coordinated force-push of her origin branch with senju |
