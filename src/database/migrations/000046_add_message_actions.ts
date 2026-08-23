@@ -1,4 +1,4 @@
-export const migration040 = `
+export const migration046 = `
 -- Message actions for conversation_messages:
 -- 1. reactions_json: JSON array of emoji reactions, e.g. '["❤️","👍"]'
 -- 2. reply_to_message_id: references the message this one replies to

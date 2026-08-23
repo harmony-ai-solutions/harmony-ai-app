@@ -915,7 +915,7 @@ export async function getCharacterProfileVisibility(
   }
   const visibility = results.rows.item(0).visibility as CharacterProfileVisibility;
   // Validate: anything we don't recognize falls back to public (backwards
-  // compatible with pre-000043 rows).
+  // compatible with pre-000049 rows).
   return visibility === CHARACTER_PROFILE_VISIBILITY_PRIVATE ||
     visibility === CHARACTER_PROFILE_VISIBILITY_MARKETPLACE
     ? visibility

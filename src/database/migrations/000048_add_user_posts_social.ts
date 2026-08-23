@@ -1,5 +1,5 @@
 /**
- * Migration 000042: User posts, follows & notifications (client-only)
+ * Migration 000048: User posts, follows & notifications (client-only)
  *
  * Adds client-only support for a local social layer:
  *
@@ -19,7 +19,7 @@
  * Cascades:
  *  - Deleting a post cleans up its likes + comments (ON DELETE CASCADE via FK).
  */
-export const migration042 = `
+export const migration048 = `
 -- User posts (client-only) — text and/or image content
 CREATE TABLE IF NOT EXISTS user_posts (
     id TEXT PRIMARY KEY,

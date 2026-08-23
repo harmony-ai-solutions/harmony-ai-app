@@ -1,5 +1,5 @@
 /**
- * Migration 000045: Marketplace listings + SOUL wallet (client-only)
+ * Migration 000051: Marketplace listings + SOUL wallet (client-only)
  *
  * Adds client-only support for selling AI characters on the Market screen:
  *
@@ -34,7 +34,7 @@
  * `CREATE TABLE IF NOT EXISTS` is idempotent and passes the migration SQL
  * guard (no ALTER DROP/RENAME).
  */
-export const migration045 = `
+export const migration051 = `
 -- AI character marketplace listings (client-only)
 CREATE TABLE IF NOT EXISTS character_marketplace_listings (
     profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE,

@@ -1,7 +1,7 @@
 /**
- * Migration 000046: Extend visibility CHECK to include 'marketplace'
+ * Migration 000052: Extend visibility CHECK to include 'marketplace'
  *
- * Migration 000043 added `character_profile_sources.visibility` with a CHECK
+ * Migration 000049 added `character_profile_sources.visibility` with a CHECK
  * constraint `visibility IN ('public', 'private')`. The Marketplace feature
  * adds a third visibility state, so a profile can be listed for sale on the
  * Market screen ('marketplace'). SQLite does not support `ALTER TABLE ...
@@ -16,7 +16,7 @@
  * The table is CLIENT-ONLY (never synced) and has no FK REFERENCES pointing
  * at it, so a plain DROP is safe (no foreign-key gate to worry about).
  */
-export const migration046 = `
+export const migration052 = `
 -- Rebuild character_profile_sources with the extended visibility CHECK
 CREATE TABLE IF NOT EXISTS character_profile_sources_new (
     profile_id TEXT PRIMARY KEY,

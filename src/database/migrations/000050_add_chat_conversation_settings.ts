@@ -1,5 +1,5 @@
 /**
- * Migration 000044: Chat conversation settings (client-only)
+ * Migration 000050: Chat conversation settings (client-only)
  *
  * Adds client-only per-conversation state so the chat list can offer the
  * standard messaging-app actions (pin / archive / mute / disable / unread):
@@ -31,7 +31,7 @@
  * `CREATE TABLE IF NOT EXISTS` is idempotent and passes the migration SQL
  * guard (no ALTER DROP/RENAME).
  */
-export const migration044 = `
+export const migration050 = `
 -- Per-conversation settings (client-only)
 CREATE TABLE IF NOT EXISTS chat_conversation_settings (
     participant_key TEXT PRIMARY KEY,

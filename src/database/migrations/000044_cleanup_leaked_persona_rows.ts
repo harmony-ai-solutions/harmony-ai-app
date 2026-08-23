@@ -1,7 +1,7 @@
 /**
- * Migration 000038: Purge leaked AI-character rows from the personas table
+ * Migration 000044: Purge leaked AI-character rows from the personas table
  *
- * A development build of migration 000037 backfilled existing user-created AI
+ * A development build of migration 000043 backfilled existing user-created AI
  * characters (entities linked to a user-tagged character profile) into the
  * `personas` table. Personas are STRICTLY identities the user chats AS and
  * must NEVER include AI characters (the entities the user chats WITH).
@@ -13,7 +13,7 @@
  *
  * Client-only table — no engine schema parity impact.
  */
-export const migration038 = `
+export const migration044 = `
 -- Remove persona rows whose backing entity links a character profile
 -- (i.e. AI characters leaked into personas). Real personas have a backing
 -- entity with character_profile_id IS NULL.

@@ -1,5 +1,5 @@
 /**
- * Migration 000035: Character profile source tagging (client-only)
+ * Migration 000041: Character profile source tagging (client-only)
  *
  * Adds a CLIENT-ONLY sidecar table that records whether a character profile
  * was created by the app user (via the Create AI / profile-edit flows) or is a
@@ -14,9 +14,9 @@
  *    stays untouched.
  *
  * Default: any profile without a sidecar row is treated as 'community'.
- * (Migration 000036 backfills pre-existing profiles as 'user'.)
+ * (Migration 000042 backfills pre-existing profiles as 'user'.)
  */
-export const migration035 = `
+export const migration041 = `
 -- Character profile source tagging (client-only sidecar)
 CREATE TABLE IF NOT EXISTS character_profile_sources (
     profile_id TEXT PRIMARY KEY,

@@ -1,5 +1,5 @@
 /**
- * Migration 000049: Marketplace cache + content library (client-only)
+ * Migration 000055: Marketplace cache + content library (client-only)
  *
  * Adds client-only cache tables for the account-backed Marketplace feature
  * (the cloud backend in `soulbits-cloud-backend` is the source of truth).
@@ -30,7 +30,7 @@
  * `CREATE TABLE IF NOT EXISTS` is idempotent and passes the migration SQL
  * guard (no ALTER DROP/RENAME).
  */
-export const migration049 = `
+export const migration055 = `
 -- Marketplace catalog cache (client-only) — mirrors the cloud backend
 CREATE TABLE IF NOT EXISTS marketplace_listings_cache (
     id TEXT PRIMARY KEY,

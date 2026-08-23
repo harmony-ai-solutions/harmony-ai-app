@@ -1,5 +1,5 @@
 /**
- * Migration 000037: Personas table (client-only)
+ * Migration 000043: Personas table (client-only)
  *
  * Personas are the identities the USER chats AS (created via My Profile).
  * They are deliberately SEPARATE from AI characters (entities the user chats
@@ -20,7 +20,7 @@
  * docs/schema-parity.md). Excluded from the schema dump in
  * scripts/dump-schema.ts (CLIENT_ONLY_TABLES).
  */
-export const migration037 = `
+export const migration043 = `
 -- Personas: identities the user chats as (client-only)
 CREATE TABLE IF NOT EXISTS personas (
     id TEXT PRIMARY KEY,

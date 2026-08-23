@@ -1,5 +1,5 @@
 /**
- * Migration 000043: Character profile visibility (client-only)
+ * Migration 000049: Character profile visibility (client-only)
  *
  * Adds a `visibility` column to the CLIENT-ONLY sidecar table
  * `character_profile_sources`, recording whether a character profile is
@@ -18,7 +18,7 @@
  * and passes the migration SQL guard. `NOT NULL DEFAULT 'public'` keeps
  * existing rows public — a profile with no explicit visibility is public.
  */
-export const migration043 = `
+export const migration049 = `
 ALTER TABLE character_profile_sources
 ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'
     CHECK (visibility IN ('public', 'private'));

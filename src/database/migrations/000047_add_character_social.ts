@@ -1,5 +1,5 @@
 /**
- * Migration 000041: AI character social layer (client-only)
+ * Migration 000047: AI character social layer (client-only)
  *
  * Adds client-only support for interacting with AI characters beyond chat:
  *
@@ -30,7 +30,7 @@
  *  - Deleting a character image cleans up its likes + comments
  *    (ON DELETE CASCADE via FK).
  */
-export const migration041 = `
+export const migration047 = `
 -- AI character likes (client-only, single device/user)
 CREATE TABLE IF NOT EXISTS character_likes (
     profile_id TEXT PRIMARY KEY REFERENCES character_profiles(id) ON DELETE CASCADE,

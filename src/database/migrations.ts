@@ -49,23 +49,21 @@ import { migration038 } from './migrations/000038_add_lifecycle_state';
 import { migration039 } from './migrations/000039_device_push_tokens_reserved';
 import { migration040 } from './migrations/000040_lifecycle_state_sync_columns';
 
-// NOTE(rebase): senju migration imports below collide on identifiers
-// (migration035/000036…) until integration commit A renumbers them 41–55.
-import { migration035 as migration035s } from './migrations/000035_add_character_profile_source';
-import { migration036 as migration036s } from './migrations/000036_backfill_character_profile_source';
-import { migration037 as migration037s } from './migrations/000037_add_personas_table';
-import { migration038 as migration038s } from './migrations/000038_cleanup_leaked_persona_rows';
-import { migration039 as migration039s } from './migrations/000039_add_character_categories_and_favorites';
-import { migration040 as migration040s } from './migrations/000040_add_message_actions';
-import { migration041 as migration041s } from './migrations/000041_add_character_social';
-import { migration042 as migration042s } from './migrations/000042_add_user_posts_social';
-import { migration043 as migration043s } from './migrations/000043_add_character_profile_visibility';
-import { migration044 as migration044s } from './migrations/000044_add_chat_conversation_settings';
-import { migration045 as migration045s } from './migrations/000045_add_marketplace_and_soul_wallet';
-import { migration046 as migration046s } from './migrations/000046_extend_visibility_check_marketplace';
-import { migration047 as migration047s } from './migrations/000047_add_blocked_users';
-import { migration048 as migration048s } from './migrations/000048_add_signup_bonus_flag';
-import { migration049 as migration049s } from './migrations/000049_add_marketplace_cache';
+import { migration041 } from './migrations/000041_add_character_profile_source';
+import { migration042 } from './migrations/000042_backfill_character_profile_source';
+import { migration043 } from './migrations/000043_add_personas_table';
+import { migration044 } from './migrations/000044_cleanup_leaked_persona_rows';
+import { migration045 } from './migrations/000045_add_character_categories_and_favorites';
+import { migration046 } from './migrations/000046_add_message_actions';
+import { migration047 } from './migrations/000047_add_character_social';
+import { migration048 } from './migrations/000048_add_user_posts_social';
+import { migration049 } from './migrations/000049_add_character_profile_visibility';
+import { migration050 } from './migrations/000050_add_chat_conversation_settings';
+import { migration051 } from './migrations/000051_add_marketplace_and_soul_wallet';
+import { migration052 } from './migrations/000052_extend_visibility_check_marketplace';
+import { migration053 } from './migrations/000053_add_blocked_users';
+import { migration054 } from './migrations/000054_add_signup_bonus_flag';
+import { migration055 } from './migrations/000055_add_marketplace_cache';
 
 // Migration definition
 export interface Migration {
@@ -278,82 +276,80 @@ export const MIGRATIONS: Migration[] = [
     description: 'lifecycle_state sync columns (watermark contract)',
     sql: migration040,
    },
-   // NOTE(rebase): senju pre-renumber registrations below — duplicate versions
-   // 35/36 until integration commit A renumbers these entries 41–55.
-   {
-    version: 35,
-    description: 'add_character_profile_source',
-    sql: migration035s,
-   },
-   {
-    version: 36,
-    description: 'backfill_character_profile_source',
-    sql: migration036s,
-   },
-   {
-    version: 37,
-    description: 'add_personas_table',
-    sql: migration037s,
-   },
-   {
-    version: 38,
-    description: 'purge_leaked_persona_rows',
-    sql: migration038s,
-   },
-   {
-    version: 39,
-    description: 'add_character_categories_and_favorites',
-    sql: migration039s,
-   },
-   {
-    version: 40,
-    description: 'add_message_actions',
-    sql: migration040s,
-   },
    {
     version: 41,
-    description: 'add_character_social',
-    sql: migration041s,
+    description: 'add_character_profile_source',
+    sql: migration041,
    },
    {
     version: 42,
-    description: 'add_user_posts_social',
-    sql: migration042s,
+    description: 'backfill_character_profile_source',
+    sql: migration042,
    },
    {
     version: 43,
-    description: 'add_character_profile_visibility',
-    sql: migration043s,
+    description: 'add_personas_table',
+    sql: migration043,
    },
    {
     version: 44,
-    description: 'add_chat_conversation_settings',
-    sql: migration044s,
+    description: 'cleanup_leaked_persona_rows',
+    sql: migration044,
    },
    {
     version: 45,
-    description: 'add_marketplace_and_soul_wallet',
-    sql: migration045s,
+    description: 'add_character_categories_and_favorites',
+    sql: migration045,
    },
    {
     version: 46,
-    description: 'extend_visibility_check_marketplace',
-    sql: migration046s,
+    description: 'add_message_actions',
+    sql: migration046,
    },
    {
     version: 47,
-    description: 'add_blocked_users',
-    sql: migration047s,
+    description: 'add_character_social',
+    sql: migration047,
    },
    {
     version: 48,
-    description: 'add_signup_bonus_flag',
-    sql: migration048s,
+    description: 'add_user_posts_social',
+    sql: migration048,
    },
    {
     version: 49,
+    description: 'add_character_profile_visibility',
+    sql: migration049,
+   },
+   {
+    version: 50,
+    description: 'add_chat_conversation_settings',
+    sql: migration050,
+   },
+   {
+    version: 51,
+    description: 'add_marketplace_and_soul_wallet',
+    sql: migration051,
+   },
+   {
+    version: 52,
+    description: 'extend_visibility_check_marketplace',
+    sql: migration052,
+   },
+   {
+    version: 53,
+    description: 'add_blocked_users',
+    sql: migration053,
+   },
+   {
+    version: 54,
+    description: 'add_signup_bonus_flag',
+    sql: migration054,
+   },
+   {
+    version: 55,
     description: 'add_marketplace_cache',
-    sql: migration049s,
+    sql: migration055,
    },
   ];
 

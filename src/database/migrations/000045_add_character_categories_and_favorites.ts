@@ -1,5 +1,5 @@
 /**
- * Migration 000039: Character categories + favorites (client-only)
+ * Migration 000045: Character categories + favorites (client-only)
  *
  * Adds client-only support for organizing AI characters into user-defined
  * categories and marking favorites:
@@ -23,7 +23,7 @@
  *    (profile_id FOREIGN KEY ON DELETE CASCADE — the app's deleteCharacterProfile
  *    uses soft-delete, so rows are kept; a permanent delete removes them).
  */
-export const migration039 = `
+export const migration045 = `
 -- User-defined character categories (client-only)
 CREATE TABLE IF NOT EXISTS character_categories (
     id TEXT PRIMARY KEY,
