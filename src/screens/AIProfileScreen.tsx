@@ -71,11 +71,7 @@ import {
   CharacterCreator,
 } from '../database/repositories/characterSocial';
 import { openCharacterChat } from '../services/CharacterChatService';
-import {
-  isChatLocked,
-  getListing,
-} from '../services/MarketplacePurchaseService';
-import type { MarketplaceListing } from '../database/repositories/marketplace';
+import type { MarketplaceListingDetail } from '../services/marketplace/MarketplaceService';
 import { createDataURL } from '../database/base64';
 import { getLocalProfile } from '../services/profile/UserProfileStore';
 import { CharacterProfile, CharacterImage } from '../database/models';
@@ -138,8 +134,12 @@ export const AIProfileScreen: React.FC = () => {
   // Follow state for the character's creator
   const [followingCreator, setFollowingCreator] = useState(false);
 
-  // ── Marketplace state (paid listing → chat is pay-gated) ──────────────
-  const [listing, setListing] = useState<MarketplaceListing | null>(null);
+  // ── Marketplace state (stub listing data → pure UI badge) ─────────────
+  // The stub marketplace has no local profile→listing linkage (upload-copy
+  // publish, A4), so an AI profile never resolves a listing here. The chat
+  // button's price-pill/lock-icon branch stays as pure UI that renders when a
+  // listing id is supplied (the future backend will resolve it).
+  const [listing, setListing] = useState<MarketplaceListingDetail | null>(null);
 
   // ── Comment modal state ────────────────────────────────────────────────
   const [commentImageId, setCommentImageId] = useState<string | null>(null);
@@ -312,14 +312,6 @@ export const AIProfileScreen: React.FC = () => {
       } catch (err) {
         log.warn('Failed to load image post state:', err);
       }
-
-      // Marketplace listing (drives the paywall badge + chat gate)
-      try {
-        const l = await getListing(profileId);
-        setListing(l);
-      } catch (err) {
-        log.warn('Failed to load marketplace listing:', err);
-      }
     } catch (err) {
       log.error('Failed to load AI profile:', err);
     } finally {
@@ -352,20 +344,9 @@ export const AIProfileScreen: React.FC = () => {
     if (!profile || chatting) return;
     setChatting(true);
     try {
-      // HARD GATE (payment not implemented yet): marketplace-listed characters
-      // that the user has not purchased (and does not own) are locked — the
-      // Chat tap is silently ignored so the chat screen can never be reached.
-      // When purchase support lands, replace this with the confirm dialog.
-      if (await isChatLocked(profile.id, user?.id)) {
-        return;
-      }
-      await openCharacterChat(
-        profile,
-        {
-          navigateToChat: params => navigation.navigate('ChatDetail', params),
-        },
-        user?.id,
-      );
+      await openCharacterChat(profile, {
+        navigateToChat: params => navigation.navigate('ChatDetail', params),
+      });
     } catch (err) {
       log.error('Failed to open chat:', err);
       showToast(t('common:error'));
@@ -750,9 +731,10 @@ export const AIProfileScreen: React.FC = () => {
 
             {/* ── Action row: primary Chat + Like / Save ── */}
             <View style={styles.actionsRow}>
-              {/* Primary Chat button — full-width, purple gradient. When the
-                  character is listed on the marketplace, the label shows the
-                  SOUL price (chat is pay-gated). */}
+              {/* Primary Chat button — full-width, purple gradient. When a
+                  listing resolves for this profile (future backend), the
+                  label shows the SOUL price pill; until then it is a normal
+                  Chat button. Paywall removed (A2). */}
               <TouchableOpacity
                 onPress={() => {
                   hapticLightPress();

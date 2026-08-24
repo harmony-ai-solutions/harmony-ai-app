@@ -1,6 +1,10 @@
 /**
  * ContentAssetScreen — read a collected text/structured asset, copy it,
  * apply it to one of your characters, or remove it from the library.
+ *
+ * Data path: MarketplaceService.getContentAsset(id) (in-memory stub). The
+ * apply-to-character flow targets the local character repos directly — it
+ * never needed the doomed content_library sidecar table.
  */
 import React, { useCallback, useState } from 'react';
 import {
@@ -26,11 +30,14 @@ import { ThemedButton } from '../components/themed/ThemedButton';
 import { hexToRgba } from '../utils/colorUtils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  getContentEntry,
-  deleteContentEntry,
-  applyTextToCharacter,
-} from '../database/repositories/contentLibrary';
-import { getUserCharacterProfiles } from '../database/repositories/characters';
+  getContentAsset,
+  type ContentAsset,
+} from '../services/marketplace/MarketplaceService';
+import {
+  getUserCharacterProfiles,
+  getCharacterProfile,
+  updateCharacterProfile,
+} from '../database/repositories/characters';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type RouteParams = RouteProp<RootStackParamList, 'ContentAsset'>;
@@ -45,7 +52,7 @@ export const ContentAssetScreen: React.FC = () => {
   const { showAlert } = useAppAlert();
   const { bottom: safeBottom } = useSafeAreaInsets();
 
-  const [entry, setEntry] = useState<any>(null);
+  const [entry, setEntry] = useState<ContentAsset | null>(null);
   const [loading, setLoading] = useState(true);
   const [applyPickerOpen, setApplyPickerOpen] = useState(false);
   const [characters, setCharacters] = useState<{ id: string; name: string }[]>([]);
@@ -53,8 +60,10 @@ export const ContentAssetScreen: React.FC = () => {
 
   const load = useCallback(async () => {
     try {
-      const e = await getContentEntry(entryId);
-      setEntry(e);
+      const asset = await getContentAsset(entryId);
+      setEntry(asset);
+    } catch {
+      setEntry(null);
     } finally {
       setLoading(false);
     }
@@ -75,9 +84,15 @@ export const ContentAssetScreen: React.FC = () => {
   };
 
   const handleApplyTo = async (profileId: string) => {
+    if (!entry?.text) return;
     setApplying(true);
     try {
-      await applyTextToCharacter(entryId, profileId);
+      // Apply the asset text directly to the character's description field
+      // (the stub asset carries no itemType→field mapping; description is the
+      // honest default until the backend encodes a target field).
+      const profile = await getCharacterProfile(profileId);
+      if (!profile) throw new Error('character_profile_not_found');
+      await updateCharacterProfile({ ...profile, description: entry.text });
       showToast(t('appliedToast'));
       setApplyPickerOpen(false);
     } catch {
@@ -88,30 +103,15 @@ export const ContentAssetScreen: React.FC = () => {
   };
 
   const handleCopy = () => {
-    if (!entry?.body) return;
-    Clipboard.setString(entry.body);
+    if (!entry?.text) return;
+    Clipboard.setString(entry.text);
     showToast(t('copiedToast'));
   };
 
   const handleDelete = () => {
-    if (!entry) return;
-    showAlert(
-      t('deleteEntry'),
-      t('deleteEntryConfirm'),
-      [
-        { text: t('buyCancel'), style: 'cancel' },
-        {
-          text: t('deleteEntry'),
-          style: 'destructive',
-          onPress: async () => {
-            await deleteContentEntry(entry.id);
-            showToast(t('copiedToast'));
-            navigation.goBack();
-          },
-        },
-      ],
-      { icon: 'trash-can-outline' },
-    );
+    // The stub backend has no library/content-asset delete API — honest error
+    // instead of a fake success.
+    showToast(t('removeUnavailablePreview'));
   };
 
   if (!theme) return null;
@@ -146,14 +146,14 @@ export const ContentAssetScreen: React.FC = () => {
         style={styles.flex}
         contentContainerStyle={[styles.content, { paddingBottom: safeBottom + 120 }]}
       >
-        {entry.body ? (
+        {entry.text ? (
           <View
             style={[
               styles.textCard,
               { backgroundColor: hexToRgba(baseHex, 0.5), borderColor: hexToRgba(accent, 0.25) },
             ]}
           >
-            <Text style={[styles.text, { color: theme.colors.text.primary }]}>{entry.body}</Text>
+            <Text style={[styles.text, { color: theme.colors.text.primary }]}>{entry.text}</Text>
           </View>
         ) : (
           <View
@@ -163,7 +163,11 @@ export const ContentAssetScreen: React.FC = () => {
             ]}
           >
             <Text style={[styles.text, { color: theme.colors.text.muted }]}>
-              {JSON.stringify(entry.payloadJson, null, 2)}
+              {JSON.stringify(
+                entry.snapshot ? { snapshot: entry.snapshot } : { kind: entry.kind },
+                null,
+                2,
+              )}
             </Text>
           </View>
         )}

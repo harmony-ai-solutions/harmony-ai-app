@@ -53,8 +53,15 @@ Remove `isChatLocked` / `canChatWithCharacter` / `confirmPurchaseIfNeeded` gates
 
 ## Verification
 
-- [ ] `grep -rn "MarketplaceApiService\|MarketplacePurchaseService\|acquireItem\|itemSnapshots\|librarySync\|isChatLocked\|canChatWithCharacter\|confirmPurchaseIfNeeded\|claimSignupBonus" src/` → zero non-historical hits
-- [ ] `grep -rln "repositories/marketplace\|repositories/soulWallet\|repositories/contentLibrary" src/ --include="*.ts*" | grep -v __tests__` → empty
-- [ ] `npx tsc --noEmit` 0 errors; `npm test` green
-- [ ] Manual smoke (user, on-device later): Market tab loads fixture listings; acquire succeeds/fails honestly; chat opens from any card without locks
-- [ ] `gitnexus_detect_changes()` before commit; commit: `feat: wire marketplace and wallet screens to in-memory stubs, remove client-side paywall`
+- [x] `grep -rn "MarketplaceApiService\|MarketplacePurchaseService\|acquireItem\|itemSnapshots\|librarySync\|isChatLocked\|canChatWithCharacter\|confirmPurchaseIfNeeded\|claimSignupBonus" src/` → zero non-historical hits (remaining: definitions inside the doomed repos + their tests + the Phase-1 static no-import assertion — both deleted in Phase 4)
+- [x] `grep -rln "repositories/marketplace\|repositories/soulWallet\|repositories/contentLibrary" src/ --include="*.ts*" | grep -v __tests__` → empty
+- [x] `npx tsc --noEmit` 0 errors; `npm test` green (unit 88/858, integration 10/50+1 skipped)
+- [ ] Manual smoke (user, on-device later): Market tab loads fixture listings; acquire succeeds/fails honestly; chat opens from any card without locks — **pending user**
+- [x] `gitnexus_detect_changes()` before commit; commit: `feat: wire marketplace and wallet screens to in-memory stubs, remove client-side paywall`
+
+### Implementation notes (deviations — see 13-Phase-1-Logbook.md for the full table)
+
+- Extra paywall/marketplace consumers found beyond the doc's list: `ChatDetailScreen` (`isChatLocked` gate + `chatLockedRef`) and `CreateAIScreen` ('marketplace' visibility segment + SOUL price input) — both removed per A2/A4.
+- `MarketScreen` has no `handleChat` (doc assumption) — current UX opens listing detail only.
+- Stub API not extended for text/theme publish, listing edit, re-list, library-remove → honest "not available in preview" errors (new market i18n keys); future backend capabilities.
+- Acquire success navigates to My Library (stub `AcquireResult` has no profile link); `salesCount` dropped (not in stub types).

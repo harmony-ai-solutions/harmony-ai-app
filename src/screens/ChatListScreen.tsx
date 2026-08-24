@@ -33,7 +33,6 @@ import {
 } from '../database/repositories/characters';
 
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
-import { useAuth } from '../contexts/AuthContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
@@ -43,7 +42,6 @@ import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
 import { ChatPartnerPickerModal } from '../components/chat/ChatPartnerPickerModal';
 import { openCharacterChat } from '../services/CharacterChatService';
-import { isChatLocked } from '../services/MarketplacePurchaseService';
 import { CharacterProfile } from '../database/models';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { createLogger } from '../utils/logger';
@@ -124,7 +122,6 @@ const getEntityDisplayName = (
 
 export const ChatListScreen: React.FC = () => {
   const { theme } = useAppTheme();
-  const { user } = useAuth();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const { canUseChat, connectionStatus } = useSyncConnection();
@@ -403,31 +400,15 @@ export const ChatListScreen: React.FC = () => {
 
   const handleNewChat = async (profile: CharacterProfile) => {
     try {
-      await openCharacterChat(
-        profile,
-        {
-          navigateToChat: params => navigation.navigate('ChatDetail', params),
-        },
-        user?.id,
-      );
+      await openCharacterChat(profile, {
+        navigateToChat: params => navigation.navigate('ChatDetail', params),
+      });
     } catch (err) {
       log.error('Failed to open chat from picker:', err);
     }
   };
 
   const handleChatPress = async (item: ChatListItem) => {
-    // HARD GATE: never open a chat with a marketplace-listed AI the user has
-    // not purchased (and does not own). The tap is silently ignored.
-    if (!item.isGroup && item.characterId) {
-      try {
-        if (await isChatLocked(item.characterId, user?.id)) {
-          return;
-        }
-      } catch (lockErr) {
-        log.warn('Failed to check chat lock:', lockErr);
-      }
-    }
-
     // Opening a conversation clears its unread counter.
     try {
       await clearConversationUnread(item.participantKey);

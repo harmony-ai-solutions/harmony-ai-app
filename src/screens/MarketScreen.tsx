@@ -1,14 +1,14 @@
 /**
  * MarketScreen — SOUL Marketplace catalog (any content type).
  *
- * Browse cached/cloud listings with category chips + search + free badges.
- * Character listings open their AI profile (or detail); other types open the
- * item detail with Buy/Get-Free.
+ * Browse the stub marketplace feed (MarketplaceService) with category chips +
+ * search + free badges. All stub listings are character cards; tapping one
+ * opens the item detail with Buy/Get-Free.
  *
- * Data flow: cloud-first via MarketplaceApiService, fall back to the local
- * cache when offline / not signed in.
+ * Data flow: MarketplaceService.getListings() (in-memory stub) + the wallet
+ * balance from walletService (EventEmitter status refresh).
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -18,17 +18,14 @@ import {
   ActivityIndicator,
   Pressable,
   Text,
-  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../contexts/ThemeContext';
-import { useAuth } from '../contexts/AuthContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
-import { ThemedButton } from '../components/themed/ThemedButton';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SoulBalanceDropdown } from '../components/market/SoulBalanceDropdown';
 import { FreeBadge } from '../components/market/FreeBadge';
@@ -38,59 +35,38 @@ import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { createLogger } from '../utils/logger';
-import { createDataURL } from '../database/base64';
+import { getListings, type MarketplaceListingSummary } from '../services/marketplace/MarketplaceService';
+import { walletService, type WalletStatus } from '../services/wallet/WalletService';
 import {
-  getCachedListings,
-  getSoulBalance,
-  type CachedListing,
-} from '../database/repositories/marketplace';
-import { applyMarketFilters } from '../utils/marketFilters';
-import { itemTypeIcon } from '../services/marketplace/marketplaceTypes';
-import { formatSoulPrice } from '../services/MarketplacePurchaseService';
-import marketplaceApiService from '../services/marketplace/MarketplaceApiService';
-import { listingDtoToCache } from '../services/marketplace/marketplaceTypes';
+  applyMarketFilters,
+  type MarketFilterableListing,
+} from '../utils/marketFilters';
+import { itemTypeIcon, formatSoulPrice } from '../utils/marketTypes';
 
 const log = createLogger('[MarketScreen]');
 
 export const MarketScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
-  const { status: authStatus } = useAuth();
   const { t } = useTranslation('market');
   const { bottom: safeBottom } = useSafeAreaInsets();
 
-  const [listings, setListings] = useState<CachedListing[]>([]);
+  const [listings, setListings] = useState<MarketFilterableListing[]>([]);
   const [query, setQuery] = useState('');
   const [activeChip, setActiveChip] = useState<string>('all');
   const [balance, setBalance] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [offline, setOffline] = useState(false);
 
   const loadMarket = useCallback(async () => {
     try {
-      // Cloud-first (account-bound listings).
-      try {
-        const res = await marketplaceApiService.list({
-          query,
-          itemType: activeChip !== 'all' && activeChip !== 'free' ? (activeChip as any) : undefined,
-          freeOnly: activeChip === 'free',
-        });
-        const rows = res.listings.map(listingDtoToCache);
-        setListings(rows);
-        setOffline(false);
-      } catch {
-        // Offline / not signed-in → cache fallback.
-        const cached = await getCachedListings({
-          query,
-          itemType: activeChip !== 'all' && activeChip !== 'free' ? (activeChip as any) : undefined,
-          freeOnly: activeChip === 'free',
-        });
-        setListings(cached);
-        setOffline(true);
-      }
-
-      const bal = await getSoulBalance();
+      const rows = (await getListings()).map(l => ({
+        ...l,
+        // The stub feed only ships character-card listings.
+        itemType: 'character' as const,
+      }));
+      setListings(rows);
+      const bal = await walletService.getBalance();
       setBalance(bal);
     } catch (err) {
       log.error('Failed to load marketplace:', err);
@@ -98,7 +74,7 @@ export const MarketScreen: React.FC = () => {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, [query, activeChip]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -106,13 +82,35 @@ export const MarketScreen: React.FC = () => {
     }, [loadMarket]),
   );
 
+  // Refresh the balance badge whenever the wallet status transitions (e.g.
+  // after an acquire elsewhere). A ref guard prevents the getBalance()
+  // syncing→ready emissions from re-triggering themselves.
+  const fetchingBalanceRef = useRef(false);
+  useEffect(() => {
+    const onStatus = (status: WalletStatus) => {
+      if (status !== 'ready' || fetchingBalanceRef.current) return;
+      fetchingBalanceRef.current = true;
+      walletService
+        .getBalance()
+        .then(setBalance)
+        .catch(() => {})
+        .finally(() => {
+          fetchingBalanceRef.current = false;
+        });
+    };
+    walletService.on('status', onStatus);
+    return () => {
+      walletService.off('status', onStatus);
+    };
+  }, []);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadMarket();
     setRefreshing(false);
   }, [loadMarket]);
 
-  const handleOpen = (listing: CachedListing) => {
+  const handleOpen = (listing: MarketFilterableListing) => {
     navigation.navigate('MarketplaceItemDetail', { listingId: listing.id });
   };
 
@@ -219,23 +217,7 @@ export const MarketScreen: React.FC = () => {
                   : t('noListingsTitle')
               }
               subtitle={
-                offline
-                  ? authStatus === 'unauthenticated'
-                    ? t('signInToBrowseBody')
-                    : t('browseOffline')
-                  : query
-                    ? t('noResultsHint')
-                    : t('noListingsHint')
-              }
-              action={
-                offline && authStatus === 'unauthenticated' ? (
-                  <ThemedButton
-                    label={t('signInToBrowse')}
-                    variant="secondary"
-                    icon="account-outline"
-                    onPress={() => navigation.navigate('Login')}
-                  />
-                ) : undefined
+                query ? t('noResultsHint') : t('noListingsHint')
               }
               style={styles.emptyOverlay}
             />
@@ -260,7 +242,7 @@ function GenericListingCard({
   accent,
   onPress,
 }: {
-  listing: CachedListing;
+  listing: MarketFilterableListing;
   accent: string;
   onPress: () => void;
 }) {
@@ -268,11 +250,7 @@ function GenericListingCard({
   if (!theme) return null;
   const isFree = listing.priceSouls === 0;
   const priceText = formatSoulPrice(listing.priceSouls);
-
-  const photoUri =
-    listing.previewImageData && listing.previewMimeType
-      ? createDataURL(listing.previewImageData, listing.previewMimeType)
-      : null;
+  const typeIcon = itemTypeIcon(listing.itemType ?? 'character');
 
   return (
     <Pressable onPress={onPress} style={styles.card}>
@@ -282,23 +260,20 @@ function GenericListingCard({
           { backgroundColor: hexToRgba(accent, 0.14), borderColor: hexToRgba(accent, 0.25) },
         ]}
       >
-        {photoUri ? (
-          <Image source={{ uri: photoUri }} style={styles.cardImage} resizeMode="cover" />
-        ) : (
-          <Icon name={itemTypeIcon(listing.itemType)} size={34} color={accent} />
-        )}
+        {/* Stub listings carry no image payload — icon placeholder only. */}
+        <Icon name={typeIcon} size={34} color={accent} />
         {/* Type tag always over the card media */}
         <View style={[styles.cardTag, { backgroundColor: 'rgba(11,11,16,0.78)' }]}>
-          <Icon name={itemTypeIcon(listing.itemType)} size={10} color={accent} />
+          <Icon name={typeIcon} size={10} color={accent} />
           <Text style={[styles.cardTagText, { color: accent }]}>
-            {capType(listing.itemType)}
+            {capType(listing.itemType ?? 'character')}
           </Text>
         </View>
       </View>
       <View style={styles.cardMeta}>
         <View style={styles.cardTitleRow}>
           <Icon
-            name={itemTypeIcon(listing.itemType)}
+            name={typeIcon}
             size={13}
             color={theme.colors.text.muted}
             style={{ marginRight: 4 }}
@@ -310,14 +285,6 @@ function GenericListingCard({
             {listing.title}
           </Text>
         </View>
-        {listing.summary ? (
-          <Text
-            numberOfLines={2}
-            style={[styles.cardSummary, { color: theme.colors.text.muted }]}
-          >
-            {listing.summary}
-          </Text>
-        ) : null}
         <View style={styles.cardBottom}>
           {isFree ? (
             <FreeBadge />

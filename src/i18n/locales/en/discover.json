@@ -6,6 +6,7 @@
   "noResultsHint": "Try a different name or letter.",
   "noCharacters": "No characters to discover yet",
   "noCharactersHint": "Characters created by other users will show up here.",
+  "previewHint": "Preview content while the community backend is in development",
   "chatOpenFailed": "Could not open chat with this character.",
   "recentPosts": "Recent Posts",
   "tabCharacters": "Characters",

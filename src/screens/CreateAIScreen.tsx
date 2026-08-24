@@ -32,7 +32,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
-import { SoulIcon } from '../components/market/SoulIcon';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -72,11 +71,6 @@ import {
   type CharacterProfileVisibility,
 } from '../database/repositories/characters';
 import { setCharacterCreator } from '../database/repositories/characterSocial';
-import {
-  getMarketplaceListing,
-  upsertMarketplaceListing,
-  removeMarketplaceListing,
-} from '../database/repositories/marketplace';
 import {
   createEntity,
   createEntityModuleMapping,
@@ -135,14 +129,11 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // Visibility / sharing:
   //   - private      → only the creator can see/chat (DEFAULT)
   //   - public       → visible + searchable on Discover, anyone can chat
-  //   - marketplace  → listed on the Market screen with a SOUL price; viewing
-  //                    the profile is free but chatting requires purchasing it
-  // Stored in the client-only character_profile_sources sidecar (never synced)
-  // + the client-only marketplace listings table (never synced).
-  const [visibility, setVisibility] = useState<'private' | 'public' | 'marketplace'>(
-    'private',
-  );
-  const [priceSouls, setPriceSouls] = useState('100');
+  // The 'marketplace' visibility + SOUL price option was REMOVED in Phase 2
+  // (A4 upload-copy ruling): publishing is upload-copy via the Market's Publish
+  // wizard — the local character never carries a marketplace visibility state
+  // or listing row.
+  const [visibility, setVisibility] = useState<'private' | 'public'>('private');
   const [visibilityLoaded, setVisibilityLoaded] = useState(false);
 
   // ── Prompts & Scenario (AI settings) ────────────────────────────────────────
@@ -169,7 +160,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     | 'voice'
     | 'typing'
     | 'audio'
-    | 'price'
     | null
   >(null);
 
@@ -495,21 +485,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setScenario(profile.scenario ?? '');
         setExampleDialogues(profile.mes_example ?? '');
 
-        // Carry over the source profile's visibility + price so the fork
-        // matches it.
+        // Carry over the source profile's visibility so the fork matches it
+        // (the 'marketplace' visibility/price option is gone — Phase 2 A4).
         try {
           const visibility = await getCharacterProfileVisibility(profile.id);
           if (!cancelled) {
-            setVisibility(visibility);
+            setVisibility(visibility === 'marketplace' ? 'public' : visibility);
             setVisibilityLoaded(true);
-          }
-          try {
-            const listing = await getMarketplaceListing(profile.id);
-            if (listing && !cancelled) {
-              setPriceSouls(String(listing.priceSouls));
-            }
-          } catch (priceErr) {
-            log.warn('Failed to copy profile price:', priceErr);
           }
         } catch (visErr) {
           log.warn('Failed to copy profile visibility:', visErr);
@@ -666,16 +648,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         try {
           const visibility = await getCharacterProfileVisibility(profile.id);
           if (!cancelled) {
-            setVisibility(visibility);
+            setVisibility(visibility === 'marketplace' ? 'public' : visibility);
             setVisibilityLoaded(true);
-          }
-          try {
-            const listing = await getMarketplaceListing(profile.id);
-            if (listing && !cancelled) {
-              setPriceSouls(String(listing.priceSouls));
-            }
-          } catch (priceErr) {
-            log.warn('Failed to load profile price:', priceErr);
           }
         } catch (visErr) {
           log.warn('Failed to load profile visibility:', visErr);
@@ -834,21 +808,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           mes_example: exampleDialogues.trim() || '',
         });
 
-        // Persist the chosen visibility (private/public/marketplace) in the
-        // sidecar + upsert/remove the marketplace listing + price.
+        // Persist the chosen visibility (private/public) in the sidecar. The
+        // 'marketplace' visibility + price row are gone (Phase 2 A4 — local
+        // characters never carry a marketplace listing state).
         await setCharacterProfileVisibility(
           editProfileId,
           visibility as CharacterProfileVisibility,
         );
-        if (visibility === 'marketplace') {
-          const price = parseFloat(priceSouls);
-          await upsertMarketplaceListing(
-            editProfileId,
-            Number.isFinite(price) ? Math.max(0, price) : 0,
-          );
-        } else {
-          await removeMarketplaceListing(editProfileId);
-        }
 
         // Reconcile images: delete the existing ones, then re-create from the
         // current UI state (avatar + gallery). This keeps the DB in exact sync
@@ -994,20 +960,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         // Tag as user-created so it is hidden from the Discover community grid
         await setCharacterProfileSource(profileId, 'user');
 
-        // Persist the chosen visibility (private/public/marketplace). Public
-        // partners appear on Discover; private ones stay hidden; marketplace
-        // partners get listed on the Market screen with their SOUL price.
+        // Persist the chosen visibility (private/public). Public partners appear on
+        // Discover; private ones stay hidden. The 'marketplace' visibility +
+        // price row are gone (Phase 2 A4).
         await setCharacterProfileVisibility(
           profileId,
           visibility as CharacterProfileVisibility,
         );
-        if (visibility === 'marketplace') {
-          const price = parseFloat(priceSouls);
-          await upsertMarketplaceListing(
-            profileId,
-            Number.isFinite(price) ? Math.max(0, price) : 0,
-          );
-        }
 
         // Record the cloud user who created this AI (creator badge + the
         // creator-only Edit Profile / Edit AI Settings buttons depend on it).
@@ -1388,7 +1347,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                   {t('visibilityLabel')}
                 </ThemedText>
 
-                {/* 3-way selector: Private / Public / Marketplace */}
+                {/* 2-way selector: Private / Public (marketplace removed, A4) */}
                 <View
                   style={[
                     styles.visibilityRow,
@@ -1400,13 +1359,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 >
                   <View style={styles.visibilityIconWrap}>
                     <Icon
-                      name={
-                        visibility === 'private'
-                          ? 'lock-outline'
-                          : visibility === 'public'
-                          ? 'earth'
-                          : 'storefront-outline'
-                      }
+                      name={visibility === 'private' ? 'lock-outline' : 'earth'}
                       size={22}
                       color={accent}
                     />
@@ -1415,27 +1368,22 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                     <ThemedText size={15} weight="bold" variant="primary">
                       {visibility === 'private'
                         ? t('visibilityPrivate')
-                        : visibility === 'public'
-                        ? t('visibilityPublic')
-                        : t('visibilityMarketplace')}
+                        : t('visibilityPublic')}
                     </ThemedText>
                     <ThemedText size={12} variant="muted">
                       {visibility === 'private'
                         ? t('visibilityPrivateHint')
-                        : visibility === 'public'
-                        ? t('visibilityPublicHint')
-                        : t('visibilityMarketplaceHint')}
+                        : t('visibilityPublicHint')}
                     </ThemedText>
                   </View>
                 </View>
 
-                {/* Segment picker: Private | Public | Marketplace */}
+                {/* Segment picker: Private | Public */}
                 <View style={styles.visibilitySegments}>
                   {(
                     [
                       { key: 'private', icon: 'lock-outline', label: t('visibilityPrivate') },
                       { key: 'public', icon: 'earth', label: t('visibilityPublic') },
-                      { key: 'marketplace', icon: 'storefront-outline', label: t('visibilityMarketplace') },
                     ] as const
                   ).map(seg => {
                     const active = visibility === seg.key;
@@ -1481,46 +1429,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                     );
                   })}
                 </View>
-
-                {/* SOUL price (marketplace only) */}
-                {visibility === 'marketplace' && (
-                  <View style={styles.priceRow}>
-                    <View style={styles.priceInputWrap}>
-                      <ThemedText size={13} variant="secondary" numberOfLines={1} style={styles.numericFieldLabel}>
-                        {t('priceSoulsLabel')}
-                      </ThemedText>
-                      <View
-                        style={[
-                          styles.inputShell,
-                          {
-                            backgroundColor: hexToRgba(surfaceColor, 0.55),
-                            borderColor:
-                              focusedField === 'price'
-                                ? accent
-                                : theme.colors.border.default,
-                          },
-                        ]}
-                      >
-                        <SoulIcon size={18} />
-                        <TextInput
-                          style={[styles.input, styles.numericInput, inputTextStyle]}
-                          value={priceSouls}
-                          onChangeText={setPriceSouls}
-                          onFocus={() => setFocusedField('price')}
-                          onBlur={() => setFocusedField(null)}
-                          placeholder="100"
-                          placeholderTextColor={theme.colors.text.muted}
-                          keyboardType="numeric"
-                          returnKeyType="done"
-                          testID="create-ai-marketplace-price"
-                        />
-                      </View>
-                    </View>
-                    <ThemedText size={11} variant="muted" style={styles.priceHint}>
-                      {t('priceSoulsHint')}
-                    </ThemedText>
-                  </View>
-                )}
 
                 {/* Personality */}
                 {renderField(

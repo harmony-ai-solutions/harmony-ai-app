@@ -36,7 +36,7 @@ const log = createLogger('[Marketplace]');
  * Mirrors the profile columns it snapshots (name/description/personality/
  * base_prompt/scenario/mes_example/voice_characteristics/typing_speed_wpm/
  * audio_response_chance_percent/image_data/image_mime), nullable as
- * appropriate. Defined here (NOT in `itemSnapshots.ts`, which is deleted in
+ * appropriate. Defined here (NOT in the snapshot module that was deleted in
  * Phase 2) and structurally identical to the fixture seed shape.
  */
 export interface CharacterSnapshot {

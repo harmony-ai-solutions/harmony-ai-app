@@ -18,7 +18,6 @@ import { pick } from '@react-native-documents/picker';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { useToast } from '../contexts/AppToastContext';
-import { useAuth } from '../contexts/AuthContext';
 import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
@@ -172,7 +171,6 @@ export const CharactersScreen: React.FC = () => {
   const { showAlert } = useAppAlert();
   const { showToast } = useToast();
   const { withExternalFlow } = useBiometricLock();
-  const { user } = useAuth();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('characters');
 
@@ -433,7 +431,6 @@ export const CharactersScreen: React.FC = () => {
         {
           navigateToChat: params => navigation.navigate('ChatDetail', params),
         },
-        user?.id,
       );
     } catch (err) {
       log.error('Failed to open chat:', err);

@@ -22,7 +22,6 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/AppToastContext';
-import { useAuth } from '../contexts/AuthContext';
 import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
@@ -34,22 +33,14 @@ import {
   itemTypeIcon,
   itemTypeLabelKey,
   type MarketplaceItemType,
-} from '../services/marketplace/marketplaceTypes';
-import {
-  buildCharacterSnapshot,
-  craftCharacterPublish,
-  craftTextPublish,
-} from '../services/marketplace/itemSnapshots';
-import marketplaceApiService from '../services/marketplace/MarketplaceApiService';
+} from '../utils/marketTypes';
 import {
   getUserCharacterProfiles,
   getCharacterProfile,
+  getPrimaryImage,
 } from '../database/repositories/characters';
-import {
-  cacheListing,
-  getCachedListing,
-} from '../database/repositories/marketplace';
-import { generateId } from '../utils/uuid';
+import type { CharacterSnapshot } from '../services/marketplace/MarketplaceService';
+import { publishListing, getListing } from '../services/marketplace/MarketplaceService';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type RouteParams = RouteProp<RootStackParamList, 'MarketplacePublish'>;
@@ -62,7 +53,6 @@ export const MarketplacePublishScreen: React.FC = () => {
   const { t } = useTranslation('market');
   const { theme } = useAppTheme();
   const { showToast } = useToast();
-  const { user } = useAuth();
   const { bottom: safeBottom } = useSafeAreaInsets();
 
   // Preload from AI Profile "Sell this character".
@@ -96,7 +86,6 @@ export const MarketplacePublishScreen: React.FC = () => {
   const { withExternalFlow } = useBiometricLock();
   const [photoData, setPhotoData] = useState<string | null>(null);
   const [photoMime, setPhotoMime] = useState<string | null>(null);
-  const [originalPayload, setOriginalPayload] = useState<unknown>(null);
 
   const handlePickPhoto = async () => {
     try {
@@ -141,17 +130,15 @@ export const MarketplacePublishScreen: React.FC = () => {
     if (!isEdit || !editListingId) return;
     (async () => {
       try {
-        const listing = await getCachedListing(editListingId);
-        if (!listing) return;
-        setItemType(listing.itemType);
+        const listing = await getListing(editListingId);
+        setItemType('character');
         setTitle(listing.title);
-        setSummary(listing.summary ?? '');
+        setSummary(listing.description);
         setTags(listing.tags.join(', '));
         setPrice(listing.priceSouls > 0 ? String(listing.priceSouls) : '');
         setIsFree(listing.priceSouls === 0);
-        setPhotoData(listing.previewImageData);
-        setPhotoMime(listing.previewMimeType);
-        setOriginalPayload(listing.payloadJson);
+        setPhotoData(listing.snapshot?.image_data ?? null);
+        setPhotoMime(listing.snapshot?.image_mime ?? null);
       } catch {
         // ignore — stays on fresh publish defaults
       }
@@ -166,144 +153,36 @@ export const MarketplacePublishScreen: React.FC = () => {
     if (!itemType) return;
     setPublishing(true);
     try {
-      let crafted;
-      if (itemType === 'character') {
-        const snapshot = await buildCharacterSnapshot(sourceProfileId!, user?.id);
-        crafted = craftCharacterPublish(snapshot, {
-          title,
-          summary,
-          tags: parseTags(tags),
-          priceSouls: isFree ? 0 : Number(price) || 0,
-        });
-      } else if (editableTextType) {
-        const text = textMode === 'scratch' ? scratchText : await getProfileField(sourceProfileId, itemType);
-        crafted = craftTextPublish(text, itemType as any, {
-          title,
-          summary,
-          tags: parseTags(tags),
-          priceSouls: isFree ? 0 : Number(price) || 0,
-        });
-      } else {
-        // theme & any structured asset — publish with a lightweight payload
-        // (a real theme picker can extend payloadJson later).
-        const label = t(itemTypeLabelKey(itemType));
-        crafted = {
-          itemType: itemType as MarketplaceItemType,
-          title: title.trim() || label,
-          summary: summary.trim() || null,
-          tags: parseTags(tags),
-          priceSouls: isFree ? 0 : Number(price) || 0,
-          payloadJson: { type: itemType, label },
-          previewImageData: photoData ?? null,
-          previewMimeType: photoMime ?? null,
-          previewText: summary.trim().slice(0, 200) || null,
-        };
-      }
-
-      // Merge the user's chosen photo over any character/listing snapshot
-      // image so a manually-picked photo is always used as the thumbnail.
-      const finalImageData = photoData ?? crafted.previewImageData;
-      const finalImageMime = photoMime ?? crafted.previewMimeType;
-
-      const targetId = isEdit ? editListingId! : undefined;
-
       // ── EDIT MODE ─────────────────────────────────────────────────────
-      if (isEdit && editListingId) {
-        try {
-          // Cloud update when available.
-          try {
-            await marketplaceApiService.update(editListingId, {
-              item_type: crafted.itemType,
-              title: crafted.title,
-              summary: crafted.summary,
-              tags: crafted.tags,
-              price_souls: crafted.priceSouls,
-              payload_json: crafted.payloadJson,
-              preview_image_data: finalImageData,
-              preview_mime_type: finalImageMime,
-            });
-          } catch {
-            // backend not live → local update below
-          }
-          await cacheListing({
-            id: editListingId,
-            itemType: crafted.itemType,
-            title: crafted.title,
-            summary: crafted.summary,
-            tags: crafted.tags,
-            priceSouls: crafted.priceSouls,
-            status: 'active',
-            sellerUserId: user?.id ?? null,
-            previewText: crafted.previewText,
-            previewImageData: finalImageData,
-            previewMimeType: finalImageMime,
-            payloadJson: originalPayload ?? crafted.payloadJson,
-          });
-        } catch (err) {
-          throw err;
-        }
-        showToast(t('snapshotUpdated'));
-        navigation.goBack();
+      // The stub backend has no update API (Phase-1 service surface) — honest
+      // error instead of fake success.
+      if (isEdit) {
+        showToast(t('editUnavailablePreview'));
         return;
       }
 
       // ── CREATE MODE ───────────────────────────────────────────────────
-      try {
-        // Cloud publish (account-bound). When the backend isn't live yet
-        // (or offline), fall back to a LOCAL listing so the item still
-        // appears on the Market immediately.
-        const dto = await marketplaceApiService.publish({
-          item_type: crafted.itemType,
-          title: crafted.title,
-          summary: crafted.summary,
-          tags: crafted.tags,
-          price_souls: crafted.priceSouls,
-          payload_json: crafted.payloadJson,
-          preview_image_data: finalImageData,
-          preview_mime_type: finalImageMime,
-        });
-        if (dto?.id) {
-          await cacheListing({
-            id: dto.id,
-            itemType: crafted.itemType,
-            title: crafted.title,
-            summary: crafted.summary,
-            tags: crafted.tags,
-            priceSouls: crafted.priceSouls,
-            status: 'active',
-            sellerUserId: user?.id ?? null,
-            previewText: crafted.previewText,
-            previewImageData: finalImageData,
-            previewMimeType: finalImageMime,
-            payloadJson: crafted.payloadJson,
-          });
-        }
-      } catch {
-        // Backend unavailable → publish locally so it works on-device.
-        await cacheListing({
-          id: targetId ?? generateId(),
-          itemType: crafted.itemType,
-          title: crafted.title,
-          summary: crafted.summary,
-          tags: crafted.tags,
-          priceSouls: crafted.priceSouls,
-          status: 'active',
-          sellerUserId: user?.id ?? null,
-          previewText: crafted.previewText,
-          previewImageData: finalImageData,
-          previewMimeType: finalImageMime,
-          payloadJson: crafted.payloadJson,
-        });
+      // The stub publish API only accepts a frozen character-card snapshot
+      // (upload-copy, A4). Text/theme listings are NOT supported by the stub
+      // backend yet — honest error, never a fake publish.
+      if (itemType !== 'character') {
+        showToast(t('publishTypePreviewOnly'));
+        return;
       }
+
+      const snapshot = await buildSnapshot(sourceProfileId!, photoData, photoMime);
+      await publishListing({
+        title: title.trim() || snapshot.name,
+        description: summary.trim(),
+        priceSouls: isFree ? 0 : Number(price) || 0,
+        tags: parseTags(tags),
+        cardSnapshot: snapshot,
+      });
 
       showToast(t('publishSuccess'));
       navigation.goBack();
-    } catch (err: any) {
-      if (err?.name === 'AuthExpiredError') {
-        showToast(t('publishAuthRequired'));
-      } else {
-        showToast(t('publishFailed'));
-      }
+    } catch {
+      showToast(t('publishFailed'));
     } finally {
       setPublishing(false);
     }
@@ -774,25 +653,47 @@ function parseTags(raw: string): string[] {
     .filter(Boolean);
 }
 
-async function getProfileField(
-  profileId: string | null,
-  itemType: MarketplaceItemType,
-): Promise<string> {
-  if (!profileId) return '';
+/**
+ * Build the frozen character-card snapshot for a publish draft (upload-copy
+ * semantics, A4). Reads the local profile + primary image; the local character
+ * card is NEVER touched by the publish itself. A manually-picked photo
+ * overrides the primary image so it is always used as the listing thumbnail.
+ */
+async function buildSnapshot(
+  profileId: string,
+  photoData: string | null,
+  photoMime: string | null,
+): Promise<CharacterSnapshot> {
   const profile = await getCharacterProfile(profileId);
-  if (!profile) return '';
-  switch (itemType) {
-    case 'description':
-      return profile.description ?? '';
-    case 'personality':
-      return profile.personality ?? '';
-    case 'prompt':
-      return profile.base_prompt ?? '';
-    case 'dialogue':
-      return profile.mes_example ?? '';
-    default:
-      return '';
+  if (!profile) {
+    throw new Error('character_profile_not_found');
   }
+
+  let imageData: string | null = null;
+  let imageMime: string | null = null;
+  try {
+    const primary = await getPrimaryImage(profileId);
+    if (primary) {
+      imageData = primary.image_data;
+      imageMime = primary.mime_type;
+    }
+  } catch {
+    // image is optional
+  }
+
+  return {
+    name: profile.name,
+    description: profile.description,
+    personality: profile.personality,
+    base_prompt: profile.base_prompt,
+    scenario: profile.scenario,
+    mes_example: profile.mes_example ?? '',
+    voice_characteristics: profile.voice_characteristics,
+    typing_speed_wpm: profile.typing_speed_wpm,
+    audio_response_chance_percent: profile.audio_response_chance_percent,
+    image_data: photoData ?? imageData,
+    image_mime: photoMime ?? imageMime,
+  };
 }
 
 function cap(s: string): string {

@@ -1,10 +1,9 @@
 /**
  * DiscoverScreen — Explore & search AI characters
  *
- * Browse the user's AI character library in a two-column grid while
- * searching for a specific character from the same screen. Uses the
- * same character repository + card component as the Characters tab,
- * with a glass search bar injected into the header.
+ * The character grid is the stub marketplace feed (fixtures visible in all
+ * builds — the real community query lands with 20-Backend-Concept); search is
+ * local. The Posts tab keeps its local social feed until Phase 3 rewires it.
  */
 import React, { useState, useCallback } from 'react';
 import {
@@ -22,7 +21,6 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../contexts/ThemeContext';
-import { useAppAlert } from '../contexts/AppAlertContext';
 import { useToast } from '../contexts/AppToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ThemedView } from '../components/themed/ThemedView';
@@ -31,31 +29,12 @@ import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
-import { getMarketplaceListing } from '../database/repositories/marketplace';
+import { getListings, getListing, type MarketplaceListingDetail } from '../services/marketplace/MarketplaceService';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { createLogger } from '../utils/logger';
 import { CharacterProfileCard } from '../components/characters/CharacterProfileCard';
-import {
-  getPublicCharacterProfiles,
-  getCharacterImages,
-} from '../database/repositories/characters';
-import {
-  createEntity,
-  createEntityModuleMapping,
-  getEntityByCharacterProfileId,
-} from '../database/repositories/entities';
-import {
-  deriveParticipantKey,
-  deriveScopeFromParticipants,
-} from '../database/repositories/interactions';
-import { v7 as uuidv7 } from 'uuid';
-import ChatPreferencesService from '../services/ChatPreferencesService';
-import { resolvePersonaId } from '../database/repositories/personas';
-import syncService from '../services/SyncService';
-import { isChatLocked } from '../services/MarketplacePurchaseService';
-import { createDataURL } from '../database/base64';
 import { CharacterProfile } from '../database/models';
 import { PostCard } from '../components/social/PostCard';
 import { PostCommentModal } from '../components/social/PostCommentModal';
@@ -68,17 +47,13 @@ import {
   getPostCommentsCount,
   deleteUserPost,
 } from '../database/repositories/userSocial';
-import {
-  filterBlockedCharacterProfiles,
-  filterBlockedUserPosts,
-} from '../database/repositories/blockedContent';
+import { filterBlockedUserPosts } from '../database/repositories/blockedContent';
 
 const log = createLogger('[DiscoverScreen]');
 
 export const DiscoverScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
-  const { showAlert } = useAppAlert();
   const { showToast } = useToast();
   const { user } = useAuth();
   const { t } = useTranslation('discover');
@@ -104,45 +79,26 @@ export const DiscoverScreen: React.FC = () => {
   // ── Data loading ─────────────────────────────────────────────────────
   const loadProfiles = useCallback(async () => {
     try {
-      // Discover shows all PUBLICLY visible AI characters: community
-      // characters (synced down from the engine) AND the current user's own
-      // public AI characters. Characters tagged 'private' in the client-only
-      // visibility sidecar are excluded entirely — they never appear here and
-      // are never searchable.
-      let data = await getPublicCharacterProfiles();
-      // Hide AI characters created by blocked users app-wide.
-      data = await filterBlockedCharacterProfiles(data);
-      setProfiles(data);
-
-      // Load primary image + count + marketplace price for every profile in
-      // parallel (a price means the chat is pay-gated — shown as a pill).
-      const imageMap: Record<string, string | null> = {};
-      const countMap: Record<string, number> = {};
-      const prices: Record<string, number | null> = {};
-      await Promise.all(
-        data.map(async profile => {
-          try {
-            const images = await getCharacterImages(profile.id);
-            const primary = images.find(img => img.is_primary === true);
-            imageMap[profile.id] = primary
-              ? createDataURL(primary.image_data, primary.mime_type)
-              : null;
-            countMap[profile.id] = images.length;
-          } catch {
-            imageMap[profile.id] = null;
-            countMap[profile.id] = 0;
-          }
-          try {
-            const listing = await getMarketplaceListing(profile.id);
-            prices[profile.id] = listing ? listing.priceSouls : null;
-          } catch {
-            prices[profile.id] = null;
-          }
-        }),
+      // The community-character backend query (doomed character_profile_sources
+      // table) lands with 20-Backend-Concept. Until then the Discover grid is
+      // the stub fixture feed — marketplace listing details ("created by other
+      // users" fixture creators), visible in all builds (O5).
+      const listings = await getListings();
+      const details = (
+        await Promise.all(
+          listings.map(l => getListing(l.id).catch(() => null)),
+        )
+      ).filter((d): d is MarketplaceListingDetail => d !== null);
+      setProfiles(details.map(listingDetailToDiscoverProfile));
+      setPrimaryImages({});
+      setImageCounts({});
+      setPriceMap(
+        Object.fromEntries(
+          details
+            .filter(d => d.priceSouls > 0)
+            .map(d => [d.id, d.priceSouls]),
+        ),
       );
-      setPrimaryImages(imageMap);
-      setImageCounts(countMap);
-      setPriceMap(prices);
     } catch (err) {
       log.error('Failed to load profiles:', err);
     } finally {
@@ -256,92 +212,20 @@ export const DiscoverScreen: React.FC = () => {
 
   // ── Navigation handlers ───────────────────────────────────────────────
   const handleOpenProfile = (profile: CharacterProfile) => {
-    // Tapping a Discover card opens the character's public AI profile page
-    // (viewing an AI you don't own should never open the editor).
-    navigation.navigate('AIProfile', { profileId: profile.id });
+    // Stub feed listings have no local character profile — the honest target
+    // is the listing detail (preview + acquire).
+    navigation.navigate('MarketplaceItemDetail', { listingId: profile.id });
   };
 
   /**
    * Open a chat with the character that uses this profile.
    *
-   * ChatDetail requires an ENTITY linked to the character profile (plus the
-   * impersonated "user" entity). If no entity uses this profile yet, one is
-   * created on the fly (mirroring the CreateAI flow), synced to the engine so
-   * INIT_ENTITY succeeds, and the user is dropped straight into the chat.
+   * ChatDetail requires an ENTITY linked to a LOCAL character profile. Stub
+   * feed listings have no local profile until acquired, so the chat action
+   * opens the listing detail instead (paywall removed, A2).
    */
   const handleChat = async (profile: CharacterProfile) => {
-    try {
-      // HARD GATE (payment not implemented yet): marketplace-listed characters
-      // that the user has not purchased (and does not own) are locked — the
-      // Chat tap is silently ignored so the chat screen can never be reached.
-      if (await isChatLocked(profile.id, user?.id)) {
-        return;
-      }
-
-      // 1. Resolve the persona we chat as (only personas — never AI
-      //    characters — are valid identities; falls back to 'user').
-      const storedId =
-        await ChatPreferencesService.getGlobalImpersonatedEntity();
-      const impersonatedEntityId = await resolvePersonaId(storedId);
-
-      // 2. Reuse an entity linked to this profile, or create one
-      let entity = await getEntityByCharacterProfileId(profile.id);
-      let createdNewEntity = false;
-      if (!entity) {
-        createdNewEntity = true;
-        const entityId = profile.name.trim();
-        entity = await createEntity({
-          id: entityId,
-          alias: profile.name.trim(),
-          character_profile_id: profile.id,
-          lifecycle_config: '{}',
-          rag_reindex_required: 1,
-        });
-        await createEntityModuleMapping({
-          entity_id: entityId,
-          backend_config_id: null,
-          cognition_config_id: null,
-          tts_config_id: null,
-          stt_config_id: null,
-          vision_config_id: null,
-          rag_config_id: null,
-          imagination_config_id: null,
-          movement_config_id: null,
-          deleted_at: null,
-        });
-      }
-
-      // 3. Push a NEWLY created entity to the engine BEFORE navigating.
-      //    ChatDetail sends INIT_ENTITY on mount; if the engine has not yet
-      //    ingested the entity it rejects with entity_not_defined and the chat
-      //    is stuck on "Connecting..." (same constraint documented in
-      //    CreateAIScreen). Existing entities are already known — no wait.
-      if (createdNewEntity) {
-        await syncService.syncAndWait({ timeoutMs: 15_000 }).catch(syncErr => {
-          log.warn('Auto-sync before chat failed (non-critical):', syncErr);
-        });
-      }
-
-      // 4. Derive chat params and navigate
-      const participantIds = [impersonatedEntityId ?? 'user', entity.id];
-      const scope = deriveScopeFromParticipants(participantIds);
-      const participantKey = deriveParticipantKey(
-        participantIds,
-        impersonatedEntityId ?? 'user',
-        scope,
-      );
-      const tempInteractionId = uuidv7();
-      navigation.navigate('ChatDetail', {
-        interactionId: tempInteractionId,
-        participantKey,
-        participantIds,
-        entityId: impersonatedEntityId ?? 'user',
-        entityName: profile.name,
-      });
-    } catch (err) {
-      log.error('Failed to open chat:', err);
-      showAlert(t('common:error'), t('chatOpenFailed'));
-    }
+    navigation.navigate('MarketplaceItemDetail', { listingId: profile.id });
   };
 
   const accent = theme.colors.accent.primary;
@@ -456,6 +340,16 @@ export const DiscoverScreen: React.FC = () => {
             </View>
           )}
         </ScreenHeader>
+
+        {/* Subtle preview hint — the character feed is stub fixture data while
+            the community backend is in development (A3 consequence). */}
+        {tab === 'characters' && (
+          <View style={styles.previewHintWrap}>
+            <ThemedText variant="muted" size={11} style={styles.previewHint}>
+              {t('previewHint')}
+            </ThemedText>
+          </View>
+        )}
       </View>
 
       {/* ── Tab content ── */}
@@ -584,6 +478,22 @@ export const DiscoverScreen: React.FC = () => {
   );
 };
 
+/**
+ * Map a stub marketplace listing detail to the CharacterProfileCard's shape
+ * (the card reads id/name/description/creator). No local character exists for
+ * fixture listings — this is a preview-feed projection.
+ */
+function listingDetailToDiscoverProfile(
+  detail: MarketplaceListingDetail,
+): CharacterProfile {
+  return {
+    id: detail.id,
+    name: detail.title,
+    description: detail.description,
+    creator: detail.creatorName,
+  } as unknown as CharacterProfile;
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   headerRightRow: {
@@ -592,6 +502,15 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   contentArea: { flex: 1 },
+  previewHintWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 2,
+  },
+  previewHint: {
+    fontStyle: 'italic',
+    opacity: 0.8,
+  },
   tabRow: {
     flexDirection: 'row',
     alignItems: 'center',

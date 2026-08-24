@@ -10,10 +10,10 @@
  * AIProfileScreen (primary Chat button), DiscoverScreen and MarketScreen so
  * every entry point behaves identically.
  *
- * HARD GATE: marketplace-listed characters that the current user has not
- * purchased (and does not own) are LOCKED — this function silently returns
- * without opening a chat. Payment is not implemented yet, so tapping Chat on
- * a paid AI is simply ignored everywhere.
+ * Paywall removed (A2 — client-side paywall was security theater): there is
+ * no lock. Any character with an entity can be chatted with; the stub
+ * marketplace has no local profile linkage, so listing acquisition happens on
+ * the listing detail screen instead.
  */
 
 import { createLogger } from '../utils/logger';
@@ -30,7 +30,6 @@ import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from './ChatPreferencesService';
 import { resolvePersonaId } from '../database/repositories/personas';
 import syncService from './SyncService';
-import { isChatLocked } from './MarketplacePurchaseService';
 import type { CharacterProfile } from '../database/models';
 
 const log = createLogger('[CharacterChatService]');
@@ -52,25 +51,11 @@ export interface CharacterChatNavigation {
  *
  * Returns null when the flow cannot complete (e.g. the profile has no usable
  * name). Throws on DB/sync errors so the caller can surface its own toast.
- *
- * @param currentUserId the signed-in cloud user id (used for the marketplace
- *   owner bypass). When omitted, marketplace locking still applies to
- *   non-purchased items.
  */
 export async function openCharacterChat(
   profile: CharacterProfile,
   navigation: CharacterChatNavigation,
-  currentUserId?: string | null,
 ): Promise<void> {
-  // 0. HARD GATE (payment not implemented yet): silently ignore the request
-  //    when the character is a marketplace listing the user has not purchased
-  //    and does not own. This guarantees ChatDetail can never be reached for
-  //    a locked AI from ANY entry point.
-  if (await isChatLocked(profile.id, currentUserId)) {
-    log.warn(`Chat locked for marketplace profile ${profile.id} — ignored.`);
-    return;
-  }
-
   // 1. Resolve the persona we chat as (only personas — never AI
   //    characters — are valid identities; falls back to 'user').
   const storedId = await ChatPreferencesService.getGlobalImpersonatedEntity();

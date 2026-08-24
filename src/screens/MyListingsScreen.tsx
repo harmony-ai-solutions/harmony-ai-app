@@ -1,6 +1,6 @@
 /**
  * MyListingsScreen — the user's published marketplace items: edit / delist /
- * re-list, sales counts, price or Free.
+ * re-list, sales counts, price or Free. Data from MarketplaceService.getMyListings().
  */
 import React, { useCallback, useState } from 'react';
 import { FlatList, View, StyleSheet, ActivityIndicator } from 'react-native';
@@ -9,19 +9,16 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/AppToastContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
-import { useAuth } from '../contexts/AuthContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ListingManageRow } from '../components/market/ListingManageRow';
 import { ThemedButton } from '../components/themed/ThemedButton';
-import marketplaceApiService from '../services/marketplace/MarketplaceApiService';
-import { listingDtoToCache } from '../services/marketplace/marketplaceTypes';
 import {
-  getCachedMyListings,
-  setCachedListingStatus,
-  type CachedListing,
-} from '../database/repositories/marketplace';
+  getMyListings,
+  delistListing,
+  type MarketplaceListingSummary,
+} from '../services/marketplace/MarketplaceService';
 
 export const MyListingsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -29,33 +26,19 @@ export const MyListingsScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { showToast } = useToast();
   const { showAlert } = useAppAlert();
-  const { user } = useAuth();
 
-  const [listings, setListings] = useState<CachedListing[]>([]);
+  const [listings, setListings] = useState<MarketplaceListingSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      // Cloud-first; when the backend isn't live yet (or offline), fall back
-      // to the locally-published listings so newly sold items appear here.
-      try {
-        const dto = await marketplaceApiService.getMine();
-        setListings(dto.map(listingDtoToCache));
-      } catch (err: any) {
-        if (err?.name === 'AuthExpiredError') {
-          // not fatal — still show local listings
-        }
-        if (user?.id) {
-          const local = await getCachedMyListings(user.id);
-          setListings(local);
-        } else {
-          setListings([]);
-        }
-      }
+      setListings(await getMyListings());
+    } catch {
+      setListings([]);
     } finally {
       setIsLoading(false);
     }
-  }, [user?.id]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -63,31 +46,26 @@ export const MyListingsScreen: React.FC = () => {
     }, [load]),
   );
 
-  const handleToggleStatus = async (listing: CachedListing) => {
-    const next = listing.status === 'active' ? 'delisted' : 'active';
-    try {
-      // Cloud delist when possible; local status update as the source of
-      // truth for local/offline listings (backend not live yet).
+  const handleToggleStatus = async (listing: MarketplaceListingSummary) => {
+    const isActive = listing.status === 'active' || listing.status === 'pending';
+    if (isActive) {
+      // Delist → soft-delete (status 'removed') via the stub backend.
       try {
-        if (next === 'delisted') {
-          await marketplaceApiService.delist(listing.id);
-        } else {
-          await marketplaceApiService.update(listing.id, {});
-        }
+        await delistListing(listing.id);
+        setListings(prev =>
+          prev.map(p => (p.id === listing.id ? { ...p, status: 'removed' as const } : p)),
+        );
+        showToast(t('delist'));
       } catch {
-        // backend unavailable → local-only is fine
+        showToast(t('publishFailed'));
       }
-      await setCachedListingStatus(listing.id, next);
-      setListings(prev =>
-        prev.map(p => (p.id === listing.id ? { ...p, status: next } : p)),
-      );
-      showToast(t(next === 'active' ? 'relist' : 'delist'));
-    } catch {
-      showToast(t('publishFailed'));
+      return;
     }
+    // Re-list: the stub backend has no re-activation API — honest error.
+    showToast(t('relistUnavailablePreview'));
   };
 
-  const confirmDelist = (listing: CachedListing) => {
+  const confirmDelist = (listing: MarketplaceListingSummary) => {
     showAlert(
       t('delist'),
       t('buyersKeepCopy'),
@@ -141,12 +119,11 @@ export const MyListingsScreen: React.FC = () => {
         renderItem={({ item }) => (
           <ListingManageRow
             title={item.title}
-            itemType={item.itemType}
+            itemType="character"
             priceSouls={item.priceSouls}
             status={item.status}
-            salesCount={item.salesCount}
             t={t}
-            onEdit={() => navigation.navigate('MarketplacePublish', { profileId: item.itemType === 'character' ? undefined : undefined, listingId: item.id })}
+            onEdit={() => navigation.navigate('MarketplacePublish', { listingId: item.id })}
             onToggleStatus={() => confirmDelist(item)}
           />
         )}

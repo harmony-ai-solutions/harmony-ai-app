@@ -1,16 +1,16 @@
 /**
  * ListingManageRow — a management row in My Listings (edit / delist / re-list /
- * sales count, price or Free badge).
+ * sales count, price or Free badge). Operates on the stub listing status
+ * vocabulary (`active | pending | removed` — Phase-1 service type).
  */
 import React from 'react';
 import { Pressable, View, Text, StyleSheet } from 'react-native';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { hexToRgba } from '../../utils/colorUtils';
-import { itemTypeIcon } from '../../services/marketplace/marketplaceTypes';
+import { itemTypeIcon, formatSoulPrice } from '../../utils/marketTypes';
 import { FreeBadge } from './FreeBadge';
-import { formatSoulPrice } from '../../services/MarketplacePurchaseService';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import type { MarketplaceItemType } from '../../database/repositories/marketplace';
+import type { MarketplaceItemType } from '../../utils/marketTypes';
 
 // Loosely-typed translate function — accepts i18next's TFunction.
 type TranslateFn = (key: string, opts?: Record<string, unknown>) => string;
@@ -19,8 +19,8 @@ interface ListingManageRowProps {
   title: string;
   itemType: MarketplaceItemType;
   priceSouls: number;
-  status: 'active' | 'delisted';
-  salesCount: number;
+  status: 'active' | 'pending' | 'removed';
+  salesCount?: number;
   t: TranslateFn;
   onEdit?: () => void;
   onToggleStatus?: () => void;
@@ -39,6 +39,13 @@ export const ListingManageRow: React.FC<ListingManageRowProps> = ({
   const { theme } = useAppTheme();
   if (!theme) return null;
   const accent = theme.colors.accent.primary;
+
+  const statusLabel =
+    status === 'active'
+      ? t('statusActive')
+      : status === 'pending'
+        ? t('statusPending')
+        : t('statusRemoved');
 
   return (
     <View
@@ -59,9 +66,9 @@ export const ListingManageRow: React.FC<ListingManageRowProps> = ({
           {title}
         </Text>
         <Text style={[styles.meta, { color: theme.colors.text.muted }]}>
-          {status === 'active' ? t('statusActive') : t('statusDelisted')} ·{' '}
-          {t('salesCountLabel', { count: salesCount })} ·{' '}
-          {priceSouls > 0 ? formatSoulPrice(priceSouls) : ''}
+          {statusLabel}
+          {salesCount != null ? ` · ${t('salesCountLabel', { count: salesCount })}` : ''}
+          {priceSouls > 0 ? ` · ${formatSoulPrice(priceSouls)}` : ''}
           {priceSouls === 0 ? <FreeBadge /> : null}
         </Text>
       </View>
@@ -78,7 +85,7 @@ export const ListingManageRow: React.FC<ListingManageRowProps> = ({
           style={[styles.iconBtn, { backgroundColor: hexToRgba(theme.colors.text.muted, 0.1) }]}
         >
           <Icon
-            name={status === 'active' ? 'close-circle-outline' : 'reload'}
+            name={status === 'active' || status === 'pending' ? 'close-circle-outline' : 'reload'}
             size={16}
             color={theme.colors.text.muted}
           />

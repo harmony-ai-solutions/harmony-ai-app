@@ -1,20 +1,22 @@
 /**
  * LibraryItemRow — a row in My Library showing an owned asset (purchase /
- * free / own badge + type icon + title).
+ * free / own badge + content-kind icon + title). Operates on the stub
+ * `ContentAsset` kind vocabulary (Phase-1 service type).
  */
 import React from 'react';
 import { Pressable, View, Text, StyleSheet } from 'react-native';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { hexToRgba } from '../../utils/colorUtils';
-import { itemTypeIcon } from '../../services/marketplace/marketplaceTypes';
+import { contentKindIcon } from '../../utils/marketTypes';
 import { FreeBadge } from './FreeBadge';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import type { MarketplaceItemType } from '../../database/repositories/marketplace';
 
 interface LibraryItemRowProps {
   title: string;
-  itemType: MarketplaceItemType;
-  kind: 'purchase' | 'free' | 'own';
+  /** Delivered asset kind ('character_card' | 'text' | 'theme'). */
+  kind: 'character_card' | 'text' | 'theme';
+  /** How the entry was obtained (badge). */
+  acquiredKind?: 'purchase' | 'free' | 'own';
   acquiredLabel?: string;
   onPress?: () => void;
   t?: (key: string) => string;
@@ -22,8 +24,8 @@ interface LibraryItemRowProps {
 
 export const LibraryItemRow: React.FC<LibraryItemRowProps> = ({
   title,
-  itemType,
   kind,
+  acquiredKind,
   acquiredLabel,
   onPress,
   t,
@@ -33,9 +35,9 @@ export const LibraryItemRow: React.FC<LibraryItemRowProps> = ({
   const accent = theme.colors.accent.primary;
 
   const kindLabel =
-    kind === 'purchase'
+    acquiredKind === 'purchase'
       ? t?.('purchaseBadge') ?? 'Purchase'
-      : kind === 'free'
+      : acquiredKind === 'free'
         ? 'FREE'
         : t?.('ownedBadge') ?? 'Owned';
 
@@ -54,7 +56,7 @@ export const LibraryItemRow: React.FC<LibraryItemRowProps> = ({
           ]}
         >
           <View style={[styles.iconWrap, { backgroundColor: hexToRgba(accent, 0.14) }]}>
-            <Icon name={itemTypeIcon(itemType)} size={20} color={accent} />
+            <Icon name={contentKindIcon(kind)} size={20} color={accent} />
           </View>
 
           <View style={styles.body}>
@@ -68,7 +70,7 @@ export const LibraryItemRow: React.FC<LibraryItemRowProps> = ({
             ) : null}
           </View>
 
-          {kind === 'free' ? (
+          {acquiredKind === 'free' ? (
             <FreeBadge />
           ) : (
             <View style={styles.badgeWrap}>

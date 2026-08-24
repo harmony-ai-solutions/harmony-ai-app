@@ -16,7 +16,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
-import { MARKETPLACE_ITEM_TYPES, itemTypeIcon, itemTypeLabelKey } from '../../services/marketplace/marketplaceTypes';
+import { MARKETPLACE_ITEM_TYPES, itemTypeIcon, itemTypeLabelKey } from '../../utils/marketTypes';
 
 export type MarketFilterKey = 'all' | 'free' | (typeof MARKETPLACE_ITEM_TYPES)[number];
 

@@ -1,7 +1,8 @@
 /**
- * MarketplaceItemDetailScreen — preview any marketplace item and Acquire it
- * (Buy for N SOULs or Get Free). On acquire, the delivered copy is
- * materialized (character clone → AIProfile; text/theme → My Library).
+ * MarketplaceItemDetailScreen — preview any marketplace listing and Acquire it
+ * (Buy for N SOULs or Get Free). The stub marketplace delivers a content asset
+ * into the library on success (My Library); there is no local character clone
+ * materialization — acquisition is honest: owned state flips ONLY on success.
  */
 
 import React, { useCallback, useState } from 'react';
@@ -11,14 +12,12 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
-  Image,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/AppToastContext';
-import { useAuth } from '../contexts/AuthContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
@@ -26,11 +25,15 @@ import { ThemedButton } from '../components/themed/ThemedButton';
 import { FreeBadge } from '../components/market/FreeBadge';
 import { hexToRgba } from '../utils/colorUtils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { createDataURL } from '../database/base64';
-import { getCachedListing, hasOwnedAsset } from '../database/repositories/marketplace';
-import { acquireItem, MarketInsufficientError } from '../services/marketplace/acquireItem';
-import { itemTypeIcon } from '../services/marketplace/marketplaceTypes';
-import { formatSoulPrice } from '../services/MarketplacePurchaseService';
+import {
+  getListing,
+  getLibrary,
+  getMyListings,
+  acquire,
+  type MarketplaceListingDetail,
+} from '../services/marketplace/MarketplaceService';
+import { InsufficientCreditsError } from '../services/stub/StubServiceError';
+import { itemTypeIcon, formatSoulPrice } from '../utils/marketTypes';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type RouteParams = RouteProp<RootStackParamList, 'MarketplaceItemDetail'>;
@@ -43,19 +46,25 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { showToast } = useToast();
   const { showAlert } = useAppAlert();
-  const { user } = useAuth();
   const { bottom: safeBottom } = useSafeAreaInsets();
 
-  const [listing, setListing] = useState<any>(null);
+  const [listing, setListing] = useState<MarketplaceListingDetail | null>(null);
   const [owned, setOwned] = useState(false);
+  const [isSeller, setIsSeller] = useState(false);
   const [loading, setLoading] = useState(true);
   const [acquiring, setAcquiring] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const cached = await getCachedListing(listingId);
-      setListing(cached);
-      setOwned(await hasOwnedAsset(listingId));
+      const detail = await getListing(listingId);
+      setListing(detail);
+      // Owned state is derived honestly from the stub library (never assumed).
+      const library = await getLibrary();
+      setOwned(library.some(e => e.listingId === listingId));
+      const mine = await getMyListings();
+      setIsSeller(mine.some(l => l.id === listingId));
+    } catch (err) {
+      setListing(null);
     } finally {
       setLoading(false);
     }
@@ -69,42 +78,27 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
     if (!listing) return;
     setAcquiring(true);
     try {
-      await runAcquire();
+      await acquire(listing.id);
+      // Owned flips ONLY on success — the D1-1 fake-success `finally` bug is
+      // gone by construction.
+      setOwned(true);
+      showToast(t('acquireSuccess').replace('{{name}}', listing.title));
+      navigation.navigate('MyLibrary');
     } catch (err) {
-      if (err instanceof MarketInsufficientError) {
-        showToast(t('insufficientBody'));
-      } else if ((err as { name?: string })?.name === 'AuthExpiredError') {
-        showToast(t('acquireAuthRequired'));
+      if (err instanceof InsufficientCreditsError) {
+        // Honest quota error — the user is short; buying Souls is coming soon.
+        showAlert(
+          t('insufficientTitle'),
+          t('insufficientSoulsBuySoon', { available: err.soulCreditsAvailable ?? 0 }),
+          [{ text: t('common:ok') }],
+          { icon: 'diamond-stone' },
+        );
       } else {
         showToast(t('acquireFailed'));
       }
     } finally {
       setAcquiring(false);
-      setOwned(true);
     }
-  };
-
-  /** The actual acquire + post-nav logic (extracted for the confirm dialog). */
-  const runAcquire = async () => {
-    if (!listing) return;
-    const outcome = await acquireItem(listing.id, user?.id, {
-        onInsufficient: () => {
-          showToast(t('insufficientBody'));
-        },
-      });
-
-      // Post-acquire navigation.
-      if (outcome.dest === 'character' && outcome.profileId) {
-        showToast(
-          (t('acquireSuccess')).replace('{{name}}', listing.title),
-        );
-        navigation.navigate('AIProfile', { profileId: outcome.profileId });
-      } else {
-        showToast(
-          (outcome.status === 'free' ? t('freeSuccess') : t('acquireSuccess')).replace('{{name}}', listing.title),
-        );
-        navigation.navigate('MyLibrary');
-      }
   };
 
   const handleAcquire = async () => {
@@ -152,15 +146,15 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
     );
   }
 
+  const typeIcon = itemTypeIcon('character'); // stub feed = character cards
   const priceText = listing.priceSouls > 0 ? formatSoulPrice(listing.priceSouls) : t('priceFree');
-  const isSeller = listing.sellerUserId && listing.sellerUserId === user?.id;
   const isFree = listing.priceSouls === 0;
 
   return (
     <ThemedView variant="base" style={styles.container}>
       <ScreenHeader
         title={listing.title}
-        subtitle={t('itemType' + cap(listing.itemType))}
+        subtitle={t('itemTypeCharacter')}
         onBack={() => navigation.goBack()}
       />
 
@@ -173,24 +167,14 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
           ]}
         >
           <View style={[styles.previewMedia, { borderColor: hexToRgba(accent, 0.3) }]}>
-            {listing.previewImageData && listing.previewMimeType ? (
-              <Image
-                source={{
-                  uri: createDataURL(listing.previewImageData, listing.previewMimeType),
-                }}
-                style={styles.previewImage}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={[styles.previewIcon, { backgroundColor: hexToRgba(accent, 0.14) }]}>
-                <Icon name={itemTypeIcon(listing.itemType)} size={40} color={accent} />
-              </View>
-            )}
+            <View style={[styles.previewIcon, { backgroundColor: hexToRgba(accent, 0.14) }]}>
+              <Icon name={typeIcon} size={40} color={accent} />
+            </View>
             {/* Type tag overlay */}
             <View style={[styles.typeTag, { backgroundColor: 'rgba(11,11,16,0.78)' }]}>
-              <Icon name={itemTypeIcon(listing.itemType)} size={11} color={accent} />
+              <Icon name={typeIcon} size={11} color={accent} />
               <Text style={[styles.typeTagText, { color: accent }]}>
-                {t('itemType' + cap(listing.itemType))}
+                {t('itemTypeCharacter')}
               </Text>
             </View>
           </View>
@@ -200,15 +184,15 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
           {isFree ? <FreeBadge label={t('listFree')} /> : null}
         </View>
 
-        {/* Summary */}
-        {listing.summary ? (
+        {/* Description (the stub detail's full text) */}
+        {listing.description ? (
           <Text style={[styles.summary, { color: theme.colors.text.primary }]}>
-            {listing.summary}
+            {listing.description}
           </Text>
         ) : null}
 
         {/* Tags */}
-        {listing.tags?.length > 0 && (
+        {listing.tags.length > 0 && (
           <View style={styles.tags}>
             {listing.tags.slice(0, 6).map((tag: string) => (
               <View
@@ -220,30 +204,6 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
             ))}
           </View>
         )}
-
-        {/* Preview text / unlock hint */}
-        {listing.previewText ? (
-          <View
-            style={[
-              styles.textPreview,
-              { backgroundColor: hexToRgba(baseHex, 0.4), borderColor: hexToRgba(accent, 0.2) },
-            ]}
-          >
-            <Text style={[{ color: theme.colors.text.muted, fontSize: 14 }]}>
-              {listing.previewText}
-              {!owned && listing.priceSouls > 0 ? '…' : ''}
-            </Text>
-            {!owned && listing.priceSouls > 0 ? (
-              <Text style={[styles.unlockHint, { color: theme.colors.text.disabled }]}>
-                {t('unlockHint')}
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
-
-        <Text style={[styles.meta, { color: theme.colors.text.muted }]}>
-          {t('salesCountLabel', { count: listing.salesCount })}
-        </Text>
       </ScrollView>
 
       {/* Sticky acquire bar */}
@@ -274,10 +234,6 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
     </ThemedView>
   );
 };
-
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
 
 export default MarketplaceItemDetailScreen;
 
@@ -317,15 +273,6 @@ const styles = StyleSheet.create({
     position: 'relative',
     marginBottom: 12,
   },
-  previewImage: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: '100%',
-    height: '100%',
-  },
   typeTag: {
     position: 'absolute',
     bottom: 10,
@@ -361,21 +308,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   tagText: { fontSize: 12, fontWeight: '600' },
-  textPreview: {
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 14,
-    marginBottom: 12,
-  },
-  unlockHint: {
-    marginTop: 8,
-    fontSize: 12,
-    fontStyle: 'italic',
-  },
-  meta: {
-    fontSize: 13,
-    marginTop: 4,
-  },
   acquireBar: {
     position: 'absolute',
     left: 0,

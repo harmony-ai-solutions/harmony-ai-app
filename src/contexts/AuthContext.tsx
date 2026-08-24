@@ -29,7 +29,6 @@ import AuthService, {
 import { cloudSessionService } from '../services/cloud/CloudSessionService';
 import DeviceAuthService from '../services/cloud/DeviceAuthService';
 import { startSoulbitsTokenSync } from '../services/cloud/soulbitsTokenSync';
-import { claimSignupBonus } from '../database/repositories/marketplace';
 import { createLogger } from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -165,15 +164,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   // ── Marketplace library hydration (non-blocking) ─────────────────────
-  // When the user is authenticated, fetch their account-bound marketplace
-  // library (everything purchased / grabbed free) and cache it locally so it
-  // follows them on any device. Never blocks authentication or the UI.
-  useEffect(() => {
-    if (status !== 'authenticated' || !user?.id) return;
-    import('../services/marketplace/librarySync').then(({ syncLibraryToLocal }) =>
-      syncLibraryToLocal(user.id).catch(() => {}),
-    );
-  }, [status, user?.id]);
+  // REMOVED in Phase 2 (A2): the in-memory stub backend owns the library
+  // (MarketplaceService.getLibrary()); there is no local cache to hydrate and
+  // the doomed content_library/marketplace_ownership_cache sidecar tables are
+  // deleted in Phase 4. MyLibraryScreen loads from the service on focus.
 
   // ── Listen for auth:changed events (login/refresh) ────────────────────
   useEffect(() => {
@@ -223,21 +217,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       await AuthService.register(email, password, displayName);
       // Registration does NOT return a token — user must verify email.
       //
-      // One-time first-signup gift: 50 free SOUL, granted exactly once per
-      // install. The claim is atomic + idempotent (soul_wallet compares-and-
-      // sets a flag inside a transaction), so a repeated submit or a second
-      // registration on the same device can never double-grant.
-      try {
-        const { claimed, balance } = await claimSignupBonus();
-        log.info(
-          claimed
-            ? `First-signup bonus granted. New SOUL balance: ${balance}`
-            : `Signup bonus already claimed. SOUL balance: ${balance}`,
-        );
-      } catch (err) {
-        // The gift is best-effort — never fail the registration because of it.
-        log.warn('Failed to claim signup soul bonus:', err);
-      }
+      // The one-time first-signup SOUL bonus flow is REMOVED (A2): the wallet
+      // stub seeds a fixed 50-soul balance on every launch, so there is no
+      // bonus to claim.
     },
     [],
   );
