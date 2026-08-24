@@ -57,7 +57,7 @@ flowchart TD
 
 Track the completion of each phase as implementation progresses:
 
-- [ ] **Phase 1: Stub Service Layer** ([1-StubServices.md](1-StubServices.md))
+- [x] **Phase 1: Stub Service Layer** ([1-StubServices.md](1-StubServices.md))
 - [ ] **Phase 2: Marketplace & Wallet Rewiring** ([2-MarketplaceWalletRewiring.md](2-MarketplaceWalletRewiring.md))
 - [ ] **Phase 3: Social, Notifications & Profile Rewiring** ([3-SocialProfileRewiring.md](3-SocialProfileRewiring.md))
 - [ ] **Phase 4: Schema Surgery & Repo Removal** ([4-SchemaSurgery.md](4-SchemaSurgery.md))

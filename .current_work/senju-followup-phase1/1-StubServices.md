@@ -133,8 +133,17 @@ New suites, mocking the stub-backend module boundary (pattern: `deviceAuth.test.
 
 ## Verification
 
-- [ ] `npx tsc --noEmit` — 0 errors
-- [ ] `npm test` — all suites green (new suites + existing 84)
-- [ ] `npx gitnexus analyze` then `gitnexus_detect_changes()` — new symbols only, no unexpected touched flows
-- [ ] Commit: `feat: add in-memory stub service layer for marketplace, wallet, social and notifications`
-- [ ] Phase doc checklist updated; summary.md Implementation Status ticked
+- [x] `npx tsc --noEmit` — 0 errors
+- [x] `npm test` — all suites green (unit 88 suites / 861 tests incl. 4 new; integration 10 suites / 50 passed + 1 skipped)
+- [x] `npx gitnexus analyze` then `gitnexus_detect_changes()` — new symbols only (274 new; index 7110→7384), no unexpected touched flows
+- [x] Commit: `feat: add in-memory stub service layer for marketplace, wallet, social and notifications`
+- [x] Phase doc checklist updated; summary.md Implementation Status ticked
+
+### Implementation notes (deviations, all minor)
+
+- `getPosts` returns `Promise<StubPost[]>` (doc's singular return type was a typo — a feed is a list).
+- `publishListing` → status `'pending'` (moderation semantics; doc didn't specify) — pending listings excluded from the public feed.
+- `InsufficientCreditsError extends MarketplaceError`; all domain error classes live in `StubServiceError.ts` to avoid import cycles.
+- `upgradeUrl` on 402 uses placeholder `https://harmony.ai/souls` (backend owns the real URL — noted for 20-Backend-Concept).
+- `NotificationService` lives at `src/services/social/NotificationService.ts` (doc allowed either location); list ops synchronous, `registerPushToken` async no-op.
+- Stub backends expose `__resetForTests()`; tests mock `stubBackendUtils` (instant latency + deterministic failures).
