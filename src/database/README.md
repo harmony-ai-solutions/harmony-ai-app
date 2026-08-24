@@ -126,7 +126,7 @@ For operations with multiple statements (like updating multiple rows):
 
 ```typescript
 // ✅ CORRECT: Nested callbacks for sequential operations
-export async function setPrimaryImage(profileId: string, imageId: number): Promise<void> {
+export async function setPrimaryImage(profileId: string, imageId: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     db.transaction(
       (tx) => {

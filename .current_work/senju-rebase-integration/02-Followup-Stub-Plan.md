@@ -39,7 +39,8 @@
 - Notifications: model `registerPushToken(token)` in the interface now (engine's `device_push_tokens` + `DeviceAuthService.registerDevice` pushToken param already anticipate it); deep-link parsing per `deviceDeepLink.ts` pattern.
 
 ### A4 User profile
-- **[directive] Cloud-first:** drop `UserProfileStore` AsyncStorage shadow store; `GET /v1/auth/me` is the read path; `PATCH /v1/auth/me` + avatar upload endpoint go into the backend concept (new doc: `20-Backend-Concept-Marketplace-Profile.md` — **proposed deliverable**); optional later: read-through cache with **cloud-wins** precedence.
+- **[directive] Cloud-first:** drop `UserProfileStore` AsyncStorage shadow store; `GET /v1/auth/me` is the read path; optional later: read-through cache with **cloud-wins** precedence.
+- **Backend reality check (2026-08-24, cross-verified):** `PATCH /v1/auth/me` **already exists** in soulbits-cloud-backend (`cmd/auth-service/main.go` route → `handlers/me.go UpdateProfile`) but accepts **`display_name` only**, and GET returns `id/email/display_name/email_verified/created_at` (no username/bio/avatar). The backend concept (new doc: `20-Backend-Concept-Marketplace-Profile.md` — **proposed deliverable**) is therefore an **extension** of the existing PATCH (add `username`/`bio`, avatar upload endpoint + `avatar_url` in responses) — not a new-endpoint design.
 
 ### A5 Tests
 Per 03 §8: unit tests next to services (mock backend module like `deviceAuth.test.ts`), no new integration harness needs.
