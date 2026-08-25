@@ -18,6 +18,7 @@ import {
   getCharacterImage,
   getCharacterImages,
   deleteCharacterImage,
+  updateCharacterImage,
   setPrimaryImage,
   getPrimaryImage,
   imageToDataURL,
@@ -289,6 +290,40 @@ describe('characters repository', () => {
       const primary = await getPrimaryImage(profileId);
       expect(primary).not.toBeNull();
       expect(primary!.id).toBe(id2);
+    });
+  });
+
+  describe('updateCharacterImage', () => {
+    it('updates caption/order/primary IN PLACE — the row id stays stable (Phase 8 image-churn gate)', async () => {
+      const profileId = 'profile-img-upd-caption';
+      await createMinimalProfile(profileId);
+      const now = new Date();
+      const imageId = await createCharacterImage({
+        character_profile_id: profileId,
+        image_data: PNG_MAGIC_BASE64,
+        mime_type: 'image/png',
+        description: 'Original caption',
+        is_primary: false,
+        display_order: 1,
+        vl_model_interpretation: '',
+        vl_model: '',
+        updated_at: now,
+      });
+
+      // Simulate the diff-based reconcile updating only changed fields.
+      await updateCharacterImage({
+        id: imageId,
+        description: 'New caption',
+        display_order: 2,
+        is_primary: true,
+      });
+
+      const image = await getCharacterImage(imageId);
+      expect(image).not.toBeNull();
+      expect(image!.id).toBe(imageId); // id preserved — no churn
+      expect(image!.description).toBe('New caption');
+      expect(image!.display_order).toBe(2);
+      expect(image!.is_primary).toBe(true);
     });
   });
 

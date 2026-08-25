@@ -15,7 +15,7 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import {
   ImportReviewSheet,
   buildImportDetectionSummary,
-} from '../ImportReviewSheet';
+} from '../editor-sections/ImportReviewSheet';
 import type { TavernCardV2 } from '../../../utils/charactercard/types';
 
 jest.mock('react-i18next', () => ({

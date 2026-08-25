@@ -70,8 +70,8 @@ import type { TavernCardV2 } from '../utils/charactercard/types';
 import {
   ImportReviewSheet,
   buildImportDetectionSummary,
-} from '../components/character-card/ImportReviewSheet';
-import type { ImportDetectionSummary } from '../components/character-card/ImportReviewSheet';
+} from '../components/character-card/editor-sections/ImportReviewSheet';
+import type { ImportDetectionSummary } from '../components/character-card/editor-sections/ImportReviewSheet';
 import {
   createEntity,
   createEntityModuleMapping,
@@ -701,7 +701,7 @@ export const CharactersScreen: React.FC = () => {
       await persistImported(pendingImport.mapped);
       const profileId = pendingImport.mapped.profile.id;
       await closeReviewAndRefresh();
-      navigation.navigate('CharacterProfileEdit', { profileId });
+      navigation.navigate('CreateAI', { editProfileId: profileId });
     } catch (e) {
       handleImportError(e);
     }
@@ -714,7 +714,7 @@ export const CharactersScreen: React.FC = () => {
       await persistImported(pendingImport.mapped);
       const profileId = pendingImport.mapped.profile.id;
       await closeReviewAndRefresh();
-      navigation.navigate('CharacterProfileEdit', { profileId });
+      navigation.navigate('CreateAI', { editProfileId: profileId });
     } catch (e) {
       handleImportError(e);
     }

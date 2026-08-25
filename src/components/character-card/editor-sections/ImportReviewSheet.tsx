@@ -2,6 +2,10 @@
  * ImportReviewSheet (3-5) — post-import review, shown AFTER the card parses and
  * BEFORE it persists.
  *
+ * Moved here in Phase 8 (Track C) so the Characters-screen import flow
+ * (`CharactersScreen` → `parseCardFile` → `ImportReviewSheet` → persist)
+ * survives the deletion of the comparison-only editor screen (Phase 8).
+ *
  * Shows a ✓/⚠ detection summary (greeting? alt-greetings? lorebook? tags?
  * provenance) with actions: Cancel / "Review & edit fields" (deep-link the
  * editor) / Save; and a prominent "Generate a greeting" CTA + "author one"
@@ -13,11 +17,11 @@ import React from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTranslation } from 'react-i18next';
-import { useAppTheme } from '../../contexts/ThemeContext';
-import { ThemedText } from '../themed/ThemedText';
-import { ThemedButton } from '../themed/ThemedButton';
-import { SheetModal } from './SheetModal';
-import type { TavernCardV2 } from '../../utils/charactercard/types';
+import { useAppTheme } from '../../../contexts/ThemeContext';
+import { ThemedText } from '../../themed/ThemedText';
+import { ThemedButton } from '../../themed/ThemedButton';
+import { SheetModal } from '../SheetModal';
+import type { TavernCardV2 } from '../../../utils/charactercard/types';
 
 export interface ImportProvenanceSummary {
   spec?: string | null;

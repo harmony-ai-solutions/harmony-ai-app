@@ -180,7 +180,7 @@ jest.mock('../../services/CharacterCardImportService', () => ({
   },
 }));
 
-jest.mock('../../components/character-card/ImportReviewSheet', () => ({
+jest.mock('../../components/character-card/editor-sections/ImportReviewSheet', () => ({
   __esModule: true,
   ImportReviewSheet: () => null,
   buildImportDetectionSummary: () => ({}),
