@@ -225,6 +225,64 @@ export async function getRecentPhoneInteractions(
 }
 
 /**
+ * One row per phone conversation (deduped by participant_key) for the chat
+ * list's paginated load-more. Recency is the conversation's LAST MESSAGE
+ * `created_at` (not `interactions.last_activity_at`), so a conversation whose
+ * interaction row is old but which just received a message sorts/pages by the
+ * message, matching the in-list sort (F6/O11).
+ *
+ * Conversations without any message sort last (NULL `last_message_at`).
+ * `interaction_id` is the lexicographically-greatest interaction id of the
+ * participant_key group (all rows of a key share scope/participants, so any
+ * id navigates to the same conversation — ChatDetail resolves via
+ * participantKey).
+ */
+export interface PhoneConversationPageRow {
+  interactionId: string;
+  interactionScope: string;
+  participantKey: string;
+  participantIds: string;
+}
+
+export async function getPhoneConversationsPage(
+  entity_id: string,
+  options: { limit: number; offset: number },
+): Promise<PhoneConversationPageRow[]> {
+  const db = getDatabase();
+
+  const [results] = await db.executeSql(
+    `SELECT MAX(i.id) AS interaction_id,
+            i.interaction_scope AS interaction_scope,
+            i.participant_key AS participant_key,
+            i.participant_ids AS participant_ids
+     FROM interactions i
+     LEFT JOIN conversation_messages cm
+            ON cm.interaction_id = i.id AND cm.deleted_at IS NULL
+     WHERE i.entity_id = ?
+       AND i.presence_type = 'phone'
+       AND i.deleted_at IS NULL
+       AND i.participant_key IS NOT NULL
+       AND i.participant_key != ''
+     GROUP BY i.participant_key
+     ORDER BY MAX(cm.created_at) DESC, MAX(i.updated_at) DESC
+     LIMIT ? OFFSET ?`,
+    [entity_id, options.limit, options.offset],
+  );
+
+  const rows: PhoneConversationPageRow[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    const row = results.rows.item(i);
+    rows.push({
+      interactionId: row.interaction_id,
+      interactionScope: row.interaction_scope,
+      participantKey: row.participant_key,
+      participantIds: row.participant_ids,
+    });
+  }
+  return rows;
+}
+
+/**
  * Check if an entity has any phone interactions (regardless of status or messages).
  * Used to determine if an entity should be shown in the "no messages yet" section.
  *

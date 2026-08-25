@@ -1702,7 +1702,13 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       );
       if (participantKey && !this.openConversationKeys.has(participantKey)) {
         try {
-          await incrementConversationUnread(participantKey, event.entity_id ?? null);
+          // Muted conversations stay visible in the chat list but never bump
+          // the unread badge (O10/F11) — the muted flag is the user's explicit
+          // "don't interrupt me" signal.
+          const settings = await getChatConversationSettings(participantKey);
+          if (!settings.muted) {
+            await incrementConversationUnread(participantKey, event.entity_id ?? null);
+          }
         } catch (error) {
           log.error('Failed to increment unread count:', error);
         }

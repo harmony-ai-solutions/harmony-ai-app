@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -23,8 +24,11 @@ import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigatio
 import { getAllEntities } from '../database/repositories/entities';
 import { resolvePersonaId } from '../database/repositories/personas';
 import {
-  getRecentPhoneInteractions,
+  getPhoneConversationsPage,
+  PhoneConversationPageRow,
   getLastInteractionMessage,
+  deriveScopeFromParticipants,
+  deriveParticipantKey,
 } from '../database/repositories/interactions';
 import {
   getPrimaryImage,
@@ -36,6 +40,7 @@ import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
+import { getBlockedUserIds } from '../services/social/SocialService';
 import { hexToRgba } from '../utils/colorUtils';
 import { InfoModal } from '../components/modals/InfoModal';
 import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
@@ -46,14 +51,14 @@ import { CharacterProfile } from '../database/models';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { createLogger } from '../utils/logger';
 import {
+  getChatConversationSettings,
   getChatConversationSettingsBatch,
   setConversationPinned,
   setConversationArchived,
   setConversationMuted,
   setConversationDisabled,
-  incrementConversationUnread,
+  setConversationUnread,
   clearConversationUnread,
-  listConversationsByFlag,
 } from '../database/repositories/chatConversationSettings';
 import { deleteConversationByParticipantKey } from '../database/repositories/conversation_messages';
 import {
@@ -64,7 +69,6 @@ import { useAppAlert } from '../contexts/AppAlertContext';
 import { useToast } from '../contexts/AppToastContext';
 import {
   showBubble,
-  hasBubblePermission,
   requestBubblePermission,
   getActiveBubbleConversations,
   setBubbleUnreadCount,
@@ -84,6 +88,28 @@ function syncBubbleUnreadBadge(listItems: ChatListItem[]): void {
     const match = listItems.find(item => item.participantKey === bubble.participantKey);
     setBubbleUnreadCount(match?.unreadCount ?? 0, bubble.participantKey);
   }
+}
+
+/** Conversations per page for the chat list's offset pagination (F6). */
+const CHAT_LIST_PAGE_SIZE = 20;
+
+/** Debounce window for full chat-list reloads after live session events. */
+const CHAT_LIST_RELOAD_DEBOUNCE_MS = 400;
+
+/**
+ * Sort conversations: pinned first, then by last-message time (newest first);
+ * conversations without messages sort to the bottom. Recency is the last
+ * message's `created_at` — the SAME source the pagination query uses (F6/O11).
+ */
+function sortListItems(items: ChatListItem[]): ChatListItem[] {
+  items.sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    if (!a.lastMessageTime && !b.lastMessageTime) return 0;
+    if (!a.lastMessageTime) return 1;
+    if (!b.lastMessageTime) return -1;
+    return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
+  });
+  return items;
 }
 
 interface ChatListItem {
@@ -128,8 +154,8 @@ export const ChatListScreen: React.FC = () => {
   const { t } = useTranslation('chatList');
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
   const [archivedList, setArchivedList] = useState<ChatListItem[]>([]);
-  const [_loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [infoModalVisible, setInfoModalVisible] = useState(false);
   // "Start a new chat" picker (＋ FAB) — lists AI characters with a chat icon
   const [pickerVisible, setPickerVisible] = useState(false);
@@ -156,41 +182,60 @@ export const ChatListScreen: React.FC = () => {
   const impersonatedEntityIdRef = useRef(impersonatedEntityId);
   impersonatedEntityIdRef.current = impersonatedEntityId;
 
-  const loadChatList = async (activeEntityId: string) => {
-    try {
-      setLoading(true);
+  // Full (main + archived) list mirror for the live-update handlers — the
+  // event subscription reads it synchronously without re-subscribing.
+  const chatListRef = useRef<ChatListItem[]>([]);
 
+  // Offset pagination (F6): pages already loaded, whether another page may
+  // exist, and an in-flight guard so onEndReached cannot stack fetches.
+  const listPageRef = useRef(0);
+  const listHasMoreRef = useRef(true);
+  const loadingMoreRef = useRef(false);
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Build chat-list rows from one page of conversation rows (deduped by
+   * participant_key). Applies the blocked-users filter (F5) at the row level:
+   * private conversations whose partner is blocked are skipped, and group
+   * conversations containing a blocked participant are skipped. Stub-gap
+   * tolerant — `blockedIds` is usually empty in stub fixtures.
+   */
+  const buildListItems = useCallback(
+    async (
+      activeEntityId: string,
+      rows: PhoneConversationPageRow[],
+      blockedIds: Set<string>,
+    ): Promise<ChatListItem[]> => {
       // Get all entities for display info lookups
       const entities = await getAllEntities();
       const entityMap = new Map(entities.map(e => [e.id, e]));
 
-      // Get recent phone interactions per D-15
-      const interactions = await getRecentPhoneInteractions(activeEntityId);
-
       const listItems: ChatListItem[] = [];
       const seenPrivateKeys = new Set<string>(); // For deduping private interactions per D-01
 
-      for (const interaction of interactions) {
+      for (const row of rows) {
         let participantIds: string[];
         try {
-          participantIds = JSON.parse(interaction.participant_ids);
+          participantIds = JSON.parse(row.participantIds);
         } catch {
           participantIds = [];
         }
 
-        const scope = interaction.interaction_scope;
+        const scope = row.interactionScope;
+        const participantKey = row.participantKey || '';
+        if (!participantKey) continue;
 
         if (scope === 'private') {
           // Private interactions: group by participant_key per D-01
-          const participantKey = interaction.participant_key || '';
-          if (!participantKey) continue;
-
           if (seenPrivateKeys.has(participantKey)) continue;
           seenPrivateKeys.add(participantKey);
 
           // Find the partner entity (the one that's NOT the impersonated entity)
           const partnerEntityId = participantIds.find(id => id !== activeEntityId);
           if (!partnerEntityId) continue;
+
+          // F5: blocked users do not appear in the chat list.
+          if (blockedIds.has(partnerEntityId)) continue;
 
           // Defensive: skip interactions whose partner entity no longer exists.
           // getAllEntities() only returns non-deleted entities, so a partner
@@ -241,7 +286,7 @@ export const ChatListScreen: React.FC = () => {
 
           // Use the most recent interactionId for this participant_key
           listItems.push({
-            interactionId: interaction.id,
+            interactionId: row.interactionId,
             entityId: partnerEntityId,
             characterId: entity?.character_profile_id ?? null,
             characterName,
@@ -260,8 +305,11 @@ export const ChatListScreen: React.FC = () => {
             unreadCount: 0,
           });
         } else if (scope === 'group') {
-          // Group interactions: show as separate entries per D-01
-          const participantKey = interaction.participant_key || '';
+          // Group interactions: one entry per participant set per D-01 (the
+          // page query already dedupes by participant_key).
+
+          // F5: skip group conversations containing a blocked participant.
+          if (participantIds.some(id => blockedIds.has(id))) continue;
 
           // Get last message preview
           const lastMsg = await getLastInteractionMessage(activeEntityId, participantKey);
@@ -295,7 +343,7 @@ export const ChatListScreen: React.FC = () => {
           const groupName = displayNames.join(', ');
 
           listItems.push({
-            interactionId: interaction.id,
+            interactionId: row.interactionId,
             entityId: '', // No single partner for groups
             characterId: null,
             characterName: groupName,
@@ -330,73 +378,247 @@ export const ChatListScreen: React.FC = () => {
         }
       }
 
-      // Sort: pinned first (by last message time), then the rest by last
-      // message time (newest first); entities without messages sort to bottom.
-      listItems.sort((a, b) => {
-        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-        if (!a.lastMessageTime && !b.lastMessageTime) return 0;
-        if (!a.lastMessageTime) return 1;
-        if (!b.lastMessageTime) return -1;
-        return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
+      return listItems;
+    },
+    [t],
+  );
+
+  /** Read the blocked-user set, tolerant of stub gaps / failures (F5). */
+  const loadBlockedUserIds = useCallback(async (): Promise<Set<string>> => {
+    try {
+      return await getBlockedUserIds();
+    } catch (error) {
+      log.warn('Failed to load blocked users — chat list filter skipped:', error);
+      return new Set<string>();
+    }
+  }, []);
+
+  /**
+   * Full chat-list (re)load — page 0 of the paginated conversation query
+   * (F6). Resets pagination state. The focus effect awaits persona resolution
+   * (F7) before calling this so the first load never flashes the default
+   * 'user' perspective.
+   */
+  const loadChatList = useCallback(
+    async (activeEntityId: string) => {
+      try {
+        const blockedIds = await loadBlockedUserIds();
+
+        listPageRef.current = 0;
+        listHasMoreRef.current = true;
+
+        const rows = await getPhoneConversationsPage(activeEntityId, {
+          limit: CHAT_LIST_PAGE_SIZE,
+          offset: 0,
+        });
+
+        const items = await buildListItems(activeEntityId, rows, blockedIds);
+        const sorted = sortListItems(items);
+        chatListRef.current = sorted;
+
+        // Disabled conversations STAY in the main list (with a shield
+        // indicator) — disabling only stops messaging. Archived conversations
+        // move to the separate archived section below the main list.
+        setChatList(sorted.filter(item => !item.archived));
+        setArchivedList(sorted.filter(item => item.archived));
+
+        // Track how many pages are loaded for load-more (1 page now loaded).
+        listPageRef.current = rows.length === CHAT_LIST_PAGE_SIZE ? 1 : 0;
+        listHasMoreRef.current = rows.length === CHAT_LIST_PAGE_SIZE;
+
+        // Keep the floating bubble's unread badge in sync with the
+        // conversation that currently has the bubble shown (if any).
+        syncBubbleUnreadBadge(sorted);
+      } catch (error) {
+        log.error('Failed to load chat list:', error);
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [buildListItems, loadBlockedUserIds],
+  );
+
+  /** Load the next page of conversations and append (offset pagination, F6). */
+  const loadMoreChatList = useCallback(async () => {
+    if (loadingMoreRef.current || !listHasMoreRef.current) return;
+    const activeEntityId = impersonatedEntityIdRef.current;
+    if (!activeEntityId) return;
+
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const blockedIds = await loadBlockedUserIds();
+      const rows = await getPhoneConversationsPage(activeEntityId, {
+        limit: CHAT_LIST_PAGE_SIZE,
+        offset: listPageRef.current * CHAT_LIST_PAGE_SIZE,
       });
 
-      // Disabled conversations STAY in the main list (with a shield indicator)
-      // — disabling only stops messaging. Archived conversations move to the
-      // separate archived section below the main list.
-      const mainList = listItems.filter(item => !item.archived);
-      setChatList(mainList);
-      setArchivedList(listItems.filter(item => item.archived));
+      if (rows.length === 0) {
+        listHasMoreRef.current = false;
+        return;
+      }
 
-      // Keep the floating bubble's unread badge in sync with the conversation
-      // that currently has the bubble shown (if any).
-      syncBubbleUnreadBadge(listItems);
+      const items = await buildListItems(activeEntityId, rows, blockedIds);
+      listPageRef.current += 1;
+      listHasMoreRef.current = rows.length === CHAT_LIST_PAGE_SIZE;
+
+      // Defensive dedupe — the page query groups by participant_key so keys
+      // never repeat across pages, but guard against re-added rows anyway.
+      const existingKeys = new Set(chatListRef.current.map(item => item.participantKey));
+      const fresh = items.filter(item => !existingKeys.has(item.participantKey));
+      if (fresh.length === 0) return;
+
+      const merged = sortListItems([...chatListRef.current, ...fresh]);
+      chatListRef.current = merged;
+      setChatList(merged.filter(item => !item.archived));
+      setArchivedList(merged.filter(item => item.archived));
+      syncBubbleUnreadBadge(merged);
     } catch (error) {
-      log.error('Failed to load chat list:', error);
+      log.error('Failed to load more conversations:', error);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
     }
-  };
+  }, [buildListItems, loadBlockedUserIds]);
+
+  /** Debounce a full reload so rapid session events collapse into one fetch. */
+  const scheduleChatListReload = useCallback(() => {
+    if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
+      loadChatList(impersonatedEntityIdRef.current);
+    }, CHAT_LIST_RELOAD_DEBOUNCE_MS);
+  }, [loadChatList]);
 
   // Load global impersonated persona on mount (personas are the ONLY
   // identities the user can chat as — falls back to the built-in 'user').
-  const loadImpersonatedEntity = useCallback(async () => {
+  // Returns the resolved id so the focus effect can AWAIT it before the first
+  // list load — killing the 'user'-perspective flash + double load (F7).
+  const loadImpersonatedEntity = useCallback(async (): Promise<string> => {
     try {
       const storedId =
         await ChatPreferencesService.getGlobalImpersonatedEntity();
       const resolvedId = await resolvePersonaId(storedId);
       setImpersonatedEntityId(resolvedId);
+      return resolvedId;
     } catch (error) {
       log.error('Failed to load impersonated persona:', error);
+      return 'user';
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadImpersonatedEntity();
-      // Reload chat list when screen gains focus (e.g., returning from
-      // ChatDetailScreen) so the last-message preview reflects any messages
-      // sent/received during the chat session. Without this, the list stays
-      // stale because impersonatedEntityId hasn't changed, so the useEffect
-      // below won't re-trigger loadChatList.
-      if (impersonatedEntityId) {
-        loadChatList(impersonatedEntityId);
-      }
-    }, [impersonatedEntityId]),
+      let active = true;
+      (async () => {
+        const resolvedId = await loadImpersonatedEntity();
+        if (!active) return;
+        // Reload chat list when screen gains focus (e.g., returning from
+        // ChatDetailScreen) so the last-message preview reflects any messages
+        // sent/received during the chat session.
+        await loadChatList(resolvedId);
+      })();
+      return () => {
+        active = false;
+      };
+    }, [loadImpersonatedEntity, loadChatList]),
   );
 
-  // Re-run loadChatList when impersonatedEntityId changes
-  useEffect(() => {
-    if (impersonatedEntityId) {
-      loadChatList(impersonatedEntityId);
-    }
-  }, [impersonatedEntityId]);
+  // F1: live updates while the list is focused. `message:received` updates the
+  // matching visible row incrementally (preview + recency + unread badge — and
+  // the floating bubble badge via syncBubbleUnreadBadge, F8); a conversation
+  // that is NOT yet in the list (brand-new chat) falls back to a debounced
+  // full reload. Session lifecycle events (`session:started` / `session:stopped`)
+  // can add/remove conversations, so they trigger the same debounced reload.
+  useFocusEffect(
+    useCallback(() => {
+      const handleMessageReceived = async (interactionId: string, message: any) => {
+        const session = EntitySessionService.getInteractionSession(interactionId);
+        if (!session) return;
+        const scope = deriveScopeFromParticipants(session.participantIds);
+        const participantKey = deriveParticipantKey(
+          session.participantIds,
+          session.ownEntityId,
+          scope,
+        );
+        if (!participantKey) return;
+
+        const existing = chatListRef.current.find(item => item.participantKey === participantKey);
+        if (!existing) {
+          // New conversation — not worth an incremental insert; debounce a
+          // full reload instead.
+          scheduleChatListReload();
+          return;
+        }
+
+        try {
+          const [settings, lastMsg] = await Promise.all([
+            getChatConversationSettings(participantKey),
+            getLastInteractionMessage(impersonatedEntityIdRef.current, participantKey),
+          ]);
+
+          // Who sent the message — 'You' for our own entity, else the partner
+          // display name.
+          let lastMessageSender = existing.lastMessageSender;
+          const senderEntityId = message?.entity_id;
+          if (senderEntityId === session.ownEntityId) {
+            lastMessageSender = t('you');
+          } else if (senderEntityId === existing.entityId) {
+            lastMessageSender = existing.characterName;
+          }
+
+          const updated: ChatListItem = {
+            ...existing,
+            lastMessage: lastMsg?.content || message?.content || existing.lastMessage,
+            lastMessageTime: lastMsg?.created_at || existing.lastMessageTime || new Date(),
+            lastMessageSender,
+            unreadCount: settings.unreadCount,
+          };
+
+          // Re-sort the full list with the refreshed row, then split.
+          const nextList = sortListItems(
+            chatListRef.current.map(item =>
+              item.participantKey === participantKey ? updated : item,
+            ),
+          );
+          chatListRef.current = nextList;
+          setChatList(nextList.filter(item => !item.archived));
+          setArchivedList(nextList.filter(item => item.archived));
+
+          // F8: push the same unread state to any floating bubble for this
+          // conversation.
+          syncBubbleUnreadBadge(nextList);
+        } catch (error) {
+          log.error('Failed to apply live message update:', error);
+          scheduleChatListReload();
+        }
+      };
+
+      const handleSessionLifecycle = () => {
+        scheduleChatListReload();
+      };
+
+      EntitySessionService.on('message:received', handleMessageReceived);
+      EntitySessionService.on('session:started', handleSessionLifecycle);
+      EntitySessionService.on('session:stopped', handleSessionLifecycle);
+
+      return () => {
+        EntitySessionService.off('message:received', handleMessageReceived);
+        EntitySessionService.off('session:started', handleSessionLifecycle);
+        EntitySessionService.off('session:stopped', handleSessionLifecycle);
+        if (reloadTimerRef.current) {
+          clearTimeout(reloadTimerRef.current);
+          reloadTimerRef.current = null;
+        }
+      };
+    }, [t, scheduleChatListReload]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadChatList(impersonatedEntityIdRef.current);
     setRefreshing(false);
-  }, []);
+  }, [loadChatList]);
 
   const handleNewChat = async (profile: CharacterProfile) => {
     try {
@@ -412,7 +634,6 @@ export const ChatListScreen: React.FC = () => {
     // Opening a conversation clears its unread counter.
     try {
       await clearConversationUnread(item.participantKey);
-      await ChatPreferencesService.markKeyAsRead(item.participantKey);
     } catch (error) {
       log.warn('Failed to clear unread on open:', error);
     }
@@ -459,7 +680,7 @@ export const ChatListScreen: React.FC = () => {
   const reloadAfterAction = useCallback(() => {
     setMenuItem(null);
     loadChatList(impersonatedEntityIdRef.current);
-  }, []);
+  }, [loadChatList]);
 
   // ── Context actions ──
   const handleTogglePin = useCallback(async () => {
@@ -503,11 +724,11 @@ export const ChatListScreen: React.FC = () => {
     if (!item) return;
     if (item.unreadCount > 0) {
       await clearConversationUnread(item.participantKey);
-      await ChatPreferencesService.markKeyAsRead(item.participantKey);
       showToast(t('toastMarkedRead'));
     } else {
-      await incrementConversationUnread(item.participantKey, item.entityId || null);
-      await ChatPreferencesService.clearKeyLastRead(item.participantKey);
+      // "Mark unread" = SET the badge to exactly 1 (never +1) so repeated
+      // actions cannot accumulate a bogus count (F10).
+      await setConversationUnread(item.participantKey, item.entityId || null, 1);
       showToast(t('toastMarkedUnread'));
     }
     reloadAfterAction();
@@ -720,6 +941,8 @@ export const ChatListScreen: React.FC = () => {
           ]}
           alwaysBounceVertical
           overScrollMode="always"
+          onEndReached={loadMoreChatList}
+          onEndReachedThreshold={0.4}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -728,6 +951,16 @@ export const ChatListScreen: React.FC = () => {
               tintColor={theme!.colors.accent.primary}
               progressBackgroundColor={theme!.colors.background.surface}
             />
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.loadMoreFooter}>
+                <ActivityIndicator
+                  size="small"
+                  color={theme!.colors.accent.primary}
+                />
+              </View>
+            ) : null
           }
           ListHeaderComponent={
             archivedList.length > 0 ? (
@@ -1035,12 +1268,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  timeBadge: {
-    alignSelf: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 99,
-    overflow: 'hidden',
+  loadMoreFooter: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   notPairedContainer: {
     flex: 1,

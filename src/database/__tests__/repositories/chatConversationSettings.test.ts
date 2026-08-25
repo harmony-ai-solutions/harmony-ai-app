@@ -14,6 +14,7 @@ import {
   setConversationMuted,
   setConversationDisabled,
   incrementConversationUnread,
+  setConversationUnread,
   clearConversationUnread,
   conversationSettingsExistForEntity,
   listConversationsByFlag,
@@ -77,6 +78,37 @@ describe('chat conversation settings repository', () => {
     const s = await getChatConversationSettings('user+e3');
     expect(s.unreadCount).toBe(1);
     expect(s.entityId).toBe('e3');
+  });
+
+  it('setConversationUnread SETS the counter to the exact value (F10 set-to-1 semantics)', async () => {
+    // Seed a counter of 3 via increments.
+    await incrementConversationUnread('user+e14', 'e14');
+    await incrementConversationUnread('user+e14', 'e14');
+    await incrementConversationUnread('user+e14', 'e14');
+    expect((await getChatConversationSettings('user+e14')).unreadCount).toBe(3);
+
+    // "Mark unread" must SET to 1, not +1.
+    await setConversationUnread('user+e14', 'e14', 1);
+    expect((await getChatConversationSettings('user+e14')).unreadCount).toBe(1);
+
+    // A second "mark unread" stays 1 — no accumulation.
+    await setConversationUnread('user+e14', 'e14', 1);
+    expect((await getChatConversationSettings('user+e14')).unreadCount).toBe(1);
+
+    // Explicit 0 (mark read) also works; unrelated flags survive.
+    await setConversationPinned('user+e14', 'e14', true);
+    await setConversationUnread('user+e14', 'e14', 0);
+    const s = await getChatConversationSettings('user+e14');
+    expect(s.unreadCount).toBe(0);
+    expect(s.pinned).toBe(true);
+  });
+
+  it('setConversationUnread creates the row for a brand-new key without a prior row', async () => {
+    await setConversationUnread('user+e15', 'e15', 1);
+    const s = await getChatConversationSettings('user+e15');
+    expect(s.unreadCount).toBe(1);
+    expect(s.entityId).toBe('e15');
+    expect(s.pinned).toBe(false);
   });
 
   it('batch load returns only keys with rows', async () => {

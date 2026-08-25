@@ -227,6 +227,20 @@ export async function clearConversationUnread(participantKey: string): Promise<v
 }
 
 /**
+ * Set the unread counter to an EXACT value (creates the row if missing, keeps
+ * the other flags untouched). "Mark unread" from the context menu uses this
+ * with `unreadCount = 1` — the badge must SET to 1, never increment, so
+ * repeated "mark unread" actions cannot accumulate a bogus count (F10).
+ */
+export async function setConversationUnread(
+  participantKey: string,
+  entityId: string | null,
+  unreadCount: number,
+): Promise<void> {
+  await upsertSettings(participantKey, entityId, { unreadCount: Math.max(0, unreadCount) });
+}
+
+/**
  * True when any conversation settings exist with the given flags — used to
  * decide whether the chat list's archive / block sections should be shown.
  */

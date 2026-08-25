@@ -7,7 +7,7 @@
  * menu (Unarchive / Pin / Mute / Bubble / Read / Block / Delete).
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { StyleSheet, View, FlatList, RefreshControl, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -20,8 +20,10 @@ import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { hapticLightPress } from '../../utils/haptics';
 import { TAB_BAR_CONTENT_PAD } from '../../components/navigation/GlassTabBar';
 import { getAllEntities } from '../../database/repositories/entities';
+import { resolvePersonaId } from '../../database/repositories/personas';
 import {
-  getRecentPhoneInteractions,
+  getPhoneConversationsPage,
+  PhoneConversationPageRow,
   getLastInteractionMessage,
 } from '../../database/repositories/interactions';
 import {
@@ -35,7 +37,7 @@ import {
   setConversationArchived,
   setConversationMuted,
   setConversationDisabled,
-  incrementConversationUnread,
+  setConversationUnread,
   clearConversationUnread,
 } from '../../database/repositories/chatConversationSettings';
 import { deleteConversationByParticipantKey } from '../../database/repositories/conversation_messages';
@@ -45,7 +47,6 @@ import { useAppAlert } from '../../contexts/AppAlertContext';
 import { useToast } from '../../contexts/AppToastContext';
 import {
   showBubble,
-  hasBubblePermission,
   requestBubblePermission,
 } from '../../services/ChatBubbleService';
 import ChatPreferencesService from '../../services/ChatPreferencesService';
@@ -92,26 +93,37 @@ export const ArchivedChatsScreen: React.FC = () => {
   // Long-press menu state
   const [menuItem, setMenuItem] = useState<ArchivedItem | null>(null);
 
+  // Live persona (F12) — refreshed on every load; stable callbacks read the
+  // ref instead of capturing a stale render value.
+  const impersonatedEntityIdRef = useRef<string>('user');
+
   const loadArchived = useCallback(async () => {
     try {
+      // F12: resolve the LIVE global persona (fallback 'user') — never
+      // hardcode the 'user' perspective.
+      const storedId = await ChatPreferencesService.getGlobalImpersonatedEntity();
+      const impersonated = await resolvePersonaId(storedId);
+      impersonatedEntityIdRef.current = impersonated;
+
       const entities = await getAllEntities();
       const entityMap = new Map(entities.map(e => [e.id, e]));
-      const impersonated = 'user';
 
-      const interactions = await getRecentPhoneInteractions(impersonated, 200);
+      // F6: same conversation-level query the chat list uses — deduped by
+      // participant_key and ordered by last-message created_at.
+      const rows = await getPhoneConversationsPage(impersonated, { limit: 200, offset: 0 });
       const candidates: ArchivedItem[] = [];
       const seenKeys = new Set<string>();
 
-      for (const interaction of interactions) {
-        const scope = interaction.interaction_scope;
+      for (const row of rows) {
+        const scope = row.interactionScope;
         if (scope !== 'private') continue;
-        const participantKey = interaction.participant_key || '';
+        const participantKey = row.participantKey || '';
         if (!participantKey || seenKeys.has(participantKey)) continue;
         seenKeys.add(participantKey);
 
         const participantIds = (() => {
           try {
-            return JSON.parse(interaction.participant_ids);
+            return JSON.parse(row.participantIds);
           } catch {
             return [];
           }
@@ -132,7 +144,7 @@ export const ArchivedChatsScreen: React.FC = () => {
         }
 
         candidates.push({
-          interactionId: interaction.id,
+          interactionId: row.interactionId,
           entityId: partnerEntityId,
           characterName: getEntityDisplayName(entity?.alias ?? null, characterProfileName, partnerEntityId),
           lastMessage: lastMsg?.content || t('noMessagesYet'),
@@ -224,7 +236,7 @@ export const ArchivedChatsScreen: React.FC = () => {
       participantKey: item.participantKey,
       interactionId: item.interactionId,
       entityId: item.entityId,
-      ownEntityId: 'user',
+      ownEntityId: impersonatedEntityIdRef.current,
       entityName: item.characterName,
       participantIds: item.participantIds,
       avatar: item.avatarUri,
@@ -252,11 +264,11 @@ export const ArchivedChatsScreen: React.FC = () => {
     if (!item) return;
     if (item.unreadCount > 0) {
       await clearConversationUnread(item.participantKey);
-      await ChatPreferencesService.markKeyAsRead(item.participantKey);
       showToast(t('toastMarkedRead'));
     } else {
-      await incrementConversationUnread(item.participantKey, item.entityId || null);
-      await ChatPreferencesService.clearKeyLastRead(item.participantKey);
+      // "Mark unread" = SET the badge to exactly 1 (never +1) so repeated
+      // actions cannot accumulate a bogus count (F10).
+      await setConversationUnread(item.participantKey, item.entityId || null, 1);
       showToast(t('toastMarkedUnread'));
     }
     reload();
@@ -308,7 +320,10 @@ export const ArchivedChatsScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteConversationByParticipantKey('user', item.participantKey);
+              await deleteConversationByParticipantKey(
+                impersonatedEntityIdRef.current,
+                item.participantKey,
+              );
               showToast(t('toastDeleted'));
               loadArchived();
             } catch (error) {
@@ -326,7 +341,7 @@ export const ArchivedChatsScreen: React.FC = () => {
       interactionId: item.interactionId,
       participantKey: item.participantKey,
       participantIds: item.participantIds,
-      entityId: 'user',
+      entityId: impersonatedEntityIdRef.current,
       entityName: item.characterName,
     });
   };
