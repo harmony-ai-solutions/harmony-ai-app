@@ -43,14 +43,17 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
 
   if (!theme) return null;
 
-  // A module never offers a "Disabled" option — every module must have a
-  // config. The Create/Edit AI screens pre-fill empty slots with the Soulbits
-  // Cloud default config, so the '' (no-config) state here is only ever
-  // transient while those defaults are being resolved.
-  const options = configs.map(c => ({ id: c.id, name: c.name, value: String(c.id) }));
+  // The '' (no-config) state is a legitimate, selectable end state: the sheet
+  // always offers a "Disabled" option so the user can clear a module slot.
+  // Engine-seeded default configs arrive via normal sync and appear as
+  // ordinary options.
+  const options = [
+    { id: -1, name: 'Disabled', value: '' },
+    ...configs.map(c => ({ id: c.id, name: c.name, value: String(c.id) })),
+  ];
 
   const selectedLabel =
-    options.find(o => o.value === selectedId)?.name ?? 'Select config';
+    options.find(o => o.value === selectedId)?.name ?? 'Disabled';
   const isDisabled = selectedId === '';
 
   return (

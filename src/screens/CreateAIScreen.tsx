@@ -10,10 +10,10 @@
  *   2. Details  — personality, voice/behavior, prompts & scenario
  *   3. Advanced — module configs (AI model / config / voice settings)
  *
- * The user can create a partner with just a name: when no module configs are
- * selected, Soulbits Cloud default configs are created automatically in the
- * background (see SoulbitsDefaultConfigService) so the partner is fully
- * wired up out of the box and chat-ready from the Characters list.
+ * The user can create a partner with just a name: module slots left unset stay
+ * unset (saved as NULL in the entity module mapping). Engine-seeded default
+ * configs ("Default SoulbitsCloud") arrive via normal sync — the engine is the
+ * single source for default configuration.
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -88,10 +88,6 @@ import {
   getAllBackendConfigs,
 } from '../database/repositories/modules';
 import syncService from '../services/SyncService';
-import {
-  ensureSoulbitsDefaultConfigs,
-  DEFAULT_CONFIG_NAME,
-} from '../services/SoulbitsDefaultConfigService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -272,133 +268,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   useEffect(() => {
     loadModuleConfigs();
   }, [loadModuleConfigs]);
-
-  // Live mirror of the module-config selections so the async default-fill
-  // below can always read the CURRENT selections (not stale closure values) —
-  // closing over the state variables would let a pending fill overwrite the
-  // edit/duplicate mapping that the prefill effect applies mid-flight.
-  const configSelectionsRef = useRef({
-    backend: backendConfigId,
-    cognition: cognitionConfigId,
-    tts: ttsConfigId,
-    stt: sttConfigId,
-    vision: visionConfigId,
-    rag: ragConfigId,
-    imagination: imaginationConfigId,
-    movement: movementConfigId,
-  });
-  useEffect(() => {
-    configSelectionsRef.current = {
-      backend: backendConfigId,
-      cognition: cognitionConfigId,
-      tts: ttsConfigId,
-      stt: sttConfigId,
-      vision: visionConfigId,
-      rag: ragConfigId,
-      imagination: imaginationConfigId,
-      movement: movementConfigId,
-    };
-  }, [
-    backendConfigId,
-    cognitionConfigId,
-    ttsConfigId,
-    sttConfigId,
-    visionConfigId,
-    ragConfigId,
-    imaginationConfigId,
-    movementConfigId,
-  ]);
-
-  // ── Auto-select Soulbits Cloud defaults for empty module slots ──────────────
-  // The module selectors must ALWAYS show a config — never "Disabled". As soon
-  // as the config lists have loaded, every slot the user has not explicitly
-  // set is pre-selected with the idempotent Soulbits Cloud default config
-  // ("Soulbits Cloud (default)"). The user can still switch any slot to a
-  // different config later. In edit/duplicate mode the copied mapping is
-  // applied by the prefill effect below and any of ITS unset slots get filled
-  // back in here: the effect re-runs whenever a selection changes, so a slot
-  // only stays empty while its default is still being created.
-  const mergeDefaultOption = (
-    list: ModuleConfigOption[],
-    id: string,
-  ): ModuleConfigOption[] =>
-    list.some(o => o.id === id)
-      ? list
-      : [...list, { id, name: DEFAULT_CONFIG_NAME }];
-
-  useEffect(() => {
-    if (hasAnyConfigs === null) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        // Idempotent — reuses existing rows, only creates missing ones.
-        const defaults = await ensureSoulbitsDefaultConfigs();
-        if (cancelled) return;
-
-        const sel = configSelectionsRef.current;
-        const backendId = defaults.backendConfigId;
-        if (backendId && sel.backend === '') {
-          setBackendConfigId(backendId);
-          setBackendConfigs(prev => mergeDefaultOption(prev, backendId));
-        }
-        const cognitionId = defaults.cognitionConfigId;
-        if (cognitionId && sel.cognition === '') {
-          setCognitionConfigId(cognitionId);
-          setCognitionConfigs(prev => mergeDefaultOption(prev, cognitionId));
-        }
-        const ttsId = defaults.ttsConfigId;
-        if (ttsId && sel.tts === '') {
-          setTtsConfigId(ttsId);
-          setTtsConfigs(prev => mergeDefaultOption(prev, ttsId));
-        }
-        const sttId = defaults.sttConfigId;
-        if (sttId && sel.stt === '') {
-          setSttConfigId(sttId);
-          setSttConfigs(prev => mergeDefaultOption(prev, sttId));
-        }
-        const visionId = defaults.visionConfigId;
-        if (visionId && sel.vision === '') {
-          setVisionConfigId(visionId);
-          setVisionConfigs(prev => mergeDefaultOption(prev, visionId));
-        }
-        const ragId = defaults.ragConfigId;
-        if (ragId && sel.rag === '') {
-          setRagConfigId(ragId);
-          setRagConfigs(prev => mergeDefaultOption(prev, ragId));
-        }
-        const imaginationId = defaults.imaginationConfigId;
-        if (imaginationId && sel.imagination === '') {
-          setImaginationConfigId(imaginationId);
-          setImaginationConfigs(prev => mergeDefaultOption(prev, imaginationId));
-        }
-        const movementId = defaults.movementConfigId;
-        if (movementId && sel.movement === '') {
-          setMovementConfigId(movementId);
-          setMovementConfigs(prev => mergeDefaultOption(prev, movementId));
-        }
-      } catch (err) {
-        log.warn('Failed to pre-select Soulbits Cloud defaults:', err);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    hasAnyConfigs,
-    // Re-run after the edit/duplicate prefill applies (it can leave unset
-    // slots as ''), after the user clears a slot, and after the merge backfills
-    // the config lists — the ref keeps this closure from double-filling.
-    backendConfigId,
-    cognitionConfigId,
-    ttsConfigId,
-    sttConfigId,
-    visionConfigId,
-    ragConfigId,
-    imaginationConfigId,
-    movementConfigId,
-  ]);
 
   // ── Prefill from an existing profile (route param prefillProfileId) ─────────
   useEffect(() => {
@@ -1008,40 +877,17 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         throw err;
       }
 
-      // 4. Resolve module config ids. When the user picked none, auto-create
-      //    the Soulbits Cloud default configs in the background so the
-      //    partner is chat-ready immediately.
-      let resolvedBackend = backendConfigId || null;
-      let resolvedCognition = cognitionConfigId || null;
-      let resolvedTts = ttsConfigId || null;
-      let resolvedStt = sttConfigId || null;
-      let resolvedVision = visionConfigId || null;
-      let resolvedRag = ragConfigId || null;
-      let resolvedImagination = imaginationConfigId || null;
-      let resolvedMovement = movementConfigId || null;
-
-      const anySelected =
-        resolvedBackend ||
-        resolvedCognition ||
-        resolvedTts ||
-        resolvedStt ||
-        resolvedVision ||
-        resolvedRag ||
-        resolvedImagination ||
-        resolvedMovement;
-
-      if (!anySelected) {
-        log.info('No module configs selected — applying Soulbits Cloud defaults.');
-        const defaults = await ensureSoulbitsDefaultConfigs();
-        resolvedBackend = defaults.backendConfigId;
-        resolvedCognition = defaults.cognitionConfigId;
-        resolvedTts = defaults.ttsConfigId;
-        resolvedStt = defaults.sttConfigId;
-        resolvedVision = defaults.visionConfigId;
-        resolvedRag = defaults.ragConfigId;
-        resolvedImagination = defaults.imaginationConfigId;
-        resolvedMovement = defaults.movementConfigId;
-      }
+      // 4. Resolve module config ids. Unset slots stay unset ('' → null) —
+      //    nothing is auto-created here. The engine/user fills them later;
+      //    engine-seeded defaults arrive via normal sync.
+      const resolvedBackend = backendConfigId || null;
+      const resolvedCognition = cognitionConfigId || null;
+      const resolvedTts = ttsConfigId || null;
+      const resolvedStt = sttConfigId || null;
+      const resolvedVision = visionConfigId || null;
+      const resolvedRag = ragConfigId || null;
+      const resolvedImagination = imaginationConfigId || null;
+      const resolvedMovement = movementConfigId || null;
 
       // 5. Create entity module mapping
       await createEntityModuleMapping({
@@ -1095,18 +941,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const accent = theme.colors.accent.primary;
   const surfaceColor = theme.colors.background.surface;
   const inputTextStyle = { color: theme.colors.text.primary };
-
-  const anyConfigSelected = () =>
-    !!(
-      backendConfigId ||
-      cognitionConfigId ||
-      ttsConfigId ||
-      sttConfigId ||
-      visionConfigId ||
-      ragConfigId ||
-      imaginationConfigId ||
-      movementConfigId
-    );
 
   const renderField = (
     labelKey: string,
@@ -1491,18 +1325,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
             {showAdvanced && (
               <View style={styles.sectionContent}>
-                {/* "No config selected — Soulbits Cloud defaults" — shown at the
-                    TOP of the Advanced section (before any module pickers) so the
-                    user sees it before choosing configs, not buried at the bottom. */}
-                {!anyConfigSelected() && hasAnyConfigs !== null && (
-                  <View style={styles.defaultHint}>
-                    <Icon name="creation" size={16} color="#e2e8f0" />
-                    <ThemedText size={13} weight="medium" style={styles.defaultHintText}>
-                      {t('defaultConfigNote')}
-                    </ThemedText>
-                  </View>
-                )}
-
                 {/* Loading indicator (only while first load is in flight) */}
                 {hasAnyConfigs === null && (
                   <View style={styles.loadingRow}>
@@ -1514,9 +1336,10 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 )}
 
                 {/* Module pickers — always visible so configs can be selected,
-                    created, or edited right here. Every slot is pre-selected
-                    with the Soulbits Cloud default config (never "Disabled");
-                    the sheet's "Create new config…" row opens ModuleConfigEdit. */}
+                    created, or edited right here. A slot with no selection
+                    stays unset ("Disabled") — engine-seeded defaults arrive
+                    via normal sync; the sheet's "Create new config…" row
+                    opens ModuleConfigEdit. */}
                 <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
                   {t('aiModelSection')}
                 </ThemedText>
@@ -1750,22 +1573,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 10,
     letterSpacing: 0.4,
-  },
-  defaultHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  defaultHintText: {
-    flex: 1,
-    color: '#e2e8f0',
   },
 
   // ── Numeric row (typing speed / audio chance) ──

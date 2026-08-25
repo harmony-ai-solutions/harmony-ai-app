@@ -31,7 +31,13 @@ If product wants "always show a default": auto-select the **engine-synced `"Defa
 
 ## Verification
 
-- [ ] `grep -rn "SoulbitsDefaultConfigService\|ensureSoulbitsDefaultConfigs\|DEFAULT_CONFIG_NAME" src/` → zero
-- [ ] `npx tsc --noEmit` 0 errors; `npm test` green
-- [ ] Manual smoke: create a partner with no module selection → saves cleanly; picker shows Disabled; after cloud sync engine defaults appear
-- [ ] `gitnexus_detect_changes()`; commit: `revert: remove app-side soulbits default config seeding, engine is single source (B4)`
+- [x] `grep -rn "SoulbitsDefaultConfigService\|ensureSoulbitsDefaultConfigs\|DEFAULT_CONFIG_NAME" src/` → zero
+- [x] `npx tsc --noEmit` 0 errors; `npm test` green (unit 84/770, integration 10/50+1 skipped)
+- [ ] Manual smoke: create a partner with no module selection → saves cleanly; picker shows Disabled; after cloud sync engine defaults appear — **pending user**
+- [x] `gitnexus_detect_changes()`; commit: `revert: remove app-side soulbits default config seeding, engine is single source (B4)`
+
+### Implementation notes
+
+- `configSelectionsRef` had no other uses (grep-verified) — removed entirely with the auto-fill machinery.
+- Also removed the `defaultConfigNote` hint + i18n key (UI counterpart of the removed auto-fill; keeping it would be dishonest).
+- `moduleDefaults.ts`/`moduleConfiguration.ts` reference the engine provider, not the service's row name — no change needed.

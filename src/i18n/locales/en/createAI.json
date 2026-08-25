@@ -55,7 +55,6 @@
   "moduleMovement": "Movement",
   "moduleVision": "Vision",
   "moduleImagination": "Imagination",
-  "defaultConfigNote": "No config selected — Soulbits Cloud defaults will be applied automatically.",
   "nameRequired": "Name Required",
   "nameRequiredMessage": "Please give your AI a name.",
   "aliasConflictTitle": "Name already in use",

@@ -13,8 +13,8 @@
 | 1 — Stub service layer | ✅ committed | `1455b6e` |
 | 2 — Marketplace & wallet rewiring | ✅ committed | `82143b7` |
 | 3 — Social/notifications/profile rewiring | ✅ committed | `20d70c9` |
-| 4 — Schema surgery | ✅ committed | (this commit) |
-| 5 — B4 seeding revert | ⏳ pending | — |
+| 4 — Schema surgery | ✅ committed | `a0992be` |
+| 5 — B4 seeding revert | ✅ committed | (this commit) |
 | 6 — D-register bug mends | ⏳ pending | — |
 | 7 — INIT_ENTITY recovery | ⏳ pending | — |
 | 8 — Editor consolidation | ⏳ pending | — |
@@ -193,6 +193,26 @@ None (phase was new-files-only by design).
 3. Gate residuals are documentation-only: the new migration's header must name `reply_to_message_id` + dropped tables (self-contradiction in the phase doc resolved in favor of required docs); `@harmony_character_categories` key substring-matches `character_categories` (false positive).
 4. `MarketplaceService.test.ts` doomed-repo jest.mock backstop removed (module gone — resolution fails loudly anyway).
 5. `src/database/README.md` untouched — verified it never listed sidecar tables.
+
+---
+
+## Phase 5 — B4 Seeding Revert (engine = single default-config source)
+
+**Track**: B4 · **Gates**: grep zero; tsc 0; unit 84/770; integration 10/50+1 skipped (service had no tests).
+
+### Removed
+- `src/services/SoulbitsDefaultConfigService.ts` (319 lines) — parallel default-config creation in engine-synced tables (duplicate rows, LWW churn, broken standalone mode). No test file existed.
+- `CreateAIScreen`: auto-fill `useEffect` + `mergeDefaultOption` helper + `configSelectionsRef` live-mirror (grep-verified: no other uses) + save-time fallback (`if !anySelected → ensure…`) + `defaultConfigNote` hint block + `anyConfigSelected()` + styles.
+- i18n: dead `createAI.json:defaultConfigNote` key.
+
+### Modified
+- `EntityModuleSelector`: **Disabled** option restored (`{id:-1, name:'Disabled', value:''}` first sheet row); label fallback `?? 'Select config'` → `?? 'Disabled'` (raw string matches the sheet's existing raw-string option names).
+- Unset slots save as unset (`'' → null`, aligning create path with edit path).
+
+### Decisions
+- No auto-select of engine-synced default rows (doc default OFF; alternative noted for record doc).
+- Constants check: `moduleDefaults.ts`/`moduleConfiguration.ts` reference engine provider `'Soulbits Cloud'`/`soulbitscloud` — NOT the service's `'Soulbits Cloud (default)'` row name; nothing to change. Dev devices' old clashing rows absorbed by existing `syncNameClash` machinery.
+- Removing the auto-fill hint was in-scope honesty (it described the removed behavior).
 
 ---
 
