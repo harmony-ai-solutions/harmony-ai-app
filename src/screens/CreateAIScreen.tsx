@@ -27,6 +27,8 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedCard } from '../components/themed/ThemedCard';
@@ -38,6 +40,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from 'react-i18next';
+import RNFS from 'react-native-fs';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[CreateAIScreen]');
@@ -55,7 +58,31 @@ import { EntityModuleSelectorWithActions } from '../components/entities/EntityMo
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
-import type { CharacterProfile } from '../database/models';
+import type { CharacterProfile, CharacterImage } from '../database/models';
+import { ProfileImagePicker } from '../components/characters/ProfileImagePicker';
+import { MacroHighlighter } from '../components/character-card/MacroHighlighter';
+import { parseJsonColumn } from '../components/character-card/lorebook';
+import type { LifecycleConfig } from '../components/character-card/LifecycleConfigEditor';
+import {
+  AlternateGreetingsSection,
+  AttributionSection,
+  ExportSection,
+  GreetingEditorSection,
+  LifecycleSection,
+  LorebookSection,
+  TagsSection,
+  computeImageDeltas,
+  editorStateToProfileFields,
+  profileToEditorState,
+  validateLifecycleConfig,
+} from '../components/character-card/editor-sections';
+import type {
+  DesiredEditorImage,
+  EditorState,
+} from '../components/character-card/editor-sections';
+import { exportProfileToCardV3, exportToJSON, exportToPNG } from '../utils/charactercard/exporter';
+import { utf8Encode } from '../utils/charactercard/pngWriter';
+import { uint8ArrayToBase64 } from '../database/base64';
 
 import {
   createCharacterProfile,
@@ -64,6 +91,8 @@ import {
   deleteCharacterProfileCascade,
   getCharacterProfile,
   getCharacterImages,
+  getAllCharacterProfiles,
+  updateCharacterImage,
   updateCharacterProfile,
 } from '../database/repositories/characters';
 import { setCharacterCreator } from '../services/social/SocialService';
@@ -71,11 +100,13 @@ import {
   createEntity,
   createEntityModuleMapping,
   createOrUpdateEntityModuleMapping,
+  getAllEntities,
   getEntityByCharacterProfileId,
   getEntityModuleMapping,
   getNextEntityAliasCopy,
   updateEntityFields,
 } from '../database/repositories/entities';
+import { getActiveInteractionsByEntity } from '../database/repositories/interactions';
 import { createDataURL } from '../database/base64';
 import {
   getAllCognitionConfigs,
@@ -88,6 +119,8 @@ import {
   getAllBackendConfigs,
 } from '../database/repositories/modules';
 import syncService from '../services/SyncService';
+import ChatPreferencesService from '../services/ChatPreferencesService';
+import EntitySessionService from '../services/EntitySessionService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -105,7 +138,9 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const { withExternalFlow } = useBiometricLock();
   const { user } = useAuth();
   const { bottom: safeBottom } = useSafeAreaInsets();
-  const { t } = useTranslation('createAI');
+  // 'characters' namespace supplies the V3/RP editor labels + validation strings
+  // (createAI has none of them); section titles resolve implicitly in order.
+  const { t } = useTranslation(['createAI', 'characters']);
 
   // ── Core fields ──────────────────────────────────────────────────────────────
   const [name, setName] = useState('');
@@ -178,6 +213,43 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false);
+
+  // ── V3/RP editor state (edit mode only; `{...current}` spread preserves
+  //    unknown columns on save, so absent columns are never wiped) ────────────
+  const [nickname, setNickname] = useState('');
+  const [firstMes, setFirstMes] = useState('');
+  const [alternateGreetings, setAlternateGreetings] = useState<string[]>([]);
+  const [postHistoryInstructions, setPostHistoryInstructions] = useState('');
+  const [creatorName, setCreatorName] = useState('');
+  const [creatorNotes, setCreatorNotes] = useState('');
+  const [characterVersion, setCharacterVersion] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
+  const [groupOnlyGreetings, setGroupOnlyGreetings] = useState<string[]>([]);
+  const [extensions, setExtensions] = useState<Record<string, unknown>>({});
+  const [assets, setAssets] = useState<unknown[] | null>(null);
+  const [cardProvenance, setCardProvenance] = useState<Record<string, unknown> | null>(null);
+  const [characterBook, setCharacterBook] = useState<string | null>(null);
+  const [lifecycleConfig, setLifecycleConfig] = useState<LifecycleConfig>({});
+  const [libraryTags, setLibraryTags] = useState<string[]>([]);
+
+  // ── Roleplay entity resolution ({{user}}) for greeting preview / test ───────
+  const [impersonatedEntityId, setImpersonatedEntityId] = useState('user');
+  const [impersonatedEntityName, setImpersonatedEntityName] = useState('{{user}}');
+
+  // ── Edit-mode image rows (real ids) for the image picker + reconcile ────────
+  const [editImages, setEditImages] = useState<CharacterImage[]>([]);
+  const [primaryImageId, setPrimaryImageId] = useState<string | null>(null);
+
+  // ── Edit-mode UI state ──────────────────────────────────────────────────────
+  const [refreshing, setRefreshing] = useState(false);
+  const [testState, setTestState] = useState<'idle' | 'generating' | 'ready'>('idle');
+  const [testGreeting, setTestGreeting] = useState('');
+  const [showGreeting, setShowGreeting] = useState(false);
+  const [showLorebook, setShowLorebook] = useState(false);
+  const [showImages, setShowImages] = useState(false);
+  const [showTags, setShowTags] = useState(false);
+  const [showLifecycle, setShowLifecycle] = useState(false);
+  const [showAttribution, setShowAttribution] = useState(false);
 
   // ── Edit mode — editProfileId edits an existing AI partner ──────────────────
   // The single edit surface: profile (name/bio/prompts/images) + entity module
@@ -474,83 +546,157 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // ── Edit mode load (route param editProfileId) ───────────────────────────────
   // Loads the existing AI partner (profile + entity + module mapping + avatar +
   // gallery images) so the whole create wizard becomes the single edit surface.
+  // Extracted so pull-to-refresh can re-run the same load.
+  const loadEditProfile = useCallback(async () => {
+    if (!editProfileId) return;
+    try {
+      const profile = await getCharacterProfile(editProfileId);
+      if (!profile) return;
+
+      setName(profile.name);
+      setDescription(profile.description ?? '');
+      setPersonality(profile.personality ?? '');
+      setVoiceCharacteristics(profile.voice_characteristics ?? '');
+      setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
+      setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
+      setBasePrompt(profile.base_prompt ?? '');
+      setScenario(profile.scenario ?? '');
+      setExampleDialogues(profile.mes_example ?? '');
+      setEditOriginalName(profile.name);
+
+      // V3/RP fields via the shared editor-state mapping (single source of
+      // truth — same mapping the round-trip test pins down).
+      const editorState = profileToEditorState(profile);
+      setNickname(editorState.nickname);
+      setFirstMes(editorState.firstMes);
+      setAlternateGreetings(editorState.alternateGreetings);
+      setPostHistoryInstructions(editorState.postHistoryInstructions);
+      setCreatorName(editorState.creator);
+      setCreatorNotes(editorState.creatorNotes);
+      setCharacterVersion(editorState.characterVersion);
+      setTags(editorState.tags);
+      setGroupOnlyGreetings(editorState.groupOnlyGreetings);
+      setExtensions(editorState.extensions);
+      setAssets(editorState.assets);
+      setCardProvenance(editorState.cardProvenance);
+      setCharacterBook(editorState.characterBook);
+      setLifecycleConfig(editorState.lifecycleConfig);
+
+      // Images: full rows (real ids) for the picker + reconcile; the primary
+      // also feeds the avatar UI and the rest the gallery tiles.
+      try {
+        const images = await getCharacterImages(profile.id);
+        setEditImages(images);
+        const primary = images.find(img => img.is_primary === true);
+        setPrimaryImageId(primary?.id ?? null);
+        if (primary && primary.image_data && primary.mime_type) {
+          setAvatarBase64(primary.image_data);
+          setAvatarMimeType(primary.mime_type);
+          setAvatarUri(createDataURL(primary.image_data, primary.mime_type));
+        }
+        setGalleryImages(
+          images
+            .filter(img => img.image_data && img.mime_type && !img.is_primary)
+            .map(img => ({
+              base64: img.image_data,
+              mimeType: img.mime_type,
+              description: img.description ?? '',
+            })),
+        );
+      } catch (imgErr) {
+        log.warn('Failed to load edit images:', imgErr);
+      }
+
+      // Entity + module mapping
+      try {
+        const entity = await getEntityByCharacterProfileId(profile.id);
+        if (entity) {
+          setEditEntityId(entity.id);
+          const mapping = await getEntityModuleMapping(entity.id);
+          if (mapping) {
+            setPrefillModuleIds({
+              backend: mapping.backend_config_id ?? null,
+              cognition: mapping.cognition_config_id ?? null,
+              tts: mapping.tts_config_id ?? null,
+              stt: mapping.stt_config_id ?? null,
+              vision: mapping.vision_config_id ?? null,
+              rag: mapping.rag_config_id ?? null,
+              imagination: mapping.imagination_config_id ?? null,
+              movement: mapping.movement_config_id ?? null,
+            });
+          }
+        }
+      } catch (entErr) {
+        log.warn('Failed to load edit entity:', entErr);
+      }
+    } catch (err) {
+      log.error('Failed to load profile for edit:', err);
+    }
+  }, [editProfileId]);
+
   useEffect(() => {
     if (!editProfileId || editLoaded) return;
     let cancelled = false;
-
     (async () => {
-      try {
-        const profile = await getCharacterProfile(editProfileId);
-        if (!profile || cancelled) return;
-
-        setName(profile.name);
-        setDescription(profile.description ?? '');
-        setPersonality(profile.personality ?? '');
-        setVoiceCharacteristics(profile.voice_characteristics ?? '');
-        setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
-        setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
-        setBasePrompt(profile.base_prompt ?? '');
-        setScenario(profile.scenario ?? '');
-        setExampleDialogues(profile.mes_example ?? '');
-        setEditOriginalName(profile.name);
-
-        // Avatar (primary image)
-        try {
-          const images = await getCharacterImages(profile.id);
-          if (cancelled) return;
-          const primary = images.find(img => img.is_primary === true);
-          if (primary && primary.image_data && primary.mime_type) {
-            setAvatarBase64(primary.image_data);
-            setAvatarMimeType(primary.mime_type);
-            setAvatarUri(createDataURL(primary.image_data, primary.mime_type));
-          }
-          // Gallery images (all non-primary images)
-          setGalleryImages(
-            images
-              .filter(img => img.image_data && img.mime_type && !img.is_primary)
-              .map(img => ({
-                base64: img.image_data,
-                mimeType: img.mime_type,
-                description: img.description ?? '',
-              })),
-          );
-        } catch (imgErr) {
-          log.warn('Failed to load edit images:', imgErr);
-        }
-
-        // Entity + module mapping
-        try {
-          const entity = await getEntityByCharacterProfileId(profile.id);
-          if (entity && !cancelled) {
-            setEditEntityId(entity.id);
-            const mapping = await getEntityModuleMapping(entity.id);
-            if (mapping) {
-              setPrefillModuleIds({
-                backend: mapping.backend_config_id ?? null,
-                cognition: mapping.cognition_config_id ?? null,
-                tts: mapping.tts_config_id ?? null,
-                stt: mapping.stt_config_id ?? null,
-                vision: mapping.vision_config_id ?? null,
-                rag: mapping.rag_config_id ?? null,
-                imagination: mapping.imagination_config_id ?? null,
-                movement: mapping.movement_config_id ?? null,
-              });
-            }
-          }
-        } catch (entErr) {
-          log.warn('Failed to load edit entity:', entErr);
-        }
-      } catch (err) {
-        log.error('Failed to load profile for edit:', err);
-      } finally {
-        if (!cancelled) setEditLoaded(true);
-      }
+      await loadEditProfile();
+      if (!cancelled) setEditLoaded(true);
     })();
-
     return () => {
       cancelled = true;
     };
-  }, [editProfileId, editLoaded]);
+  }, [editProfileId, editLoaded, loadEditProfile]);
+
+  // Reset the load latch when the edit target changes (stack reuse — same
+  // pattern as the duplicate-flow latch reset below).
+  useEffect(() => {
+    if (!editProfileId) return;
+    setEditLoaded(false);
+  }, [editProfileId]);
+
+  // ── Edit-mode helpers: roleplay entity ({{user}}) + library tags ────────────
+  // Only needed by the greeting preview / test-scenario / tag suggestions, which
+  // render exclusively in edit mode.
+  useEffect(() => {
+    if (!editProfileId) return;
+    (async () => {
+      try {
+        const allEntities = await getAllEntities();
+        const stored = await ChatPreferencesService.getGlobalImpersonatedEntity();
+        const id =
+          stored && allEntities.some(e => e.id === stored)
+            ? stored
+            : (allEntities.find(e => e.id === 'user')?.id ??
+              allEntities[0]?.id ??
+              'user');
+        const ent = allEntities.find(e => e.id === id);
+        setImpersonatedEntityId(id);
+        setImpersonatedEntityName(ent?.alias ?? id);
+      } catch {
+        setImpersonatedEntityId('user');
+        setImpersonatedEntityName('{{user}}');
+      }
+      try {
+        const all = await getAllCharacterProfiles();
+        const allTags = [
+          ...new Set(all.flatMap(p => parseJsonColumn<string[]>(p.tags) ?? [])),
+        ];
+        setLibraryTags(allTags);
+      } catch {
+        // Non-critical — suggestions stay empty.
+      }
+    })();
+  }, [editProfileId]);
+
+  /** Pull-to-refresh: reload the profile (edit mode only). */
+  const onRefresh = useCallback(async () => {
+    if (!editProfileId) return;
+    setRefreshing(true);
+    try {
+      await loadEditProfile();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [editProfileId, loadEditProfile]);
 
   // ── Avatar picker ────────────────────────────────────────────────────────────
   const handlePickAvatar = async () => {
@@ -566,9 +712,35 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       );
       if (result.assets?.[0]) {
         const asset = result.assets[0];
+        const base64 = asset.base64 ?? null;
+        const mimeType = asset.type ?? 'image/jpeg';
+
+        // Edit mode: changing the avatar demotes the current primary row into
+        // the gallery (it stays a non-primary image — the save-time reconcile
+        // persists the is_primary/order flags; the old row's id stays stable).
+        if (editProfileId && base64) {
+          const curPrimary = editImages.find(img => img.is_primary);
+          if (
+            curPrimary &&
+            !(curPrimary.image_data === base64 && curPrimary.mime_type === mimeType)
+          ) {
+            setGalleryImages(prev => [
+              {
+                base64: curPrimary.image_data,
+                mimeType: curPrimary.mime_type,
+                description: curPrimary.description ?? '',
+              },
+              ...prev.filter(
+                g =>
+                  !(g.base64 === curPrimary.image_data && g.mimeType === curPrimary.mime_type),
+              ),
+            ]);
+          }
+        }
+
         setAvatarUri(asset.uri ?? null);
-        setAvatarBase64(asset.base64 ?? null);
-        setAvatarMimeType(asset.type ?? 'image/jpeg');
+        setAvatarBase64(base64);
+        setAvatarMimeType(mimeType);
       }
     } catch (err) {
       log.error('Failed to pick avatar:', err);
@@ -606,6 +778,287 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     setGalleryImages(prev => prev.filter((_, i) => i !== index));
   };
 
+  // ── V3/RP editor state builder (single mapping for save + export) ────────────
+  const currentEditorState = useCallback(
+    (): EditorState => ({
+      name,
+      description,
+      personality,
+      voiceCharacteristics,
+      typingSpeedWpm,
+      audioResponseChance,
+      basePrompt,
+      scenario,
+      firstMes,
+      alternateGreetings,
+      mesExample: exampleDialogues,
+      postHistoryInstructions,
+      creatorNotes,
+      creator: creatorName,
+      characterVersion,
+      nickname,
+      tags,
+      groupOnlyGreetings,
+      extensions,
+      assets,
+      cardProvenance,
+      characterBook,
+      lifecycleConfig,
+    }),
+    [
+      name, description, personality, voiceCharacteristics,
+      typingSpeedWpm, audioResponseChance, basePrompt, scenario,
+      firstMes, alternateGreetings, exampleDialogues, postHistoryInstructions,
+      creatorNotes, creatorName, characterVersion, nickname, tags,
+      groupOnlyGreetings, extensions, assets, cardProvenance, characterBook,
+      lifecycleConfig,
+    ],
+  );
+
+  // ── Alternate greeting operations ────────────────────────────────────────────
+  const handleAddAlternate = () => {
+    setAlternateGreetings(prev => [...prev, '']);
+  };
+
+  const handleRemoveAlternate = (index: number) => {
+    setAlternateGreetings(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleMoveAlternate = (index: number, direction: -1 | 1) => {
+    setAlternateGreetings(prev => {
+      const target = index + direction;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
+
+  const handleEditAlternate = (index: number, value: string) => {
+    setAlternateGreetings(prev => {
+      if (!value.trim()) {
+        return prev.filter((_, i) => i !== index);
+      }
+      return prev.map((g, i) => (i === index ? value : g));
+    });
+  };
+
+  const handlePromoteToDefault = (greeting: string) => {
+    setAlternateGreetings(prev => {
+      const next = prev.filter(g => g !== greeting);
+      if (firstMes.trim()) {
+        next.push(firstMes);
+      }
+      return next;
+    });
+    setFirstMes(greeting);
+  };
+
+  // ── [Test scenario generation] (edit mode — needs a saved profile + entity) ──
+  const handleTestScenario = useCallback(async () => {
+    if (testState === 'generating') return;
+    if (!editProfileId) {
+      showAlert(t('saveFirst'), t('testScenarioNeedsSavedProfile'));
+      return;
+    }
+    try {
+      const entity = await getEntityByCharacterProfileId(editProfileId);
+      if (!entity) {
+        showAlert(t('common:error'), t('testScenarioNoEntity'));
+        return;
+      }
+      const interactions = await getActiveInteractionsByEntity(entity.id);
+      const interactionId = interactions[0]?.id;
+      if (!interactionId) {
+        showAlert(t('common:error'), t('testScenarioUnavailable'));
+        return;
+      }
+      setTestState('generating');
+      const result = await EntitySessionService.generateGreeting({
+        entityId: entity.id,
+        targetEntityId: impersonatedEntityId,
+        interactionId,
+        mode: 'directed',
+      });
+      setTestGreeting(result.greeting);
+      setTestState('ready');
+    } catch (err) {
+      log.warn('Test scenario generation failed (engine gate):', err);
+      showAlert(t('common:error'), t('testScenarioUnavailable'));
+      setTestState('idle');
+    }
+  }, [editProfileId, testState, impersonatedEntityId, showAlert, t]);
+
+  const handleUseTestGreeting = () => {
+    setFirstMes(testGreeting);
+    setTestGreeting('');
+    setTestState('idle');
+  };
+
+  const handleDiscardTestGreeting = () => {
+    setTestGreeting('');
+    setTestState('idle');
+  };
+
+  // ── Export (JSON / PNG ccv3) — lifts the CURRENT form state ──────────────────
+  const handleExport = async (kind: 'json' | 'png') => {
+    if (!name.trim()) {
+      showAlert('Validation', t('validationName'));
+      return;
+    }
+    try {
+      const fields = editorStateToProfileFields(currentEditorState());
+      const card = exportProfileToCardV3(
+        {
+          id: editProfileId ?? 'export',
+          ...fields,
+          vision_config_id: null,
+        },
+        editImages,
+      );
+      const filename = sanitizeExportFilename(name);
+      const ext = kind === 'json' ? 'json' : 'png';
+      const base64 =
+        kind === 'json'
+          ? uint8ArrayToBase64(utf8Encode(exportToJSON(card)))
+          : uint8ArrayToBase64(exportToPNG(card));
+      const path = `${RNFS.CachesDirectoryPath}/${filename}.${ext}`;
+      await RNFS.writeFile(path, base64, 'base64');
+
+      // No RN file-share dependency is installed (INTEGRATIONS.md): iOS shares
+      // a file:// URL attachment; Android has no built-in file share without
+      // extra native modules, so the path is passed in the message and the
+      // success alert surfaces the saved location either way.
+      await Share.share(
+        Platform.OS === 'ios'
+          ? { url: `file://${path}`, title: filename }
+          : { message: `file://${path}`, title: filename },
+        { dialogTitle: t('exportCard') },
+      );
+    } catch (err) {
+      log.error('Failed to export card:', err);
+      showAlert(t('common:error'), t('exportFailed'));
+    }
+  };
+
+  const sanitizeExportFilename = (raw: string): string => {
+    const cleaned = raw
+      .trim()
+      .replace(/[^a-zA-Z0-9 _-]/g, '_')
+      .replace(/\s+/g, ' ')
+      .replace(/_+/g, '_');
+    return cleaned || 'character';
+  };
+
+  // ── Edit-mode image operations (local-only; the save path reconciles) ───────
+  // Deferred writes: the picker mutates local state and the diff-based
+  // reconcile on save computes the create/update/remove deltas, so untouched
+  // image rows keep their ids (Phase 8 Step 4 — no more hard-delete+recreate).
+  const handleAddImage = async () => {
+    if (!editProfileId) {
+      showAlert(t('saveFirst'), t('saveFirstMessage'));
+      return;
+    }
+    try {
+      const result = await withExternalFlow(() =>
+        launchImageLibrary({
+          mediaType: 'photo',
+          includeBase64: true,
+          quality: 0.8,
+        }),
+      );
+      if (!result.assets || !result.assets[0]) return;
+      const asset = result.assets[0];
+      if (!asset.base64) {
+        showAlert(t('common:error'), t('imageError'));
+        return;
+      }
+      const mimeType = asset.type ?? 'image/jpeg';
+      const isFirst = editImages.length === 0;
+      const tempId = `tmp-${uuidv4()}`;
+      const row: CharacterImage = {
+        id: tempId,
+        character_profile_id: editProfileId,
+        image_data: asset.base64,
+        mime_type: mimeType,
+        description: '',
+        is_primary: isFirst,
+        display_order: editImages.length,
+        vl_model_interpretation: '',
+        vl_model: '',
+        created_at: new Date(),
+        updated_at: new Date(),
+        deleted_at: null,
+      };
+      setEditImages(prev => [...prev, row]);
+      setGalleryImages(prev => [
+        ...prev,
+        { base64: asset.base64!, mimeType, description: '' },
+      ]);
+      if (isFirst) {
+        setPrimaryImageId(tempId);
+        setAvatarBase64(asset.base64);
+        setAvatarMimeType(mimeType);
+        setAvatarUri(createDataURL(asset.base64, mimeType));
+      }
+    } catch (err) {
+      log.error('Failed to add image:', err);
+      showAlert(t('common:error'), t('addImageFailed'));
+    }
+  };
+
+  const handleSetPrimary = (imageId: string) => {
+    setPrimaryImageId(imageId);
+    setEditImages(prev =>
+      prev.map(img => ({ ...img, is_primary: img.id === imageId })),
+    );
+    const target = editImages.find(img => img.id === imageId);
+    if (target) {
+      setAvatarBase64(target.image_data || null);
+      setAvatarMimeType(target.mime_type || 'image/jpeg');
+      setAvatarUri(createDataURL(target.image_data, target.mime_type));
+      setGalleryImages(prev =>
+        prev.filter(
+          g =>
+            !(g.base64 === target.image_data && g.mimeType === target.mime_type),
+        ),
+      );
+    }
+  };
+
+  const handleDeleteImage = (imageId: string) => {
+    const target = editImages.find(img => img.id === imageId);
+    const remaining = editImages.filter(img => img.id !== imageId);
+    setEditImages(remaining);
+    if (target) {
+      setGalleryImages(prev =>
+        prev.filter(
+          g =>
+            !(g.base64 === target.image_data && g.mimeType === target.mime_type),
+        ),
+      );
+    }
+    if (primaryImageId === imageId) {
+      const replacement = remaining[0] ?? null;
+      setPrimaryImageId(replacement?.id ?? null);
+      if (replacement) {
+        setAvatarBase64(replacement.image_data || null);
+        setAvatarMimeType(replacement.mime_type || 'image/jpeg');
+        setAvatarUri(createDataURL(replacement.image_data, replacement.mime_type));
+        setGalleryImages(prev =>
+          prev.filter(
+            g =>
+              !(g.base64 === replacement.image_data && g.mimeType === replacement.mime_type),
+          ),
+        );
+      } else {
+        setAvatarBase64(null);
+        setAvatarMimeType('image/jpeg');
+        setAvatarUri(null);
+      }
+    }
+  };
+
   // ── Save ─────────────────────────────────────────────────────────────────────
   /**
    * Persist the character profile + entity + module mapping, then go back to
@@ -623,72 +1076,98 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     try {
       // ── EDIT MODE: update the existing AI partner in place ─────────────
       if (editProfileId) {
+        // Validation alerts instead of silent clamping (Phase 8 Step 2).
         const typingWpm = parseInt(typingSpeedWpm, 10);
+        if (isNaN(typingWpm) || typingWpm < 1 || typingWpm > 200) {
+          showAlert('Validation', t('validationTypingSpeed'));
+          setIsSaving(false);
+          return;
+        }
         const audioChance = parseInt(audioResponseChance, 10);
+        if (isNaN(audioChance) || audioChance < 0 || audioChance > 100) {
+          showAlert('Validation', t('validationAudioChance'));
+          setIsSaving(false);
+          return;
+        }
+        if (!validateLifecycleConfig(lifecycleConfig)) {
+          showAlert('Validation', t('lifecycleInvalidNumber'));
+          setIsSaving(false);
+          return;
+        }
 
         const current = await getCharacterProfile(editProfileId);
         if (!current) throw new Error('Profile not found');
 
+        // V3 columns flow through the existing save path — `{...current}` keeps
+        // every column the editors don't touch; the shared mapping encodes the
+        // V3/RP columns explicitly (mapper JSON conventions, §A12).
+        const fields = editorStateToProfileFields(currentEditorState());
         await updateCharacterProfile({
           ...current,
-          name: trimmedName,
-          description: description.trim() || '',
-          personality: personality.trim() || '',
-          voice_characteristics: voiceCharacteristics.trim() || '',
-          typing_speed_wpm: Number.isFinite(typingWpm)
-            ? Math.min(200, Math.max(1, typingWpm))
-            : current.typing_speed_wpm,
-          audio_response_chance_percent: Number.isFinite(audioChance)
-            ? Math.min(100, Math.max(0, audioChance))
-            : current.audio_response_chance_percent,
-          base_prompt: basePrompt.trim() || '',
-          scenario: scenario.trim() || '',
-          mes_example: exampleDialogues.trim() || '',
+          ...fields,
         });
 
-        // Reconcile images: delete the existing ones, then re-create from the
-        // current UI state (avatar + gallery). This keeps the DB in exact sync
-        // with what the user sees, whether they swapped the avatar, removed a
-        // gallery tile, or added new ones.
+        // Diff-based image reconcile (Phase 8 Step 4): compute create/update/
+        // remove deltas from the editor state vs the persisted rows and apply
+        // ONLY the deltas — ids of untouched images stay stable (the old path
+        // hard-deleted + recreated every row, churning engine-synced ids).
         try {
           const existingImages = await getCharacterImages(editProfileId);
-          for (const img of existingImages) {
+          const hasAvatar = !!(avatarBase64 && avatarMimeType);
+          const desiredImages: DesiredEditorImage[] = [];
+          if (hasAvatar) {
+            desiredImages.push({
+              id: null,
+              base64: avatarBase64!,
+              mimeType: avatarMimeType!,
+              description: '',
+              isPrimary: true,
+            });
+          }
+          galleryImages.forEach((galleryImg, index) => {
+            desiredImages.push({
+              id: null,
+              base64: galleryImg.base64,
+              mimeType: galleryImg.mimeType,
+              description: galleryImg.description,
+              isPrimary: !hasAvatar && index === 0,
+            });
+          });
+          const deltas = computeImageDeltas(existingImages, desiredImages);
+          for (const removeId of deltas.remove) {
             try {
-              await deleteCharacterImage(img.id, true);
+              await deleteCharacterImage(removeId);
             } catch (delErr) {
-              log.warn('Failed to delete edit image:', delErr);
+              log.warn('Failed to delete stale edit image:', delErr);
             }
           }
+          for (const update of deltas.update) {
+            try {
+              await updateCharacterImage({
+                id: update.id,
+                description: update.description,
+                display_order: update.displayOrder,
+                is_primary: update.isPrimary,
+              });
+            } catch (updErr) {
+              log.warn('Failed to update edit image:', updErr);
+            }
+          }
+          for (const create of deltas.create) {
+            await createCharacterImage({
+              character_profile_id: editProfileId,
+              image_data: create.base64,
+              mime_type: create.mimeType,
+              description: create.description,
+              is_primary: create.isPrimary,
+              display_order: create.displayOrder,
+              vl_model_interpretation: '',
+              vl_model: '',
+              updated_at: new Date(),
+            });
+          }
         } catch (imgErr) {
-          log.warn('Failed to load images for edit reconcile:', imgErr);
-        }
-
-        const hasAvatar = !!(avatarBase64 && avatarMimeType);
-        if (hasAvatar) {
-          await createCharacterImage({
-            character_profile_id: editProfileId,
-            image_data: avatarBase64!,
-            mime_type: avatarMimeType!,
-            description: '',
-            is_primary: true,
-            display_order: 0,
-            vl_model_interpretation: '',
-            vl_model: '',
-            updated_at: new Date(),
-          });
-        }
-        for (const [index, galleryImg] of galleryImages.entries()) {
-          await createCharacterImage({
-            character_profile_id: editProfileId,
-            image_data: galleryImg.base64,
-            mime_type: galleryImg.mimeType,
-            description: galleryImg.description,
-            is_primary: !hasAvatar && index === 0,
-            display_order: index + 1,
-            vl_model_interpretation: '',
-            vl_model: '',
-            updated_at: new Date(),
-          });
+          log.warn('Failed to reconcile edit images:', imgErr);
         }
 
         // Update the entity (alias rename if the name changed) + module mapping
@@ -951,7 +1430,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     multiline = false,
     icon: string,
   ) => {
-    const focused = focusedField === field;
+const focused = focusedField === field;
     return (
       <View style={styles.fieldGroup}>
         <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
@@ -995,6 +1474,36 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   };
 
+  // Collapsible section card — same anatomy as Details/Advanced (chevron
+  // header + expandable body). Hosts the V3/RP editor sections in edit mode.
+  const renderCollapsibleCard = (
+    title: string,
+    open: boolean,
+    setOpen: React.Dispatch<React.SetStateAction<boolean>>,
+    children: React.ReactNode,
+    testID?: string,
+  ) => (
+    <ThemedCard elevated accentStripe style={styles.section}>
+      <TouchableOpacity
+        onPress={() => setOpen(prev => !prev)}
+        activeOpacity={0.7}
+        testID={testID}
+      >
+        <SectionHeader
+          title={title}
+          right={
+            <Icon
+              name={open ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={theme.colors.text.muted}
+            />
+          }
+        />
+      </TouchableOpacity>
+      {open && <View style={styles.sectionContent}>{children}</View>}
+</ThemedCard>
+  );
+
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
@@ -1017,6 +1526,17 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            editProfileId ? (
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={[accent]}
+                tintColor={accent}
+                progressBackgroundColor={theme.colors.background.surface}
+              />
+            ) : undefined
+          }
         >
           {/* ══════════════════ 1. GENERAL ══════════════════ */}
           <ThemedCard elevated accentStripe style={styles.section}>
@@ -1100,6 +1620,26 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                 'description',
                 true,
                 'text-box-outline',
+              )}
+
+              {/* Nickname (edit mode — V3 field, identity surface) */}
+              {editProfileId && (
+                <View style={styles.fieldGroup} testID="nickname-field">
+                  <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
+                    {t('nickname')}
+                  </ThemedText>
+                  <View style={[styles.inputShell, { backgroundColor: hexToRgba(surfaceColor, 0.55), borderColor: theme.colors.border.default }]}>
+                    <Icon name="account-edit-outline" size={20} color={theme.colors.text.muted} />
+                    <TextInput
+                      style={[styles.input, inputTextStyle]}
+                      value={nickname}
+                      onChangeText={setNickname}
+                      placeholder={t('nicknamePlaceholder')}
+                      placeholderTextColor={theme.colors.text.muted}
+                      testID="nickname-input"
+                    />
+                  </View>
+                </View>
               )}
 
             </View>
@@ -1251,65 +1791,223 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
                   'chat-processing-outline',
                 )}
 
-                {/* ── Images gallery ── */}
-                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
-                  {t('imagesLabel')}
-                </ThemedText>
-
-                <View style={styles.galleryWrap}>
-                  {galleryImages.map((img, index) => (
-                    <View key={`${index}-${img.base64.length}`} style={styles.galleryTile}>
-                      <Image
-                        source={{ uri: `data:${img.mimeType};base64,${img.base64}` }}
-                        style={styles.galleryTileImage}
-                        resizeMode="cover"
+                {/* Post-history instructions (UJB) — edit mode, V3 column */}
+                {editProfileId && (
+                  <View style={styles.fieldGroup} testID="post-history-field">
+                    <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
+                      {t('postHistoryInstructions')}
+                    </ThemedText>
+                    <View style={[styles.inputShell, styles.multilineShell, { backgroundColor: hexToRgba(surfaceColor, 0.55), borderColor: theme.colors.border.default }]}>
+                      <Icon name="text-box-edit-outline" size={20} color={theme.colors.text.muted} style={styles.multilineIcon} />
+                      <TextInput
+                        style={[styles.input, styles.multilineInput, inputTextStyle]}
+                        value={postHistoryInstructions}
+                        onChangeText={setPostHistoryInstructions}
+                        placeholder={t('postHistoryHint')}
+                        placeholderTextColor={theme.colors.text.muted}
+                        multiline
+                        numberOfLines={3}
+                        textAlignVertical="top"
+                        testID="post-history-input"
                       />
+                    </View>
+                    <MacroHighlighter
+                      text={postHistoryInstructions}
+                      numberOfLines={2}
+                      testID="post-history-macro-highlight"
+                    />
+                  </View>
+                )}
+
+                {/* ── Images gallery (create/duplicate flow; edit mode uses the
+                     dedicated picker card with viewer / set-primary / captions) ── */}
+                {!editProfileId && (
+                  <>
+                    <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
+                      {t('imagesLabel')}
+                    </ThemedText>
+
+                    <View style={styles.galleryWrap}>
+                      {galleryImages.map((img, index) => (
+                        <View key={`${index}-${img.base64.length}`} style={styles.galleryTile}>
+                          <Image
+                            source={{ uri: `data:${img.mimeType};base64,${img.base64}` }}
+                            style={styles.galleryTileImage}
+                            resizeMode="cover"
+                          />
+                          <TouchableOpacity
+                            onPress={() => {
+                              hapticLightPress();
+                              handleRemoveGalleryImage(index);
+                            }}
+                            activeOpacity={0.7}
+                            style={styles.galleryTileRemove}
+                            testID="create-ai-remove-gallery-image"
+                            accessibilityRole="button"
+                            accessibilityLabel={t('removeImage')}
+                          >
+                            <Icon name="close" size={14} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+
+                      {/* Add image tile */}
                       <TouchableOpacity
                         onPress={() => {
                           hapticLightPress();
-                          handleRemoveGalleryImage(index);
+                          handleAddGalleryImage();
                         }}
                         activeOpacity={0.7}
-                        style={styles.galleryTileRemove}
-                        testID="create-ai-remove-gallery-image"
+                        style={styles.galleryAddTile}
+                        testID="create-ai-add-gallery-image"
                         accessibilityRole="button"
-                        accessibilityLabel={t('removeImage')}
+                        accessibilityLabel={t('addImage')}
                       >
-                        <Icon name="close" size={14} color="#fff" />
+                        <Icon name="plus" size={26} color={accent} />
+                        <ThemedText size={11} variant="muted">
+                          {t('addImage')}
+                        </ThemedText>
                       </TouchableOpacity>
                     </View>
-                  ))}
-
-                  {/* Add image tile */}
-                  <TouchableOpacity
-                    onPress={() => {
-                      hapticLightPress();
-                      handleAddGalleryImage();
-                    }}
-                    activeOpacity={0.7}
-                    style={styles.galleryAddTile}
-                    testID="create-ai-add-gallery-image"
-                    accessibilityRole="button"
-                    accessibilityLabel={t('addImage')}
-                  >
-                    <Icon name="plus" size={26} color={accent} />
-                    <ThemedText size={11} variant="muted">
-                      {t('addImage')}
+                    <ThemedText size={11} variant="muted" style={styles.galleryHint}>
+                      {t('imagesHint')}
                     </ThemedText>
-                  </TouchableOpacity>
-                </View>
-                <ThemedText size={11} variant="muted" style={styles.galleryHint}>
-                  {t('imagesHint')}
-                </ThemedText>
+                  </>
+                )}
               </View>
             )}
           </ThemedCard>
+
+          {/* ══════════════════ V3/RP EDITOR SECTIONS (edit mode) ══════════════ */}
+          {editProfileId && (
+            <>
+              {/* Greeting */}
+              {renderCollapsibleCard(
+                t('greetingSection'),
+                showGreeting,
+                setShowGreeting,
+                <>
+                  <GreetingEditorSection
+                    firstMes={firstMes}
+                    onChangeFirstMes={setFirstMes}
+                    charName={nickname.trim() || name.trim() || '{{char}}'}
+                    userName={impersonatedEntityName}
+                    testState={testState}
+                    testGreeting={testGreeting}
+                    onTestScenario={handleTestScenario}
+                    onUseTestGreeting={handleUseTestGreeting}
+                    onDiscardTestGreeting={handleDiscardTestGreeting}
+                  />
+                  <AlternateGreetingsSection
+                    alternateGreetings={alternateGreetings}
+                    firstMes={firstMes}
+                    charName={nickname.trim() || name.trim() || '{{char}}'}
+                    userName={impersonatedEntityName}
+                    onAdd={handleAddAlternate}
+                    onRemove={handleRemoveAlternate}
+                    onMove={handleMoveAlternate}
+                    onEdit={handleEditAlternate}
+                    onPromoteToDefault={handlePromoteToDefault}
+                  />
+                </>,
+                'greeting-section-toggle',
+              )}
+
+              {/* Lorebook */}
+              {renderCollapsibleCard(
+                t('lorebookSection'),
+                showLorebook,
+                setShowLorebook,
+                <LorebookSection
+                  characterBook={characterBook}
+                  onChange={setCharacterBook}
+                />,
+                'lorebook-section-toggle',
+              )}
+
+              {/* Images — viewer / set-primary / captions via ProfileImagePicker */}
+              {renderCollapsibleCard(
+                t('imagesLabel'),
+                showImages,
+                setShowImages,
+                <>
+                  <ProfileImagePicker
+                    images={editImages}
+                    primaryImageId={primaryImageId}
+                    onAddImage={handleAddImage}
+                    onSetPrimary={handleSetPrimary}
+                    onDeleteImage={handleDeleteImage}
+                  />
+                  <ThemedText variant="muted" size={12} style={styles.imageHint}>
+                    {editImages.length > 0
+                      ? `${editImages.length} image${editImages.length !== 1 ? 's' : ''} · Tap to view · Hold for options`
+                      : t('characters:saveFirstMessage')}
+                  </ThemedText>
+                </>,
+                'images-section-toggle',
+              )}
+
+              {/* Tags */}
+              {renderCollapsibleCard(
+                t('tags'),
+                showTags,
+                setShowTags,
+                <TagsSection
+                  tags={tags}
+                  onChange={setTags}
+                  suggestions={libraryTags}
+                />,
+                'tags-section-toggle',
+              )}
+
+              {/* Lifecycle */}
+              {renderCollapsibleCard(
+                t('lifecycleSection'),
+                showLifecycle,
+                setShowLifecycle,
+                <LifecycleSection
+                  config={lifecycleConfig}
+                  onChange={setLifecycleConfig}
+                />,
+                'lifecycle-section-toggle',
+              )}
+
+              {/* Attribution */}
+              {renderCollapsibleCard(
+                t('attributionSection'),
+                showAttribution,
+                setShowAttribution,
+                <AttributionSection
+                  creator={creatorName}
+                  onChangeCreator={setCreatorName}
+                  creatorNotes={creatorNotes}
+                  onChangeCreatorNotes={setCreatorNotes}
+                  characterVersion={characterVersion}
+                  onChangeCharacterVersion={setCharacterVersion}
+                  cardProvenance={cardProvenance}
+                />,
+                'attribution-section-toggle',
+              )}
+
+              {/* Export */}
+              <ThemedCard elevated accentStripe style={styles.section}>
+                <SectionHeader title={t('exportCard')} />
+                <View style={styles.sectionContent}>
+                  <ExportSection
+                    onExport={handleExport}
+                    disabled={!name.trim()}
+                  />
+                </View>
+              </ThemedCard>
+            </>
+          )}
 
           {/* ══════════════════ 3. ADVANCED ══════════════════ */}
           <ThemedCard elevated accentStripe accentTint style={styles.section}>
             <TouchableOpacity
               onPress={() => setShowAdvanced(prev => !prev)}
               activeOpacity={0.7}
+              testID="advanced-toggle"
             >
               <SectionHeader
                 title={t('advancedSettings')}
@@ -1653,6 +2351,11 @@ const styles = StyleSheet.create({
   galleryHint: {
     marginTop: 8,
     marginLeft: 2,
+  },
+
+  // ── Edit-mode images section ──
+  imageHint: {
+    marginTop: 4,
   },
 
   // ── CTA ──
