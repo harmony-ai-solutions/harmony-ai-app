@@ -62,7 +62,7 @@ Track the completion of each phase as implementation progresses:
 - [x] **Phase 3: Social, Notifications & Profile Rewiring** ([3-SocialProfileRewiring.md](3-SocialProfileRewiring.md))
 - [x] **Phase 4: Schema Surgery & Repo Removal** ([4-SchemaSurgery.md](4-SchemaSurgery.md))
 - [x] **Phase 5: B4 Seeding Revert** ([5-SeedingRevert.md](5-SeedingRevert.md))
-- [ ] **Phase 6: D-Register Bug Mends** ([6-BugMends.md](6-BugMends.md))
+- [x] **Phase 6: D-Register Bug Mends** ([6-BugMends.md](6-BugMends.md))
 - [ ] **Phase 7: Track E INIT_ENTITY Recovery** ([7-InitEntityRecovery.md](7-InitEntityRecovery.md))
 - [ ] **Phase 8: Track C Editor Consolidation** ([8-EditorConsolidation.md](8-EditorConsolidation.md))
 - [ ] **Phase 9: Verification, Records & Docs** ([9-VerificationRecords.md](9-VerificationRecords.md))

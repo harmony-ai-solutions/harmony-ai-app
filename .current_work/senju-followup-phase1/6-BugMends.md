@@ -49,6 +49,13 @@
 
 ## Verification
 
-- [ ] Per-group: `npx tsc --noEmit` + affected suites green
-- [ ] New unit tests where cheap: F3 cascade, F10 set-to-1, F11 mute suppression, reply-mode service, stats aggregate
-- [ ] `gitnexus_detect_changes()` before each commit
+- [x] Per-group: `npx tsc --noEmit` + affected suites green (final: unit 91 suites/810 tests, integration 10/50+1 skipped)
+- [x] New unit tests where cheap: F3 cascade, F10 set-to-1, F11 mute suppression, reply-mode service, stats aggregate (+ participant-key contract pin, recording tick, background purge)
+- [x] `gitnexus_detect_changes()` before each commit
+
+### Implementation record (commits)
+
+- `ba97e9a` F3 cascade (repo-level, self-contained first)
+- `4fc4ab0` F1 F5 F6 F7 F8 F10 F11 F12 + cleanup (F5 folded here — its code lives in ChatListScreen)
+- `77518e5` F4/O3 + D1-3 + D1-4 (F4 verdict: **no drift** — derivation + callers already engine-aligned; docstring fixed + contract pinned by test. D1-4 Kotlin `show()` = Promise-based boolean, bridgeless-compatible; compile rides next device build. D1-3 = 2 stacked root-cause bugs fixed)
+- `40553b3` A6 + D1-5 + D1-7 + D1-8 + D1-12 (one commit — EntitySessionService carries both A6 and D1-5 changes). A6 extras: `InteractionSession.replyMode` field added so partner reconnect honors the preference (was hardcoded 'realistic'); storage key prefix migrated to `@harmony_chat_reply_mode_` (old dev values abandoned per F4-style accept-loss)

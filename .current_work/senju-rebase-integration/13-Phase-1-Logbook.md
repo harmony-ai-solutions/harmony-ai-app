@@ -14,8 +14,8 @@
 | 2 — Marketplace & wallet rewiring | ✅ committed | `82143b7` |
 | 3 — Social/notifications/profile rewiring | ✅ committed | `20d70c9` |
 | 4 — Schema surgery | ✅ committed | `a0992be` |
-| 5 — B4 seeding revert | ✅ committed | (this commit) |
-| 6 — D-register bug mends | ⏳ pending | — |
+| 5 — B4 seeding revert | ✅ committed | `29871ab` |
+| 6 — D-register bug mends | ✅ committed | `ba97e9a`+`4fc4ab0`+`77518e5`+`40553b3` |
 | 7 — INIT_ENTITY recovery | ⏳ pending | — |
 | 8 — Editor consolidation | ⏳ pending | — |
 | 9 — Verification/records/docs | ⏳ pending | — |
@@ -216,6 +216,39 @@ None (phase was new-files-only by design).
 
 ---
 
+## Phase 6 — D-Register Bug Mends (4 commits: 3 agent batches + 1 orchestrator fix)
+
+**Gates per batch**: tsc 0; final unit **91 suites/810 tests** (from 84/770 baseline: +7 suites/+40 tests); integration 10/50+1 skipped throughout.
+
+### Batch A — ChatList cluster (`ba97e9a` F3 cascade; `4fc4ab0` F1 F5 F6 F7 F8 F10 F11 F12)
+- **F1**: ChatListScreen focus-scoped subscription to `message:received` (incremental row update + re-sort) / `session:started|stopped` (400 ms debounced full reload); listeners cleaned on blur.
+- **F3**: `deleteConversationByParticipantKey` cascades `chat_conversation_settings` delete (repo-level) + `conversationDeleteCascade.test.ts`.
+- **F5**: chat list filters via `SocialService.getBlockedUserIds()`.
+- **F6**: new `getPhoneConversationsPage(entityId, {limit, offset})` in interactions repo — GROUP BY participant_key, ORDER BY MAX(last-message created_at); ChatList + Archived on 20/page `onEndReached` pagination (also fixes duplicate group entries).
+- **F7**: persona resolution awaited before first list load.
+- **F8**: bubble unread badge pushed through the F1 subscription (`setBubbleUnreadCount`).
+- **F10**: new `setConversationUnread(key, entityId, count)` = set-to-1 semantics.
+- **F11**: `handleIncomingMessage` muted guard skips `incrementConversationUnread` + `entitySessionMuteSuppression.test.ts`.
+- **F12**: ArchivedChatsScreen bubble uses live persona.
+- Cleanup: `getKeyLastRead`/`setKeyLastRead`/`markKeyAsRead`/`clearKeyLastRead` subsystem deleted; unused imports/styles/`_loading` gone.
+
+### Batch B — Keys/recording/bubble (`77518e5` F4/O3 D1-3 D1-4)
+- **F4 verdict: NO drift** — app derivation + all callers already match the engine exactly (own entity in the key everywhere; evidence table of both sides' callers in the phase record). Fixed the false docstring in `interactions.ts`; pinned the engine contract in `interactionsParticipantKey.test.ts` (12 cases). Data note: old-derivation settings rows = accepted loss on dev devices (comment in `chatConversationSettings.ts`; no re-key migration — decided).
+- **D1-3**: ChatInputBar 120 s auto-stop now FINISHES the recording (stop + attach) — root cause was 2 stacked bugs (abort-flag set before finish + stale-closure interval). Pure helper `nextRecordingTick` + 5 tests. Countdown kept, pinned at 2:00.
+- **D1-4**: `ChatBubbleModule.show()` Kotlin → **Promise-based boolean** (canDrawOverlays → false; try/catch around service start → true/false). Promise over sync-boolean because `newArchEnabled=true` (bridgeless forbids sync native returns); mirrors the module's own `hasPermission`/`isSupported` pattern. TS `result === false` check in `ChatBubbleService.showBubble` is live again. **Kotlin compile rides the user's next device build.**
+
+### Batch C — Toggle/indicators/misc (`40553b3` A6 D1-5 D1-7 D1-8 D1-12)
+- **A6**: reply-mode toggle in `ChatConversationMenuModal` (ChatList + Archived long-press); storage `@harmony_chat_reply_mode_<participantKey>` via ChatPreferencesService (key prefix migrated from her `chat_reply_mode_` — old dev values abandoned, consistent with F4 ruling); paced via `INIT_ENTITY.payload.reply_mode` on session start; `ChatPreferencesService.test.ts` (8 tests).
+- **Orchestrator follow-up fix**: `InteractionSession.replyMode` field added (seeded at session start) so partner **reconnect** (`sendInitEntityForEntity`) honors the preference instead of hardcoded `'realistic'`.
+- **D1-5**: background handler in `EntitySessionService.setupAppStateListener` early-returns while `cloudSessionService.isPurging()` (purge owns WS lifecycle; policy comment in code) + `entitySessionBackgroundPurge.test.ts`.
+- **D1-7**: 3-state connection indicator restored in ChatDetailScreen — connected (purple), connecting (amber pulsing), offline (grey); i18n `statusConnected/Connecting/Offline`.
+- **D1-8**: first message now also gets a day divider (`i === 0 ||` condition).
+- **D1-12**: `getCharacterStats` chats count via aggregate SQL (JSON1 `json_each` + EXISTS) with JS-scan fallback; shape unchanged; 2 new tests.
+
+### D1/D2 rows DONE-BY or deferred (unchanged): D1-1/2/6/9 (done by Phases 1–4), D1-11 legacy persona prefs (deferred P4/O2), F2/F9 (paywall), F4 data note above.
+
+---
+
 ## Pointers for follow-up Phase 2 (engine) planning
 
 *(append after each phase)*
@@ -226,3 +259,4 @@ None (phase was new-files-only by design).
 - **Phase-3 additions**: profile extension = `username`/`bio` in PATCH /v1/auth/me + avatar upload endpoint + `avatar_url` in responses; notification **write** side (comment/like/follow/image-comment events → notifications); per-item liked-state + count reads on posts/images; follower graph for local user; creator user ids on marketplace listings (blocked-filter + attribution + `filterBlockedCharacterProfiles` creator resolution).
 - **Phase-4 state (parity baseline for engine Phase 2)**: RN↔Go divergence set = `conversation_messages` D3-narrowed (`reactions_json`, `is_pinned`, `idx_conversation_messages_pinned`) + 10 pre-existing cosmetic drifts + `device_push_tokens` Go-only. B1 (Go mirror migration for message actions incl. read flags, shape O12) closes D3. `CLIENT_ONLY_TABLES` interim = `personas` (dies B3), `character_favorites` + `chat_conversation_settings` (redesigned B2) — mechanism expires with the last entry.
 - **Ownership signal gap (B2 input)**: `getUserCharacterProfiles` interim-returns ALL profiles (old `character_profile_sources` JOIN dropped). Engine mirror must restore per-user ownership so MyProfile "AI Characters" count, publish flow, and apply-to-character picker filter correctly.
+- **Phase-6 inputs**: reply-mode becomes a synced `chat_conversation_settings` column in B2 (interim AsyncStorage `@harmony_chat_reply_mode_<participantKey>`); read-flags (B1) supersede `unread_count` (kept until then); F4 confirmed NO app/engine key drift — contract pinned by test; Kotlin `show()` is now Promise<boolean> (device-build compile pending); F1/F8 event contract (`message:received` + session lifecycle) is app-local — engine-side event needs only exist if B1 planning wants push-driven chat lists.
