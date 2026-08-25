@@ -92,6 +92,7 @@ import {
   hasBubblePermission,
   requestBubblePermission,
 } from '../services/ChatBubbleService';
+import { isChatLocked } from '../services/marketplace/MarketplaceService';
 
 const log = createLogger('[ChatDetailScreen]');
 
@@ -222,6 +223,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Using a ref (not state) avoids re-render cascades and stale closure issues
   // in event listeners that need the current ID at callback time.
   const currentInteractionIdRef = useRef(routeInteractionId);
+
+  // HARD GATE — marketplace preview lock (viewable free, chat locked until
+  // acquired; own library never locked): once set, this chat is a locked
+  // marketplace conversation — the session must never start and any open is
+  // reverted. Guards the async race between the header-resolution lock check
+  // and session initialization.
+  const chatLockedRef = useRef(false);
 
   const flatListRef = useRef<FlatList<any>>(null);
   const sessionDividerTimestamp = useRef<number>(0);
@@ -364,6 +372,30 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         const allEntities = await getAllEntities();
         const entity = allEntities.find(e => e.id === partnerEntityId);
         if (entity?.character_profile_id) {
+          // HARD GATE — marketplace preview lock (viewable free, chat locked
+          // until acquired; own library never locked): if the partner is a
+          // marketplace-listed AI the local user has not acquired (and does
+          // not own), this chat must never open — navigate back immediately
+          // and stop the session before any message can be sent or received.
+          // Defense in depth: the central openCharacterChat gate normally
+          // prevents reaching this screen, but direct navigation (chat list,
+          // bubbles, deep links) still hits this path.
+          try {
+            if (await isChatLocked(entity.character_profile_id)) {
+              log.warn(
+                `Chat locked for marketplace profile ${entity.character_profile_id} — closing chat.`,
+              );
+              // Never let a session start for this chat, stop any session the
+              // context may have started, then leave.
+              chatLockedRef.current = true;
+              stopInteractionSession(routeInteractionId).catch(() => {});
+              navigation.goBack();
+              return;
+            }
+          } catch (lockErr) {
+            log.warn('Failed to check chat lock, allowing:', lockErr);
+          }
+
           // Link the header to the partner's AI profile (tap avatar/name →
           // AIProfile). Skip in group chats — there is no single profile to open.
           setPartnerProfileId(entity.character_profile_id);
@@ -539,6 +571,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Session initialization – (re)start the session when sync connection becomes available
   useEffect(() => {
     let mounted = true;
+
+    // HARD GATE — marketplace preview lock: never start a session for a locked
+    // marketplace conversation (the header-resolution gate set the ref).
+    if (chatLockedRef.current) {
+      return;
+    }
 
     if (!isConnected || !participantKey) {
       return;

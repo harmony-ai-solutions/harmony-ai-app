@@ -237,7 +237,10 @@ describe('MarketplaceService — acquire', () => {
     expect(await walletService.getBalance()).toBe(50);
 
     const result = await MarketplaceService.acquire('listing-wren'); // 45 souls
-    expect(result).toEqual({ ok: true, listingId: 'listing-wren' });
+    expect(result).toMatchObject({ ok: true, listingId: 'listing-wren' });
+    // Deep-link ids for MyLibrary navigation are exposed on the result.
+    expect(result.deliveredEntryId).toEqual(expect.any(String));
+    expect(result.deliveredAssetId).toEqual(expect.any(String));
     expect(await walletService.getBalance()).toBe(5);
 
     const library = await MarketplaceService.getLibrary();
@@ -254,7 +257,9 @@ describe('MarketplaceService — acquire', () => {
   it('acquiring an already-owned listing is idempotent (no second debit)', async () => {
     // listing-echo is pre-seeded as owned (free fixture).
     const result = await MarketplaceService.acquire('listing-echo');
-    expect(result).toEqual({ ok: true, listingId: 'listing-echo' });
+    expect(result).toMatchObject({ ok: true, listingId: 'listing-echo' });
+    expect(result.deliveredEntryId).toEqual(expect.any(String));
+    expect(result.deliveredAssetId).toEqual(expect.any(String));
     expect(await walletService.getBalance()).toBe(50);
 
     // A purchase-acquired listing is also idempotent.
@@ -358,6 +363,352 @@ describe('MarketplaceService — refresh', () => {
     expect(feed.some(l => l.id === 'listing-nyx' && l.status === 'active')).toBe(true);
     expect(feed.some(l => l.title === 'Ephemeral Listing')).toBe(false);
     expect(await MarketplaceService.getMyListings()).toHaveLength(0);
+  });
+});
+
+describe('MarketplaceService — wire extensions (salesCount, preview, text/theme)', () => {
+  it('exposes salesCount on every feed summary (popular-sort source)', async () => {
+    const listings = await MarketplaceService.getListings();
+    expect(listings.length).toBeGreaterThan(0);
+    expect(listings.every(l => typeof l.salesCount === 'number')).toBe(true);
+    expect(listings.find(l => l.id === 'listing-echo')?.salesCount).toBe(402);
+  });
+
+  it('exposes salesCount on the detail (detail extends summary)', async () => {
+    const detail = await MarketplaceService.getListing('listing-luna');
+    expect(detail.salesCount).toBe(42);
+  });
+
+  it('exposes preview fields on the detail (feed cards do not carry them)', async () => {
+    const detail = await MarketplaceService.getListing('listing-luna');
+    expect(detail.previewText).toEqual(expect.any(String));
+    expect(detail.previewText!.length).toBeGreaterThan(0);
+    // Fixtures ship no image assets — the UI renders images only when present.
+    expect(detail.previewImageData).toBeNull();
+    expect(detail.previewMimeType).toBeNull();
+  });
+
+  it('publishListing accepts a text draft and validates the text payload', async () => {
+    const published = await MarketplaceService.publishListing({
+      title: 'My Field Notes',
+      description: 'Notes on companion design.',
+      priceSouls: 15,
+      tags: ['notes'],
+      cardSnapshot: makeSnapshot('Field Notes'),
+      kind: 'text',
+      text: 'Remember the user, not just the conversation.',
+      previewText: 'A short teaser shown before acquisition.',
+    });
+    expect(published.status).toBe('pending');
+    // The preview teaser round-trips onto the pending detail.
+    const detail = await MarketplaceService.getListing(published.id);
+    expect(detail.previewText).toBe('A short teaser shown before acquisition.');
+
+    // kind 'text' without a body is an invalid draft (honest 400).
+    await expect(
+      MarketplaceService.publishListing({
+        title: 'Empty Body',
+        description: 'd',
+        priceSouls: 5,
+        cardSnapshot: makeSnapshot(),
+        kind: 'text',
+        text: '   ',
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_draft' });
+  });
+
+  it('insertListing stores kind/text/previewText/sourceProfileId on the record', async () => {
+    const record = await MarketplaceBackend.insertListing({
+      title: 'Stored Payload',
+      description: 'd',
+      priceSouls: 7,
+      tags: ['t'],
+      snapshot: makeSnapshot(),
+      kind: 'theme',
+      text: 'The theme payload.',
+      previewText: 'A teaser.',
+      sourceProfileId: 'profile-stored',
+    });
+    expect(record.kind).toBe('theme');
+    expect(record.text).toBe('The theme payload.');
+    expect(record.previewText).toBe('A teaser.');
+    expect(record.sourceProfileId).toBe('profile-stored');
+  });
+
+  it('acquiring a text-kind listing delivers a text asset (no snapshot)', async () => {
+    // listing-essay is an active fixture text listing (30 souls).
+    const result = await MarketplaceService.acquire('listing-essay');
+    expect(result.deliveredAssetId).toEqual(expect.any(String));
+
+    const asset = await MarketplaceService.getContentAsset(result.deliveredAssetId!);
+    expect(asset.kind).toBe('text');
+    expect(asset.text).toContain('the ones who remember');
+    expect(asset.snapshot).toBeUndefined();
+  });
+
+  it('acquiring a theme-kind listing delivers a theme asset with the theme payload', async () => {
+    // listing-starlight-frame is an active fixture theme listing (20 souls).
+    const result = await MarketplaceService.acquire('listing-starlight-frame');
+
+    const asset = await MarketplaceService.getContentAsset(result.deliveredAssetId!);
+    expect(asset.kind).toBe('theme');
+    expect(asset.text).toContain('night sky');
+    expect(asset.snapshot).toBeUndefined();
+  });
+});
+
+describe('MarketplaceService — updateListing (owner-only)', () => {
+  it('happy path: applies changes and keeps the status unchanged', async () => {
+    const published = await MarketplaceService.publishListing({
+      title: 'Original Title',
+      description: 'Original description.',
+      priceSouls: 10,
+      tags: ['old'],
+      cardSnapshot: makeSnapshot(),
+    });
+    expect(published.status).toBe('pending');
+
+    const updated = await MarketplaceService.updateListing(published.id, {
+      title: '  New Title  ',
+      description: '  New description.  ',
+      priceSouls: 33,
+      tags: ['new', 'tags'],
+      previewText: 'A fresh teaser.',
+    });
+    expect(updated.title).toBe('New Title');
+    expect(updated.description).toBe('New description.');
+    expect(updated.priceSouls).toBe(33);
+    expect(updated.tags).toEqual(['new', 'tags']);
+    expect(updated.previewText).toBe('A fresh teaser.');
+    expect(updated.status).toBe('pending'); // update NEVER changes status
+
+    const roundTrip = await MarketplaceService.getListing(published.id);
+    expect(roundTrip.title).toBe('New Title');
+    expect(roundTrip.previewText).toBe('A fresh teaser.');
+  });
+
+  it('throws 403 forbidden for listings owned by someone else', async () => {
+    await expect(
+      MarketplaceService.updateListing('listing-luna', { title: 'Hijack' }),
+    ).rejects.toMatchObject({ status: 403, code: 'forbidden' });
+  });
+
+  it('throws 404 for unknown listings', async () => {
+    await expect(
+      MarketplaceService.updateListing('missing-listing', { title: 'X' }),
+    ).rejects.toMatchObject({ status: 404, code: 'not_found' });
+  });
+
+  it('validates title / price like publish (400 invalid_draft)', async () => {
+    const published = await MarketplaceService.publishListing({
+      title: 'Valid',
+      description: 'd',
+      priceSouls: 10,
+      cardSnapshot: makeSnapshot(),
+    });
+
+    await expect(
+      MarketplaceService.updateListing(published.id, { title: '   ' }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_draft' });
+    await expect(
+      MarketplaceService.updateListing(published.id, { priceSouls: -5 }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_draft' });
+  });
+
+  it('throws 503 honestly when the simulated backend op fails (store untouched)', async () => {
+    const published = await MarketplaceService.publishListing({
+      title: 'Doomed Edit',
+      description: 'd',
+      priceSouls: 10,
+      cardSnapshot: makeSnapshot(),
+    });
+
+    mockSimulateTransientFailure.mockReturnValue(true);
+    await expect(
+      MarketplaceService.updateListing(published.id, { title: 'Changed?' }),
+    ).rejects.toMatchObject({ status: 503, code: 'stub_backend_unavailable' });
+
+    mockSimulateTransientFailure.mockReturnValue(false);
+    const detail = await MarketplaceService.getListing(published.id);
+    expect(detail.title).toBe('Doomed Edit');
+  });
+});
+
+describe('MarketplaceService — relistListing', () => {
+  it('re-lists a removed listing back to active', async () => {
+    const published = await MarketplaceService.publishListing({
+      title: 'Comeback Listing',
+      description: 'd',
+      priceSouls: 10,
+      cardSnapshot: makeSnapshot(),
+    });
+    await MarketplaceService.delistListing(published.id);
+    expect((await MarketplaceService.getListing(published.id)).status).toBe('removed');
+
+    const relisted = await MarketplaceService.relistListing(published.id);
+    expect(relisted.status).toBe('active');
+
+    const feed = await MarketplaceService.getListings();
+    expect(feed.some(l => l.id === published.id && l.status === 'active')).toBe(true);
+  });
+
+  it('rejects non-removed statuses with 409 listing_not_available', async () => {
+    // Owned listing currently active (publish → delist → relist → active).
+    const published = await MarketplaceService.publishListing({
+      title: 'Already Live',
+      description: 'd',
+      priceSouls: 10,
+      cardSnapshot: makeSnapshot(),
+    });
+    await MarketplaceService.delistListing(published.id);
+    await MarketplaceService.relistListing(published.id);
+    await expect(MarketplaceService.relistListing(published.id)).rejects.toMatchObject({
+      status: 409,
+      code: 'listing_not_available',
+    });
+
+    // Owned listing still pending (never delisted).
+    const pending = await MarketplaceService.publishListing({
+      title: 'Still Pending',
+      description: 'd',
+      priceSouls: 10,
+      cardSnapshot: makeSnapshot(),
+    });
+    await expect(MarketplaceService.relistListing(pending.id)).rejects.toMatchObject({
+      status: 409,
+      code: 'listing_not_available',
+    });
+  });
+
+  it('throws 403 forbidden for someone else\u2019s removed listing', async () => {
+    // listing-archive is a removed fixture owned by a foreign creator.
+    await expect(MarketplaceService.relistListing('listing-archive')).rejects.toMatchObject({
+      status: 403,
+      code: 'forbidden',
+    });
+  });
+
+  it('throws 404 for unknown listings', async () => {
+    await expect(MarketplaceService.relistListing('missing-listing')).rejects.toMatchObject({
+      status: 404,
+      code: 'not_found',
+    });
+  });
+
+  it('throws 503 honestly when the simulated backend op fails (status unchanged)', async () => {
+    const published = await MarketplaceService.publishListing({
+      title: 'Doomed Relist',
+      description: 'd',
+      priceSouls: 10,
+      cardSnapshot: makeSnapshot(),
+    });
+    await MarketplaceService.delistListing(published.id);
+
+    mockSimulateTransientFailure.mockReturnValue(true);
+    await expect(MarketplaceService.relistListing(published.id)).rejects.toMatchObject({
+      status: 503,
+      code: 'stub_backend_unavailable',
+    });
+
+    mockSimulateTransientFailure.mockReturnValue(false);
+    expect((await MarketplaceService.getListing(published.id)).status).toBe('removed');
+  });
+});
+
+describe('MarketplaceService — removeLibraryEntry', () => {
+  it('removes the entry and revokes ownership so the listing can be acquired again', async () => {
+    // listing-echo is pre-seeded as owned (free fixture) — find its entry.
+    const before = await MarketplaceService.getLibrary();
+    const echoEntry = before.find(e => e.listingId === 'listing-echo');
+    expect(echoEntry).toBeDefined();
+
+    await MarketplaceService.removeLibraryEntry(echoEntry!.id);
+
+    const after = await MarketplaceService.getLibrary();
+    expect(after.some(e => e.id === echoEntry!.id)).toBe(false);
+
+    // Ownership revoked → acquire succeeds again (free, no debit).
+    const reacquired = await MarketplaceService.acquire('listing-echo');
+    expect(reacquired).toMatchObject({ ok: true, listingId: 'listing-echo' });
+    expect(reacquired.deliveredEntryId).toEqual(expect.any(String));
+    expect(await walletService.getBalance()).toBe(50);
+
+    const library = await MarketplaceService.getLibrary();
+    expect(library.some(e => e.listingId === 'listing-echo')).toBe(true);
+  });
+
+  it('throws 404 for unknown library entries', async () => {
+    await expect(MarketplaceService.removeLibraryEntry('missing-entry')).rejects.toMatchObject({
+      status: 404,
+      code: 'not_found',
+    });
+  });
+});
+
+describe('MarketplaceService — profile linkage + chat-lock', () => {
+  it('no listing → not locked, no profile listing', async () => {
+    expect(await MarketplaceService.isChatLocked('profile-unknown')).toBe(false);
+    expect(await MarketplaceService.getListingForProfile('profile-unknown')).toBeNull();
+  });
+
+  it('own active listing (creator) → never locked', async () => {
+    const published = await MarketplaceService.publishListing({
+      title: 'My Own Character',
+      description: 'd',
+      priceSouls: 10,
+      cardSnapshot: makeSnapshot('My OC'),
+      sourceProfileId: 'profile-mine',
+    });
+    await MarketplaceService.delistListing(published.id);
+    await MarketplaceService.relistListing(published.id); // now active, creator = You
+
+    expect(await MarketplaceService.isChatLocked('profile-mine')).toBe(false);
+  });
+
+  it('someone else\u2019s active listing via sourceProfileId → chat locked, listing surfaced', async () => {
+    MarketplaceBackend.__seedForeignListingForTest({
+      id: 'foreign-active',
+      title: 'Foreign Active',
+      sourceProfileId: 'profile-foreign-active',
+    });
+
+    const listing = await MarketplaceService.getListingForProfile('profile-foreign-active');
+    expect(listing).not.toBeNull();
+    expect(listing!.id).toBe('foreign-active');
+    expect(await MarketplaceService.isChatLocked('profile-foreign-active')).toBe(true);
+  });
+
+  it('after acquiring the foreign listing → chat unlocked', async () => {
+    MarketplaceBackend.__seedForeignListingForTest({
+      id: 'foreign-active',
+      title: 'Foreign Active',
+      sourceProfileId: 'profile-foreign-active',
+    });
+
+    const result = await MarketplaceService.acquire('foreign-active');
+    expect(result).toMatchObject({ ok: true, listingId: 'foreign-active' });
+
+    expect(await MarketplaceService.isChatLocked('profile-foreign-active')).toBe(false);
+  });
+
+  it('pending / removed listings never lock', async () => {
+    MarketplaceBackend.__seedForeignListingForTest({
+      id: 'foreign-pending',
+      title: 'Foreign Pending',
+      sourceProfileId: 'profile-foreign-pending',
+      status: 'pending',
+    });
+    MarketplaceBackend.__seedForeignListingForTest({
+      id: 'foreign-removed',
+      title: 'Foreign Removed',
+      sourceProfileId: 'profile-foreign-removed',
+      status: 'removed',
+    });
+
+    expect(await MarketplaceService.isChatLocked('profile-foreign-pending')).toBe(false);
+    expect(await MarketplaceService.isChatLocked('profile-foreign-removed')).toBe(false);
+    expect(await MarketplaceService.getListingForProfile('profile-foreign-pending')).toBeNull();
+    expect(await MarketplaceService.getListingForProfile('profile-foreign-removed')).toBeNull();
   });
 });
 

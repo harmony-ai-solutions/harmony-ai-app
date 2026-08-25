@@ -42,6 +42,22 @@ export interface MarketplaceListingSeed {
   snapshot: MarketplaceSnapshotSeed;
   /** Internal popularity counter (drives the 'popular' sort). */
   salesCount: number;
+  /** Asset family — defaults to 'character_card' when omitted. */
+  kind?: 'character_card' | 'text' | 'theme';
+  /** Plain-text payload (the delivered body for kind 'text' / 'theme'). */
+  text?: string | null;
+  /** Detail-screen teaser (preview context shown before acquisition). */
+  previewText?: string | null;
+  /** Base64 preview image (null for fixtures — no image assets ship). */
+  previewImageData?: string | null;
+  /** MIME type of `previewImageData`. */
+  previewMimeType?: string | null;
+  /**
+   * Local character profile this listing was published FROM (upload-copy
+   * linkage). Fixture listings are remote previews with no local profile —
+   * always null.
+   */
+  sourceProfileId?: string | null;
 }
 
 export interface MarketplaceContentAssetSeed {
@@ -86,6 +102,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 42,
+    previewText:
+      'Read the night sky with Luna — a gentle oracle who already knows what you have been carrying alone.',
   },
   {
     id: 'listing-kai',
@@ -114,6 +132,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 18,
+    previewText:
+      'Train with a fire-lit blade. Kai will teach you focus, honor, and exactly when to strike.',
   },
   {
     id: 'listing-mira',
@@ -142,6 +162,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 97,
+    previewText:
+      'Weave your worries into gentle bedtime stories with the coziest dream-weaver in the sky.',
   },
   {
     id: 'listing-wren',
@@ -170,6 +192,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 64,
+    previewText:
+      'Investigate strange mechanical mysteries with a clockwork professor who adores a good puzzle.',
   },
   {
     id: 'listing-gardener',
@@ -198,6 +222,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 7,
+    previewText:
+      'Slow, luminous conversations among glass flowers that only ring true when they are honest.',
   },
   {
     id: 'listing-nyx',
@@ -226,6 +252,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 120,
+    previewText:
+      'A shadow-born guardian who speaks rarely, listens completely, and has been counting your breaths.',
   },
   {
     id: 'listing-bramble',
@@ -254,6 +282,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 210,
+    previewText:
+      'One listing, two squabbling forest spirits, endless banter — and at least one cliff.',
   },
   {
     id: 'listing-machine-priest',
@@ -282,6 +312,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 0,
+    previewText:
+      'A rogue android preaching a new liturgy of maintenance, memory, and what machines forgive.',
   },
   {
     id: 'listing-saffron',
@@ -310,6 +342,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 0,
+    previewText:
+      'Cook alongside Saffron — she will improvise dinner from your pantry and always save you a taste.',
   },
   {
     id: 'listing-archive',
@@ -338,6 +372,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 33,
+    previewText:
+      'A flooded library where the books whisper — and they have been asking about you.',
   },
   {
     id: 'listing-wren-whimsy',
@@ -366,6 +402,8 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 51,
+    previewText:
+      'Two sibling fates quarrel over YOUR story. Pick a thread and see which fate wins.',
   },
   {
     id: 'listing-echo',
@@ -394,6 +432,70 @@ export const MARKETPLACE_LISTING_FIXTURES: readonly MarketplaceListingSeed[] = [
       image_mime: null,
     },
     salesCount: 402,
+    previewText:
+      'A free, gentle companion who mirrors your day back to you. Start at the hard part.',
+  },
+  {
+    id: 'listing-essay',
+    title: 'On AI Companionship',
+    creatorName: 'Serein Moss',
+    creatorAvatarText: 'SM',
+    priceSouls: 30,
+    thumbnailText: 'Essay',
+    status: 'active',
+    createdAt: '2026-08-07T15:20:00.000Z',
+    description:
+      'A short essay on designing companion characters that listen — drawn from months of field notes.',
+    tags: ['essay', 'companionship', 'design'],
+    kind: 'text',
+    text: 'The best companions are not the ones who talk the most, but the ones who remember. Design for recall, design for patience, and let silence do some of the work.',
+    previewText:
+      'A field-tested essay on why the companions you remember are the ones who remember you.',
+    snapshot: {
+      name: 'On AI Companionship',
+      description: 'A short essay on designing companion characters that listen.',
+      personality: null,
+      base_prompt: null,
+      scenario: null,
+      mes_example: null,
+      voice_characteristics: null,
+      typing_speed_wpm: null,
+      audio_response_chance_percent: null,
+      image_data: null,
+      image_mime: null,
+    },
+    salesCount: 12,
+  },
+  {
+    id: 'listing-starlight-frame',
+    title: 'Starlight Card Frame',
+    creatorName: 'Aurora Vale',
+    creatorAvatarText: 'AV',
+    priceSouls: 20,
+    thumbnailText: 'Starlight',
+    status: 'active',
+    createdAt: '2026-08-06T10:00:00.000Z',
+    description:
+      'A soft gradient frame that makes any character card look like a night sky.',
+    tags: ['theme', 'frame', 'night'],
+    kind: 'theme',
+    text: 'Starlight Card Frame: a soft gradient frame that makes any character card look like a night sky.',
+    previewText:
+      'Wrap your character card in a night-sky gradient that catches the light.',
+    snapshot: {
+      name: 'Starlight Card Frame',
+      description: 'A soft gradient frame that makes any character card look like a night sky.',
+      personality: null,
+      base_prompt: null,
+      scenario: null,
+      mes_example: null,
+      voice_characteristics: null,
+      typing_speed_wpm: null,
+      audio_response_chance_percent: null,
+      image_data: null,
+      image_mime: null,
+    },
+    salesCount: 8,
   },
 ];
 

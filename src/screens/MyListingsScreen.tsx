@@ -17,6 +17,7 @@ import { ThemedButton } from '../components/themed/ThemedButton';
 import {
   getMyListings,
   delistListing,
+  relistListing,
   type MarketplaceListingSummary,
 } from '../services/marketplace/MarketplaceService';
 
@@ -46,23 +47,32 @@ export const MyListingsScreen: React.FC = () => {
     }, [load]),
   );
 
-  const handleToggleStatus = async (listing: MarketplaceListingSummary) => {
-    const isActive = listing.status === 'active' || listing.status === 'pending';
-    if (isActive) {
-      // Delist → soft-delete (status 'removed') via the stub backend.
-      try {
-        await delistListing(listing.id);
-        setListings(prev =>
-          prev.map(p => (p.id === listing.id ? { ...p, status: 'removed' as const } : p)),
-        );
-        showToast(t('delist'));
-      } catch {
-        showToast(t('publishFailed'));
-      }
-      return;
+  const handleDelist = async (listing: MarketplaceListingSummary) => {
+    // Delist → soft-delete (status 'removed') via the stub backend. Honest
+    // failure: transient 503s surface as a retryable toast.
+    try {
+      await delistListing(listing.id);
+      setListings(prev =>
+        prev.map(p => (p.id === listing.id ? { ...p, status: 'removed' as const } : p)),
+      );
+      showToast(t('delist'));
+    } catch {
+      showToast(t('publishFailed'));
     }
-    // Re-list: the stub backend has no re-activation API — honest error.
-    showToast(t('relistUnavailablePreview'));
+  };
+
+  const handleRelist = async (listing: MarketplaceListingSummary) => {
+    // Re-list → 'removed' → 'active' (only transition the stub allows). The
+    // listing flips back into the market feed on the next load.
+    try {
+      await relistListing(listing.id);
+      setListings(prev =>
+        prev.map(p => (p.id === listing.id ? { ...p, status: 'active' as const } : p)),
+      );
+      showToast(t('relist'));
+    } catch {
+      showToast(t('publishFailed'));
+    }
   };
 
   const confirmDelist = (listing: MarketplaceListingSummary) => {
@@ -74,7 +84,7 @@ export const MyListingsScreen: React.FC = () => {
         {
           text: t('delist'),
           style: 'destructive',
-          onPress: () => handleToggleStatus(listing),
+          onPress: () => handleDelist(listing),
         },
       ],
       { icon: 'close-circle-outline' },
@@ -122,9 +132,12 @@ export const MyListingsScreen: React.FC = () => {
             itemType="character"
             priceSouls={item.priceSouls}
             status={item.status}
+            salesCount={item.salesCount}
             t={t}
             onEdit={() => navigation.navigate('MarketplacePublish', { listingId: item.id })}
-            onToggleStatus={() => confirmDelist(item)}
+            onToggleStatus={() =>
+              item.status === 'removed' ? handleRelist(item) : confirmDelist(item)
+            }
           />
         )}
       />

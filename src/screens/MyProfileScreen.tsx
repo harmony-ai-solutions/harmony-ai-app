@@ -15,7 +15,9 @@
  * for the display name (graceful "User" fallback), characters come from the
  * character_profiles repository (local), follower/following stats and the
  * Posts/Saved tabs come from the SocialService stub, and personas are entities
- * linked to user-tagged character profiles (see personas repo).
+ * linked to user-tagged character profiles (see personas repo). Username / bio
+ * / avatar are per-device extras merged in from the ProfileExtrasService stub
+ * seam (the locally-picked avatar overrides the cloud avatar_url).
  */
 
 import React, { useState, useCallback } from 'react';
@@ -51,6 +53,7 @@ import type { StubPost } from '../services/social/SocialService';
 import { getAllPersonas, Persona } from '../database/repositories/personas';
 import { CharacterProfile } from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import ProfileExtrasService from '../services/profile/ProfileExtrasService';
 import { createLogger } from '../utils/logger';
 import { CreatePostModal } from '../components/social/CreatePostModal';
 import { PostCommentModal } from '../components/social/PostCommentModal';
@@ -72,8 +75,8 @@ export const MyProfileScreen: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ProfileTabKey>('posts');
 
   // Cloud-first profile: the display name resolves from useAuth().user (the
-  // backend PATCH /v1/auth/me keeps it in sync); username/bio have no backend
-  // field yet and avatar uploads are not supported — honest stub.
+  // backend PATCH /v1/auth/me keeps it in sync); username/bio/avatar are
+  // per-device extras from the ProfileExtrasService stub seam.
   const [displayName, setDisplayName] = useState<string>('');
   const [username, setUsername] = useState<string>('');
   const [bio, setBio] = useState<string>('');
@@ -108,12 +111,19 @@ export const MyProfileScreen: React.FC = () => {
   // ── Loaders ────────────────────────────────────────────────────────────
   const loadProfile = useCallback(async () => {
     if (!user) return;
-    // Cloud-first: display name from auth (the single source of truth after
-    // PATCH /v1/auth/me), avatar from the cloud avatar_url.
-    setDisplayName(user.display_name ?? '');
-    setUsername('');
-    setBio('');
-    setAvatarUri(user.avatar_url ?? null);
+    try {
+      // Cloud-first: display name from auth (the single source of truth after
+      // PATCH /v1/auth/me). Username / bio / avatar are per-device extras from
+      // the ProfileExtrasService stub — the locally-picked avatar overrides
+      // the cloud avatar_url (mirroring the old shadow store's merge).
+      const extras = await ProfileExtrasService.getExtras(user.id);
+      setDisplayName(user.display_name ?? '');
+      setUsername(extras.username);
+      setBio(extras.bio);
+      setAvatarUri(extras.avatarDataUrl ?? user.avatar_url ?? null);
+    } catch (err) {
+      log.error('Failed to load profile extras:', err);
+    }
   }, [user]);
 
   const loadFollowStats = useCallback(async () => {

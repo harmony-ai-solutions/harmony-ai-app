@@ -40,7 +40,15 @@ import {
   getPrimaryImage,
 } from '../database/repositories/characters';
 import type { CharacterSnapshot } from '../services/marketplace/MarketplaceService';
-import { publishListing, getListing } from '../services/marketplace/MarketplaceService';
+import {
+  publishListing,
+  getListing,
+  updateListing,
+} from '../services/marketplace/MarketplaceService';
+import {
+  VisibilitySettingsSection,
+  type VisibilityValue,
+} from '../components/market/VisibilitySettingsSection';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type RouteParams = RouteProp<RootStackParamList, 'MarketplacePublish'>;
@@ -81,6 +89,15 @@ export const MarketplacePublishScreen: React.FC = () => {
 
   const [scratchText, setScratchText] = useState('');
   const [publishing, setPublishing] = useState(false);
+
+  // Availability intent for the future backend's visibility contract
+  // (20-Backend-Concept). Publishing from this screen ALWAYS creates
+  // marketplace content, so the control initializes to 'marketplace' — the
+  // private/public options represent the listing's availability intent and
+  // are persisted here in the draft state. The stub backend currently
+  // ignores them beyond the marketplace classification (it only understands
+  // marketplace semantics), but the UI contract stays ready for the backend.
+  const [visibility, setVisibility] = useState<VisibilityValue>('marketplace');
 
   // ── Photo (listing thumbnail) ─────────────────────────────────────────
   const { withExternalFlow } = useBiometricLock();
@@ -151,37 +168,96 @@ export const MarketplacePublishScreen: React.FC = () => {
 
   const handlePublish = async () => {
     if (!itemType) return;
+
+    // ── Honest validation (no fake success — block before calling out) ──
+    const priceSouls = isFree ? 0 : Number(price) || 0;
+    if (!isFree && (!Number.isFinite(priceSouls) || priceSouls < 0)) {
+      showToast(t('publishFailed'));
+      return;
+    }
+    if (isEdit && !title.trim()) {
+      showToast(t('publishFailed'));
+      return;
+    }
+
     setPublishing(true);
     try {
       // ── EDIT MODE ─────────────────────────────────────────────────────
-      // The stub backend has no update API (Phase-1 service surface) — honest
-      // error instead of fake success.
-      if (isEdit) {
-        showToast(t('editUnavailablePreview'));
+      // Owner-only update via the stub (keeps status; never fake success).
+      // The listing's kind is NOT editable through this form — updateListing
+      // only touches title/description/price/tags/previewText.
+      if (isEdit && editListingId) {
+        await updateListing(editListingId, {
+          title: title.trim(),
+          description: summary.trim(),
+          priceSouls,
+          tags: parseTags(tags),
+          previewText: summary.trim().slice(0, 200) || null,
+        });
+        showToast(t('snapshotUpdated'));
+        navigation.goBack();
         return;
       }
 
       // ── CREATE MODE ───────────────────────────────────────────────────
-      // The stub publish API only accepts a frozen character-card snapshot
-      // (upload-copy, A4). Text/theme listings are NOT supported by the stub
-      // backend yet — honest error, never a fake publish.
-      if (itemType !== 'character') {
-        showToast(t('publishTypePreviewOnly'));
-        return;
-      }
+      const description = summary.trim();
 
-      const snapshot = await buildSnapshot(sourceProfileId!, photoData, photoMime);
-      await publishListing({
-        title: title.trim() || snapshot.name,
-        description: summary.trim(),
-        priceSouls: isFree ? 0 : Number(price) || 0,
-        tags: parseTags(tags),
-        cardSnapshot: snapshot,
-      });
+      if (itemType === 'character') {
+        // Upload-copy (A4): freeze the local profile's card + primary image
+        // into the draft; the local character is NEVER touched. sourceProfileId
+        // links the listing back to the profile (chat-lock linkage).
+        const snapshot = await buildSnapshot(sourceProfileId!, photoData, photoMime);
+        await publishListing({
+          title: title.trim() || snapshot.name,
+          description,
+          priceSouls,
+          tags: parseTags(tags),
+          cardSnapshot: snapshot,
+          kind: 'character_card',
+          sourceProfileId,
+          previewText: description.slice(0, 200) || null,
+        });
+      } else if (editableTextType) {
+        // Text listing — from a character field OR scratch (old wizard path).
+        const text =
+          textMode === 'scratch'
+            ? scratchText.trim()
+            : (await getProfileField(sourceProfileId, itemType)).trim();
+        if (!text) {
+          showToast(t('publishFailed'));
+          return;
+        }
+        await publishListing({
+          title: title.trim() || defaultTextTitle(itemType),
+          description,
+          priceSouls,
+          tags: parseTags(tags),
+          cardSnapshot: emptySnapshot(),
+          kind: 'text',
+          text,
+          previewText: text.slice(0, 200) || null,
+        });
+      } else {
+        // Theme & any structured asset — mirror the old lightweight payload
+        // (a real theme picker can extend the payload later): the type label
+        // becomes the delivered `text` payload.
+        const label = t(itemTypeLabelKey(itemType));
+        await publishListing({
+          title: title.trim() || label,
+          description,
+          priceSouls,
+          tags: parseTags(tags),
+          cardSnapshot: emptySnapshot(),
+          kind: 'theme',
+          text: label,
+          previewText: description.slice(0, 200) || null,
+        });
+      }
 
       showToast(t('publishSuccess'));
       navigation.goBack();
     } catch {
+      // Transient 503s / 400 invalid drafts surface honestly — retryable.
       showToast(t('publishFailed'));
     } finally {
       setPublishing(false);
@@ -449,6 +525,21 @@ export const MarketplacePublishScreen: React.FC = () => {
           </Pressable>
         </View>
       </View>
+
+      {/* Visibility & Sharing — availability intent for the future backend.
+          The listing published here IS marketplace content, so the section
+          starts on Marketplace with the current price; the private/public
+          options persist as draft-state classification (the stub ignores
+          them beyond marketplace semantics — see VisibilitySettingsSection). */}
+      <VisibilitySettingsSection
+        value={visibility}
+        onChange={setVisibility}
+        priceSouls={isFree ? 0 : Number(price) || 0}
+        onPriceChange={n => {
+          setPrice(String(n));
+          if (n > 0) setIsFree(false);
+        }}
+      />
     </ScrollView>
   );
 
@@ -462,7 +553,7 @@ export const MarketplacePublishScreen: React.FC = () => {
             ? textMode === 'scratch'
               ? scratchText.trim().length > 0
               : !!sourceProfileId
-            : false
+            : true // theme & other — lightweight payload, nothing to pick
         : step === 'details'
           ? (title.trim().length > 0 || !!sourceProfileId || textMode === 'scratch')
           : true;
@@ -698,6 +789,71 @@ async function buildSnapshot(
 
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Extract a single text field from a character profile for a text listing
+ * (restored old wizard path). `backstory` was a profile-description publish;
+ * description/personality/prompt/dialogue map to the profile columns.
+ */
+async function getProfileField(
+  profileId: string | null,
+  itemType: MarketplaceItemType,
+): Promise<string> {
+  if (!profileId) return '';
+  const profile = await getCharacterProfile(profileId);
+  if (!profile) return '';
+  switch (itemType) {
+    case 'description':
+      return profile.description ?? '';
+    case 'personality':
+      return profile.personality ?? '';
+    case 'prompt':
+      return profile.base_prompt ?? '';
+    case 'dialogue':
+      return profile.mes_example ?? '';
+    default:
+      return '';
+  }
+}
+
+/** Default title for a text listing when the user leaves the title empty. */
+function defaultTextTitle(type: MarketplaceItemType): string {
+  switch (type) {
+    case 'backstory':
+      return 'Backstory';
+    case 'description':
+      return 'Description';
+    case 'personality':
+      return 'Personality';
+    case 'prompt':
+      return 'Prompt';
+    case 'dialogue':
+      return 'Example Dialogues';
+    default:
+      return 'Content';
+  }
+}
+
+/**
+ * Blank frozen card for text/theme listings. The stub stores a `cardSnapshot`
+ * on every listing record, but a text/theme asset is delivered from its
+ * `text` payload (see assetFromListing) — the card is never consumed.
+ */
+function emptySnapshot(): CharacterSnapshot {
+  return {
+    name: '',
+    description: null,
+    personality: null,
+    base_prompt: null,
+    scenario: null,
+    mes_example: null,
+    voice_characteristics: null,
+    typing_speed_wpm: null,
+    audio_response_chance_percent: null,
+    image_data: null,
+    image_mime: null,
+  };
 }
 
 export default MarketplacePublishScreen;

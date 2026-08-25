@@ -3,13 +3,15 @@
  * avatar).
  *
  * Cloud-first: display name persists via AuthService → `PATCH /v1/auth/me`
- * (the backend accepts display_name ONLY). Username / bio / avatar upload
- * cannot persist yet — those fields render disabled with a "coming soon" hint
- * (honest stub, no shadow storage). They are extension items (Phase 9):
- * username/bio in PATCH + an avatar upload endpoint + avatar_url in responses.
+ * (the backend accepts display_name ONLY). Username / bio / avatar have no
+ * backend fields yet — they persist per-device via ProfileExtrasService (an
+ * AsyncStorage stub seam scoped per user id) until the backend grows
+ * `username` / `bio` + an avatar upload endpoint (see
+ * `.current_work/senju-rebase-integration/20-Backend-Concept-Marketplace-Profile.md`
+ * §5).
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -21,9 +23,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
+import { useBiometricLock } from '../contexts/BiometricLockContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
@@ -31,6 +35,7 @@ import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import AuthService from '../services/auth/AuthService';
+import ProfileExtrasService from '../services/profile/ProfileExtrasService';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[EditProfileScreen]');
@@ -42,6 +47,7 @@ export const EditProfileScreen: React.FC = () => {
   const { t } = useTranslation('profile');
   const { user, status, refreshUser } = useAuth();
   const { showAlert } = useAppAlert();
+  const { withExternalFlow } = useBiometricLock();
 
   // ── Form state ─────────────────────────────────────────────────────────
   const [displayName, setDisplayName] = useState('');
@@ -51,19 +57,25 @@ export const EditProfileScreen: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  const usernameRef = useRef<TextInput>(null);
+  const bioRef = useRef<TextInput>(null);
+
   // ── Load current values ────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!user) return;
       try {
+        // Cloud-first: display name from auth. Username / bio / avatar are
+        // per-device extras from the ProfileExtrasService stub seam (the
+        // locally-picked avatar overrides the cloud avatar_url, as the old
+        // shadow store did).
+        const extras = await ProfileExtrasService.getExtras(user.id);
         if (cancelled) return;
-        // Cloud-first: display name from auth. Username/bio/avatar have no
-        // backend fields yet — shown read-only with a "coming soon" hint.
         setDisplayName(user.display_name ?? '');
-        setUsername('');
-        setBio('');
-        setAvatarUri(user.avatar_url ?? null);
+        setUsername(extras.username);
+        setBio(extras.bio);
+        setAvatarUri(extras.avatarDataUrl ?? user.avatar_url ?? null);
         setLoaded(true);
       } catch (err) {
         log.error('Failed to load profile for editing:', err);
@@ -75,6 +87,32 @@ export const EditProfileScreen: React.FC = () => {
     };
   }, [user]);
 
+  // ── Avatar handling ────────────────────────────────────────────────────
+  const handlePickAvatar = async () => {
+    try {
+      const result = await withExternalFlow(() =>
+        launchImageLibrary({
+          mediaType: 'photo',
+          includeBase64: true,
+          quality: 0.8,
+        }),
+      );
+
+      if (result.assets && result.assets[0]?.base64) {
+        const asset = result.assets[0];
+        const mimeType = asset.type ?? 'image/jpeg';
+        setAvatarUri(`data:${mimeType};base64,${asset.base64}`);
+      }
+    } catch (err) {
+      log.error('Failed to pick avatar:', err);
+      showAlert(t('common:error'), t('updateFailed', { message: '' }));
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    setAvatarUri(null);
+  };
+
   // ── Save ───────────────────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
     if (!user) return;
@@ -85,10 +123,16 @@ export const EditProfileScreen: React.FC = () => {
 
     setIsSaving(true);
     try {
-      // Persist the display name to the cloud (PATCH /v1/auth/me accepts
-      // display_name ONLY), then re-fetch the profile so useAuth().user (and
-      // MyProfileScreen's header) reflects the new name.
+      // Cloud: display name persists via PATCH /v1/auth/me (the backend
+      // accepts display_name ONLY), then re-fetch the profile so useAuth().user
+      // (and MyProfileScreen's header) reflects the new name. Local: username /
+      // bio / avatar persist per-device via the ProfileExtrasService stub seam.
       await AuthService.updateDisplayName(displayName.trim());
+      await ProfileExtrasService.saveExtras(user.id, {
+        username,
+        bio,
+        avatarDataUrl: avatarUri,
+      });
       await refreshUser();
       showAlert(t('profileUpdated'), undefined, [{ text: 'OK' }]);
       navigation.goBack();
@@ -98,7 +142,7 @@ export const EditProfileScreen: React.FC = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [user, displayName, navigation, showAlert, t, refreshUser]);
+  }, [user, displayName, username, bio, avatarUri, navigation, showAlert, t, refreshUser]);
 
   // ── Guard: not signed in (after all hooks) ─────────────────────────────
   if (!user) {
@@ -140,8 +184,7 @@ export const EditProfileScreen: React.FC = () => {
             <View style={styles.avatarActions}>
               <ThemedButton
                 label={t('changeAvatar')}
-                onPress={() => {}}
-                disabled
+                onPress={handlePickAvatar}
                 variant="outline"
                 icon="camera-outline"
                 style={styles.avatarBtn}
@@ -150,17 +193,13 @@ export const EditProfileScreen: React.FC = () => {
               {avatarUri && (
                 <ThemedButton
                   label={t('removeAvatar')}
-                  onPress={() => {}}
-                  disabled
+                  onPress={handleRemoveAvatar}
                   variant="ghost"
                   icon="close"
                   style={styles.avatarBtn}
                 />
               )}
             </View>
-            <ThemedText size={11} variant="muted" hierarchy="caption" style={styles.fieldHint}>
-              {t('avatarComingSoon')}
-            </ThemedText>
           </View>
 
           {/* ── Fields ── */}
@@ -178,11 +217,13 @@ export const EditProfileScreen: React.FC = () => {
                 placeholderTextColor={theme.colors.text.muted}
                 autoCapitalize="words"
                 autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => usernameRef.current?.focus()}
                 editable={!isSaving}
               />
             </View>
 
-            {/* Username — no backend field yet (honest stub) */}
+            {/* Username — per-device extras via ProfileExtrasService */}
             <View style={styles.fieldGroup}>
               <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
                 {t('username')}
@@ -192,25 +233,32 @@ export const EditProfileScreen: React.FC = () => {
                   @
                 </ThemedText>
                 <TextInput
+                  ref={usernameRef}
                   style={[styles.input, inputStyle, styles.usernameInput]}
                   value={username}
                   onChangeText={setUsername}
                   placeholder={t('usernamePlaceholder')}
                   placeholderTextColor={theme.colors.text.muted}
-                  editable={false}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="username"
+                  returnKeyType="next"
+                  onSubmitEditing={() => bioRef.current?.focus()}
+                  editable={!isSaving}
                 />
               </View>
               <ThemedText size={11} variant="muted" hierarchy="caption" style={styles.fieldHint}>
-                {t('usernameComingSoon')}
+                {t('usernameHint')}
               </ThemedText>
             </View>
 
-            {/* Bio — no backend field yet (honest stub) */}
+            {/* Bio — per-device extras via ProfileExtrasService */}
             <View style={styles.fieldGroup}>
               <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
                 {t('bio')}
               </ThemedText>
               <TextInput
+                ref={bioRef}
                 style={[styles.input, inputStyle, styles.bioInput]}
                 value={bio}
                 onChangeText={setBio}
@@ -219,11 +267,8 @@ export const EditProfileScreen: React.FC = () => {
                 multiline
                 numberOfLines={4}
                 textAlignVertical="top"
-                editable={false}
+                editable={!isSaving}
               />
-              <ThemedText size={11} variant="muted" hierarchy="caption" style={styles.fieldHint}>
-                {t('bioComingSoon')}
-              </ThemedText>
             </View>
           </ThemedCard>
 

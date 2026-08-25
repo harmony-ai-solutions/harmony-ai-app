@@ -19,6 +19,7 @@ function makeListing(partial: Partial<MarketFilterableListing>): MarketFilterabl
     creatorName: 'Creator',
     priceSouls: 0,
     status: 'active',
+    salesCount: 0,
     createdAt: '2026-01-01T00:00:00.000Z',
     itemType: 'character',
     ...partial,

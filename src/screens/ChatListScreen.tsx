@@ -624,6 +624,13 @@ export const ChatListScreen: React.FC = () => {
     setRefreshing(false);
   }, [loadChatList]);
 
+  // Marketplace preview lock — viewable free, chat locked until acquired; own
+  // library (never published) is NEVER locked. The picker list is built inside
+  // ChatPartnerPickerModal (this screen does not own the rows), so locked
+  // entries cannot be pre-filtered cheaply here — the CENTRAL hard gate in
+  // openCharacterChat covers them instead: it silently returns (log.warn) and
+  // no chat opens. That matches the old "locked characters simply don't open
+  // a chat" picker UX without per-row async lock checks.
   const handleNewChat = async (profile: CharacterProfile) => {
     try {
       await openCharacterChat(profile, {

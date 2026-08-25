@@ -64,15 +64,30 @@ export interface MarketplaceListingSummary {
   priceSouls: number;
   thumbnailText?: string;
   status: MarketplaceListingStatus;
+  /** Internal popularity counter — drives the 'popular' sort. */
+  salesCount: number;
   /** ISO 8601 timestamp. */
   createdAt: string;
 }
 
-/** Full listing detail (summary + description, tags and frozen snapshot). */
+/**
+ * Full listing detail (summary + description, tags and frozen snapshot).
+ * Preview fields are detail-only: they render the "preview context" screen
+ * (image + teaser + unlock hint) before a paid listing is acquired — the feed
+ * card never carries them.
+ */
 export interface MarketplaceListingDetail extends MarketplaceListingSummary {
   description: string;
   tags: string[];
   snapshot: CharacterSnapshot;
+  /** Asset family — mirrors the publish draft's `kind` (defaults to 'character_card'). */
+  kind?: 'character_card' | 'text' | 'theme';
+  /** Detail-screen teaser (preview context shown before acquisition). */
+  previewText?: string | null;
+  /** Base64 preview image (rendered only when present). */
+  previewImageData?: string | null;
+  /** MIME type of `previewImageData`. */
+  previewMimeType?: string | null;
 }
 
 /** Query options for the public feed. */
@@ -81,19 +96,50 @@ export interface MarketplaceListingQuery {
   sort?: 'recent' | 'price' | 'popular';
 }
 
-/** Draft payload for publishing (upload-copy: the caller supplies the frozen card). */
+/**
+ * Draft payload for publishing (upload-copy: the caller supplies the frozen
+ * card). `kind` selects the delivered asset family ('character_card' default):
+ * character listings deliver the frozen card; text/theme listings carry their
+ * body in `text` and deliver a `text`/`theme` asset instead of the card.
+ */
 export interface PublishListingDraft {
   title: string;
   description: string;
   priceSouls: number;
   tags?: string[];
   cardSnapshot: CharacterSnapshot;
+  /** Asset family — defaults to 'character_card'. */
+  kind?: 'character_card' | 'text' | 'theme';
+  /** Plain-text payload — REQUIRED for kind 'text' / 'theme'. */
+  text?: string | null;
+  /** Detail-screen teaser (preview context shown before acquisition). */
+  previewText?: string | null;
+  /** Local character profile this listing is published FROM (chat-lock linkage). */
+  sourceProfileId?: string | null;
 }
 
-/** Result of a successful acquisition (throws MarketplaceError on failure). */
+/** Owner-only listing edits (updateListing). */
+export interface ListingUpdateChanges {
+  title?: string;
+  description?: string;
+  priceSouls?: number;
+  tags?: string[];
+  /** Pass null to clear the teaser. */
+  previewText?: string | null;
+}
+
+/**
+ * Result of a successful acquisition (throws MarketplaceError on failure).
+ * `deliveredEntryId` / `deliveredAssetId` let the UI deep-link into MyLibrary
+ * right after acquiring (the library entry + its content asset ids).
+ */
 export interface AcquireResult {
   ok: true;
   listingId: string;
+  /** Library entry id of the delivered asset. */
+  deliveredEntryId?: string;
+  /** Content-asset id inside the delivered library entry. */
+  deliveredAssetId?: string;
 }
 
 /**
@@ -175,22 +221,21 @@ export async function getListings(
  */
 export async function getListing(id: string): Promise<MarketplaceListingDetail> {
   const record = await marketplaceBackend.getListingRecord(id);
-  return {
-    ...toSummary(record),
-    description: record.description,
-    tags: [...record.tags],
-    snapshot: record.snapshot,
-  };
+  return toDetail(record);
 }
 
 /**
  * Publish a listing — upload-copy semantics (A4): the supplied `cardSnapshot`
  * is frozen into the stub store; the local character/profile is NEVER touched.
- * New listings enter `pending` (moderation review).
+ * New listings enter `pending` (moderation review). `kind` selects the
+ * delivered asset family; text/theme listings require a non-empty `text`
+ * payload. When the draft was published FROM a local character profile, pass
+ * `sourceProfileId` so the profile→listing linkage (chat-lock) works.
  *
- * @throws {MarketplaceError} 400 `invalid_draft` for an empty title or a
- *   negative/non-finite price; 503 `stub_backend_unavailable` when the
- *   simulated backend op fails (honest failure — no fake success).
+ * @throws {MarketplaceError} 400 `invalid_draft` for an empty title, a
+ *   negative/non-finite price, or a text/theme listing without `text`;
+ *   503 `stub_backend_unavailable` when the simulated backend op fails
+ *   (honest failure — no fake success).
  */
 export async function publishListing(
   draft: PublishListingDraft,
@@ -204,6 +249,14 @@ export async function publishListing(
       code: 'invalid_draft',
     });
   }
+  const kind = draft.kind ?? 'character_card';
+  if (kind !== 'character_card' && !(draft.text ?? '').trim()) {
+    throw new MarketplaceError(
+      400,
+      'text/theme listings require a non-empty text payload',
+      { code: 'invalid_draft' },
+    );
+  }
 
   const record = await marketplaceBackend.insertListing({
     title,
@@ -211,6 +264,10 @@ export async function publishListing(
     priceSouls: draft.priceSouls,
     tags: draft.tags ?? [],
     snapshot: draft.cardSnapshot,
+    kind,
+    text: draft.text ?? null,
+    previewText: draft.previewText ?? null,
+    sourceProfileId: draft.sourceProfileId ?? null,
   });
   log.info(`Published listing "${record.title}" (${record.id}) — pending review`);
   return toSummary(record);
@@ -229,9 +286,96 @@ export async function delistListing(id: string): Promise<void> {
 }
 
 /**
+ * Owner-only listing edit (title/description/price/tags/previewText). The
+ * listing's status is NEVER changed by an update. Validation mirrors publish
+ * (title required, price non-negative).
+ *
+ * @throws {MarketplaceError} 400 `invalid_draft` | 403 `forbidden` (not the
+ *   current user's listing) | 404 `not_found` | 503.
+ */
+export async function updateListing(
+  id: string,
+  changes: ListingUpdateChanges,
+): Promise<MarketplaceListingDetail> {
+  if (changes.title !== undefined && !changes.title.trim()) {
+    throw new MarketplaceError(400, 'listing title is required', { code: 'invalid_draft' });
+  }
+  if (
+    changes.priceSouls !== undefined &&
+    (!Number.isFinite(changes.priceSouls) || changes.priceSouls < 0)
+  ) {
+    throw new MarketplaceError(400, 'listing price must be a non-negative number of souls', {
+      code: 'invalid_draft',
+    });
+  }
+
+  const record = await marketplaceBackend.updateListingRecord(id, {
+    title: changes.title?.trim(),
+    description: changes.description?.trim(),
+    priceSouls: changes.priceSouls,
+    tags: changes.tags ? [...changes.tags] : undefined,
+    previewText: changes.previewText,
+  });
+  log.info(`Updated listing ${id}`);
+  return toDetail(record);
+}
+
+/**
+ * Re-list a removed listing (soft-undelete → `active`). ONLY `removed` →
+ * `active` is allowed; any other status throws 409.
+ *
+ * @throws {MarketplaceError} 403 `forbidden` | 404 `not_found` |
+ *   409 `listing_not_available` | 503.
+ */
+export async function relistListing(id: string): Promise<MarketplaceListingDetail> {
+  const record = await marketplaceBackend.relistListingRecord(id);
+  log.info(`Relisted listing ${id}`);
+  return toDetail(record);
+}
+
+/**
+ * Remove an entry from the user's library AND revoke ownership of its listing
+ * (the listing can then be acquired again).
+ *
+ * @throws {MarketplaceError} 404 `not_found` when the entry id is unknown.
+ */
+export async function removeLibraryEntry(entryId: string): Promise<void> {
+  await marketplaceBackend.removeLibraryEntryRecord(entryId);
+  log.info(`Removed library entry ${entryId}`);
+}
+
+/**
+ * The ACTIVE listing published from a local character profile (for the price
+ * pill / acquire entry on the AI profile), or null when the profile has no
+ * live listing. Pending/removed listings never surface here.
+ */
+export async function getListingForProfile(
+  profileId: string,
+): Promise<MarketplaceListingDetail | null> {
+  const record = await marketplaceBackend.getListingForProfileRecord(profileId);
+  return record ? toDetail(record) : null;
+}
+
+/**
+ * Chat-lock rule being restored: a character published to the marketplace is
+ * VIEWABLE for free but CHAT is locked (preview context) until acquired. True
+ * when there is an `active` listing published FROM this profile whose creator
+ * is not the local user and which is not in the library. Own listings and
+ * never-published profiles are never locked; pending/removed listings never
+ * lock.
+ */
+export async function isChatLocked(profileId: string): Promise<boolean> {
+  const record = await marketplaceBackend.getListingForProfileRecord(profileId);
+  if (!record) return false;
+  return marketplaceBackend.isChatLockedByRecord(record);
+}
+
+/**
  * Acquire a listing: checks the wallet balance and debits the price, then
  * delivers the asset into the library. Idempotent — re-acquiring an owned
- * listing returns `{ ok: true }` without a second debit.
+ * listing returns the existing library entry without a second debit. The
+ * result carries `deliveredEntryId` / `deliveredAssetId` so screens can
+ * deep-link into MyLibrary after a successful acquisition.
  *
  * @throws {MarketplaceError} 404 `not_found` | 409 `listing_not_available`
  *   when the listing is not `active`.
@@ -250,7 +394,13 @@ export async function acquire(listingId: string): Promise<AcquireResult> {
 
   // Already owned → idempotent, no debit.
   if (await marketplaceBackend.isListingOwned(listingId)) {
-    return { ok: true, listingId };
+    const owned = await marketplaceBackend.acquireListingRecord(listingId);
+    return {
+      ok: true,
+      listingId,
+      deliveredEntryId: owned.id,
+      deliveredAssetId: owned.asset.id,
+    };
   }
 
   const balance = await walletService.getBalance();
@@ -259,9 +409,14 @@ export async function acquire(listingId: string): Promise<AcquireResult> {
   }
 
   await walletService.debit(record.priceSouls);
-  await marketplaceBackend.acquireListingRecord(listingId);
+  const entry = await marketplaceBackend.acquireListingRecord(listingId);
   log.info(`Acquired "${record.title}" (${listingId}) for ${record.priceSouls} souls`);
-  return { ok: true, listingId };
+  return {
+    ok: true,
+    listingId,
+    deliveredEntryId: entry.id,
+    deliveredAssetId: entry.asset.id,
+  };
 }
 
 /** Listings published by the current user (all statuses, newest first). */
@@ -303,6 +458,21 @@ function toSummary(record: ListingRecord): MarketplaceListingSummary {
     priceSouls: record.priceSouls,
     thumbnailText: record.thumbnailText,
     status: record.status,
+    salesCount: record.salesCount,
     createdAt: record.createdAt,
+  };
+}
+
+/** Full detail mapping (summary + description, tags, snapshot, preview). */
+function toDetail(record: ListingRecord): MarketplaceListingDetail {
+  return {
+    ...toSummary(record),
+    description: record.description,
+    tags: [...record.tags],
+    snapshot: record.snapshot,
+    kind: record.kind ?? 'character_card',
+    previewText: record.previewText ?? null,
+    previewImageData: record.previewImageData ?? null,
+    previewMimeType: record.previewMimeType ?? null,
   };
 }

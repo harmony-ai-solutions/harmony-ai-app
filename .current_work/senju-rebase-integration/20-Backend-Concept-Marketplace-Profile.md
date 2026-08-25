@@ -18,6 +18,16 @@
   client-side scan.
 - Ownership: creator user ids on listings (needed for blocked-filter + attribution + creator resolution).
 - salesCount (shown optionally in the manage row today; needs a backend source).
+- **Marketplace preview lock** (review-phase user ruling): a listed character is viewable free but CHAT is locked
+  until acquired (creator/owner bypass). Client stub models this via `sourceProfileId` linkage +
+  `MarketplaceService.isChatLocked()`; the backend must own this enforcement server-side (client gates are
+  defense-in-depth only).
+- **Visibility classification UI exists**: `src/components/market/VisibilitySettingsSection.tsx`
+  (private/public/marketplace segments + SOUL price input, reused createAI i18n keys) — wired into the publish
+  screen's preview step. The backend contract needs a per-listing (or per-content) visibility/classification
+  field so this component maps 1:1; today the stub ignores private/public beyond marketplace semantics.
+- Listing `kind` (`character_card|text|theme`) + text payload: stub already publishes/delivers all three kinds
+  (review-phase restore); backend needs the same asset-family model.
 
 ## 2. Wallet ledger (souls accounting)
 
@@ -47,15 +57,24 @@
 
 - Backend already accepts `display_name` only (verified 2026-08-24). Phase 1 added `AuthService.updateDisplayName`.
 - Extend: `username`, `bio` in PATCH /v1/auth/me; avatar upload endpoint + `avatar_url` in responses.
-- UX contract: EditProfile shows disabled username/bio/avatar inputs with "coming soon" hints until the backend
-  lands these fields.
+- UX contract (updated, review phase): EditProfile's username/bio/avatar editing is FULLY RESTORED and persists
+  per-device through the explicit stub seam `src/services/profile/ProfileExtrasService.ts` (AsyncStorage key
+  `@harmony_profile/<userId>` — the old shadow-store key, deliberately reused). When the backend lands these
+  fields, swap the service internals for cloud calls — the screens already treat it as the seam.
 
-## 6. Stub seam contract (client design input — exact surfaces shipped in Phase 1)
+## 6. Stub seam contract (client design input — surfaces shipped in Phase 1 + review phase)
 
 - `MarketplaceService`: `getListings(query?)`, `getListing(id)`, `publishListing(draft)`, `delistListing(id)`,
-  `acquire(listingId)`, `getMyListings()`, `getLibrary()`, `getContentAsset(id)`, `refresh()`. Types:
-  `CharacterSnapshot`, `MarketplaceListingSummary/Detail`, `PublishListingDraft`, `AcquireResult`,
-  `ContentAsset` (kind `character_card|text|theme`), `OwnedLibraryEntry` (kind `purchase|free|own`).
+  `acquire(listingId)`, `getMyListings()`, `getLibrary()`, `getContentAsset(id)`, `refresh()`; review-phase
+  additions: `updateListing(id, changes)`, `relistListing(id)`, `removeLibraryEntry(entryId)`,
+  `getListingForProfile(profileId)`, `isChatLocked(profileId)`. Types:
+  `CharacterSnapshot`, `MarketplaceListingSummary/Detail` (summary carries `salesCount`; detail carries `kind` +
+  `previewText/previewImageData/previewMimeType`), `PublishListingDraft` (kind `character_card|text|theme`,
+  `text`, `previewText`, `sourceProfileId`), `AcquireResult` (ok + `deliveredEntryId`/`deliveredAssetId`),
+  `ContentAsset` (kind `character_card|text|theme`), `OwnedLibraryEntry` (kind `purchase|free|own`),
+  `ListingUpdateChanges`.
+- `ProfileExtrasService` (review phase): `getExtras(userId)`, `saveExtras(userId, extras)` — per-device
+  AsyncStorage stub behind the profile-extras seam (see §5).
 - `WalletService`: `getStatus()`, `getBalance()`, `getSubscription()`, `on()`; status `idle|syncing|ready|failed`;
   `SubscriptionStatus {tier, soulCreditsAvailable, currentTier?, upgradeUrl?}`.
 - `SocialService`: `getPublicUserProfile`, `toggleFollow`, `isFollowing`, `getFollowedUsers`, `getPosts`,
@@ -75,10 +94,16 @@
 
 ## 7. Concrete gaps discovered in Phases 2–3 (from the logbook)
 
-- Profile→listing linkage (AIProfile price pill + acquire-success deep link currently have none).
-- Text/theme publish + listing edit + re-list + library-remove (honest-error placeholders now).
-- `salesCount` (optional in the manage row; no stub source).
-- itemType→profile-field mapping for apply-to-character (stub maps asset text to `description` only).
+> Review-phase status (2026-08-26): the ✅ items below are now STUB-SUPPORTED (in-memory preview works); each
+> still needs its real backend counterpart before launch.
+
+- ✅ Profile→listing linkage (AIProfile price pill resolves via `getListingForProfile`; acquire-success deep
+  link to AIProfile is preserved as commented TODO code in MarketplaceItemDetailScreen — needs backend profile
+  materialization, still open).
+- ✅ Text/theme publish + listing edit + re-list + library-remove (all flow through the stub APIs now).
+- ✅ `salesCount` (exposed on the summary wire; MyListings + detail screen render it).
+- itemType→profile-field mapping for apply-to-character (stub maps asset text to `description` only;
+  apply-to-character UI was removed with the sidecar repos and is NOT yet restored — needs a ruling).
 - Creator user ids on marketplace listings (blocked-filter + attribution + creator resolution).
 - Notification write side (comment/like/follow/image-comment events → notifications).
 - Per-item liked-state + count reads on posts/images (and `isCharacterSaved`).

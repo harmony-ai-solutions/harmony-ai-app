@@ -10,10 +10,16 @@
  * AIProfileScreen (primary Chat button), DiscoverScreen and MarketScreen so
  * every entry point behaves identically.
  *
- * Paywall removed (A2 — client-side paywall was security theater): there is
- * no lock. Any character with an entity can be chatted with; the stub
- * marketplace has no local profile linkage, so listing acquisition happens on
- * the listing detail screen instead.
+ * MARKETPLACE PREVIEW LOCK (user ruling, Wave 1 stub): a character published
+ * to the marketplace is VIEWABLE for free, but CHAT is locked until the
+ * viewer acquires it. This function is the CENTRAL hard gate:
+ * `MarketplaceService.isChatLocked(profileId)` resolves true ⇔ an ACTIVE
+ * listing exists published FROM this profile AND the local user is neither
+ * the creator nor an owner (library). Characters never published to the
+ * marketplace (the user's own library) are NEVER locked; pending/removed
+ * listings never lock. When locked, the request is silently ignored (a
+ * log.warn) so ChatDetail can never be reached from any entry point — the
+ * stub owns ownership state in-memory (no userId parameter needed).
  */
 
 import { createLogger } from '../utils/logger';
@@ -30,6 +36,7 @@ import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from './ChatPreferencesService';
 import { resolvePersonaId } from '../database/repositories/personas';
 import syncService from './SyncService';
+import { isChatLocked } from './marketplace/MarketplaceService';
 import type { CharacterProfile } from '../database/models';
 
 const log = createLogger('[CharacterChatService]');
@@ -49,6 +56,11 @@ export interface CharacterChatNavigation {
  * sync a newly-created entity to the engine, and hand the caller the params
  * needed to open ChatDetail.
  *
+ * Marketplace preview lock (step 0): when the profile is a marketplace listing
+ * the local user has not acquired (and does not own), the call is SILENTLY
+ * ignored (log.warn) — a listed character is viewable free but chat is locked
+ * until acquired; never-published profiles (own library) are never locked.
+ *
  * Returns null when the flow cannot complete (e.g. the profile has no usable
  * name). Throws on DB/sync errors so the caller can surface its own toast.
  */
@@ -56,6 +68,15 @@ export async function openCharacterChat(
   profile: CharacterProfile,
   navigation: CharacterChatNavigation,
 ): Promise<void> {
+  // 0. HARD GATE — marketplace preview lock (viewable free, chat locked until
+  //    acquired; own library never locked). Silently ignore the request so
+  //    ChatDetail can never be reached for a locked AI from ANY entry point.
+  //    The stub owns ownership state in-memory — no userId is passed here.
+  if (await isChatLocked(profile.id)) {
+    log.warn(`Chat locked for marketplace profile ${profile.id} — ignored.`);
+    return;
+  }
+
   // 1. Resolve the persona we chat as (only personas — never AI
   //    characters — are valid identities; falls back to 'user').
   const storedId = await ChatPreferencesService.getGlobalImpersonatedEntity();

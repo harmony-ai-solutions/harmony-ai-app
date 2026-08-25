@@ -12,6 +12,7 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -24,6 +25,7 @@ import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { FreeBadge } from '../components/market/FreeBadge';
 import { hexToRgba } from '../utils/colorUtils';
+import { createDataURL } from '../database/base64';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   getListing,
@@ -83,6 +85,23 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
       // gone by construction.
       setOwned(true);
       showToast(t('acquireSuccess').replace('{{name}}', listing.title));
+      // Non-character listings (text/theme — no frozen card to materialize)
+      // deliver a content asset straight into MyLibrary — keep that honest
+      // post-acquire navigation. `kind` is the wire truth; the snapshot-null
+      // check is a defensive fallback for older shapes.
+      if (listing.kind ? listing.kind !== 'character_card' : !listing.snapshot) {
+        navigation.navigate('MyLibrary');
+        return;
+      }
+      // Character acquisitions would deep-link to the materialized profile.
+      // TODO(backend): when the marketplace backend materializes acquired
+      // character cards into local profiles
+      // (20-Backend-Concept-Marketplace-Profile.md §7), restore post-acquire
+      // deep-linking to the AI profile:
+      //   navigation.navigate('AIProfile', { profileId: outcome.profileId });
+      // (The future backend acquire returns the materialized profileId; the
+      // stub's AcquireResult only carries deliveredEntryId/deliveredAssetId.)
+      // Until then, character copies land in MyLibrary like every other asset.
       navigation.navigate('MyLibrary');
     } catch (err) {
       if (err instanceof InsufficientCreditsError) {
@@ -167,9 +186,19 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
           ]}
         >
           <View style={[styles.previewMedia, { borderColor: hexToRgba(accent, 0.3) }]}>
-            <View style={[styles.previewIcon, { backgroundColor: hexToRgba(accent, 0.14) }]}>
-              <Icon name={typeIcon} size={40} color={accent} />
-            </View>
+            {listing.previewImageData && listing.previewMimeType ? (
+              <Image
+                source={{
+                  uri: createDataURL(listing.previewImageData, listing.previewMimeType),
+                }}
+                style={styles.previewImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={[styles.previewIcon, { backgroundColor: hexToRgba(accent, 0.14) }]}>
+                <Icon name={typeIcon} size={40} color={accent} />
+              </View>
+            )}
             {/* Type tag overlay */}
             <View style={[styles.typeTag, { backgroundColor: 'rgba(11,11,16,0.78)' }]}>
               <Icon name={typeIcon} size={11} color={accent} />
@@ -204,6 +233,30 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
             ))}
           </View>
         )}
+
+        {/* Preview text / unlock hint (paid teaser shown before acquisition) */}
+        {listing.previewText ? (
+          <View
+            style={[
+              styles.textPreview,
+              { backgroundColor: hexToRgba(baseHex, 0.4), borderColor: hexToRgba(accent, 0.2) },
+            ]}
+          >
+            <Text style={[{ color: theme.colors.text.muted, fontSize: 14 }]}>
+              {listing.previewText}
+              {!owned && listing.priceSouls > 0 ? '…' : ''}
+            </Text>
+            {!owned && listing.priceSouls > 0 ? (
+              <Text style={[styles.unlockHint, { color: theme.colors.text.disabled }]}>
+                {t('unlockHint')}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        <Text style={[styles.meta, { color: theme.colors.text.muted }]}>
+          {t('salesCountLabel', { count: listing.salesCount })}
+        </Text>
       </ScrollView>
 
       {/* Sticky acquire bar */}
@@ -273,6 +326,15 @@ const styles = StyleSheet.create({
     position: 'relative',
     marginBottom: 12,
   },
+  previewImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+  },
   typeTag: {
     position: 'absolute',
     bottom: 10,
@@ -308,6 +370,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   tagText: { fontSize: 12, fontWeight: '600' },
+  textPreview: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 12,
+  },
+  unlockHint: {
+    marginTop: 8,
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  meta: {
+    fontSize: 13,
+    marginTop: 4,
+  },
   acquireBar: {
     position: 'absolute',
     left: 0,

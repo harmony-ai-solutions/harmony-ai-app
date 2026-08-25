@@ -31,6 +31,8 @@ import { hexToRgba } from '../utils/colorUtils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   getContentAsset,
+  getLibrary,
+  removeLibraryEntry,
   type ContentAsset,
 } from '../services/marketplace/MarketplaceService';
 import {
@@ -109,9 +111,37 @@ export const ContentAssetScreen: React.FC = () => {
   };
 
   const handleDelete = () => {
-    // The stub backend has no library/content-asset delete API — honest error
-    // instead of a fake success.
-    showToast(t('removeUnavailablePreview'));
+    if (!entry) return;
+    showAlert(
+      t('deleteEntry'),
+      t('deleteEntryConfirm'),
+      [
+        { text: t('buyCancel'), style: 'cancel' },
+        {
+          text: t('deleteEntry'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // The route param is the CONTENT ASSET id (MyLibrary passes
+              // item.asset.id) — removeLibraryEntry needs the LIBRARY ENTRY
+              // id, so resolve the owning entry from the library first.
+              const library = await getLibrary();
+              const libEntry = library.find(e => e.asset.id === entryId);
+              if (!libEntry) {
+                showToast(t('publishFailed'));
+                return;
+              }
+              await removeLibraryEntry(libEntry.id);
+              showToast(t('statusRemoved'));
+              navigation.goBack(); // MyLibrary refreshes on focus
+            } catch {
+              showToast(t('publishFailed'));
+            }
+          },
+        },
+      ],
+      { icon: 'trash-can-outline' },
+    );
   };
 
   if (!theme) return null;

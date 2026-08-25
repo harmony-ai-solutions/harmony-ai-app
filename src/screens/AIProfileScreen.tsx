@@ -58,6 +58,10 @@ import { getEntityByCharacterProfileId } from '../database/repositories/entities
 import * as SocialService from '../services/social/SocialService';
 import type { StubCharacterCreator } from '../services/social/SocialService';
 import { openCharacterChat } from '../services/CharacterChatService';
+import {
+  getListingForProfile,
+  isChatLocked,
+} from '../services/marketplace/MarketplaceService';
 import type { MarketplaceListingDetail } from '../services/marketplace/MarketplaceService';
 import { createDataURL } from '../database/base64';
 import { CharacterProfile, CharacterImage } from '../database/models';
@@ -114,11 +118,13 @@ export const AIProfileScreen: React.FC = () => {
   // Follow state for the character's creator
   const [followingCreator, setFollowingCreator] = useState(false);
 
-  // ── Marketplace state (stub listing data → pure UI badge) ─────────────
-  // The stub marketplace has no local profile→listing linkage (upload-copy
-  // publish, A4), so an AI profile never resolves a listing here. The chat
-  // button's price-pill/lock-icon branch stays as pure UI that renders when a
-  // listing id is supplied (the future backend will resolve it).
+  // ── Marketplace state (stub listing → price pill + chat lock) ──────────
+  // Wave 1 stub links a local profile → ACTIVE listing via `sourceProfileId`
+  // (getListingForProfile), so this resolves during profile load. The chat
+  // button shows the SOUL price pill + lock icon while a live listing is set,
+  // and handleChat routes locked profiles to the listing detail to acquire.
+  // Marketplace preview lock — viewable free, chat locked until acquired; own
+  // library (never published) is never locked.
   const [listing, setListing] = useState<MarketplaceListingDetail | null>(null);
 
   // ── Comment modal state ────────────────────────────────────────────────
@@ -263,6 +269,19 @@ export const AIProfileScreen: React.FC = () => {
       } catch (err) {
         log.warn('Failed to load image post state:', err);
       }
+
+      // ── Marketplace listing (drives the price pill + chat lock) ──────
+      // Wave 1 stub resolves an ACTIVE listing published from this profile
+      // (sourceProfileId linkage). When set, the chat button shows the SOUL
+      // price + lock icon and handleChat routes locked profiles to the
+      // listing detail to acquire (marketplace preview lock — viewable free,
+      // chat locked until acquired; own library never locked).
+      try {
+        const listing = await getListingForProfile(profileId);
+        setListing(listing);
+      } catch (err) {
+        log.warn('Failed to load marketplace listing:', err);
+      }
     } catch (err) {
       log.error('Failed to load AI profile:', err);
     } finally {
@@ -295,6 +314,27 @@ export const AIProfileScreen: React.FC = () => {
     if (!profile || chatting) return;
     setChatting(true);
     try {
+      // Marketplace preview lock — viewable free, chat locked until acquired;
+      // own library (never published) is NEVER locked. The single isChatLocked
+      // check is enough (creator/owner never lock). Instead of the old silent
+      // ignore (a placeholder because payment didn't exist), route to the
+      // listing detail where the user can acquire the character — the stub
+      // now has a working acquire flow. openCharacterChat keeps the central
+      // hard gate as defense in depth.
+      if (await isChatLocked(profile.id)) {
+        const resolvedListing =
+          listing ?? (await getListingForProfile(profile.id));
+        if (resolvedListing) {
+          navigation.navigate('MarketplaceItemDetail', {
+            listingId: resolvedListing.id,
+          });
+        } else {
+          log.warn(
+            `Chat locked for marketplace profile ${profile.id} — no active listing resolved; ignored.`,
+          );
+        }
+        return;
+      }
       await openCharacterChat(profile, {
         navigateToChat: params => navigation.navigate('ChatDetail', params),
       });
@@ -607,10 +647,12 @@ export const AIProfileScreen: React.FC = () => {
 
             {/* ── Action row: primary Chat + Like / Save ── */}
             <View style={styles.actionsRow}>
-              {/* Primary Chat button — full-width, purple gradient. When a
-                  listing resolves for this profile (future backend), the
-                  label shows the SOUL price pill; until then it is a normal
-                  Chat button. Paywall removed (A2). */}
+              {/* Primary Chat button — full-width, purple gradient. When an ACTIVE
+                  listing resolves for this profile (Wave 1 stub linkage), the
+                  label shows the SOUL price pill + lock icon and the tap routes
+                  to the listing detail to acquire (marketplace preview lock —
+                  viewable free, chat locked until acquired; own library never
+                  locked). Otherwise it is a normal Chat button. */}
               <TouchableOpacity
                 onPress={() => {
                   hapticLightPress();

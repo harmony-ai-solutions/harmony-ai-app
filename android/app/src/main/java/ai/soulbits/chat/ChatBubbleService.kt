@@ -219,29 +219,62 @@ class ChatBubbleService : Service() {
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    // The notification's PendingIntent embeds the conversation payload —
+    // refresh it for SHOW deliveries BEFORE the foreground notification is
+    // (re)built below.
+    if (intent?.action == null || intent.action == ACTION_SHOW) {
+      conversationJson = intent?.getStringExtra(EXTRA_CONVERSATION)
+    }
+    // EVERY startForegroundService() delivery obligates this service to call
+    // startForeground() within the system timeout (~10 s) — including command
+    // deliveries (ACTION_SET_UNREAD / ACTION_HIDE_ONE / ACTION_CLOSE_WINDOW,
+    // sent via startForegroundService by ChatBubbleModule so they work while
+    // the app is backgrounded) and including deliveries while the service is
+    // ALREADY foreground. Skipping the call crashes the whole app with
+    // ForegroundServiceDidNotStartInTimeException — observed on-device from
+    // ChatBubbleModule.closeWindow (2026-08-23/26 crash buffer). Re-calling
+    // startForeground() on a running service is legal and cheap: it just
+    // re-posts the same notification.
+    startForegroundCompat()
     when (intent?.action) {
       ACTION_SET_UNREAD -> {
         val count = intent.getIntExtra(EXTRA_UNREAD_COUNT, 0)
         val key = intent.getStringExtra(EXTRA_PARTICIPANT_KEY)
         setUnreadCount(key, count)
+        maybeStopWhenEmpty()
         return START_NOT_STICKY
       }
       ACTION_HIDE_ONE -> {
         // Remove a single bubble from the stack (the rest stay).
         intent.getStringExtra(EXTRA_PARTICIPANT_KEY)?.let { removeBubbleEntry(it) }
+        maybeStopWhenEmpty()
         return START_NOT_STICKY
       }
       ACTION_CLOSE_WINDOW -> {
         // Close only the floating chat window — the bubbles stay.
         closeFloatingChat()
+        maybeStopWhenEmpty()
         return START_NOT_STICKY
       }
       else -> {
-        conversationJson = intent?.getStringExtra(EXTRA_CONVERSATION)
-        startForegroundCompat()
         showBubble()
         return START_STICKY
       }
+    }
+  }
+
+  /**
+   * Stop the service when a command delivery finds it with nothing to show.
+   *
+   * Android may (re)create the service for a command intent after the stack
+   * was already empty (e.g. closeWindow arriving after the last bubble was
+   * removed). With the unconditional startForegroundCompat() above, such a
+   * revival would otherwise leave a zombie "Tap the bubble to chat"
+   * notification with no bubble behind it.
+   */
+  private fun maybeStopWhenEmpty() {
+    if (bubbles.isEmpty()) {
+      stopSelf()
     }
   }
 
