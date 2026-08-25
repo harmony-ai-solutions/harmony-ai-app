@@ -15,7 +15,12 @@ import { loadTextColumn } from '../sync';
 
 /**
  * Derive the interaction scope from the number of participants:
- * 0 or 1 → "world", 2 → "private", 3+ → "group"
+ * 0 or 1 → "world", 2 → "private", 3+ → "group".
+ *
+ * ENGINE CONTRACT (mirrors harmony-link-private `DeriveScopeFromParticipants`,
+ * interaction_controller.go): `participantIds` is the FULL participant set
+ * INCLUDING the own entity. The own entity is part of the participant key
+ * EVERYWHERE (O3 ruling) — private/group scopes embed it; world has no key.
  */
 export function deriveScopeFromParticipants(participantIds: string[]): string {
   const count = participantIds.length;
@@ -28,10 +33,25 @@ export function deriveScopeFromParticipants(participantIds: string[]): string {
 }
 
 /**
- * Derive the participant key for interaction lookup.
- * - private: sorted pair of entity IDs joined by "+"
- * - group: all sorted participant IDs joined by "+" (unique per participant set)
+ * Derive the participant key for interaction lookup — EXACT engine contract
+ * (harmony-link-private `DeriveParticipantKey`, interaction_controller.go):
+ * - private: sorted pair of "own entity + partner" joined by "+" (the own
+ *   entity is ALWAYS in the key — per-persona semantics: two personas are
+ *   distinct entity ids, so each persona derives its OWN pair key and its
+ *   own conversation with the same partner)
+ * - group: ALL sorted participant IDs joined by "+" (unique per participant
+ *   set — the set ALWAYS includes the own entity; overlapping groups like
+ *   own+alice+bob vs own+alice+dave must NOT collide)
  * - world: "" (empty string)
+ *
+ * CALLER CONVENTION: `participantIds` MUST include the own entity (`entityId`)
+ * — every app caller passes the full participant set (session.participantIds,
+ * or route params built as [ownEntityId, ...partners]) exactly like the engine
+ * (FindActiveInteractionForPartner passes []string{entityID, partnerEntityID};
+ * ResolveInteraction receives sets that include the own entity). The function
+ * tolerates the own entity being absent (pairs own with the first other —
+ * engine parity, see engine TestDeriveParticipantKey_OwnEntityNotInSet), but
+ * that is NOT the caller convention.
  */
 export function deriveParticipantKey(
   participantIds: string[],

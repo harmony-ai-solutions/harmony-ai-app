@@ -28,7 +28,9 @@ import com.facebook.react.module.annotations.ReactModule
  *     granted (via onActivityResult); it is never resolved FALSE from
  *     native — the JS side re-checks hasPermission() through its AppState
  *     listener + poll and settles the request (grant or timeout).
- *   - show(conversationJson): starts the foreground bubble service
+ *   - show(conversationJson): starts the foreground bubble service. Resolves
+ *     TRUE when the service was started; FALSE when the overlay permission is
+ *     missing or the start failed (e.g. Android 12+ background-start policy).
  *   - hide(): stops the foreground bubble service
  */
 @ReactModule(name = ChatBubbleModule.NAME)
@@ -90,16 +92,35 @@ class ChatBubbleModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun show(conversationJson: String?) {
-    if (!canDrawOverlays()) return
+  fun show(conversationJson: String?, promise: Promise) {
+    // D1-4: show() resolves a REAL boolean (mirrors hasPermission/isSupported —
+    // the module's Promise-based boolean pattern). JS's `result === false`
+    // check is live again.
+    if (!canDrawOverlays()) {
+      // Overlay permission missing — resolve false. The JS side handles the
+      // permission flow (requestBubblePermission + auto-show on grant), so a
+      // false here must NOT be treated as a permission denial by callers —
+      // see ChatBubbleService.ts showBubble.
+      promise.resolve(false)
+      return
+    }
     val intent = Intent(reactContext, ChatBubbleService::class.java).apply {
       action = ChatBubbleService.ACTION_SHOW
       putExtra(ChatBubbleService.EXTRA_CONVERSATION, conversationJson)
     }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      reactContext.startForegroundService(intent)
-    } else {
-      reactContext.startService(intent)
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        reactContext.startForegroundService(intent)
+      } else {
+        reactContext.startService(intent)
+      }
+      promise.resolve(true)
+    } catch (e: Exception) {
+      // e.g. ForegroundServiceStartNotAllowedException (Android 12+ background
+      // start policy) or SecurityException — resolve false, never crash the
+      // bridge call. The JS side surfaces an honest "bubble was not displayed"
+      // log and callers may retry.
+      promise.resolve(false)
     }
   }
 

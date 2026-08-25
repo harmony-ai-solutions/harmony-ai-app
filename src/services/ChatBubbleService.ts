@@ -353,14 +353,18 @@ export async function showBubble(
   }
   try {
     activeBubbleConversations.set(conversation.participantKey, conversation);
-    const result = native.show(JSON.stringify(conversation));
+    // D1-4: native show() resolves a REAL boolean (canDrawOverlays + try/catch
+    // in ChatBubbleModule.kt) — the `result === false` check is live again.
+    const result = await native.show(JSON.stringify(conversation));
     if (result === false) {
-      // Native refused to start the bubble service (e.g. foreground-service
-      // policy) — this is NOT a permission problem, so callers can retry
-      // without treating it as a permission denial.
+      // Native refused to start the bubble service (missing overlay
+      // permission, or a foreground-service start failure such as the
+      // Android 12+ background-start policy) — this is NOT necessarily a
+      // permission problem, so callers can retry without treating it as a
+      // permission denial.
       log.warn(
         `Native show() returned false for ${conversation.entityName ?? conversation.participantKey}; ` +
-          'bubble was not displayed (overlay permission IS granted).',
+          'bubble was not displayed.',
       );
       return false;
     }

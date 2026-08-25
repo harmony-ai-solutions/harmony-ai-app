@@ -42,6 +42,26 @@ const MAX_RECORDING_SECONDS = 120;
 /** Extra breathing room below the bar so it floats above the gesture/nav bar. */
 const BOTTOM_LIFT = 14;
 
+/**
+ * Pure countdown tick for the recording timer (D1-3).
+ *
+ * Returns the next second value clamped to `max`, and invokes `onCeiling`
+ * EXACTLY ONCE — when the count first reaches the ceiling (the 120 s
+ * auto-stop). After that the count stays pinned at `max` without re-firing,
+ * so callers never double-trigger the auto-stop.
+ */
+export function nextRecordingTick(
+  current: number,
+  max: number,
+  onCeiling: () => void,
+): number {
+  const next = current + 1;
+  if (next === max) {
+    onCeiling();
+  }
+  return Math.min(next, max);
+}
+
 /** A single picked image, kept in memory as base64 until sent. */
 export interface PickedImage {
   base64: string;
@@ -352,6 +372,16 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     t,
   ]);
 
+  // D1-3: the countdown interval below is created inside startRecording's
+  // closure, which captured the PRE-recording render's finishRecording
+  // (isRecording === false at that point). Firing that stale copy made the
+  // 120 s auto-stop a silent no-op. Keep the LATEST finishRecording in a ref
+  // so the auto-stop behaves exactly like the user pressing the stop button.
+  const finishRecordingRef = useRef(finishRecording);
+  useEffect(() => {
+    finishRecordingRef.current = finishRecording;
+  }, [finishRecording]);
+
   const startRecording = useCallback(async () => {
     if (disabled || isRecording) return;
     Keyboard.dismiss();
@@ -364,17 +394,20 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
       setRecordingSeconds(0);
       setIsRecording(true);
       recordingTimerRef.current = setInterval(() => {
-        setRecordingSeconds(prev => {
-          const next = prev + 1;
-          if (next >= MAX_RECORDING_SECONDS) {
-            // Auto-stop at the ceiling.
+        setRecordingSeconds(prev =>
+          nextRecordingTick(prev, MAX_RECORDING_SECONDS, () => {
+            // D1-3: the 120 s auto-stop FINISHES the recording (stop + attach
+            // to the composer) exactly like the stop button — it must NOT set
+            // recordingAbortedRef (that flag means "user cancelled → discard";
+            // cancelRecording is the only path that sets it). finishRecordingRef
+            // holds the latest callback so the stale-closure bug that made the
+            // auto-stop a silent no-op (and left the abort flag set, so the
+            // eventual manual stop DISCARDED the audio) cannot recur.
             if (!recordingAbortedRef.current) {
-              recordingAbortedRef.current = true;
-              void finishRecording();
+              void finishRecordingRef.current();
             }
-          }
-          return Math.min(next, MAX_RECORDING_SECONDS);
-        });
+          }),
+        );
       }, 1000);
     } catch (err: any) {
       log.error('Failed to start recording:', err);

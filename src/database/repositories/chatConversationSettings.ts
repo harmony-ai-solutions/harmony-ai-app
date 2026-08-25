@@ -18,6 +18,14 @@
  *   unread_count    INTEGER — incremented on incoming messages while the chat
  *     is not open, reset to 0 on open
  *
+ * ⚠️ DATA NOTE (F4/O3): participant_key is derived by
+ * `interactions.deriveParticipantKey` — the ENGINE contract where the own
+ * entity is part of the key EVERYWHERE. Rows keyed by any OLDER derivation
+ * (e.g. pair-key without the own persona entity) are ACCEPTED-LOSS on dev
+ * devices: do NOT write a re-key migration. Old rows simply never match a
+ * newly-derived key → default (all-off, 0 unread) settings — the same state
+ * as a fresh install.
+ *
  * A conversation with no row simply means "not pinned / not archived / not
  * muted / not disabled / zero unread".
  */
