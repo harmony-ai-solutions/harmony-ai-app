@@ -114,6 +114,7 @@ function makeSession(interactionId = 'ix-scenario'): InteractionSession {
     ]),
     pendingTranscriptions: new Map(),
     replyMode: 'realistic',
+    initRetryCount: 0,
   };
 }
 

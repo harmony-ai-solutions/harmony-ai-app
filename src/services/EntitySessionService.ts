@@ -23,6 +23,18 @@ import { v7 as uuidv7 } from 'uuid';
 
 const log = createLogger('[EntitySessionService]');
 
+/**
+ * Track E — INIT_ENTITY ingestion-error recovery bounds. The engine rejects
+ * INIT_ENTITY with an "entity not defined"-class error when the chat is opened
+ * before the fire-and-forget entity sync (CreateAIScreen) has been ingested.
+ * Recovery re-syncs (SyncService.syncAndWait) and re-sends INIT_ENTITY at most
+ * MAX_INIT_ENTITY_RETRIES times before failing the session normally.
+ */
+const MAX_INIT_ENTITY_RETRIES = 2;
+
+/** Engine ingestion-rejection code for an entity the engine hasn't ingested yet. */
+const INIT_ENTITY_INGESTION_ERROR = 'entity_not_defined';
+
 // ============================================================================
 // InteractionSession — replaces DualEntitySession
 // ============================================================================
@@ -63,6 +75,14 @@ export interface InteractionSession {
    * never silently flips pacing.
    */
   replyMode: string;
+  /**
+   * Track E — INIT_ENTITY recovery bookkeeping. Number of engine-rejection
+   * recoveries already performed for this session (each = re-sync + fresh
+   * connection + re-sent INIT_ENTITY). Bounded by MAX_INIT_ENTITY_RETRIES;
+   * once reached, the session fails with session:error like any other
+   * initialization failure.
+   */
+  initRetryCount: number;
 }
 
 /**
@@ -270,6 +290,13 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     });
     cm.on('disconnected:entity', (entityId: string) => {
       cm.entitySessionEventTarget?.handleEntityDisconnected(entityId);
+    });
+    // Transport-error path. BaseWebSocketConnection emits BOTH 'event' and
+    // 'error' for an ERROR-status message; handleEntityConnectionError defers
+    // to the event-path recovery when the error carries an INIT_ENTITY event
+    // (genuine transport errors stay fatal).
+    cm.on('error:entity', (entityId: string, error: any) => {
+      cm.entitySessionEventTarget?.handleEntityConnectionError(entityId, error);
     });
   }
 
@@ -508,6 +535,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         ownEntityId,
         connections,
         pendingTranscriptions: new Map(),
+        initRetryCount: 0,
       };
 
       // Register the session BEFORE sending INIT_ENTITY. The engine can return
@@ -1677,25 +1705,155 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
       // If we have an interaction session, handle error
       if (interactionSession && interactionId) {
-        this.emit('session:error', interactionId,
-          event.payload?.error || 'Session initialization failed');
+        const errorMessage = event.payload?.error || 'Session initialization failed';
 
-        // Clean up the interaction session
-        this.cancelReconnectsForInteraction(interactionId);
-        this.sessions.delete(interactionId);
+        // Track E — INIT_ENTITY ingestion-error recovery. CreateAIScreen syncs
+        // new entities fire-and-forget; when the chat is opened before the
+        // engine ingested the entity, the engine rejects INIT_ENTITY with an
+        // "entity not defined"-class error. Instead of tearing the session down
+        // instantly (and letting context-level retries re-send INIT_ENTITY
+        // WITHOUT syncing, failing identically every time), re-sync + re-send
+        // INIT_ENTITY, bounded by MAX_INIT_ENTITY_RETRIES. Only after exhausting
+        // the retries (or for non-ingestion errors) does the session fail.
+        const isIngestionError = errorMessage === INIT_ENTITY_INGESTION_ERROR;
+        const retryCount = interactionSession.initRetryCount ?? 0;
+        if (isIngestionError && retryCount < MAX_INIT_ENTITY_RETRIES) {
+          interactionSession.initRetryCount = retryCount + 1;
+          log.info(`INIT_ENTITY rejected by engine for ${entityId} (${errorMessage}) — recovery attempt ${interactionSession.initRetryCount}/${MAX_INIT_ENTITY_RETRIES} (interaction ${interactionId})`);
 
-        // Disconnect all connections for this interaction
-        for (const [, conn] of interactionSession.connections) {
-          if (this.connectionManager.isConnected(conn.connectionId)) {
-            this.connectionManager.disconnectConnection(conn.connectionId);
-          }
+          // Fire-and-forget recovery (non-blocking): any throw inside recovery
+          // is logged and falls through to the normal teardown path.
+          this.recoverInitEntity(entityId, interactionSession, interactionId).catch((err) => {
+            log.error(`INIT_ENTITY recovery failed for ${entityId} (interaction ${interactionId}):`, err);
+            this.failInteractionSession(interactionId, interactionSession, errorMessage);
+          });
+          return;
         }
 
-        // Clean up pending sessions
-        for (const pid of interactionSession.participantIds) {
-          this.pendingSessions.delete(pid);
-        }
+        // Normal failure path: retry cap reached, non-ingestion error, or the
+        // recovery above threw — emit session:error + tear down.
+        this.failInteractionSession(interactionId, interactionSession, errorMessage);
       }
+    }
+  }
+
+  /**
+   * Emit session:error and tear down an interaction session. Shared by the
+   * INIT_ENTITY ERROR branch, the recovery-failure path, and the transport
+   * error path. Mirrors the historical teardown: cancel reconnect timers,
+   * drop the session, disconnect all entity sockets, clear pending sessions.
+   */
+  private failInteractionSession(
+    interactionId: string,
+    interactionSession: InteractionSession,
+    errorMessage: string
+  ): void {
+    this.emit('session:error', interactionId, errorMessage);
+    this.cancelReconnectsForInteraction(interactionId);
+    this.sessions.delete(interactionId);
+
+    // Disconnect all connections for this interaction
+    for (const [, conn] of interactionSession.connections) {
+      if (this.connectionManager.isConnected(conn.connectionId)) {
+        this.connectionManager.disconnectConnection(conn.connectionId);
+      }
+    }
+
+    // Clean up pending sessions
+    for (const pid of interactionSession.participantIds) {
+      this.pendingSessions.delete(pid);
+    }
+  }
+
+  /**
+   * Track E — INIT_ENTITY engine-rejection recovery. Best-effort BLOCKING
+   * re-sync (SyncService.syncAndWait) so the engine ingests the freshly-created
+   * entity → create a fresh entity connection for that entity → re-send
+   * INIT_ENTITY. Fire-and-forget from the ERROR branch; any throw here is
+   * caught there and falls through to the normal teardown.
+   */
+  private async recoverInitEntity(
+    entityId: string,
+    session: InteractionSession,
+    interactionId: string
+  ): Promise<void> {
+    // Purge interplay: the cloud data purge owns the WS lifecycle — never
+    // re-sync / re-dial entity sockets mid-purge (fail fast → teardown path).
+    if (cloudSessionService.isPurging?.()) {
+      throw new Error('Cloud data purge in progress — skipping INIT_ENTITY recovery');
+    }
+
+    log.info(`INIT_ENTITY recovery for ${entityId} (interaction ${interactionId}): re-syncing entity state (attempt ${session.initRetryCount}/${MAX_INIT_ENTITY_RETRIES})`);
+
+    // 1) Blocking re-sync (best-effort): ensure the engine has ingested the entity.
+    await SyncService.getInstance().syncAndWait();
+
+    // 2) Create a fresh entity connection for this entity.
+    const connection = session.connections.get(entityId);
+    if (!connection) {
+      throw new Error(`No connection found for ${entityId} during INIT_ENTITY recovery`);
+    }
+
+    const source = await ConnectionStateManager.getCurrentSource();
+    let wsUrl: string;
+    let mode: string;
+    if (source === 'cloud') {
+      wsUrl = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`;
+      mode = 'cloud';
+    } else {
+      mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
+      wsUrl = mode === 'unencrypted'
+        ? (await ConnectionStateManager.getWSUrl()) ?? ''
+        : (await ConnectionStateManager.getWSSUrl()) ?? '';
+    }
+    if (!wsUrl) {
+      throw new Error('No connection URL available for INIT_ENTITY recovery');
+    }
+
+    await this.connectionManager.createConnection(
+      connection.connectionId,
+      'entity',
+      wsUrl,
+      mode as any,
+      entityId,
+    );
+
+    // 3) Re-send INIT_ENTITY (honors session.replyMode + participant list).
+    await this.sendInitEntityForEntity(entityId, session);
+
+    log.info(`INIT_ENTITY re-sent for ${entityId} after recovery sync (attempt ${session.initRetryCount}/${MAX_INIT_ENTITY_RETRIES})`);
+  }
+
+  /**
+   * Transport-error path (ConnectionManager 'error:entity'). Guard: when the
+   * incoming error carries an app-level harmony event (BaseWebSocketConnection
+   * emits BOTH 'event' and 'error' for an ERROR-status message), defer to the
+   * event-path recovery (handleEntityEvent → handleInitEntityResponse) instead
+   * of tearing the session down — the bug that defeated recovery. Genuine
+   * transport errors (no attached event) stay fatal.
+   */
+  private async handleEntityConnectionError(entityId: string, error: any): Promise<void> {
+    if (error?.event?.event_type === 'INIT_ENTITY') {
+      log.info(`Transport error for ${entityId} carries an INIT_ENTITY app event — deferring to event-path recovery`);
+      return;
+    }
+
+    log.error(`Entity connection error for ${entityId}:`, error);
+
+    // Find the InteractionSession that contains this entity's connection.
+    for (const [interactionId, session] of this.sessions.entries()) {
+      const connection = session.connections.get(entityId);
+      if (!connection) continue;
+
+      this.failInteractionSession(interactionId, session, error?.message || 'Entity connection error');
+      return;
+    }
+
+    // No matching interaction session — drop any pending session for this entity.
+    if (this.pendingSessions.has(entityId)) {
+      const pending = this.pendingSessions.get(entityId)!;
+      pending.status = 'disconnected';
+      this.pendingSessions.delete(entityId);
     }
   }
 

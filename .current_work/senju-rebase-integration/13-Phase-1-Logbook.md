@@ -16,7 +16,7 @@
 | 4 — Schema surgery | ✅ committed | `a0992be` |
 | 5 — B4 seeding revert | ✅ committed | `29871ab` |
 | 6 — D-register bug mends | ✅ committed | `ba97e9a`+`4fc4ab0`+`77518e5`+`40553b3` |
-| 7 — INIT_ENTITY recovery | ⏳ pending | — |
+| 7 — INIT_ENTITY recovery | ✅ committed | (this commit) |
 | 8 — Editor consolidation | ⏳ pending | — |
 | 9 — Verification/records/docs | ⏳ pending | — |
 
@@ -246,6 +246,28 @@ None (phase was new-files-only by design).
 - **D1-12**: `getCharacterStats` chats count via aggregate SQL (JSON1 `json_each` + EXISTS) with JS-scan fallback; shape unchanged; 2 new tests.
 
 ### D1/D2 rows DONE-BY or deferred (unchanged): D1-1/2/6/9 (done by Phases 1–4), D1-11 legacy persona prefs (deferred P4/O2), F2/F9 (paywall), F4 data note above.
+
+---
+
+## Phase 7 — Track E: INIT_ENTITY Ingestion-Error Recovery
+
+**Gates**: re-enabled spec suite 4/4 green UNMODIFIED; all 11 entity-session suites green; tsc 0; unit 92 suites/814 tests; integration 10/50+1 skipped. Impact pre-check: `handleInitEntityResponse` upstream LOW (event-routing path only).
+
+### Changed — `src/services/EntitySessionService.ts`
+- `MAX_INIT_ENTITY_RETRIES = 2` + `INIT_ENTITY_INGESTION_ERROR = 'entity_not_defined'` named consts.
+- `InteractionSession.initRetryCount: number` (required, init 0 at session creation; test fixtures updated).
+- `handleInitEntityResponse` ERROR branch: ingestion-class (`entity_not_defined`) → no teardown, increment counter, fire-and-forget recovery; cap reached → `session:error` + `failInteractionSession`; non-ingestion errors keep old behavior.
+- New private `failInteractionSession` (session:error + cancel reconnects + delete session + disconnect + clear pending) — shared teardown.
+- New private `recoverInitEntity`: purge guard (`isPurging?.()` optional-call so the unmodified spec's mock passes while production suppression works) → blocking `SyncService.syncAndWait()` → fresh entity WS connection (cloud/selfhosted URL resolution mirroring `reconnectPartner`) → re-send INIT_ENTITY (honors `replyMode`). Any throw → log + teardown.
+- New `handleEntityConnectionError` wired to ConnectionManager `error:entity` (transport-error-storm guard): error carrying `event.event_type === 'INIT_ENTITY'` defers to event-path recovery; genuine transport errors stay fatal.
+- Dedup composition verified: `started` flag + register-before-send → no double `session:started`.
+
+### Re-enabled
+- `src/services/__tests__/entitySessionInitRecovery.test.ts` (was `.skip`, D2 skip from the rebase now resolved).
+
+### Notes
+- Manual on-device smoke (create partner → immediately open chat → recovers after brief connecting) — pending user.
+- The D2 rebase decision (skip red test with TODO) is now fully closed.
 
 ---
 

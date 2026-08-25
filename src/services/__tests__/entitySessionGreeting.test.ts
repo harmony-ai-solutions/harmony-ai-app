@@ -112,6 +112,7 @@ function makeSession(interactionId = 'ix-greeting'): InteractionSession {
     ]),
     pendingTranscriptions: new Map(),
     replyMode: 'realistic',
+    initRetryCount: 0,
   };
 }
 

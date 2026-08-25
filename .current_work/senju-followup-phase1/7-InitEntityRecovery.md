@@ -26,8 +26,8 @@ Spec:
 
 ## Verification
 
-- [ ] Re-enabled suite green: `npx jest --selectProjects unit --testPathPatterns entitySessionInitRecovery`
-- [ ] Full unit + integration green (session suites: dedup, connection-id, monkey, stop, listener idempotency)
-- [ ] `gitnexus_impact({target: "handleInitEntityResponse"})` before editing — expect callers in the event-routing path only; report blast radius before proceeding
-- [ ] `gitnexus_detect_changes()`; commit: `feat: INIT_ENTITY ingestion-error recovery with bounded retries (Track E)`
-- [ ] Manual smoke (user, on-device): create partner → immediately open chat → session recovers after brief connecting state instead of "Session initialization failed"
+- [x] Re-enabled suite green: `npx jest --selectProjects unit --testPathPatterns entitySessionInitRecovery` — 4/4, assertions UNMODIFIED
+- [x] Full unit + integration green (unit 92 suites/814 tests incl. all 11 entity-session suites; integration 10/50+1 skipped)
+- [x] `gitnexus_impact({target: "handleInitEntityResponse"})` before editing — LOW, callers in event-routing path only (as doc predicted)
+- [x] `gitnexus_detect_changes()`; commit: `feat: INIT_ENTITY ingestion-error recovery with bounded retries (Track E)`
+- [ ] Manual smoke (user, on-device): create partner → immediately open chat → session recovers after brief connecting state instead of "Session initialization failed" — **pending user**
