@@ -436,6 +436,11 @@ export async function deleteConversationMessage(id: string): Promise<void> {
  * action. Deleting the interaction's messages with the entity scope predicate
  * matches the deleteEntity cascade convention (never touch conversations
  * rooted at another entity).
+ *
+ * F3 cascade: also DELETEs the `chat_conversation_settings` row for the key so
+ * no stale pinned/muted/archived/disabled/unread state resurrects when the
+ * conversation is re-created (the settings table has no FK to interactions, so
+ * this is an explicit repo-level cascade).
  */
 export async function deleteConversationByParticipantKey(
   entityId: string,
@@ -466,6 +471,14 @@ export async function deleteConversationByParticipantKey(
       [now, now, interactionId],
     );
   }
+
+  // F3: drop the client-only settings row (pinned / archived / muted /
+  // disabled / unread_count) so deleted conversations never resurrect stale
+  // badge or preference state.
+  await db.executeSql(
+    'DELETE FROM chat_conversation_settings WHERE participant_key = ?',
+    [participantKey],
+  );
 }
 
 // Helper function to map DB row to ConversationMessage
