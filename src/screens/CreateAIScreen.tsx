@@ -70,7 +70,7 @@ import {
   updateCharacterProfile,
   type CharacterProfileVisibility,
 } from '../database/repositories/characters';
-import { setCharacterCreator } from '../database/repositories/characterSocial';
+import { setCharacterCreator } from '../services/social/SocialService';
 import {
   createEntity,
   createEntityModuleMapping,
@@ -974,9 +974,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           try {
             await setCharacterCreator({
               profileId,
-              creatorUserId: user.id,
-              creatorDisplayName: user.display_name || user.email?.split('@')[0] || 'Creator',
-              creatorAvatarUrl: user.avatar_url ?? null,
+              userId: user.id,
             });
           } catch (err) {
             log.warn('Failed to record character creator:', err);

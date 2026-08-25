@@ -45,22 +45,9 @@ import { hexToRgba } from '../utils/colorUtils';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { PostCard } from '../components/social/PostCard';
 import { PostCommentModal } from '../components/social/PostCommentModal';
-import {
-  getUserPostsByAuthor,
-  UserPost,
-  isPostLiked,
-  togglePostLike,
-  getPostLikesCount,
-  getPostCommentsCount,
-  isFollowing,
-  addFollow,
-  removeFollow,
-  isUserBlocked,
-  addBlockedUser,
-  removeBlockedUser,
-} from '../database/repositories/userSocial';
-import { filterBlockedUserPosts } from '../database/repositories/blockedContent';
-import UserProfileStore from '../services/profile/UserProfileStore';
+import * as SocialService from '../services/social/SocialService';
+import type { StubPost } from '../services/social/SocialService';
+import { filterBlockedUserPosts } from '../utils/blockedContentFilters';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
 
@@ -91,9 +78,12 @@ export const UserProfileScreen: React.FC = () => {
   const [username, setUsername] = useState<string>('');
   const [bio, setBio] = useState<string>('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  // Public profile stats (stub-backed for known fixture users; 0 otherwise).
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
 
   // User posts authored by this user (public content only)
-  const [posts, setPosts] = useState<UserPost[]>([]);
+  const [posts, setPosts] = useState<StubPost[]>([]);
   const [commentPostId, setCommentPostId] = useState<string | null>(null);
   const [postState, setPostState] = useState<
     Record<string, { liked: boolean; likes: number; commentCount: number }>
@@ -103,59 +93,68 @@ export const UserProfileScreen: React.FC = () => {
 
   const loadProfile = useCallback(async () => {
     if (isSelf && currentUser) {
-      try {
-        const local = await UserProfileStore.getLocalProfile(currentUser.id);
-        setDisplayName(local.displayName ?? currentUser.display_name ?? '');
-        setUsername(local.username ?? '');
-        setBio(local.bio ?? '');
-        setAvatarUri(local.avatar_data_url ?? currentUser.avatar_url ?? null);
-      } catch (err) {
-        log.error('Failed to load local profile:', err);
-      }
-    } else {
-      // For other users the app only has what it has recorded locally —
-      // creator rows / post author rows / follow entries. The navigation
-      // params carry the creator's recorded name/avatar when known.
-      setDisplayName(paramName ?? '');
+      // Cloud-first: the signed-in user's own profile comes from auth.
+      setDisplayName(currentUser.display_name ?? '');
       setUsername('');
       setBio('');
-      setAvatarUri(paramAvatar ?? null);
+      setAvatarUri(currentUser.avatar_url ?? null);
+      setFollowerCount(0);
+      setFollowingCount(0);
+    } else {
+      // Resolve the target's PUBLIC profile from the stub service. Unknown
+      // users (not in the fixture set) fall back to the navigation params.
+      try {
+        const profile = await SocialService.getPublicUserProfile(userId);
+        setDisplayName(profile.displayName ?? paramName ?? '');
+        setUsername('');
+        setBio(profile.bio ?? '');
+        setAvatarUri(profile.avatarUrl ?? paramAvatar ?? null);
+        setFollowerCount(profile.followerCount);
+        setFollowingCount(profile.followingCount);
+      } catch (err) {
+        log.warn(`Failed to load public profile for ${userId}:`, err);
+        setDisplayName(paramName ?? '');
+        setUsername('');
+        setBio('');
+        setAvatarUri(paramAvatar ?? null);
+        setFollowerCount(0);
+        setFollowingCount(0);
+      }
     }
-  }, [isSelf, currentUser, paramName, paramAvatar]);
+  }, [isSelf, currentUser, userId, paramName, paramAvatar]);
 
   const loadPosts = useCallback(async () => {
     try {
-      let list = await getUserPostsByAuthor(userId);
-      list = await filterBlockedUserPosts(list);
+      // When viewing your own public profile, the stub authors your posts as
+      // LOCAL_USER_ID (the cloud id has no authored posts in the stub).
+      const authorId = isSelf ? SocialService.LOCAL_USER_ID : userId;
+      let list = await SocialService.getPosts({ authorId });
+      const blockedIds = await SocialService.getBlockedUserIds();
+      list = filterBlockedUserPosts(list, blockedIds);
       setPosts(list);
+      // The stub post carries like/comment counts at read time; the liked-by-
+      // current-user flag is only returned by togglePostLike (no read API).
       const stateMap: Record<string, { liked: boolean; likes: number; commentCount: number }> = {};
-      await Promise.all(
-        list.map(async post => {
-          try {
-            const [liked, likes, commentCount] = await Promise.all([
-              isPostLiked(post.id),
-              getPostLikesCount(post.id),
-              getPostCommentsCount(post.id),
-            ]);
-            stateMap[post.id] = { liked, likes, commentCount };
-          } catch {
-            stateMap[post.id] = { liked: false, likes: 0, commentCount: 0 };
-          }
-        }),
-      );
+      for (const post of list) {
+        stateMap[post.id] = {
+          liked: false,
+          likes: post.likeCount,
+          commentCount: post.commentCount,
+        };
+      }
       setPostState(stateMap);
     } catch (err) {
       log.error('Failed to load user posts:', err);
     }
-  }, [userId]);
+  }, [isSelf, userId]);
 
   const loadFollowState = useCallback(async () => {
     if (!currentUser || isSelf) return;
     try {
-      const following = await isFollowing(userId);
+      const following = await SocialService.isFollowing(userId);
       setFollowingCreator(following);
-      const isBlocked = await isUserBlocked(userId);
-      setBlocked(isBlocked);
+      const blockedIds = await SocialService.getBlockedUserIds();
+      setBlocked(blockedIds.has(userId));
     } catch (err) {
       log.error('Failed to load follow state:', err);
     }
@@ -178,19 +177,13 @@ export const UserProfileScreen: React.FC = () => {
   const handleToggleFollow = async () => {
     if (!currentUser || isSelf) return;
     try {
-      if (followingCreator) {
-        await removeFollow(userId);
-        setFollowingCreator(false);
-        showToast(t('postUnfollowedToast', { name: resolvedDisplayName }));
-      } else {
-        await addFollow({
-          targetUserId: userId,
-          targetDisplayName: resolvedDisplayName,
-          targetAvatarUrl: avatarUri,
-        });
-        setFollowingCreator(true);
-        showToast(t('postFollowedToast', { name: resolvedDisplayName }));
-      }
+      const nowFollowing = await SocialService.toggleFollow(userId);
+      setFollowingCreator(nowFollowing);
+      showToast(
+        nowFollowing
+          ? t('postFollowedToast', { name: resolvedDisplayName })
+          : t('postUnfollowedToast', { name: resolvedDisplayName }),
+      );
     } catch (err) {
       log.error('Failed to toggle follow:', err);
     }
@@ -199,11 +192,7 @@ export const UserProfileScreen: React.FC = () => {
   const performBlock = async () => {
     if (!currentUser || isSelf) return;
     try {
-      await addBlockedUser({
-        blockedUserId: userId,
-        blockedDisplayName: resolvedDisplayName,
-        blockedAvatarUrl: avatarUri,
-      });
+      await SocialService.blockUser(userId);
       setBlocked(true);
       setFollowingCreator(false);
       setPosts([]);
@@ -218,7 +207,7 @@ export const UserProfileScreen: React.FC = () => {
     setMenuVisible(false);
     hapticLightPress();
     if (blocked) {
-      removeBlockedUser(userId)
+      SocialService.unblockUser(userId)
         .then(() => {
           setBlocked(false);
           showToast(t('userUnblockedToast', { name: resolvedDisplayName }));
@@ -244,13 +233,17 @@ export const UserProfileScreen: React.FC = () => {
 
   const handleTogglePostLike = async (postId: string) => {
     try {
-      const nowLiked = await togglePostLike(postId);
-      const likes = await getPostLikesCount(postId);
+      const nowLiked = await SocialService.togglePostLike(postId);
+      // Re-read the post for the updated like count.
+      const authorId = isSelf ? SocialService.LOCAL_USER_ID : userId;
+      const post = (await SocialService.getPosts({ authorId })).find(
+        p => p.id === postId,
+      );
       setPostState(prev => ({
         ...prev,
         [postId]: {
           liked: nowLiked,
-          likes,
+          likes: post?.likeCount ?? prev[postId]?.likes ?? 0,
           commentCount: prev[postId]?.commentCount ?? 0,
         },
       }));
@@ -266,14 +259,14 @@ export const UserProfileScreen: React.FC = () => {
   const handlePostCommentsClosed = () => {
     if (commentPostId != null) {
       const pid = commentPostId;
-      getPostCommentsCount(pid)
-        .then(count => {
+      SocialService.getPostComments(pid)
+        .then(comments => {
           setPostState(prev => ({
             ...prev,
             [pid]: {
               liked: prev[pid]?.liked ?? false,
               likes: prev[pid]?.likes ?? 0,
-              commentCount: count,
+              commentCount: comments.length,
             },
           }));
         })
@@ -475,7 +468,7 @@ export const UserProfileScreen: React.FC = () => {
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <ThemedText variant="primary" size={18} weight="bold" hierarchy="header">
-              0
+              {followingCount}
             </ThemedText>
             <ThemedText variant="muted" size={12} hierarchy="caption">
               {t('following')}
@@ -483,7 +476,7 @@ export const UserProfileScreen: React.FC = () => {
           </View>
           <View style={styles.statItem}>
             <ThemedText variant="primary" size={18} weight="bold" hierarchy="header">
-              0
+              {followerCount}
             </ThemedText>
             <ThemedText variant="muted" size={12} hierarchy="caption">
               {t('followers')}

@@ -128,12 +128,11 @@ jest.mock('../../database/repositories/characters', () => ({
   getCharacterCategoryMembers: jest.fn().mockResolvedValue([]),
 }));
 
-// filterBlockedCharacterProfiles (senju's blocked-users repo) is called at the
-// top of loadProfiles — pass-through so profiles load unchanged in tests.
-jest.mock('../../database/repositories/blockedContent', () => ({
-  filterBlockedCharacterProfiles: jest
-    .fn()
-    .mockImplementation(async (profiles: unknown[]) => profiles),
+// The screen fetches the blocked-user id set from the SocialService stub and
+// passes it to the PURE utils filter (which no-ops on an empty set). Mock the
+// service so the block list starts clean in tests.
+jest.mock('../../services/social/SocialService', () => ({
+  getBlockedUserIds: jest.fn().mockResolvedValue(new Set()),
 }));
 
 jest.mock('../../database/repositories/entities', () => ({

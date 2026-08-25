@@ -36,7 +36,15 @@ Screens: `src/screens/UserProfileScreen.tsx`, `src/screens/MyProfileScreen.tsx` 
 
 ## Verification
 
-- [ ] `grep -rln "repositories/characterSocial\|repositories/userSocial\|repositories/blockedContent\|UserProfileStore" src/ --include="*.ts*" | grep -v __tests__` → empty
-- [ ] `npx tsc --noEmit` 0 errors; `npm test` green
-- [ ] Manual smoke: My Profile loads (cloud display name), Edit Profile saves display name, username/bio visibly "coming soon"; notifications badge updates live after stub actions; Block/Unblock filters fixture content across Discover/Market/Characters
-- [ ] `gitnexus_detect_changes()`; commit: `feat: wire social, notifications and profile to stub services, drop user profile shadow store`
+- [x] `grep -rln "repositories/characterSocial\|repositories/userSocial\|repositories/blockedContent\|UserProfileStore" src/ --include="*.ts*" | grep -v __tests__` → empty (remaining hits = doomed-repo tests, deleted Phase 4)
+- [x] `npx tsc --noEmit` 0 errors; `npm test` green (unit 88/858, integration 10/50+1 skipped)
+- [ ] Manual smoke: My Profile loads (cloud display name), Edit Profile saves display name, username/bio visibly "coming soon"; notifications badge updates live after stub actions; Block/Unblock filters fixture content across Discover/Market/Characters — **pending user**
+- [x] `gitnexus_detect_changes()`; commit: `feat: wire social, notifications and profile to stub services, drop user profile shadow store`
+
+### Implementation notes (deviations — full detail in 13-Phase-1-Logbook.md)
+
+- `addNotification` call sites removed (NotificationService is a read-only fixture feed — backend writes notifications later).
+- New `AuthService.updateDisplayName` (PATCH /v1/auth/me) + `AuthContext.refreshUser()`.
+- Extra creator-write consumers wired: `CharacterCardImportService`, `CreateAIScreen`, `CharacterProfileEditScreen`.
+- Stub read-API gaps (liked-by-me, count getters) derived at read time; My-Profile Followers honest 0.
+- No UserProfileStore/screen tests existed to port (verified); only `CharactersScreen.test.tsx` mock swapped.

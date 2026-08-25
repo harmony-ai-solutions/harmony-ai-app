@@ -3,50 +3,38 @@
  *
  * Renders a compact obsidian-glass circular button (matching HeaderMenuButton)
  * with a MaterialCommunityIcons bell. A small accent badge shows the unread
- * notification count (loaded from the client-only notifications repo). Tapping
- * opens the Notifications screen (pushed over the tabs from the root stack).
+ * notification count, pushed live from the in-memory NotificationService
+ * (`subscribe` → 'unread' events — not reload-synced, so the badge updates the
+ * moment the count changes). Tapping opens the Notifications screen (pushed
+ * over the tabs from the root stack).
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import { useAuth } from '../../contexts/AuthContext';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
-import { getUnreadNotificationCount } from '../../database/repositories/userSocial';
+import { notificationService } from '../../services/social/NotificationService';
 import { ThemedText } from '../themed/ThemedText';
 
 export const HeaderNotificationButton: React.FC = () => {
   const { theme } = useAppTheme();
   const navigation = useNavigation<any>();
-  const { user } = useAuth();
 
   const [unread, setUnread] = useState(0);
 
-  const refreshUnread = useCallback(async () => {
-    if (!user?.id) return;
-    try {
-      const count = await getUnreadNotificationCount(user.id);
-      setUnread(count);
-    } catch {
-      setUnread(0);
-    }
-  }, [user?.id]);
-
-  // Refresh whenever the screen regains focus (e.g. returning from the feed).
-  useFocusEffect(
-    useCallback(() => {
-      refreshUnread();
-    }, [refreshUnread]),
-  );
-
-  // Also refresh on mount / user change.
+  // Push updates from the NotificationService — subscribe once on mount and
+  // seed the badge with the current count. The service emits 'unread' whenever
+  // markRead/markAllRead changes the count, so the badge stays live without
+  // focus-driven reloads (the pattern the F8 bubble follows later).
   useEffect(() => {
-    refreshUnread();
-  }, [refreshUnread]);
+    const unsubscribe = notificationService.subscribe(count => setUnread(count));
+    setUnread(notificationService.getUnreadCount());
+    return unsubscribe;
+  }, []);
 
   if (!theme) return null;
 

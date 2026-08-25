@@ -68,8 +68,8 @@ export interface UserProfile {
   created_at: string;
   // Optional social-profile extras. The current backend MeResponse does not
   // return these yet — they are kept optional so the type stays truthful to
-  // the wire contract. The My Profile feature persists them locally via
-  // UserProfileStore and merges them over this base object.
+  // the wire contract. The backend PATCH /v1/auth/me accepts display_name only
+  // (Phase 9 extension items: username/bio in PATCH + avatar_url in responses).
   username?: string;
   bio?: string;
   avatar_url?: string;
@@ -341,6 +341,35 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
     }
 
     return (await res.json()) as UserProfile;
+  }
+
+  /**
+   * Update the current user's display name via `PATCH /v1/auth/me`.
+   *
+   * The backend accepts `display_name` ONLY (cross-verified 2026-08-24) —
+   * username, bio and avatar uploads are extension items (Phase 9). The PATCH
+   * follows the same authenticated-fetch path as getProfile() (single
+   * deduplicated 401 refresh). Callers should then re-fetch the profile
+   * (AuthContext.refreshUser) so `useAuth().user` reflects the new name.
+   *
+   * @returns The freshly-fetched profile after the PATCH succeeds.
+   */
+  async updateDisplayName(displayName: string): Promise<UserProfile> {
+    const res = await this.fetch(AUTH_ENDPOINTS.me, {
+      method: 'PATCH',
+      body: JSON.stringify({ display_name: displayName.trim() }),
+    });
+
+    if (!res.ok) {
+      const body = await parseErrorBody(res);
+      throw new AuthError(
+        'updateDisplayName',
+        body?.error ?? `HTTP ${res.status}`,
+        res.status,
+      );
+    }
+
+    return this.getProfile();
   }
 
   // ──── Token access ──────────────────────────────────────────────────

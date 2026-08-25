@@ -23,6 +23,16 @@ import * as socialBackend from './socialStubBackend';
 
 const log = createLogger('[Social]');
 
+// ── Stub identity (the signed-in user) ─────────────────────────────────────
+// The stub backend stands in for auth with a fixed local-user id. Screens that
+// need "my own posts" (My Profile > Posts) pass LOCAL_USER_ID to getPosts().
+// The future backend derives this from the auth token — no UI change needed.
+
+/** The stub user id attributed to the signed-in user's own activity. */
+export const LOCAL_USER_ID = socialBackend.CURRENT_USER_ID;
+/** Display name the stub attributes to the signed-in user's activity. */
+export const LOCAL_USER_DISPLAY_NAME = socialBackend.CURRENT_USER_DISPLAY_NAME;
+
 // ── Types (REST-shaped, documented for the future backend) ───────────────
 
 /** Public cloud-user profile. */

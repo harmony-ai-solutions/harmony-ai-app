@@ -2,12 +2,12 @@
  * blockedContentFilters — PURE filter helpers for hiding content belonging to
  * blocked cloud users.
  *
- * The future home of the `src/database/repositories/blockedContent.ts`
- * filtering logic (Phase 3 rewires its callers to these). Unlike the repo
- * version, these functions are pure — no database access — taking the
- * `blockedIds: Set<string>` explicitly, so they are trivially unit-testable
- * and work against any item shape (stub service records, marketplace
- * listings, feed posts, notifications).
+ * The Phase-3 home of the doomed SQLite `blockedContent.ts` filtering logic
+ * (its callers — Discover, Characters, Notifications, UserProfile posts — were
+ * rewired to these). Unlike the repo version, these functions are pure — no
+ * database access — taking the `blockedIds: Set<string>` explicitly, so they
+ * are trivially unit-testable and work against any item shape (stub service
+ * records, marketplace listings, feed posts, notifications).
  *
  * Item-shape contracts (mirror the current repo signatures so Phase 3 callers
  * pass the same shapes):

@@ -19,7 +19,7 @@ import {
   createCharacterImage,
   setCharacterProfileSource,
 } from '../database/repositories/characters';
-import { setCharacterCreator } from '../database/repositories/characterSocial';
+import { setCharacterCreator } from './social/SocialService';
 import { base64ToUint8Array } from '../database/base64';
 import { createLogger } from '../utils/logger';
 
@@ -221,7 +221,7 @@ export async function importCharacterCardFromFile(
       try {
         await setCharacterCreator({
           profileId: mapped.profile.id,
-          ...creator,
+          userId: creator.creatorUserId,
         });
       } catch (err) {
         log.warn('Failed to record character creator:', err);

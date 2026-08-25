@@ -38,16 +38,9 @@ import { CharacterProfileCard } from '../components/characters/CharacterProfileC
 import { CharacterProfile } from '../database/models';
 import { PostCard } from '../components/social/PostCard';
 import { PostCommentModal } from '../components/social/PostCommentModal';
-import {
-  getAllUserPosts,
-  UserPost,
-  isPostLiked,
-  togglePostLike,
-  getPostLikesCount,
-  getPostCommentsCount,
-  deleteUserPost,
-} from '../database/repositories/userSocial';
-import { filterBlockedUserPosts } from '../database/repositories/blockedContent';
+import * as SocialService from '../services/social/SocialService';
+import type { StubPost } from '../services/social/SocialService';
+import { filterBlockedUserPosts } from '../utils/blockedContentFilters';
 
 const log = createLogger('[DiscoverScreen]');
 
@@ -70,7 +63,7 @@ export const DiscoverScreen: React.FC = () => {
   const [tab, setTab] = useState<'characters' | 'posts'>('characters');
 
   // Community posts (Discover feed)
-  const [posts, setPosts] = useState<UserPost[]>([]);
+  const [posts, setPosts] = useState<StubPost[]>([]);
   const [postState, setPostState] = useState<
     Record<string, { liked: boolean; likes: number; commentCount: number }>
   >({});
@@ -110,25 +103,21 @@ export const DiscoverScreen: React.FC = () => {
   // ── Community posts loader ────────────────────────────────────────────
   const loadPosts = useCallback(async () => {
     try {
-      let list = await getAllUserPosts();
+      let list = await SocialService.getPosts();
       // Hide posts authored by blocked users.
-      list = await filterBlockedUserPosts(list);
+      const blockedIds = await SocialService.getBlockedUserIds();
+      list = filterBlockedUserPosts(list, blockedIds);
       setPosts(list);
+      // The stub post carries like/comment counts at read time; the liked-by-
+      // current-user flag is only returned by togglePostLike (no read API).
       const stateMap: Record<string, { liked: boolean; likes: number; commentCount: number }> = {};
-      await Promise.all(
-        list.map(async post => {
-          try {
-            const [liked, likes, commentCount] = await Promise.all([
-              isPostLiked(post.id),
-              getPostLikesCount(post.id),
-              getPostCommentsCount(post.id),
-            ]);
-            stateMap[post.id] = { liked, likes, commentCount };
-          } catch {
-            stateMap[post.id] = { liked: false, likes: 0, commentCount: 0 };
-          }
-        }),
-      );
+      for (const post of list) {
+        stateMap[post.id] = {
+          liked: false,
+          likes: post.likeCount,
+          commentCount: post.commentCount,
+        };
+      }
       setPostState(stateMap);
     } catch (err) {
       log.error('Failed to load posts:', err);
@@ -137,13 +126,14 @@ export const DiscoverScreen: React.FC = () => {
 
   const handleTogglePostLike = async (postId: string) => {
     try {
-      const nowLiked = await togglePostLike(postId);
-      const likes = await getPostLikesCount(postId);
+      const nowLiked = await SocialService.togglePostLike(postId);
+      // Re-read the post for the updated like count.
+      const post = (await SocialService.getPosts()).find(p => p.id === postId);
       setPostState(prev => ({
         ...prev,
         [postId]: {
           liked: nowLiked,
-          likes,
+          likes: post?.likeCount ?? prev[postId]?.likes ?? 0,
           commentCount: prev[postId]?.commentCount ?? 0,
         },
       }));
@@ -152,10 +142,10 @@ export const DiscoverScreen: React.FC = () => {
     }
   };
 
-  // Delete a post (owner only — all client-local posts belong to the current user).
+  // Delete a post (owner only — all stub posts belong to the signed-in user).
   const handleDeletePost = (postId: string) => {
     try {
-      deleteUserPost(postId)
+      SocialService.deletePost(postId)
         .then(() => {
           setPosts(prev => prev.filter(p => p.id !== postId));
           showToast(t('profile:postDeleteDone'));
@@ -171,14 +161,14 @@ export const DiscoverScreen: React.FC = () => {
   const handlePostCommentsClosed = () => {
     if (commentPostId != null) {
       const pid = commentPostId;
-      getPostCommentsCount(pid)
-        .then(count => {
+      SocialService.getPostComments(pid)
+        .then(comments => {
           setPostState(prev => ({
             ...prev,
             [pid]: {
               liked: prev[pid]?.liked ?? false,
               likes: prev[pid]?.likes ?? 0,
-              commentCount: count,
+              commentCount: comments.length,
             },
           }));
         })

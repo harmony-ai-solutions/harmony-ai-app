@@ -30,15 +30,10 @@ import { useInModalToast } from '../modals/InModalToast';
 import { ThemedText } from '../themed/ThemedText';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
-import {
-  getImageComments,
-  addImageComment,
-  deleteImageComment,
-  CharacterImageComment,
-} from '../../database/repositories/characterSocial';
+import * as SocialService from '../../services/social/SocialService';
+import type { StubImageComment } from '../../services/social/SocialService';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
 import { useAuth } from '../../contexts/AuthContext';
-import UserProfileStore from '../../services/profile/UserProfileStore';
 import { createLogger } from '../../utils/logger';
 import { formatPostDate } from '../../utils/dateFormat';
 
@@ -72,7 +67,7 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
   const { user } = useAuth();
   const toast = useInModalToast();
 
-  const [comments, setComments] = useState<CharacterImageComment[]>([]);
+  const [comments, setComments] = useState<StubImageComment[]>([]);
   const [draft, setDraft] = useState('');
   const [posting, setPosting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -104,7 +99,7 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
     if (imageId == null) return;
     setLoading(true);
     try {
-      const list = await getImageComments(imageId);
+      const list = await SocialService.getImageComments(imageId);
       setComments(list);
     } catch (err) {
       log.warn('Failed to load comments:', err);
@@ -132,29 +127,9 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
     if (!text || posting || imageId == null) return;
     setPosting(true);
     try {
-      let authorUserId: string | null = null;
-      let authorDisplayName = '';
-      let authorAvatarUrl: string | null = null;
-      if (user) {
-        authorUserId = user.id;
-        authorDisplayName =
-          user.display_name || user.email?.split('@')[0] || '';
-        authorAvatarUrl = user.avatar_url ?? null;
-        try {
-          const local = await UserProfileStore.getLocalProfile(user.id);
-          authorDisplayName = local.displayName || authorDisplayName;
-          authorAvatarUrl = local.avatar_data_url ?? authorAvatarUrl;
-        } catch {
-          // keep cloud values
-        }
-      }
-      const created = await addImageComment({
-        imageId,
-        authorUserId,
-        authorDisplayName: authorDisplayName || 'Guest',
-        authorAvatarUrl,
-        text,
-      });
+      // The stub service stamps the signed-in user as the comment author
+      // (LOCAL_USER_ID); the future backend derives it from the auth token.
+      const created = await SocialService.addImageComment({ imageId, text });
       setComments(prev => [...prev, created]);
       setDraft('');
       toast.show(t('commentSent'));
@@ -166,10 +141,10 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
     }
   };
 
-  const handleDelete = async (comment: CharacterImageComment) => {
+  const handleDelete = async (comment: StubImageComment) => {
     setActionCommentId(null);
     try {
-      await deleteImageComment(comment.id);
+      await SocialService.deleteImageComment(comment.id);
       setComments(prev => prev.filter(c => c.id !== comment.id));
       toast.show(t('commentDeleted'));
     } catch (err) {
@@ -177,7 +152,7 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
     }
   };
 
-  const handleCopyComment = (comment: CharacterImageComment) => {
+  const handleCopyComment = (comment: StubImageComment) => {
     setActionCommentId(null);
     try {
       Clipboard.setString(comment.text);
@@ -293,7 +268,7 @@ export const ImageCommentModal: React.FC<ImageCommentModalProps> = ({
                     >
                       <ProfileAvatar
                         name={comment.authorDisplayName || '?'}
-                        uri={comment.authorAvatarUrl}
+                        uri={null}
                         size={34}
                         showRing={false}
                       />

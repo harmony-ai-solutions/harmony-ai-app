@@ -5,6 +5,9 @@
  * user's public profile) with avatar + name + a one-tap Unblock action.
  * Unblocking immediately restores the user's AI characters, posts and profile
  * on every surface (Discover, Market, Characters, notification feed).
+ *
+ * Backed by the in-memory SocialService block list (starts empty — the stub
+ * has no blocked users until one is blocked from a user profile).
  */
 import React, { useCallback, useState } from 'react';
 import { StyleSheet, ScrollView, View, TouchableOpacity } from 'react-native';
@@ -20,26 +23,50 @@ import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { hapticLightPress } from '../../utils/haptics';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { ProfileAvatar } from '../../components/profile/ProfileAvatar';
-import {
-  getBlockedUsers,
-  removeBlockedUser,
-  BlockedUserEntry,
-} from '../../database/repositories/userSocial';
+import * as SocialService from '../../services/social/SocialService';
+import { createLogger } from '../../utils/logger';
 import { hexToRgba } from '../../utils/colorUtils';
+
+const log = createLogger('[BlockedUsersScreen]');
+
+/** A blocked cloud user row resolved from the stub's user profiles. */
+interface BlockedUserRow {
+  blockedUserId: string;
+  blockedDisplayName: string;
+  blockedAvatarUrl: string | null;
+}
 
 export const BlockedUsersScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { t } = useTranslation('profile');
   const { showToast } = useToast();
-  const [entries, setEntries] = useState<BlockedUserEntry[]>([]);
+  const [entries, setEntries] = useState<BlockedUserRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadBlocked = useCallback(async () => {
     try {
       setLoading(true);
-      const blocked = await getBlockedUsers();
-      setEntries(blocked);
+      const blockedIds = await SocialService.getBlockedUserIds();
+      // Resolve each blocked id to its public profile (avatar + display name).
+      // The stub throws 404 for unknown ids — skip those defensively.
+      const rows: BlockedUserRow[] = [];
+      await Promise.all(
+        [...blockedIds].map(async userId => {
+          try {
+            const profile = await SocialService.getPublicUserProfile(userId);
+            rows.push({
+              blockedUserId: userId,
+              blockedDisplayName: profile.displayName,
+              blockedAvatarUrl: profile.avatarUrl,
+            });
+          } catch (err) {
+            log.warn(`Failed to resolve blocked user ${userId}:`, err);
+          }
+        }),
+      );
+      rows.sort((a, b) => a.blockedDisplayName.localeCompare(b.blockedDisplayName));
+      setEntries(rows);
     } catch {
       // ignore — empty list on error
     } finally {
@@ -53,10 +80,10 @@ export const BlockedUsersScreen: React.FC = () => {
     }, [loadBlocked]),
   );
 
-  const handleUnblock = async (entry: BlockedUserEntry) => {
+  const handleUnblock = async (entry: BlockedUserRow) => {
     hapticLightPress();
     try {
-      await removeBlockedUser(entry.blockedUserId);
+      await SocialService.unblockUser(entry.blockedUserId);
       showToast(
         t('userUnblockedToast', { name: entry.blockedDisplayName }),
       );

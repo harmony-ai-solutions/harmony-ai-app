@@ -1,9 +1,9 @@
 /**
  * NotificationsScreen — the user's notification feed.
  *
- * Lists notifications from the client-only `notifications` table (who followed
- * the user, liked their AI profile / image / post, or commented on their posts
- * / images). Rows show the actor avatar + name, a type icon, the notification
+ * Lists notifications from the in-memory NotificationService (who followed the
+ * user, liked their AI profile / image / post, or commented on their posts /
+ * images). Rows show the actor avatar + name, a type icon, the notification
  * text and a timestamp. Opening the screen marks everything as read.
  */
 
@@ -19,7 +19,6 @@ import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../contexts/ThemeContext';
-import { useAuth } from '../contexts/AuthContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
@@ -28,17 +27,14 @@ import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { hexToRgba } from '../utils/colorUtils';
 import { formatPostDate } from '../utils/dateFormat';
 import { createLogger } from '../utils/logger';
-import {
-  getNotifications,
-  markAllNotificationsRead,
-  AppNotification,
-  NotificationType,
-} from '../database/repositories/userSocial';
-import { filterBlockedUserNotifications } from '../database/repositories/blockedContent';
+import { notificationService } from '../services/social/NotificationService';
+import type { StubNotification, StubNotificationType } from '../services/social/NotificationService';
+import * as SocialService from '../services/social/SocialService';
+import { filterBlockedUserNotifications } from '../utils/blockedContentFilters';
 
 const log = createLogger('[NotificationsScreen]');
 
-function typeIcon(type: NotificationType): string {
+function typeIcon(type: StubNotificationType): string {
   switch (type) {
     case 'follow':
       return 'account-plus-outline';
@@ -61,34 +57,31 @@ export const NotificationsScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('profile');
-  const { user } = useAuth();
   const navigation = useNavigation<any>();
 
-  const [items, setItems] = useState<AppNotification[]>([]);
+  const [items, setItems] = useState<StubNotification[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    if (!user?.id) return;
     try {
-      const data = await filterBlockedUserNotifications(
-        await getNotifications(user.id),
+      // Hide notifications whose actor is a blocked cloud user.
+      const blockedIds = await SocialService.getBlockedUserIds();
+      const data = filterBlockedUserNotifications(
+        notificationService.list(),
+        blockedIds,
       );
       setItems(data);
     } catch (err) {
       log.error('Failed to load notifications:', err);
     }
-  }, [user?.id]);
+  }, []);
 
   // Load + mark everything read on focus (opening the feed reads it).
   useEffect(() => {
     load();
-    if (user?.id) {
-      markAllNotificationsRead(user.id).catch(err =>
-        log.warn('Failed to mark notifications read:', err),
-      );
-    }
+    notificationService.markAllRead();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load, user?.id]);
+  }, [load]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -140,7 +133,7 @@ export const NotificationsScreen: React.FC = () => {
             >
               <ProfileAvatar
                 name={item.actorDisplayName || '?'}
-                uri={item.actorAvatarUrl}
+                uri={null}
                 size={40}
                 showRing={false}
               />

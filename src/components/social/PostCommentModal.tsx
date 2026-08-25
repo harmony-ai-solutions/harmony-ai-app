@@ -30,17 +30,11 @@ import { useInModalToast } from '../modals/InModalToast';
 import { ThemedText } from '../themed/ThemedText';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
-import {
-  getPostComments,
-  addPostComment,
-  deletePostComment,
-  UserPostComment,
-} from '../../database/repositories/userSocial';
+import * as SocialService from '../../services/social/SocialService';
+import type { StubPostComment } from '../../services/social/SocialService';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
 import { useAuth } from '../../contexts/AuthContext';
-import UserProfileStore from '../../services/profile/UserProfileStore';
 import { createLogger } from '../../utils/logger';
-import { addNotification, getUserPost } from '../../database/repositories/userSocial';
 import { formatPostDate } from '../../utils/dateFormat';
 
 const log = createLogger('[PostCommentModal]');
@@ -69,7 +63,7 @@ export const PostCommentModal: React.FC<PostCommentModalProps> = ({
   const { user } = useAuth();
   const toast = useInModalToast();
 
-  const [comments, setComments] = useState<UserPostComment[]>([]);
+  const [comments, setComments] = useState<StubPostComment[]>([]);
   const [draft, setDraft] = useState('');
   const [posting, setPosting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -101,7 +95,7 @@ export const PostCommentModal: React.FC<PostCommentModalProps> = ({
     if (!postId) return;
     setLoading(true);
     try {
-      const list = await getPostComments(postId);
+      const list = await SocialService.getPostComments(postId);
       setComments(list);
     } catch (err) {
       log.warn('Failed to load comments:', err);
@@ -129,56 +123,12 @@ export const PostCommentModal: React.FC<PostCommentModalProps> = ({
     if (!text || posting || !postId) return;
     setPosting(true);
     try {
-      let authorUserId: string | null = null;
-      let authorDisplayName = '';
-      let authorAvatarUrl: string | null = null;
-      if (user) {
-        authorUserId = user.id;
-        authorDisplayName =
-          user.display_name || user.email?.split('@')[0] || '';
-        authorAvatarUrl = user.avatar_url ?? null;
-        try {
-          const local = await UserProfileStore.getLocalProfile(user.id);
-          authorDisplayName = local.displayName || authorDisplayName;
-          authorAvatarUrl = local.avatar_data_url ?? authorAvatarUrl;
-        } catch {
-          // keep cloud values
-        }
-      }
-      const created = await addPostComment({
-        postId,
-        authorUserId,
-        authorDisplayName: authorDisplayName || 'Guest',
-        authorAvatarUrl,
-        text,
-      });
+      // The stub service stamps the signed-in user as the comment author
+      // (LOCAL_USER_ID); the future backend derives it from the auth token.
+      const created = await SocialService.addPostComment({ postId, text });
       setComments(prev => [...prev, created]);
       setDraft('');
       toast.show(t('commentSent'));
-
-      // Notify the post author when someone comments on their post.
-      try {
-        const post = await getUserPost(postId);
-        if (
-          post &&
-          post.authorUserId &&
-          user?.id &&
-          post.authorUserId !== user.id
-        ) {
-          await addNotification({
-            recipientUserId: post.authorUserId,
-            actorUserId: user.id,
-            actorDisplayName: authorDisplayName || 'Someone',
-            actorAvatarUrl: authorAvatarUrl,
-            type: 'post_comment',
-            targetType: 'user_post',
-            targetId: postId,
-            targetLabel: post.text.slice(0, 40),
-          });
-        }
-      } catch (notifErr) {
-        log.warn('Failed to create post-comment notification:', notifErr);
-      }
     } catch (err) {
       log.warn('Failed to post comment:', err);
     } finally {
@@ -186,10 +136,10 @@ export const PostCommentModal: React.FC<PostCommentModalProps> = ({
     }
   };
 
-  const handleDelete = async (comment: UserPostComment) => {
+  const handleDelete = async (comment: StubPostComment) => {
     setActionCommentId(null);
     try {
-      await deletePostComment(comment.id);
+      await SocialService.deletePostComment(comment.id);
       setComments(prev => prev.filter(c => c.id !== comment.id));
       toast.show(t('commentDeleted'));
     } catch (err) {
@@ -197,7 +147,7 @@ export const PostCommentModal: React.FC<PostCommentModalProps> = ({
     }
   };
 
-  const handleCopyComment = (comment: UserPostComment) => {
+  const handleCopyComment = (comment: StubPostComment) => {
     setActionCommentId(null);
     try {
       Clipboard.setString(comment.text);

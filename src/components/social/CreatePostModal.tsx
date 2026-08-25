@@ -33,8 +33,7 @@ import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
-import { createUserPost } from '../../database/repositories/userSocial';
-import UserProfileStore from '../../services/profile/UserProfileStore';
+import * as SocialService from '../../services/social/SocialService';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[CreatePostModal]');
@@ -128,21 +127,10 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
     if (!body && !imageBase64) return;
     setPublishing(true);
     try {
-      // Resolve the author's local display name + avatar so the post card
-      // shows the same identity as My Profile.
-      let displayName = user.display_name || user.email?.split('@')[0] || 'User';
-      let avatarUrl: string | null = user.avatar_url ?? null;
-      try {
-        const local = await UserProfileStore.getLocalProfile(user.id);
-        if (local.displayName) displayName = local.displayName;
-        avatarUrl = local.avatar_data_url ?? avatarUrl;
-      } catch {
-        // keep defaults
-      }
-      await createUserPost({
-        authorUserId: user.id,
-        authorDisplayName: displayName,
-        authorAvatarUrl: avatarUrl,
+      // The stub service authors the post as the signed-in user (LOCAL_USER_ID);
+      // the display name shown on the card comes from the cloud profile. The
+      // future backend derives the author from the auth token.
+      await SocialService.createPost({
         text: body,
         imageData: imageBase64,
         imageMimeType: imageMime,

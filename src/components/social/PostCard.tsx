@@ -15,11 +15,12 @@ import { ThemedText } from '../themed/ThemedText';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
 import { hapticLightPress } from '../../utils/haptics';
 import { formatPostDate, formatPostDateTime } from '../../utils/dateFormat';
-import { UserPost } from '../../database/repositories/userSocial';
+import type { StubPost } from '../../services/social/SocialService';
+import { createDataURL } from '../../database/base64';
 import { hexToRgba } from '../../utils/colorUtils';
 
 interface PostCardProps {
-  post: UserPost;
+  post: StubPost;
   liked: boolean;
   likes: number;
   commentCount: number;
@@ -48,6 +49,12 @@ export const PostCard: React.FC<PostCardProps> = ({
   if (!theme) return null;
 
   const accent = theme.colors.accent.primary;
+  // The stub post carries raw image bytes + mime — derive the data URL for the
+  // <Image> (the future backend returns a ready-to-render URL).
+  const imageDataUrl =
+    post.imageData && post.imageMimeType
+      ? createDataURL(post.imageData, post.imageMimeType)
+      : null;
 
   return (
     <View style={styles.card}>
@@ -145,9 +152,9 @@ export const PostCard: React.FC<PostCardProps> = ({
           {post.text}
         </ThemedText>
       ) : null}
-      {post.imageDataUrl ? (
+      {imageDataUrl ? (
         <Image
-          source={{ uri: post.imageDataUrl }}
+          source={{ uri: imageDataUrl }}
           style={styles.postImage}
           resizeMode="cover"
         />

@@ -11,8 +11,8 @@
 | Phase | State | Commit |
 |---|---|---|
 | 1 — Stub service layer | ✅ committed | `1455b6e` |
-| 2 — Marketplace & wallet rewiring | ✅ committed | (this commit) |
-| 3 — Social/notifications/profile rewiring | ⏳ pending | — |
+| 2 — Marketplace & wallet rewiring | ✅ committed | `82143b7` |
+| 3 — Social/notifications/profile rewiring | ✅ committed | (this commit) |
 | 4 — Schema surgery | ⏳ pending | — |
 | 5 — B4 seeding revert | ⏳ pending | — |
 | 6 — D-register bug mends | ⏳ pending | — |
@@ -114,6 +114,54 @@ None (phase was new-files-only by design).
 
 ---
 
+## Phase 3 — Social, Notifications & Profile Rewiring
+
+**Track**: A3/A4 wiring · **Gates**: gate-1 grep clean (only doomed-repo tests remain — Phase 4 deletes); tsc 0 errors; unit 88 suites/858 tests; integration 10/50+1 skipped.
+
+### Added
+- `AuthService.updateDisplayName(displayName)` — `PATCH /v1/auth/me` (display_name ONLY, backend-verified 2026-08-24) on the existing authenticated-fetch path; returns freshly-fetched profile. Extension items for 20-Backend-Concept: username/bio in PATCH, avatar upload + `avatar_url` in responses.
+- `AuthContext.refreshUser()` — re-fetches `getProfile()` → `setUser` so display-name saves propagate to `useAuth().user`.
+- `SocialService` exports `LOCAL_USER_ID` / `LOCAL_USER_DISPLAY_NAME` (from stub backend) for "my posts" queries.
+- i18n: `profile.json` +3: `avatarComingSoon`, `usernameComingSoon`, `bioComingSoon`.
+
+### Removed
+- `src/services/profile/UserProfileStore.ts` — AsyncStorage shadow store (`@harmony_profile/<userId>`) deleted per A4 (cloud-first). No tests existed for it or My/EditProfile screens (verified by grep — doc's port instruction was a no-op).
+- All `addNotification` creation calls (PostCommentModal ×1, AIProfileScreen ×4) — NotificationService is a read-only fixture feed with no write API; badge reflects seeded feed only. Backend writes notifications later (20-Backend-Concept item).
+
+### Modified — components
+| File | Change |
+|---|---|
+| `CreatePostModal` | publish via `SocialService.createPost({text, imageData, imageMimeType})`. |
+| `PostCard` | `StubPost` type; derives `imageDataUrl` from raw bytes via `createDataURL`. |
+| `PostCommentModal` | comments via SocialService; notify block removed. |
+| `ImageCommentModal` | comments via SocialService; avatar `uri={null}` (stub comment has no avatar). |
+| `HeaderNotificationButton` | badge = `notificationService.getUnreadCount()` + `subscribe()` push events; auth-independent, no focus reload. |
+
+### Modified — screens
+| File | Change |
+|---|---|
+| `UserProfileScreen` | profile/posts/follow/block via SocialService; posts filtered by pure `filterBlockedUserPosts` + stub blocked ids; stats from stub profile counts (was hardcoded 0/0). |
+| `MyProfileScreen` | cloud display name w/ 'User' fallback; Followers honest 0 (no stub source) / Following via `getFollowedUsers().length`; Posts tab via `LOCAL_USER_ID`; Saved tab via `getSavedCharacterEntries()`. |
+| `NotificationsScreen` | `notificationService.list()/markAllRead()` + pure blocked filter. |
+| `BlockedUsersScreen` | `getBlockedUserIds()` → `getPublicUserProfile` rows → `unblockUser` (fixture users). |
+| `AIProfileScreen` | like/save/image comments/creator/follow via SocialService; `isCharacterSaved` derived from saved entries; image-comment count = `.length`. |
+| `EditProfileScreen` | display name via `AuthService.updateDisplayName` + `refreshUser()`; username/bio/avatar inputs disabled + "coming soon" hints (honest stub). |
+| `DiscoverScreen` | posts tab via `SocialService.getPosts()` + pure blocked filter. |
+| `CharactersScreen` | `filterBlockedCharacterProfiles` (pure) + `getBlockedUserIds()` (test mock swapped accordingly). |
+| `CreateAIScreen`, `CharacterProfileEditScreen` | `setCharacterCreator({profileId, userId})` via SocialService. |
+| `CharacterCardImportService` (extra consumer) | creator write via SocialService. |
+
+### Deviations / stub limitations (relevant for engine Phase 2 planning)
+1. **Notification creation gone** — stub feed is read-only; old `addNotification` call sites removed (badge = seeded feed). Backend must own notification writes.
+2. **No read APIs for liked-by-me / count getters** in stub (`isPostLiked`, `isImageLiked`, `getPostLikesCount`, comments counts, `isCharacterSaved`) — screens derive from feed payload at read time, start `liked=false`, trust toggle return; focus reload resets liked visuals. Future backend should expose per-item liked-state + counts.
+3. **Followers stays 0** on My Profile (only Following derivable) — honest stub limitation; backend graph needed.
+4. `filterBlockedCharacterProfiles` matches blocked **user ids** against local profile ids — no creator→user resolution at stub level (old doomed table did that). Backend resolves creator membership.
+5. Marketplace/Discover character feeds not blocked-filterable (listings carry `creatorName` string, no user id) — backend needs creator user ids on listings.
+6. `setCharacterCreator` input narrowed to `{profileId, userId}`; display name/avatar derived from fixture users.
+7. Extra consumers found: `CharacterCardImportService`, `CreateAIScreen`, `CharacterProfileEditScreen` (creator-write call sites) + stale `AuthService` comment — all handled.
+
+---
+
 ## Pointers for follow-up Phase 2 (engine) planning
 
 *(append after each phase)*
@@ -121,3 +169,4 @@ None (phase was new-files-only by design).
 - **Stub seam contract** (client design input, wire shapes must survive): `MarketplaceService`/`WalletService`/`SocialService`/`NotificationService` method surfaces as shipped in Phase 1 (see `src/services/*/[A-Z]*Service.ts` doc comments); error taxonomy = `StubServiceError` ≡ client `APIError` observable surface.
 - **Backend concept items discovered during Phase 2**: profile→listing linkage (AIProfile price pill + acquire-success deep link currently have none); text/theme publish + listing edit + re-list + library-remove (honest-error placeholders now); `salesCount`; itemType→profile-field mapping for apply-to-character; "created by others" Discover query; real `upgradeUrl` (placeholder `https://harmony.ai/souls`).
 - **Honest-error i18n keys added**: see Phase-2 Added table — copy review when backend makes them real.
+- **Phase-3 additions**: profile extension = `username`/`bio` in PATCH /v1/auth/me + avatar upload endpoint + `avatar_url` in responses; notification **write** side (comment/like/follow/image-comment events → notifications); per-item liked-state + count reads on posts/images; follower graph for local user; creator user ids on marketplace listings (blocked-filter + attribution + `filterBlockedCharacterProfiles` creator resolution).

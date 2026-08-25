@@ -88,7 +88,8 @@ import {
 import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { resolvePersonaId } from '../database/repositories/personas';
-import { filterBlockedCharacterProfiles } from '../database/repositories/blockedContent';
+import { filterBlockedCharacterProfiles } from '../utils/blockedContentFilters';
+import * as SocialService from '../services/social/SocialService';
 import { CharacterProfile } from '../database/models';
 import { CharacterCardImportError } from '../services/CharacterCardImportService';
 import { openCharacterChat } from '../services/CharacterChatService';
@@ -280,8 +281,11 @@ export const CharactersScreen: React.FC = () => {
   const loadProfiles = async () => {
     try {
       let data = await getAllCharacterProfiles();
-      // Hide AI characters created by blocked users app-wide.
-      data = await filterBlockedCharacterProfiles(data);
+      // Hide AI characters created by blocked users app-wide. The stub block
+      // list is user-id-based; the pure filter drops profiles whose id is in
+      // the blocked set (the future backend resolves creator→profile ids).
+      const blockedIds = await SocialService.getBlockedUserIds();
+      data = filterBlockedCharacterProfiles(data, blockedIds);
       setProfiles(data);
 
       // Distinct library tags for the filter chip row (4-3) — isolated so a

@@ -63,7 +63,7 @@ import { getActiveInteractionsByEntity } from '../database/repositories/interact
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
 import { CharacterProfile, CharacterImage } from '../database/models';
-import { setCharacterCreator } from '../database/repositories/characterSocial';
+import { setCharacterCreator } from '../services/social/SocialService';
 import { createLogger } from '../utils/logger';
 import {
   exportProfileToCardV3,
@@ -324,9 +324,7 @@ export const CharacterProfileEditScreen: React.FC = () => {
           try {
             await setCharacterCreator({
               profileId: newId,
-              creatorUserId: user.id,
-              creatorDisplayName: user.display_name || user.email?.split('@')[0] || 'Creator',
-              creatorAvatarUrl: user.avatar_url ?? null,
+              userId: user.id,
             });
           } catch (err) {
             log.warn('Failed to record character creator:', err);

@@ -72,6 +72,8 @@ export interface AuthContextType {
   loginWithGoogle: (idToken: string) => Promise<void>;
   loginWithApple: (identityToken: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Re-fetch the current user's profile from the backend and update `user`. */
+  refreshUser: () => Promise<void>;
 }
 
 // ── Context ─────────────────────────────────────────────────────────────
@@ -241,6 +243,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setStatus('unauthenticated');
   }, []);
 
+  // ── Re-fetch the profile (after PATCH /v1/auth/me display-name saves) ──
+  const refreshUser = useCallback(async () => {
+    try {
+      const profile = await AuthService.getProfile();
+      setUser(profile);
+    } catch (err) {
+      log.warn('Failed to refresh user profile:', err);
+    }
+  }, []);
+
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <AuthContext.Provider
@@ -253,6 +265,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         loginWithGoogle,
         loginWithApple,
         logout,
+        refreshUser,
       }}>
       {children}
     </AuthContext.Provider>

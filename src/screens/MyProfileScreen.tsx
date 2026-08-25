@@ -11,10 +11,11 @@
  * All profile text (name, handle, bio, stats) is raw floating text directly
  * on the screen background — no background cards / containers / boxes.
  *
- * All data is local-first: the cloud UserProfile from useAuth() is merged
- * with locally-stored extras (username / bio / avatar) via UserProfileStore,
- * characters come from the character_profiles repository, and personas are
- * entities linked to user-tagged character profiles (see personas repo).
+ * All data is cloud-first: the UserProfile from useAuth() is the single source
+ * for the display name (graceful "User" fallback), characters come from the
+ * character_profiles repository (local), follower/following stats and the
+ * Posts/Saved tabs come from the SocialService stub, and personas are entities
+ * linked to user-tagged character profiles (see personas repo).
  */
 
 import React, { useState, useCallback } from 'react';
@@ -45,27 +46,15 @@ import { hapticLightPress } from '../utils/haptics';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { ProfileTabs, ProfileTabKey, ProfileTabDef } from '../components/profile/ProfileTabs';
 import { getUserCharacterProfiles } from '../database/repositories/characters';
-import {
-  getSavedCharacterEntries,
-  SavedCharacterEntry,
-} from '../database/repositories/characterSocial';
+import * as SocialService from '../services/social/SocialService';
+import type { StubPost } from '../services/social/SocialService';
 import { getAllPersonas, Persona } from '../database/repositories/personas';
 import { CharacterProfile } from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
-import UserProfileStore from '../services/profile/UserProfileStore';
 import { createLogger } from '../utils/logger';
 import { CreatePostModal } from '../components/social/CreatePostModal';
 import { PostCommentModal } from '../components/social/PostCommentModal';
 import { PostCard } from '../components/social/PostCard';
-import {
-  getMyUserPosts,
-  UserPost,
-  isPostLiked,
-  togglePostLike,
-  getPostLikesCount,
-  getPostCommentsCount,
-  deleteUserPost,
-} from '../database/repositories/userSocial';
 
 const log = createLogger('[MyProfileScreen]');
 
@@ -82,13 +71,16 @@ export const MyProfileScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<ProfileTabKey>('posts');
 
-  // Local profile extras (merged over the cloud UserProfile). `displayName`
-  // is stored locally too — the backend has no profile-update endpoint yet,
-  // so the locally-edited name takes precedence over the cloud value.
+  // Cloud-first profile: the display name resolves from useAuth().user (the
+  // backend PATCH /v1/auth/me keeps it in sync); username/bio have no backend
+  // field yet and avatar uploads are not supported — honest stub.
   const [displayName, setDisplayName] = useState<string>('');
   const [username, setUsername] = useState<string>('');
   const [bio, setBio] = useState<string>('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  // Social stub stats (Following = stub follow count; Followers has no stub
+  // source yet — kept honest at 0).
+  const [followingCount, setFollowingCount] = useState(0);
 
   // User-created characters (drives the AI Characters stat)
   const [characters, setCharacters] = useState<CharacterProfile[]>([]);
@@ -97,11 +89,14 @@ export const MyProfileScreen: React.FC = () => {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [activePersonaId, setActivePersonaId] = useState<string | null>(null);
 
-  // Saved AI characters (My Profile > Saved tab)
-  const [savedCharacters, setSavedCharacters] = useState<SavedCharacterEntry[]>([]);
+  // Saved AI characters (My Profile > Saved tab) — stub entries are
+  // self-contained {profileId, name, avatarText, savedAt} records.
+  const [savedCharacters, setSavedCharacters] = useState<
+    SocialService.SavedCharacterEntry[]
+  >([]);
 
   // User posts (My Profile > Posts tab) + interaction state
-  const [posts, setPosts] = useState<UserPost[]>([]);
+  const [posts, setPosts] = useState<StubPost[]>([]);
   const [createPostVisible, setCreatePostVisible] = useState(false);
   const [commentPostId, setCommentPostId] = useState<string | null>(null);
   const [postState, setPostState] = useState<
@@ -113,16 +108,22 @@ export const MyProfileScreen: React.FC = () => {
   // ── Loaders ────────────────────────────────────────────────────────────
   const loadProfile = useCallback(async () => {
     if (!user) return;
-    try {
-      const local = await UserProfileStore.getLocalProfile(user.id);
-      setDisplayName(local.displayName ?? user.display_name ?? '');
-      setUsername(local.username ?? '');
-      setBio(local.bio ?? '');
-      setAvatarUri(local.avatar_data_url ?? user.avatar_url ?? null);
-    } catch (err) {
-      log.error('Failed to load local profile:', err);
-    }
+    // Cloud-first: display name from auth (the single source of truth after
+    // PATCH /v1/auth/me), avatar from the cloud avatar_url.
+    setDisplayName(user.display_name ?? '');
+    setUsername('');
+    setBio('');
+    setAvatarUri(user.avatar_url ?? null);
   }, [user]);
+
+  const loadFollowStats = useCallback(async () => {
+    try {
+      const followed = await SocialService.getFollowedUsers();
+      setFollowingCount(followed.length);
+    } catch (err) {
+      log.error('Failed to load follow stats:', err);
+    }
+  }, []);
 
   const loadCharacters = useCallback(async () => {
     try {
@@ -147,7 +148,7 @@ export const MyProfileScreen: React.FC = () => {
 
   const loadSaved = useCallback(async () => {
     try {
-      const entries = await getSavedCharacterEntries();
+      const entries = await SocialService.getSavedCharacterEntries();
       setSavedCharacters(entries);
     } catch (err) {
       log.error('Failed to load saved characters:', err);
@@ -157,24 +158,21 @@ export const MyProfileScreen: React.FC = () => {
   const loadPosts = useCallback(async () => {
     if (!user) return;
     try {
-      const list = await getMyUserPosts(user.id);
+      // The stub authors the signed-in user's posts as LOCAL_USER_ID.
+      const list = await SocialService.getPosts({
+        authorId: SocialService.LOCAL_USER_ID,
+      });
       setPosts(list);
-      // Load per-post like/comment state in parallel
+      // The stub post carries like/comment counts at read time; the liked-by-
+      // current-user flag is only returned by togglePostLike (no read API).
       const stateMap: Record<string, { liked: boolean; likes: number; commentCount: number }> = {};
-      await Promise.all(
-        list.map(async post => {
-          try {
-            const [liked, likes, commentCount] = await Promise.all([
-              isPostLiked(post.id),
-              getPostLikesCount(post.id),
-              getPostCommentsCount(post.id),
-            ]);
-            stateMap[post.id] = { liked, likes, commentCount };
-          } catch {
-            stateMap[post.id] = { liked: false, likes: 0, commentCount: 0 };
-          }
-        }),
-      );
+      for (const post of list) {
+        stateMap[post.id] = {
+          liked: false,
+          likes: post.likeCount,
+          commentCount: post.commentCount,
+        };
+      }
       setPostState(stateMap);
     } catch (err) {
       log.error('Failed to load posts:', err);
@@ -188,24 +186,26 @@ export const MyProfileScreen: React.FC = () => {
     useCallback(() => {
       setActiveTab('posts');
       loadProfile();
+      loadFollowStats();
       loadCharacters();
       loadPersonas();
       loadSaved();
       loadPosts();
-    }, [loadProfile, loadCharacters, loadPersonas, loadSaved, loadPosts]),
+    }, [loadProfile, loadFollowStats, loadCharacters, loadPersonas, loadSaved, loadPosts]),
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([
       loadProfile(),
+      loadFollowStats(),
       loadCharacters(),
       loadPersonas(),
       loadSaved(),
       loadPosts(),
     ]);
     setRefreshing(false);
-  }, [loadProfile, loadCharacters, loadPersonas, loadSaved, loadPosts]);
+  }, [loadProfile, loadFollowStats, loadCharacters, loadPersonas, loadSaved, loadPosts]);
 
   // ── Persona actions ────────────────────────────────────────────────────
   const handleSetActivePersona = async (id: string) => {
@@ -232,13 +232,16 @@ export const MyProfileScreen: React.FC = () => {
 
   const handleTogglePostLike = async (postId: string) => {
     try {
-      const nowLiked = await togglePostLike(postId);
-      const likes = await getPostLikesCount(postId);
+      const nowLiked = await SocialService.togglePostLike(postId);
+      // Re-read the post for the updated like count.
+      const post = (
+        await SocialService.getPosts({ authorId: SocialService.LOCAL_USER_ID })
+      ).find(p => p.id === postId);
       setPostState(prev => ({
         ...prev,
         [postId]: {
           liked: nowLiked,
-          likes,
+          likes: post?.likeCount ?? prev[postId]?.likes ?? 0,
           commentCount: prev[postId]?.commentCount ?? 0,
         },
       }));
@@ -254,7 +257,7 @@ export const MyProfileScreen: React.FC = () => {
   // Delete one of the user's own posts (owner only).
   const handleDeletePost = (postId: string) => {
     try {
-      deleteUserPost(postId)
+      SocialService.deletePost(postId)
         .then(() => {
           setPosts(prev => prev.filter(p => p.id !== postId));
           showToast(t('postDeleteDone'));
@@ -271,14 +274,14 @@ export const MyProfileScreen: React.FC = () => {
   const handlePostCommentsClosed = () => {
     if (commentPostId != null) {
       const pid = commentPostId;
-      getPostCommentsCount(pid)
-        .then(count => {
+      SocialService.getPostComments(pid)
+        .then(comments => {
           setPostState(prev => ({
             ...prev,
             [pid]: {
               liked: prev[pid]?.liked ?? false,
               likes: prev[pid]?.likes ?? 0,
-              commentCount: count,
+              commentCount: comments.length,
             },
           }));
         })
@@ -476,7 +479,7 @@ export const MyProfileScreen: React.FC = () => {
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <ThemedText variant="primary" size={18} weight="bold" hierarchy="header">
-              0
+              {followingCount}
             </ThemedText>
             <ThemedText variant="muted" size={12} hierarchy="caption">
               {t('following')}
@@ -569,23 +572,23 @@ export const MyProfileScreen: React.FC = () => {
               <View style={styles.grid}>
                 {savedCharacters.map(entry => (
                   <TouchableOpacity
-                    key={entry.profile.id}
+                    key={entry.profileId}
                     onPress={() => {
                       hapticLightPress();
                       navigation.navigate('AIProfile', {
-                        profileId: entry.profile.id,
+                        profileId: entry.profileId,
                       });
                     }}
                     activeOpacity={0.75}
                     style={styles.gridItem}
                     testID="profile-saved-ai-cell"
                     accessibilityRole="button"
-                    accessibilityLabel={entry.profile.name}
+                    accessibilityLabel={entry.name}
                   >
                     <View style={styles.gridAvatarWrap}>
                       <ProfileAvatar
-                        name={entry.profile.name}
-                        uri={entry.avatarUri}
+                        name={entry.name}
+                        uri={null}
                         size={72}
                         showRing={false}
                       />
@@ -596,7 +599,7 @@ export const MyProfileScreen: React.FC = () => {
                       numberOfLines={1}
                       style={styles.gridItemName}
                     >
-                      {entry.profile.name}
+                      {entry.name}
                     </ThemedText>
                   </TouchableOpacity>
                 ))}

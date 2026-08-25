@@ -56,34 +56,15 @@ import {
   CharacterStats,
 } from '../database/repositories/characters';
 import { getEntityByCharacterProfileId } from '../database/repositories/entities';
-import {
-  isCharacterLiked,
-  toggleCharacterLike,
-  getCharacterLikesCount,
-  isCharacterSaved,
-  toggleCharacterSave,
-  isImageLiked,
-  toggleImageLike,
-  getImageLikesCount,
-  getImageCommentsCount,
-  getCharacterCreator,
-  isCharacterCreator,
-  CharacterCreator,
-} from '../database/repositories/characterSocial';
+import * as SocialService from '../services/social/SocialService';
+import type { StubCharacterCreator } from '../services/social/SocialService';
 import { openCharacterChat } from '../services/CharacterChatService';
 import type { MarketplaceListingDetail } from '../services/marketplace/MarketplaceService';
 import { createDataURL } from '../database/base64';
-import { getLocalProfile } from '../services/profile/UserProfileStore';
 import { CharacterProfile, CharacterImage } from '../database/models';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
 import { formatPostDate } from '../utils/dateFormat';
-import {
-  addNotification,
-  isFollowing,
-  addFollow,
-  removeFollow,
-} from '../database/repositories/userSocial';
 
 const log = createLogger('[AIProfileScreen]');
 
@@ -128,7 +109,7 @@ export const AIProfileScreen: React.FC = () => {
   const [profileLiked, setProfileLiked] = useState(false);
   const [profileLikes, setProfileLikes] = useState(0);
   const [profileSaved, setProfileSaved] = useState(false);
-  const [creator, setCreator] = useState<CharacterCreator | null>(null);
+  const [creator, setCreator] = useState<StubCharacterCreator | null>(null);
   const [isOwner, setIsOwner] = useState(false);
   const [imagePosts, setImagePosts] = useState<Record<string, ImagePostState>>({});
   // Follow state for the character's creator
@@ -200,13 +181,16 @@ export const AIProfileScreen: React.FC = () => {
 
       // ── Social layer ────────────────────────────────────────────────────
       try {
+        const savedEntries = await SocialService.getSavedCharacterEntries();
         const [liked, likes, saved, characterCreator, owner, source] =
           await Promise.all([
-            isCharacterLiked(profileId),
-            getCharacterLikesCount(profileId),
-            isCharacterSaved(profileId),
-            getCharacterCreator(profileId),
-            isCharacterCreator(profileId, user?.id),
+            SocialService.isCharacterLiked(profileId),
+            SocialService.getCharacterLikesCount(profileId),
+            Promise.resolve(
+              savedEntries.some(e => e.profileId === profileId),
+            ),
+            SocialService.getCharacterCreator(profileId),
+            SocialService.isCharacterCreator(profileId, user?.id),
             getCharacterProfileSource(profileId),
           ]);
         setProfileLiked(liked);
@@ -221,65 +205,43 @@ export const AIProfileScreen: React.FC = () => {
 
         // Creator badge: prefer the recorded creator; otherwise synthesize
         // one from the current user so user-created characters always show
-        // "Created by …" (with the locally-picked avatar when available).
+        // "Created by …" (cloud profile — the locally-picked avatar shadow
+        // store is gone, so the badge falls back to the cloud avatar_url).
         if (characterCreator) {
-          // When the recorded creator is the current user, resolve their
-          // locally-picked avatar (UserProfileStore) so the badge shows the
-          // real avatar — the creator row only stores the cloud avatar_url,
-          // which is null for locally-picked avatars (this affects every
-          // user-created character AND its forks).
           if (user?.id && characterCreator.creatorUserId === user.id) {
-            try {
-              const local = await getLocalProfile(user.id);
-              const resolvedAvatar =
-                local.avatar_data_url ?? characterCreator.creatorAvatarUrl ?? null;
-              const resolvedName =
-                local.displayName ||
-                characterCreator.creatorDisplayName ||
+            setCreator({
+              ...characterCreator,
+              creatorDisplayName:
                 user.display_name ||
                 user.email?.split('@')[0] ||
-                'Creator';
-              setCreator({
-                ...characterCreator,
-                creatorDisplayName: resolvedName,
-                creatorAvatarUrl: resolvedAvatar,
-              });
-            } catch {
-              setCreator(characterCreator);
-            }
+                characterCreator.creatorDisplayName ||
+                'Creator',
+              creatorAvatarUrl:
+                characterCreator.creatorAvatarUrl ?? user.avatar_url ?? null,
+            });
           } else {
             setCreator(characterCreator);
           }
         } else if (source === 'user') {
-          let creatorName = '';
-          let creatorAvatar: string | null = null;
-          if (user?.id) {
-            try {
-              const local = await getLocalProfile(user.id);
-              creatorAvatar = local.avatar_data_url ?? user.avatar_url ?? null;
-              creatorName =
-                local.displayName ||
-                user.display_name ||
-                user.email?.split('@')[0] ||
-                '';
-            } catch {
-              creatorName = '';
-            }
-          }
           setCreator({
             profileId,
             creatorUserId: user?.id ?? '',
-            creatorDisplayName: creatorName || 'Creator',
-            creatorAvatarUrl: creatorAvatar,
+            creatorDisplayName:
+              user?.display_name ||
+              user?.email?.split('@')[0] ||
+              'Creator',
+            creatorAvatarUrl: user?.avatar_url ?? null,
           });
         }
 
         // Follow state — whether the local user follows the character's creator.
         const resolvedCreator =
-          (await getCharacterCreator(profileId)) ?? null;
+          (await SocialService.getCharacterCreator(profileId)) ?? null;
         if (resolvedCreator && user?.id && resolvedCreator.creatorUserId !== user.id) {
           try {
-            const following = await isFollowing(resolvedCreator.creatorUserId);
+            const following = await SocialService.isFollowing(
+              resolvedCreator.creatorUserId,
+            );
             setFollowingCreator(following);
           } catch (followErr) {
             log.warn('Failed to load follow state:', followErr);
@@ -291,18 +253,19 @@ export const AIProfileScreen: React.FC = () => {
         log.warn('Failed to load character social state:', err);
       }
 
-      // Per-image post state (likes + comments)
+      // Per-image post state (likes + comments). The stub has no read API for
+      // "liked by me" on images — the flag is only returned by toggleImageLike,
+      // so the initial render shows un-liked with the seeded like baseline.
       try {
         const postMap: Record<string, ImagePostState> = {};
         await Promise.all(
           imgs.map(async img => {
             try {
-              const [liked, likes, comments] = await Promise.all([
-                isImageLiked(img.id),
-                getImageLikesCount(img.id),
-                getImageCommentsCount(img.id),
+              const [likes, comments] = await Promise.all([
+                SocialService.getImageLikesCount(img.id),
+                SocialService.getImageComments(img.id),
               ]);
-              postMap[img.id] = { liked, likes, commentCount: comments };
+              postMap[img.id] = { liked: false, likes, commentCount: comments.length };
             } catch {
               postMap[img.id] = { liked: false, likes: 0, commentCount: 0 };
             }
@@ -358,8 +321,8 @@ export const AIProfileScreen: React.FC = () => {
   const handleToggleLike = async () => {
     if (!profile) return;
     try {
-      const nowLiked = await toggleCharacterLike(profileId);
-      const likes = await getCharacterLikesCount(profileId);
+      const nowLiked = await SocialService.toggleCharacterLike(profileId);
+      const likes = await SocialService.getCharacterLikesCount(profileId);
       setProfileLiked(nowLiked);
       setProfileLikes(likes);
       showToast(
@@ -367,29 +330,6 @@ export const AIProfileScreen: React.FC = () => {
           ? t('aiLikedToast', { name: profile.name })
           : t('aiUnlikedToast', { name: profile.name }),
       );
-
-      // Notify the creator when their AI profile is liked (not by themselves).
-      if (nowLiked && creator && user?.id && creator.creatorUserId !== user.id) {
-        try {
-          const local = await getLocalProfile(user.id);
-          await addNotification({
-            recipientUserId: creator.creatorUserId,
-            actorUserId: user.id,
-            actorDisplayName:
-              local.displayName ||
-              user.display_name ||
-              user.email?.split('@')[0] ||
-              'Someone',
-            actorAvatarUrl: local.avatar_data_url ?? user.avatar_url ?? null,
-            type: 'profile_like',
-            targetType: 'character_profile',
-            targetId: profileId,
-            targetLabel: profile.name,
-          });
-        } catch (notifErr) {
-          log.warn('Failed to create profile-like notification:', notifErr);
-        }
-      }
     } catch (err) {
       log.warn('Failed to toggle like:', err);
     }
@@ -398,7 +338,7 @@ export const AIProfileScreen: React.FC = () => {
   const handleToggleSave = async () => {
     if (!profile) return;
     try {
-      const nowSaved = await toggleCharacterSave(profileId);
+      const nowSaved = await SocialService.toggleCharacterSave(profileId);
       setProfileSaved(nowSaved);
       showToast(
         nowSaved
@@ -412,8 +352,8 @@ export const AIProfileScreen: React.FC = () => {
 
   const handleToggleImageLike = async (img: CharacterImage) => {
     try {
-      const nowLiked = await toggleImageLike(img.id);
-      const likes = await getImageLikesCount(img.id);
+      const nowLiked = await SocialService.toggleImageLike(img.id);
+      const likes = await SocialService.getImageLikesCount(img.id);
       setImagePosts(prev => ({
         ...prev,
         [img.id]: {
@@ -422,29 +362,6 @@ export const AIProfileScreen: React.FC = () => {
           commentCount: prev[img.id]?.commentCount ?? 0,
         },
       }));
-
-      // Notify the creator when one of their AI images is liked.
-      if (nowLiked && creator && user?.id && creator.creatorUserId !== user.id) {
-        try {
-          const local = await getLocalProfile(user.id);
-          await addNotification({
-            recipientUserId: creator.creatorUserId,
-            actorUserId: user.id,
-            actorDisplayName:
-              local.displayName ||
-              user.display_name ||
-              user.email?.split('@')[0] ||
-              'Someone',
-            actorAvatarUrl: local.avatar_data_url ?? user.avatar_url ?? null,
-            type: 'image_like',
-            targetType: 'character_image',
-            targetId: String(img.id),
-            targetLabel: profile?.name ?? '',
-          });
-        } catch (notifErr) {
-          log.warn('Failed to create image-like notification:', notifErr);
-        }
-      }
     } catch (err) {
       log.warn('Failed to toggle image like:', err);
     }
@@ -460,14 +377,14 @@ export const AIProfileScreen: React.FC = () => {
     setCommentImageId(null);
     // Refresh the comment counts after the modal closes.
     if (commentImageId != null) {
-      getImageCommentsCount(commentImageId)
-        .then(count => {
+      SocialService.getImageComments(commentImageId)
+        .then(comments => {
           setImagePosts(prev => ({
             ...prev,
             [commentImageId]: {
               liked: prev[commentImageId]?.liked ?? false,
               likes: prev[commentImageId]?.likes ?? 0,
-              commentCount: count,
+              commentCount: comments.length,
             },
           }));
         })
@@ -492,44 +409,15 @@ export const AIProfileScreen: React.FC = () => {
   const handleToggleFollowCreator = async () => {
     if (!creator || !user) return;
     try {
-      if (followingCreator) {
-        await removeFollow(creator.creatorUserId);
-        setFollowingCreator(false);
-        showToast(
-          t('postUnfollowedToast', { name: creator.creatorDisplayName }),
-        );
-      } else {
-        await addFollow({
-          targetUserId: creator.creatorUserId,
-          targetDisplayName: creator.creatorDisplayName,
-          targetAvatarUrl: creator.creatorAvatarUrl,
-        });
-        setFollowingCreator(true);
-        showToast(
-          t('postFollowedToast', { name: creator.creatorDisplayName }),
-        );
-
-        // Notify the creator when they gain a new follower.
-        try {
-          const local = await getLocalProfile(user.id);
-          await addNotification({
-            recipientUserId: creator.creatorUserId,
-            actorUserId: user.id,
-            actorDisplayName:
-              local.displayName ||
-              user.display_name ||
-              user.email?.split('@')[0] ||
-              'Someone',
-            actorAvatarUrl: local.avatar_data_url ?? user.avatar_url ?? null,
-            type: 'follow',
-            targetType: 'user',
-            targetId: user.id,
-            targetLabel: local.displayName || user.display_name || '',
-          });
-        } catch (notifErr) {
-          log.warn('Failed to create follow notification:', notifErr);
-        }
-      }
+      const nowFollowing = await SocialService.toggleFollow(
+        creator.creatorUserId,
+      );
+      setFollowingCreator(nowFollowing);
+      showToast(
+        nowFollowing
+          ? t('postFollowedToast', { name: creator.creatorDisplayName })
+          : t('postUnfollowedToast', { name: creator.creatorDisplayName }),
+      );
     } catch (err) {
       log.warn('Failed to toggle follow:', err);
     }
@@ -1016,30 +904,6 @@ export const AIProfileScreen: React.FC = () => {
         onClose={handleCommentsClosed}
         // The character's owner can moderate (copy/delete) any comment.
         canModerateAll={isOwner}
-        onCommentPosted={async () => {
-          // Notify the character's creator when someone comments on an AI image.
-          if (creator && user?.id && creator.creatorUserId !== user.id) {
-            try {
-              const local = await getLocalProfile(user.id);
-              await addNotification({
-                recipientUserId: creator.creatorUserId,
-                actorUserId: user.id,
-                actorDisplayName:
-                  local.displayName ||
-                  user.display_name ||
-                  user.email?.split('@')[0] ||
-                  'Someone',
-                actorAvatarUrl: local.avatar_data_url ?? user.avatar_url ?? null,
-                type: 'image_comment',
-                targetType: 'character_image',
-                targetId: commentImageId != null ? String(commentImageId) : null,
-                targetLabel: profile?.name ?? '',
-              });
-            } catch (notifErr) {
-              log.warn('Failed to create image-comment notification:', notifErr);
-            }
-          }
-        }}
       />
     </ThemedView>
   );
