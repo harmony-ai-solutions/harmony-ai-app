@@ -19,6 +19,7 @@ import {
   Modal,
   View,
   TouchableWithoutFeedback,
+  Animated,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import LinearGradient from 'react-native-linear-gradient';
@@ -1479,11 +1480,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
     // Insert a calendar-day divider before the first message of each new day.
     // This runs on the raw messages so dividers stay stable regardless of the
-    // session/persona divider insertion below.
+    // session/persona divider insertion below. D1-8: also emit a divider for
+    // the FIRST message (i === 0) so a freshly opened conversation shows its
+    // start date ("Today"/"Yesterday"/date) like mainstream chat apps.
     let withDivider: any[] = [];
     for (let i = 0; i < messages.length; i++) {
       if (
-        i > 0 &&
+        i === 0 ||
         !isSameCalendarDay(messages[i - 1].created_at, messages[i].created_at)
       ) {
         withDivider.push({
@@ -1912,9 +1915,40 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
     ],
   );
 
-  // The character is "online" when the sync connection is up AND a session
-  // with the partner is actively running.
-  const isOnline = isConnected && isSessionActive(currentInteractionIdRef.current);
+  // Connection indicator (D1-7): three states, restored from her cd821db
+  // collapse (which reduced it to a single online/offline boolean dot).
+  //   connected  — sync WS up AND the entity session is fully active (purple)
+  //   connecting — sync WS up, session still initializing (amber, pulsing)
+  //   offline    — sync WS down / disconnected (grey)
+  const connectionState: 'connected' | 'connecting' | 'offline' = isConnected
+    ? isSessionActive(currentInteractionIdRef.current)
+      ? 'connected'
+      : 'connecting'
+    : 'offline';
+
+  // Pulsing affordance for the "connecting" state.
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (connectionState === 'connecting') {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 0.35,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+    pulseAnim.setValue(1);
+  }, [connectionState, pulseAnim]);
 
   // In-flight generation affordance (§2-4): GreetingBubble `preparing` (shimmer
   // + TypingIndicator) plus the "Preparing the opening…" caption. No streaming —
@@ -1952,25 +1986,44 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         title={headerName}
         onTitlePress={partnerProfileId ? handleOpenPartnerProfile : undefined}
         titleRight={
-          <View
-            style={styles.statusDotWrap}
-            accessibilityRole="image"
-            accessibilityLabel={isOnline ? 'Online' : 'Offline'}
-          >
-            <LinearGradient
-              colors={
-                isOnline
-                  ? [
-                      (theme?.colors.accent.primary ?? '#7c3aed') + 'E6',
-                      ((theme?.colors.accent.secondary ?? theme?.colors.accent.primaryHover ?? '#7c3aed') + '80'),
-                    ]
-                  : ['#6b7280', '#9ca3af']
-              }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.statusDot, isOnline ? styles.statusDotOnline : styles.statusDotOffline]}
-            />
-          </View>
+          connectionState === 'connected' ? (
+            <View
+              style={styles.statusDotWrap}
+              accessibilityRole="image"
+              accessibilityLabel={t('statusConnected')}
+            >
+              <LinearGradient
+                colors={[
+                  (theme?.colors.accent.primary ?? '#7c3aed') + 'E6',
+                  ((theme?.colors.accent.secondary ?? theme?.colors.accent.primaryHover ?? '#7c3aed') + '80'),
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.statusDot, styles.statusDotOnline]}
+              />
+            </View>
+          ) : connectionState === 'connecting' ? (
+            <Animated.View
+              style={[styles.statusDotWrap, { opacity: pulseAnim }]}
+              accessibilityRole="image"
+              accessibilityLabel={t('statusConnecting')}
+            >
+              <View style={[styles.statusDot, styles.statusDotConnecting]} />
+            </Animated.View>
+          ) : (
+            <View
+              style={styles.statusDotWrap}
+              accessibilityRole="image"
+              accessibilityLabel={t('statusOffline')}
+            >
+              <LinearGradient
+                colors={['#6b7280', '#9ca3af']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.statusDot, styles.statusDotOffline]}
+              />
+            </View>
+          )
         }
         onBack={() => navigation.goBack()}
         left={
@@ -2403,7 +2456,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
           onSendText={handleSendTextMessage}
           onSendAudio={handleSendAudioMessage}
           onSendImages={handleSendImages}
-          disabled={!isOnline}
+          disabled={connectionState !== 'connected'}
           entityId={ownEntityId}
           showScenarioButton={!hasFirstMes}
           onScenarioPress={openScenarioSheet}
@@ -2503,6 +2556,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.6,
     shadowRadius: 4,
     elevation: 3,
+  },
+  // Amber "session initializing" dot (D1-7 third state); the Animated.View
+  // wrapping it pulses opacity while connecting.
+  statusDotConnecting: {
+    backgroundColor: '#f59e0b',
   },
   statusDotOffline: {
     opacity: 0.85,

@@ -93,6 +93,7 @@ jest.mock('../cloud/CloudSessionService', () => ({
     connect: jest.fn().mockResolvedValue(undefined),
     disconnect: jest.fn().mockResolvedValue(undefined),
     getStatus: jest.fn().mockReturnValue('idle'),
+    isPurging: jest.fn().mockReturnValue(false),
   },
   default: {},
 }));
@@ -112,6 +113,7 @@ function makeSession(interactionId = 'ix-scenario'): InteractionSession {
       ['user-entity', { connectionId: 'entity-user-x', status: 'active' as const }],
     ]),
     pendingTranscriptions: new Map(),
+    replyMode: 'realistic',
   };
 }
 

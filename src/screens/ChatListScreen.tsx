@@ -38,7 +38,7 @@ import {
 
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import ChatPreferencesService from '../services/ChatPreferencesService';
+import ChatPreferencesService, { ChatReplyMode } from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
 import { getBlockedUserIds } from '../services/social/SocialService';
 import { hexToRgba } from '../utils/colorUtils';
@@ -168,7 +168,11 @@ export const ChatListScreen: React.FC = () => {
     muted: false,
     disabled: false,
     unreadCount: 0,
+    replyMode: 'realistic',
   });
+  // Guards the async reply-mode load in handleLongPress: only apply the result
+  // if the SAME conversation is still the one whose menu is open.
+  const menuItemKeyRef = useRef<string | null>(null);
   const { showAlert } = useAppAlert();
   const { showToast } = useToast();
 
@@ -664,17 +668,30 @@ export const ChatListScreen: React.FC = () => {
   // ── Long-press → context menu ──
   const handleLongPress = (item: ChatListItem) => {
     hapticLightPress();
+    menuItemKeyRef.current = item.participantKey;
     setMenuSettings({
       pinned: item.pinned,
       archived: item.archived,
       muted: item.muted,
       disabled: item.disabled,
       unreadCount: item.unreadCount,
+      // Optimistic default; the persisted value is loaded below.
+      replyMode: 'realistic',
     });
     setMenuItem(item);
+    // A6: load the persisted reply pacing for this participant key so the
+    // menu label reflects the current mode. Keyed by participantKey (stable).
+    ChatPreferencesService.getReplyMode(item.participantKey).then(mode => {
+      if (menuItemKeyRef.current === item.participantKey) {
+        setMenuSettings(prev => ({ ...prev, replyMode: mode }));
+      }
+    });
   };
 
-  const closeMenu = useCallback(() => setMenuItem(null), []);
+  const closeMenu = useCallback(() => {
+    menuItemKeyRef.current = null;
+    setMenuItem(null);
+  }, []);
 
   // Reload the list after any context action.
   const reloadAfterAction = useCallback(() => {
@@ -718,6 +735,30 @@ export const ChatListScreen: React.FC = () => {
     showToast(item.muted ? t('toastUnmuted') : t('toastMuted'));
     reloadAfterAction();
   }, [menuItem, reloadAfterAction, showToast, t]);
+
+  // A6 — reply pacing toggle (instant vs realistic). Persists the preference
+  // per participant key; best-effort broadcasts SET_REPLY_MODE to an active
+  // session for this interaction (e.g. the floating bubble) if one exists.
+  // The pacing itself is applied at session INIT (INIT_ENTITY.reply_mode) —
+  // see ChatDetailScreen.initializeSession.
+  const handleToggleReplyMode = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    const newMode: ChatReplyMode =
+      menuSettings.replyMode === 'realistic' ? 'instant' : 'realistic';
+    try {
+      await ChatPreferencesService.setReplyMode(item.participantKey, newMode);
+      // No-op (logs a warning) when no session matches — safe best-effort.
+      await EntitySessionService.setReplyMode(item.interactionId, newMode);
+      showToast(
+        newMode === 'instant'
+          ? t('toastReplyModeInstant')
+          : t('toastReplyModeRealistic'),
+      );
+    } catch (error) {
+      log.error('Failed to set reply mode:', error);
+    }
+  }, [menuItem, menuSettings.replyMode, showToast, t]);
 
   const handleToggleRead = useCallback(async () => {
     const item = menuItem;
@@ -1030,6 +1071,7 @@ export const ChatListScreen: React.FC = () => {
         onOpenBubble={handleOpenBubble}
         onToggleRead={handleToggleRead}
         onToggleDisable={handleToggleDisable}
+        onToggleReplyMode={handleToggleReplyMode}
         onDelete={handleDelete}
       />
     </ThemedView>

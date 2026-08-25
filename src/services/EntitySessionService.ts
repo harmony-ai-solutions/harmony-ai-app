@@ -18,6 +18,7 @@ import {
 import { Interaction } from '../database/models';
 import { SyncService } from './SyncService';
 import AudioPlayer, { AudioPlayer as AudioPlayerClass } from './AudioPlayer';
+import { cloudSessionService } from './cloud/CloudSessionService';
 import { v7 as uuidv7 } from 'uuid';
 
 const log = createLogger('[EntitySessionService]');
@@ -55,6 +56,13 @@ export interface InteractionSession {
    * has been processed.
    */
   hasFirstMes?: boolean;
+  /**
+   * Reply pacing preference ('instant' | 'realistic') captured from
+   * ChatPreferencesService at session start (A6). Sent in every INIT_ENTITY —
+   * including partner reconnects (sendInitEntityForEntity) so a reconnect
+   * never silently flips pacing.
+   */
+  replyMode: string;
 }
 
 /**
@@ -206,8 +214,24 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     // the cloud session then makes the overlay report "offline / disconnected
     // from cloud" and forces a slow broker re-provision on resume. Leaving the
     // cloud session ready lets the sync WS reconnect instantly on foreground.
+    //
+    // D1-5 background-WS policy (her 20c985a removed background disconnect):
+    // keep the always-connected behavior, BUT yield to an in-flight cloud data
+    // purge. SyncConnectionContext.connect() already skips auto-connect while
+    // `cloudSessionService.isPurging()` is true (and the connect catch already
+    // handles PurgeInProgressError for another device's purge). The background
+    // disconnect/reconnect dance must NOT run during that window either: the
+    // purge owns the cloud/entity WS lifecycle until it settles, and re-dialing
+    // entity sockets mid-purge would race the purge's own teardown / broker 409
+    // (PurgeInProgressError path). Entity sessions simply stay connected while
+    // the purge completes; the existing foreground re-evaluate path restores
+    // normal state afterwards.
     this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'background') {
+        if (cloudSessionService.isPurging()) {
+          log.info('App going to background during cloud data purge — keeping entity sessions connected (purge owns the WS lifecycle)');
+          return;
+        }
         log.info('App going to background, closing entity sessions (cloud session stays ready)');
         this.closeAllSessions();
       }
@@ -348,7 +372,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         device_platform: Platform.OS,
         capabilities: ['chat'],
         tts_output_type: 'binary',
-        reply_mode: 'realistic',
+        reply_mode: session.replyMode, // A6: honor the per-conversation preference on reconnect too (was hardcoded 'realistic')
       }
     };
 
@@ -480,6 +504,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         interactionId: tempInteractionId,
         interaction: null,
         participantIds,
+        replyMode,
         ownEntityId,
         connections,
         pendingTranscriptions: new Map(),

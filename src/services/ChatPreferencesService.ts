@@ -12,7 +12,15 @@ const log = createLogger('[ChatPreferencesService]');
 const STORAGE_KEY_PREFIX = 'chat_entity_pref_';
 const LAST_READ_PREFIX = 'chat_last_read_';
 const GLOBAL_ENTITY_KEY = 'chat_global_impersonated_entity';
-const REPLY_MODE_PREFIX = 'chat_reply_mode_';
+// Reply pacing preference (A6): stored per participant key. The `@harmony_`
+// prefix matches the app's reserved AsyncStorage key convention (cf.
+// `@harmony_character_categories`, `@harmony_setting_biometric_lock`).
+// Interim client-side storage — becomes a synced `chat_conversation_settings`
+// column in engine Phase 2 (B2).
+const REPLY_MODE_PREFIX = '@harmony_chat_reply_mode_';
+
+/** Reply pacing for a conversation: instant, or realistic (typing-delay). */
+export type ChatReplyMode = 'instant' | 'realistic';
 
 /**
  * Get the preferred impersonated entity for a chat partner
@@ -155,34 +163,34 @@ async function setGlobalImpersonatedEntity(entityId: string): Promise<void> {
 }
 
 /**
- * Get the reply mode for a specific chat partner.
+ * Get the reply pacing mode for a specific chat (A6).
  * Returns "realistic" if no preference is stored (default behavior).
- * @param partnerEntityId The entity ID of the chat partner
+ * @param participantKey The participant key (engine-aligned, F4/O3) of the chat
  * @returns "instant" or "realistic"
  */
-async function getReplyMode(partnerEntityId: string): Promise<string> {
+async function getReplyMode(participantKey: string): Promise<ChatReplyMode> {
   try {
-    const key = `${REPLY_MODE_PREFIX}${partnerEntityId}`;
+    const key = `${REPLY_MODE_PREFIX}${participantKey}`;
     const value = await AsyncStorage.getItem(key);
     return value === 'instant' ? 'instant' : 'realistic';
   } catch (error) {
-    log.error(`Failed to get reply mode for ${partnerEntityId}:`, error);
+    log.error(`Failed to get reply mode for ${participantKey}:`, error);
     return 'realistic';
   }
 }
 
 /**
- * Set the reply mode for a specific chat partner.
- * @param partnerEntityId The entity ID of the chat partner
+ * Set the reply pacing mode for a specific chat (A6).
+ * @param participantKey The participant key (engine-aligned, F4/O3) of the chat
  * @param mode "instant" or "realistic"
  */
-async function setReplyMode(partnerEntityId: string, mode: string): Promise<void> {
+async function setReplyMode(participantKey: string, mode: ChatReplyMode): Promise<void> {
   try {
-    const key = `${REPLY_MODE_PREFIX}${partnerEntityId}`;
+    const key = `${REPLY_MODE_PREFIX}${participantKey}`;
     await AsyncStorage.setItem(key, mode);
-    log.info(`Set reply mode for ${partnerEntityId}: ${mode}`);
+    log.info(`Set reply mode for ${participantKey}: ${mode}`);
   } catch (error) {
-    log.error(`Failed to set reply mode for ${partnerEntityId}:`, error);
+    log.error(`Failed to set reply mode for ${participantKey}:`, error);
     throw error;
   }
 }

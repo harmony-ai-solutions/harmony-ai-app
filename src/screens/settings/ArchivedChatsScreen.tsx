@@ -49,7 +49,7 @@ import {
   showBubble,
   requestBubblePermission,
 } from '../../services/ChatBubbleService';
-import ChatPreferencesService from '../../services/ChatPreferencesService';
+import ChatPreferencesService, { ChatReplyMode } from '../../services/ChatPreferencesService';
 import EntitySessionService from '../../services/EntitySessionService';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { hexToRgba } from '../../utils/colorUtils';
@@ -92,6 +92,30 @@ export const ArchivedChatsScreen: React.FC = () => {
 
   // Long-press menu state
   const [menuItem, setMenuItem] = useState<ArchivedItem | null>(null);
+  // A6 reply pacing for the conversation whose menu is open.
+  const [menuReplyMode, setMenuReplyMode] = useState<ChatReplyMode>('realistic');
+  // Guards the async reply-mode load: only apply if the same conversation is
+  // still the one whose menu is open.
+  const menuItemKeyRef = useRef<string | null>(null);
+
+  const closeMenu = useCallback(() => {
+    menuItemKeyRef.current = null;
+    setMenuItem(null);
+  }, []);
+
+  const handleLongPress = (item: ArchivedItem) => {
+    hapticLightPress();
+    menuItemKeyRef.current = item.participantKey;
+    setMenuReplyMode('realistic');
+    setMenuItem(item);
+    // A6: load the persisted reply pacing so the menu label reflects the
+    // current mode (keyed by participantKey, stable across navigations).
+    ChatPreferencesService.getReplyMode(item.participantKey).then(mode => {
+      if (menuItemKeyRef.current === item.participantKey) {
+        setMenuReplyMode(mode);
+      }
+    });
+  };
 
   // Live persona (F12) — refreshed on every load; stable callbacks read the
   // ref instead of capturing a stale render value.
@@ -227,6 +251,27 @@ export const ArchivedChatsScreen: React.FC = () => {
     reload();
   }, [menuItem, reload, showToast, t]);
 
+  // A6 — reply pacing toggle (instant vs realistic). Persists the preference
+  // per participant key; best-effort broadcasts SET_REPLY_MODE to an active
+  // session for this interaction if one exists (usually none from this screen).
+  const handleToggleReplyMode = useCallback(async () => {
+    const item = menuItem;
+    if (!item) return;
+    const newMode: ChatReplyMode =
+      menuReplyMode === 'realistic' ? 'instant' : 'realistic';
+    try {
+      await ChatPreferencesService.setReplyMode(item.participantKey, newMode);
+      await EntitySessionService.setReplyMode(item.interactionId, newMode);
+      showToast(
+        newMode === 'instant'
+          ? t('toastReplyModeInstant')
+          : t('toastReplyModeRealistic'),
+      );
+    } catch (error) {
+      // ignore — storage failure shouldn't block the menu
+    }
+  }, [menuItem, menuReplyMode, showToast, t]);
+
   const handleOpenBubble = useCallback(async () => {
     const item = menuItem;
     if (!item) return;
@@ -349,7 +394,7 @@ export const ArchivedChatsScreen: React.FC = () => {
   if (!theme) return null;
 
   const renderItem = ({ item }: { item: ArchivedItem }) => (
-    <ArchivedRow item={item} onPress={() => handleOpenChat(item)} onLongPress={() => setMenuItem(item)} />
+    <ArchivedRow item={item} onPress={() => handleOpenChat(item)} onLongPress={() => handleLongPress(item)} />
   );
 
   return (
@@ -391,15 +436,17 @@ export const ArchivedChatsScreen: React.FC = () => {
           muted: menuItem?.muted ?? false,
           disabled: menuItem?.disabled ?? false,
           unreadCount: menuItem?.unreadCount ?? 0,
+          replyMode: menuReplyMode,
         }}
         isDisabled={menuItem?.disabled ?? false}
-        onClose={() => setMenuItem(null)}
+        onClose={closeMenu}
         onTogglePin={handleTogglePin}
         onToggleArchive={handleUnarchive}
         onToggleMute={handleToggleMute}
         onOpenBubble={handleOpenBubble}
         onToggleRead={handleToggleRead}
         onToggleDisable={handleToggleDisable}
+        onToggleReplyMode={handleToggleReplyMode}
         onDelete={handleDelete}
       />
     </ThemedView>

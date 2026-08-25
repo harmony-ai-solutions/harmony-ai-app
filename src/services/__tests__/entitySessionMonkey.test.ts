@@ -104,7 +104,7 @@ jest.mock('../../database/connection', () => ({
 }));
 
 jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: { connect: jest.fn(), disconnect: jest.fn(), getStatus: jest.fn().mockReturnValue('idle') },
+  cloudSessionService: { connect: jest.fn(), disconnect: jest.fn(), getStatus: jest.fn().mockReturnValue('idle'), isPurging: jest.fn().mockReturnValue(false) },
   default: {},
 }));
 

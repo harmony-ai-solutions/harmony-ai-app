@@ -1,18 +1,18 @@
 /**
- * EntitySessionService.stopInteractionSession — teardown robustness tests.
+ * EntitySessionService — background WS policy during cloud purge (D1-5).
  *
- * Regression test for the connection-leak bug found via on-device logs
- * (2026-08-05): `AudioPlayer.stop()` was the FIRST statement in the teardown
- * try-block and throws 'player_not_initialized' when TrackPlayer was never set
- * up (the chat had no audio playback). The throw jumped to the outer catch,
- * so the connection-teardown loop NEVER ran — every chat exit leaked its
- * entity WebSockets (live heartbeats, "Connection entity-X already exists,
- * disconnecting first" on the next session, orphaned engine-side sessions).
- *
- * These tests pin the fix: audio errors (and per-connection teardown errors)
- * must never skip the remaining disconnects.
+ * Her commit 20c985a made the entity WebSockets stay connected when the app
+ * backgrounds (only the entity sessions are torn down for battery; the cloud
+ * session stays ready for the floating overlay). D1-5 keeps that behavior but
+ * guards it against the cloud data-purge window: the background handler must
+ * NOT disconnect/reconnect entity sessions while `cloudSessionService.isPurging()`
+ * is true — the purge owns the WS lifecycle until it settles, and re-dialing
+ * mid-purge would race the purge teardown / broker 409 (the same reasoning as
+ * SyncConnectionContext.connect()'s `isPurging()` skip + PurgeInProgressError
+ * catch).
  */
 
+import { AppState, AppStateStatus } from 'react-native';
 import { EntitySessionService } from '../EntitySessionService';
 import { EventEmitter } from 'eventemitter3';
 
@@ -22,6 +22,12 @@ let mockConnectionManager: EventEmitter & {
   disconnectConnection: jest.Mock;
 };
 let mockAudioPlayerStop: jest.Mock;
+let mockCloudSession: {
+  connect: jest.Mock;
+  disconnect: jest.Mock;
+  getStatus: jest.Mock;
+  isPurging: jest.Mock;
+};
 
 jest.mock('react-native-device-info', () => ({
   getUniqueId: jest.fn().mockResolvedValue('test-device'),
@@ -76,15 +82,15 @@ jest.mock('../../database/connection', () => ({
   getSyncDatabase: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: {
+jest.mock('../cloud/CloudSessionService', () => {
+  mockCloudSession = {
     connect: jest.fn().mockResolvedValue(undefined),
     disconnect: jest.fn().mockResolvedValue(undefined),
     getStatus: jest.fn().mockReturnValue('idle'),
     isPurging: jest.fn().mockReturnValue(false),
-  },
-  default: {},
-}));
+  };
+  return { cloudSessionService: mockCloudSession, default: {} };
+});
 
 function resetSingleton(): void {
   (EntitySessionService as any).instance = null;
@@ -104,7 +110,19 @@ function seedSession(svc: any, interactionId: string): void {
   });
 }
 
-describe('EntitySessionService.stopInteractionSession teardown', () => {
+/** Grab the 'change' listener registered by the CURRENT instance's setupAppStateListener(). */
+function getAppStateHandler(): (s: AppStateStatus) => void {
+  const calls = (AppState.addEventListener as jest.Mock).mock.calls;
+  // reverse so the most recently registered handler (the current instance)
+  // wins — stale handlers from prior tests' instances must not be fired.
+  const changeCall = [...calls].reverse().find((c: any[]) => c[0] === 'change');
+  if (!changeCall) {
+    throw new Error('EntitySessionService did not register an AppState listener');
+  }
+  return changeCall[1] as (s: AppStateStatus) => void;
+}
+
+describe('EntitySessionService background WS policy (D1-5)', () => {
   beforeEach(() => {
     mockConnectionManager.removeAllListeners();
     mockConnectionManager.sendEvent.mockClear();
@@ -114,48 +132,44 @@ describe('EntitySessionService.stopInteractionSession teardown', () => {
     mockConnectionManager.disconnectConnection.mockClear();
     mockAudioPlayerStop.mockClear();
     mockAudioPlayerStop.mockResolvedValue(undefined);
+    mockCloudSession.isPurging.mockClear();
+    mockCloudSession.isPurging.mockReturnValue(false);
+    // Stale AppState registrations from prior tests' instances must not leak
+    // into getAppStateHandler() (the fresh instance re-registers below).
+    (AppState.addEventListener as jest.Mock).mockClear();
     resetSingleton();
   });
 
-  it('still disconnects ALL connections when AudioPlayer.stop() throws player_not_initialized', async () => {
-    // TrackPlayer was never set up → stop() rejects, exactly like on device.
-    mockAudioPlayerStop.mockRejectedValue(
-      Object.assign(new Error('Stop failed'), { code: 'player_not_initialized' }),
-    );
+  it('keeps entity sessions connected when the app backgrounds during a purge', async () => {
+    mockCloudSession.isPurging.mockReturnValue(true);
 
     const svc = EntitySessionService.getInstance();
     seedSession(svc as any, 'ix-1');
 
-    const stoppedEvents: string[] = [];
-    svc.on('session:stopped', (id: string) => stoppedEvents.push(id));
+    getAppStateHandler()('background');
+    await Promise.resolve();
 
-    await svc.stopInteractionSession('ix-1');
-
-    // The audio error must not skip connection teardown (the on-device bug).
-    expect(mockConnectionManager.disconnectConnection).toHaveBeenCalledWith('entity-claire');
-    expect(mockConnectionManager.disconnectConnection).toHaveBeenCalledWith('entity-user');
-    // Session is still cleaned up and the stopped event still fires.
-    expect(stoppedEvents).toEqual(['ix-1']);
-    expect((svc as any).sessions.has('ix-1')).toBe(false);
+    // The purge guard must skip closeAllSessions entirely — no
+    // ENTITY_SESSION_END sends and no connection teardown.
+    expect(mockConnectionManager.sendEvent).not.toHaveBeenCalled();
+    expect(mockConnectionManager.disconnectConnection).not.toHaveBeenCalled();
+    expect((svc as any).sessions.has('ix-1')).toBe(true);
   });
 
-  it('continues tearing down remaining connections when one disconnect fails', async () => {
-    // First connection's ENTITY_SESSION_END send fails — the second connection
-    // must still be disconnected (per-connection fault isolation).
-    mockConnectionManager.sendEvent
-      .mockRejectedValueOnce(new Error('socket dead'))
-      .mockResolvedValue(undefined);
+  it('still closes entity sessions on background when no purge is active', async () => {
+    mockCloudSession.isPurging.mockReturnValue(false);
 
     const svc = EntitySessionService.getInstance();
     seedSession(svc as any, 'ix-2');
 
-    const stoppedEvents: string[] = [];
-    svc.on('session:stopped', (id: string) => stoppedEvents.push(id));
+    getAppStateHandler()('background');
+    // Let closeAllSessions → stopInteractionSession microtasks settle
+    // (AudioPlayer.stop → ENTITY_SESSION_END send → disconnect, per conn).
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
 
-    await svc.stopInteractionSession('ix-2');
-
+    expect(mockConnectionManager.disconnectConnection).toHaveBeenCalledWith('entity-claire');
     expect(mockConnectionManager.disconnectConnection).toHaveBeenCalledWith('entity-user');
-    expect(stoppedEvents).toEqual(['ix-2']);
     expect((svc as any).sessions.has('ix-2')).toBe(false);
   });
 });

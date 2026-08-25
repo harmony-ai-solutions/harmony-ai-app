@@ -900,29 +900,54 @@ export async function getCharacterStats(
   const db = getDatabase();
 
   // Count distinct "other participants" this character chatted with.
-  // participant_ids is a JSON array — require an EXACT element match so "Max"
-  // never counts chats that belong to "Max 2", then collect every participant
-  // EXCEPT the character itself (that is the human/user side of the chat).
-  const [interactionResults] = await db.executeSql(
-    `SELECT participant_ids FROM interactions
-     WHERE presence_type = 'phone' AND deleted_at IS NULL`,
-  );
-  const chatUsers = new Set<string>();
-  for (let i = 0; i < interactionResults.rows.length; i++) {
-    const raw = interactionResults.rows.item(i).participant_ids;
-    try {
-      const ids: unknown = JSON.parse(raw);
-      if (Array.isArray(ids) && ids.includes(entityId)) {
-        for (const id of ids) {
-          if (id !== entityId) chatUsers.add(id);
+  // D1-12: replaced the JS full-scan of every phone interaction with an
+  // aggregate SQL query over SQLite JSON1 (`json_each`). participant_ids is a
+  // JSON array — the EXISTS subquery requires an EXACT element match so "Max"
+  // never counts chats that belong to "Max 2", then COUNT(DISTINCT) tallies
+  // every participant EXCEPT the character itself (that is the human/user side
+  // of the chat), deduping mirrored local+sync interaction rows and repeated
+  // chats by the same user — identical semantics to the old scan, in SQL.
+  //
+  // Falls back to the JS scan when JSON1 is unavailable or a row carries
+  // malformed JSON (same defensive pattern as getDistinctTags).
+  let chats = 0;
+  try {
+    const [results] = await db.executeSql(
+      `SELECT COUNT(DISTINCT je.value) AS chats
+       FROM interactions i, json_each(i.participant_ids) je
+       WHERE i.presence_type = 'phone'
+         AND i.deleted_at IS NULL
+         AND je.value != ?
+         AND EXISTS (
+           SELECT 1 FROM json_each(i.participant_ids) AS inner_je
+           WHERE inner_je.value = ?
+         )`,
+      [entityId, entityId],
+    );
+    chats = Number(results.rows.item(0).chats) || 0;
+  } catch {
+    // JSON1 unavailable or a malformed participant_ids row — compute the
+    // distinct set client-side (defensive fallback).
+    const [interactionResults] = await db.executeSql(
+      `SELECT participant_ids FROM interactions
+       WHERE presence_type = 'phone' AND deleted_at IS NULL`,
+    );
+    const chatUsers = new Set<string>();
+    for (let i = 0; i < interactionResults.rows.length; i++) {
+      const raw = interactionResults.rows.item(i).participant_ids;
+      try {
+        const ids: unknown = JSON.parse(raw);
+        if (Array.isArray(ids) && ids.includes(entityId)) {
+          for (const id of ids) {
+            if (id !== entityId) chatUsers.add(id);
+          }
         }
+      } catch {
+        // Ignore malformed participant_ids
       }
-    } catch {
-      // Ignore malformed participant_ids
     }
+    chats = chatUsers.size;
   }
-
-  const chats = chatUsers.size;
 
   const [msgResults] = await db.executeSql(
     `SELECT reactions_json FROM conversation_messages

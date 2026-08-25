@@ -612,6 +612,29 @@ describe('characters repository', () => {
       expect((await getCharacterStats('Max 3')).chats).toBe(0);
     });
 
+    it('counts each distinct other participant in a group chat (aggregate SQL, D1-12)', async () => {
+      // One group chat: Max + alice + bob → 2 distinct users chatted with Max.
+      await createInteraction(makeInteraction('g1', 'user', ['Max', 'alice', 'bob']));
+      // Another group chat with the same users — still 2 (COUNT DISTINCT).
+      await createInteraction(makeInteraction('g2', 'user', ['Max', 'alice', 'bob']));
+      // A group chat Max is NOT in — must not count.
+      await createInteraction(makeInteraction('g3', 'user', ['claire', 'alice', 'bob']));
+
+      expect((await getCharacterStats('Max')).chats).toBe(2);
+    });
+
+    it('falls back to the client-side scan when participant_ids is malformed (D1-12)', async () => {
+      // A malformed participant_ids row makes json_each throw — the fallback
+      // path must still produce the correct count from the valid rows.
+      const bad = makeInteraction('b1', 'user', ['Max', 'user']);
+      bad.participant_ids = '{not-json';
+      await createInteraction(bad);
+      await createInteraction(makeInteraction('ok1', 'user', ['Max', 'alice']));
+      await createInteraction(makeInteraction('ok2', 'user', ['Max', 'bob']));
+
+      expect((await getCharacterStats('Max')).chats).toBe(2);
+    });
+
     it('counts likes = total emoji reactions on messages sent by the character', async () => {
       await createNamedProfile('max', 'Max');
       await createEntity({

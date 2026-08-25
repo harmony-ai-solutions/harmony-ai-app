@@ -90,5 +90,8 @@
   "toastDisabled": "AI disabled",
   "toastEnabled": "AI enabled",
   "today": "Today",
-  "yesterday": "Yesterday"
+  "yesterday": "Yesterday",
+  "statusConnected": "Connected",
+  "statusConnecting": "Connecting...",
+  "statusOffline": "Offline"
 }

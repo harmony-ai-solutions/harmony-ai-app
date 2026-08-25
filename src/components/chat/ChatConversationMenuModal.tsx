@@ -6,8 +6,9 @@
  *   - Pin / Unpin        — pin the conversation to the top of the list
  *   - Archive / Unarchive — hide the conversation from the main list
  *   - Mute / Unmute      — suppress incoming-message alerts for this chat
- *   - Open chat bubble   — launch the floating bubble for this AI
- *   - Mark as read / Unread — reset / bump the unread state
+*  - Open chat bubble   — launch the floating bubble for this AI
+ *  - Reply pacing       — toggle instant ↔ realistic replies for this chat (A6)
+ *  - Mark as read / Unread — reset / bump the unread state
  *   - Disable / Enable   — stop the AI from sending AND receiving messages
  *   - Delete             — delete the conversation (messages + interaction)
  *
@@ -40,6 +41,8 @@ export interface ChatConversationMenuState {
   muted: boolean;
   disabled: boolean;
   unreadCount: number;
+  /** Reply pacing for this conversation (A6): 'instant' | 'realistic'. */
+  replyMode: 'instant' | 'realistic';
 }
 
 interface ChatConversationMenuModalProps {
@@ -56,6 +59,7 @@ interface ChatConversationMenuModalProps {
   onOpenBubble: () => void;
   onToggleRead: () => void;
   onToggleDisable: () => void;
+  onToggleReplyMode: () => void;
   onDelete: () => void;
 }
 
@@ -78,6 +82,7 @@ export const ChatConversationMenuModal: React.FC<ChatConversationMenuModalProps>
   onOpenBubble,
   onToggleRead,
   onToggleDisable,
+  onToggleReplyMode,
   onDelete,
 }) => {
   const { theme } = useAppTheme();
@@ -115,6 +120,17 @@ export const ChatConversationMenuModal: React.FC<ChatConversationMenuModalProps>
       label: t('menuOpenBubble'),
       color: accentSecondary,
       onPress: onOpenBubble,
+    },
+    {
+      // Reply pacing toggle (A6): shows the ACTION like Pin/Unpin — tapping
+      // switches instant ↔ realistic. Not the reply-to-message feature (O4).
+      icon: settings.replyMode === 'realistic' ? 'flash-outline' : 'clock-outline',
+      label:
+        settings.replyMode === 'realistic'
+          ? t('menuReplyModeInstant')
+          : t('menuReplyModeRealistic'),
+      color: accent,
+      onPress: onToggleReplyMode,
     },
     {
       icon: settings.unreadCount > 0 ? 'check-all' : 'email-outline',
