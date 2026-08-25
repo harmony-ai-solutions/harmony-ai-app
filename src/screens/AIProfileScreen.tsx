@@ -52,7 +52,6 @@ import {
   getCharacterImages,
   getSiblingCharacterProfiles,
   getCharacterStats,
-  getCharacterProfileSource,
   CharacterStats,
 } from '../database/repositories/characters';
 import { getEntityByCharacterProfileId } from '../database/repositories/entities';
@@ -182,7 +181,7 @@ export const AIProfileScreen: React.FC = () => {
       // ── Social layer ────────────────────────────────────────────────────
       try {
         const savedEntries = await SocialService.getSavedCharacterEntries();
-        const [liked, likes, saved, characterCreator, owner, source] =
+        const [liked, likes, saved, characterCreator, owner] =
           await Promise.all([
             SocialService.isCharacterLiked(profileId),
             SocialService.getCharacterLikesCount(profileId),
@@ -191,20 +190,19 @@ export const AIProfileScreen: React.FC = () => {
             ),
             SocialService.getCharacterCreator(profileId),
             SocialService.isCharacterCreator(profileId, user?.id),
-            getCharacterProfileSource(profileId),
           ]);
         setProfileLiked(liked);
         setProfileLikes(likes);
         setProfileSaved(saved);
 
-        // Ownership: the recorded cloud creator matches the current user, OR
-        // the profile is tagged user-created. The source tag is the reliable
-        // signal in self-hosted mode and for characters created before the
-        // creator feature, where no character_creators row exists.
-        setIsOwner(owner || source === 'user');
+        // Ownership: the recorded cloud creator matches the current user. The
+        // client-side source tag that used to back this signal was removed
+        // with the stub layer (A3) — ownership now resolves from the cloud
+        // creator only.
+        setIsOwner(!!owner);
 
         // Creator badge: prefer the recorded creator; otherwise synthesize
-        // one from the current user so user-created characters always show
+        // one from the current user so owned characters always show
         // "Created by …" (cloud profile — the locally-picked avatar shadow
         // store is gone, so the badge falls back to the cloud avatar_url).
         if (characterCreator) {
@@ -222,16 +220,6 @@ export const AIProfileScreen: React.FC = () => {
           } else {
             setCreator(characterCreator);
           }
-        } else if (source === 'user') {
-          setCreator({
-            profileId,
-            creatorUserId: user?.id ?? '',
-            creatorDisplayName:
-              user?.display_name ||
-              user?.email?.split('@')[0] ||
-              'Creator',
-            creatorAvatarUrl: user?.avatar_url ?? null,
-          });
         }
 
         // Follow state — whether the local user follows the character's creator.

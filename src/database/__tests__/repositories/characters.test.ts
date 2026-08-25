@@ -22,25 +22,11 @@ import {
   getPrimaryImage,
   imageToDataURL,
   getCharacterImagesWithDataURLs,
-  setCharacterProfileSource,
-  getCharacterProfileSource,
-  getCommunityCharacterProfiles,
-  setCharacterProfileVisibility,
-  getCharacterProfileVisibility,
-  getPublicCharacterProfiles,
   isCharacterFavorite,
   addCharacterFavorite,
   removeCharacterFavorite,
   toggleCharacterFavorite,
   getFavoriteCharacterProfileIds,
-  getCharacterCategories,
-  createCharacterCategory,
-  renameCharacterCategory,
-  deleteCharacterCategory,
-  getCharacterCategoryMembers,
-  addCharacterToCategory,
-  removeCharacterFromCategory,
-  getCharacterProfileCategories,
   getSiblingCharacterProfiles,
   getCharacterStats,
 } from '../../repositories/characters';
@@ -485,94 +471,6 @@ describe('characters repository', () => {
       }
     });
   });
-  describe('character profile source tagging', () => {
-    it('defaults to community when no sidecar row exists', async () => {
-      await createMinimalProfile('src-default-community');
-      const source = await getCharacterProfileSource('src-default-community');
-      expect(source).toBe('community');
-    });
-
-    it('setCharacterProfileSource marks a profile as user', async () => {
-      await createMinimalProfile('src-user');
-      await setCharacterProfileSource('src-user', 'user');
-      expect(await getCharacterProfileSource('src-user')).toBe('user');
-    });
-
-    it('setCharacterProfileSource upserts (idempotent re-tag)', async () => {
-      await createMinimalProfile('src-retag');
-      await setCharacterProfileSource('src-retag', 'community');
-      expect(await getCharacterProfileSource('src-retag')).toBe('community');
-      await setCharacterProfileSource('src-retag', 'user');
-      expect(await getCharacterProfileSource('src-retag')).toBe('user');
-    });
-
-    it('getCommunityCharacterProfiles excludes user-tagged profiles', async () => {
-      await createMinimalProfile('src-comm-1');
-      await createMinimalProfile('src-comm-2');
-      await createMinimalProfile('src-user-1');
-      await setCharacterProfileSource('src-user-1', 'user');
-
-      const community = await getCommunityCharacterProfiles();
-      const ids = community.map(p => p.id);
-      expect(ids).toContain('src-comm-1');
-      expect(ids).toContain('src-comm-2');
-      expect(ids).not.toContain('src-user-1');
-    });
-
-    it('getCommunityCharacterProfiles excludes soft-deleted profiles', async () => {
-      await createMinimalProfile('src-del-1');
-      await deleteCharacterProfile('src-del-1');
-      const community = await getCommunityCharacterProfiles();
-      expect(community.some(p => p.id === 'src-del-1')).toBe(false);
-    });
-
-    it('getCharacterProfileVisibility defaults to public when no sidecar row', async () => {
-      await createMinimalProfile('vis-default');
-      expect(await getCharacterProfileVisibility('vis-default')).toBe('public');
-    });
-
-    it('setCharacterProfileVisibility upserts public/private', async () => {
-      await createMinimalProfile('vis-toggle');
-      // Defaults to public
-      expect(await getCharacterProfileVisibility('vis-toggle')).toBe('public');
-      // Set private
-      await setCharacterProfileVisibility('vis-toggle', 'private');
-      expect(await getCharacterProfileVisibility('vis-toggle')).toBe('private');
-      // Flip back to public
-      await setCharacterProfileVisibility('vis-toggle', 'public');
-      expect(await getCharacterProfileVisibility('vis-toggle')).toBe('public');
-    });
-
-    it('getCommunityCharacterProfiles excludes private community profiles', async () => {
-      await createMinimalProfile('vis-comm-pub');
-      await createMinimalProfile('vis-comm-priv');
-      await setCharacterProfileVisibility('vis-comm-priv', 'private');
-
-      const community = await getCommunityCharacterProfiles();
-      const ids = community.map(p => p.id);
-      expect(ids).toContain('vis-comm-pub');
-      expect(ids).not.toContain('vis-comm-priv');
-    });
-
-    it('getPublicCharacterProfiles includes public profiles of any source and excludes private ones', async () => {
-      // Community (untagged) public
-      await createMinimalProfile('vis-pub-comm');
-      // User-tagged public
-      await createMinimalProfile('vis-pub-user');
-      await setCharacterProfileSource('vis-pub-user', 'user');
-      // Private (user-tagged)
-      await createMinimalProfile('vis-priv');
-      await setCharacterProfileSource('vis-priv', 'user');
-      await setCharacterProfileVisibility('vis-priv', 'private');
-
-      const publicProfiles = await getPublicCharacterProfiles();
-      const ids = publicProfiles.map(p => p.id);
-      expect(ids).toContain('vis-pub-comm');
-      expect(ids).toContain('vis-pub-user');
-      expect(ids).not.toContain('vis-priv');
-    });
-  });
-
   describe('character favorites', () => {
     it('is not favorited by default', async () => {
       await createMinimalProfile('fav-default');
@@ -616,67 +514,6 @@ describe('characters repository', () => {
       expect(ids).toContain('fav-list-2');
       // fav-list-2 was favorited last → newest first
       expect(ids.indexOf('fav-list-2')).toBeLessThan(ids.indexOf('fav-list-1'));
-    });
-  });
-
-  describe('character categories', () => {
-    it('createCharacterCategory returns the created category and lists it', async () => {
-      const cat = await createCharacterCategory('  My Group  ');
-      expect(cat.name).toBe('My Group');
-      expect(cat.id).toBeTruthy();
-
-      const cats = await getCharacterCategories();
-      expect(cats.map(c => c.id)).toContain(cat.id);
-    });
-
-    it('renameCharacterCategory updates the name', async () => {
-      const cat = await createCharacterCategory('Old');
-      await renameCharacterCategory(cat.id, 'New Name');
-      const cats = await getCharacterCategories();
-      const updated = cats.find(c => c.id === cat.id);
-      expect(updated?.name).toBe('New Name');
-    });
-
-    it('deleteCharacterCategory removes it and its memberships', async () => {
-      await createMinimalProfile('cat-del-prof');
-      const cat = await createCharacterCategory('To Delete');
-      await addCharacterToCategory('cat-del-prof', cat.id);
-      expect(await getCharacterCategoryMembers(cat.id)).toContain('cat-del-prof');
-
-      await deleteCharacterCategory(cat.id);
-      expect((await getCharacterCategories()).some(c => c.id === cat.id)).toBe(false);
-      // Member rows cascade away (querying the deleted category returns nothing)
-      expect(await getCharacterCategoryMembers(cat.id)).toEqual([]);
-    });
-
-    it('addCharacterToCategory then members and profile categories reflect it', async () => {
-      await createMinimalProfile('cat-mem-prof');
-      const cat = await createCharacterCategory('Members');
-      await addCharacterToCategory('cat-mem-prof', cat.id);
-
-      expect(await getCharacterCategoryMembers(cat.id)).toContain('cat-mem-prof');
-      const profileCats = await getCharacterProfileCategories('cat-mem-prof');
-      expect(profileCats.map(c => c.id)).toContain(cat.id);
-    });
-
-    it('addCharacterToCategory is idempotent (no duplicate rows)', async () => {
-      await createMinimalProfile('cat-idem-prof');
-      const cat = await createCharacterCategory('Idempotent');
-      await addCharacterToCategory('cat-idem-prof', cat.id);
-      await addCharacterToCategory('cat-idem-prof', cat.id);
-
-      const members = await getCharacterCategoryMembers(cat.id);
-      expect(members.filter(m => m === 'cat-idem-prof')).toHaveLength(1);
-    });
-
-    it('removeCharacterFromCategory detaches the profile', async () => {
-      await createMinimalProfile('cat-unassign-prof');
-      const cat = await createCharacterCategory('Unassign');
-      await addCharacterToCategory('cat-unassign-prof', cat.id);
-      await removeCharacterFromCategory('cat-unassign-prof', cat.id);
-
-      expect(await getCharacterCategoryMembers(cat.id)).not.toContain('cat-unassign-prof');
-      expect(await getCharacterProfileCategories('cat-unassign-prof')).toEqual([]);
     });
   });
 
@@ -799,7 +636,6 @@ describe('characters repository', () => {
         is_edited: false,
         edit_of_message_id: null,
         reactions_json: '["❤️","👍"]',
-        reply_to_message_id: null,
         is_pinned: false,
       });
       await createConversationMessage({
@@ -815,7 +651,6 @@ describe('characters repository', () => {
         is_edited: false,
         edit_of_message_id: null,
         reactions_json: '["😂"]',
-        reply_to_message_id: null,
         is_pinned: false,
       });
 

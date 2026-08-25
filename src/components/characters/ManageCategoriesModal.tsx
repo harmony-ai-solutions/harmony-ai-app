@@ -28,7 +28,7 @@ import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
-import type { CharacterCategory } from '../../database/repositories/characters';
+import type { CharacterCategory } from '../../services/CategoryPreferencesService';
 
 interface ManageCategoriesModalProps {
   visible: boolean;

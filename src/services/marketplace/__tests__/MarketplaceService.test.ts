@@ -46,12 +46,10 @@ jest.mock('../../stub/stubBackendUtils', () => {
 
 // Backstop: the marketplace stub service layer must NEVER touch the local DB
 // repos. If a repo module is ever imported, these factories throw on load and
-// the suite fails loudly.
+// the suite fails loudly. (The marketplace/social/wallet repos were deleted in
+// the schema-surgery phase — the surviving characters repo keeps its guard.)
 jest.mock('../../../database/repositories/characters', () => {
   throw new Error('MarketplaceService must not import database/repositories/characters');
-});
-jest.mock('../../../database/repositories/marketplace', () => {
-  throw new Error('MarketplaceService must not import database/repositories/marketplace');
 });
 
 import { readFileSync } from 'fs';

@@ -64,11 +64,7 @@ import {
   deleteCharacterProfileCascade,
   getCharacterProfile,
   getCharacterImages,
-  getCharacterProfileVisibility,
-  setCharacterProfileSource,
-  setCharacterProfileVisibility,
   updateCharacterProfile,
-  type CharacterProfileVisibility,
 } from '../database/repositories/characters';
 import { setCharacterCreator } from '../services/social/SocialService';
 import {
@@ -127,14 +123,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [avatarMimeType, setAvatarMimeType] = useState<string>('image/jpeg');
 
   // Visibility / sharing:
-  //   - private      → only the creator can see/chat (DEFAULT)
-  //   - public       → visible + searchable on Discover, anyone can chat
-  // The 'marketplace' visibility + SOUL price option was REMOVED in Phase 2
-  // (A4 upload-copy ruling): publishing is upload-copy via the Market's Publish
+  // The client-only visibility sidecar was REMOVED with the stub layer (A3 —
+  // source/visibility persistence is gone). Discover is stub-fixture driven, so
+  // a local private/public toggle would be dead UI; the 'marketplace'
+  // visibility + SOUL price option was already removed in Phase 2 (A4
+  // upload-copy ruling): publishing is upload-copy via the Market's Publish
   // wizard — the local character never carries a marketplace visibility state
   // or listing row.
-  const [visibility, setVisibility] = useState<'private' | 'public'>('private');
-  const [visibilityLoaded, setVisibilityLoaded] = useState(false);
 
   // ── Prompts & Scenario (AI settings) ────────────────────────────────────────
   const [basePrompt, setBasePrompt] = useState('');
@@ -485,19 +480,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setScenario(profile.scenario ?? '');
         setExampleDialogues(profile.mes_example ?? '');
 
-        // Carry over the source profile's visibility so the fork matches it
-        // (the 'marketplace' visibility/price option is gone — Phase 2 A4).
-        try {
-          const visibility = await getCharacterProfileVisibility(profile.id);
-          if (!cancelled) {
-            setVisibility(visibility === 'marketplace' ? 'public' : visibility);
-            setVisibilityLoaded(true);
-          }
-        } catch (visErr) {
-          log.warn('Failed to copy profile visibility:', visErr);
-          if (!cancelled) setVisibilityLoaded(true);
-        }
-
         // Copy the source profile's gallery images (the primary avatar is
         // already copied separately above — skip it to avoid a duplicate).
         try {
@@ -642,19 +624,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         setScenario(profile.scenario ?? '');
         setExampleDialogues(profile.mes_example ?? '');
         setEditOriginalName(profile.name);
-
-        // Visibility (private/public/marketplace) — loaded from the client-only
-        // sidecar + marketplace listing price.
-        try {
-          const visibility = await getCharacterProfileVisibility(profile.id);
-          if (!cancelled) {
-            setVisibility(visibility === 'marketplace' ? 'public' : visibility);
-            setVisibilityLoaded(true);
-          }
-        } catch (visErr) {
-          log.warn('Failed to load profile visibility:', visErr);
-          if (!cancelled) setVisibilityLoaded(true);
-        }
 
         // Avatar (primary image)
         try {
@@ -808,14 +777,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           mes_example: exampleDialogues.trim() || '',
         });
 
-        // Persist the chosen visibility (private/public) in the sidecar. The
-        // 'marketplace' visibility + price row are gone (Phase 2 A4 — local
-        // characters never carry a marketplace listing state).
-        await setCharacterProfileVisibility(
-          editProfileId,
-          visibility as CharacterProfileVisibility,
-        );
-
         // Reconcile images: delete the existing ones, then re-create from the
         // current UI state (avatar + gallery). This keeps the DB in exact sync
         // with what the user sees, whether they swapped the avatar, removed a
@@ -957,16 +918,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           scenario: scenario.trim() || '',
           mes_example: exampleDialogues.trim() || '',
         });
-        // Tag as user-created so it is hidden from the Discover community grid
-        await setCharacterProfileSource(profileId, 'user');
-
-        // Persist the chosen visibility (private/public). Public partners appear on
-        // Discover; private ones stay hidden. The 'marketplace' visibility +
-        // price row are gone (Phase 2 A4).
-        await setCharacterProfileVisibility(
-          profileId,
-          visibility as CharacterProfileVisibility,
-        );
 
         // Record the cloud user who created this AI (creator badge + the
         // creator-only Edit Profile / Edit AI Settings buttons depend on it).
@@ -1340,94 +1291,6 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
             {showDetails && (
               <View style={styles.sectionContent}>
-                {/* ── Visibility & Sharing ── */}
-                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
-                  {t('visibilityLabel')}
-                </ThemedText>
-
-                {/* 2-way selector: Private / Public (marketplace removed, A4) */}
-                <View
-                  style={[
-                    styles.visibilityRow,
-                    {
-                      backgroundColor: hexToRgba(surfaceColor, 0.55),
-                      borderColor: hexToRgba(accent, 0.25),
-                    },
-                  ]}
-                >
-                  <View style={styles.visibilityIconWrap}>
-                    <Icon
-                      name={visibility === 'private' ? 'lock-outline' : 'earth'}
-                      size={22}
-                      color={accent}
-                    />
-                  </View>
-                  <View style={styles.visibilityLabelGroup}>
-                    <ThemedText size={15} weight="bold" variant="primary">
-                      {visibility === 'private'
-                        ? t('visibilityPrivate')
-                        : t('visibilityPublic')}
-                    </ThemedText>
-                    <ThemedText size={12} variant="muted">
-                      {visibility === 'private'
-                        ? t('visibilityPrivateHint')
-                        : t('visibilityPublicHint')}
-                    </ThemedText>
-                  </View>
-                </View>
-
-                {/* Segment picker: Private | Public */}
-                <View style={styles.visibilitySegments}>
-                  {(
-                    [
-                      { key: 'private', icon: 'lock-outline', label: t('visibilityPrivate') },
-                      { key: 'public', icon: 'earth', label: t('visibilityPublic') },
-                    ] as const
-                  ).map(seg => {
-                    const active = visibility === seg.key;
-                    return (
-                      <TouchableOpacity
-                        key={seg.key}
-                        onPress={() => {
-                          hapticLightPress();
-                          setVisibility(seg.key);
-                        }}
-                        activeOpacity={0.8}
-                        disabled={!visibilityLoaded && !!editProfileId}
-                        testID={`create-ai-visibility-${seg.key}`}
-                        accessibilityRole="button"
-                        accessibilityLabel={seg.label}
-                        style={[
-                          styles.visibilitySegment,
-                          {
-                            backgroundColor: active
-                              ? hexToRgba(accent, 0.18)
-                              : hexToRgba(surfaceColor, 0.45),
-                            borderColor: active
-                              ? accent
-                              : theme.colors.border.default,
-                          },
-                        ]}
-                      >
-                        <Icon
-                          name={seg.icon}
-                          size={16}
-                          color={active ? accent : theme.colors.text.muted}
-                        />
-                        <ThemedText
-                          size={12}
-                          weight={active ? 'bold' : 'medium'}
-                          variant={active ? 'primary' : 'muted'}
-                          numberOfLines={1}
-                          style={styles.visibilitySegmentLabel}
-                        >
-                          {seg.label}
-                        </ThemedText>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
                 {/* Personality */}
                 {renderField(
                   'personalityLabel',
@@ -1922,51 +1785,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 15,
     paddingVertical: 0,
-  },
-
-  // ── Visibility & sharing (3-way selector) ──
-  visibilityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 8,
-  },
-  visibilityIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-  },
-  visibilityLabelGroup: {
-    flex: 1,
-    gap: 2,
-  },
-  visibilitySegments: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 4,
-  },
-  visibilitySegment: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-  },
-  visibilitySegmentLabel: {
-    flexShrink: 1,
   },
 
   // ── SOUL price (marketplace only) ──

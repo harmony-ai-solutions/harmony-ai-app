@@ -49,21 +49,7 @@ import { migration038 } from './migrations/000038_add_lifecycle_state';
 import { migration039 } from './migrations/000039_device_push_tokens_reserved';
 import { migration040 } from './migrations/000040_lifecycle_state_sync_columns';
 
-import { migration041 } from './migrations/000041_add_character_profile_source';
-import { migration042 } from './migrations/000042_backfill_character_profile_source';
-import { migration043 } from './migrations/000043_add_personas_table';
-import { migration044 } from './migrations/000044_cleanup_leaked_persona_rows';
-import { migration045 } from './migrations/000045_add_character_categories_and_favorites';
-import { migration046 } from './migrations/000046_add_message_actions';
-import { migration047 } from './migrations/000047_add_character_social';
-import { migration048 } from './migrations/000048_add_user_posts_social';
-import { migration049 } from './migrations/000049_add_character_profile_visibility';
-import { migration050 } from './migrations/000050_add_chat_conversation_settings';
-import { migration051 } from './migrations/000051_add_marketplace_and_soul_wallet';
-import { migration052 } from './migrations/000052_extend_visibility_check_marketplace';
-import { migration053 } from './migrations/000053_add_blocked_users';
-import { migration054 } from './migrations/000054_add_signup_bonus_flag';
-import { migration055 } from './migrations/000055_add_marketplace_cache';
+import { migration041 } from './migrations/000041_consolidate_senju_features';
 
 // Migration definition
 export interface Migration {
@@ -278,78 +264,8 @@ export const MIGRATIONS: Migration[] = [
    },
    {
     version: 41,
-    description: 'add_character_profile_source',
+    description: 'consolidate_senju_features (personas, favorites, message actions, chat settings)',
     sql: migration041,
-   },
-   {
-    version: 42,
-    description: 'backfill_character_profile_source',
-    sql: migration042,
-   },
-   {
-    version: 43,
-    description: 'add_personas_table',
-    sql: migration043,
-   },
-   {
-    version: 44,
-    description: 'cleanup_leaked_persona_rows',
-    sql: migration044,
-   },
-   {
-    version: 45,
-    description: 'add_character_categories_and_favorites',
-    sql: migration045,
-   },
-   {
-    version: 46,
-    description: 'add_message_actions',
-    sql: migration046,
-   },
-   {
-    version: 47,
-    description: 'add_character_social',
-    sql: migration047,
-   },
-   {
-    version: 48,
-    description: 'add_user_posts_social',
-    sql: migration048,
-   },
-   {
-    version: 49,
-    description: 'add_character_profile_visibility',
-    sql: migration049,
-   },
-   {
-    version: 50,
-    description: 'add_chat_conversation_settings',
-    sql: migration050,
-   },
-   {
-    version: 51,
-    description: 'add_marketplace_and_soul_wallet',
-    sql: migration051,
-   },
-   {
-    version: 52,
-    description: 'extend_visibility_check_marketplace',
-    sql: migration052,
-   },
-   {
-    version: 53,
-    description: 'add_blocked_users',
-    sql: migration053,
-   },
-   {
-    version: 54,
-    description: 'add_signup_bonus_flag',
-    sql: migration054,
-   },
-   {
-    version: 55,
-    description: 'add_marketplace_cache',
-    sql: migration055,
    },
   ];
 

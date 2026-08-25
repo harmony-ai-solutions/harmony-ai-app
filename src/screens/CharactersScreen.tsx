@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -51,17 +51,13 @@ import {
   deleteCharacterProfileCascade,
   createCharacterProfile,
   createCharacterImage,
+  updateCharacterProfile,
   getFavoriteCharacterProfileIds,
   toggleCharacterFavorite,
-  getCharacterCategories,
-  createCharacterCategory,
-  renameCharacterCategory,
-  deleteCharacterCategory,
-  getCharacterCategoryMembers,
-  addCharacterToCategory,
-  removeCharacterFromCategory,
-  CharacterCategory,
 } from '../database/repositories/characters';
+import CategoryPreferencesService, {
+  CharacterCategory,
+} from '../services/CategoryPreferencesService';
 import { createDataURL, base64ToUint8Array } from '../database/base64';
 import RNFS from 'react-native-fs';
 import {
@@ -223,48 +219,70 @@ export const CharactersScreen: React.FC = () => {
 
   // ── Favorites + categories ─────────────────────────────────────────────
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
-  const [categories, setCategories] = useState<CharacterCategory[]>([]);
+  // Custom categories persisted in AsyncStorage (O6 — the old DB sidecar is
+  // gone). Membership is tag-based: a profile "belongs" to a category when its
+  // `character_profiles.tags` contains the category name.
+  const [customCategories, setCustomCategories] = useState<CharacterCategory[]>(
+    [],
+  );
   // activeFilter: 'all' | 'favorites' | category id
   const [activeFilter, setActiveFilter] = useState<string>('all');
-  // Which profile is currently being assigned to categories (null = none)
-  // Per-category membership cache: categoryId → Set<profileId>
-  const [categoryMembers, setCategoryMembers] = useState<
-    Record<string, Set<string>>
-  >({});
   const [manageVisible, setManageVisible] = useState(false);
   // Which profile the long-press context menu is open for (null = closed)
   const [menuProfile, setMenuProfile] = useState<CharacterProfile | null>(null);
   // Which profile the "Add to category" picker is open for (null = closed)
   const [categoryPickProfile, setCategoryPickProfile] = useState<CharacterProfile | null>(null);
 
+  /** Parse a profile's tags JSON column (defensive). */
+  const profileTags = useCallback(
+    (profile: CharacterProfile): string[] => {
+      return parseJsonColumn<string[]>(profile.tags) ?? [];
+    },
+    [],
+  );
+
+  /** Does a profile carry a given category name as a tag? (case-insensitive) */
+  const profileHasCategory = useCallback(
+    (profile: CharacterProfile, categoryName: string): boolean => {
+      const target = categoryName.toLowerCase();
+      return profileTags(profile).some(tag => tag.toLowerCase() === target);
+    },
+    [profileTags],
+  );
+
   /**
-   * Load favorites + categories + per-category membership in parallel.
-   * Membership is lazy — only the active category's member set is needed for
-   * filtering, but we load all members so the category-assign modal can show
-   * every profile's current assignment instantly.
+   * The filterable category list = custom AsyncStorage categories ∪ distinct
+   * profile tags (each tag that is not already a custom category surfaces as a
+   * tag-derived category option). Tag-derived ids are `tag:<lowercased name>`
+   * so they never collide with custom category ids.
+   */
+  const categories: CharacterCategory[] = useMemo(() => {
+    const seen = new Set<string>();
+    const union: CharacterCategory[] = [];
+    for (const cat of customCategories) {
+      seen.add(cat.name.toLowerCase());
+      union.push(cat);
+    }
+    for (const tag of allTags) {
+      if (!seen.has(tag.toLowerCase())) {
+        union.push({ id: `tag:${tag.toLowerCase()}`, name: tag });
+      }
+    }
+    return union;
+  }, [customCategories, allTags]);
+
+  /**
+   * Load favorites + custom categories (membership needs no loading — it is
+   * derived from profile tags, which loadProfiles already has).
    */
   const loadFavoritesAndCategories = useCallback(async () => {
     try {
       const [favIds, cats] = await Promise.all([
         getFavoriteCharacterProfileIds(),
-        getCharacterCategories(),
+        CategoryPreferencesService.getCategories(),
       ]);
       setFavoriteIds(new Set(favIds));
-      setCategories(cats);
-
-      // Load membership for every category in parallel.
-      const memberMap: Record<string, Set<string>> = {};
-      await Promise.all(
-        cats.map(async cat => {
-          try {
-            const ids = await getCharacterCategoryMembers(cat.id);
-            memberMap[cat.id] = new Set(ids);
-          } catch {
-            memberMap[cat.id] = new Set();
-          }
-        }),
-      );
-      setCategoryMembers(memberMap);
+      setCustomCategories(cats);
     } catch (err) {
       log.error('Failed to load favorites/categories:', err);
     }
@@ -340,9 +358,16 @@ export const CharactersScreen: React.FC = () => {
       q.length === 0 || p.name.toLowerCase().startsWith(q);
     if (!matchesQuery) return false;
 
-    // Active filter: all / favorites / category id (AND-composed with the filters below)
+    // Active filter: all / favorites / category (AND-composed with the
+    // filters below). Category membership is tag-based (O6): a profile matches
+    // when its tags contain the active category's name.
     if (activeFilter === 'favorites' && !favoriteIds.has(p.id)) return false;
-    if (activeFilter !== 'all' && !(categoryMembers[activeFilter]?.has(p.id) ?? false)) return false;
+    if (activeFilter !== 'all' && activeFilter !== 'favorites') {
+      const activeCategory = categories.find(c => c.id === activeFilter);
+      if (!activeCategory || !profileHasCategory(p, activeCategory.name)) {
+        return false;
+      }
+    }
 
     if (selectedTags.length > 0) {
       const tags = parseJsonColumn<string[]>(p.tags) ?? [];
@@ -414,6 +439,8 @@ export const CharactersScreen: React.FC = () => {
 
   const handleCategoriesChanged = useCallback(() => {
     loadFavoritesAndCategories();
+    // Rename/delete rewrite profile tags — reload so filters + chips reflect.
+    loadProfiles();
   }, [loadFavoritesAndCategories]);
 
   const handleEdit = (profile: CharacterProfile) => {
@@ -493,25 +520,30 @@ export const CharactersScreen: React.FC = () => {
 
   /**
    * Toggle a profile's membership in a category (from the "Add to category"
-   * picker). Persists and updates the membership cache.
+   * picker). Membership is tag-based (O6): toggling writes/removes the
+   * category NAME as a native tag on `character_profiles.tags` (which syncs to
+   * the engine), then updates local state so filters/counts reflect instantly.
    */
   const handleCategoryPickToggle = async (categoryId: string, assign: boolean) => {
     const profile = categoryPickProfile;
     if (!profile) return;
+    const category = categories.find(c => c.id === categoryId);
+    if (!category) return;
     try {
-      if (assign) {
-        await addCharacterToCategory(profile.id, categoryId);
-      } else {
-        await removeCharacterFromCategory(profile.id, categoryId);
-      }
-      setCategoryMembers(prev => {
-        const next = { ...prev };
-        const current = new Set(next[categoryId] ?? []);
-        if (assign) current.add(profile.id);
-        else current.delete(profile.id);
-        next[categoryId] = current;
-        return next;
+      const current = profileTags(profile);
+      const target = category.name.toLowerCase();
+      const without = current.filter(tag => tag.toLowerCase() !== target);
+      const nextTags = assign ? [...without, category.name] : without;
+      await updateCharacterProfile({
+        ...profile,
+        tags: JSON.stringify(nextTags),
       });
+      // Reflect the tag change locally (filters + counts derive from tags).
+      setProfiles(prev =>
+        prev.map(p =>
+          p.id === profile.id ? { ...p, tags: JSON.stringify(nextTags) } : p,
+        ),
+      );
     } catch (err) {
       log.error('Failed to update category membership:', err);
     }
@@ -521,16 +553,39 @@ export const CharactersScreen: React.FC = () => {
   const categoryPickState: Record<string, boolean> = {};
   if (categoryPickProfile) {
     for (const cat of categories) {
-      categoryPickState[cat.id] =
-        categoryMembers[cat.id]?.has(categoryPickProfile.id) ?? false;
+      categoryPickState[cat.id] = profileHasCategory(categoryPickProfile, cat.name);
     }
   }
 
   /** categoryId → member count, shown next to each category in the dropdown. */
   const categoryMemberCounts: Record<string, number> = {};
   for (const cat of categories) {
-    categoryMemberCounts[cat.id] = categoryMembers[cat.id]?.size ?? 0;
+    categoryMemberCounts[cat.id] = profiles.filter(p =>
+      profileHasCategory(p, cat.name),
+    ).length;
   }
+
+  /**
+   * Rewrite a category-name tag on every profile that carries it — used on
+   * category rename (old tag → new tag, preserving membership, which is the
+   * tag-based equivalent of the old id-based rename) and delete (tag stripped,
+   * mirroring the old FK-cascade that removed member rows). The modal fires
+   * `onChange` after each mutation, which reloads profiles + chips.
+   */
+  const rewriteCategoryTag = async (oldName: string, newName: string | null) => {
+    const target = oldName.toLowerCase();
+    const all = await getAllCharacterProfiles();
+    const affected = all.filter(p =>
+      profileTags(p).some(tag => tag.toLowerCase() === target),
+    );
+    for (const p of affected) {
+      const without = profileTags(p).filter(
+        tag => tag.toLowerCase() !== target,
+      );
+      const nextTags = newName ? [...without, newName] : without;
+      await updateCharacterProfile({ ...p, tags: JSON.stringify(nextTags) });
+    }
+  };
 
   /**
    * "New AI Partner" — opens the Create AI Partner wizard (fresh profile
@@ -1021,20 +1076,26 @@ export const CharactersScreen: React.FC = () => {
         onSelect={handlePickerSelect}
       />
 
-      {/* Manage categories bottom sheet */}
+      {/* Manage categories bottom sheet — manages the AsyncStorage custom list
+          (O6). Rename/delete also rewrite the corresponding profile tags so
+          membership stays coherent. */}
       <ManageCategoriesModal
         visible={manageVisible}
-        categories={categories}
+        categories={customCategories}
         onClose={() => setManageVisible(false)}
         onChange={handleCategoriesChanged}
         onCreate={async name => {
-          await createCharacterCategory(name);
+          await CategoryPreferencesService.createCategory(name);
         }}
         onRename={async (categoryId, name) => {
-          await renameCharacterCategory(categoryId, name);
+          const old = customCategories.find(c => c.id === categoryId);
+          await CategoryPreferencesService.renameCategory(categoryId, name);
+          if (old) await rewriteCategoryTag(old.name, name);
         }}
         onDelete={async categoryId => {
-          await deleteCharacterCategory(categoryId);
+          const target = customCategories.find(c => c.id === categoryId);
+          await CategoryPreferencesService.deleteCategory(categoryId);
+          if (target) await rewriteCategoryTag(target.name, null);
         }}
       />
 

@@ -294,82 +294,20 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
 }
 
 /**
- * Get all character profiles whose source is 'user' (created by the app user
- * via Create AI / profile editing / character-card import). Used by the My
- * Profile "AI Characters" tab. Filters out soft-deleted by default — identical
- * semantics to getAllCharacterProfiles / getCommunityCharacterProfiles.
+ * Get all character profiles the user owns/created (My Profile "AI
+ * Characters" tab, publish source picker, content-asset apply picker).
+ *
+ * INTERIM BEHAVIOUR: the source-tagging sidecar that marked user-created
+ * profiles was removed with the stub layer (A3 — source/visibility persistence
+ * is gone). Until a Phase-2 engine mirror restores a real "creator/ownership"
+ * signal, this returns the full local library (all non-deleted profiles) — the
+ * honest post-sidecar state for a local-only library. Filters out soft-deleted
+ * by default — identical semantics to getAllCharacterProfiles.
  */
 export async function getUserCharacterProfiles(
   includeDeleted = false,
 ): Promise<CharacterProfile[]> {
-  const db = getDatabase();
-  const query = includeDeleted
-    ? `SELECT cp.id, cp.name, cp.description, cp.personality,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario,
-              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config,
-              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
-              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
-              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
-              cp.card_provenance, cp.character_book,
-              cp.created_at, cp.updated_at, cp.deleted_at
-       FROM character_profiles cp
-       INNER JOIN character_profile_sources cps ON cps.profile_id = cp.id
-       WHERE cps.source = 'user'
-       ORDER BY cp.name`
-    : `SELECT cp.id, cp.name, cp.description, cp.personality,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario,
-              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config,
-              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
-              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
-              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
-              cp.card_provenance, cp.character_book,
-              cp.created_at, cp.updated_at, cp.deleted_at
-       FROM character_profiles cp
-       INNER JOIN character_profile_sources cps ON cps.profile_id = cp.id
-       WHERE cp.deleted_at IS NULL
-         AND cps.source = 'user'
-       ORDER BY cp.name`;
-
-  const [results] = await db.executeSql(query);
-
-  const profiles: CharacterProfile[] = [];
-  for (let i = 0; i < results.rows.length; i++) {
-    const row = results.rows.item(i);
-    profiles.push({
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      personality: row.personality,
-      voice_characteristics: row.voice_characteristics,
-      base_prompt: row.base_prompt,
-      scenario: row.scenario,
-      typing_speed_wpm: row.typing_speed_wpm,
-      audio_response_chance_percent: row.audio_response_chance_percent,
-      vision_config_id: row.vision_config_id ?? null,
-      lifecycle_config: row.lifecycle_config ?? null,
-      first_mes: row.first_mes ?? '',
-      mes_example: row.mes_example ?? '',
-      alternate_greetings: row.alternate_greetings ?? '',
-      post_history_instructions: row.post_history_instructions ?? '',
-      creator_notes: row.creator_notes ?? '',
-      creator: row.creator ?? '',
-      character_version: row.character_version ?? '',
-      nickname: row.nickname ?? '',
-      tags: row.tags ?? '',
-      group_only_greetings: row.group_only_greetings ?? '',
-      extensions: row.extensions ?? '',
-      assets: row.assets ?? '',
-      card_provenance: row.card_provenance ?? '',
-      character_book: row.character_book ?? '',
-      created_at: new Date(row.created_at),
-      updated_at: new Date(row.updated_at),
-      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
-    });
-  }
-
-  return profiles;
+  return getAllCharacterProfiles(includeDeleted);
 }
 
 /**
@@ -839,285 +777,13 @@ export async function getCharacterImagesWithDataURLs(
 }
 
 // ============================================================================
-// Character Profile Source + Visibility Tagging (client-only)
+// Character Favorites (client-only)
 // ============================================================================
 //
-// The source sidecar records whether a profile was created by the app user
-// ('user') or is a community/default character ('community'). The same sidecar
-// also records the profile's **visibility** ('public' | 'private') — public
-// profiles are visible + searchable on the Discover screen, private profiles
-// are hidden. Stored in a separate CLIENT-ONLY table that is never synced, so
-// the engine schema (strict parity, docs/schema-parity.md) stays untouched. A
-// profile with no sidecar row defaults to 'community' source and 'public'
-// visibility.
-
-export type CharacterProfileSource = 'user' | 'community';
-
-export const CHARACTER_PROFILE_SOURCE_USER = 'user' as const;
-export const CHARACTER_PROFILE_SOURCE_COMMUNITY = 'community' as const;
-
-export type CharacterProfileVisibility = 'public' | 'private' | 'marketplace';
-
-export const CHARACTER_PROFILE_VISIBILITY_PUBLIC = 'public' as const;
-export const CHARACTER_PROFILE_VISIBILITY_PRIVATE = 'private' as const;
-export const CHARACTER_PROFILE_VISIBILITY_MARKETPLACE = 'marketplace' as const;
-
-/**
- * Mark a character profile as user-created (via the app's Create AI / edit flows).
- * Upserts the sidecar row. Never touches character_profiles itself.
- */
-export async function setCharacterProfileSource(
-  profileId: string,
-  source: CharacterProfileSource,
-): Promise<void> {
-  const db = getDatabase();
-  await db.executeSql(
-    `INSERT INTO character_profile_sources (profile_id, source, created_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(profile_id) DO UPDATE SET source = excluded.source`,
-    [profileId, source, new Date().toISOString()],
-  );
-}
-
-/**
- * Get the source for a single profile. Returns 'community' when no sidecar
- * row exists (default).
- */
-export async function getCharacterProfileSource(
-  profileId: string,
-): Promise<CharacterProfileSource> {
-  const db = getDatabase();
-  const [results] = await db.executeSql(
-    'SELECT source FROM character_profile_sources WHERE profile_id = ?',
-    [profileId],
-  );
-  if (results.rows.length === 0) {
-    return CHARACTER_PROFILE_SOURCE_COMMUNITY;
-  }
-  const source = results.rows.item(0).source as CharacterProfileSource;
-  return source === 'user' ? source : CHARACTER_PROFILE_SOURCE_COMMUNITY;
-}
-
-/**
- * Set the visibility of a character profile:
- *   - 'public'       → visible + searchable on Discover, chat freely
- *   - 'private'      → hidden from Discover/search + Market, only the creator
- *   - 'marketplace'  → visible on Discover + Market, chat requires purchase
- * Upserts the sidecar row so profiles without one get one. Never touches
- * character_profiles itself.
- */
-export async function setCharacterProfileVisibility(
-  profileId: string,
-  visibility: CharacterProfileVisibility,
-): Promise<void> {
-  const db = getDatabase();
-  await db.executeSql(
-    `INSERT INTO character_profile_sources (profile_id, source, created_at, visibility)
-     VALUES (?, 'user', ?, ?)
-     ON CONFLICT(profile_id) DO UPDATE SET visibility = excluded.visibility`,
-    [profileId, new Date().toISOString(), visibility],
-  );
-}
-
-/**
- * Get the visibility for a single profile. Returns 'public' when no sidecar
- * row exists (default) or when the row predates the visibility column.
- */
-export async function getCharacterProfileVisibility(
-  profileId: string,
-): Promise<CharacterProfileVisibility> {
-  const db = getDatabase();
-  const [results] = await db.executeSql(
-    'SELECT visibility FROM character_profile_sources WHERE profile_id = ?',
-    [profileId],
-  );
-  if (results.rows.length === 0) {
-    return CHARACTER_PROFILE_VISIBILITY_PUBLIC;
-  }
-  const visibility = results.rows.item(0).visibility as CharacterProfileVisibility;
-  // Validate: anything we don't recognize falls back to public (backwards
-  // compatible with pre-000049 rows).
-  return visibility === CHARACTER_PROFILE_VISIBILITY_PRIVATE ||
-    visibility === CHARACTER_PROFILE_VISIBILITY_MARKETPLACE
-    ? visibility
-    : CHARACTER_PROFILE_VISIBILITY_PUBLIC;
-}
-
-/**
- * Get all character profiles whose source is 'community' (imported cards,
- * synced from the engine, or legacy rows without a sidecar tag) AND are
- * publicly visible. Filters out soft-deleted by default — identical semantics
- * to getAllCharacterProfiles.
- */
-export async function getCommunityCharacterProfiles(
-  includeDeleted = false,
-): Promise<CharacterProfile[]> {
-  const db = getDatabase();
-  const query = includeDeleted
-    ? `SELECT cp.id, cp.name, cp.description, cp.personality,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario,
-              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config,
-              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
-              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
-              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
-              cp.card_provenance, cp.character_book,
-              cp.created_at, cp.updated_at, cp.deleted_at
-       FROM character_profiles cp
-       LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
-       WHERE (cps.profile_id IS NULL OR cps.source = 'community')
-         AND (cps.visibility IS NULL OR cps.visibility = 'public')
-       ORDER BY cp.name`
-    : `SELECT cp.id, cp.name, cp.description, cp.personality,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario,
-              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config,
-              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
-              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
-              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
-              cp.card_provenance, cp.character_book,
-              cp.created_at, cp.updated_at, cp.deleted_at
-       FROM character_profiles cp
-       LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
-       WHERE cp.deleted_at IS NULL
-         AND (cps.profile_id IS NULL OR cps.source = 'community')
-         AND (cps.visibility IS NULL OR cps.visibility = 'public')
-       ORDER BY cp.name`;
-
-  const [results] = await db.executeSql(query);
-
-  const profiles: CharacterProfile[] = [];
-  for (let i = 0; i < results.rows.length; i++) {
-    const row = results.rows.item(i);
-    profiles.push({
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      personality: row.personality,
-      voice_characteristics: row.voice_characteristics,
-      base_prompt: row.base_prompt,
-      scenario: row.scenario,
-      typing_speed_wpm: row.typing_speed_wpm,
-      audio_response_chance_percent: row.audio_response_chance_percent,
-      vision_config_id: row.vision_config_id ?? null,
-      lifecycle_config: row.lifecycle_config ?? null,
-      first_mes: row.first_mes ?? '',
-      mes_example: row.mes_example ?? '',
-      alternate_greetings: row.alternate_greetings ?? '',
-      post_history_instructions: row.post_history_instructions ?? '',
-      creator_notes: row.creator_notes ?? '',
-      creator: row.creator ?? '',
-      character_version: row.character_version ?? '',
-      nickname: row.nickname ?? '',
-      tags: row.tags ?? '',
-      group_only_greetings: row.group_only_greetings ?? '',
-      extensions: row.extensions ?? '',
-      assets: row.assets ?? '',
-      card_provenance: row.card_provenance ?? '',
-      character_book: row.character_book ?? '',
-      created_at: new Date(row.created_at),
-      updated_at: new Date(row.updated_at),
-      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
-    });
-  }
-
-  return profiles;
-}
-
-/**
- * Get ALL publicly visible character profiles regardless of source — community
- * characters AND the current user's own public AI characters. This is what the
- * Discover screen uses so a user's public partners appear in their own Discover
- * grid, while private partners are hidden from both Discover and search.
- * Filters out soft-deleted by default.
- */
-export async function getPublicCharacterProfiles(
-  includeDeleted = false,
-): Promise<CharacterProfile[]> {
-  const db = getDatabase();
-  const query = includeDeleted
-    ? `SELECT cp.id, cp.name, cp.description, cp.personality,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario,
-              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config,
-              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
-              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
-              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
-              cp.card_provenance, cp.character_book,
-              cp.created_at, cp.updated_at, cp.deleted_at
-       FROM character_profiles cp
-       LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
-       WHERE cps.visibility IS NULL OR cps.visibility IN ('public', 'marketplace')
-       ORDER BY cp.name`
-    : `SELECT cp.id, cp.name, cp.description, cp.personality,
-              cp.voice_characteristics, cp.base_prompt, cp.scenario,
-              cp.typing_speed_wpm, cp.audio_response_chance_percent, cp.vision_config_id,
-              cp.lifecycle_config,
-              cp.first_mes, cp.mes_example, cp.alternate_greetings, cp.post_history_instructions,
-              cp.creator_notes, cp.creator, cp.character_version, cp.nickname,
-              cp.tags, cp.group_only_greetings, cp.extensions, cp.assets,
-              cp.card_provenance, cp.character_book,
-              cp.created_at, cp.updated_at, cp.deleted_at
-       FROM character_profiles cp
-       LEFT JOIN character_profile_sources cps ON cps.profile_id = cp.id
-       WHERE cp.deleted_at IS NULL
-         AND (cps.visibility IS NULL OR cps.visibility IN ('public', 'marketplace'))
-       ORDER BY cp.name`;
-
-  const [results] = await db.executeSql(query);
-
-  const profiles: CharacterProfile[] = [];
-  for (let i = 0; i < results.rows.length; i++) {
-    const row = results.rows.item(i);
-    profiles.push({
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      personality: row.personality,
-      voice_characteristics: row.voice_characteristics,
-      base_prompt: row.base_prompt,
-      scenario: row.scenario,
-      typing_speed_wpm: row.typing_speed_wpm,
-      audio_response_chance_percent: row.audio_response_chance_percent,
-      vision_config_id: row.vision_config_id ?? null,
-      lifecycle_config: row.lifecycle_config ?? null,
-      first_mes: row.first_mes ?? '',
-      mes_example: row.mes_example ?? '',
-      alternate_greetings: row.alternate_greetings ?? '',
-      post_history_instructions: row.post_history_instructions ?? '',
-      creator_notes: row.creator_notes ?? '',
-      creator: row.creator ?? '',
-      character_version: row.character_version ?? '',
-      nickname: row.nickname ?? '',
-      tags: row.tags ?? '',
-      group_only_greetings: row.group_only_greetings ?? '',
-      extensions: row.extensions ?? '',
-      assets: row.assets ?? '',
-      card_provenance: row.card_provenance ?? '',
-      character_book: row.character_book ?? '',
-      created_at: new Date(row.created_at),
-      updated_at: new Date(row.updated_at),
-      deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
-    });
-  }
-
-  return profiles;
-}
-
-// ============================================================================
-// Character Favorites + Categories (client-only)
-// ============================================================================
-//
-// Both features are stored in CLIENT-ONLY sidecar tables (never synced to the
-// engine — strict schema parity, see docs/schema-parity.md), mirroring the
-// `character_profile_sources` and `personas` pattern. A profile with no rows
-// is simply "not favorited / in no category".
-
-export interface CharacterCategory {
-  id: string;
-  name: string;
-  displayOrder: number;
-}
+// Favorites are stored in the CLIENT-ONLY `character_favorites` sidecar table
+// (never synced to the engine — strict schema parity, see docs/schema-parity.md)
+// and survive as a client-side piece pending the Phase-2 engine mirror. A
+// profile with no row is simply "not favorited".
 
 /**
  * True when a character profile is favorited.
@@ -1182,234 +848,98 @@ export async function getFavoriteCharacterProfileIds(): Promise<string[]> {
   return ids;
 }
 
+// ============================================================================
+// AI Profile helpers (forks + stats)
+// ============================================================================
+
 /**
- * All user-defined categories ordered by display_order then name.
+ * All character profiles that share the same fork base name as the given
+ * profile — i.e. "the other forks of the same AI character". Includes the
+ * profile itself (the screen filters it out). Groups "Max", "Max 2",
+ * "Max 3" together via stripCopySuffix.
  */
-export async function getCharacterCategories(): Promise<CharacterCategory[]> {
-  const db = getDatabase();
-  const [results] = await db.executeSql(
-    'SELECT id, name, display_order FROM character_categories ORDER BY display_order ASC, name ASC',
+export async function getSiblingCharacterProfiles(
+  profileName: string,
+): Promise<CharacterProfile[]> {
+  const base = stripCopySuffix(profileName).toLowerCase();
+  const all = await getAllCharacterProfiles();
+  return all.filter(
+    p => stripCopySuffix(p.name).toLowerCase() === base,
   );
-  const categories: CharacterCategory[] = [];
-  for (let i = 0; i < results.rows.length; i++) {
-    const row = results.rows.item(i);
-      categories.push({
-        id: row.id,
-        name: row.name,
-        displayOrder: row.display_order,
-      });
-    }
-    return categories;
-  }
+}
 
-  // ============================================================================
-  // AI Profile helpers (forks + stats)
-  // ============================================================================
+/** Aggregated social stats for an AI character. */
+export interface CharacterStats {
+  /** Total emoji reactions received on messages sent by this character. */
+  likes: number;
+  /** Total distinct users who have opened a chat with this character. */
+  chats: number;
+}
 
-  /**
-   * All character profiles that share the same fork base name as the given
-   * profile — i.e. "the other forks of the same AI character". Includes the
-   * profile itself (the screen filters it out). Groups "Max", "Max 2",
-   * "Max 3" together via stripCopySuffix.
-   */
-  export async function getSiblingCharacterProfiles(
-    profileName: string,
-  ): Promise<CharacterProfile[]> {
-    const base = stripCopySuffix(profileName).toLowerCase();
-    const all = await getAllCharacterProfiles();
-    return all.filter(
-      p => stripCopySuffix(p.name).toLowerCase() === base,
-    );
-  }
+/**
+ * Compute "Likes" and "Chats" for an AI character entity.
+ *
+ *   - likes = sum of all reaction chips on messages SENT by this entity
+ *   - chats = number of DISTINCT users who have opened a chat with this
+ *     character — 1 per user, no matter how many chat sessions (interaction
+ *     rows) that user started. The "user" side of a chat is identified by the
+ *     OTHER participants in the interaction (never the character itself), so
+ *     the count is correct even when the same single chat is recorded twice —
+ *     once locally (entity_id = the user's identity) and once when the engine
+ *     syncs the interaction back (entity_id = the character). Counting rows or
+ *     owners would inflate the number when the same user chats again, or when
+ *     a single chat is mirrored as two interaction rows.
+ *
+ *   Forks are independent: a duplicated character ("Max 2") is a new entity
+ *   whose entity id appears in none of the original's interactions, so its
+ *   chat count starts at 0.
+ */
+export async function getCharacterStats(
+  entityId: string,
+): Promise<CharacterStats> {
+  const db = getDatabase();
 
-  /** Aggregated social stats for an AI character. */
-  export interface CharacterStats {
-    /** Total emoji reactions received on messages sent by this character. */
-    likes: number;
-    /** Total distinct users who have opened a chat with this character. */
-    chats: number;
-  }
-
-  /**
-   * Compute "Likes" and "Chats" for an AI character entity.
-   *
-   *   - likes = sum of all reaction chips on messages SENT by this entity
-   *   - chats = number of DISTINCT users who have opened a chat with this
-   *     character — 1 per user, no matter how many chat sessions (interaction
-   *     rows) that user started. The "user" side of a chat is identified by the
-   *     OTHER participants in the interaction (never the character itself), so
-   *     the count is correct even when the same single chat is recorded twice —
-   *     once locally (entity_id = the user's identity) and once when the engine
-   *     syncs the interaction back (entity_id = the character). Counting rows or
-   *     owners would inflate the number when the same user chats again, or when
-   *     a single chat is mirrored as two interaction rows.
-   *
-   *   Forks are independent: a duplicated character ("Max 2") is a new entity
-   *   whose entity id appears in none of the original's interactions, so its
-   *   chat count starts at 0.
-   */
-  export async function getCharacterStats(
-    entityId: string,
-  ): Promise<CharacterStats> {
-    const db = getDatabase();
-
-    // Count distinct "other participants" this character chatted with.
-    // participant_ids is a JSON array — require an EXACT element match so "Max"
-    // never counts chats that belong to "Max 2", then collect every participant
-    // EXCEPT the character itself (that is the human/user side of the chat).
-    const [interactionResults] = await db.executeSql(
-      `SELECT participant_ids FROM interactions
-       WHERE presence_type = 'phone' AND deleted_at IS NULL`,
-    );
-    const chatUsers = new Set<string>();
-    for (let i = 0; i < interactionResults.rows.length; i++) {
-      const raw = interactionResults.rows.item(i).participant_ids;
-      try {
-        const ids: unknown = JSON.parse(raw);
-        if (Array.isArray(ids) && ids.includes(entityId)) {
-          for (const id of ids) {
-            if (id !== entityId) chatUsers.add(id);
-          }
+  // Count distinct "other participants" this character chatted with.
+  // participant_ids is a JSON array — require an EXACT element match so "Max"
+  // never counts chats that belong to "Max 2", then collect every participant
+  // EXCEPT the character itself (that is the human/user side of the chat).
+  const [interactionResults] = await db.executeSql(
+    `SELECT participant_ids FROM interactions
+     WHERE presence_type = 'phone' AND deleted_at IS NULL`,
+  );
+  const chatUsers = new Set<string>();
+  for (let i = 0; i < interactionResults.rows.length; i++) {
+    const raw = interactionResults.rows.item(i).participant_ids;
+    try {
+      const ids: unknown = JSON.parse(raw);
+      if (Array.isArray(ids) && ids.includes(entityId)) {
+        for (const id of ids) {
+          if (id !== entityId) chatUsers.add(id);
         }
-      } catch {
-        // Ignore malformed participant_ids
       }
+    } catch {
+      // Ignore malformed participant_ids
     }
+  }
 
-    const chats = chatUsers.size;
+  const chats = chatUsers.size;
 
-    const [msgResults] = await db.executeSql(
-      `SELECT reactions_json FROM conversation_messages
-       WHERE sender_entity_id = ? AND deleted_at IS NULL
-         AND reactions_json IS NOT NULL AND reactions_json != ''`,
-      [entityId],
-    );
-    let likes = 0;
-    for (let i = 0; i < msgResults.rows.length; i++) {
-      const raw = msgResults.rows.item(i).reactions_json;
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) likes += parsed.length;
-      } catch {
-        // Ignore malformed reactions_json
-      }
+  const [msgResults] = await db.executeSql(
+    `SELECT reactions_json FROM conversation_messages
+     WHERE sender_entity_id = ? AND deleted_at IS NULL
+       AND reactions_json IS NOT NULL AND reactions_json != ''`,
+    [entityId],
+  );
+  let likes = 0;
+  for (let i = 0; i < msgResults.rows.length; i++) {
+    const raw = msgResults.rows.item(i).reactions_json;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) likes += parsed.length;
+    } catch {
+      // Ignore malformed reactions_json
     }
-
-    return { likes, chats };
   }
 
-/**
- * Create a new category. Returns the created category.
- */
-export async function createCharacterCategory(name: string): Promise<CharacterCategory> {
-  const db = getDatabase();
-  const id = generateId();
-  const now = new Date().toISOString();
-  // Place new categories after existing ones.
-  const [countResults] = await db.executeSql(
-    'SELECT COUNT(*) as count FROM character_categories',
-  );
-  const displayOrder = countResults.rows.item(0).count;
-  await db.executeSql(
-    `INSERT INTO character_categories (id, name, display_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`,
-    [id, name.trim(), displayOrder, now, now],
-  );
-  return { id, name: name.trim(), displayOrder };
-}
-
-/**
- * Rename a category.
- */
-export async function renameCharacterCategory(
-  categoryId: string,
-  name: string,
-): Promise<void> {
-  const db = getDatabase();
-  await db.executeSql(
-    `UPDATE character_categories SET name = ?, updated_at = ? WHERE id = ?`,
-    [name.trim(), new Date().toISOString(), categoryId],
-  );
-}
-
-/**
- * Delete a category (and its member rows — FK ON DELETE CASCADE).
- */
-export async function deleteCharacterCategory(categoryId: string): Promise<void> {
-  const db = getDatabase();
-  await db.executeSql('DELETE FROM character_categories WHERE id = ?', [categoryId]);
-}
-
-/**
- * Profile IDs that belong to a given category.
- */
-export async function getCharacterCategoryMembers(
-  categoryId: string,
-): Promise<string[]> {
-  const db = getDatabase();
-  const [results] = await db.executeSql(
-    'SELECT profile_id FROM character_category_members WHERE category_id = ? ORDER BY created_at DESC',
-    [categoryId],
-  );
-  const ids: string[] = [];
-  for (let i = 0; i < results.rows.length; i++) {
-    ids.push(results.rows.item(i).profile_id);
-  }
-  return ids;
-}
-
-/**
- * Add a profile to a category (idempotent).
- */
-export async function addCharacterToCategory(
-  profileId: string,
-  categoryId: string,
-): Promise<void> {
-  const db = getDatabase();
-  await db.executeSql(
-    `INSERT OR IGNORE INTO character_category_members (profile_id, category_id, created_at)
-     VALUES (?, ?, ?)`,
-    [profileId, categoryId, new Date().toISOString()],
-  );
-}
-
-/**
- * Remove a profile from a category (idempotent).
- */
-export async function removeCharacterFromCategory(
-  profileId: string,
-  categoryId: string,
-): Promise<void> {
-  const db = getDatabase();
-  await db.executeSql(
-    'DELETE FROM character_category_members WHERE profile_id = ? AND category_id = ?',
-    [profileId, categoryId],
-  );
-}
-
-/**
- * All categories a given profile belongs to.
- */
-export async function getCharacterProfileCategories(
-  profileId: string,
-): Promise<CharacterCategory[]> {
-  const db = getDatabase();
-  const [results] = await db.executeSql(
-    `SELECT c.id, c.name, c.display_order
-     FROM character_categories c
-     INNER JOIN character_category_members m ON m.category_id = c.id
-     WHERE m.profile_id = ?
-     ORDER BY c.display_order ASC, c.name ASC`,
-    [profileId],
-  );
-  const categories: CharacterCategory[] = [];
-  for (let i = 0; i < results.rows.length; i++) {
-    const row = results.rows.item(i);
-    categories.push({
-      id: row.id,
-      name: row.name,
-      displayOrder: row.display_order,
-    });
-  }
-  return categories;
+  return { likes, chats };
 }

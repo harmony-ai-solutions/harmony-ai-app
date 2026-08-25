@@ -3,9 +3,9 @@
  *
  * Backs the chat-list long-press actions (pin / archive / mute / disable)
  * plus per-conversation unread counters, mirroring the `character_favorites` /
- * `character_profile_sources` / `personas` sidecar pattern: everything here
- * lives in CLIENT-ONLY tables (never synced to the engine — strict schema
- * parity, see docs/schema-parity.md).
+ * `personas` client-only sidecar pattern: everything here lives in
+ * CLIENT-ONLY tables (never synced to the engine — strict schema parity, see
+ * docs/schema-parity.md).
  *
  * Table: chat_conversation_settings
  *   participant_key TEXT PRIMARY KEY — the stable conversation identifier

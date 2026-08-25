@@ -25,7 +25,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
-import type { CharacterCategory } from '../../database/repositories/characters';
+import type { CharacterCategory } from '../../services/CategoryPreferencesService';
 
 interface AddToCategoryModalProps {
   visible: boolean;

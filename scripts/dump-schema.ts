@@ -47,29 +47,9 @@ import {dumpSchema} from '../src/database/__test_utils__/dumpSchema';
  * mirrored migrations on both sides).
  */
 const CLIENT_ONLY_TABLES = new Set<string>([
-  'character_profile_sources',
-  'character_categories',
-  'character_category_members',
-  'character_favorites',
-  'character_likes',
-  'character_saves',
-  'character_image_likes',
-  'character_image_comments',
-  'character_creators',
-  'personas',
-  'user_posts',
-  'user_post_likes',
-  'user_post_comments',
-  'follows',
-  'blocked_users',
-  'notifications',
-  'chat_conversation_settings',
-  'character_marketplace_listings',
-  'soul_wallet',
-  'soul_purchases',
-  'marketplace_listings_cache',
-  'marketplace_ownership_cache',
-  'content_library',
+  'personas',                  // dies in Phase 2 / B3 (persona → user entities)
+  'character_favorites',       // becomes synced in Phase 2 / B2 (Go mirror)
+  'chat_conversation_settings',// synced redesign in Phase 2 / B2
 ]);
 
 /**

@@ -72,10 +72,11 @@ export const DiscoverScreen: React.FC = () => {
   // ── Data loading ─────────────────────────────────────────────────────
   const loadProfiles = useCallback(async () => {
     try {
-      // The community-character backend query (doomed character_profile_sources
-      // table) lands with 20-Backend-Concept. Until then the Discover grid is
-      // the stub fixture feed — marketplace listing details ("created by other
-      // users" fixture creators), visible in all builds (O5).
+      // The community-character backend query (source/visibility tagging
+      // removed with the stub layer) lands with 20-Backend-Concept. Until then
+      // the Discover grid is the stub fixture feed — marketplace listing
+      // details ("created by other users" fixture creators), visible in all
+      // builds (O5).
       const listings = await getListings();
       const details = (
         await Promise.all(

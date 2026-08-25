@@ -12,8 +12,8 @@
 |---|---|---|
 | 1 — Stub service layer | ✅ committed | `1455b6e` |
 | 2 — Marketplace & wallet rewiring | ✅ committed | `82143b7` |
-| 3 — Social/notifications/profile rewiring | ✅ committed | (this commit) |
-| 4 — Schema surgery | ⏳ pending | — |
+| 3 — Social/notifications/profile rewiring | ✅ committed | `20d70c9` |
+| 4 — Schema surgery | ✅ committed | (this commit) |
 | 5 — B4 seeding revert | ⏳ pending | — |
 | 6 — D-register bug mends | ⏳ pending | — |
 | 7 — INIT_ENTITY recovery | ⏳ pending | — |
@@ -162,6 +162,40 @@ None (phase was new-files-only by design).
 
 ---
 
+## Phase 4 — Schema Surgery (B5 consolidation + O4 reply strip + O6 categories off tables)
+
+**Track**: B5 amendment + O4 + O6 + repo deletions · **Gates**: reply/doomed greps → code zero (only the new migration's header docs); tsc 0; unit **84 suites/770 tests** (−5 repo suites, +1 CategoryPreferencesService suite; snapshots regenerated −648/+6 lines, v5–v40 boundaries byte-identical); integration 10/50+1 skipped; **parity = expected set exactly** (RN-only: `idx_conversation_messages_pinned` — part of the named D3 divergence; Go-only: `device_push_tokens`; different-SQL 11 = conversation_messages D3 + 10 pre-existing cosmetic drifts; the 5 client-only index leaks GONE).
+
+### Added
+- `src/database/migrations/000041_consolidate_senju_features.ts` — single consolidated migration: personas + character_favorites + chat_conversation_settings (physical `blocked` column kept) + conversation_messages `reactions_json`/`is_pinned`/pinned index. Header documents rationale, 000039 reserved placeholder, dev-DB-wipe note.
+- `src/services/CategoryPreferencesService.ts` + test (O6) — AsyncStorage `@harmony_character_categories` `[{id,name}]`; rename rewrites the tag on affected profiles; delete strips it; "Add to category" writes the category name as a native `character_profiles.tags` entry (syncs to engine).
+
+### Removed (26 files)
+- 15 migrations `000041_add_character_profile_source` … `000055_add_marketplace_cache`.
+- 6 sidecar repos: `marketplace.ts`, `soulWallet.ts`, `characterSocial.ts`, `userSocial.ts`, `contentLibrary.ts`, `blockedContent.ts`.
+- 5 repo test suites (marketplace, marketplaceCache, characterSocial, userSocial, blockedContent).
+- Reply feature (O4): `replyToMessageId` param/payload in `EntitySessionService.sendTextMessage`; reply columns in `conversation_messages` repo INSERT/SELECT/UPDATE; `reply_to_message_id` in `models.ts`; `repliedMessage` lookup + prop in `ChatDetailScreen`; reply-header rendering + prop in `ChatBubble`.
+- `characters.ts`: source/visibility fns + category fns deleted; favorites fns, `getUserCharacterProfiles`, `getSiblingCharacterProfiles`, `getCharacterStats` kept.
+
+### Modified (highlights)
+- `migrations.ts`: 15 imports/entries → single `migration041`.
+- `scripts/dump-schema.ts`: `CLIENT_ONLY_TABLES` 23 → 3 (`personas`, `character_favorites`, `chat_conversation_settings`).
+- `schema/rn-schema.json` regenerated; both migration `.snap` files regenerated.
+- **CreateAIScreen**: "Visibility & Sharing" (private/public) UI removed entirely — vestigial after stubs, its persistence table is gone.
+- **AIProfileScreen**: ownership resolves from cloud creator only (source-tag fallback gone).
+- Import flow (`CharacterCardImportService`, duplicate-creation paths): source-tagging writes removed.
+- O6 categories UI: `CharactersScreen` + `ManageCategoriesModal`/`AddToCategoryModal`/`CategoryFilterDropdown` on AsyncStorage ∪ distinct profile tags.
+- Step-6 verified (no fix needed): `is_pinned` boolean↔integer map exists in `sync.ts normalizeBooleanFields` + repo; `reactions_json` opaque passthrough.
+
+### Deviations (accepted)
+1. **`getUserCharacterProfiles` adapted, not kept verbatim** — its SQL JOINed `character_profile_sources` (dropped); now returns all non-deleted profiles via `getAllCharacterProfiles` with interim-behaviour comment. Ownership signal returns with the Phase-2 engine mirror. Consumers today: MyProfileScreen count, publish screen, content-asset apply picker.
+2. **4 files still called "dead" fns** (plan assumed zero consumers): CreateAIScreen, AIProfileScreen, CharacterProfileEditScreen, CharacterCardImportService — call sites removed (see above).
+3. Gate residuals are documentation-only: the new migration's header must name `reply_to_message_id` + dropped tables (self-contradiction in the phase doc resolved in favor of required docs); `@harmony_character_categories` key substring-matches `character_categories` (false positive).
+4. `MarketplaceService.test.ts` doomed-repo jest.mock backstop removed (module gone — resolution fails loudly anyway).
+5. `src/database/README.md` untouched — verified it never listed sidecar tables.
+
+---
+
 ## Pointers for follow-up Phase 2 (engine) planning
 
 *(append after each phase)*
@@ -170,3 +204,5 @@ None (phase was new-files-only by design).
 - **Backend concept items discovered during Phase 2**: profile→listing linkage (AIProfile price pill + acquire-success deep link currently have none); text/theme publish + listing edit + re-list + library-remove (honest-error placeholders now); `salesCount`; itemType→profile-field mapping for apply-to-character; "created by others" Discover query; real `upgradeUrl` (placeholder `https://harmony.ai/souls`).
 - **Honest-error i18n keys added**: see Phase-2 Added table — copy review when backend makes them real.
 - **Phase-3 additions**: profile extension = `username`/`bio` in PATCH /v1/auth/me + avatar upload endpoint + `avatar_url` in responses; notification **write** side (comment/like/follow/image-comment events → notifications); per-item liked-state + count reads on posts/images; follower graph for local user; creator user ids on marketplace listings (blocked-filter + attribution + `filterBlockedCharacterProfiles` creator resolution).
+- **Phase-4 state (parity baseline for engine Phase 2)**: RN↔Go divergence set = `conversation_messages` D3-narrowed (`reactions_json`, `is_pinned`, `idx_conversation_messages_pinned`) + 10 pre-existing cosmetic drifts + `device_push_tokens` Go-only. B1 (Go mirror migration for message actions incl. read flags, shape O12) closes D3. `CLIENT_ONLY_TABLES` interim = `personas` (dies B3), `character_favorites` + `chat_conversation_settings` (redesigned B2) — mechanism expires with the last entry.
+- **Ownership signal gap (B2 input)**: `getUserCharacterProfiles` interim-returns ALL profiles (old `character_profile_sources` JOIN dropped). Engine mirror must restore per-user ownership so MyProfile "AI Characters" count, publish flow, and apply-to-character picker filter correctly.

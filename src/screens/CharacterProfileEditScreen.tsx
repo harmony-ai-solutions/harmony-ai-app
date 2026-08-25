@@ -56,7 +56,6 @@ import {
   deleteCharacterImage,
   setPrimaryImage,
   getAllCharacterProfiles,
-  setCharacterProfileSource,
 } from '../database/repositories/characters';
 import { getAllEntities, getEntityByCharacterProfileId } from '../database/repositories/entities';
 import { getActiveInteractionsByEntity } from '../database/repositories/interactions';
@@ -315,8 +314,6 @@ export const CharacterProfileEditScreen: React.FC = () => {
           ...buildProfileFields(),
           vision_config_id: null,
         });
-        // Tag as user-created so it is hidden from the Discover community grid
-        await setCharacterProfileSource(newId, 'user');
 
         // Record the cloud user who created this AI (creator badge + the
         // creator-only Edit Profile / Edit AI Settings buttons depend on it).

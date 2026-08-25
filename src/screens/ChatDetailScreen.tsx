@@ -1471,15 +1471,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     navigation.navigate('AIProfile', { profileId: partnerProfileId });
   }, [partnerProfileId, navigation]);
 
-  // Index messages by id so reply headers can look up the quoted message.
-  const messageById = useMemo(() => {
-    const map = new Map<string, ConversationMessage>();
-    for (const m of messages) {
-      map.set(m.id, m);
-    }
-    return map;
-  }, [messages]);
-
   // Calculate messages with divider AND compute the initial scroll target
   const { messagesWithDivider, initialScrollTarget } = useMemo(() => {
     if (messages.length === 0 && !personaChangeText) {
@@ -1881,10 +1872,6 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
       const isLastMessage =
         messages.length > 0 && item.id === messages[messages.length - 1].id;
       const isTranscriptionFailed = failedTranscriptions.has(item.id);
-      const repliedMessage =
-        item.reply_to_message_id && messageById.has(item.reply_to_message_id)
-          ? messageById.get(item.reply_to_message_id)
-          : null;
 
       return (
         <ChatBubble
@@ -1893,7 +1880,6 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
           isTranscriptionFailed={isTranscriptionFailed}
           partnerAvatar={!isOwn ? partnerAvatar : null}
           partnerName={partnerName}
-          repliedMessage={repliedMessage}
           onImagePress={() => {}}
           onSendMessage={handleConfirmAndSendMessage}
           onEdit={handleEditMessage}
@@ -1906,7 +1892,6 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
     },
     [
       messages,
-      messageById,
       partnerAvatar,
       theme,
       ownEntityId,

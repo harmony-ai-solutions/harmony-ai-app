@@ -121,11 +121,23 @@ jest.mock('../../database/repositories/characters', () => ({
   deleteCharacterProfile: jest.fn(),
   createCharacterProfile: jest.fn(),
   createCharacterImage: jest.fn(),
+  updateCharacterProfile: jest.fn(),
   // Senju's load-path additions — empty results so loadFavoritesAndCategories
   // completes without favorites/category data.
   getFavoriteCharacterProfileIds: jest.fn().mockResolvedValue([]),
-  getCharacterCategories: jest.fn().mockResolvedValue([]),
-  getCharacterCategoryMembers: jest.fn().mockResolvedValue([]),
+}));
+
+// O6: custom categories persist in AsyncStorage via CategoryPreferencesService
+// (the old DB categories sidecar is gone). Tests start with no custom
+// categories; the filter chips then derive purely from profile tags.
+jest.mock('../../services/CategoryPreferencesService', () => ({
+  __esModule: true,
+  default: {
+    getCategories: jest.fn().mockResolvedValue([]),
+    createCategory: jest.fn(),
+    renameCategory: jest.fn(),
+    deleteCategory: jest.fn(),
+  },
 }));
 
 // The screen fetches the blocked-user id set from the SocialService stub and

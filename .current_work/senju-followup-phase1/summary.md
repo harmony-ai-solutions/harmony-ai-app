@@ -60,7 +60,7 @@ Track the completion of each phase as implementation progresses:
 - [x] **Phase 1: Stub Service Layer** ([1-StubServices.md](1-StubServices.md))
 - [x] **Phase 2: Marketplace & Wallet Rewiring** ([2-MarketplaceWalletRewiring.md](2-MarketplaceWalletRewiring.md))
 - [x] **Phase 3: Social, Notifications & Profile Rewiring** ([3-SocialProfileRewiring.md](3-SocialProfileRewiring.md))
-- [ ] **Phase 4: Schema Surgery & Repo Removal** ([4-SchemaSurgery.md](4-SchemaSurgery.md))
+- [x] **Phase 4: Schema Surgery & Repo Removal** ([4-SchemaSurgery.md](4-SchemaSurgery.md))
 - [ ] **Phase 5: B4 Seeding Revert** ([5-SeedingRevert.md](5-SeedingRevert.md))
 - [ ] **Phase 6: D-Register Bug Mends** ([6-BugMends.md](6-BugMends.md))
 - [ ] **Phase 7: Track E INIT_ENTITY Recovery** ([7-InitEntityRecovery.md](7-InitEntityRecovery.md))

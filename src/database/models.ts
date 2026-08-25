@@ -510,7 +510,6 @@ export interface ConversationMessage {
 
   // Message actions (Migration 46)
   reactions_json?: string | null;   // JSON array of emoji reaction strings, e.g. '["❤️","👍"]'
-  reply_to_message_id?: string | null; // references the message this one replies to
   is_pinned?: boolean;              // true if the message is pinned
 
   created_at: Date;

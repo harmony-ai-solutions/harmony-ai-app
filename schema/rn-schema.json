@@ -26,11 +26,6 @@
   },
   {
     "type": "index",
-    "name": "idx_conversation_messages_reply_to",
-    "sql": "CREATE INDEX idx_conversation_messages_reply_to ON conversation_messages(reply_to_message_id)"
-  },
-  {
-    "type": "index",
     "name": "idx_emoji_actions_entity_id",
     "sql": "CREATE INDEX idx_emoji_actions_entity_id ON entity_emoji_actions(entity_id)"
   },
@@ -117,7 +112,7 @@
   {
     "type": "table",
     "name": "conversation_messages",
-    "sql": "CREATE TABLE \"conversation_messages\" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT , reactions_json TEXT, reply_to_message_id TEXT, is_pinned INTEGER NOT NULL DEFAULT 0)"
+    "sql": "CREATE TABLE \"conversation_messages\" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL, sender_entity_id TEXT NOT NULL, interaction_id TEXT, content TEXT NOT NULL, audio_duration REAL, message_type TEXT NOT NULL, audio_data TEXT, audio_mime_type TEXT, image_data TEXT, image_mime_type TEXT, vl_model TEXT, vl_model_interpretation TEXT, emotional_state_bits INTEGER NOT NULL DEFAULT 0, is_recon_followup INTEGER NOT NULL DEFAULT 0, is_edited INTEGER NOT NULL DEFAULT 0, edit_of_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT , reactions_json TEXT, is_pinned INTEGER NOT NULL DEFAULT 0)"
   },
   {
     "type": "table",

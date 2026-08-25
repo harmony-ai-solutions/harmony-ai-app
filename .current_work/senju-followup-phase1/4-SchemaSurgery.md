@@ -73,8 +73,16 @@ Devices that already ran builds recording 41–55 keep orphaned tables (harmless
 
 ## Verification
 
-- [ ] `grep -rn "reply_to_message_id\|replyToMessageId\|repliedMessage" src/` → zero
-- [ ] `grep -rln "repositories/marketplace\|repositories/soulWallet\|repositories/characterSocial\|repositories/userSocial\|repositories/contentLibrary\|repositories/blockedContent\|character_profile_sources\|character_categories" src/ --include="*.ts*"` → only the new migration file + summary docs
-- [ ] `npx tsc --noEmit` 0 errors; `npm test` green (migration suites regenerated)
-- [ ] Parity output matches Step 8 expectations exactly
-- [ ] `gitnexus_detect_changes()`; commit: `refactor: consolidate senju migrations into 000041, drop marketplace/social sidecar tables and reply feature`
+- [x] `grep -rn "reply_to_message_id\|replyToMessageId\|repliedMessage" src/` → zero in code (3 residual hits = the new migration's REQUIRED header documentation of the O4 strip + wipe note)
+- [x] `grep -rln "repositories/marketplace\|repositories/soulWallet\|repositories/characterSocial\|repositories/userSocial\|repositories/contentLibrary\|repositories/blockedContent\|character_profile_sources\|character_categories" src/ --include="*.ts*"` → only the new migration file's header docs + the `@harmony_character_categories` storage-key false positive
+- [x] `npx tsc --noEmit` 0 errors; `npm test` green (unit 84 suites/770 tests after −5 repo suites +1 service suite; snapshots regenerated −648/+6, v5–v40 boundaries byte-identical)
+- [x] Parity output matches Step 8 expectations exactly (RN-only 1 = pinned index within the named D3 divergence; Go-only device_push_tokens; different-SQL 11 = D3 + 10 pre-existing cosmetic; 5 index leaks GONE)
+- [x] `gitnexus_detect_changes()`; commit: `refactor: consolidate senju migrations into 000041, drop marketplace/social sidecar tables and reply feature`
+
+### Implementation notes (deviations — full detail in 13-Phase-1-Logbook.md)
+
+- `getUserCharacterProfiles` adapted (old SQL JOINed dropped `character_profile_sources`): interim returns all profiles; ownership signal returns with the Phase-2 engine mirror.
+- 4 files still called "dead" source/visibility fns (CreateAIScreen, AIProfileScreen, CharacterProfileEditScreen, CharacterCardImportService) — call sites removed; CreateAI "Visibility & Sharing" UI block removed entirely; AIProfile ownership = cloud creator only.
+- O6 semantics: rename rewrites the profile tag old→new; delete strips it; add writes category name as native tag.
+- Step 6 verified, no fix needed (`is_pinned` map in `sync.ts` normalizeBooleanFields; `reactions_json` opaque).
+- `src/database/README.md` untouched (never listed sidecar tables).
