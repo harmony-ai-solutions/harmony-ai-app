@@ -44,8 +44,15 @@ Her save path hard-deletes + recreates all image rows on every save → engine-s
 
 ## Verification
 
-- [ ] `grep -rn "CharacterProfileEdit" src/` → zero route/navigator references (historical docs excluded)
-- [ ] Round-trip test: import a V3 card fixture (`src/utils/charactercard/__tests__/fixtures/v3-card.json`), edit every section, export → field-by-field parity
-- [ ] Image churn: unit test asserting unchanged images keep ids across save
-- [ ] `npx tsc --noEmit` 0 errors; `npm test` green
-- [ ] `gitnexus_detect_changes()`; commits: `refactor: extract editor sections` → `feat: V3 RP editor suite in CreateAI edit mode` → `chore: remove comparison-only CharacterProfileEdit screen`
+- [x] `grep -rn "CharacterProfileEdit" src/` → zero route/navigator/screen references (stale `e2e/.maestro/03-conflict-resolution.yaml` outside src/ flagged for on-device e2e rework)
+- [x] Round-trip test: v3-card fixture import → edit every section → export → field-by-field parity (`EditorSectionsRoundtrip.test.ts`, 2/2)
+- [x] Image churn: `imageReconcile.test.ts` (7 cases — unchanged ids stable) + DB-level caption-keeps-id test
+- [x] `npx tsc --noEmit` 0 errors; `npm test` green (unit 95 suites/834 tests, integration 10/50+1 skipped; intermediate commits verified green via worktrees)
+- [x] `gitnexus_detect_changes()`; commits: `ca48bd5 refactor: extract editor sections` → `3310dde feat: V3 RP editor suite in CreateAI edit mode` → `7352034 chore: remove comparison-only CharacterProfileEdit screen`
+
+### Implementation notes
+
+- `EntityConfigEdit`: zero references in src/ — did not survive the rebase; Q-D4a fully closed, no TODO needed.
+- `updateCharacterImage` (caption/order/primary) already existed → no new repo fn. Reconcile uses soft delete.
+- Hidden V3 fields (`group_only_greetings`/`extensions`/`assets`) carried as edit-mode state so saves can't wipe them.
+- i18n: only 4 genuinely-new keys; everything else reuses `characters.json`.

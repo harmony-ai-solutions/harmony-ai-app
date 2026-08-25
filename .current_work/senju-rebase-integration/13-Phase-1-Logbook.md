@@ -16,8 +16,8 @@
 | 4 — Schema surgery | ✅ committed | `a0992be` |
 | 5 — B4 seeding revert | ✅ committed | `29871ab` |
 | 6 — D-register bug mends | ✅ committed | `ba97e9a`+`4fc4ab0`+`77518e5`+`40553b3` |
-| 7 — INIT_ENTITY recovery | ✅ committed | (this commit) |
-| 8 — Editor consolidation | ⏳ pending | — |
+| 7 — INIT_ENTITY recovery | ✅ committed | `ec0aaca` |
+| 8 — Editor consolidation | ✅ committed | `ca48bd5`+`3310dde`+`7352034` |
 | 9 — Verification/records/docs | ⏳ pending | — |
 
 ---
@@ -271,6 +271,35 @@ None (phase was new-files-only by design).
 
 ---
 
+## Phase 8 — Track C: Editor Consolidation (3 commits)
+
+**Gates**: tsc 0 (verified at final state AND at both intermediate commits via worktrees); unit 95 suites/834 tests (+3 suites/+20 tests); integration 10/50+1 skipped; grep `CharacterProfileEdit` in src/ → zero.
+
+### Commit `ca48bd5` — refactor: extract editor sections
+- New `src/components/character-card/editor-sections/`: `editorState.ts` (pure snake↔camel V3 mapping — shared with the round-trip test so they can't drift), `imageReconcile.ts` (pure diff-based image deltas), section components `GreetingEditorSection` (incl. test-scenario generator bar), `AlternateGreetingsSection`, `LorebookSection`, `TagsSection`, `LifecycleSection`, `AttributionSection`, `ExportSection`, `ImportReviewSheet` (**moved** here — Characters import flow depends on it), barrel `index.ts`.
+- Tests: `EditorState.test.ts` (8), `imageReconcile.test.ts` (7 — image-churn gate: unchanged images keep ids), `EditorSectionsRoundtrip.test.ts` (2 — v3-card fixture import → edit every section → export → field-by-field parity), `ProfileEditorSections.test.tsx` (8 — retargeted from the deleted screen's suite).
+- `CharactersScreen` + tests: ImportReviewSheet import path + navigation retarget (→ `CreateAI {editProfileId}`). i18n +4 keys (`creatorPlaceholder`, `creatorNotesPlaceholder`, `characterVersionPlaceholder`, `lifecycleInvalidNumber`). `characters.test.ts` +in-place caption test.
+
+### Commit `3310dde` — feat: V3 RP editor suite in CreateAI edit mode
+- Edit-mode load → `loadEditProfile` (V3/RP state via `profileToEditorState` + images + entity + tags); pull-to-refresh reloads.
+- Save: validation alerts (typing 1–200, audio 0–100, `validateLifecycleConfig`) instead of silent clamping; V3 columns (`first_mes`, `alternate_greetings`, `character_book`, `tags`, `creator`, `creator_notes`, `card_provenance`, `lifecycle_config`, `scenario`, `post_history_instructions`, `nickname`) explicit; hidden `group_only_greetings`/`extensions`/`assets` carried as state so the spread can't wipe them.
+- **Image churn fixed**: `computeImageDeltas(existing, desired)` → apply only create/update/remove deltas via `createCharacterImage`/`updateCharacterImage` (existed: caption/order/primary, id preserved)/soft-delete. Untouched ids stable.
+- Layout: General → Details → Greeting/Alternate/Lorebook/Images/Tags/Lifecycle/Attribution/Export → Advanced; create mode keeps lightweight subset (RP cards only when `editProfileId`).
+- Restored capabilities: `ProfileImagePicker` + `ImageViewerModal` zoom, per-image "Set as primary" + captions, pull-to-refresh.
+
+### Commit `7352034` — chore: remove comparison-only screen
+- Deleted `CharacterProfileEditScreen.tsx` + old `ProfileEditorSections.test.tsx` + route/param/`// D4: comparison-only` scaffolding in `AppNavigator.tsx`.
+- **`EntityConfigEdit` finding**: zero references anywhere — the screen did NOT survive the rebase; no survivor navigates to it; nothing to drop/TODO. Q-D4a fully closed.
+- Stale artifact flagged: `e2e/.maestro/03-conflict-resolution.yaml` references the old card-tap→editor flow (already broken pre-Phase-8; outside jest gates; needs on-device e2e rework).
+- `ProfileImagePicker` + `ImageViewerModal` kept as shared components.
+
+### Deviations
+- Image reconcile uses soft delete (repo default) not permanent delete — audit trail kept.
+- `updateCharacterImage` already existed → no new repo fn (doc's conditional).
+- D4 (two-step editor handling) from the rebase decision record is now fully closed.
+
+---
+
 ## Pointers for follow-up Phase 2 (engine) planning
 
 *(append after each phase)*
@@ -282,3 +311,4 @@ None (phase was new-files-only by design).
 - **Phase-4 state (parity baseline for engine Phase 2)**: RN↔Go divergence set = `conversation_messages` D3-narrowed (`reactions_json`, `is_pinned`, `idx_conversation_messages_pinned`) + 10 pre-existing cosmetic drifts + `device_push_tokens` Go-only. B1 (Go mirror migration for message actions incl. read flags, shape O12) closes D3. `CLIENT_ONLY_TABLES` interim = `personas` (dies B3), `character_favorites` + `chat_conversation_settings` (redesigned B2) — mechanism expires with the last entry.
 - **Ownership signal gap (B2 input)**: `getUserCharacterProfiles` interim-returns ALL profiles (old `character_profile_sources` JOIN dropped). Engine mirror must restore per-user ownership so MyProfile "AI Characters" count, publish flow, and apply-to-character picker filter correctly.
 - **Phase-6 inputs**: reply-mode becomes a synced `chat_conversation_settings` column in B2 (interim AsyncStorage `@harmony_chat_reply_mode_<participantKey>`); read-flags (B1) supersede `unread_count` (kept until then); F4 confirmed NO app/engine key drift — contract pinned by test; Kotlin `show()` is now Promise<boolean> (device-build compile pending); F1/F8 event contract (`message:received` + session lifecycle) is app-local — engine-side event needs only exist if B1 planning wants push-driven chat lists.
+- **Phase-7/8 state**: INIT_ENTITY recovery live (bounded 2 retries; engine contract: `entity_not_defined` rejection during pre-ingestion race is now recovered app-side — engine unchanged). Editor consolidated into CreateAI edit mode; V3 column surface fully editable app-side (matters if the engine ever validates/normalizes card columns on sync).
