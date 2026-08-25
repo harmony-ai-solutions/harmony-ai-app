@@ -5,8 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### Security & Configuration
-=====
+### Marketplace, Wallet, Social & Notifications
+#### Added
+- **Community preview data**: the Market, Soul wallet, social feeds and notifications now show **preview content** while the community backend is in development. The Market lists sample characters, the wallet starts with a preview balance, and social/notification feeds display seeded sample content — everything is clearly marked as preview.
+#### Changed
+- **The chat paywall is gone** — every AI character can be chatted with freely from any entry point. No more purchase gates or silent ignores.
+- The **Soul wallet** shows a preview balance, and **buying Souls is coming soon** — attempting an acquire with insufficient balance now explains this honestly instead of failing silently.
+- **Marketplace publishing is preview-only**: character cards can be listed for preview, while text/theme publishing, listing editing, re-listing and library removal show a clear "not available in preview yet" message.
+- **Social interactions are preview interactions** — follows, likes, posts and notifications are backed by sample data until the community backend lands.
+
+### Characters
+#### Added
+- The **Create AI editor** now hosts the full V3/RP editing suite: greetings, alternate greetings, lorebook, tags, lifecycle, attribution and export. Editing an existing character opens the same editor with everything in one place, and image changes keep **stable image ids** (no more churn on save).
+#### Changed
+- **Character categories now sync via tags** — renaming or deleting a category updates the affected characters' tags so the change reaches the engine.
+- Module pickers on Create AI / Edit AI Settings: the **"Disabled" option is back** and nothing is auto-selected anymore. Engine-synced default configs still appear in the picker when the device is connected.
+
+### Profile
+#### Changed
+- **Display name now saves to the cloud** (per account). Username, bio and avatar upload are coming soon — those fields are shown but disabled with a "coming soon" hint.
+
+### Chat & Messaging
+#### Fixed
+- **Chat list live updates**: new messages appear in the list immediately with correct ordering, conversations paginate cleanly (no more duplicate entries), and unread counts are correct. Muted conversations no longer show unread badges, blocked users' content is filtered out, and deleting a conversation cleans up its settings too.
+- **Chatting with a freshly created partner is reliable** — if the session is interrupted during initialization, the app now recovers automatically instead of showing "Session initialization failed".
+- **Voice recordings are kept** when the 120-second auto-stop kicks in — the recording is finished and attached instead of being discarded.
+- The connection indicator now clearly shows **connecting / connected / offline** states.
+- The first message in a conversation now gets a day divider like the rest of the timeline.
+
+> **Note for testers / dev builds:** if you ran pre-release builds during development, wipe the app's local database once. Orphaned preview tables are harmless but linger until then.
 
 ### Security & Configuration
 #### Added

@@ -65,7 +65,7 @@ Track the completion of each phase as implementation progresses:
 - [x] **Phase 6: D-Register Bug Mends** ([6-BugMends.md](6-BugMends.md))
 - [x] **Phase 7: Track E INIT_ENTITY Recovery** ([7-InitEntityRecovery.md](7-InitEntityRecovery.md))
 - [x] **Phase 8: Track C Editor Consolidation** ([8-EditorConsolidation.md](8-EditorConsolidation.md))
-- [ ] **Phase 9: Verification, Records & Docs** ([9-VerificationRecords.md](9-VerificationRecords.md))
+- [x] **Phase 9: Verification, Records & Docs** ([9-VerificationRecords.md](9-VerificationRecords.md))
 
 ## Codebase-mapping documents consulted
 

@@ -73,6 +73,22 @@ cd ../harmony-ai-app
 python3 scripts/compare-schemas.py rn-schema.json go-schema.json
 ```
 
+## Current Divergence State (as of Senju Follow-Up Phase 1, 2026-08-25)
+
+The **D3 divergence set is now NARROWED** to `conversation_messages.reactions_json` + `is_pinned`
+(plus the `idx_conversation_messages_pinned` index). Phase 2 (engine track, B1 — a Go mirror migration for
+message actions including read flags, shape O12) closes D3 and turns the parity gate green. Everything else in
+the dump is the known pre-existing baseline (10 cosmetic SQL drifts + `device_push_tokens` Go-only — RN's
+`000039` is the reserved-number placeholder that deliberately never creates that table).
+
+`CLIENT_ONLY_TABLES` in `scripts/dump-schema.ts` is an **interim 3-entry set**:
+- `personas` — dies in Phase 2 B3 (personas → user entities conversion)
+- `character_favorites` + `chat_conversation_settings` — redesigned in Phase 2 B2 (unread → derived read-flags;
+  favorites gets an engine mirror + SyncService registration)
+
+The client-only exclusion mechanism is deleted together with its last entry (end state = zero exclusions, no
+client-only tables left).
+
 ## Related Documents
 
 - [Phase 5-1: RN Schema Dump Utility](../.current_work/test-framework-overhaul/5-1-RNSchemaDumpUtility.md)
