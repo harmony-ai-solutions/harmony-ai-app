@@ -18,11 +18,12 @@
 | 6 — D-register bug mends | ✅ committed | `ba97e9a` + `4fc4ab0` + `77518e5` + `40553b3` |
 | 7 — INIT_ENTITY recovery | ✅ committed | `ec0aaca` |
 | 8 — Editor consolidation | ✅ committed | `ca48bd5` + `3310dde` + `7352034` |
-| 9 — Verification, records & docs | ✅ written (this record) | docs commit pending (orchestrator) |
+| 9 — Verification, records & docs | ✅ committed | `ab0c635` |
+| R — Review corrections (post-phase) | ✅ committed | `755c117` |
 
-Docs commits that landed during the phase: `3839fcc` (phase-6 logbook record), `18fb1a5` (phase-8 logbook record).
+Docs commits that landed during the phase: `3839fcc` (phase-6 logbook record), `18fb1a5` (phase-8 logbook record), `ab0c635` (record/outlines/CHANGELOG/memory bank).
 The logbook (`13-Phase-1-Logbook.md`) was kept up to date per phase; this record, `20-Backend-Concept-Marketplace-Profile.md`,
-the CHANGELOG wave, the memory-bank entries and the summary.md tick are Phase 9's own output (uncommitted this session).
+the CHANGELOG wave, the memory-bank entries and the summary.md tick are Phase 9's own output.
 
 ---
 
@@ -147,6 +148,27 @@ Rewired every marketplace/wallet consumer onto the stubs and **removed the clien
   drop/TODO. Q-D4a fully closed. Stale `e2e/.maestro/03-conflict-resolution.yaml` flagged (broken pre-Phase-8,
   outside jest gates, needs on-device e2e rework) — intentionally NOT fixed.
 
+### Review phase — post-Phase-1 corrections (user rulings) — `755c117`
+The user's diff review (baseline `59739e0`) found UI removed beyond "screens stay verbatim"; rulings restored it on
+extended stubs. **Full detail: `senju-followup-phase1/10-ReviewCorrections.md`**; superseded markers below refer
+to this section.
+- **Stub extensions**: `updateListing`/`relistListing`/`removeLibraryEntry`; draft `kind` (`character_card|text|theme`)
+  + `text`/`previewText`/`sourceProfileId`; summary `salesCount`; detail preview fields + `kind`; `AcquireResult`
+  deep-link ids; NEW `ProfileExtrasService` (username/bio/avatar, AsyncStorage `@harmony_profile/<userId>`).
+- **Restored UI**: marketplace detail preview region + salesCount (+4 tests); full publish wizard incl. text/theme
+  (from character field or scratch) + edit mode + re-list + library-remove (fixed latent unreachable theme step);
+  marketplace PREVIEW chat locks (ruling: viewable free, chat locked until acquired, own library never locked) via
+  `getListingForProfile`/`isChatLocked` + central `openCharacterChat` gate + AIProfile price pill/lock + ChatDetail
+  defense-in-depth; EditProfile username/bio/avatar + MyProfile header extras.
+- **New component**: `VisibilitySettingsSection` (private/public/marketplace + SOUL price) — publish screen; noted
+  in 20-Backend-Concept §1. Post-acquire AIProfile navigation preserved as commented `TODO(backend)`.
+- **Bugs found during verification**: (1) import failure `no such column: first_mes` = stale dev DB predating
+  migration 000037 (standing question #2 CONFIRMED on-device; user wiped). (2) `ChatBubbleService` FGS crash
+  (`ForegroundServiceDidNotStartInTimeException` from closeWindow/hideOne/setUnreadCount command deliveries) —
+  `onStartCommand` now calls `startForegroundCompat()` unconditionally + `maybeStopWhenEmpty()`; compile-verified;
+  **on-device verification rides the next device build (with D1-4 Kotlin)**.
+- **Gates**: tsc 0 errors; unit 98 suites / 873 tests; integration 10 / 50 + 1 skipped.
+
 ---
 
 ## Deviations from the phase docs (with reasoning)
@@ -155,10 +177,13 @@ Rewired every marketplace/wallet consumer onto the stubs and **removed the clien
    incomplete; both were found by the zero-hit gate and cleaned per the A4 ruling. `MarketScreen` had no
    `handleChat` to strip (doc assumed one).
 2. **Stub API deliberately NOT extended** (Phase 2): text/theme publish, listing edit, re-list, library-remove =
-   honest errors, not fake success (honest-stub rule).
+   honest errors, not fake success (honest-stub rule). *(SUPERSEDED by review phase — all four now work via the
+   extended stub, per the user ruling.)*
 3. **`salesCount`** dropped from the detail screen (not in stub types); optional in the manage row. **Apply-to-
    character** maps asset text to `description` (no itemType→field mapping in stub `ContentAsset`). **Acquire
-   success → navigate My Library** (stub `AcquireResult` carries no profile link).
+   success → navigate My Library** (stub `AcquireResult` carries no profile link). *(salesCount SUPERSEDED by
+   review phase — restored via the summary wire. Apply-to-character still open; acquire→AIProfile deep link
+   preserved as commented TODO code.)*
 4. **Gate-1 literal zero-hit deferred to Phase 4** — `claimSignupBonus`/`canChatWithCharacter` were still defined
    inside the doomed repos + their tests (zero non-test importers); the literal zero lands when the repos are
    deleted.
@@ -191,7 +216,8 @@ Rewired every marketplace/wallet consumer onto the stubs and **removed the clien
 ## What was intentionally NOT fixed
 
 - **Stub API surface kept minimal** — text/theme publish, listing edit, re-list, library-remove are honest
-  "not available in preview" errors; no fake success anywhere.
+  "not available in preview" errors; no fake success anywhere. *(SUPERSEDED by review phase — all four flow
+  through the extended stub now.)*
 - **Notification write side** — the stub feed is read-only; the badge reflects the seeded feed only. Backend must
   own notification writes (20-Backend-Concept item).
 - **No read APIs for per-item liked-state / counts** in the stub (posts, images, saved-state) — screens derive at
@@ -306,6 +332,8 @@ path exists for the dropped tables by design (they were never synced to the engi
   upload endpoint + `avatar_url` in responses; notification **write** side (comment/like/follow/image-comment
   events → notifications); per-item liked-state + count reads on posts/images; follower graph for the local user;
   creator user ids on marketplace listings (blocked-filter + attribution + creator resolution).
+  *(Review-phase update: profile→listing linkage, text/theme publish + edit/re-list/library-remove, `salesCount`,
+  and the profile-extras seam are now STUB-SUPPORTED — the listed items remain as the real-backend requirements.)*
 - **Stub read-API gaps:** no liked-by-me / count getters in the stub — screens derive at read time and start
   `liked=false`; a focus reload resets liked visuals. Future backend should expose per-item liked-state + counts.
 - **Stub seam contract (client design input):** `MarketplaceService` / `WalletService` / `SocialService` /

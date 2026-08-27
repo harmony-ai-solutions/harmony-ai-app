@@ -52,6 +52,7 @@ flowchart TD
 | 7 | [7-InitEntityRecovery.md](7-InitEntityRecovery.md) | Track E | INIT_ENTITY ingestion-error recovery; skipped test re-enabled |
 | 8 | [8-EditorConsolidation.md](8-EditorConsolidation.md) | Track C | V3/RP editor suite in CreateAI edit mode as section components; CharacterProfileEditScreen deleted; image-churn fix |
 | 9 | [9-VerificationRecords.md](9-VerificationRecords.md) | wrap-up | Full gates, parity check, record doc, 20-Backend-Concept outline, Phase-2 outline, CHANGELOG, memory bank |
+| 10 | [10-ReviewCorrections.md](10-ReviewCorrections.md) | review (post-phase) | User-review corrections: restore mistakenly removed UI (marketplace preview + salesCount, publish/edit/relist/text+theme flows, VisibilitySettingsSection component, marketplace preview chat locks, profile extras editing), stub API extensions, import-bug diagnosis (stale dev DB), ChatBubbleService FGS crash fix |
 
 ## Implementation Status
 
@@ -66,6 +67,7 @@ Track the completion of each phase as implementation progresses:
 - [x] **Phase 7: Track E INIT_ENTITY Recovery** ([7-InitEntityRecovery.md](7-InitEntityRecovery.md))
 - [x] **Phase 8: Track C Editor Consolidation** ([8-EditorConsolidation.md](8-EditorConsolidation.md))
 - [x] **Phase 9: Verification, Records & Docs** ([9-VerificationRecords.md](9-VerificationRecords.md))
+- [x] **Review: Post-Phase-1 Corrections** ([10-ReviewCorrections.md](10-ReviewCorrections.md)) — commit `755c117`; bubble FGS fix pending on-device verification with next build
 
 ## Codebase-mapping documents consulted
 
@@ -74,7 +76,7 @@ Track the completion of each phase as implementation progresses:
 ## Standing open questions (decided defaults; escalate only if blocked)
 
 1. `blocked_users` table dropped; block list lives in the SocialService stub (BlockedUsersScreen keeps working against fixture users). *(default: yes — user-approved proposal)*
-2. Devices that already ran builds recording migrations 41–55 need a **one-time dev DB wipe** (dev-only exposure; orphans are otherwise harmless but `reply_to_message_id` lingers unused). *(default: document the wipe)*
+2. Devices that already ran builds recording migrations 41–55 need a **one-time dev DB wipe** (dev-only exposure; orphans are otherwise harmless but `reply_to_message_id` lingers unused). *(default: document the wipe)* — **CONFIRMED on-device 2026-08-26**: stale DB without the migration-000037 V3 columns broke character-card import and every profile SELECT (`no such column: first_mes`); wipe fixed it. See [10-ReviewCorrections.md](10-ReviewCorrections.md) §Bugs.
 3. `MarketplacePurchaseService` deleted; acquire flow folds into `MarketplaceService.acquire()`. *(default: yes)*
 4. `chat_conversation_settings.blocked` column name stays until the Phase-2 B2 table rewrite (repo keeps the `'blocked'` storage flag deliberately). *(default: leave)*
 5. `21-Engine-Contract-Persona-Enums.md` is drafted in Phase 2's planning round, not now. Phase 9 writes only the outline section. *(default: defer)*
