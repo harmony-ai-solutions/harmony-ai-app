@@ -75,15 +75,15 @@ Rewired every marketplace/wallet consumer onto the stubs and **removed the clien
 - **Notification creation removed**: the stub feed is read-only; old `addNotification` call sites deleted
   (backend must own notification writes in Phase 2).
 
-### Phase 4 — Schema surgery (B5 consolidation + O4 reply strip + O6 categories off tables) — `a0992be`
+### Phase 4 — Schema surgery (B5 consolidation + O6 categories off tables) — `a0992be`
 - **Consolidation amendment (user-approved):** the 15 migrations `000041_add_character_profile_source` …
   `000055_add_marketplace_cache` collapse into a SINGLE `000041_consolidate_senju_features.ts` containing only the
   surviving SQL — personas, character_favorites, chat_conversation_settings (physical `blocked` column kept),
-  conversation_messages `reactions_json`/`is_pinned`/pinned index. Header documents the rationale, the `000039`
+  conversation_messages message-action columns. Header documents the rationale, the `000039`
   reserved placeholder, and the dev-DB-wipe note.
 - Deleted 26 files: 15 migrations + 6 sidecar repos (marketplace, soulWallet, characterSocial, userSocial,
-  contentLibrary, blockedContent) + 5 repo test suites + the O4 reply feature (`reply_to_message_id` param/payload
-  through `EntitySessionService`, repo INSERT/SELECT/UPDATE, `models.ts`, `ChatDetailScreen`, `ChatBubble`).
+  contentLibrary, blockedContent) + 5 repo test suites. *(The O4 reply strip part of this commit was
+  reverted 2026-08-28 — see §Reply restore below.)*
 - `characters.ts`: source/visibility + category fns deleted; favorites, `getUserCharacterProfiles`,
   `getSiblingCharacterProfiles`, `getCharacterStats` kept.
 - `scripts/dump-schema.ts`: `CLIENT_ONLY_TABLES` 23 → **3** (`personas`, `character_favorites`,
@@ -169,6 +169,35 @@ to this section.
   **on-device verification rides the next device build (with D1-4 Kotlin)**.
 - **Gates**: tsc 0 errors; unit 98 suites / 873 tests; integration 10 / 50 + 1 skipped.
 
+## Reply restore — post-review correction (2026-08-28, uncommitted)
+
+The Phase-4 O4 reply strip went beyond the "keep but hidden" consensus: the original UI retirement
+(hers) had only removed the UI ENTRY (action-sheet "Reply" row + input preview bar) while the plumbing
+stayed dormant. The full pipeline is RESTORED (reverse of the Phase-4 removal):
+
+- **Migration 000041 amended IN PLACE**: `reply_to_message_id` column + `idx_conversation_messages_reply_to`
+  back in the consolidated migration; header + dev-wipe note updated. Devices that already ran the previous
+  000041 revision keep the old shape (an applied migration never re-runs), so the one-time dev DB wipe is now
+  REQUIRED on those devices; fresh installs are unaffected.
+- **Plumbing**: `ConversationMessage.reply_to_message_id`; repo INSERT/SELECT/UPDATE + all row mappers;
+  `EntitySessionService.sendTextMessage(..., replyToMessageId)` — local store + `utterance.reply_to_message_id`
+  wire field.
+- **UI (kept, gated OFF)**: ChatBubble `repliedMessage` prop + "Replying to" header + reply-min-width logic;
+  ChatDetail `messageById` index + `replyToMessage` state + `handleReplyToMessage`/`handleCancelReply` +
+  send-path reply id; MessageActionSheet `reply` row behind new `hideReply` prop (defaults to the gate —
+  same convention as `hideForward`/`hideReactions`); ChatInputBar `replyTo`/`onCancelReply` props + reply
+  preview bar (renders only when set).
+- **Feature gate**: `MESSAGE_REPLY_ENABLED = false` in NEW `src/constants/chatFeatures.ts` — one-line flip
+  re-enables the reply UI; no other change needed.
+- **Parity**: D3 divergence now `reactions_json` + `reply_to_message_id` + `is_pinned` (+ 2 indexes);
+  the Phase-2 B1 engine mirror MUST carry the reply column + index. `docs/schema-parity.md` updated;
+  schema dump + 3 migration snapshots regenerated.
+- **Gates**: tsc 0 errors; unit 98/98 suites · 873 tests; integration 10/50+1 skipped (pre-existing skip).
+  Impact: `createConversationMessage` HIGH flag reviewed — the change is purely additive (re-add of the
+  pre-removal contract), no caller signature breaks.
+- **B1 planning note**: the Phase-2 `21-Engine-Contract-Persona-Enums.md` round must include
+  `reply_to_message_id` + `idx_conversation_messages_reply_to` in the shape-O12 column list.
+
 ---
 
 ## Deviations from the phase docs (with reasoning)
@@ -229,7 +258,8 @@ to this section.
   block-filterable (listings carry `creatorName` only) — backend needs creator user ids on listings.
 - **10 pre-existing cosmetic parity drifts + `device_push_tokens` Go-only** — pre-existing baseline, untouched
   (this phase's parity gate is exactly the expected narrowed-D3 set).
-- **`reply_to_message_id` / reply feature** — stripped (O4), not kept.
+- **`reply_to_message_id` / reply feature** — kept but hidden: pipeline restored 2026-08-28 (see
+  §Reply restore below); UI gated OFF via `MESSAGE_REPLY_ENABLED` in `src/constants/chatFeatures.ts`.
 - **D1-11 legacy persona prefs** — deferred (P4/O2). **F2/F9 (paywall)** — done by this phase. **F4 no-re-key
   ruling** — old settings rows accepted loss.
 - **Kotlin `show()` Promise<boolean> compile** — rides the user's next device build (no Kotlin source change by us).
@@ -277,9 +307,11 @@ to this section.
 | Go-only | **1** | `device_push_tokens` (engine-only; RN's `000039` is the reserved-number placeholder) |
 | Different SQL | **11** | `conversation_messages` (D3-narrowed) + 10 pre-existing cosmetic drifts |
 
-**Exactly the expected Phase-1 end state:** D3 is now NARROWED to `conversation_messages.reactions_json` +
-`is_pinned` (+ pinned index); RN-only index leaks: **zero**. Anything else would have been investigated, not
-papered over.
+**Phase-1 end state:** D3 was NARROWED to `conversation_messages.reactions_json` + `is_pinned` (+ pinned
+index); RN-only index leaks: **zero**. Anything else would have been investigated, not papered over.
+
+> **2026-08-28 (reply restore):** D3 now also covers `reply_to_message_id` + `idx_conversation_messages_reply_to`
+> (restored — see §Reply restore below). The B1 engine mirror must carry them.
 
 ---
 
@@ -295,7 +327,8 @@ path exists for the dropped tables by design (they were never synced to the engi
 ## Standing decisions consumed
 
 1. **Consolidation amendment (Track B5, user-approved)** — 15 migrations collapse into ONE `000041` containing
-   only surviving SQL (message actions minus reply-to, personas, character_favorites, chat_conversation_settings);
+   only surviving SQL (message actions incl. the restored reply-to column, personas, character_favorites,
+   chat_conversation_settings);
    all marketplace/social/wallet sidecar SQL dropped.
 2. **`blocked_users` → stub** — table dropped; the block list lives in the `SocialService` stub (BlockedUsersScreen
    keeps working against fixture users).

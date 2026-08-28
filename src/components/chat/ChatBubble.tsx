@@ -35,6 +35,8 @@ interface ChatBubbleProps {
   isTranscriptionFailed?: boolean;
   partnerAvatar?: string | null;
   partnerName?: string;
+  /** The message this one replies to (rendered as a "Replying to" header). */
+  repliedMessage?: ConversationMessage | null;
   onImagePress?: (imageBase64: string, mimeType: string) => void;
   onSendMessage?: (messageId: string, editedText: string) => void;
   onEdit?: (messageId: string, newText: string) => void;
@@ -100,6 +102,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isTranscriptionFailed = false,
   partnerAvatar,
   partnerName = 'AI',
+  repliedMessage,
   onImagePress,
   onSendMessage,
   onEdit,
@@ -109,6 +112,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   theme,
 }) => {
   const { t } = useTranslation('chatDetail');
+
+  // When replying, size the bubble to at least the quoted message's width so
+  // the reply preview isn't squeezed into a tiny bubble. Estimate width from
+  // content length (≈6.5px/char at 12-14px font) capped at the max bubble width.
+  const replyMinWidth = repliedMessage?.content
+    ? Math.min(
+        screenWidth * 0.72,
+        Math.max(140, repliedMessage.content.length * 6.5),
+      )
+    : undefined;
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -251,6 +264,44 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
     return (
       <>
+        {/* ── Reply header: "Replying to X" with a snippet of the quoted message ── */}
+        {repliedMessage && (
+          <TouchableOpacity
+            style={[
+              styles.replyHeader,
+              {
+                backgroundColor: isOwn
+                  ? 'rgba(255,255,255,0.12)'
+                  : theme.colors.accent.primary + '12',
+                borderLeftColor: theme.colors.accent.primary,
+              },
+            ]}
+            activeOpacity={0.7}
+          >
+            <View style={styles.replyHeaderText}>
+              <ThemedText
+                size={12}
+                weight="bold"
+                numberOfLines={1}
+                style={{
+                  color: isOwn ? '#fff' : theme.colors.accent.primary,
+                }}
+              >
+                {t('replyingTo', { name: repliedMessage.sender_entity_id === message.entity_id ? partnerName : t('you') })}
+              </ThemedText>
+              <ThemedText
+                size={12}
+                numberOfLines={2}
+                style={{
+                  color: isOwn ? 'rgba(255,255,255,0.85)' : theme.colors.text.secondary,
+                }}
+              >
+                {repliedMessage.content || t('mediaMessage')}
+              </ThemedText>
+            </View>
+          </TouchableOpacity>
+        )}
+
         {hasImage && (
           <TouchableOpacity onPress={handleImagePress} style={styles.imageContainer}>
             <Image
@@ -508,7 +559,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             style={[
               styles.bubble,
               styles.ownBubble,
-              { backgroundColor: theme.colors.background.surface },
+              { backgroundColor: theme.colors.background.surface, minWidth: replyMinWidth },
             ]}
           >
             {renderContent()}
@@ -519,7 +570,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             colors={[theme.colors.background.elevated, theme.colors.background.surface]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={[styles.bubble, styles.partnerBubble]}
+            style={[styles.bubble, styles.partnerBubble, { minWidth: replyMinWidth }]}
           >
             {renderContent()}
           </LinearGradient>
@@ -581,6 +632,18 @@ const styles = StyleSheet.create({
   },
   partnerBubble: {
     borderBottomLeftRadius: 4,
+  },
+  replyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    borderLeftWidth: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 8,
+  },
+  replyHeaderText: {
+    flex: 1,
   },
   textContent: {
     fontSize: 16,

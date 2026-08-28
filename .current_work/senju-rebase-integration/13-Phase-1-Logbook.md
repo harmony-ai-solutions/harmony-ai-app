@@ -308,7 +308,7 @@ None (phase was new-files-only by design).
 - **Backend concept items discovered during Phase 2**: profile→listing linkage (AIProfile price pill + acquire-success deep link currently have none); text/theme publish + listing edit + re-list + library-remove (honest-error placeholders now); `salesCount`; itemType→profile-field mapping for apply-to-character; "created by others" Discover query; real `upgradeUrl` (placeholder `https://harmony.ai/souls`).
 - **Honest-error i18n keys added**: see Phase-2 Added table — copy review when backend makes them real.
 - **Phase-3 additions**: profile extension = `username`/`bio` in PATCH /v1/auth/me + avatar upload endpoint + `avatar_url` in responses; notification **write** side (comment/like/follow/image-comment events → notifications); per-item liked-state + count reads on posts/images; follower graph for local user; creator user ids on marketplace listings (blocked-filter + attribution + `filterBlockedCharacterProfiles` creator resolution).
-- **Phase-4 state (parity baseline for engine Phase 2)**: RN↔Go divergence set = `conversation_messages` D3-narrowed (`reactions_json`, `is_pinned`, `idx_conversation_messages_pinned`) + 10 pre-existing cosmetic drifts + `device_push_tokens` Go-only. B1 (Go mirror migration for message actions incl. read flags, shape O12) closes D3. `CLIENT_ONLY_TABLES` interim = `personas` (dies B3), `character_favorites` + `chat_conversation_settings` (redesigned B2) — mechanism expires with the last entry.
+- **Phase-4 state (parity baseline for engine Phase 2)**: RN↔Go divergence set = `conversation_messages` D3-narrowed (`reactions_json`, `reply_to_message_id` (restored 2026-08-28 — see post-review correction below), `is_pinned`, `idx_conversation_messages_pinned`, `idx_conversation_messages_reply_to`) + 10 pre-existing cosmetic drifts + `device_push_tokens` Go-only. B1 (Go mirror migration for message actions incl. read flags, shape O12) closes D3 — the mirror MUST include the reply column + index. `CLIENT_ONLY_TABLES` interim = `personas` (dies B3), `character_favorites` + `chat_conversation_settings` (redesigned B2) — mechanism expires with the last entry.
 - **Ownership signal gap (B2 input)**: `getUserCharacterProfiles` interim-returns ALL profiles (old `character_profile_sources` JOIN dropped). Engine mirror must restore per-user ownership so MyProfile "AI Characters" count, publish flow, and apply-to-character picker filter correctly.
 - **Phase-6 inputs**: reply-mode becomes a synced `chat_conversation_settings` column in B2 (interim AsyncStorage `@harmony_chat_reply_mode_<participantKey>`); read-flags (B1) supersede `unread_count` (kept until then); F4 confirmed NO app/engine key drift — contract pinned by test; Kotlin `show()` is now Promise<boolean> (device-build compile pending); F1/F8 event contract (`message:received` + session lifecycle) is app-local — engine-side event needs only exist if B1 planning wants push-driven chat lists.
 - **Phase-7/8 state**: INIT_ENTITY recovery live (bounded 2 retries; engine contract: `entity_not_defined` rejection during pre-ingestion race is now recovered app-side — engine unchanged). Editor consolidated into CreateAI edit mode; V3 column surface fully editable app-side (matters if the engine ever validates/normalizes card columns on sync).
@@ -326,3 +326,35 @@ User code review of the phase-1 diff (baseline `59739e0`) found UI removed beyon
 - **Bug: import failure (`no such column: first_mes`)** — stale dev DB predating migration 000037's V3-column rebuild; consolidated 000041 records as applied so columns never arrive. NOT a code bug; user wiped the DB (standing question #2 confirmed on-device).
 - **Bug: `ChatBubbleService` FGS crash (`ForegroundServiceDidNotStartInTimeException` from `closeWindow`/`hideOne`/`setUnreadCount` command deliveries — crash buffer 2026-08-23/26)** — `onStartCommand` skipped `startForeground()` on command intents (obligation exists per delivery, even when already foreground). Fix: unconditional `startForegroundCompat()` at the top + `maybeStopWhenEmpty()` guard. **Compile-verified (`:app:compileDevDebugKotlin` BUILD SUCCESSFUL); on-device verification rides the same next device build as the D1-4 Kotlin `show()` boolean** — untracked until now (on-device-only failure, ~10 s delayed, invisible to jest).
 - **Gates**: tsc 0 errors; unit 98/873 green; integration 10/50+1 skipped; all edited symbols LOW risk.
+
+---
+
+## Post-review correction — reply-to-message restore (2026-08-28, uncommitted)
+
+User ruling: the Phase-4 O4 reply-strip went beyond the "keep but hidden" consensus — senju's own
+follow-up commit (`d4151b3`) had only removed the UI ENTRY (action-sheet "Reply" row + input
+preview bar) while leaving the plumbing dormant. The full pipeline is therefore RESTORED
+(reverse of the Phase-4 removal):
+
+- **Migration 000041 amended IN PLACE**: `reply_to_message_id` column + `idx_conversation_messages_reply_to`
+  back in the consolidated migration; header + dev-wipe note updated. Devices that already ran the previous
+  000041 revision keep the old shape (an applied migration never re-runs), so the one-time dev DB wipe is now
+  REQUIRED on those devices; fresh installs are unaffected.
+- **Plumbing**: `ConversationMessage.reply_to_message_id` (models.ts); repo INSERT/SELECT/UPDATE + all row
+  mappers; `EntitySessionService.sendTextMessage(..., replyToMessageId)` — local store +
+  `utterance.reply_to_message_id` wire field.
+- **UI (kept, gated OFF)**: ChatBubble `repliedMessage` prop + "Replying to" header + reply-min-width logic;
+  ChatDetail `messageById` index + `replyToMessage` state + `handleReplyToMessage`/`handleCancelReply` +
+  send-path reply id; MessageActionSheet `reply` row behind new `hideReply` prop (defaults to the gate —
+  same convention as `hideForward`/`hideReactions`); ChatInputBar `replyTo`/`onCancelReply` props + reply
+  preview bar (renders only when set).
+- **Feature gate**: `MESSAGE_REPLY_ENABLED = false` in NEW `src/constants/chatFeatures.ts` — one-line flip
+  re-enables the reply UI; no other change needed.
+- **Parity**: D3 divergence now `reactions_json` + `reply_to_message_id` + `is_pinned` (+ 2 indexes);
+  the Phase-2 B1 engine mirror MUST carry the reply column + index. `docs/schema-parity.md` updated;
+  schema dump + 3 migration snapshots regenerated.
+- **Gates**: tsc 0 errors; unit 98/98 suites · 873 tests; integration 10/50+1 skipped (pre-existing skip).
+  Impact: `createConversationMessage` HIGH flag reviewed — the change is purely additive (re-add of the
+  pre-removal contract), no caller signature breaks.
+- **B1 planning note**: the Phase-2 `21-Engine-Contract-Persona-Enums.md` round must include
+  `reply_to_message_id` + `idx_conversation_messages_reply_to` in the shape-O12 column list.

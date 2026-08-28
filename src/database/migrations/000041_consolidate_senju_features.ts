@@ -8,9 +8,10 @@
  *   personas                   — identities the user chats AS (My Profile tab)
  *   character_favorites        — favorited character profiles
  *   chat_conversation_settings — per-conversation pin/archive/mute/block/unread
- *   conversation_messages      — reactions_json + is_pinned (message actions;
- *                                the reply_to_message_id column + its index are
- *                                DROPPED — O4 removed the reply feature)
+ *   conversation_messages      — reactions_json + reply_to_message_id +
+ *                                is_pinned (message actions; the reply column
+ *                                is KEPT DORMANT — the user-facing reply UI is
+ *                                gated off, plumbing restored for later enable)
  *
  * Dropped SQL (NOT carried over, per the approved consolidation amendment):
  *   character_profile_sources + backfill + visibility rebuilds (000041/42/49/52
@@ -26,11 +27,13 @@
  * device_push_tokens migration (no-op app-side), so the 1:1 number mirror
  * between app and engine survives.
  *
- * DEV-DEVICE WIPE NOTE: devices that already ran builds recording migrations
- * 41–55 keep their orphaned tables (harmless — nothing reads them) and a
- * lingering reply_to_message_id column on conversation_messages (never read).
- * A one-time dev DB wipe (Dev DB viewer wipe or reinstall) is recommended when
- * picking this branch up. Only dev installs ever executed these migrations.
+ * DEV-DEVICE WIPE NOTE: this migration was amended in place (reply column
+ * restored), and an already-applied migration never re-runs. Devices that
+ * already ran the previous 000041 revision (or the old 41–55 migrations) keep
+ * orphaned tables and MISS the reply_to_message_id column until wiped. A
+ * one-time dev DB wipe (Dev DB viewer wipe or reinstall) is REQUIRED on those
+ * devices to get the column back. Only dev installs ever executed these
+ * migrations; fresh installs are unaffected.
  *
  * The surviving pieces (personas / character_favorites /
  * chat_conversation_settings) are the last client-only tables pending the
@@ -57,10 +60,13 @@ CREATE TABLE IF NOT EXISTS character_favorites (
 
 -- Message actions for conversation_messages:
 -- 1. reactions_json: JSON array of emoji reactions, e.g. '["❤️","👍"]'
--- 2. is_pinned: 0/1 flag for pinned messages
+-- 2. reply_to_message_id: references the message this one replies to (dormant — UI gated off)
+-- 3. is_pinned: 0/1 flag for pinned messages
 ALTER TABLE conversation_messages ADD COLUMN reactions_json TEXT;
+ALTER TABLE conversation_messages ADD COLUMN reply_to_message_id TEXT;
 ALTER TABLE conversation_messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;
 
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_reply_to ON conversation_messages(reply_to_message_id);
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_pinned ON conversation_messages(is_pinned);
 
 -- Per-conversation settings (client-only)

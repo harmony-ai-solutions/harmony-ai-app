@@ -79,6 +79,7 @@ import {
   MessageActionSheet,
   MessageAction,
 } from '../components/chat/MessageActionSheet';
+import { MESSAGE_REPLY_ENABLED } from '../constants/chatFeatures';
 import {
   ForwardPickerModal,
   ForwardTarget,
@@ -213,6 +214,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   );
 
   const [actionSheetMessage, setActionSheetMessage] =
+    useState<ConversationMessage | null>(null);
+  // Reply-to context: the message the user is replying to (consumed on send).
+  // The UI entry points stay gated behind MESSAGE_REPLY_ENABLED (chatFeatures);
+  // the pipeline itself is fully restored so a flag flip activates the feature.
+  const [replyToMessage, setReplyToMessage] =
     useState<ConversationMessage | null>(null);
   const [forwardPickerVisible, setForwardPickerVisible] = useState(false);
   const [forwardMessageText, setForwardMessageText] = useState('');
@@ -1147,6 +1153,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         // Resolve emoji actions in the text
         let sendText = text;
         let additionalEffects = null;
+        const replyId = replyToMessage?.id ?? null;
 
         const resolved = await EntityEmojiActionService.resolveMessageActions(
           currentInteractionIdRef.current,
@@ -1158,11 +1165,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           additionalEffects = resolved.effects;
         }
 
+        // Store the reply reference (reply_to_message_id) instead of embedding
+        // a text quote — the UI renders a proper "Replying to" header.
         await EntitySessionService.sendTextMessage(
           currentInteractionIdRef.current,
           sendText,
           additionalEffects,
+          replyId,
         );
+
+        // Reply context consumed
+        if (replyToMessage) {
+          setReplyToMessage(null);
+        }
 
         log.info(`Text message sent for interaction ${routeInteractionId}`);
         if (participantKey) {
@@ -1186,6 +1201,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       isSessionActive,
       showToast,
       t,
+      replyToMessage,
     ],
   );
 
@@ -1286,6 +1302,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     ],
   );
 
+  const handleReplyToMessage = useCallback(
+    (message: ConversationMessage) => {
+      setReplyToMessage(message);
+    },
+    [],
+  );
+
+  const handleCancelReply = useCallback(() => {
+    setReplyToMessage(null);
+  }, []);
+
   // Handle the message action sheet selection
   const handleMessageAction = useCallback(
     (action: MessageAction) => {
@@ -1294,6 +1321,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       closeActionSheet();
 
       switch (action) {
+        case 'reply':
+          handleReplyToMessage(message);
+          break;
         case 'delete':
           handleDeleteMessage(message.id);
           break;
@@ -1314,6 +1344,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     [
       actionSheetMessage,
       closeActionSheet,
+      handleReplyToMessage,
       handleDeleteMessage,
       handleCopyMessage,
       handleForwardMessage,
@@ -1509,6 +1540,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     hapticLightPress();
     navigation.navigate('AIProfile', { profileId: partnerProfileId });
   }, [partnerProfileId, navigation]);
+
+  // Index messages by id so reply headers can look up the quoted message.
+  const messageById = useMemo(() => {
+    const map = new Map<string, ConversationMessage>();
+    for (const m of messages) {
+      map.set(m.id, m);
+    }
+    return map;
+  }, [messages]);
 
   // Calculate messages with divider AND compute the initial scroll target
   const { messagesWithDivider, initialScrollTarget } = useMemo(() => {
@@ -1913,6 +1953,10 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
       const isLastMessage =
         messages.length > 0 && item.id === messages[messages.length - 1].id;
       const isTranscriptionFailed = failedTranscriptions.has(item.id);
+      const repliedMessage =
+        item.reply_to_message_id && messageById.has(item.reply_to_message_id)
+          ? messageById.get(item.reply_to_message_id)
+          : null;
 
       return (
         <ChatBubble
@@ -1921,6 +1965,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
           isTranscriptionFailed={isTranscriptionFailed}
           partnerAvatar={!isOwn ? partnerAvatar : null}
           partnerName={partnerName}
+          repliedMessage={repliedMessage}
           onImagePress={() => {}}
           onSendMessage={handleConfirmAndSendMessage}
           onEdit={handleEditMessage}
@@ -1933,6 +1978,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
     },
     [
       messages,
+      messageById,
       partnerAvatar,
       theme,
       ownEntityId,
@@ -2498,6 +2544,19 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
           entityId={ownEntityId}
           showScenarioButton={!hasFirstMes}
           onScenarioPress={openScenarioSheet}
+          replyTo={
+            MESSAGE_REPLY_ENABLED && replyToMessage
+              ? {
+                  id: replyToMessage.id,
+                  senderName:
+                    replyToMessage.sender_entity_id === ownEntityId
+                      ? ownEntityName
+                      : partnerName,
+                  content: replyToMessage.content || '',
+                }
+              : null
+          }
+          onCancelReply={handleCancelReply}
         />
       )}
 

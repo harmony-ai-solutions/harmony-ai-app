@@ -950,7 +950,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   async sendTextMessage(
     interactionId: string,
     text: string,
-    additionalEffects?: any | null
+    additionalEffects?: any | null,
+    replyToMessageId?: string | null
   ): Promise<void> {
     const session = this.sessions.get(interactionId);
     if (!session) {
@@ -987,6 +988,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       is_recon_followup: false,
       is_edited: false,
       edit_of_message_id: null,
+      reply_to_message_id: replyToMessageId ?? null,
     };
 
     await createConversationMessage(message);
@@ -999,6 +1001,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       content: text,
       type: 'UTTERANCE_COMBINED'
     };
+
+    if (replyToMessageId) {
+      utterance.reply_to_message_id = replyToMessageId;
+    }
 
     // Attach additional effects if present
     if (additionalEffects && additionalEffects.emotionEffects && additionalEffects.emotionEffects.length > 0) {

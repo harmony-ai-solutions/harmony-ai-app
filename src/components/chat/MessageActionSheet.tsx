@@ -8,6 +8,7 @@ import {
   ScrollView,
   useWindowDimensions,
 } from 'react-native';
+import { MESSAGE_REPLY_ENABLED } from '../../constants/chatFeatures';
 import LinearGradient from 'react-native-linear-gradient';
 import { useTranslation } from 'react-i18next';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -21,6 +22,7 @@ import { ConversationMessage } from '../../database/models';
 export const QUICK_REACTIONS = ['❤️', '👍', '😂', '😮', '😢'] as const;
 
 export type MessageAction =
+  | 'reply'
   | 'delete'
   | 'copy'
   | 'forward'
@@ -39,6 +41,12 @@ interface MessageActionSheetProps {
   /** Hide the "Forward" action from the list (still handled internally, just not shown). */
   hideForward?: boolean;
   /**
+   * Hide the "Reply" action from the list (still handled internally, just not
+   * shown). Defaults to the MESSAGE_REPLY_ENABLED feature gate — pass
+   * `hideReply={false}` (or flip the gate) to surface the reply entry.
+   */
+  hideReply?: boolean;
+  /**
    * When false, the "Delete" action is hidden. Used to restrict deletion to
    * only the last message of a conversation.
    */
@@ -51,7 +59,8 @@ interface MessageActionSheetProps {
 /**
  * MessageActionSheet — bottom-sheet shown when the user long-presses a message
  * bubble. Contains a preview of the message, a row of 5 quick reactions, and
- * the action list: Delete, Copy, Forward, Translate, Pin/Unpin.
+ * the action list: Reply (gated by MESSAGE_REPLY_ENABLED), Delete, Copy,
+ * Forward, Translate, Pin/Unpin.
  *
  * Styling follows the app's glass/gradient design language (see the chat
  * context menu in ChatDetailScreen for the shared visual vocabulary).
@@ -64,6 +73,7 @@ export const MessageActionSheet: React.FC<MessageActionSheetProps> = ({
   isPinned = false,
   hideReactions = false,
   hideForward = false,
+  hideReply = !MESSAGE_REPLY_ENABLED,
   canDelete = true,
   onAction,
   onReact,
@@ -92,6 +102,9 @@ export const MessageActionSheet: React.FC<MessageActionSheetProps> = ({
     label: string;
     destructive?: boolean;
   }[] = [
+    ...(!hideReply
+      ? [{ key: 'reply' as MessageAction, icon: 'reply', label: t('reply') }]
+      : []),
     ...(canDelete
       ? [{ key: 'delete' as MessageAction, icon: 'delete-outline', label: t('delete'), destructive: true }]
       : []),

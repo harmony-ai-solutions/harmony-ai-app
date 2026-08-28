@@ -73,13 +73,18 @@ cd ../harmony-ai-app
 python3 scripts/compare-schemas.py rn-schema.json go-schema.json
 ```
 
-## Current Divergence State (as of Senju Follow-Up Phase 1, 2026-08-25)
+## Current Divergence State (as of Senju Follow-Up Phase 1 + reply restore, 2026-08-28)
 
-The **D3 divergence set is now NARROWED** to `conversation_messages.reactions_json` + `is_pinned`
-(plus the `idx_conversation_messages_pinned` index). Phase 2 (engine track, B1 — a Go mirror migration for
-message actions including read flags, shape O12) closes D3 and turns the parity gate green. Everything else in
-the dump is the known pre-existing baseline (10 cosmetic SQL drifts + `device_push_tokens` Go-only — RN's
-`000039` is the reserved-number placeholder that deliberately never creates that table).
+The **D3 divergence set is now NARROWED** to `conversation_messages.reactions_json` +
+`reply_to_message_id` + `is_pinned` (plus the `idx_conversation_messages_pinned` and
+`idx_conversation_messages_reply_to` indexes). The `reply_to_message_id` column was RESTORED
+(keep-but-hidden consensus: the feature pipeline is live again while the user-facing reply UI
+stays gated behind `MESSAGE_REPLY_ENABLED` in `src/constants/chatFeatures.ts`). Phase 2
+(engine track, B1 — a Go mirror migration for message actions including read flags, shape O12)
+closes D3 and turns the parity gate green — the engine mirror must now include the reply
+column + index. Everything else in the dump is the known pre-existing baseline (10 cosmetic
+SQL drifts + `device_push_tokens` Go-only — RN's `000039` is the reserved-number placeholder
+that deliberately never creates that table).
 
 `CLIENT_ONLY_TABLES` in `scripts/dump-schema.ts` is an **interim 3-entry set**:
 - `personas` — dies in Phase 2 B3 (personas → user entities conversion)

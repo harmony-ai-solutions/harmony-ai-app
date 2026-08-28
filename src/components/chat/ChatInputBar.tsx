@@ -83,6 +83,14 @@ interface ChatInputBarProps {
   showScenarioButton?: boolean;
   /** Called when the ✨ scenario trigger is tapped (opens ScenarioGeneratorSheet). */
   onScenarioPress?: () => void;
+  /**
+   * When set, a "Replying to X" preview bar renders above the input (reply
+   * feature; gated by MESSAGE_REPLY_ENABLED — ChatDetail only passes it when
+   * the gate is on).
+   */
+  replyTo?: { id: string; senderName: string; content: string } | null;
+  /** Called when the ✕ on the reply preview bar is tapped. */
+  onCancelReply?: () => void;
 }
 
 export const ChatInputBar: React.FC<ChatInputBarProps> = ({
@@ -93,6 +101,8 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   entityId,
   showScenarioButton = true,
   onScenarioPress,
+  replyTo,
+  onCancelReply,
 }) => {
   const { t } = useTranslation('chatDetail');
   const { theme } = useAppTheme();
@@ -628,6 +638,40 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
         </View>
       )}
 
+      {/* ── Reply preview bar (feature-gated; rendered only when replyTo is set) ── */}
+      {replyTo && (
+        <View
+          style={[
+            styles.replyBar,
+            {
+              backgroundColor: theme.colors.accent.primary + '14',
+              borderColor: theme.colors.accent.primary + '44',
+            },
+          ]}
+        >
+          <View style={[styles.replyAccent, { backgroundColor: theme.colors.accent.primary }]} />
+          <View style={styles.replyInfo}>
+            <ThemedText variant="accent" size={12} weight="medium" numberOfLines={1}>
+              {t('replyingTo', { name: replyTo.senderName })}
+            </ThemedText>
+            <ThemedText variant="muted" size={12} numberOfLines={2}>
+              {replyTo.content || t('mediaMessage')}
+            </ThemedText>
+          </View>
+          {onCancelReply && (
+            <TouchableOpacity
+              onPress={onCancelReply}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.replyClose}
+              accessibilityRole="button"
+              accessibilityLabel={t('cancel')}
+            >
+              <Icon name="close" size={18} color={theme.colors.text.muted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
       {/* ── Main input row / recording panel ── */}
       {isRecording ? (
         renderRecordingPanel()
@@ -813,6 +857,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
+  },
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  replyAccent: {
+    width: 3,
+    alignSelf: 'stretch',
+    borderRadius: 2,
+    marginRight: 10,
+  },
+  replyInfo: {
+    flex: 1,
+  },
+  replyClose: {
+    marginLeft: 8,
+    padding: 2,
   },
   iconBtn: {
     width: 42,
