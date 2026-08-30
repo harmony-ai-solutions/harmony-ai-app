@@ -18,9 +18,9 @@
     "gsd-project-researcher": { "model": "opencode-go/glm-5.3-flash" },
     "gsd-research-synthesizer": { "model": "zai-coding-plan/glm-5.3" },
     "gsd-roadmapper": { "model": "zai-coding-plan/glm-5.3" },
-    "gsd-ui-auditor": { "model": "opencode-go/deepseek-v4-flash-vision-exp" },
-    "gsd-ui-checker": { "model": "opencode-go/deepseek-v4-flash-vision-exp" },
-    "gsd-ui-researcher": { "model": "opencode-go/deepseek-v4-flash-vision-exp" },
+    "gsd-ui-auditor": { "model": "opencode-go/glm-5.3-flash" },
+    "gsd-ui-checker": { "model": "opencode-go/glm-5.3-flash" },
+    "gsd-ui-researcher": { "model": "opencode-go/glm-5.3-flash" },
     "gsd-user-profiler": { "model": "opencode-go/glm-5.3-flash" },
     "gsd-verifier": { "model": "zai-coding-plan/glm-5.3" }
   }
