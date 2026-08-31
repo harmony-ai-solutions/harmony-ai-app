@@ -5,9 +5,12 @@
 ## 1. Record doc — `.current_work/senju-rebase-integration/15-Engine-Phase2-Record.md`
 
 Per-phase what-changed/why (both repos, commit hashes per phase doc), deviations from the phase docs with
-reasoning, what was intentionally NOT fixed, gate outputs (parity excerpt incl. allowlist listing), the extended
-dev-DB-wipe note, standing decisions consumed (Q1–Q16 **+ §9 amendments A1–A7, 2026-08-31**), and the
-cross-repo commit pairing table (app ↔ engine lockstep commits). Note the **engine GitNexus index refresh** and any impact-analysis surprises.
+reasoning, what was intentionally NOT fixed, gate outputs (parity excerpt incl. allowlist listing — end state =
+2 entries per §9-A8/A9), the extended dev-DB-wipe note, standing decisions consumed (Q1–Q16 **+ §9 amendments
+A1–A12, 2026-08-31, including the SECOND plan-review round: A8 comment-insensitive comparator, A9 label
+reconciliation sweep superseding A1, A10 userEntities pull-forward, A11 lockstep authoring workflow, A12
+AI-authored-reactions deferral**), and the cross-repo commit pairing table (app ↔ engine lockstep commits, one
+session per pair per A11). Note the **engine GitNexus index refresh** and any impact-analysis surprises.
 
 ## 2. Repo documentation updates
 

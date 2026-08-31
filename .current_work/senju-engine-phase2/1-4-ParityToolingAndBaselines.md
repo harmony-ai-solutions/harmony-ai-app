@@ -5,38 +5,57 @@
 
 ## Objective
 
-Make "parity green" a real, enforceable state: an allowlisted comparator, truthful committed baselines, and the
-end of the D6 interim exclusion mechanism.
+Make "parity green" a real, enforceable state: a **comment-insensitive** comparator (§9-A8), truthful committed
+baselines, and the end of the D6 interim exclusion mechanism. With the §9-A9 reconciliation sweep, the end-state
+allowlist shrinks to **deliberate cross-repo design differences only**.
+
+## 0. Dump-writer hardening — comment-insensitive normalization (§9-A8, DO THIS FIRST)
+
+Both dump writers strip SQL comments BEFORE whitespace collapse (the comparator receives already-collapsed text,
+where inline `--` comments have no recoverable terminator — a comparator-side stripper was verified to TRUNCATE
+the engine's `lifecycle_state` DDL at the first comment):
+
+- Engine `normalizeSQL` (`cmd/dump_schema.go`) and app `normalizeSql`
+  (`src/database/__test_utils__/dumpSchema.ts`, consumed by `scripts/dump-schema.ts` + migration snapshots):
+  add a string-literal-aware comment stripper (`--` to end-of-line + `/* */` blocks; a `'` state machine with
+  `''` escaping protects string bodies containing `--`), applied before the existing whitespace collapse.
+- **TDD**: write the stripper tests FIRST (red) — fixtures: inline `--` comments, block comments, a DEFAULT
+  string containing `--` (e.g. `DEFAULT 'a--b'`), escaped quotes (`'it''s'`), comment at end without newline.
+  Cross-impl: the SAME fixture list runs in Go (`cmd/dump_schema_test.go`) and TS, asserting identical outputs.
+- Migration snapshots + `schema/rn-schema.json` regenerate (outputs change where comments existed).
 
 ## 1. `scripts/compare-schemas.py` — documented allowlist
 
 Add a versioned `EXPECTED_DIVERGENCES` registry (exact `type:name` keys + one-line reason each), loaded from a
-sibling file `scripts/parity-allowlist.json` (keeps the policy reviewable):
+sibling file `scripts/parity-allowlist.json` (keeps the policy reviewable). With §9-A8 (comment-insensitivity)
++ §9-A9 (label reconciliation in 1-2/1-3), the registry at THIS phase contains exactly ONE entry:
 
-- 9 cosmetic drifts (post-reconciliation state): `table:character_profiles` (inline comment),
-  `table:emotion_state` (comments + `deleted_at` label), `table:entities` (`alias DEFAULT ''`),
-  `table:entity_emoji_actions` (comments + timestamp labels), `table:interactions` (comments + FK clause),
-  `table:memories` (comments), `table:provider_config_soulbitscloud` (comments),
-  `table:sync_devices` (comments), `table:sync_history` (comment + `updated_at` column).
 - `table:device_push_tokens` — **Go-only**, engine push infra, app `000039` is the reserved placeholder.
-- `table:conversation_messages` — **timestamp-label drift by amendment A1** (engine `TIMESTAMP`/`DATETIME`, app
-  `TEXT` on `created_at`/`updated_at`/`deleted_at`). The Go driver's Scan dispatch depends on the declared type;
-  RN is label-agnostic; the app's TEXT labels are the 000025 remediation — see `docs/schema-parity.md`
-  "Timestamp Column Labels". Added by senior-dev ruling 2026-08-31 (the one sanctioned addition to this registry).
+
+(`table:sync_devices` joins in 4-2 when the engine-local `synced_tables` column lands — sanctioned by §9-A9;
+end state = 2 entries. The former 9 cosmetic drifts + `conversation_messages` are gone: comment-only drifts
+ceased to exist via §9-A8; label/column drifts reconciled app-side via §9-A9.)
+
 - Semantics: exit 0 iff (diff − allowlist) is empty AND every allowlist entry still matches an actual divergence
   (stale allowlist entries = failure — forces cleanup when a drift is reconciled). Report format keeps the
   RN-only/Go-only/different sections, annotated `[allowlisted]`.
-- Note in-file: allowlist entries may only be REMOVED (reconciliation), never added, without a senior-dev ruling.
+- Note in-file: allowlist entries may only be REMOVED (reconciliation), never added, without a senior-dev ruling
+  (the 4-2 `sync_devices` addition is pre-sanctioned by §9-A9 — cite it in the entry reason).
 
 ## 2. Baselines
 
-- Regenerate app baseline: `npm run schema:dump -- --output schema/rn-schema.json` (after 1-2/1-3).
-- Regenerate engine baseline: `go run . dump-schema | tail -n +4 > schema/go-schema.json` in harmony-link-private
-  (the committed one is STALE — missing `lifecycle_state` + `device_push_tokens`; CI doesn't notice because it
-  re-dumps). Commit on `feat/engine-track-phase2`.
-- `docs/schema-parity.md`: rewrite the "Current Divergence State" section — Phase-2 end state = allowlist only;
-  D3 closed via canonical rebuild; document the allowlist mechanism + the CI-red-by-design note (Q16: workflow pins
-  engine `main`; until the coordinated merge, local compare is authoritative).
+- Regenerate app baseline: `npm run schema:dump -- --output schema/rn-schema.json` (after §0 + 1-2/1-3).
+- Regenerate engine baseline: `go run . dump-schema | tail -n +3 > schema/go-schema.json` in harmony-link-private
+  (**the dump emits 2 header lines on this machine — verify the output starts with `[` before committing it**;
+  the committed baseline is STALE — missing `lifecycle_state` + `device_push_tokens`; CI doesn't notice because
+  it re-dumps). Commit on `feat/engine-track-phase2`. Baselines regenerate AFTER the §0 writer hardening so they
+  are comment-insensitive artifacts.
+- `docs/schema-parity.md`: rewrite the "Real Differences (Fix Required)" and "Common Cosmetic Differences"
+  sections (the doc has no "Current Divergence State" heading — those are the actual section names) + update
+  "Timestamp Column Labels" to the §9-A9 policy (rebuilt tables adopt engine `TIMESTAMP`/`DATETIME` labels; no
+  timestamp defaults; app never relies on `DEFAULT CURRENT_TIMESTAMP`). Document the comment-insensitive
+  comparator (§9-A8), the allowlist mechanism, and the CI-red-by-design note (Q16: workflow pins engine `main`;
+  until the coordinated merge, local compare is authoritative).
 
 ## 3. Delete the `CLIENT_ONLY_TABLES` mechanism (D6 end state)
 
@@ -54,9 +73,12 @@ sibling file `scripts/parity-allowlist.json` (keeps the policy reviewable):
 
 ## Verification
 
-- [ ] Local compare on fresh dumps exits 0 with output = 11 `[allowlisted]` entries (9 cosmetic +
-      `device_push_tokens` + `conversation_messages` A1 timestamp labels — assert EXACTLY the registered set;
-      sections may split RN-only/Go-only, the key set must not)
+- [ ] Comment stripper: cross-impl fixtures green in BOTH repos (Go + TS produce identical normalized output)
+- [ ] Local compare on fresh dumps (once the 1-1/1-2/1-3 pairs exist locally — §9-A11) exits 0 with output =
+      EXACTLY 1 `[allowlisted]` entry (`table:device_push_tokens`); `conversation_messages`, `entities`,
+      `emotion_state`, `entity_emoji_actions`, `interactions`, `sync_history` all MATCH; RN-only index leaks:
+      zero (2 entries only after 4-2 adds `sync_devices` — end state)
 - [ ] Stale-allowlist detection tested: temporarily remove a real drift → comparator fails (manual check OK)
-- [ ] `CLIENT_ONLY` grep zero; dump byte-identical before/after mechanism deletion
-- [ ] tsc 0, `npm test` green; commits + `gitnexus_detect_changes()`
+- [ ] `CLIENT_ONLY` grep zero; dump output unchanged by the mechanism deletion beyond formatting
+- [ ] tsc 0, `npm test` green; `go build ./...` + `go test ./cmd/...` green (stripper tests); commits +
+      `gitnexus_detect_changes()` per repo

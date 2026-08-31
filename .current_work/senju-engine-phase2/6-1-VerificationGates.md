@@ -8,7 +8,7 @@
 go build ./...
 go vet ./...
 go test ./...                      # incl. database roll-forward/rollback suite
-go run . dump-schema | tail -n +4 > /tmp/go-final.json
+go run . dump-schema | tail -n +3 > /tmp/go-final.json   # dump emits 2 header lines — assert output starts with [
 ```
 
 ## App repo (`senju-design-updates-rebase`)
@@ -26,10 +26,11 @@ npx gitnexus analyze
 
 - [ ] tsc = 0 errors; unit + integration all green (no new skips; `entitySessionInitRecovery` still green)
 - [ ] `go test ./...` green incl. migration rollback/re-apply for 000041/000042/000043
-- [ ] **Parity compare exits 0**; output = EXACTLY the allowlist: 9 cosmetic drifts + `device_push_tokens`
-      Go-only + `conversation_messages` timestamp-label drift (A1) = 11 entries (+ the `000043` placeholder
-      pairing noted). `character_favorites`, `chat_conversation_settings`, `entities`-beyond-alias-drift: MATCHING;
-      `conversation_messages` matches beyond the A1 labels. RN-only index leaks: zero.
+- [ ] **Parity compare exits 0**; output = EXACTLY the allowlist: **2 entries** — `device_push_tokens` Go-only +
+      `sync_devices` (engine-local `synced_tables` column, added in 4-2 per §9-A9). Everything else MATCHES after
+      comment normalization (§9-A8): `conversation_messages` byte-identical (§9-A9), `entities`, `emotion_state`,
+      `entity_emoji_actions`, `interactions`, `sync_history` reconciled, `character_favorites` +
+      `chat_conversation_settings` mirrored. RN-only index leaks: zero. (+ the `000043` placeholder pairing noted.)
 - [ ] Grep sweeps (app `src/`): `CLIENT_ONLY|unread_count|chat_last_read_|chat_entity_pref_|getKeyLastRead` →
       zero; `blocked` → zero **scoped to the chat_conversation_settings concept only** (social blocking —
       `SocialService.getBlockedUserIds` and its ChatList/Discover/Characters consumers — STAYS, A4); `personas`

@@ -26,11 +26,13 @@
 7. **Seeder tagging** (`config/db/init.go`): `claire` → `'ai'` explicitly; `user` → `'user'` explicitly (belt-and-braces
    with the 000042 backfill).
 
-## Tests
+## Tests (TDD — red → green)
 
-- Round-trip: sync model preserves type + flags; empty-string decode → 'ai'.
-- Cache: entity loaded with correct type; FETCH response includes new fields (snapshot/assert).
-- Management: create with/without type; type-change rejected.
+- **RED first**: round-trip test (sync model preserves type + flags; empty-string decode → 'ai') — compile-fails
+  before the fields exist.
+- **RED first**: cache test (entity loaded with correct type) + FETCH response includes new fields
+  (snapshot/assert) — fail before plumbing.
+- Management: create with/without type; type-change rejected (red before the handler guards).
 
 ## Verification
 

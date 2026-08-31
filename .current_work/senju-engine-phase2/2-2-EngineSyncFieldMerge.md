@@ -41,9 +41,12 @@ case "conversation_messages":
   list needs no change (row counts identical).
 - **Engine-side reaction writes** (from 2-3) go through the same repo fn and simply bump `updated_at` → rows sync
   back down on the next device sync. No special propagation.
-- Add a focused engine test: (a) insert carries reply_to + reactions; (b) update-merge changes ONLY the four
-  fields (assert content/audio untouched); (c) older `updated_at` loses; (d) timestamp preserved exactly
-  (string compare).
+- **TDD order (red → green)**: write the four engine tests FIRST against today's insert-only behavior —
+  (a) insert carries reply_to + reactions; (b) update-merge changes ONLY the four fields (assert content/audio
+  untouched); (c) older `updated_at` loses; (d) timestamp preserved exactly (string compare) — RED = (a)/(b)/(d)
+  fail (fields discarded, no merge, timestamps re-stamped). Then implement the merge + repo fn until green.
+  Caveat for (d): compare the value the engine RETURNS/re-reads, not the Go in-memory `time.Time` formatting —
+  RFC3339Nano trailing-zero normalization can differ from the stored string; assert on the DB round-trip.
 
 ## Files
 

@@ -45,14 +45,17 @@ The engine-side 7-step recipe for both new tables + the per-device initial-backf
   `since = 0` (full table) and the size-estimate counts it likewise; at `handleSyncFinalize` (:1671-1739) add all
   current registered tables to the set. Stale sets (tables later removed) are pruned at finalize.
 - The apply side needs no backfill concept (inbound rows apply via LWW regardless).
-- Registry hygiene: `sync_devices` grows the `synced_tables` column → update the `table:sync_devices` entry REASON
-  in `scripts/parity-allowlist.json` in the same commit ("comments" → "comments + `synced_tables` column").
+- Registry hygiene: `sync_devices` grows the `synced_tables` column → **ADD** the `table:sync_devices` entry to
+  `scripts/parity-allowlist.json` in the same commit (reason: "engine-local `synced_tables` column — sanctioned
+  by §9-A9"; the old "comments" reason is moot post-§9-A8). This is the one sanctioned allowlist addition of
+  Phase 2 — end state = 2 entries.
 
-## Tests
+## Tests (TDD — red → green)
 
-- Migration: up/down + rollback suite green (`go test ./database/...`).
-- Sync: full exchange of both tables (insert/update/LWW-tie/tombstone); backfill: device without `synced_tables`
-  entry receives full table ONCE, then incremental; second device unaffected; finalize records the set.
+- **RED first**: sync exchange tests (insert/update/LWW-tie/tombstone for both tables) + backfill tests (device
+  without `synced_tables` entry receives full table ONCE, then incremental; second device unaffected; finalize
+  records the set) — fail before the cases/models exist.
+- Migration: up/down + rollback suite green (`go test ./database/...`) — snapshot-style, runs after authoring.
 
 ## Verification
 

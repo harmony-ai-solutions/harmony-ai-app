@@ -57,11 +57,13 @@ path, `EntitySessionService.ts:1879-1898`).
       (partner `is_disabled` → drop, defense-in-depth; primary enforcement is engine-side INIT rejection, 4-3).
 5. **ArchivedChatsScreen** (`:307-320`): clear-on-open → `markConversationMessagesRead`; badge columns from the same map.
 
-## Tests
+## Tests (TDD — red → green; scope note)
 
-- Repo tests: mark-read bulk semantics (own vs partner sent, deleted excluded, upTo boundary), unread counts batch,
-  mark-unread sets exactly 1. Service/screen tests: badge seam rendering with derived map; muted partner suppresses
-  badge (O10); sync-apply recount event fires handler.
+- **Moved to the Phase-1 change set (A5/A10 — write them RED before the 1-2 repo implementation lands)**:
+  repo tests for mark-read bulk semantics (own vs partner sent, deleted excluded, upTo boundary), unread counts
+  batch, mark-unread sets exactly 1 — all asserting the A2 `entity_id = own POV` scoping.
+- **This phase (red first)**: badge seam rendering with derived map; muted partner suppresses badge (O10);
+  sync-apply recount event fires handler; divider derivation from first unread at open.
 
 ## Verification
 

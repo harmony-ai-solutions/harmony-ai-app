@@ -40,15 +40,15 @@ Verify + minimal fixes only (mechanics are already entity-agnostic):
   user entities via sync like today.
 - The 5-2 generation-suppression guard must NOT block RAG init for user entities (RAG = knowledge, not generation).
 
-## Tests
+## Tests (TDD — red → green)
 
-- Seeder: fresh DB has `user` entity WITH profile link (id stable, name "You"); repeated init does not duplicate
-  (empty-DB gate).
-- Resolvers: profile-linked entity (incl. `user`) resolves to profile name; profile-less entity falls back to
-  alias/id.
+- **RED first**: seeder test — fresh DB has `user` entity WITH profile link (id stable, name "You"); repeated init
+  does not duplicate (empty-DB gate) — fails today (no profile link).
+- **RED first**: resolver tests — profile-linked entity (incl. `user`) resolves to profile name; profile-less
+  entity falls back to alias/id — fails today (`user` renders as the literal id).
 - RAG: user entity with RAG mapping initializes collections + indexes lore from its profile's character_book;
-  without mapping → nothing.
-- Protection: delete/rename of `user` rejected.
+  without mapping → nothing (characterization — expected green, pins Q13 symmetry).
+- **RED first**: protection tests — delete/rename of `user` rejected (management routes currently allow both).
 
 ## Verification
 

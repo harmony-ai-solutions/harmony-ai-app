@@ -59,11 +59,13 @@ surface.
 New keys in `src/i18n/locales/en/chat.json` (+ registration): `entityDisabledTitle/Body`, `entityDisabledEnable`,
 `muteEntity`, `unmuteEntity`, `disableEntity`, `enableEntity`, `replyModeSyncedHint` (if needed).
 
-## Tests
+## Tests (TDD — red → green)
 
-- Repo: setReplyMode upsert-merge; reply-mode fallback+key-delete; entity flag round-trips.
-- Screen: menu actions call entity repo; disabled partner blocked client-side with toast; INIT `entity_disabled`
-  handled without retries; ChatList filters disabled partners' rows.
+- **RED first**: repo tests setReplyMode upsert-merge; reply-mode legacy-key fallback + key-delete (fail before
+  the fns exist — note the flag round-trips moved to Phase 1 per A5).
+- **RED first**: screen tests menu actions call entity repo; disabled partner blocked client-side with toast;
+  INIT `entity_disabled` handled without retries; ChatList filters disabled partners' rows
+  (social-blocked ∪ disabled union — A4).
 
 ## Verification
 

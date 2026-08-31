@@ -3,24 +3,30 @@
 > Execution plan for the engine track (Track B1/B2/B3 of
 > `.current_work/senju-rebase-integration/02-Followup-Stub-Plan.md`, Phase-2 items 7–10).
 > **Binding contract base:** `.current_work/senju-rebase-integration/21-Engine-Contract-Persona-Enums.md`
-> (all Q1–Q16 rulings, schema/sync/behavior contracts **+ §9 amendments A1–A7, 2026-08-31**). Where a phase doc
-> and the contract disagree, the contract wins.
+> (all Q1–Q16 rulings, schema/sync/behavior contracts **+ §9 amendments A1–A12, 2026-08-31 — including the
+> second plan-review round: A8 comment-insensitive comparator, A9 label-reconciliation sweep (supersedes A1),
+> A10 userEntities pull-forward, A11 lockstep authoring workflow, A12 AI-authored-reactions deferral**). Where a
+> phase doc and the contract disagree, the contract wins.
 > Two repos: `harmony-ai-app` (branch `senju-design-updates-rebase`) + `harmony-link-private`
 > (new branch `feat/engine-track-phase2` off `main`). **No merges to main during Phase 2.**
 
 ## What this phase delivers
 
 1. **B1 message-layer parity**: `conversation_messages` rebuilt to one canonical column set/order on both sides
-   (incl. `reactions_json`, `reply_to_message_id`, `is_pinned`, new `is_read`); timestamp labels stay per-side by
-   amendment A1 (engine `TIMESTAMP`/`DATETIME`, app `TEXT` — allowlisted drift); engine ingests/persists all of it
+   (incl. `reactions_json`, `reply_to_message_id`, `is_pinned`, new `is_read`); **byte-identical both sides per
+   amendment §9-A9 (supersedes A1): the app adopts the engine `TIMESTAMP`/`DATETIME` labels, no timestamp
+   defaults either side — the table never enters the allowlist**; engine ingests/persists all of it
    (field-scoped merge, inbound timestamps preserved, reaction awareness); unread becomes derived app-side.
-   **D3 closes for real; parity diff = allowlist only.**
+   **D3 closes for real; §9-A9 additionally reconciles `emotion_state`/`entity_emoji_actions`/`sync_history`/
+   `interactions`/`entities` app-side — end-state parity diff = 2 deliberate allowlist entries.**
 2. **B2 preferences sync**: `character_favorites` + slimmed `chat_conversation_settings` (POV `entity_id`, pinned,
    archived, `reply_mode`) become engine-synced tables with watermark contract, per-table initial backfill, and a
    centralized app PK registry.
 3. **B3 entity typing**: `entities.entity_type` + global `is_muted`/`is_disabled`; personas become user entities
    (linked profiles, default persona "You" engine-seeded and editable); AI-only automation gating; symmetric RAG.
-4. **Parity tooling**: allowlisted comparator, regenerated baselines, `CLIENT_ONLY_TABLES` mechanism deleted.
+4. **Parity tooling**: **comment-insensitive comparator (§9-A8 — both dump writers strip SQL comments before
+   whitespace collapse, string-literal-aware, cross-impl tested)**, allowlist (end state = `device_push_tokens` +
+   `sync_devices` only), regenerated baselines, `CLIENT_ONLY_TABLES` mechanism deleted.
 
 ## Working agreements (binding)
 
@@ -28,11 +34,16 @@
   Never merge to main, never force-push `senju-design-updates` (coordination with senju still pending).
 - **Every commit green** — app: `npx tsc --noEmit` = 0, `npm test` green; engine: `go build ./...`, `go test ./...`.
   Schema-touching commits additionally regenerate migration snapshots (app) and pass the roll-forward/rollback suite (engine).
-- **Schema changes land in cross-repo lockstep**: the paired migrations in Phase 1 are committed to both repos
-  before any consumer code (A5 exception: the app 1-2+1-3 change set bundles schema + direct consumer rewiring in
-  one commit — parity is still verified against the schema state); local parity compare must show
-  `diff ⊆ allowlist` after every schema change.
+- **Schema changes land in cross-repo lockstep (§9-A11 workflow)**: BOTH sides of a pair (1-1↔1-2, both 000042s,
+  4-2's 000043 pair) are authored in ONE session; build/test/parity gates run only once both sides exist locally —
+  a single-sided state is never parity-gated (expected to diverge). The paired migrations in Phase 1 are committed
+  to both repos before any consumer code (A5/A10: the app 1-2+1-3 change set bundles schema + direct consumer
+  rewiring + the `userEntities` repo + `personas.ts` shim in one commit — parity is still verified against the
+  schema state); local parity compare must show `diff ⊆ allowlist` after every COMPLETE pair.
   **CI parity stays red by design** (it pins engine `main`) — local compare is the authoritative gate.
+- **TDD (full, 2026-08-31 ruling)**: every code-bearing task writes its tests RED first, then implements to
+  green (per-doc "TDD order" sections). Migration/SQL tasks stay snapshot-based (snapshot regeneration +
+  roll-forward/rollback suites).
 - **GitNexus protocol** (AGENTS.md) in BOTH repos: `gitnexus_impact` before editing existing symbols;
   `gitnexus_detect_changes()` before each commit; refresh stale indexes (`npx gitnexus analyze` — the engine repo
   index is 4 commits stale, refresh FIRST).
@@ -48,7 +59,7 @@
 
 | Phase | Docs | Track | Output |
 |---|---|---|---|
-| 1 — Schema lockstep | 1-1…1-4 | B1/B2/B3 schema | Engine `000041` + edited app `000041` (canonical rebuild, favorites, settings, personas removed); paired `000042` (`entity_type`, `is_muted`, `is_disabled`); **A5: mute/disable→entity-flag + derived-unread core land here too (no dead UI window)**; snapshots, baselines, allowlist, `CLIENT_ONLY_TABLES` deletion |
+| 1 — Schema lockstep | 1-1…1-4 | B1/B2/B3 schema | Engine `000041` + edited app `000041` (canonical rebuild incl. §9-A9 label adoption, favorites, settings, personas removed + 4 reconciliation rebuilds); paired `000042` (`entity_type`, `is_muted`, `is_disabled`; app side = `entities` rebuild w/ `alias DEFAULT ''`); **A5/A10: mute/disable→entity-flag + derived-unread core + `userEntities` repo + personas shim land here too (no dead UI window)**; §9-A8 dump-writer hardening, snapshots, baselines, allowlist, `CLIENT_ONLY_TABLES` deletion |
 | 2 — B1 engine | 2-1…2-3 | B1 | Message models/query columns; field-merge sync apply + inbound timestamps + `reply_to` persistence; reaction awareness |
 | 3 — B1 app | 3-1 | B1 | Remainder after A5 pull-forward: `chat_last_read_*` deletion, sync-applied recount event, divider derivation, full tests |
 | 4 — B2 sync | 4-1…4-4 | B2 | PK registry; sync registration both repos (7-step recipe ×2); per-table backfill; engine muted/disabled gates; app settings rewiring |
@@ -80,6 +91,7 @@ App: `.planning/codebase/` (ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, INTEG
 - Dev-DB-wipe note (extended): devices that ran ANY pre-Phase-2 build of the rebase branch (old `000041`, old
   settings shape, personas table) need the one-time wipe — the edited `000041` never re-runs for them. Documented in
   the migration header + CHANGELOG.
-- Parity expected output after Phase 1 = exactly the allowlist (9 cosmetic drifts + `device_push_tokens` Go-only +
-  `conversation_messages` timestamp-label drift per A1 = 11 entries); anything else → investigate, never paper over.
+- Parity expected output: after Phase 1 = exactly 1 allowlist entry (`device_push_tokens` Go-only — the §9-A8/§9-A9
+  sweep eliminates every accidental drift); after 4-2 = 2 entries (+ `sync_devices` engine-local `synced_tables`
+  column); anything else → investigate, never paper over.
 - App parity CI remains red-by-design until the coordinated mainline merge (Q16) — do not "fix" it.

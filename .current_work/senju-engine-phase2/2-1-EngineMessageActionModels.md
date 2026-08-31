@@ -7,6 +7,17 @@
 
 Make the canonical `conversation_messages` columns first-class in the Go data layer.
 
+## TDD order (red → green)
+
+1. **RED**: write the `ToSyncModel`/`ToDBModel` round-trip unit test first (assert all four new fields +
+   inbound `CreatedAt`/`UpdatedAt` preserved verbatim; JSON wire keys `reactions_json`, `reply_to_message_id`,
+   `is_pinned`, `is_read`). Red = compile failure (fields don't exist yet).
+2. **RED**: extend the `GetChangedConversationMessages` scan test to expect the four columns (red = column
+   count/scan mismatch).
+3. **GREEN**: implement models (:9-39, :42-72), `sync_utils.go` query + scan targets, repo INSERT list +
+   inbound-timestamp persistence, `UpdateConversationMessageActions` — in that order, re-running the tests after
+   each step.
+
 ## Changes
 
 1. **`database/models/conversation.go`** — `ConversationMessage` (:9-39) += `ReactionsJSON sql.NullString`,

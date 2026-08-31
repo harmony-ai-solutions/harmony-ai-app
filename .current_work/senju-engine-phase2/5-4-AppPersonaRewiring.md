@@ -5,12 +5,15 @@
 
 ## Objective
 
-The `personas` table is gone (1-2 stubbed the repo). Personas = user entities with linked profiles. All persona UI
-works against `entity_type='user'`.
+The `personas` table is gone and the identity layer ALREADY lives on user entities: `userEntities.ts` + the
+`personas.ts` re-export shim landed in the Phase-1 change set (§9-A10 — no stub, no dead window). This phase
+finishes the surface: screen rewiring polish, persona-from-card, orphan deletions, the O2 sweep, i18n, and
+DELETION of the shim. All persona UI works against `entity_type='user'`.
 
-## 1. Identity layer (replaces `src/database/repositories/personas.ts`)
+## 1. Identity layer — LANDED IN PHASE 1 (§9-A10); kept here as the authoritative spec
 
-New `src/database/repositories/userEntities.ts` (or heavily rewritten personas.ts — prefer new file, delete old):
+`src/database/repositories/userEntities.ts` exists since Phase 1; `personas.ts` is its re-export shim (deleted in
+this phase). Spec (implemented + tested in Phase 1 unless noted):
 - `getUserEntities()` — entities WHERE `entity_type='user'` AND not deleted, JOIN profile (name/description/
   personality) + primary avatar (first `character_image` is_primary), returns `Persona`-shaped rows (id = entity id).
 - `createUserPersona({name, description, personality, avatar?})` — tx: minimal `character_profiles` row (name +
@@ -21,8 +24,8 @@ New `src/database/repositories/userEntities.ts` (or heavily rewritten personas.t
   `entity_type:'user'`, `character_profile_id` set. Then `syncAndWait` fire-and-forget (PersonaEdit pattern :183).
 - `updateUserPersona(id, fields)` — profile fields via `updateCharacterProfile`, entity alias sync (rename = profile
   name + alias, entity id FROZEN), image reconcile (diff-based, Phase-8 `computeImageDeltas` pattern).
-- `deleteUserPersona(id)` — FK-safe: `deleteEntity` soft path (`entities.ts:381-389`) + profile soft-delete; **guard:
-  id `'user'` → throw** (A1).
+- `deleteUserPersona(id)` — FK-safe: `deleteEntity` soft path (fn starts `entities.ts:328`, soft-delete branch
+  within `:328-389`) + profile soft-delete; **guard: id `'user'` → throw** (A1).
 - `resolvePersonaId(stored)` — stored id → valid (non-deleted) user entity else `'user'` (A7; keeps AI ids out).
 
 ## 2. Screens (A1-A4, A6)
@@ -52,9 +55,11 @@ identity fields only; document this).
 
 ## 4. Consumers audit (perspective plumbing — verify, mostly unchanged)
 
-`CharacterChatService` (:82-83, 127-141), `ChatListScreen` (:501-512), `ArchivedChatsScreen` (:124-137),
-`ChatDetailScreen` persona switch (:1453-1481) — all already consume `resolvePersonaId`/entity ids; swap imports to
-the new repo; semantics identical. `EntitiesScreen`/CreateAI lists: filter OUT user entities from AI-partner
+`CharacterChatService` (:82-83, 127-141), `ChatListScreen` (:501-512),
+`src/screens/settings/ArchivedChatsScreen.tsx` (:124-137),
+`ChatDetailScreen` persona switch (:1453-1481) — all already consume `resolvePersonaId`/entity ids (via the shim
+since Phase 1); swap imports to `userEntities` directly and semantics stay identical.
+`EntitiesScreen`/CreateAI lists: filter OUT user entities from AI-partner
 pickers (`entity_type` filter — verify CreateAI's entity-reuse paths don't offer personas). **§9-A3 ruling: user
 entities are NEVER visible as chat options — audit EVERY partner-picking surface, not just these two.**
 
@@ -63,15 +68,17 @@ entities are NEVER visible as chat options — audit EVERY partner-picking surfa
 `persona.json` namespace: keys for built-in persona name/desc ("You"), `createPersonaFromCard`, delete-protection
 error, editor field labels reuse.
 
-## Tests
+## Tests (TDD — red → green)
 
-- Repo: create (profile+entity+avatar tx), update (rename keeps id), delete guards ('user'), resolvePersonaId
-  sanitization (AI id → 'user'), sweep removes legacy keys.
-- Screens: editor create/edit/built-in modes; switcher default row content; from-card prefill; MyProfile list.
-- Update `src/database/__tests__/repositories/personas.test.ts` → new repo suite (defense cases become entity_type cases).
+- Repo suite: landed with Phase 1 (§9-A10) — create (profile+entity+avatar tx), update (rename keeps id), delete
+  guards ('user'), resolvePersonaId sanitization (AI id → 'user').
+- **RED first** (this phase): sweep removes legacy keys; screens editor create/edit/built-in modes; switcher
+  default row content; from-card prefill; MyProfile list; shim deletion breaks zero imports.
+- `src/database/__tests__/repositories/personas.test.ts` was already retargeted in Phase 1 (defense cases became
+  entity_type cases) — verify, extend for from-card.
 
 ## Verification
 
-- [ ] tsc 0; `npm test` green; grep: `from '../database/repositories/personas'` → zero (or only the new module);
-      `ImpersonationSelectorModal|PersonaRow` → zero
+- [ ] tsc 0; `npm test` green; grep: `from '../database/repositories/personas'` → **zero (the shim is DELETED in
+      this phase)**; `ImpersonationSelectorModal|PersonaRow` → zero
 - [ ] `gitnexus_impact` on `resolvePersonaId` consumers before editing; `gitnexus_detect_changes()` before committing

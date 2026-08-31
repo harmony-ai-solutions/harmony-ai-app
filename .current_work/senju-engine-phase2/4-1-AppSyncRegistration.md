@@ -48,11 +48,14 @@ Register `character_favorites` + `chat_conversation_settings` for engine sync ap
   table list payload); favorites → CharactersScreen favorite ids refresh hook (it already reloads on focus; add the
   subscription for live correctness).
 
-## Tests
+## Tests (TDD — red → green)
 
-- PK registry: table-driven unit test (all registered tables + default); regression: existing sync tests green.
-- Initial-upload set: new tables upload with since=0 once; second sync incremental; set persisted.
+- **RED first**: PK registry table-driven unit test (all registered tables + default) — fails while
+  `pkRegistry.ts` doesn't exist; the A7 lifecycle_state send-path cases fail against the current ternaries.
+- **RED first**: initial-upload set tests (new tables upload with since=0 once; second sync incremental; set
+  persisted) — fail before the set exists.
 - Favorites soft-delete/resurrect round-trips through `getChangedRecords`.
+- Regression: existing sync tests green (update the A7-affected ones deliberately — documented bugfix).
 
 ## Verification
 

@@ -51,13 +51,13 @@ unchanged with the new column (no filtering unless a dev-tools list wants a type
 Cloud lifecycle-worker (consumes `NewEntityBeatRunner` `lifecycle/runner.go:84` + `PersistOutreachMessage`
 `lifecycle/outreach.go:23-40`) must apply the same gate — record in the record doc as a cloud-track dependency.
 
-## Tests
+## Tests (TDD — red → green)
 
-- INIT user entity: session created, NO runner/emotion engine registered (assert service maps empty for it),
-  chat STT path functional.
-- INIT AI entity: runner + engine created (regression).
-- AI entity flipped to user/disabled mid-flight → onTick no-ops (existing runner).
-- User entity with cognition mapping → generation suppressed + warning logged.
+- **RED first** (fail against today's ungated INIT): INIT user entity → session created, NO runner/emotion engine
+  registered (assert service maps empty for it), chat STT path functional.
+- INIT AI entity: runner + engine created (regression — stays green).
+- **RED first**: AI entity flipped to user/disabled mid-flight → onTick no-ops (existing runner).
+- **RED first**: user entity with cognition mapping → generation suppressed + warning logged.
 
 ## Verification
 

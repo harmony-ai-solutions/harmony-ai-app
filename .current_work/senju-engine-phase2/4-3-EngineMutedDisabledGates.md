@@ -33,18 +33,21 @@
 
 ## Config/source of truth
 
-- Flags live on the `entities` row → sync applies them (LWW upsert, `synchronization.go:1306-1324`) → cache refresh
-  (`RefreshEntityCache` post-sync, :1514-1524) makes them effective without restart. `config.EntityConfig`
-  gains `EntityType`, `IsMuted`, `IsDisabled` (if not already from 5-1).
+- Flags live on the `entities` row → sync applies them (LWW upsert, `synchronization.go:1306-1324`) → cache
+  refresh makes them effective without restart. Naming precision: the post-sync refresh is the INLINE reload at
+  `synchronization.go:1508-1524` (`db.LoadAllEntities` → `config.ApplicationConfig.Entities` when the applied
+  table is `entities`/`entity_module_mappings`) — NOT the management package's `RefreshEntityCache` helper.
+  `config.EntityConfig` gains `EntityType`, `IsMuted`, `IsDisabled` (if not already from 5-1).
 - Engine never writes the flags (UI-driven, app→sync→engine read-only). Document in the model docblock.
 
-## Tests
+## Tests (TDD — red → green)
 
-- INIT with disabled entity → ERROR `entity_disabled`; enabled → proceeds. Muted → INIT proceeds.
+- **RED first** (fail against today's ungated behavior): INIT with disabled AI entity → ERROR `entity_disabled`;
+  enabled → proceeds; muted → INIT proceeds; user entity with flag → INIT still allowed (A3 type-scoping).
 - Disabled entity: no runner/emotion engine created; existing runner's onTick no-ops; DeliverOutreach drops.
 - Muted: outreach persists + WS-delivers, push skipped.
-- Flag flip via sync apply → cache refresh → next INIT honors new state (integration-style test along existing
-  synchronization test patterns).
+- Flag flip via sync apply → inline cache reload (`:1508-1524`) → next INIT honors new state (integration-style
+  test along existing synchronization test patterns).
 
 ## Verification
 

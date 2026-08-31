@@ -41,10 +41,19 @@ Two deliverables:
 - Both features are **AI-entity-only paths** (they run inside the AI's ThoughtProcessor; user entities never get
   one — 5-2).
 
-## Tests
+## Scope amendment (§9-A12, 2026-08-31)
 
-- [ ] Prompt snapshot: history lines show reaction annotations when present, nothing when empty
-- [ ] Reaction effect: appends to `reactions_json`, bumps `updated_at`, persists; second effect appends (no dup of same emoji)
-- [ ] `generate_expressions` off → no behavior change
-- [ ] `go build ./...`; `go test ./...`; `gitnexus_impact` on `applyAdditionalEffects`/prompt builder symbols;
+**AI-authored reactions (deliverable 2 below) are DEFERRED.** The backend deliberately does not emit reaction
+effects yet. The producer site (backend response → reaction parsing) AND the consumption mechanism
+(`AdditionalEffects` sibling — note that struct is a client-resolved channel today, `events.go:164-171` — vs an
+engine-internal `updateMessageAudio`-style update) are decided when the backend gains the capability. Keep only
+deliverable 1 + its tests in this phase; leave deliverable 2's text below as the design sketch for that future
+decision.
+
+## Tests (TDD — snapshot first)
+
+- [ ] **RED first**: prompt snapshot test asserting history lines show reaction annotations when present,
+      nothing when empty (fails: annotations don't exist)
+- [ ] GREEN: builder change makes it pass; `generate_expressions` off → no behavior change (guard test stays green)
+- [ ] `go build ./...`; `go test ./...`; `gitnexus_impact` on prompt builder symbols before editing;
       `gitnexus_detect_changes()` before committing
