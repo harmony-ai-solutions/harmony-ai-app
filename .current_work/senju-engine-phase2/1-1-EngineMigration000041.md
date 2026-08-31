@@ -67,10 +67,10 @@ No `DROP COLUMN` (guard in `migrations.go:287-358` bans it) — use a rebuild in
 
 - [ ] `go build ./...` clean
 - [ ] `go test ./database/...` green — roll-forward, idempotency, key-table checks, **rollback + re-apply** (`migrations_test.go:10-90`)
-- [ ] `go run . dump-schema | tail -n +3 > /tmp/go-schema.json` (the dump emits **2** header lines on this
-      machine — verify the output starts with `[` before using it) — contains canonical `conversation_messages`,
-      both new tables, `personas` absent
+- [ ] `go run . dump-schema > /tmp/go-schema.json` — after 1-4 §0's §9-A15 fix stdout is pure JSON (assert the
+      file starts with `[`; until that fix lands, strip everything before the first `[` — the header line count
+      varies 1–2) — contains canonical `conversation_messages`, both new tables, `personas` absent
 - [ ] Local compare vs regenerated app dump (run once BOTH sides of the 1-1/1-2 pair exist locally — §9-A11):
       `character_favorites`, `chat_conversation_settings` MATCH; `conversation_messages` MATCHES byte-for-byte
-      after comment normalization (§9-A8/§9-A9 — no allowlist entry for this table)
+      after comment + quote normalization (§9-A8/§9-A13/§9-A9 — no allowlist entry for this table)
 - [ ] Commit on `feat/engine-track-phase2`; `gitnexus_detect_changes()` (repo `harmony-link-private`) before committing

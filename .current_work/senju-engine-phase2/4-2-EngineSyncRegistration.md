@@ -35,20 +35,28 @@ The engine-side 7-step recipe for both new tables + the per-device initial-backf
 - Cleanup: extend soft-delete cleanup scope if tombstones should hard-purge (follow `lifecycle_state` precedent —
   include both tables).
 
-## 4. Per-table initial backfill (Q7, engine side)
+## 4. Per-table initial backfill (Q7, engine side) + paired app 000043 (§9-A14)
 
-- `sync_devices` += column `synced_tables TEXT NOT NULL DEFAULT '[]'` — **migration needed**: this is an
-  engine-LOCAL infra table (not synced, not in the app schema) → a Go-only migration `000043_synced_tables_registry`
-  with an **app-side reserved no-op placeholder `000043`** (000039 convention: comment-only app migration keeping
-  the 1:1 number mirror; document in both headers).
+- `sync_devices` += column `synced_tables TEXT NOT NULL DEFAULT '[]'` — **migration needed**: engine migration
+  `000043_synced_tables_registry`, authored in lockstep (§9-A11) with the **paired REAL app migration `000043`**
+  (see below). ~~Engine-LOCAL table not in the app schema~~ — **corrected by §9-A14**: `sync_devices` (and
+  `sync_history`) DO exist app-side as mistakenly-ported mirrors with a ZERO-caller repo
+  (`src/database/repositories/sync.ts`); the pairing deliberately makes them Go-only.
+- **App-side `000043` (repo: harmony-ai-app, same lockstep session)**: `DROP TABLE IF EXISTS sync_devices;
+  DROP TABLE IF EXISTS sync_history;` + **delete `src/database/repositories/sync.ts`** (all six fns verified
+  dead — zero callers) + remove the `SyncDevice`/`SyncHistory` model types from `src/database/models.ts` +
+  register in `src/database/migrations.ts` (version 43) + regenerate migration snapshots + `schema/rn-schema.json`.
+  Dev-DB note: devices that already synced keep orphaned empty tables until wiped — harmless, covered by the
+  extended wipe note. Both headers cross-reference their pair.
 - Contract: in `sendLocalChanges`, for each registered table NOT in the device's `synced_tables` set → fetch with
   `since = 0` (full table) and the size-estimate counts it likewise; at `handleSyncFinalize` (:1671-1739) add all
   current registered tables to the set. Stale sets (tables later removed) are pruned at finalize.
 - The apply side needs no backfill concept (inbound rows apply via LWW regardless).
-- Registry hygiene: `sync_devices` grows the `synced_tables` column → **ADD** the `table:sync_devices` entry to
-  `scripts/parity-allowlist.json` in the same commit (reason: "engine-local `synced_tables` column — sanctioned
-  by §9-A9"; the old "comments" reason is moot post-§9-A8). This is the one sanctioned allowlist addition of
-  Phase 2 — end state = 2 entries.
+- Registry hygiene (§9-A14): with the app drops, `sync_devices` AND `sync_history` become **Go-only** → in the
+  same commit **CONVERT** the interim `table:sync_history` different-SQL entry to Go-only and **ADD**
+  `table:sync_devices` Go-only to `scripts/parity-allowlist.json` (reason: "engine-local sync-infra table, app
+  copy was dead code and dropped — sanctioned by §9-A14"). End state = **3 uniform Go-only infra entries**
+  (`device_push_tokens` + `sync_devices` + `sync_history`).
 
 ## Tests (TDD — red → green)
 
@@ -56,9 +64,14 @@ The engine-side 7-step recipe for both new tables + the per-device initial-backf
   without `synced_tables` entry receives full table ONCE, then incremental; second device unaffected; finalize
   records the set) — fail before the cases/models exist.
 - Migration: up/down + rollback suite green (`go test ./database/...`) — snapshot-style, runs after authoring.
+- App 000043: snapshot regen; app migration tests green; tsc 0 (repo + models deleted cleanly).
 
 ## Verification
 
 - [ ] `go build ./...`; `go test ./...` green
+- [ ] App: tsc 0, `npm test` green; grep `sync_devices|sync_history|createSyncDevice|createSyncHistory` in
+      `src/` → zero (outside migration files); snapshots + `rn-schema.json` regenerated
 - [ ] Lockstep check: fetch list ↔ countChanges list ↔ app upload list contain the same two tables
-- [ ] `gitnexus_impact` on `sendLocalChanges`/`handleSyncData` before editing; `gitnexus_detect_changes()` before committing
+- [ ] Local parity compare (both sides of 000043 exist locally — §9-A11): output = EXACTLY the allowlist =
+      3 Go-only entries; `sync_devices`/`sync_history` absent from the RN dump
+- [ ] `gitnexus_impact` on `sendLocalChanges`/`handleSyncData` before editing; `gitnexus_detect_changes()` before committing (both repos)

@@ -3,9 +3,11 @@
 > Execution plan for the engine track (Track B1/B2/B3 of
 > `.current_work/senju-rebase-integration/02-Followup-Stub-Plan.md`, Phase-2 items 7–10).
 > **Binding contract base:** `.current_work/senju-rebase-integration/21-Engine-Contract-Persona-Enums.md`
-> (all Q1–Q16 rulings, schema/sync/behavior contracts **+ §9 amendments A1–A12, 2026-08-31 — including the
-> second plan-review round: A8 comment-insensitive comparator, A9 label-reconciliation sweep (supersedes A1),
-> A10 userEntities pull-forward, A11 lockstep authoring workflow, A12 AI-authored-reactions deferral**). Where a
+> (all Q1–Q16 rulings, schema/sync/behavior contracts **+ §9 amendments A1–A18, 2026-08-31 — rounds 2 and 3:
+> A8 comment-insensitive comparator, A9 label-reconciliation sweep (supersedes A1), A10 userEntities
+> pull-forward, A11 lockstep authoring workflow, A12 AI-authored-reactions deferral; A13 identifier-quote
+> normalization, A14 dead sync-infra tables dropped app-side + 000043 pair re-scope, A15 engine dump stdout
+> purity, A16 shim surface completion, A17 parity-doc heading fixes, A18 residual sign-offs**). Where a
 > phase doc and the contract disagree, the contract wins.
 > Two repos: `harmony-ai-app` (branch `senju-design-updates-rebase`) + `harmony-link-private`
 > (new branch `feat/engine-track-phase2` off `main`). **No merges to main during Phase 2.**
@@ -17,16 +19,20 @@
    amendment §9-A9 (supersedes A1): the app adopts the engine `TIMESTAMP`/`DATETIME` labels, no timestamp
    defaults either side — the table never enters the allowlist**; engine ingests/persists all of it
    (field-scoped merge, inbound timestamps preserved, reaction awareness); unread becomes derived app-side.
-   **D3 closes for real; §9-A9 additionally reconciles `emotion_state`/`entity_emoji_actions`/`sync_history`/
-   `interactions`/`entities` app-side — end-state parity diff = 2 deliberate allowlist entries.**
+   **D3 closes for real; §9-A9 additionally reconciles `emotion_state`/`entity_emoji_actions`/`interactions`/
+   `entities` app-side (§9-A13 quote normalization makes the rebuilds byte-stick; `sync_history` reconciliation
+   cancelled by §9-A14) — end-state parity diff = 3 deliberate Go-only infra entries.**
 2. **B2 preferences sync**: `character_favorites` + slimmed `chat_conversation_settings` (POV `entity_id`, pinned,
    archived, `reply_mode`) become engine-synced tables with watermark contract, per-table initial backfill, and a
    centralized app PK registry.
 3. **B3 entity typing**: `entities.entity_type` + global `is_muted`/`is_disabled`; personas become user entities
    (linked profiles, default persona "You" engine-seeded and editable); AI-only automation gating; symmetric RAG.
-4. **Parity tooling**: **comment-insensitive comparator (§9-A8 — both dump writers strip SQL comments before
-   whitespace collapse, string-literal-aware, cross-impl tested)**, allowlist (end state = `device_push_tokens` +
-   `sync_devices` only), regenerated baselines, `CLIENT_ONLY_TABLES` mechanism deleted.
+4. **Parity tooling**: **comment-insensitive + quote-normalized comparator (§9-A8/§9-A13 — both dump writers
+   strip SQL comments and canonicalize `CREATE TABLE` header quoting before whitespace collapse,
+   string-literal-aware, cross-impl tested; §9-A15 makes the engine dump pure-JSON stdout)**, allowlist
+   (end state = 3 uniform Go-only infra entries: `device_push_tokens` + `sync_devices` + `sync_history` — the
+   latter two's dead app copies DROPPED by the paired app `000043`, §9-A14), regenerated baselines,
+   `CLIENT_ONLY_TABLES` mechanism deleted.
 
 ## Working agreements (binding)
 
@@ -59,10 +65,10 @@
 
 | Phase | Docs | Track | Output |
 |---|---|---|---|
-| 1 — Schema lockstep | 1-1…1-4 | B1/B2/B3 schema | Engine `000041` + edited app `000041` (canonical rebuild incl. §9-A9 label adoption, favorites, settings, personas removed + 4 reconciliation rebuilds); paired `000042` (`entity_type`, `is_muted`, `is_disabled`; app side = `entities` rebuild w/ `alias DEFAULT ''`); **A5/A10: mute/disable→entity-flag + derived-unread core + `userEntities` repo + personas shim land here too (no dead UI window)**; §9-A8 dump-writer hardening, snapshots, baselines, allowlist, `CLIENT_ONLY_TABLES` deletion |
+| 1 — Schema lockstep | 1-1…1-4 | B1/B2/B3 schema | Engine `000041` + edited app `000041` (canonical rebuild incl. §9-A9 label adoption, favorites, settings, personas removed + 3 reconciliation rebuilds — `sync_history` cancelled by §9-A14); paired `000042` (`entity_type`, `is_muted`, `is_disabled`; app side = `entities` rebuild w/ `alias DEFAULT ''`); **A5/A10: mute/disable→entity-flag + derived-unread core + `userEntities` repo + personas shim land here too (no dead UI window)**; §9-A8/§9-A13/§9-A15 dump-writer hardening, snapshots, baselines, allowlist, `CLIENT_ONLY_TABLES` deletion |
 | 2 — B1 engine | 2-1…2-3 | B1 | Message models/query columns; field-merge sync apply + inbound timestamps + `reply_to` persistence; reaction awareness |
 | 3 — B1 app | 3-1 | B1 | Remainder after A5 pull-forward: `chat_last_read_*` deletion, sync-applied recount event, divider derivation, full tests |
-| 4 — B2 sync | 4-1…4-4 | B2 | PK registry; sync registration both repos (7-step recipe ×2); per-table backfill; engine muted/disabled gates; app settings rewiring |
+| 4 — B2 sync | 4-1…4-4 | B2 | PK registry; sync registration both repos (7-step recipe ×2); per-table backfill + paired `000043` (engine `synced_tables` ↔ app DROPS dead `sync_devices`/`sync_history` + deletes their repo, §9-A14); engine muted/disabled gates; app settings rewiring |
 | 5 — B3 entities | 5-1…5-4 | B3 | Engine entity plumbing + AI-only gating + user-entity support (seeder, resolvers, protection, symmetric RAG); app persona rewiring (contract §6 gap list A1–A7, persona-from-card) |
 | 6 — Verification | 6-1…6-2 | wrap-up | Full gates both repos, parity = allowlist-only, record doc, CHANGELOG, memory bank, smoke list |
 
@@ -91,7 +97,8 @@ App: `.planning/codebase/` (ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, INTEG
 - Dev-DB-wipe note (extended): devices that ran ANY pre-Phase-2 build of the rebase branch (old `000041`, old
   settings shape, personas table) need the one-time wipe — the edited `000041` never re-runs for them. Documented in
   the migration header + CHANGELOG.
-- Parity expected output: after Phase 1 = exactly 1 allowlist entry (`device_push_tokens` Go-only — the §9-A8/§9-A9
-  sweep eliminates every accidental drift); after 4-2 = 2 entries (+ `sync_devices` engine-local `synced_tables`
-  column); anything else → investigate, never paper over.
+- Parity expected output: after Phase 1 = exactly 2 allowlist entries (`device_push_tokens` Go-only + `sync_history`
+  interim different-SQL — the §9-A8/§9-A13/§9-A9 sweep eliminates every accidental drift; `sync_history` drifts
+  deliberately until 4-2 drops it); after 4-2 = **3 uniform Go-only infra entries** (+ `sync_devices`, whose dead
+  app copy the paired app `000043` removes — §9-A14); anything else → investigate, never paper over.
 - App parity CI remains red-by-design until the coordinated mainline merge (Q16) — do not "fix" it.

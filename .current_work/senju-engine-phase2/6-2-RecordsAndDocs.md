@@ -6,16 +6,20 @@
 
 Per-phase what-changed/why (both repos, commit hashes per phase doc), deviations from the phase docs with
 reasoning, what was intentionally NOT fixed, gate outputs (parity excerpt incl. allowlist listing — end state =
-2 entries per §9-A8/A9), the extended dev-DB-wipe note, standing decisions consumed (Q1–Q16 **+ §9 amendments
-A1–A12, 2026-08-31, including the SECOND plan-review round: A8 comment-insensitive comparator, A9 label
-reconciliation sweep superseding A1, A10 userEntities pull-forward, A11 lockstep authoring workflow, A12
-AI-authored-reactions deferral**), and the cross-repo commit pairing table (app ↔ engine lockstep commits, one
-session per pair per A11). Note the **engine GitNexus index refresh** and any impact-analysis surprises.
+3 uniform Go-only infra entries per §9-A8/A9/A13/A14), the extended dev-DB-wipe note, standing decisions
+consumed (Q1–Q16 **+ §9 amendments A1–A18, 2026-08-31, including the SECOND plan-review round (A8
+comment-insensitive comparator, A9 label reconciliation sweep superseding A1, A10 userEntities pull-forward,
+A11 lockstep authoring workflow, A12 AI-authored-reactions deferral) AND the THIRD validation round (A13
+identifier-quote normalization, A14 dead sync-infra tables dropped app-side + 000043 pair re-scope, A15 engine
+dump stdout purity, A16 shim surface completion, A17 parity-doc heading fixes, A18 residual sign-offs)**), and
+the cross-repo commit pairing table (app ↔ engine lockstep commits, one session per pair per A11). Note the
+**engine GitNexus index refresh** and any impact-analysis surprises.
 
 ## 2. Repo documentation updates
 
 - `docs/schema-parity.md`: final state section (rewritten in 1-4; verify accuracy against final output; add the
-  `000043` reserved-placeholder pairing note).
+  `000043` pairing note — engine `synced_tables` ↔ app drop migration per §9-A14; keep the `000039`
+  reserved-placeholder note).
 - `CHANGELOG.md` (app): user-relevant waves — message reactions/pins/replies sync across devices; read-state sync
   (unread derived); reply-mode synced; mute/disable now global per AI; personas become user identities ("You"
   default persona, create from card); **dev-build DB wipe hint** (extended scope).

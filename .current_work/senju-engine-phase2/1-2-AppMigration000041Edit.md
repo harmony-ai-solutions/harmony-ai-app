@@ -19,18 +19,20 @@ into pre-release migrations is approved; only dev devices ever ran it) into its 
 3. Replace `character_favorites` with the synced shape (watermark triple, `favorited_at` dropped).
 4. Replace `chat_conversation_settings` with the slimmed shape (drop `unread_count`, `muted`, `blocked`; add
    `reply_mode TEXT NOT NULL DEFAULT 'realistic'`, `deleted_at`).
-5. **§9-A9 reconciliation rebuilds (app-side only, engine untouched, Q12 intact)** — same migration, four more
+5. **§9-A9 reconciliation rebuilds (app-side only, engine untouched, Q12 intact)** — same migration, three more
    `_new`-table rebuilds adopting the engine's stored text so the post-migration dumps MATCH after comment
-   normalization (§9-A8):
-   - `emotion_state`: `deleted_at TEXT DEFAULT NULL` → `deleted_at DATETIME DEFAULT NULL` (only real diff).
-   - `entity_emoji_actions`: `created_at/updated_at/deleted_at` TEXT → `DATETIME NOT NULL DEFAULT
-     CURRENT_TIMESTAMP` / `DATETIME DEFAULT NULL` (defaults dormant — every writer supplies explicit timestamps;
-     `normalizeTimestampForSync` covers strays).
-   - `sync_history`: add the engine's `updated_at DATETIME DEFAULT CURRENT_TIMESTAMP` **in the engine's column
-     position** (before `deleted_at`) — ALTER-append would land it last and keep the drift; use a rebuild.
-   - `interactions`: `started_at/last_activity_at/ended_at/deleted_at/created_at/updated_at` TEXT → DATETIME;
-     `memory_id`/`continued_interaction_id` gain explicit `NULL`; add the engine's trailing
-     `FOREIGN KEY (entity_id) REFERENCES entities(id)` clause.
+   normalization (§9-A8) **+ identifier-quote normalization (§9-A13 — the rebuild-RENAME stores quoted table
+   names; the writers must canonicalize the header so `"emotion_state"` ≡ `emotion_state`)**:
+    - `emotion_state`: `deleted_at TEXT DEFAULT NULL` → `deleted_at DATETIME DEFAULT NULL` (only real diff).
+    - `entity_emoji_actions`: `created_at/updated_at/deleted_at` TEXT → `DATETIME NOT NULL DEFAULT
+      CURRENT_TIMESTAMP` / `DATETIME DEFAULT NULL` (defaults dormant — every writer supplies explicit timestamps;
+      `normalizeTimestampForSync` covers strays).
+    - `interactions`: `started_at/last_activity_at/ended_at/deleted_at/created_at/updated_at` TEXT → DATETIME;
+      `memory_id`/`continued_interaction_id` gain explicit `NULL`; add the engine's trailing
+      `FOREIGN KEY (entity_id) REFERENCES entities(id)` clause.
+    - ~~`sync_history`~~ **CANCELLED by §9-A14**: the table (and `sync_devices`) are zero-caller dead code app-side
+      and are DROPPED by the paired app `000043` in 4-2 — the reconciliation rebuild is moot. Interim: `sync_history`
+      stays a real drift (allowlisted) until 4-2 lands.
 6. Update the header comments: rationale, `000039` reserved-placeholder note (keep), **extended dev-DB-wipe note**
    (devices that ran ANY earlier build of this branch — old 000041, old settings shape, personas table, shim
    entities — need the one-time wipe; the edited migration never re-runs for them).
@@ -92,8 +94,9 @@ into pre-release migrations is approved; only dev devices ever ran it) into its 
     1-3 in this same change set; `createUserPersona`, `updateUserPersona`, `deleteUserPersona` with the
     `'user'`-delete guard, `resolvePersonaId` validating stored ids against non-deleted user entities with
     `'user'` fallback). `src/database/repositories/personas.ts` becomes a **thin re-export shim** of it (same
-    export surface: `Persona` shape, `getAllPersonas`/`createPersona`/`updatePersona`/`deletePersona`/
-    `resolvePersonaId`) so every consumer (`ChatListScreen`, `CharactersScreen`, `ArchivedChatsScreen`,
+    export surface per §9-A16: `Persona` + `PersonaRecord` shapes, `getAllPersonas`/`getPersona`/`createPersona`/
+    `updatePersona`/`deletePersona`/`resolvePersonaId`) so every consumer (`ChatListScreen`, `CharactersScreen`,
+    `ArchivedChatsScreen`,
     `CharacterChatService`, persona screens) keeps compiling and functional — the shim is deleted in 5-4.
     **Interim note (document in the shim header): the built-in `user` entity has no linked profile until 5-3's
     engine seeder lands, so the persona switcher's default row shows the raw `'user'` id until Phase 5.**
@@ -120,8 +123,10 @@ into pre-release migrations is approved; only dev devices ever ran it) into its 
 - [ ] `npm run schema:dump -- --output schema/rn-schema.json`; local compare vs engine branch dump
       (run once BOTH sides of the 1-1/1-2 pair exist locally — §9-A11): `character_favorites`,
       `chat_conversation_settings`, `conversation_messages`, `emotion_state`, `entity_emoji_actions`,
-      `sync_history`, `interactions` ALL MATCH (after comment normalization §9-A8; `conversation_messages`
-      byte-identical per §9-A9); `personas` absent from the dump; RN-only index leaks: zero; no new divergences
+      `interactions` ALL MATCH (after comment normalization §9-A8 + quote normalization §9-A13;
+      `conversation_messages` byte-identical per §9-A9); `sync_history` = the ONE expected interim drift
+      (§9-A14 — allowlisted until 4-2's 000043 drops it); `personas` absent from the dump; RN-only index leaks:
+      zero; no new divergences
 - [ ] Wipe note present in the migration header; userEntities repo + personas shim landed (§9-A10) with the
       interim `'user'`-raw-id note documented
 - [ ] UI stays live through the change set: mute/disable/mark-unread menu actions work against entity flags;

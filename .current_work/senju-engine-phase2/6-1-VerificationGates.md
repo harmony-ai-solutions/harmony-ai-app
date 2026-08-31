@@ -8,7 +8,7 @@
 go build ./...
 go vet ./...
 go test ./...                      # incl. database roll-forward/rollback suite
-go run . dump-schema | tail -n +3 > /tmp/go-final.json   # dump emits 2 header lines — assert output starts with [
+go run . dump-schema > /tmp/go-final.json               # pure JSON stdout after 1-4 §0 (§9-A15); assert starts with [
 ```
 
 ## App repo (`senju-design-updates-rebase`)
@@ -26,15 +26,18 @@ npx gitnexus analyze
 
 - [ ] tsc = 0 errors; unit + integration all green (no new skips; `entitySessionInitRecovery` still green)
 - [ ] `go test ./...` green incl. migration rollback/re-apply for 000041/000042/000043
-- [ ] **Parity compare exits 0**; output = EXACTLY the allowlist: **2 entries** — `device_push_tokens` Go-only +
-      `sync_devices` (engine-local `synced_tables` column, added in 4-2 per §9-A9). Everything else MATCHES after
-      comment normalization (§9-A8): `conversation_messages` byte-identical (§9-A9), `entities`, `emotion_state`,
-      `entity_emoji_actions`, `interactions`, `sync_history` reconciled, `character_favorites` +
-      `chat_conversation_settings` mirrored. RN-only index leaks: zero. (+ the `000043` placeholder pairing noted.)
+- [ ] **Parity compare exits 0**; output = EXACTLY the allowlist: **3 uniform Go-only infra entries** —
+      `device_push_tokens`, `sync_devices`, `sync_history` (dead app copies dropped by the paired app `000043`
+      in 4-2, engine `synced_tables` column — §9-A14). Everything else MATCHES after comment + quote
+      normalization (§9-A8/§9-A13): `conversation_messages` byte-identical (§9-A9), `entities`, `emotion_state`,
+      `entity_emoji_actions`, `interactions` reconciled app-side (§9-A9), `character_favorites` +
+      `chat_conversation_settings` mirrored; `sync_devices`/`sync_history` ABSENT from the RN dump. RN-only
+      index leaks: zero. (+ the `000043` pair — engine `synced_tables` ↔ app drop migration — noted.)
 - [ ] Grep sweeps (app `src/`): `CLIENT_ONLY|unread_count|chat_last_read_|chat_entity_pref_|getKeyLastRead` →
       zero; `blocked` → zero **scoped to the chat_conversation_settings concept only** (social blocking —
       `SocialService.getBlockedUserIds` and its ChatList/Discover/Characters consumers — STAYS, A4); `personas`
-      repo imports → zero; `reply_to_message_id` present in engine models (spot-check)
+      repo imports → zero; `sync_devices|sync_history|createSyncDevice|createSyncHistory` → zero outside
+      migration files (§9-A14); `reply_to_message_id` present in engine models (spot-check)
 - [ ] `gitnexus analyze` both repos; no stale warnings; `gitnexus_detect_changes()` clean-scope on the final commits
 
 ## Cross-repo integration smoke (on-device, manual — hand-off list)
