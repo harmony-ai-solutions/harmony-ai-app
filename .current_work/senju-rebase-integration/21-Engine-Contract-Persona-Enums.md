@@ -39,7 +39,7 @@
 | Q1 | Read-flag = **single column** `conversation_messages.is_read INTEGER NOT NULL DEFAULT 0`. Unread badges/dividers derived. No `read_at` (YAGNI; addable via paired ALTER). |
 | Q2 | **Read-by-AI: no schema.** Semantics (AI noticing messages) live in engine lifecycle/reply-mode code. Deferred. |
 | Q3 | Engine gets a **field-scoped merge** for existing message rows: only `reactions_json`, `is_pinned`, `is_read`, `updated_at` updatable via sync; content immutable. **Inbound timestamps preserved** (stop `time.Now()` re-stamping on sync-applied rows). No new WS events. **NEW engine behavior:** cognition/lifecycle may read reactions; the AI may author its own reaction on a message via the update path (`updateMessageAudio` precedent). |
-| Q4 | **Joint canonical rebuild** of `conversation_messages` (byte-identical both sides, `_new`-table pattern). Canonical labels: app-flavored — `TEXT` for audio/image data (base64), `INTEGER` for boolean-ish, no engine defaults, no engine-only FK clause. Final column set incl. `reply_to_message_id` + `is_read` (§3). |
+| Q4 | **Joint canonical rebuild** of `conversation_messages` (byte-identical both sides — timestamp labels excepted, amended by A1; `_new`-table pattern). Canonical labels: app-flavored — `TEXT` for audio/image data (base64), `INTEGER` for boolean-ish, no engine defaults, no engine-only FK clause. Final column set incl. `reply_to_message_id` + `is_read` (§3). |
 | Q5 | `character_favorites`: keep `profile_id TEXT PRIMARY KEY` + watermark triple; drop `favorited_at` (`created_at` subsumes). **Centralized PK registry** in the app: replace the ~6 scattered pkField sites (`sync.ts:364-375` + `SyncService.ts:792,903,1165,1252,1269,1286`) with one shared table→pk-column map. |
 | Q6 | `chat_conversation_settings.entity_id` = **the POV entity** (the user-entity persona the conversation is chatted as; NULL for groups) — never the partner. Partner resolution happens via participant-key derivation where needed. |
 | Q7 | **Per-table initial backfill** (NOT global full resync): engine tracks per-device exchanged-table set (`sync_devices.synced_tables` JSON); unlisted tables send with `since = 0` once (size estimate likewise); recorded at SYNC_FINALIZE. App mirror-image via a local per-table initial-upload set (AsyncStorage, keyed by sync source). LWW apply makes re-sends harmless. |
@@ -50,12 +50,12 @@
 | Q12 | **Parity allowlist**: `compare-schemas.py` gains a documented, versioned allowlist (the 9 remaining cosmetic drifts + `device_push_tokens` Go-only). Gate = green iff diff ⊆ allowlist. Never edit shipped migrations 1–40. Regenerate the stale committed Go baseline. `conversation_messages` leaves the drift list via Q4; reconcile others only opportunistically. |
 | Q13 | **RAG is symmetric**: user entities get collections/lore indexing/`rag_reindex_required` exactly like AI entities **iff a RAG module is configured for that entity** (default `user` = STT-only = RAG-less until configured). No new app UI for this. |
 | Q14 | O2/P4 legacy "chat as AI character" prefs: keep silent fallback (`resolvePersonaId` already sanitizes) + one-time sweep of dead `chat_entity_pref_*` AsyncStorage keys. **No convert-offer.** Persona-from-card ships as new UI (independent of O2). |
-| Q15 | **Migration numbering (2 pairs)**: edited app `000041` (canonical rebuild + favorites + settings final, personas removed) ↔ engine `000041` (byte-identical mirror); paired app+engine `000042` = `entities` ALTERs (`entity_type`, `is_muted`, `is_disabled`) + Q9 backfill. Engine `.down.sql` mandatory (guard bans DROP COLUMN — downs use rebuilds). App forward-only. |
+| Q15 | **Migration numbering (2 pairs)**: edited app `000041` (canonical rebuild + favorites + settings final, personas removed) ↔ engine `000041` (mirror; column set identical — timestamp-label exception A1); paired app+engine `000042` = `entities` ALTERs (`entity_type`, `is_muted`, `is_disabled`) + Q9 backfill. Engine `.down.sql` mandatory (guard bans DROP COLUMN — downs use rebuilds). App forward-only. |
 | Q16 | Engine branch `feat/engine-track-phase2` off `main`; app continues on `senju-design-updates-rebase`; **no merges to main during Phase 2** → parity CI (pins engine `main`) stays red by design; **local parity compare is the authoritative gate**. Engine GitNexus re-index before work starts (currently 4 commits stale). |
 
 ## 3. Schema contracts (final shapes)
 
-### 3.1 `conversation_messages` — canonical DDL (both sides byte-identical, Q4)
+### 3.1 `conversation_messages` — canonical DDL (column set/order identical both sides; Q4, amended by A1)
 
 ```sql
 CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY NOT NULL, entity_id TEXT NOT NULL,
@@ -69,9 +69,16 @@ CREATE TABLE "conversation_messages" ( id TEXT PRIMARY KEY NOT NULL, entity_id T
 ```
 Indexes (both sides): `idx_conversation_messages_entity(entity_id)`, `idx_conversation_messages_interaction_id(interaction_id)`,
 `idx_conversation_messages_pinned(is_pinned)`, `idx_conversation_messages_reply_to(reply_to_message_id)`.
-Delivered via `_new`-table rebuild (data carried by INSERT SELECT; per-side source column lists — label differences
-are affinity-equivalent). App column order/NOT NULLs; engine loses its `content`/`message_type` defaults, FK clause,
-BLOB/BOOLEAN/TIMESTAMP labels. App-side `is_read` joins the booleanFields sync map (`sync.ts:193`).
+Delivered via `_new`-table rebuild (data carried by INSERT SELECT; per-side source column lists). App column
+order/NOT NULLs; engine loses its `content`/`message_type` defaults, FK clause, BLOB/BOOLEAN labels.
+**AMENDED (A1, 2026-08-31): the engine KEEPS its `TIMESTAMP`/`DATETIME` labels on `created_at`/`updated_at`/
+`deleted_at`; the app keeps `TEXT`.** Reason: the Go driver's Scan dispatch depends on the declared type
+(TIMESTAMP/DATETIME → `time.Time`, TEXT → string — relabeling breaks every engine read with
+`unsupported Scan … string into time.Time`), while RN reads by storage class (labels irrelevant); the app's TEXT
+choice is the 000025 remediation (timestamp DEFAULTs once produced space-format values that iOS JSC and the sync
+wire cannot parse). The DDL above defines the canonical COLUMN SET/ORDER only; the timestamp-label drift joins the
+parity allowlist (see `docs/schema-parity.md` "Timestamp Column Labels"). App-side `is_read` joins the
+booleanFields sync map (`sync.ts:193`).
 
 ### 3.2 `character_favorites` (Q5)
 
@@ -161,3 +168,20 @@ scripts/compare-schemas.py`). GitNexus protocol both repos. Engine index refresh
 - Backend-concept items (creator ids, notification write side, marketplace/wallet) → `20-Backend-Concept`.
 - Cloud lifecycle-worker entity gate + Postgres cloud-path verification (flagged to cloud track).
 - Reconciliation of the 9 allowlisted cosmetic drifts (opportunistic only).
+
+## 9. Amendments (2026-08-31, senju-engine-phase2 plan review)
+
+Senior-dev rulings from the plan-review round (evidence: code-expert reports in both repos; findings embedded in
+the phase docs). These amend — not replace — the Q1–Q16 rulings above. Note: the ids A1–A7 below are DISTINCT from
+the §6 default-persona gap-list ids (also A1–A7, cited in doc 5-4); phase docs write `§9-A#` where ambiguity is
+possible.
+
+| # | Amendment |
+|---|---|
+| A1 | **Timestamp labels stay per-side (engine `TIMESTAMP`/`DATETIME`, app `TEXT`).** Q4's byte-identical bar applies to the column set/order/names — NOT the timestamp labels. Go's go-sqlite3 Scan dispatches on the declared type (TIMESTAMP/DATETIME → `time.Time`; TEXT → string → runtime scan errors), RN is label-agnostic; the app's TEXT labels are the 000025/`c62c7ca` remediation (timestamp DEFAULTs produced space-format values breaking iOS `new Date` + the sync wire). `conversation_messages` joins the parity allowlist for exactly this drift. Documented in `docs/schema-parity.md` ("Timestamp Column Labels"). Invariant: no `DEFAULT CURRENT_TIMESTAMP`-reliance on app date columns, ever. |
+| A2 | **`is_read` is per-record and born 0.** Verified copy model: each entity keeps its own record — app rows carry `entity_id` = POV persona (app mints its own uuidv7 even for WS-received partner messages, `EntitySessionService.ts:1965-1995`); engine rows carry `entity_id` = engine entity; user messages share one id across sides, AI messages have per-side ids. `is_read` on a record = "the counterpart has read it" — own messages stay 0, only the app's read action writes 1, the engine NEVER stamps 1 (2-1 §4's "born read" is retracted). App unread derivation MUST scope `cm.entity_id = own POV` (engine-perspective copies sync in under different ids and join the same `interaction_id`; unscoped queries double-count/double-render). |
+| A3 | **Disabled-INIT gate is type-scoped.** `entity_disabled` INIT rejection applies only when the INIT'd session entity `is_disabled && entity_type == 'ai'`. User entities are valid INIT targets (persona chat; resume integration tests INIT `"user"`) and 5-2 keeps their INIT allowed-but-chat-only. App-side guard: user entities can never be muted/disabled targets nor visible as chat-partner options. |
+| A4 | **Social blocking and entity disable stay separate.** `SocialService.getBlockedUserIds` (cloud-user social graph; ChatList/Discover/Characters filters) is untouched by Phase 2; ChatList filtering becomes social-blocked ∪ disabled-entities, never a replacement. All `blocked` greps are scoped to the `chat_conversation_settings` concept only. |
+| A5 | **Consumer rewiring moves into Phase 1.** Mute/disable→entity-flag and the derived-unread core land with the 1-2/1-3 app change set (one commit) so no UI goes dark mid-phase. `DisabledAIsScreen` is KEPT and rewired to disabled AI entities (it is the real disabled management UI — `AccountSettingsScreen.tsx:72` → `AppNavigator.tsx:206`; the earlier "ArchivedChats disabled filter" reference was wrong). |
+| A6 | **`chat_conversation_settings.entity_id` = POV (Q6) requires call-site rewiring** — today every setter receives the PARTNER id (`ChatListScreen.tsx:713-714`, `ChatDetailScreen.tsx:1375`, `EntitySessionService.ts:1899`). All writers pass the POV entity id from Phase 1 on. |
+| A7 | **PK registry fixes a pre-existing lifecycle_state asymmetry** (send path keyed `id`, apply path `entity_id` — `SyncService.ts:792/903/1165` vs `:1252/1269/1286`): the registry standardizes on `entity_id`; the send-path change is a deliberate bugfix, affected tests updated — not "behavior-neutral". |

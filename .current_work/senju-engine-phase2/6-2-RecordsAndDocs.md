@@ -6,8 +6,8 @@
 
 Per-phase what-changed/why (both repos, commit hashes per phase doc), deviations from the phase docs with
 reasoning, what was intentionally NOT fixed, gate outputs (parity excerpt incl. allowlist listing), the extended
-dev-DB-wipe note, standing decisions consumed (Q1–Q16), and the cross-repo commit pairing table (app ↔ engine
-lockstep commits). Note the **engine GitNexus index refresh** and any impact-analysis surprises.
+dev-DB-wipe note, standing decisions consumed (Q1–Q16 **+ §9 amendments A1–A7, 2026-08-31**), and the
+cross-repo commit pairing table (app ↔ engine lockstep commits). Note the **engine GitNexus index refresh** and any impact-analysis surprises.
 
 ## 2. Repo documentation updates
 

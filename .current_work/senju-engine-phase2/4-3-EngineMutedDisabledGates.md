@@ -11,12 +11,14 @@
 
 ## Gate sites
 
-1. **INIT_ENTITY rejection** — `eventserver/eventprocessor.go` `handleInitEntity` fresh (:196-199 area) + resume
-   (:726-728 area): after entity lookup, `if cfg.IsDisabled → error "entity_disabled"` (new constant
-   `ErrEntityDisabled = "entity_disabled"` beside `ErrEntityNotDefined`, `handler_websocket.go:29`). This rejects
-   sessions where the disabled entity is the INIT'd participant (the AI partner). Note: the POV/user entity being
-   muted/disabled is irrelevant engine-side (flags are only meaningful for AI entities; do not gate on the
-   participant that isn't the session entity).
+1. **INIT_ENTITY rejection (type-scoped, A3)** — `eventserver/eventprocessor.go` `handleInitEntity` fresh
+   (:196-199 area) + resume (:726-728 area): after entity lookup, `if cfg.IsDisabled && cfg.EntityType == "ai" →
+   error "entity_disabled"` (new constant `ErrEntityDisabled = "entity_disabled"` beside `ErrEntityNotDefined`,
+   `handler_websocket.go:29`). The INIT'd session entity is whatever entity id the client sends — for persona chat
+   that is a USER entity (resume integration tests INIT `"user"`; 5-2 keeps user-entity INIT allowed-but-chat-only),
+   so an unscoped disabled-check would kill persona chat the moment a user entity carries the flag. Flags are
+   AI-partner semantics; the app-side guard (A3: `setEntityMuted`/`setEntityDisabled` throw for user entities, user
+   entities never offered as chat partners) is the belt to this engine-side brace.
 2. **Automation skip (disabled)** — `lifecycle/service.go`: `EnsureBeatRunnerStarted` (:87-157, beside the autonomy
    check :108-111) and `EnsureEmotionEngine` (:52-71) return early for disabled entities. This shares the exact
    sites with the 5-2 entity_type gate — implement both checks together (one helper: `shouldAutomate(cfg) = type ==

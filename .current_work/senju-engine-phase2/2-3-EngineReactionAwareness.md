@@ -33,8 +33,11 @@ Two deliverables:
   - On receipt: `UpdateConversationMessageActions` merges the emoji into the target message's `reactions_json`
     (JSON array; append if absent, no dedupe drama — same toggle semantics as the app's
     `handleReactToMessage`, `ChatDetailScreen.tsx:857-898`: array rewrite) + bump `updated_at` → syncs down.
-  - Target resolution: most recent user-sent message in the interaction (no message-id targeting wire in this
-    phase — the backend doesn't know app message ids; document this simplification).
+- Target resolution: most recent user-sent message in the interaction (no message-id targeting wire in this
+  phase — keep resolution simple; note the engine already holds the app-minted ids for user rows via the utterance
+  wire, `cognition.go:842-844`). Copy-model note (A2): user-sent rows share ONE id across sides, so a reaction
+  merged engine-side syncs down onto the app's row with the same id and renders correctly; AI-authored rows have
+  per-side ids, and AI reactions only target user rows, so no id mismatch arises.
 - Both features are **AI-entity-only paths** (they run inside the AI's ThoughtProcessor; user entities never get
   one — 5-2).
 

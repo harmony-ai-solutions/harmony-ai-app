@@ -30,7 +30,12 @@ case "conversation_messages":
 ```
 
 - **Inbound timestamps verbatim** — never re-stamp (echo-safety: equal timestamps → no-op re-apply; the row's
-  `updated_at` only advances when someone actually edits).
+  `updated_at` only advances when someone actually edits). Wire format is RFC3339 ('T'-separated) in BOTH
+  directions (Go marshals `time.Time` as RFC3339Nano; the engine's DB-internal space format never crosses the
+  wire), so no mixed-format values can enter either DB.
+- **`is_read` direction (A2)**: the merge is the read-receipt channel — an app 0→1 read bumps `updated_at` and
+  flows up; the engine NEVER writes `is_read` (its rows are born 0 per 2-1 §4), so no engine→app read state
+  exists (read-by-AI stays deferred, Q2).
 - Operation semantics with `DetermineOperation` (`sync_utils.go:1258-1285`): `insert` = new row (unchanged);
   `update` = existing row → the merge branch; `delete` = soft delete (unchanged). Size-estimate `countChanges`
   list needs no change (row counts identical).

@@ -24,8 +24,11 @@ UPDATE entities SET entity_type = 'user' WHERE character_profile_id IS NULL;
 ## App side (`src/database/migrations/000042_entity_type_and_flags.ts`)
 
 - Register in `src/database/migrations.ts` (version 42, sequential — enforced by `migrations.rollforward.test.ts:37-43`).
-- Update in the SAME commit (green rule): `src/database/models.ts` `Entity` model += `entity_type`, `is_muted`,
-  `is_disabled`; `src/database/repositories/entities.ts` INSERT/SELECT column lists + `updateEntityFields` allowlist.
+- Update in the SAME commit (green rule; **land app-side 1-2 + 1-3 as ONE change set with the 1-2 consumer
+  rewiring — amendment A5**): `src/database/models.ts` `Entity` model += `entity_type`, `is_muted`, `is_disabled`;
+  `src/database/repositories/entities.ts` INSERT/SELECT column lists + `updateEntityFields` allowlist + the A5 flag
+  surface (`setEntityMuted`/`setEntityDisabled` — **A3 guard: throw for `entity_type='user'`** — plus
+  `getDisabledEntityIds`/`getMutedEntityIds`).
 - Regenerate snapshots + `schema/rn-schema.json`.
 
 ## Engine side (`database/migrations/000042_entity_type_and_flags.{up,down}.sql`)

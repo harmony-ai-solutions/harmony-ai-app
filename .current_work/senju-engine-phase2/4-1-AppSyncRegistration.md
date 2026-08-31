@@ -14,8 +14,11 @@ Register `character_favorites` + `chat_conversation_settings` for engine sync ap
      character_favorites: 'profile_id', chat_conversation_settings: 'participant_key' }` (+ default `id`),
   with `getPkField(table)`.
 - Replace ALL scattered sites: `getPrimaryKeyField` (`src/database/sync.ts:364-375`) and the five pkField ternaries
-  in `SyncService.ts` (:792, :903, :1165, :1252, :1269, :1286) → import from the registry. Behavior-neutral refactor;
-  existing tests must stay green unmodified.
+  in `SyncService.ts` (:792, :903, :1165, :1252, :1269, :1286) → import from the registry. **NOT behavior-neutral
+  (A7)**: the send-path ternaries (:1252/:1269/:1286) key `lifecycle_state` by `id` today while the apply path
+  (:792/:903/:1165) keys it by `entity_id` — a pre-existing asymmetry. The registry standardizes on `entity_id`
+  (verify against the `lifecycle_state` PK in migration 000040 when implementing); the send-path change is a
+  deliberate bugfix — update affected tests, don't paper over the difference.
 - `gitnexus_impact` on `getPrimaryKeyField` + `applyBufferedSyncData` first (this is the riskiest refactor of the phase).
 
 ## 2. Table registration (both new tables)

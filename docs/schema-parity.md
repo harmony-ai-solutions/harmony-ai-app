@@ -32,8 +32,22 @@ The comparison script reports:
 ### Common Cosmetic Differences
 
 - **Inline SQL comments:** Go migrations include `-- comments` within CREATE TABLE statements. RN migrations don't. These appear as "Different SQL" even though the effective schema is identical. The normalization step does NOT strip comments — if this becomes too noisy, update `normalizeSql()` on both sides to strip SQL comments.
-- **TEXT vs DATETIME/TIMESTAMP:** SQLite treats all of these as TEXT affinity — functionally identical but the SQL text differs.
+- **TEXT vs DATETIME/TIMESTAMP:** functionally identical for the RN app (see "Timestamp Column Labels" below) but the SQL text differs — and the labels are load-bearing for the Go side, so alignment is a coordinated decision, not a cosmetic fix-up.
 - **INTEGER vs BOOLEAN:** SQLite has no native BOOLEAN type — both are stored as 0/1. But `BOOLEAN` in SQL text differs from `INTEGER`.
+
+### Timestamp Column Labels (RN TEXT vs Go TIMESTAMP)
+
+Declared-type labels on date columns behave asymmetrically across the two codebases:
+
+- **RN side** (`react-native-sqlite-storage`): reads are dispatched by SQLite **storage class**, not declared type. A `TIMESTAMP`-labeled column holding `'2026-08-31T10:00:00.000Z'` returns the same string as a `TEXT`-labeled one. Affinity note: `TEXT` label = TEXT affinity, `TIMESTAMP`/`DATETIME` = NUMERIC affinity — ISO-8601 strings are not numeric-coercible, so they keep TEXT storage class either way (cosmetic in practice).
+- **Go side** (`mattn`/`jgiannuzzi go-sqlite3`): `Scan` dispatches on the **declared column type** — `TIMESTAMP/DATETIME/DATE`-declared columns are parsed into `time.Time`; `TEXT`-declared columns return raw strings. Relabeling a Go-scanned date column TIMESTAMP→TEXT breaks every `time.Time`/`sql.NullTime` scan at runtime (`unsupported Scan, storing driver.Value type string into type time.Time`).
+
+**History (why app tables use TEXT):** `conversation_messages` timestamps were originally `DATETIME/TIMESTAMP DEFAULT CURRENT_TIMESTAMP` (000005, 000013). SQLite's `CURRENT_TIMESTAMP` default writes space-separated `'YYYY-MM-DD HH:MM:SS'`, which (a) iOS JavaScriptCore fails to parse via `new Date(...)` and (b) does not match the ISO-8601 'T'-separated format the sync protocol expects. 000025 (commit `c62c7ca` "fix: sync issues") switched these columns to `TEXT NOT NULL` **without defaults**, with all writes explicit `new Date().toISOString()`, plus the `normalizeTimestampForSync` upload failsafe (`src/database/sync.ts`).
+
+**Invariants:**
+- Never reintroduce `DEFAULT CURRENT_TIMESTAMP` on app tables whose values feed `new Date(...)` or the sync wire — always write explicit ISO-8601.
+- The sync wire is safe across formats: the Go side marshals `time.Time` to RFC3339Nano (ISO 'T') JSON and binds/parses `time.Time` on write/read, so app DBs only ever receive ISO-T strings even though the engine DB stores space-format internally.
+- Timestamp-label changes on synced tables must be decided jointly for both repos (Go scan behavior depends on the label); the engine must keep `TIMESTAMP`-style labels on columns scanned as `time.Time`.
 
 ### Real Differences (Fix Required)
 

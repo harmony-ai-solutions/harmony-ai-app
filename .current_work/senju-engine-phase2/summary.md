@@ -3,14 +3,16 @@
 > Execution plan for the engine track (Track B1/B2/B3 of
 > `.current_work/senju-rebase-integration/02-Followup-Stub-Plan.md`, Phase-2 items 7–10).
 > **Binding contract base:** `.current_work/senju-rebase-integration/21-Engine-Contract-Persona-Enums.md`
-> (all Q1–Q16 rulings, schema/sync/behavior contracts). Where a phase doc and the contract disagree, the contract wins.
+> (all Q1–Q16 rulings, schema/sync/behavior contracts **+ §9 amendments A1–A7, 2026-08-31**). Where a phase doc
+> and the contract disagree, the contract wins.
 > Two repos: `harmony-ai-app` (branch `senju-design-updates-rebase`) + `harmony-link-private`
 > (new branch `feat/engine-track-phase2` off `main`). **No merges to main during Phase 2.**
 
 ## What this phase delivers
 
-1. **B1 message-layer parity**: `conversation_messages` rebuilt to one canonical byte-identical DDL on both sides
-   (incl. `reactions_json`, `reply_to_message_id`, `is_pinned`, new `is_read`); engine ingests/persists all of it
+1. **B1 message-layer parity**: `conversation_messages` rebuilt to one canonical column set/order on both sides
+   (incl. `reactions_json`, `reply_to_message_id`, `is_pinned`, new `is_read`); timestamp labels stay per-side by
+   amendment A1 (engine `TIMESTAMP`/`DATETIME`, app `TEXT` — allowlisted drift); engine ingests/persists all of it
    (field-scoped merge, inbound timestamps preserved, reaction awareness); unread becomes derived app-side.
    **D3 closes for real; parity diff = allowlist only.**
 2. **B2 preferences sync**: `character_favorites` + slimmed `chat_conversation_settings` (POV `entity_id`, pinned,
@@ -27,7 +29,9 @@
 - **Every commit green** — app: `npx tsc --noEmit` = 0, `npm test` green; engine: `go build ./...`, `go test ./...`.
   Schema-touching commits additionally regenerate migration snapshots (app) and pass the roll-forward/rollback suite (engine).
 - **Schema changes land in cross-repo lockstep**: the paired migrations in Phase 1 are committed to both repos
-  before any consumer code; local parity compare must show `diff ⊆ allowlist` after every schema change.
+  before any consumer code (A5 exception: the app 1-2+1-3 change set bundles schema + direct consumer rewiring in
+  one commit — parity is still verified against the schema state); local parity compare must show
+  `diff ⊆ allowlist` after every schema change.
   **CI parity stays red by design** (it pins engine `main`) — local compare is the authoritative gate.
 - **GitNexus protocol** (AGENTS.md) in BOTH repos: `gitnexus_impact` before editing existing symbols;
   `gitnexus_detect_changes()` before each commit; refresh stale indexes (`npx gitnexus analyze` — the engine repo
@@ -44,11 +48,11 @@
 
 | Phase | Docs | Track | Output |
 |---|---|---|---|
-| 1 — Schema lockstep | 1-1…1-4 | B1/B2/B3 schema | Engine `000041` + edited app `000041` (canonical rebuild, favorites, settings, personas removed); paired `000042` (`entity_type`, `is_muted`, `is_disabled`); snapshots, baselines, allowlist, `CLIENT_ONLY_TABLES` deletion |
+| 1 — Schema lockstep | 1-1…1-4 | B1/B2/B3 schema | Engine `000041` + edited app `000041` (canonical rebuild, favorites, settings, personas removed); paired `000042` (`entity_type`, `is_muted`, `is_disabled`); **A5: mute/disable→entity-flag + derived-unread core land here too (no dead UI window)**; snapshots, baselines, allowlist, `CLIENT_ONLY_TABLES` deletion |
 | 2 — B1 engine | 2-1…2-3 | B1 | Message models/query columns; field-merge sync apply + inbound timestamps + `reply_to` persistence; reaction awareness |
-| 3 — B1 app | 3-1 | B1 | `is_read` wiring; derived unread (3 seams); `chat_last_read_*` second system deleted |
+| 3 — B1 app | 3-1 | B1 | Remainder after A5 pull-forward: `chat_last_read_*` deletion, sync-applied recount event, divider derivation, full tests |
 | 4 — B2 sync | 4-1…4-4 | B2 | PK registry; sync registration both repos (7-step recipe ×2); per-table backfill; engine muted/disabled gates; app settings rewiring |
-| 5 — B3 entities | 5-1…5-4 | B3 | Engine entity plumbing + AI-only gating + user-entity support (seeder, resolvers, protection, symmetric RAG); app persona rewiring (A1–A7, persona-from-card) |
+| 5 — B3 entities | 5-1…5-4 | B3 | Engine entity plumbing + AI-only gating + user-entity support (seeder, resolvers, protection, symmetric RAG); app persona rewiring (contract §6 gap list A1–A7, persona-from-card) |
 | 6 — Verification | 6-1…6-2 | wrap-up | Full gates both repos, parity = allowlist-only, record doc, CHANGELOG, memory bank, smoke list |
 
 Sequencing rationale: schema first (everything compiles against the final shape), then B1 (read-flags must exist
@@ -76,6 +80,6 @@ App: `.planning/codebase/` (ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, INTEG
 - Dev-DB-wipe note (extended): devices that ran ANY pre-Phase-2 build of the rebase branch (old `000041`, old
   settings shape, personas table) need the one-time wipe — the edited `000041` never re-runs for them. Documented in
   the migration header + CHANGELOG.
-- Parity expected output after Phase 1 = exactly the allowlist (9 cosmetic drifts + `device_push_tokens` Go-only);
-  anything else → investigate, never paper over.
+- Parity expected output after Phase 1 = exactly the allowlist (9 cosmetic drifts + `device_push_tokens` Go-only +
+  `conversation_messages` timestamp-label drift per A1 = 11 entries); anything else → investigate, never paper over.
 - App parity CI remains red-by-design until the coordinated mainline merge (Q16) — do not "fix" it.

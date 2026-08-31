@@ -5,8 +5,10 @@
 
 ## Objective
 
-Finish the consumer rewiring: reply-mode becomes the synced `reply_mode` column; mute/disable become global
-entity-level actions; the settings repo shrinks to its final surface.
+Finish the consumer rewiring (the mute/disable→entity-flag LOGIC and derived-unread core already landed in
+Phase 1 per A5 — 4-4 does the final UI treatment + verification): reply-mode becomes the synced `reply_mode`
+column; mute/disable get their final UX (labels, AIProfile chip, guards); the settings repo reaches its final
+surface.
 
 ## 1. `chatConversationSettings.ts` final surface
 
@@ -14,8 +16,9 @@ entity-level actions; the settings repo shrinks to its final surface.
   `upsertSettings`, `setConversationPinned/Archived`, `conversationSettingsExistForEntity`,
   `listConversationsByFlag` (pinned/archived only now).
 - Add: `getReplyMode(participantKey)` / `setReplyMode(participantKey, mode)` (upsert merge-preserving, bumps `updated_at`).
-- Delete: mute/disable functions (`getDisabledConversation`, `getDisabledEntityIds`) — replaced by entity queries
-  (below). The `'blocked'` mapping and header hack comments die; document Q6 (entity_id = POV) in the header.
+- Delete (executed in the Phase-1 change set — verify zero remnants): mute/disable functions
+  (`getDisabledConversation`, `getDisabledEntityIds`). The `'blocked'` mapping and header hack comments die; Q6
+  (entity_id = POV) documented in the header with all writers passing POV ids (A6).
 - `EntitySessionService` reply-mode: `startInteractionSession`/`sendInitEntityForEntity` read the SYNCED value
   (repo `getReplyMode`) instead of `ChatPreferencesService.getReplyMode`; `SET_REPLY_MODE` broadcast + the
   `InteractionSession.replyMode` field stay (live partner pacing still needs the WS push).
@@ -31,19 +34,25 @@ entity-level actions; the settings repo shrinks to its final surface.
   `updateEntityFields` (allowlist from 1-3); `getDisabledEntityIds()` / `getMutedEntityIds()` re-implemented here
   (SELECT id FROM entities WHERE is_disabled = 1 AND deleted_at IS NULL …).
 - Consumers:
-  - `ChatListScreen` long-press menu (`:1068` area): "Mute"/"Disable" actions now entity-scoped (partner entity);
-    labels/i18n adjusted ("Mute {name}" global semantics); the disabled partner's conversations are filtered from
-    the list (reuse the blocked-filter seam `SocialService.getBlockedUserIds` position — replace with
-    `getDisabledEntityIds` union).
+  - `ChatListScreen` long-press menu (`:1068` area): "Mute"/"Disable" actions are entity-scoped since Phase 1
+    (A5); 4-4 adjusts labels/i18n ("Mute {name}" global semantics). The disabled partner's conversations are
+    filtered from the list as social-blocked (`SocialService.getBlockedUserIds` — **UNCHANGED, A4; social-graph
+    blocking is a different feature**) **∪** `getDisabledEntityIds` — a union at the same seam, never a
+    replacement.
   - O10 badge suppression (3-1): partner `is_muted` from the entities map (already wired there; verify).
   - `CharacterChatService.openCharacterChat` + `ChatDetailScreen`: client-side defense-in-depth — disabled partner →
     honest error toast + navigate to AIProfile (which shows state + enable action); engine `entity_disabled`
     INIT error → same UX (extend `handleInitEntityResponse` ERROR branch: `entity_disabled` → toast, NO recovery
     retries — distinct from `entity_not_defined`, `EntitySessionService.ts:1697-1737`).
   - `AIProfileScreen`: disabled/muted state chip + toggle actions (i18n keys).
-- Disabled partners list: wherever ChatList surfaced disabled conversations before (ArchivedChats "disabled" filter)
-  — switch to a disabled-ENTITIES section or drop the filter (decide at implementation: prefer AIProfile + a
-  "Disabled" manage list in Settings → Keep Simple: AIProfile toggle only, no dedicated list screen this phase).
+  - Guards (A3): `setEntityMuted`/`setEntityDisabled` throw for `entity_type='user'` (landed Phase 1 — verify);
+    user entities are NEVER offered as chat partners anywhere a partner is picked (see 5-4 §4); engine INIT gate
+    is type-scoped (4-3).
+- Disabled partners list: **DisabledAIsScreen is KEPT and rewired** (A5) — it is the existing management UI
+  (`AccountSettingsScreen.tsx:72` → `AppNavigator.tsx:206`), listing disabled AI entities
+  (`entity_type='ai' AND is_disabled=1`) instead of `listConversationsByFlag('blocked')`. The earlier
+  "ArchivedChats 'disabled' filter" reference was factually wrong (ArchivedChats filters only `archived`; its
+  `:307-320` mark-read handler is the only seam touched there). AIProfile keeps the new state chip + toggles.
 
 ## 3. i18n
 

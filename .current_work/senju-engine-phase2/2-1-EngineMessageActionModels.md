@@ -28,9 +28,15 @@ Make the canonical `conversation_messages` columns first-class in the Go data la
    - New: `UpdateConversationMessageActions(tx, id, reactionsJSON, isPinned, isRead, updatedAt)` — the field-scoped
      update used by 2-2 (content columns never touched).
 4. **Engine-generated rows** (greetings, replies, outreach, dreams): must write coherent zero-values —
-   `ReactionsJSON` NULL/`'[]'`, `ReplyToMessageID` NULL, `IsPinned` 0, `IsRead` 1 for AI-authored messages
-   (**decided: engine-authored rows are born read** — a partner's own message is never "unread" to itself; app
-   unread derivation counts only rows where `sender != POV entity`, so this is consistency, not behavior).
+   `ReactionsJSON` NULL/`'[]'`, `ReplyToMessageID` NULL, `IsPinned` 0, `IsRead` **0** — do not stamp `is_read` at
+   all; the column default covers it (**amendment A2, retracts the earlier "born read" decision**). Verified copy
+   model: each entity keeps its OWN record — the app stores POV copies (`entity_id` = persona, app-minted uuidv7
+   even for WS-received partner messages, `EntitySessionService.ts:1965-1995`), the engine stores its own
+   (`entity_id` = engine entity); user messages share one id across sides, AI messages have per-side ids. `is_read`
+   on a record means "the record owner's counterpart has read it": own messages stay 0, only the app's read action
+   ever writes 1 (flowing up as a read-receipt via the 2-2 merge). Stamping 1 at birth would make every
+   engine-authored message permanently read app-side (no unread badge for synced-in outreach/greetings — the exact
+   bug 3-1 exists to fix) and would pre-implement read-by-AI semantics that Q2 deferred.
 
 ## Verification
 

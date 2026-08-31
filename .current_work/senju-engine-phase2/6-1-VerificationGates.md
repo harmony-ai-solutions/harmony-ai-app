@@ -27,11 +27,13 @@ npx gitnexus analyze
 - [ ] tsc = 0 errors; unit + integration all green (no new skips; `entitySessionInitRecovery` still green)
 - [ ] `go test ./...` green incl. migration rollback/re-apply for 000041/000042/000043
 - [ ] **Parity compare exits 0**; output = EXACTLY the allowlist: 9 cosmetic drifts + `device_push_tokens`
-      Go-only (+ the `000043` placeholder pairing noted). `conversation_messages`, `character_favorites`,
-      `chat_conversation_settings`, `entities`-beyond-alias-drift: MATCHING. RN-only index leaks: zero.
-- [ ] Grep sweeps (app `src/`): `CLIENT_ONLY|unread_count|chat_last_read_|chat_entity_pref_|getKeyLastRead|
-      blocked` (chat-settings context) → zero; `personas` repo imports → zero; `reply_to_message_id` present in
-      engine models (spot-check)
+      Go-only + `conversation_messages` timestamp-label drift (A1) = 11 entries (+ the `000043` placeholder
+      pairing noted). `character_favorites`, `chat_conversation_settings`, `entities`-beyond-alias-drift: MATCHING;
+      `conversation_messages` matches beyond the A1 labels. RN-only index leaks: zero.
+- [ ] Grep sweeps (app `src/`): `CLIENT_ONLY|unread_count|chat_last_read_|chat_entity_pref_|getKeyLastRead` →
+      zero; `blocked` → zero **scoped to the chat_conversation_settings concept only** (social blocking —
+      `SocialService.getBlockedUserIds` and its ChatList/Discover/Characters consumers — STAYS, A4); `personas`
+      repo imports → zero; `reply_to_message_id` present in engine models (spot-check)
 - [ ] `gitnexus analyze` both repos; no stale warnings; `gitnexus_detect_changes()` clean-scope on the final commits
 
 ## Cross-repo integration smoke (on-device, manual — hand-off list)
@@ -41,6 +43,9 @@ npx gitnexus analyze
    reactions/pin/read-state via sync.
 3. Unread derivation: partner message while app closed → badge appears after sync (the old bug); open → clears;
    "mark unread" → exactly 1.
+3b. Copy-model integrity (A2): after a sync round-trip, an engine-authored partner message appears EXACTLY ONCE
+   in ChatDetail and counts EXACTLY ONCE in unread (entity-scoped queries; catches the per-side-uuid duplication
+   vector — WS copy + synced engine copy).
 4. Reply-mode toggle in conversation menu → survives reinstall via sync.
 5. Mute partner → outreach arrives in-chat, no push. Disable partner → chat blocked (engine `entity_disabled`),
    AIProfile can re-enable.

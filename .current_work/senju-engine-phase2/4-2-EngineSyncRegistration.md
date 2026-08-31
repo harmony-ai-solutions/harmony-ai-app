@@ -10,8 +10,10 @@ The engine-side 7-step recipe for both new tables + the per-device initial-backf
 ## 1. Models (`database/models/`)
 
 - `CharacterFavorite{Sync}` pair + `ChatConversationSetting{Sync}` pair with `ToSyncModel`/`ToDBModel`
-  (template: `models/entity.go:9-70`). JSON keys = app column names. Types: favorites `ProfileID string`,
-  timestamps as string pointers; settings `ParticipantKey`, `EntityID *string`, `Pinned/Archived` (match 4-1's
+  (template: `models/entity.go:9-70`). JSON keys = app column names. Types: favorites `ProfileID string`;
+  **timestamps as `time.Time`/`*time.Time`** (the columns are TIMESTAMP-labeled so the driver returns `time.Time` —
+  string pointers would scan but re-format to RFC3339Nano on every round-trip; `time.Time` lets binding normalize);
+  settings `ParticipantKey`, `EntityID *string`, `Pinned/Archived` (match 4-1's
   boolean decision — prefer `int64` 0/1 to avoid JSON bool friction), `ReplyMode string`,
   watermark triple. Add `convertToSyncModel` cases (`synchronization.go:2275-2517`).
 
@@ -43,6 +45,8 @@ The engine-side 7-step recipe for both new tables + the per-device initial-backf
   `since = 0` (full table) and the size-estimate counts it likewise; at `handleSyncFinalize` (:1671-1739) add all
   current registered tables to the set. Stale sets (tables later removed) are pruned at finalize.
 - The apply side needs no backfill concept (inbound rows apply via LWW regardless).
+- Registry hygiene: `sync_devices` grows the `synced_tables` column → update the `table:sync_devices` entry REASON
+  in `scripts/parity-allowlist.json` in the same commit ("comments" → "comments + `synced_tables` column").
 
 ## Tests
 

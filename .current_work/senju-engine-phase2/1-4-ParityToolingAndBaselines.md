@@ -19,6 +19,10 @@ sibling file `scripts/parity-allowlist.json` (keeps the policy reviewable):
   `table:memories` (comments), `table:provider_config_soulbitscloud` (comments),
   `table:sync_devices` (comments), `table:sync_history` (comment + `updated_at` column).
 - `table:device_push_tokens` — **Go-only**, engine push infra, app `000039` is the reserved placeholder.
+- `table:conversation_messages` — **timestamp-label drift by amendment A1** (engine `TIMESTAMP`/`DATETIME`, app
+  `TEXT` on `created_at`/`updated_at`/`deleted_at`). The Go driver's Scan dispatch depends on the declared type;
+  RN is label-agnostic; the app's TEXT labels are the 000025 remediation — see `docs/schema-parity.md`
+  "Timestamp Column Labels". Added by senior-dev ruling 2026-08-31 (the one sanctioned addition to this registry).
 - Semantics: exit 0 iff (diff − allowlist) is empty AND every allowlist entry still matches an actual divergence
   (stale allowlist entries = failure — forces cleanup when a drift is reconciled). Report format keeps the
   RN-only/Go-only/different sections, annotated `[allowlisted]`.
@@ -50,8 +54,9 @@ sibling file `scripts/parity-allowlist.json` (keeps the policy reviewable):
 
 ## Verification
 
-- [ ] Local compare on fresh dumps exits 0 with output = 11 `[allowlisted]` entries (9 + device_push_tokens +
-      whatever of the 9 splits into RN-only/Go-only sections — assert EXACTLY the registered set)
+- [ ] Local compare on fresh dumps exits 0 with output = 11 `[allowlisted]` entries (9 cosmetic +
+      `device_push_tokens` + `conversation_messages` A1 timestamp labels — assert EXACTLY the registered set;
+      sections may split RN-only/Go-only, the key set must not)
 - [ ] Stale-allowlist detection tested: temporarily remove a real drift → comparator fails (manual check OK)
 - [ ] `CLIENT_ONLY` grep zero; dump byte-identical before/after mechanism deletion
 - [ ] tsc 0, `npm test` green; commits + `gitnexus_detect_changes()`

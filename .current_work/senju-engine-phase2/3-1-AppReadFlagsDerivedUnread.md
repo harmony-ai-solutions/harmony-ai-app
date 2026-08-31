@@ -2,6 +2,15 @@
 
 > Phase 3 / repo: **harmony-ai-app**. Contract: `21-Engine-Contract` Q1/Q3; sync-side facts from research
 > (unread seams; the sync-arrived-messages badge bug). Prerequisite: Phase 1 + 2 landed.
+>
+> **Scope amended (A5/A2, 2026-08-31):** the derived-unread CORE (repo fns, `is_read` sync-map entry, badge seams,
+> mark-read rewiring, EntitySessionService increment removal) executed in Phase 1 with the 1-2 change set. This doc
+> retains: `chat_last_read_*` deletion, the sync-applied recount event, the "new messages" divider derivation,
+> mark-unread semantics, full test coverage. **A2 applies to EVERY query here: scope `entity_id = own POV`** — the
+> verified copy model gives each side its own rows (app = POV record with app-minted uuidv7 even for WS-received
+> partner messages, `EntitySessionService.ts:1965-1995`; engine = its own record; user messages share ids, AI
+> messages have per-side ids), and engine-perspective copies sync in under different ids joining the same
+> `interaction_id` — unscoped queries double-render and double-count.
 
 ## Objective
 
@@ -14,20 +23,21 @@ path, `EntitySessionService.ts:1879-1898`).
 
 1. **Repo layer** — `src/database/repositories/conversation_messages.ts`:
    - `updateConversationMessage` already pattern-exists; add `markConversationMessagesRead(participantKey, ownEntityId,
-     upToMessageId?)` — bulk `UPDATE … SET is_read = 1, updated_at = ? WHERE` partner-sent (`sender_entity_id != own`)
-     AND `is_read = 0` (AND `created_at <= upTo` when given); returns count.
+      upToMessageId?)` — bulk `UPDATE … SET is_read = 1, updated_at = ? WHERE` partner-sent (`sender_entity_id != own`)
+      AND **`entity_id = own` (A2 — own-record rows only)** AND `is_read = 0` (AND `created_at <= upTo` when given);
+      returns count.
    - New read query: `getUnreadCountByParticipantKeys(keys[], ownEntityId)` — batched (300-key chunks, mirrors
-     `getChatConversationSettingsBatch`) GROUP BY participant_key count of unread partner-sent rows
-     (`deleted_at IS NULL`). Used by the list seam.
+      `getChatConversationSettingsBatch`) GROUP BY participant_key count of unread partner-sent rows
+      (`deleted_at IS NULL` **AND `entity_id = own` — A2**). Used by the list seam.
    - `is_read` added to the booleanFields sync map (`src/database/sync.ts:193`).
 2. **Open-conversation marking** — ChatDetail: on focus/message-render, `markConversationMessagesRead(...)` fire-and-forget
-   (replaces `persistMarkAsRead`, `ChatDetailScreen.tsx:1636-1648`). "New" divider = position of first unread message
+   (replaces `persistMarkAsRead`, `ChatDetailScreen.tsx:1676-1688`). "New" divider = position of first unread message
    at open (derive from the loaded page; no AsyncStorage). "Mark unread" (F10 menu action) →
    `setConversationUnread`-replacement: `markConversationMessagesUnread(participantKey, ownEntityId, count=1)` — set
    `is_read = 0` on the LAST partner-sent message only (set-to-1 semantics preserved).
 3. **The three badge seams** (ChatListScreen):
    - list load (`:371-383`): unread map ← `getUnreadCountByParticipantKeys` instead of settings batch.
-   - live update (`message:received` handler, `:559-590`): incremental — if conversation open in this list's POV and
+   - live update (`message:received` handler, `:539-599`): incremental — if conversation open in this list's POV and
      not muted-suppressed (partner `is_muted` check via entities map — O10, now entity-level per Q8), bump the row's
      derived count; the guard set `openConversationKeys` (`EntitySessionService.ts:1319-1329`) stays (open conv → the
      app marks read anyway).
@@ -42,10 +52,10 @@ path, `EntitySessionService.ts:1879-1898`).
    - `chatConversationSettings.ts`: delete `incrementConversationUnread`/`clearConversationUnread`/
      `setConversationUnread` remnants if still referenced (schema already dropped the column in 1-2; this phase
      removes the last behavioral references).
-   - `EntitySessionService.handleIncomingMessage` (`:1879-1898`): the unread-increment block is DELETED — derivation
-     replaces it; keep the disabled-drop check but move it to the entity-level gate (partner `is_disabled` → drop,
-     defense-in-depth; primary enforcement is engine-side INIT rejection, 4-3).
-5. **ArchivedChatsScreen** (`:310-316`): clear-on-open → `markConversationMessagesRead`; badge columns from the same map.
+   - `EntitySessionService.handleIncomingMessage` (`:1870-1905`): the unread-increment block was DELETED in the
+      Phase-1 change set (A5) — verify zero remnants; the disabled-drop check lives at the entity-level gate
+      (partner `is_disabled` → drop, defense-in-depth; primary enforcement is engine-side INIT rejection, 4-3).
+5. **ArchivedChatsScreen** (`:307-320`): clear-on-open → `markConversationMessagesRead`; badge columns from the same map.
 
 ## Tests
 

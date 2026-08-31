@@ -55,7 +55,8 @@ identity fields only; document this).
 `CharacterChatService` (:82-83, 127-141), `ChatListScreen` (:501-512), `ArchivedChatsScreen` (:124-137),
 `ChatDetailScreen` persona switch (:1453-1481) — all already consume `resolvePersonaId`/entity ids; swap imports to
 the new repo; semantics identical. `EntitiesScreen`/CreateAI lists: filter OUT user entities from AI-partner
-pickers (`entity_type` filter — verify CreateAI's entity-reuse paths don't offer personas).
+pickers (`entity_type` filter — verify CreateAI's entity-reuse paths don't offer personas). **§9-A3 ruling: user
+entities are NEVER visible as chat options — audit EVERY partner-picking surface, not just these two.**
 
 ## 5. i18n
 
