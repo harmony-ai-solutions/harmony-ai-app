@@ -52,6 +52,7 @@ import { migration040 } from './migrations/000040_lifecycle_state_sync_columns';
 import { migration041 } from './migrations/000041_consolidate_senju_features';
 import { migration042 } from './migrations/000042_entity_type_and_flags';
 import { migration043 } from './migrations/000043_drop_dead_sync_infra';
+import { migration044 } from './migrations/000044_favorite_column';
 
 // Migration definition
 export interface Migration {
@@ -278,6 +279,11 @@ export const MIGRATIONS: Migration[] = [
      version: 43,
      description: 'drop dead sync-infra tables (sync_devices/sync_history; §9-A14 pair — engine 000043 = synced_tables registry)',
      sql: migration043,
+   },
+   {
+     version: 44,
+     description: 'is_favorite column on character_profiles replaces the favorites sidecar table (user ruling 2026-09-01, LWW coupling accepted; paired engine 000044)',
+     sql: migration044,
    },
   ];
 

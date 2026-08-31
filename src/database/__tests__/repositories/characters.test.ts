@@ -506,49 +506,82 @@ describe('characters repository', () => {
       }
     });
   });
-  describe('character favorites', () => {
-    it('is not favorited by default', async () => {
+  describe('character favorites (is_favorite column, migration 000044)', () => {
+    // The sidecar table is gone: favorites are an `is_favorite` flag on the
+    // profile row. A default profile is not favorited (0). This suite pins the
+    // flag round-trip through getCharacterProfile, idempotency, the deleted-
+    // profiles exclusion, and the updated_at bump that makes a favorite toggle
+    // sync through the profile row's watermark (writers-supply-timestamps).
+    it('is not favorited by default, and the flag round-trips as 0', async () => {
       await createMinimalProfile('fav-default');
       expect(await isCharacterFavorite('fav-default')).toBe(false);
+      const p = await getCharacterProfile('fav-default');
+      expect(p!.is_favorite).toBe(0);
     });
 
-    it('addCharacterFavorite then isCharacterFavorite is true', async () => {
+    it('addCharacterFavorite sets the flag (1) and isCharacterFavorite is true', async () => {
       await createMinimalProfile('fav-add');
       await addCharacterFavorite('fav-add');
       expect(await isCharacterFavorite('fav-add')).toBe(true);
+      const p = await getCharacterProfile('fav-add');
+      expect(p!.is_favorite).toBe(1);
     });
 
-    it('removeCharacterFavorite is idempotent', async () => {
+    it('addCharacterFavorite is idempotent (re-setting 1 → 1 is a no-op)', async () => {
+      await createMinimalProfile('fav-add2');
+      await addCharacterFavorite('fav-add2');
+      await addCharacterFavorite('fav-add2');
+      expect(await isCharacterFavorite('fav-add2')).toBe(true);
+      const p = await getCharacterProfile('fav-add2');
+      expect(p!.is_favorite).toBe(1);
+    });
+
+    it('removeCharacterFavorite clears the flag and is idempotent (plain flag clear, no tombstone)', async () => {
       await createMinimalProfile('fav-remove');
       await addCharacterFavorite('fav-remove');
       await removeCharacterFavorite('fav-remove');
       expect(await isCharacterFavorite('fav-remove')).toBe(false);
+      const p = await getCharacterProfile('fav-remove');
+      expect(p!.is_favorite).toBe(0);
       // Removing again is a no-op
       await removeCharacterFavorite('fav-remove');
       expect(await isCharacterFavorite('fav-remove')).toBe(false);
+      const p2 = await getCharacterProfile('fav-remove');
+      expect(p2!.is_favorite).toBe(0);
     });
 
-    it('toggleCharacterFavorite flips state and returns new state', async () => {
+    it('toggleCharacterFavorite flips state, bumps updated_at on every write, and returns new state', async () => {
       await createMinimalProfile('fav-toggle');
+      const before = (await getCharacterProfile('fav-toggle'))!.updated_at.getTime();
+      // Cursor-safe delay so the explicit updated_at strictly increases.
+      await new Promise(r => setTimeout(r, 5));
+
       expect(await toggleCharacterFavorite('fav-toggle')).toBe(true);
       expect(await isCharacterFavorite('fav-toggle')).toBe(true);
+      const afterAdd = (await getCharacterProfile('fav-toggle'))!.updated_at.getTime();
+      expect(afterAdd).toBeGreaterThan(before);
+
+      await new Promise(r => setTimeout(r, 5));
       expect(await toggleCharacterFavorite('fav-toggle')).toBe(false);
       expect(await isCharacterFavorite('fav-toggle')).toBe(false);
+      const afterRemove = (await getCharacterProfile('fav-toggle'))!.updated_at.getTime();
+      expect(afterRemove).toBeGreaterThan(afterAdd);
     });
 
-    it('getFavoriteCharacterProfileIds returns most-recent first', async () => {
+    it('getFavoriteCharacterProfileIds returns only favorited, non-deleted profiles', async () => {
       await createMinimalProfile('fav-list-1');
       await createMinimalProfile('fav-list-2');
+      await createMinimalProfile('fav-list-del');
       await addCharacterFavorite('fav-list-1');
-      // Small delay so ordering by favorited_at is deterministic.
-      await new Promise(r => setTimeout(r, 5));
       await addCharacterFavorite('fav-list-2');
+      await addCharacterFavorite('fav-list-del');
+      // Soft-delete one favorite — it must drop out of the favorite ids.
+      await deleteCharacterProfile('fav-list-del');
 
       const ids = await getFavoriteCharacterProfileIds();
       expect(ids).toContain('fav-list-1');
       expect(ids).toContain('fav-list-2');
-      // fav-list-2 was favorited last → newest first
-      expect(ids.indexOf('fav-list-2')).toBeLessThan(ids.indexOf('fav-list-1'));
+      expect(ids).not.toContain('fav-list-del');
     });
   });
 

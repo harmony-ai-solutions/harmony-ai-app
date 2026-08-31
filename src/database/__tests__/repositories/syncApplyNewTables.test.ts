@@ -1,21 +1,21 @@
 /**
- * Sync apply for the two newly-registered tables (4-1, Q5).
+ * Sync apply for the newly-registered table (4-1, Q5).
  *
  * `applySyncRecord` resolves each table's PK through the centralized registry
- * (`getPkField`). `character_favorites` keys rows by `profile_id` and
- * `chat_conversation_settings` by `participant_key` — neither has an `id`
- * column, so the pre-registry `getPrimaryKeyField` fallback (`id`) made the
- * existence-check / LWW WHERE clause throw on these tables. This suite pins the
+ * (`getPkField`). `chat_conversation_settings` keys rows by `participant_key` —
+ * it has no `id` column, so the pre-registry `getPrimaryKeyField` fallback
+ * (`id`) made the existence-check / LWW WHERE clause throw. This suite pins the
  * corrected behavior end-to-end through the real transaction-wrapped apply.
+ * (The favorites table used to be registered here too but was replaced by the
+ * `is_favorite` column on character_profiles in migration 000044.)
  */
 
 import {useFreshDatabase} from '../repositoryFixtures';
 import {applySyncRecord, getChangedRecords} from '../../sync';
 import {withTransaction} from '../../transaction';
 import {getDatabase} from '../../connection';
-import {createCharacterProfile} from '../../repositories/characters';
 
-describe('sync apply for the newly registered tables (4-1)', () => {
+describe('sync apply for the newly registered table (4-1)', () => {
   const {getDb} = useFreshDatabase();
 
   async function apply(
@@ -28,76 +28,6 @@ describe('sync apply for the newly registered tables (4-1)', () => {
       await applySyncRecord(table, operation, record, tx);
     });
   }
-
-  describe('character_favorites (PK = profile_id)', () => {
-    beforeEach(async () => {
-      await createCharacterProfile({
-        id: 'pf-fav-1',
-        name: 'Fav Char',
-        description: '',
-        personality: '',
-        voice_characteristics: '',
-        base_prompt: '',
-        scenario: '',
-        typing_speed_wpm: 60,
-        audio_response_chance_percent: 50,
-        vision_config_id: null,
-        lifecycle_config: '{}',
-      });
-    });
-
-    it('inserts a favorites row keyed by profile_id', async () => {
-      await apply('character_favorites', 'insert', {
-        profile_id: 'pf-fav-1',
-        created_at: '2026-08-31T00:00:00.000Z',
-        updated_at: '2026-08-31T00:00:00.000Z',
-        deleted_at: null,
-      });
-
-      const [res] = await getDb().executeSql(
-        'SELECT profile_id FROM character_favorites WHERE profile_id = ?',
-        ['pf-fav-1'],
-      );
-      expect(res.rows.length).toBe(1);
-      expect(res.rows.item(0).profile_id).toBe('pf-fav-1');
-    });
-
-    it('round-trips a favorites row through getChangedRecords (profile_id PK, watermark triple)', async () => {
-      await apply('character_favorites', 'insert', {
-        profile_id: 'pf-fav-1',
-        created_at: '2026-08-31T00:00:00.000Z',
-        updated_at: '2026-08-31T00:00:00.000Z',
-        deleted_at: null,
-      });
-
-      const records = await getChangedRecords('character_favorites', 0);
-      const match = records.find(r => r.profile_id === 'pf-fav-1');
-      expect(match).toBeDefined();
-      expect(match.deleted_at).toBeNull();
-    });
-
-    it('soft-deletes a favorites row via the profile_id WHERE clause', async () => {
-      await apply('character_favorites', 'insert', {
-        profile_id: 'pf-fav-1',
-        created_at: '2026-08-31T00:00:00.000Z',
-        updated_at: '2026-08-31T00:00:00.000Z',
-        deleted_at: null,
-      });
-
-      await apply('character_favorites', 'delete', {
-        profile_id: 'pf-fav-1',
-        updated_at: '2026-08-31T00:00:01.000Z',
-        deleted_at: '2026-08-31T00:00:01.000Z',
-      });
-
-      const [res] = await getDb().executeSql(
-        'SELECT deleted_at FROM character_favorites WHERE profile_id = ?',
-        ['pf-fav-1'],
-      );
-      expect(res.rows.length).toBe(1);
-      expect(res.rows.item(0).deleted_at).not.toBeNull();
-    });
-  });
 
   describe('chat_conversation_settings (PK = participant_key)', () => {
     it('inserts a settings row keyed by participant_key', async () => {

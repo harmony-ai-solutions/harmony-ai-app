@@ -40,6 +40,12 @@ export interface CharacterProfile {
   assets?: string; // JSON []
   card_provenance?: string; // JSON {}
   character_book?: string; // JSON {}
+  // Favorite flag (migration 000044): replaced the favorites sidecar table.
+  // 0/1 number (same convention as Entity's is_muted/is_disabled) — NO
+  // boolean normalization, it rides the profile sync row as a JSON number.
+  // Optional (`?`) because some in-memory construction sites predate the column;
+  // persisted / synced rows always carry it.
+  is_favorite?: number;
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;

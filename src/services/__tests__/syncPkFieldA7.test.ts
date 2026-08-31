@@ -102,26 +102,6 @@ describe('SyncService A7 lifecycle_state PK symmetry (4-1)', () => {
     expect((svc as any).incomingDataBuffer[0].record.entity_id).toBe('entity-42');
   });
 
-  it('handleIncomingSyncData keys character_favorites by profile_id', async () => {
-    const svc = SyncService.getInstance();
-    (svc as any).currentSession = {...session};
-
-    await (svc as any).handleIncomingSyncData({
-      table: 'character_favorites',
-      operation: 'insert',
-      sync_session_id: 'sess-a7',
-      event_id: 'evt-2',
-      record: {
-        profile_id: 'pf-9',
-        created_at: '2026-08-31T00:00:00.000Z',
-        updated_at: '2026-08-31T00:00:00.000Z',
-        deleted_at: null,
-      },
-    });
-
-    expect((svc as any).serverRecordIds.has('character_favorites:pf-9')).toBe(true);
-  });
-
   it('handleIncomingSyncData keys chat_conversation_settings by participant_key', async () => {
     const svc = SyncService.getInstance();
     (svc as any).currentSession = {...session};

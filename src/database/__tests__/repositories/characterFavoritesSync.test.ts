@@ -1,12 +1,13 @@
 /**
- * character_favorites round-trip through getChangedRecords (4-1).
+ * is_favorite profile-row sync round-trip via getChangedRecords (000044).
  *
- * Favorites now participate in engine sync (Phase-1 schema + this registration).
- * The sync contract is a watermark triple + soft delete: a favorited row rides
- * as a live row, an un-favorite lands as a tombstone (`deleted_at` set) in the
- * changed set, and a resurrect clears the tombstone and bumps `updated_at` —
- * exactly the Phase-1 repository semantics (favorited_at dropped, created_at
- * subsumes it, Q5).
+ * Favorites now live on the `character_profiles` row as the `is_favorite` flag
+ * (the favorites sidecar table is gone). The sync contract is: a
+ * favorite toggle bumps the profile row's `updated_at` (writers-supply-
+ * timestamps) so the change rides the full-row profile sync through
+ * `getChangedRecords`. `is_favorite` is a JSON NUMBER (0/1) — there is NO
+ * boolean normalization entry for character_profiles (same convention as
+ * `pinned`/`archived`).
  */
 
 import {useFreshDatabase} from '../repositoryFixtures';
@@ -14,11 +15,10 @@ import {getChangedRecords} from '../../sync';
 import {
   addCharacterFavorite,
   removeCharacterFavorite,
-  isCharacterFavorite,
 } from '../../repositories/characters';
 import {createCharacterProfile} from '../../repositories/characters';
 
-describe('character_favorites sync round-trip via getChangedRecords (4-1)', () => {
+describe('is_favorite profile-row sync round-trip via getChangedRecords (000044)', () => {
   const {getDb} = useFreshDatabase();
 
   async function createProfile(id: string): Promise<void> {
@@ -37,71 +37,72 @@ describe('character_favorites sync round-trip via getChangedRecords (4-1)', () =
     });
   }
 
-  it('a favorited row is picked up by getChangedRecords(since=0) as live', async () => {
+  it('a favorited profile is picked up by getChangedRecords(since=0) with is_favorite=1 (JSON number)', async () => {
     await createProfile('fav-live-1');
     await addCharacterFavorite('fav-live-1');
 
-    const records = await getChangedRecords('character_favorites', 0);
-    const match = records.find(r => r.profile_id === 'fav-live-1');
+    const records = await getChangedRecords('character_profiles', 0);
+    const match = records.find(r => r.id === 'fav-live-1');
     expect(match).toBeDefined();
+    // Pre-decided shape contract: NO boolean normalization for character_profiles —
+    // is_favorite rides as a 0/1 JSON number (Go int64), NOT a boolean.
+    expect(typeof match.is_favorite).toBe('number');
+    expect(match.is_favorite).toBe(1);
     expect(match.deleted_at).toBeNull();
   });
 
-  it('an un-favorite (soft-delete tombstone) lands in the changed set with deleted_at set', async () => {
+  it('a non-favorited profile rides as is_favorite=0', async () => {
+    await createProfile('fav-off-1');
+    const records = await getChangedRecords('character_profiles', 0);
+    const match = records.find(r => r.id === 'fav-off-1');
+    expect(match).toBeDefined();
+    expect(match.is_favorite).toBe(0);
+  });
+
+  it('an un-favorite clears the flag and bumps updated_at (plain flag clear, no tombstone)', async () => {
     await createProfile('fav-tom-1');
     await addCharacterFavorite('fav-tom-1');
+
+    const [beforeRes] = await getDb().executeSql(
+      'SELECT updated_at, is_favorite, deleted_at FROM character_profiles WHERE id = ?',
+      ['fav-tom-1'],
+    );
+    const beforeRow = beforeRes.rows.item(0);
+    expect(beforeRow.is_favorite).toBe(1);
+
+    // Cursor-safe delay so the explicit updated_at strictly increases.
+    await new Promise(r => setTimeout(r, 5));
     await removeCharacterFavorite('fav-tom-1');
 
-    const records = await getChangedRecords('character_favorites', 0);
-    const match = records.find(r => r.profile_id === 'fav-tom-1');
-    expect(match).toBeDefined();
-    expect(match.deleted_at).not.toBeNull();
-  });
-
-  it('a resurrect clears the tombstone, bumps updated_at, and is reported live', async () => {
-    await createProfile('fav-res-1');
-    await addCharacterFavorite('fav-res-1');
-
-    // Tombstone it (the `deleted_at` earlier than the resurrect's).
-    await removeCharacterFavorite('fav-res-1');
-    const [tombRes] = await getDb().executeSql(
-      'SELECT updated_at, deleted_at FROM character_favorites WHERE profile_id = ?',
-      ['fav-res-1'],
+    const [afterRes] = await getDb().executeSql(
+      'SELECT updated_at, is_favorite, deleted_at FROM character_profiles WHERE id = ?',
+      ['fav-tom-1'],
     );
-    const tombstoneDeletedAt = tombRes.rows.item(0).deleted_at;
+    const afterRow = afterRes.rows.item(0);
+    expect(afterRow.is_favorite).toBe(0);
+    expect(Date.parse(afterRow.updated_at)).toBeGreaterThan(Date.parse(beforeRow.updated_at));
+    expect(afterRow.deleted_at).toBeNull(); // no tombstone — plain flag clear
 
-    // Resurrect it after a small delay so updated_at strictly increases.
-    await new Promise(r => setTimeout(r, 5));
-    await addCharacterFavorite('fav-res-1');
-
-    expect(await isCharacterFavorite('fav-res-1')).toBe(true);
-
-    const [res] = await getDb().executeSql(
-      'SELECT updated_at, deleted_at FROM character_favorites WHERE profile_id = ?',
-      ['fav-res-1'],
-    );
-    const row = res.rows.item(0);
-    expect(row.deleted_at).toBeNull();
-    expect(Date.parse(row.updated_at)).toBeGreaterThan(Date.parse(tombstoneDeletedAt));
-
-    const records = await getChangedRecords('character_favorites', 0);
-    const match = records.find(r => r.profile_id === 'fav-res-1');
+    // And it flows through the changed set as is_favorite=0 with a bumped watermark.
+    const records = await getChangedRecords('character_profiles', 0);
+    const match = records.find(r => r.id === 'fav-tom-1');
     expect(match).toBeDefined();
+    expect(match.is_favorite).toBe(0);
     expect(match.deleted_at).toBeNull();
   });
 
-  it('unchanged rows only reload with since=0 (full) — incremental path requires updated_at freshness', async () => {
+  it('incremental getChangedRecords only returns a favorited profile when updated_at is fresh', async () => {
     await createProfile('fav-inc-1');
     await addCharacterFavorite('fav-inc-1');
 
     const [res] = await getDb().executeSql(
-      'SELECT updated_at FROM character_favorites WHERE profile_id = ?',
+      'SELECT updated_at FROM character_profiles WHERE id = ?',
       ['fav-inc-1'],
     );
     const nowUnix = Math.floor(Date.parse(res.rows.item(0).updated_at) / 1000);
 
-    // With since = now (a future watermark), the row is NOT returned.
-    const incremental = await getChangedRecords('character_favorites', nowUnix + 5);
-    expect(incremental.find(r => r.profile_id === 'fav-inc-1')).toBeUndefined();
+    // With since = now+5 (a future watermark), the row is NOT returned.
+    const incremental = await getChangedRecords('character_profiles', nowUnix + 5);
+    expect(incremental.find(r => r.id === 'fav-inc-1')).toBeUndefined();
   });
 });

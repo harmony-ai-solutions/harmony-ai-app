@@ -96,7 +96,7 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
               first_mes, mes_example, alternate_greetings, post_history_instructions,
               creator_notes, creator, character_version, nickname,
               tags, group_only_greetings, extensions, assets,
-              card_provenance, character_book,
+              card_provenance, character_book, is_favorite,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE id = ?`
@@ -107,7 +107,7 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
               first_mes, mes_example, alternate_greetings, post_history_instructions,
               creator_notes, creator, character_version, nickname,
               tags, group_only_greetings, extensions, assets,
-              card_provenance, character_book,
+              card_provenance, character_book, is_favorite,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE id = ? AND deleted_at IS NULL`;
@@ -145,6 +145,7 @@ export async function getCharacterProfile(id: string, includeDeleted = false): P
     assets: row.assets ?? '',
     card_provenance: row.card_provenance ?? '',
     character_book: row.character_book ?? '',
+    is_favorite: row.is_favorite ?? 0,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -236,7 +237,7 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
               first_mes, mes_example, alternate_greetings, post_history_instructions,
               creator_notes, creator, character_version, nickname,
               tags, group_only_greetings, extensions, assets,
-              card_provenance, character_book,
+              card_provenance, character_book, is_favorite,
               created_at, updated_at, deleted_at
        FROM character_profiles
        ORDER BY name`
@@ -247,7 +248,7 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
               first_mes, mes_example, alternate_greetings, post_history_instructions,
               creator_notes, creator, character_version, nickname,
               tags, group_only_greetings, extensions, assets,
-              card_provenance, character_book,
+              card_provenance, character_book, is_favorite,
               created_at, updated_at, deleted_at
        FROM character_profiles
        WHERE deleted_at IS NULL
@@ -284,6 +285,7 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
       assets: row.assets ?? '',
       card_provenance: row.card_provenance ?? '',
       character_book: row.character_book ?? '',
+      is_favorite: row.is_favorite ?? 0,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -777,56 +779,58 @@ export async function getCharacterImagesWithDataURLs(
 }
 
 // ============================================================================
-// Character Favorites (synced sidecar)
+// Character Favorites (is_favorite column on character_profiles)
 // ============================================================================
 //
-// Favorites live in the `character_favorites` sidecar table. Once client-only,
-// it joined engine sync in Phase 2 (4-1): the sync layer registers it
-// (PK = profile_id, watermark triple + soft delete) and the engine mirrors it
-// (Q5 — `favorited_at` dropped; `created_at` subsumes it). A profile with no
-// row is simply "not favorited".
+// Favorites live on the `character_profiles` row as an `is_favorite` flag
+// (migration 000044, user ruling 2026-09-01). They replaced the favorites
+// sidecar table; a profile with `is_favorite = 0` is simply "not favorited".
+//
+// The row-LWW coupling is ACCEPTED by the user: every favorite write ALSO sets
+// `updated_at` explicitly (writers-supply-timestamps invariant), so the change
+// syncs via the profile row's watermark and rides the full-row profile sync. A
+// concurrent profile edit on another device can lose LWW against a favorite
+// toggle — accepted (favorites/profile edits rarely happen on different devices
+// before a sync).
 
 /**
- * True when a character profile is favorited (non-deleted tombstone).
+ * True when a character profile is favorited (`is_favorite = 1`).
+ * Soft-deleted profiles are excluded.
  */
 export async function isCharacterFavorite(profileId: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
-    'SELECT 1 FROM character_favorites WHERE profile_id = ? AND deleted_at IS NULL',
+    'SELECT is_favorite FROM character_profiles WHERE id = ? AND deleted_at IS NULL',
     [profileId],
   );
-  return results.rows.length > 0;
+  return results.rows.length > 0 && results.rows.item(0).is_favorite === 1;
 }
 
 /**
- * Favorite a character profile (idempotent). Clears the soft-delete tombstone
- * on resurrect. Timestamps are supplied explicitly (A1 invariant — never rely
- * on the dormant DEFAULT CURRENT_TIMESTAMP).
+ * Favorite a character profile (idempotent): sets the flag to 1 and bumps
+ * `updated_at` explicitly so the change rides the profile row's sync watermark
+ * (A1 — writers-supply-timestamps).
  */
 export async function addCharacterFavorite(profileId: string): Promise<void> {
   const db = getDatabase();
   const now = new Date().toISOString();
   await db.executeSql(
-    `INSERT INTO character_favorites (profile_id, created_at, updated_at, deleted_at)
-     VALUES (?, ?, ?, NULL)
-     ON CONFLICT(profile_id) DO UPDATE SET
-       deleted_at = NULL,
-       updated_at = excluded.updated_at,
-       created_at = COALESCE(character_favorites.created_at, excluded.created_at)`,
-    [profileId, now, now],
+    'UPDATE character_profiles SET is_favorite = 1, updated_at = ? WHERE id = ?',
+    [now, profileId],
   );
 }
 
 /**
- * Remove a character profile from favorites (idempotent) via a soft-delete
- * tombstone. Timestamps supplied explicitly (A1).
+ * Remove a character profile from favorites (idempotent): plain flag clear to 0
+ * (tombstone semantics are GONE — an un-favorite no longer soft-deletes a row).
+ * Bumps `updated_at` explicitly (A1) so the un-favorite also syncs.
  */
 export async function removeCharacterFavorite(profileId: string): Promise<void> {
   const db = getDatabase();
   const now = new Date().toISOString();
   await db.executeSql(
-    'UPDATE character_favorites SET deleted_at = ?, updated_at = ? WHERE profile_id = ?',
-    [now, now, profileId],
+    'UPDATE character_profiles SET is_favorite = 0, updated_at = ? WHERE id = ?',
+    [now, profileId],
   );
 }
 
@@ -844,18 +848,21 @@ export async function toggleCharacterFavorite(profileId: string): Promise<boolea
 }
 
 /**
- * All favorite profile IDs, most-recently-favorited first (created_at desc,
- * non-deleted). `favorited_at` was dropped in the Phase-1 schema — created_at
- * subsumes it (Q5).
+ * All favorite profile IDs. The old sidecar impl ordered by the sidecar's
+ * `created_at DESC` (favorite recency), but that timestamp no longer exists on
+ * the profile row. Every consumer (CharactersScreen) builds a membership Set
+ * and does NOT consume order, so this is a plain scan with no ORDER BY. If an
+ * ordering consumer is ever added, switch to `ORDER BY updated_at DESC` (an
+ * approximation — profile edits reshuffle favorite recency).
  */
 export async function getFavoriteCharacterProfileIds(): Promise<string[]> {
   const db = getDatabase();
   const [results] = await db.executeSql(
-    'SELECT profile_id FROM character_favorites WHERE deleted_at IS NULL ORDER BY created_at DESC',
+    'SELECT id FROM character_profiles WHERE is_favorite = 1 AND deleted_at IS NULL',
   );
   const ids: string[] = [];
   for (let i = 0; i < results.rows.length; i++) {
-    ids.push(results.rows.item(i).profile_id);
+    ids.push(results.rows.item(i).id);
   }
   return ids;
 }

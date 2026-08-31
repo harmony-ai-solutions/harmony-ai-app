@@ -19,7 +19,6 @@ describe('PK registry (4-1, Q5)', () => {
       entity_module_mappings: 'entity_id',
       emotion_state: 'entity_id',
       lifecycle_state: 'entity_id',
-      character_favorites: 'profile_id',
       chat_conversation_settings: 'participant_key',
     });
   });
@@ -28,7 +27,6 @@ describe('PK registry (4-1, Q5)', () => {
     expect(getPkField('entity_module_mappings')).toBe('entity_id');
     expect(getPkField('emotion_state')).toBe('entity_id');
     expect(getPkField('lifecycle_state')).toBe('entity_id');
-    expect(getPkField('character_favorites')).toBe('profile_id');
     expect(getPkField('chat_conversation_settings')).toBe('participant_key');
   });
 

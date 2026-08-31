@@ -50,7 +50,7 @@ interface SyncServiceEvents {
    * based on which tables are present:
    *   - `conversation_messages` → ChatList recounts derived unread badges (3-1)
    *   - `chat_conversation_settings` → ChatList debounced reload (4-1, pin/archive)
-   *   - `character_favorites` → CharactersScreen favorite-ids refresh (4-1)
+   *   - `character_profiles` → CharactersScreen favorite-ids refresh (4-1; favorites now ride the profile row via is_favorite, 000044)
    * Payload is a plain `{ tables: string[] }`.
    */
   'sync:data-applied': (payload: { tables: string[] }) => void;
@@ -74,8 +74,9 @@ export interface SyncSession {
  * Used by both the upload phase (sendLocalChangesSequentially) and to mark the
  * per-table initial-upload set complete on SYNC_FINALIZE (Q7).
  *
- * 4-1: `character_favorites` rides after `character_profiles` (its FK target),
- * and `chat_conversation_settings` after `conversation_messages`.
+ * 4-1: `chat_conversation_settings` rides after `conversation_messages`.
+ * Favorites are no longer a sync table: they ride inside `character_profiles`
+ * as the `is_favorite` flag (000044), so the favorites sidecar is gone.
  */
 const SYNC_TABLES: string[] = [
   // Provider configs first (no FK dependencies)
@@ -106,7 +107,6 @@ const SYNC_TABLES: string[] = [
   'imagination_configs',
   // Character and entity data
   'character_profiles',
-  'character_favorites', // 4-1: references character_profiles(id)
   'character_image',
   'entities',
   'entity_module_mappings',
@@ -965,7 +965,6 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'vision_configs': 2,
         'imagination_configs': 2,
         'character_profiles': 3,
-        'character_favorites': 4, // 4-1: references character_profiles(id)
         'character_image': 4,
         'entities': 5,
         'entity_module_mappings': 6,
@@ -1320,7 +1319,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
       // Resolve the PK via the centralized registry (4-1) — tables with a
       // non-`id` PK (entity_module_mappings, emotion_state, lifecycle_state,
-      // character_favorites, chat_conversation_settings) key correctly.
+      // chat_conversation_settings) key correctly.
       const pkField = getPkField(table);
       log.info(`Sending sync data for ${table}:${record[pkField] || 'undefined'}, eventId: ${eventId}`);
       this.connectionManager.sendEvent('sync', event).catch(reject);
@@ -1607,7 +1606,6 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       'tts_configs',
       'vision_configs',
       'imagination_configs',
-      'character_favorites', // 4-1: soft-delete cleanup
       'chat_conversation_settings', // 4-1: soft-delete cleanup
     ];
 
@@ -1658,7 +1656,6 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       ],
       'interactions': ['entity_id', 'memory_id'],
       'lifecycle_state': ['entity_id'],
-      'character_favorites': ['profile_id'], // 4-1: references character_profiles(id)
       'backend_configs': ['provider_config_id'],
       'vision_configs': ['provider_config_id'],
       'imagination_configs': ['provider_config_id'],

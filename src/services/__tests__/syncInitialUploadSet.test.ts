@@ -122,7 +122,7 @@ describe('per-table initial upload set (4-1, Q7)', () => {
 
   describe('resolveTableSyncSince', () => {
     it('a table NOT yet initial-uploaded resolves to since=0 (full upload)', () => {
-      expect(resolveTableSyncSince('character_favorites', 12345, ['entities'])).toBe(0);
+      expect(resolveTableSyncSince('chat_conversation_settings', 12345, ['entities'])).toBe(0);
     });
 
     it('a table already initial-uploaded resolves to the incremental watermark', () => {
@@ -137,7 +137,7 @@ describe('per-table initial upload set (4-1, Q7)', () => {
 
     it('a force-full-sync (lastSync=0) stays 0 for both done and pending tables', () => {
       expect(resolveTableSyncSince('entities', 0, ['entities'])).toBe(0);
-      expect(resolveTableSyncSince('character_favorites', 0, ['entities'])).toBe(0);
+      expect(resolveTableSyncSince('chat_conversation_settings', 0, ['entities'])).toBe(0);
     });
   });
 

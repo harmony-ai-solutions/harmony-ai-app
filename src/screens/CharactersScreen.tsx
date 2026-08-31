@@ -288,13 +288,15 @@ export const CharactersScreen: React.FC = () => {
     }
   }, []);
 
-  // 4-1: live favorites refresh. SyncService emits `sync:data-applied` after an
-  // inbound apply commits; when it touched `character_favorites`, reload the
-  // favorite ids so the favorites filter reflects engine-side changes even if
+  // 4-1 / 000044: live favorites refresh. SyncService emits `sync:data-applied`
+  // after an inbound apply commits; when it touched `character_profiles`, reload
+  // the favorite ids so the favorites filter reflects engine-side changes even if
   // this screen stays focused (the focus reload above only fires on re-focus).
+  // Favorites now ride inside the profile row as `is_favorite`, so the profile
+  // table filter covers them (the old favorites sidecar table is gone).
   useEffect(() => {
     const handleSyncApplied = (payload: { tables: string[] }) => {
-      if (!payload.tables.includes('character_favorites')) return;
+      if (!payload.tables.includes('character_profiles')) return;
       loadFavoritesAndCategories();
     };
     syncService.on('sync:data-applied', handleSyncApplied);
