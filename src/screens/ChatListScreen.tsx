@@ -60,6 +60,8 @@ import {
   getChatConversationSettingsBatch,
   setConversationPinned,
   setConversationArchived,
+  getReplyMode,
+  setReplyMode,
 } from '../database/repositories/chatConversationSettings';
 import {
   deleteConversationByParticipantKey,
@@ -765,9 +767,9 @@ export const ChatListScreen: React.FC = () => {
       replyMode: 'realistic',
     });
     setMenuItem(item);
-    // A6: load the persisted reply pacing for this participant key so the
-    // menu label reflects the current mode. Keyed by participantKey (stable).
-    ChatPreferencesService.getReplyMode(item.participantKey).then(mode => {
+    // 4-4 (A6): read the SYNCED reply pacing from the settings column. The
+    // legacy AsyncStorage migration happens inside getReplyMode.
+    getReplyMode(item.participantKey).then(mode => {
       if (menuItemKeyRef.current === item.participantKey) {
         setMenuSettings(prev => ({ ...prev, replyMode: mode }));
       }
@@ -831,7 +833,7 @@ export const ChatListScreen: React.FC = () => {
     const newMode: ChatReplyMode =
       menuSettings.replyMode === 'realistic' ? 'instant' : 'realistic';
     try {
-      await ChatPreferencesService.setReplyMode(item.participantKey, newMode);
+      await setReplyMode(item.participantKey, newMode);
       // No-op (logs a warning) when no session matches — safe best-effort.
       await EntitySessionService.setReplyMode(item.interactionId, newMode);
       showToast(

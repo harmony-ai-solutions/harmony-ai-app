@@ -112,6 +112,16 @@ export async function openCharacterChat(
     });
   }
 
+  // 2b. Client-side defense-in-depth (Q8/A3): a DISABLED AI entity is off —
+  // never drop the user into a chat that the engine will reject with
+  // `entity_disabled`. Refuse to navigate (the caller stays on the profile
+  // screen, which offers the enable action). ChatDetailScreen's
+  // session:error 'entity_disabled' branch covers the engine-Init path too.
+  if (entity.entity_type === 'ai' && entity.is_disabled === 1) {
+    log.warn(`Cannot open chat for disabled AI entity ${entity.id} — blocked client-side (Q8).`);
+    return;
+  }
+
   // 3. Push a NEWLY created entity to the engine BEFORE navigating.
   //    ChatDetail sends INIT_ENTITY on mount; if the engine has not yet
   //    ingested the entity it rejects with entity_not_defined and the chat

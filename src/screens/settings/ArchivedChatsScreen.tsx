@@ -40,6 +40,8 @@ import {
   getChatConversationSettingsBatch,
   setConversationPinned,
   setConversationArchived,
+  getReplyMode,
+  setReplyMode,
 } from '../../database/repositories/chatConversationSettings';
 import {
   deleteConversationByParticipantKey,
@@ -116,9 +118,8 @@ export const ArchivedChatsScreen: React.FC = () => {
     menuItemKeyRef.current = item.participantKey;
     setMenuReplyMode('realistic');
     setMenuItem(item);
-    // A6: load the persisted reply pacing so the menu label reflects the
-    // current mode (keyed by participantKey, stable across navigations).
-    ChatPreferencesService.getReplyMode(item.participantKey).then(mode => {
+    // 4-4 (A6): read the SYNCED reply pacing from the settings column.
+    getReplyMode(item.participantKey).then(mode => {
       if (menuItemKeyRef.current === item.participantKey) {
         setMenuReplyMode(mode);
       }
@@ -274,7 +275,7 @@ export const ArchivedChatsScreen: React.FC = () => {
     const newMode: ChatReplyMode =
       menuReplyMode === 'realistic' ? 'instant' : 'realistic';
     try {
-      await ChatPreferencesService.setReplyMode(item.participantKey, newMode);
+      await setReplyMode(item.participantKey, newMode);
       await EntitySessionService.setReplyMode(item.interactionId, newMode);
       showToast(
         newMode === 'instant'

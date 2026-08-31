@@ -44,6 +44,7 @@ import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hapticLightPress } from '../utils/haptics';
+import { hexToRgba } from '../utils/colorUtils';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { ProfileTabs } from '../components/profile/ProfileTabs';
 import { ImageCommentModal } from '../components/characters/ImageCommentModal';
@@ -54,7 +55,11 @@ import {
   getCharacterStats,
   CharacterStats,
 } from '../database/repositories/characters';
-import { getEntityByCharacterProfileId } from '../database/repositories/entities';
+import {
+  getEntityByCharacterProfileId,
+  setEntityDisabled,
+  setEntityMuted,
+} from '../database/repositories/entities';
 import * as SocialService from '../services/social/SocialService';
 import type { StubCharacterCreator } from '../services/social/SocialService';
 import { openCharacterChat } from '../services/CharacterChatService';
@@ -108,6 +113,12 @@ export const AIProfileScreen: React.FC = () => {
   const [stats, setStats] = useState<CharacterStats>({ likes: 0, chats: 0 });
   const [loaded, setLoaded] = useState(false);
 
+  // ── Entity flags (Q8) ──────────────────────────────────────────────────
+  // The profile's linked AI entity — muted/disabled are GLOBAL per entity.
+  const [aiEntityId, setAiEntityId] = useState<string | null>(null);
+  const [entityDisabled, setEntityDisabledState] = useState(false);
+  const [entityMuted, setEntityMutedState] = useState(false);
+
   // ── Social state ───────────────────────────────────────────────────────
   const [profileLiked, setProfileLiked] = useState(false);
   const [profileLikes, setProfileLikes] = useState(0);
@@ -138,6 +149,18 @@ export const AIProfileScreen: React.FC = () => {
       const data = await getCharacterProfile(profileId);
       setProfile(data);
       if (!data) return;
+
+      // Partner AI entity flags (Q8) — muted/disabled are GLOBAL per entity.
+      try {
+        const ent = await getEntityByCharacterProfileId(profileId);
+        if (ent) {
+          setAiEntityId(ent.id);
+          setEntityDisabledState(ent.is_disabled === 1);
+          setEntityMutedState(ent.is_muted === 1);
+        }
+      } catch (entErr) {
+        log.warn('Failed to load entity flags:', entErr);
+      }
 
       // Primary avatar + full gallery
       const imgs = await getCharacterImages(profileId);
@@ -346,6 +369,42 @@ export const AIProfileScreen: React.FC = () => {
     }
   };
 
+  // Q8 — entity-level mute/disable toggles (A3 guard: user entities throw in
+  // the repo, so these actions only ever apply to AI entities).
+  const handleToggleEntityDisable = async () => {
+    if (!aiEntityId) return;
+    try {
+      const next = !entityDisabled;
+      await setEntityDisabled(aiEntityId, next);
+      setEntityDisabledState(next);
+      showToast(
+        next
+          ? t('aiDisabledToast', { name: profile?.name ?? '' })
+          : t('aiEnabledToast', { name: profile?.name ?? '' }),
+      );
+    } catch (err) {
+      log.warn('Failed to toggle disable:', err);
+      showToast(t('common:error'));
+    }
+  };
+
+  const handleToggleEntityMute = async () => {
+    if (!aiEntityId) return;
+    try {
+      const next = !entityMuted;
+      await setEntityMuted(aiEntityId, next);
+      setEntityMutedState(next);
+      showToast(
+        next
+          ? t('aiMutedToast', { name: profile?.name ?? '' })
+          : t('aiUnmutedToast', { name: profile?.name ?? '' }),
+      );
+    } catch (err) {
+      log.warn('Failed to toggle mute:', err);
+      showToast(t('common:error'));
+    }
+  };
+
   const handleToggleLike = async () => {
     if (!profile) return;
     try {
@@ -454,6 +513,7 @@ export const AIProfileScreen: React.FC = () => {
   if (!theme) return null;
 
   const accent = theme.colors.accent.primary;
+  const errorColor = theme.colors.status.error;
   const resolvedName = (profile?.name || 'AI Character').trim();
   const bioText = (profile?.description ?? '').trim();
 
@@ -747,6 +807,58 @@ export const AIProfileScreen: React.FC = () => {
                 />
               </TouchableOpacity>
             </View>
+
+            {/* ── Entity status chip row (Q8) — disable / mute, global per entity ── */}
+            {aiEntityId && (
+              <View style={styles.entityChipRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLightPress();
+                    handleToggleEntityDisable();
+                  }}
+                  activeOpacity={0.7}
+                  style={[
+                    styles.entityChip,
+                    entityDisabled && { backgroundColor: hexToRgba(errorColor, 0.15), borderColor: errorColor },
+                  ]}
+                  testID="ai-profile-disable-button"
+                  accessibilityRole="button"
+                  accessibilityLabel={entityDisabled ? t('enableEntity', { name: profile?.name ?? '' }) : t('disableEntity', { name: profile?.name ?? '' })}
+                >
+                  <Icon
+                    name={entityDisabled ? 'shield-account-outline' : 'shield-off-outline'}
+                    size={14}
+                    color={entityDisabled ? errorColor : theme.colors.text.secondary}
+                  />
+                  <ThemedText size={12} weight="medium">
+                    {entityDisabled ? t('enableEntity', { name: profile?.name ?? '' }) : t('disableEntity', { name: profile?.name ?? '' })}
+                  </ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLightPress();
+                    handleToggleEntityMute();
+                  }}
+                  activeOpacity={0.7}
+                  style={[
+                    styles.entityChip,
+                    entityMuted && { backgroundColor: hexToRgba(accent, 0.15), borderColor: accent },
+                  ]}
+                  testID="ai-profile-mute-button"
+                  accessibilityRole="button"
+                  accessibilityLabel={entityMuted ? t('unmuteEntity', { name: profile?.name ?? '' }) : t('muteEntity', { name: profile?.name ?? '' })}
+                >
+                  <Icon
+                    name={entityMuted ? 'volume-high' : 'volume-off'}
+                    size={14}
+                    color={entityMuted ? accent : theme.colors.text.secondary}
+                  />
+                  <ThemedText size={12} weight="medium">
+                    {entityMuted ? t('unmuteEntity', { name: profile?.name ?? '' }) : t('muteEntity', { name: profile?.name ?? '' })}
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* ── Stats row: Likes · Chats ── */}
             <View style={styles.statsRow}>
@@ -1161,6 +1273,25 @@ const styles = StyleSheet.create({
   },
   copyName: {
     flex: 1,
+  },
+  // ── Entity status chips (Q8) ──
+  entityChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+    paddingHorizontal: 16,
+  },
+  entityChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 99,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
 });
 

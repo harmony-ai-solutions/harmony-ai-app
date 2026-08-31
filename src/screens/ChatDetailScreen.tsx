@@ -68,6 +68,7 @@ import {
   getEntity,
   setEntityDisabled,
 } from '../database/repositories/entities';
+import { getReplyMode } from '../database/repositories/chatConversationSettings';
 import { getPersona } from '../database/repositories/personas';
 import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
@@ -582,9 +583,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const initializeSession = async () => {
       try {
         log.info(`Initializing interaction session for ${routeInteractionId}...`);
-        // Reply mode is read fresh from storage on every session init so the
-        // mode is not lost between navigations. Uses participantKey (stable).
-        const savedMode = await ChatPreferencesService.getReplyMode(participantKey);
+        // Reply mode is read fresh from the SYNCED settings column on every
+        // session init so the mode is not lost between navigations. Uses
+        // participantKey (stable). 4-4: supersedes ChatPreferencesService; the
+        // one-time legacy AsyncStorage migration runs inside getReplyMode.
+        const savedMode = await getReplyMode(participantKey);
         const mode = savedMode || 'realistic';
         await startInteractionSession(ownEntityId, participantIds, mode);
       } catch (error: any) {
@@ -739,6 +742,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       if (errorInteractionId === currentInteractionIdRef.current) {
         log.error(`Session error for ${currentInteractionIdRef.current}:`, error);
 
+        // Q8/A3 — a DISABLED AI partner is a terminal state. The engine refuses
+        // INIT_ENTITY with `entity_disabled`; the app surfaces the honest
+        // disabled-partner toast and jumps to the AI profile (which shows the
+        // disabled state + the enable action). Distinct from the generic error
+        // path.
+        if (error === 'entity_disabled') {
+          showToast(t('entityDisabledBody', { name: headerName }));
+          if (partnerProfileId) {
+            navigation.navigate('AIProfile', { profileId: partnerProfileId });
+          }
+          return;
+        }
+
         showToast(t('chatSessionError', { error }));
       }
     };
@@ -748,7 +764,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => {
       EntitySessionService.off('session:error', handleSessionError);
     };
-  }, [routeInteractionId]);
+  }, [routeInteractionId, partnerProfileId, headerName, navigation, showToast, t]);
 
   // Seed emoji action defaults when session becomes active
   useEffect(() => {

@@ -111,7 +111,11 @@ export const ChatConversationMenuModal: React.FC<ChatConversationMenuModalProps>
     },
     {
       icon: settings.muted ? 'volume-high' : 'volume-off',
-      label: settings.muted ? t('menuUnmute') : t('menuMute'),
+      // Entity-scoped mute (Q8) — the label reads "Mute {name}" / "Unmute {name}"
+      // with the partner name, reflecting global per-entity semantics.
+      label: settings.muted
+        ? t('unmuteEntity', { name: conversationName })
+        : t('muteEntity', { name: conversationName }),
       color: accent,
       onPress: onToggleMute,
     },
@@ -141,7 +145,10 @@ export const ChatConversationMenuModal: React.FC<ChatConversationMenuModalProps>
     },
     {
       icon: isDisabled ? 'shield-account-outline' : 'shield-off-outline',
-      label: isDisabled ? t('menuEnable') : t('menuDisable'),
+      // Entity-scoped disable (Q8) — "Disable {name}" / "Enable {name}".
+      label: isDisabled
+        ? t('enableEntity', { name: conversationName })
+        : t('disableEntity', { name: conversationName }),
       color: errorColor,
       onPress: onToggleDisable,
     },

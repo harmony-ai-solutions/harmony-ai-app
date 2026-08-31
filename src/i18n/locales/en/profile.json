@@ -151,5 +151,13 @@
   "blockedUsersTitle": "Blocked Users",
   "blockedUsersEmpty": "No blocked users",
   "blockedUsersEmptyHint": "Users you block will appear here. You can unblock them anytime.",
-  "blockedUsersUnblock": "Unblock"
+  "blockedUsersUnblock": "Unblock",
+  "disableEntity": "Disable {{name}}",
+  "enableEntity": "Enable {{name}}",
+  "muteEntity": "Mute {{name}}",
+  "unmuteEntity": "Unmute {{name}}",
+  "aiDisabledToast": "Disabled {{name}}",
+  "aiEnabledToast": "Enabled {{name}}",
+  "aiMutedToast": "Muted {{name}}",
+  "aiUnmutedToast": "Unmuted {{name}}"
 }

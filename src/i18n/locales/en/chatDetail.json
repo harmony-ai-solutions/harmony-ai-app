@@ -93,5 +93,8 @@
   "yesterday": "Yesterday",
   "statusConnected": "Connected",
   "statusConnecting": "Connecting...",
-  "statusOffline": "Offline"
+  "statusOffline": "Offline",
+  "entityDisabledTitle": "Partner disabled",
+  "entityDisabledBody": "{{name}} is disabled. You can't chat until you enable it.",
+  "entityDisabledEnable": "Enable {{name}}"
 }

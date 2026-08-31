@@ -12,6 +12,7 @@ import {
   deriveParticipantKey,
 } from '../database/repositories/interactions';
 import { getEntity } from '../database/repositories/entities';
+import { getReplyMode as getSyncedReplyMode } from '../database/repositories/chatConversationSettings';
 import { Interaction } from '../database/models';
 import { SyncService } from './SyncService';
 import AudioPlayer, { AudioPlayer as AudioPlayerClass } from './AudioPlayer';
@@ -31,6 +32,16 @@ const MAX_INIT_ENTITY_RETRIES = 2;
 
 /** Engine ingestion-rejection code for an entity the engine hasn't ingested yet. */
 const INIT_ENTITY_INGESTION_ERROR = 'entity_not_defined';
+
+/**
+ * Engine rejection code for a DISABLED AI entity (Q8). The engine refuses to
+ * INIT_ENTITY for `is_disabled && entity_type='ai'` entities (A3 — user
+ * entities are valid INIT targets). App-side this is a TERMINAL state — no
+ * recovery retries (an entity_disabled rejection will not resolve by
+ * re-syncing), so the session fails immediately and the UI shows the honest
+ * disabled-partner toast + enables navigation to the AI profile.
+ */
+const INIT_ENTITY_DISABLED_ERROR = 'entity_disabled';
 
 // ============================================================================
 // InteractionSession — replaces DualEntitySession
@@ -518,13 +529,27 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     const participantKey = deriveParticipantKey(participantIds, ownEntityId, scope);
     const connKeySuffix = participantKey ? `-${participantKey.replace(/\+/g, '-')}` : '';
 
+    // 4-4 (A6): read the SYNCED reply-pacing value from the settings column.
+    // This supersedes the client-side ChatPreferencesService value passed by
+    // callers — the engine sees the same mode the rest of the app does. The
+    // passed replyMode stays as a fallback when the read fails (e.g. tests
+    // without a DB, or a transient DB error). SET_REPLY_MODE broadcasts and the
+    // InteractionSession.replyMode field STAY — live partner pacing still needs
+    // the WS push (Q8).
+    let effectiveReplyMode = replyMode;
+    try {
+      effectiveReplyMode = await getSyncedReplyMode(participantKey);
+    } catch (error) {
+      log.warn(`Failed to read synced reply mode for ${participantKey}, using passed value '${replyMode}':`, error);
+    }
+
     try {
       // Create the InteractionSession with temp interactionId
       const session: InteractionSession = {
         interactionId: tempInteractionId,
         interaction: null,
         participantIds,
-        replyMode,
+        replyMode: effectiveReplyMode,
         ownEntityId,
         connections,
         pendingTranscriptions: new Map(),
@@ -562,7 +587,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
           deviceType: 'phone',
           deviceId,
           capabilities: ['chat'],
-          replyMode,
+          replyMode: effectiveReplyMode,
           connectedAt: Date.now(),
           lastActivity: Date.now(),
           status: 'connecting',
@@ -594,7 +619,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
             device_platform: Platform.OS,
             capabilities: ['chat'],
             tts_output_type: 'binary', // Request binary audio output for mobile app
-            reply_mode: replyMode,
+            reply_mode: effectiveReplyMode,
           }
         };
 
@@ -1689,7 +1714,18 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         // INIT_ENTITY, bounded by MAX_INIT_ENTITY_RETRIES. Only after exhausting
         // the retries (or for non-ingestion errors) does the session fail.
         const isIngestionError = errorMessage === INIT_ENTITY_INGESTION_ERROR;
+        const isDisabledError = errorMessage === INIT_ENTITY_DISABLED_ERROR;
         const retryCount = interactionSession.initRetryCount ?? 0;
+        if (isDisabledError) {
+          // Terminal (A3/Q8): a disabled AI entity is off — re-syncing will NOT
+          // clear `is_disabled`, so NO recovery retries. Fail immediately with
+          // the honest error; the UI (ChatDetailScreen) keys off the
+          // 'entity_disabled' session:error to show the disabled-partner toast
+          // + navigate to the AI profile (which offers the enable action).
+          log.info(`INIT_ENTITY rejected for ${entityId}: entity disabled (${errorMessage}) — no recovery attempted (interaction ${interactionId})`);
+          this.failInteractionSession(interactionId, interactionSession, errorMessage);
+          return;
+        }
         if (isIngestionError && retryCount < MAX_INIT_ENTITY_RETRIES) {
           interactionSession.initRetryCount = retryCount + 1;
           log.info(`INIT_ENTITY rejected by engine for ${entityId} (${errorMessage}) — recovery attempt ${interactionSession.initRetryCount}/${MAX_INIT_ENTITY_RETRIES} (interaction ${interactionId})`);

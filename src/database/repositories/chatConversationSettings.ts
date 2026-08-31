@@ -4,7 +4,8 @@
  * Backs the chat-list long-press actions (pin / archive) only. Mute/disable
  * moved ONTO the entity itself (entities.is_muted / entities.is_disabled,
  * Q8), unread is DERIVED from conversation_messages.is_read (A5/A2), and the
- * `'blocked'` store of disabled state is dead. `chat_conversation_settings`
+ * legacy `'blocked'` flag carried in this table is gone.
+ * `chat_conversation_settings`
  * loses `unread_count`, `muted`, `blocked` and gains `reply_mode` + `deleted_at`
  * (final shape, mirroring the engine).
  *
@@ -37,6 +38,16 @@
  */
 
 import { getDatabase } from '../connection';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+/**
+ * Legacy reply-pacing AsyncStorage key prefix (A6). Before the synced
+ * `chat_conversation_settings.reply_mode` column existed, reply pacing was
+ * stored client-side under `@harmony_chat_reply_mode_<participantKey>`
+ * (ChatPreferencesService). 4-4 migrates those values into the synced column
+ * ONCE (read the legacy key, write the settings row, delete the key).
+ */
+const LEGACY_REPLY_MODE_PREFIX = '@harmony_chat_reply_mode_';
 
 export interface ChatConversationSettings {
   participantKey: string;
@@ -121,13 +132,14 @@ export async function getChatConversationSettingsBatch(
 async function upsertSettings(
   participantKey: string,
   entityId: string | null,
-  patch: Partial<Pick<ChatConversationSettings, 'pinned' | 'archived'>>,
+  patch: Partial<Pick<ChatConversationSettings, 'pinned' | 'archived' | 'replyMode'>>,
 ): Promise<void> {
   const db = getDatabase();
   const existing = await getChatConversationSettings(participantKey);
   const next = {
     pinned: patch.pinned ?? existing.pinned,
     archived: patch.archived ?? existing.archived,
+    replyMode: patch.replyMode ?? existing.replyMode,
   };
   const now = new Date().toISOString();
   await db.executeSql(
@@ -145,7 +157,7 @@ async function upsertSettings(
       entityId ?? null,
       next.pinned ? 1 : 0,
       next.archived ? 1 : 0,
-      existing.replyMode,
+      next.replyMode,
       now,
       now,
     ],
@@ -206,4 +218,77 @@ export async function listConversationsByFlag(
     list.push(mapRow(results.rows.item(i) as SettingsRow));
   }
   return list;
+}
+
+// ============================================================================
+// Reply mode (A6) — the synced `reply_mode` column
+// ============================================================================
+
+/** Read the legacy reply-pacing AsyncStorage value for a participant key. */
+async function readLegacyReplyMode(
+  participantKey: string,
+): Promise<'realistic' | 'instant' | null> {
+  try {
+    const key = `${LEGACY_REPLY_MODE_PREFIX}${participantKey}`;
+    const value = await AsyncStorage.getItem(key);
+    if (value === 'instant') return 'instant';
+    if (value === 'realistic') return 'realistic';
+    return null;
+  } catch {
+    // Best-effort: an AsyncStorage read failure must never break a read.
+    return null;
+  }
+}
+
+/** Delete the legacy reply-pacing AsyncStorage value (best-effort). */
+async function clearLegacyReplyMode(participantKey: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(`${LEGACY_REPLY_MODE_PREFIX}${participantKey}`);
+  } catch {
+    // Best-effort.
+  }
+}
+
+/**
+ * Read the synced reply-pacing mode for a conversation.
+ *
+ * Reads the `reply_mode` column; a row REPLACING the default 'realistic' is a
+ * synced value and wins over any stale legacy key. On a NO-ROW miss, the
+ * legacy AsyncStorage key (`@harmony_chat_reply_mode_<participantKey>`) is
+ * consulted ONCE, migrated into a settings row, then deleted — the honest
+ * one-time migration from the pre-4-4 client-side storage.
+ */
+export async function getReplyMode(
+  participantKey: string,
+): Promise<'realistic' | 'instant'> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT reply_mode FROM chat_conversation_settings WHERE participant_key = ?',
+    [participantKey],
+  );
+  if (results.rows.length > 0) {
+    const replyMode = results.rows.item(0).reply_mode;
+    return replyMode === 'instant' ? 'instant' : 'realistic';
+  }
+
+  // No row → one-time legacy migration.
+  const legacyValue = await readLegacyReplyMode(participantKey);
+  if (legacyValue !== null) {
+    await setReplyMode(participantKey, legacyValue);
+    await clearLegacyReplyMode(participantKey);
+    return legacyValue;
+  }
+  return 'realistic';
+}
+
+/**
+ * Set the synced reply-pacing mode for a conversation. Merge-preserving:
+ * never clobbers pinned/archived/entity_id; bumps updated_at.
+ */
+export async function setReplyMode(
+  participantKey: string,
+  mode: 'realistic' | 'instant',
+): Promise<void> {
+  const existing = await getChatConversationSettings(participantKey);
+  await upsertSettings(participantKey, existing.entityId, { replyMode: mode });
 }

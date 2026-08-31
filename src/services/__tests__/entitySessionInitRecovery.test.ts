@@ -257,6 +257,35 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
   });
 
+  it('does NOT trigger recovery for entity_disabled (distinct from entity_not_defined) — surfaces session:error immediately', async () => {
+    const svc = EntitySessionService.getInstance();
+    const session = makeSession();
+    (svc as any).sessions.set(session.interactionId, session);
+
+    const errors: string[] = [];
+    svc.on('session:error', (_id: string, err: string) => errors.push(err));
+
+    await (svc as any).handleInitEntityResponse(
+      'claire',
+      initEntityError('entity_disabled'),
+      null,
+      session,
+      session.interactionId,
+    );
+
+    // A disabled partner is a terminal state — NO recovery re-sync / re-send,
+    // NO retries. The session fails immediately with the honest error.
+    expect(errors).toEqual(['entity_disabled']);
+    expect((svc as any).sessions.has(session.interactionId)).toBe(false);
+    expect(mockSyncAndWait).not.toHaveBeenCalled();
+    expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
+    expect(
+      mockConnectionManager.sendEvent.mock.calls.filter(
+        (c: any[]) => c[1]?.event_type === 'INIT_ENTITY',
+      ),
+    ).toHaveLength(0);
+  });
+
   it('does not tear down when the transport error storm delivers an INIT_ENTITY app-level error', async () => {
     // BaseWebSocketConnection.handleMessage emits BOTH 'event' and 'error' for
     // an ERROR-status message: the error object carries the harmony event under
