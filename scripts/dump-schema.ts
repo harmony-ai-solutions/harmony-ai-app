@@ -15,7 +15,6 @@
  *   - Collapse whitespace to single spaces
  *   - Strip trailing semicolons
  *   - Exclude internal sqlite_* tables
- *   - Exclude CLIENT-ONLY tables (never synced, never present on the Go engine)
  *
  * Usage:
  *   npx ts-node scripts/dump-schema.ts > rn-schema.json
@@ -32,40 +31,6 @@
 import {createInMemoryDatabase} from '../src/database/__test_utils__/testDatabase';
 import {runMigrations} from '../src/database/migrations';
 import {dumpSchema} from '../src/database/__test_utils__/dumpSchema';
-
-/**
- * Tables that exist ONLY on the RN client and are never synced to the Go
- * engine. They must be excluded from the schema dump so the parity gate
- * (RN ↔ Go) does not report them as "RN-only" drift.
- *
- * INTERIM MECHANISM (decision D6): this exclusion list is scaffolding for
- * senju's client-only sidecar tables and is scheduled for deletion — it
- * shrinks as 02-Followup-Stub-Plan drops the sidecar tables (B5 / Track A)
- * and is removed entirely once the last entry is gone. End state: zero dump
- * exclusions; "app-only table" is not a category in this architecture
- * (local-only state lives in AsyncStorage; engine-appropriate data gets
- * mirrored migrations on both sides).
- */
-const CLIENT_ONLY_TABLES = new Set<string>([]);
-
-/**
- * True for client-only tables AND for indexes defined on them (the index
- * name differs from the table name, so a name-only check lets them leak
- * into the parity dump). Interim with CLIENT_ONLY_TABLES — see D6 note above.
- */
-function isClientOnlyEntry(entry: {type: string; name: string; sql: string}): boolean {
-  if (CLIENT_ONLY_TABLES.has(entry.name)) {
-    return true;
-  }
-  if (entry.type === 'index') {
-    // Index SQL shape: CREATE [UNIQUE] INDEX idx_x ON <table> (<cols>).
-    // Grab the first identifier after ON (optionally quoted) — table names
-    // in this schema are plain identifiers.
-    const onTable = entry.sql.match(/\bON\s+["'`\[]?(\w+)/i);
-    return onTable !== null && CLIENT_ONLY_TABLES.has(onTable[1]);
-  }
-  return false;
-}
 
 interface Args {
   output?: string;
@@ -87,9 +52,7 @@ async function main() {
   try {
     // silent=true suppresses migration log output
     await runMigrations(db, true);
-    const schema = (await dumpSchema(db)).filter(
-      entry => !isClientOnlyEntry(entry),
-    );
+    const schema = await dumpSchema(db);
     const json = JSON.stringify(schema, null, 2);
 
     if (args.output) {
