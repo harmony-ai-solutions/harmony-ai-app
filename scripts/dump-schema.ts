@@ -46,11 +46,7 @@ import {dumpSchema} from '../src/database/__test_utils__/dumpSchema';
  * (local-only state lives in AsyncStorage; engine-appropriate data gets
  * mirrored migrations on both sides).
  */
-const CLIENT_ONLY_TABLES = new Set<string>([
-  'personas',                  // dies in Phase 2 / B3 (persona → user entities)
-  'character_favorites',       // becomes synced in Phase 2 / B2 (Go mirror)
-  'chat_conversation_settings',// synced redesign in Phase 2 / B2
-]);
+const CLIENT_ONLY_TABLES = new Set<string>([]);
 
 /**
  * True for client-only tables AND for indexes defined on them (the index

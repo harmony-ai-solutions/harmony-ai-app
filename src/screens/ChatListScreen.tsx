@@ -21,7 +21,12 @@ import { ThemedFab } from '../components/themed/ThemedFab';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { hapticLightPress } from '../utils/haptics';
 import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigation/GlassTabBar';
-import { getAllEntities } from '../database/repositories/entities';
+import {
+  getAllEntities,
+  setEntityMuted,
+  setEntityDisabled,
+  getDisabledEntityIds,
+} from '../database/repositories/entities';
 import { resolvePersonaId } from '../database/repositories/personas';
 import {
   getPhoneConversationsPage,
@@ -51,16 +56,16 @@ import { CharacterProfile } from '../database/models';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { createLogger } from '../utils/logger';
 import {
-  getChatConversationSettings,
   getChatConversationSettingsBatch,
   setConversationPinned,
   setConversationArchived,
-  setConversationMuted,
-  setConversationDisabled,
-  setConversationUnread,
-  clearConversationUnread,
 } from '../database/repositories/chatConversationSettings';
-import { deleteConversationByParticipantKey } from '../database/repositories/conversation_messages';
+import {
+  deleteConversationByParticipantKey,
+  markConversationMessagesRead,
+  markConversationMessagesUnread,
+  getUnreadCountByParticipantKeys,
+} from '../database/repositories/conversation_messages';
 import {
   ChatConversationMenuModal,
   ChatConversationMenuState,
@@ -124,7 +129,9 @@ interface ChatListItem {
   participantKey: string;
   participantIds: string[];
   isGroup: boolean;
-  // Conversation settings (pin / archive / mute / block / unread)
+  // pin/archive live on chat_conversation_settings; mute/disable are ENTITY
+  // flags (entities.is_muted / is_disabled, Q8); unread is DERIVED from
+  // conversation_messages.is_read (A5/A2).
   pinned: boolean;
   archived: boolean;
   muted: boolean;
@@ -208,7 +215,7 @@ export const ChatListScreen: React.FC = () => {
     async (
       activeEntityId: string,
       rows: PhoneConversationPageRow[],
-      blockedIds: Set<string>,
+      filteredIds: Set<string>,
     ): Promise<ChatListItem[]> => {
       // Get all entities for display info lookups
       const entities = await getAllEntities();
@@ -239,7 +246,7 @@ export const ChatListScreen: React.FC = () => {
           if (!partnerEntityId) continue;
 
           // F5: blocked users do not appear in the chat list.
-          if (blockedIds.has(partnerEntityId)) continue;
+          if (filteredIds.has(partnerEntityId)) continue;
 
           // Defensive: skip interactions whose partner entity no longer exists.
           // getAllEntities() only returns non-deleted entities, so a partner
@@ -301,11 +308,12 @@ export const ChatListScreen: React.FC = () => {
             participantKey,
             participantIds,
             isGroup: false,
-            // Filled in below from the settings batch
+            // pin/archived filled in below from the settings batch; mute/
+            // disabled from the partner ENTITY flags (Q8); unread derived.
             pinned: false,
             archived: false,
-            muted: false,
-            disabled: false,
+            muted: entity?.is_muted === 1,
+            disabled: entity?.is_disabled === 1,
             unreadCount: 0,
           });
         } else if (scope === 'group') {
@@ -313,7 +321,7 @@ export const ChatListScreen: React.FC = () => {
           // page query already dedupes by participant_key).
 
           // F5: skip group conversations containing a blocked participant.
-          if (participantIds.some(id => blockedIds.has(id))) continue;
+          if (participantIds.some(id => filteredIds.has(id))) continue;
 
           // Get last message preview
           const lastMsg = await getLastInteractionMessage(activeEntityId, participantKey);
@@ -358,7 +366,8 @@ export const ChatListScreen: React.FC = () => {
             participantKey,
             participantIds,
             isGroup: true,
-            // Filled in below from the settings batch
+            // Groups have no single partner entity — mute/disable flags are
+            // not applicable. pin/archived/unread filled in below.
             pinned: false,
             archived: false,
             muted: false,
@@ -368,18 +377,19 @@ export const ChatListScreen: React.FC = () => {
         }
       }
 
-      // Merge per-conversation settings (pin / archive / mute / block / unread)
+      // Merge per-conversation pin/archive state from the settings batch.
       const keys = listItems.map(item => item.participantKey);
       const settingsMap = await getChatConversationSettingsBatch(keys);
+      // Derive unread counts from conversation_messages.is_read, scoped to this
+      // POV entity (A2) — the badge is no longer a stored counter.
+      const unreadMap = await getUnreadCountByParticipantKeys(keys, activeEntityId);
       for (const item of listItems) {
         const settings = settingsMap.get(item.participantKey);
         if (settings) {
           item.pinned = settings.pinned;
           item.archived = settings.archived;
-          item.muted = settings.muted;
-          item.disabled = settings.disabled;
-          item.unreadCount = settings.unreadCount;
         }
+        item.unreadCount = unreadMap.get(item.participantKey) ?? 0;
       }
 
       return listItems;
@@ -387,14 +397,25 @@ export const ChatListScreen: React.FC = () => {
     [t],
   );
 
-  /** Read the blocked-user set, tolerant of stub gaps / failures (F5). */
-  const loadBlockedUserIds = useCallback(async (): Promise<Set<string>> => {
+  /**
+   * Read the chat-list filter set: social-blocked users (getBlockedUserIds,
+   * UNCHANGED — A4) UNION disabled entities (getDisabledEntityIds, Q8). A
+   * disabled AI entity is filtered out of the list exactly like a blocked one
+   * — it is off and must not be offered as a partner.
+   */
+  const loadFilteredEntityIds = useCallback(async (): Promise<Set<string>> => {
+    const filtered = new Set<string>();
     try {
-      return await getBlockedUserIds();
+      (await getBlockedUserIds()).forEach(id => filtered.add(id));
     } catch (error) {
       log.warn('Failed to load blocked users — chat list filter skipped:', error);
-      return new Set<string>();
     }
+    try {
+      (await getDisabledEntityIds()).forEach(id => filtered.add(id));
+    } catch (error) {
+      log.warn('Failed to load disabled entities — chat list filter skipped:', error);
+    }
+    return filtered;
   }, []);
 
   /**
@@ -406,7 +427,7 @@ export const ChatListScreen: React.FC = () => {
   const loadChatList = useCallback(
     async (activeEntityId: string) => {
       try {
-        const blockedIds = await loadBlockedUserIds();
+        const filteredIds = await loadFilteredEntityIds();
 
         listPageRef.current = 0;
         listHasMoreRef.current = true;
@@ -416,13 +437,13 @@ export const ChatListScreen: React.FC = () => {
           offset: 0,
         });
 
-        const items = await buildListItems(activeEntityId, rows, blockedIds);
+        const items = await buildListItems(activeEntityId, rows, filteredIds);
         const sorted = sortListItems(items);
         chatListRef.current = sorted;
 
-        // Disabled conversations STAY in the main list (with a shield
-        // indicator) — disabling only stops messaging. Archived conversations
-        // move to the separate archived section below the main list.
+        // Disabled conversations are FILTERED OUT (the disabled entity is off,
+        // A4 union) — an enabled-but-archived conversation moves to the
+        // separate archived section below the main list.
         setChatList(sorted.filter(item => !item.archived));
         setArchivedList(sorted.filter(item => item.archived));
 
@@ -439,7 +460,7 @@ export const ChatListScreen: React.FC = () => {
         setRefreshing(false);
       }
     },
-    [buildListItems, loadBlockedUserIds],
+    [buildListItems, loadFilteredEntityIds],
   );
 
   /** Load the next page of conversations and append (offset pagination, F6). */
@@ -451,7 +472,7 @@ export const ChatListScreen: React.FC = () => {
     loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      const blockedIds = await loadBlockedUserIds();
+      const filteredIds = await loadFilteredEntityIds();
       const rows = await getPhoneConversationsPage(activeEntityId, {
         limit: CHAT_LIST_PAGE_SIZE,
         offset: listPageRef.current * CHAT_LIST_PAGE_SIZE,
@@ -462,7 +483,7 @@ export const ChatListScreen: React.FC = () => {
         return;
       }
 
-      const items = await buildListItems(activeEntityId, rows, blockedIds);
+      const items = await buildListItems(activeEntityId, rows, filteredIds);
       listPageRef.current += 1;
       listHasMoreRef.current = rows.length === CHAT_LIST_PAGE_SIZE;
 
@@ -483,7 +504,7 @@ export const ChatListScreen: React.FC = () => {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [buildListItems, loadBlockedUserIds]);
+  }, [buildListItems, loadFilteredEntityIds]);
 
   /** Debounce a full reload so rapid session events collapse into one fetch. */
   const scheduleChatListReload = useCallback(() => {
@@ -556,27 +577,40 @@ export const ChatListScreen: React.FC = () => {
         }
 
         try {
-          const [settings, lastMsg] = await Promise.all([
-            getChatConversationSettings(participantKey),
-            getLastInteractionMessage(impersonatedEntityIdRef.current, participantKey),
-          ]);
+          const lastMsg = await getLastInteractionMessage(
+            impersonatedEntityIdRef.current,
+            participantKey,
+          );
 
           // Who sent the message — 'You' for our own entity, else the partner
           // display name.
           let lastMessageSender = existing.lastMessageSender;
           const senderEntityId = message?.entity_id;
-          if (senderEntityId === session.ownEntityId) {
+          const isOwnMessage = senderEntityId === session.ownEntityId;
+          if (isOwnMessage) {
             lastMessageSender = t('you');
           } else if (senderEntityId === existing.entityId) {
             lastMessageSender = existing.characterName;
           }
+
+          // Derived unread (A5/A2): a partner message bumps the derived badge
+          // ONLY when the conversation is not open on screen AND the partner
+          // entity is not muted (O10 — muted partner suppresses the badge).
+          // Open conversations are marked read as they render (ChatDetail),
+          // so the open-conversation guard stays: no bump while open.
+          const isOpen = EntitySessionService.isConversationOpen(participantKey);
+          const mutedPartner = existing.muted;
+          const nextUnread =
+            !isOwnMessage && !isOpen && !mutedPartner
+              ? existing.unreadCount + 1
+              : existing.unreadCount;
 
           const updated: ChatListItem = {
             ...existing,
             lastMessage: lastMsg?.content || message?.content || existing.lastMessage,
             lastMessageTime: lastMsg?.created_at || existing.lastMessageTime || new Date(),
             lastMessageSender,
-            unreadCount: settings.unreadCount,
+            unreadCount: nextUnread,
           };
 
           // Re-sort the full list with the refreshed row, then split.
@@ -642,11 +676,15 @@ export const ChatListScreen: React.FC = () => {
   };
 
   const handleChatPress = async (item: ChatListItem) => {
-    // Opening a conversation clears its unread counter.
+    // Opening a conversation marks its partner-sent messages read (derived
+    // unread, A5/A2) so the badge clears immediately.
     try {
-      await clearConversationUnread(item.participantKey);
+      await markConversationMessagesRead(
+        item.participantKey,
+        impersonatedEntityIdRef.current,
+      );
     } catch (error) {
-      log.warn('Failed to clear unread on open:', error);
+      log.warn('Failed to mark read on open:', error);
     }
     // Reload so the badge disappears immediately.
     loadChatList(impersonatedEntityIdRef.current);
@@ -734,11 +772,9 @@ export const ChatListScreen: React.FC = () => {
   const handleToggleMute = useCallback(async () => {
     const item = menuItem;
     if (!item) return;
-    await setConversationMuted(
-      item.participantKey,
-      item.entityId || null,
-      !item.muted,
-    );
+    // Mute is a per-ENTITY flag (Q8) — no-op for groups (no single partner).
+    if (!item.entityId) return;
+    await setEntityMuted(item.entityId, !item.muted);
     showToast(item.muted ? t('toastUnmuted') : t('toastMuted'));
     reloadAfterAction();
   }, [menuItem, reloadAfterAction, showToast, t]);
@@ -770,13 +806,16 @@ export const ChatListScreen: React.FC = () => {
   const handleToggleRead = useCallback(async () => {
     const item = menuItem;
     if (!item) return;
+    const ownEntityId = impersonatedEntityIdRef.current;
     if (item.unreadCount > 0) {
-      await clearConversationUnread(item.participantKey);
+      // Mark all partner-sent messages in this conversation read.
+      await markConversationMessagesRead(item.participantKey, ownEntityId);
       showToast(t('toastMarkedRead'));
     } else {
-      // "Mark unread" = SET the badge to exactly 1 (never +1) so repeated
-      // actions cannot accumulate a bogus count (F10).
-      await setConversationUnread(item.participantKey, item.entityId || null, 1);
+      // "Mark unread" = set exactly the LAST partner-sent message unread
+      // (set-to-1 semantics, F10/A5) so repeated actions cannot accumulate a
+      // bogus count.
+      await markConversationMessagesUnread(item.participantKey, ownEntityId, 1);
       showToast(t('toastMarkedUnread'));
     }
     reloadAfterAction();
@@ -785,6 +824,8 @@ export const ChatListScreen: React.FC = () => {
   const handleToggleDisable = useCallback(async () => {
     const item = menuItem;
     if (!item) return;
+    // Disable is a per-ENTITY flag (Q8) — no-op for groups (no single partner).
+    if (!item.entityId) return;
     const nowDisabled = !item.disabled;
     if (nowDisabled) {
       showAlert(
@@ -796,8 +837,7 @@ export const ChatListScreen: React.FC = () => {
             text: t('menuDisable'),
             style: 'destructive',
             onPress: async () => {
-              await setConversationDisabled(item.participantKey, item.entityId || null, true);
-              EntitySessionService.setDisabledOverride(item.participantKey, true);
+              await setEntityDisabled(item.entityId, true);
               showToast(t('toastDisabled'));
               reloadAfterAction();
             },
@@ -806,10 +846,9 @@ export const ChatListScreen: React.FC = () => {
       );
       return;
     }
-    // Apply the override BEFORE the DB write resolves so the send guard
-    // allows messages immediately after enabling.
-    EntitySessionService.setDisabledOverride(item.participantKey, false);
-    await setConversationDisabled(item.participantKey, item.entityId || null, false);
+    // Disabling lives on the entity — no conversation override to seed; the
+    // send/incoming guards read the entity flag directly (Q8).
+    await setEntityDisabled(item.entityId, false);
     showToast(t('toastEnabled'));
     reloadAfterAction();
   }, [menuItem, reloadAfterAction, showAlert, showToast, t]);

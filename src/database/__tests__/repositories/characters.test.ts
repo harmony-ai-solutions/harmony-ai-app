@@ -573,6 +573,26 @@ describe('characters repository', () => {
   });
 
   describe('getCharacterStats', () => {
+    // interactions.entity_id FK-constrains entities(id) — ensure each entity
+    // referenced by an interaction row exists. Tolerant: the "likes" test links
+    // 'Max' to a profile via its own createEntity, so ignore pre-existing rows.
+    async function ensureStatsEntity(id: string): Promise<void> {
+      try {
+        await createEntity(
+          {id, alias: id, character_profile_id: null, lifecycle_config: '{}', rag_reindex_required: 1},
+          {entity_type: id === 'user' ? 'user' : 'ai'},
+        );
+      } catch {
+        // already exists — fine
+      }
+    }
+
+    beforeEach(async () => {
+      for (const id of ['user', 'Max', 'Max 2', 'Max 3', 'alice', 'bob', 'claire', 'Other']) {
+        await ensureStatsEntity(id);
+      }
+    });
+
     function makeInteraction(id: string, entityId: string, participantIds: string[]): Interaction {
       return {
         id,
@@ -671,14 +691,10 @@ describe('characters repository', () => {
     });
 
     it('counts likes = total emoji reactions on messages sent by the character', async () => {
+      // 'Max' entity is pre-seeded by beforeEach; link the profile for realism
+      // (getCharacterStats reads messages + interactions only, not the profile —
+      // but keep the profile so the entity is genuinely profiled).
       await createNamedProfile('max', 'Max');
-      await createEntity({
-        id: 'Max',
-        alias: 'Max',
-        character_profile_id: 'max',
-        lifecycle_config: '{}',
-        rag_reindex_required: 1,
-      });
       await createInteraction(makeInteraction('i5', 'user', ['Max', 'user']));
 
       await createConversationMessage({

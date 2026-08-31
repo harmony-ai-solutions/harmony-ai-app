@@ -11,10 +11,7 @@ import {
   deriveScopeFromParticipants,
   deriveParticipantKey,
 } from '../database/repositories/interactions';
-import {
-  getChatConversationSettings,
-  incrementConversationUnread,
-} from '../database/repositories/chatConversationSettings';
+import { getEntity } from '../database/repositories/entities';
 import { Interaction } from '../database/models';
 import { SyncService } from './SyncService';
 import AudioPlayer, { AudioPlayer as AudioPlayerClass } from './AudioPlayer';
@@ -166,10 +163,6 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   // Participant keys of conversations currently open on screen — incoming
   // messages for these do NOT bump the unread counter.
   private openConversationKeys: Set<string> = new Set();
-  // In-memory disable-state overrides keyed by participant key. The UI updates
-  // this synchronously on disable/enable so the send/incoming guards see the
-  // new state IMMEDIATELY (no stale DB read while the write is in flight).
-  private disabledOverrides: Map<string, boolean> = new Map();
 
   private constructor() {
     super();
@@ -1335,53 +1328,27 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
 
   /**
-   * True when the conversation that `session` belongs to is disabled by the
-   * local user (see chat_conversation_settings). Disabled conversations
-   * cannot send OR receive messages.
+   * The partner entity ids in a session (everything that is NOT the POV /
+   * own entity). For a 2-way phone chat this is exactly the one AI partner;
+   * for groups it is every other participant. Used by the entity-flag guards
+   * (Q8 — mute/disable live on the entity, not conversation settings).
    */
-  async isSessionDisabled(session: InteractionSession): Promise<boolean> {
-    try {
-      const scope = deriveScopeFromParticipants(session.participantIds);
-      const key = deriveParticipantKey(
-        session.participantIds,
-        session.ownEntityId,
-        scope,
-      );
-      if (!key) return false;
-      // In-memory override wins — the UI writes it synchronously on
-      // disable/enable so sends react instantly (no stale DB read).
-      if (this.disabledOverrides.has(key)) {
-        return Boolean(this.disabledOverrides.get(key));
-      }
-      const settings = await getChatConversationSettings(key);
-      return settings.disabled;
-    } catch (error) {
-      log.error('Failed to check disabled state for session:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Synchronously update the in-memory disabled state for a participant key.
-   * Call this right after persisting the disable/enable so the send guard and
-   * the incoming handler see the new state immediately.
-   */
-  setDisabledOverride(participantKey: string, disabled: boolean): void {
-    if (!participantKey) return;
-    if (disabled) {
-      this.disabledOverrides.set(participantKey, true);
-    } else {
-      this.disabledOverrides.delete(participantKey);
-    }
+  private partnerEntityIds(session: InteractionSession): string[] {
+    return session.participantIds.filter(id => id !== session.ownEntityId);
   }
 
   /**
    * Disable guard for the outbound send paths. Throws a friendly error when
-   * the conversation is disabled so the UI can surface it without sending.
+   * the partner entity is disabled (entities.is_disabled, Q8) so the UI can
+   * surface it without sending. User entities can never be disable targets
+   * (A3) — they are excluded by Nature since the partner is always the AI.
    */
   private async assertNotDisabled(session: InteractionSession): Promise<void> {
-    if (await this.isSessionDisabled(session)) {
-      throw new Error('This AI is disabled. Enable it to chat again.');
+    for (const partnerId of this.partnerEntityIds(session)) {
+      const partner = await getEntity(partnerId);
+      if (partner?.is_disabled) {
+        throw new Error('This AI is disabled. Enable it to chat again.');
+      }
     }
   }
 
@@ -1875,33 +1842,21 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     try {
       log.info(`Incoming message from ${event.entity_id} in interaction ${interactionId}`);
 
-      // Disabled conversations cannot RECEIVE messages either — drop them
-      // before they reach the database.
-      if (await this.isSessionDisabled(interactionSession)) {
-        log.info(`Dropping incoming message from ${event.entity_id}: conversation is disabled`);
+      // Disabled entities cannot RECEIVE messages either — drop before they
+      // reach the database (defense-in-depth; primary enforcement is the
+      // engine-side INIT_ENTITY rejection, 4-3). Q8: the disabled flag lives
+      // on the partner entity.
+      const partnerEntity = await getEntity(event.entity_id);
+      if (partnerEntity?.is_disabled) {
+        log.info(`Dropping incoming message from ${event.entity_id}: entity is disabled`);
         return;
       }
 
-      // Bump the unread counter unless this conversation is open on screen.
-      const scope = deriveScopeFromParticipants(interactionSession.participantIds);
-      const participantKey = deriveParticipantKey(
-        interactionSession.participantIds,
-        interactionSession.ownEntityId,
-        scope,
-      );
-      if (participantKey && !this.openConversationKeys.has(participantKey)) {
-        try {
-          // Muted conversations stay visible in the chat list but never bump
-          // the unread badge (O10/F11) — the muted flag is the user's explicit
-          // "don't interrupt me" signal.
-          const settings = await getChatConversationSettings(participantKey);
-          if (!settings.muted) {
-            await incrementConversationUnread(participantKey, event.entity_id ?? null);
-          }
-        } catch (error) {
-          log.error('Failed to increment unread count:', error);
-        }
-      }
+      // Unread is DERIVED from conversation_messages.is_read (A5/A2) — there is
+      // no counter to increment here anymore. The ChatList badge recomputes from
+      // the message rows, so a live increment is unnecessary AND would race the
+      // derived count. The open-conversation guard lives at the badge seam in
+      // ChatListScreen, not here.
 
       // Save to database
       await this.handleIncomingUtterance(interactionSession, interactionId, event.payload, event.event_id);

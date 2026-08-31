@@ -62,9 +62,12 @@ import {
   getCharacterProfile,
   imageToDataURL,
 } from '../database/repositories/characters';
-import { getAllEntities } from '../database/repositories/entities';
-import { deleteEntity } from '../database/repositories/entities';
-import { getEntity } from '../database/repositories/entities';
+import {
+  getAllEntities,
+  deleteEntity,
+  getEntity,
+  setEntityDisabled,
+} from '../database/repositories/entities';
 import { getPersona } from '../database/repositories/personas';
 import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
@@ -84,10 +87,7 @@ import {
   ForwardPickerModal,
   ForwardTarget,
 } from '../components/chat/ForwardPickerModal';
-import {
-  getChatConversationSettings,
-  setConversationDisabled,
-} from '../database/repositories/chatConversationSettings';
+import { markConversationMessagesRead } from '../database/repositories/conversation_messages';
 import {
   showBubble,
   hasBubblePermission,
@@ -485,15 +485,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [routeInteractionId, participantKey, ownEntityId]);
 
-  // Load blocked state + register the conversation as open (so incoming
-  // messages don't bump the unread counter while this chat is on screen).
+  // Load disabled state (the partner ENTITY flag, Q8) + register the
+  // conversation as open (so incoming messages don't bump the unread counter
+  // while this chat is on screen).
   useEffect(() => {
     let mounted = true;
     const loadDisabled = async () => {
       try {
         if (participantKey) {
-          const settings = await getChatConversationSettings(participantKey);
-          if (mounted) setIsDisabled(settings.disabled);
+          const partnerEntityId = participantIds.find(id => id !== ownEntityId);
+          if (partnerEntityId) {
+            const partner = await getEntity(partnerEntityId);
+            if (mounted) setIsDisabled(partner?.is_disabled === 1);
+          }
         }
       } catch (error) {
         log.error('Failed to load disabled state:', error);
@@ -509,7 +513,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         EntitySessionService.unregisterOpenConversation(participantKey);
       }
     };
-  }, [participantKey]);
+  }, [participantKey, participantIds, ownEntityId]);
 
   // Load messages and last-read timestamp on mount
   useEffect(() => {
@@ -1361,6 +1365,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     const partnerEntityId = otherIds[0] || '';
     const partnerName = headerName || t('partnerSettings');
 
+    // Disable is a per-ENTITY flag (Q8) — no single partner (group) → no-op.
+    if (!partnerEntityId) return;
+
     if (!isDisabled) {
       showAlert(
         t('disableTitle', { name: partnerName }),
@@ -1372,10 +1379,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             style: 'destructive',
             onPress: async () => {
               try {
-                await setConversationDisabled(participantKey, partnerEntityId || null, true);
-                // Apply the in-memory override instantly so the send guard
-                // sees the disabled state immediately.
-                EntitySessionService.setDisabledOverride(participantKey, true);
+                await setEntityDisabled(partnerEntityId, true);
                 setIsDisabled(true);
                 showToast(t('toastDisabled'));
               } catch (error) {
@@ -1386,14 +1390,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         ],
       );
     } else {
-      // Enable — no confirmation needed. Apply the in-memory override FIRST
-      // (before the DB write resolves) so the send guard allows messages
-      // immediately — no stale "AI disabled" on the next send.
-      EntitySessionService.setDisabledOverride(participantKey, false);
+      // Enable — the send/incoming guards read the entity flag directly
+      // (Q8), no conversation override to seed.
       setIsDisabled(false);
       showToast(t('toastEnabled'));
-      setConversationDisabled(participantKey, partnerEntityId || null, false)
-        .catch(error => log.error('Failed to enable:', error));
+      setEntityDisabled(partnerEntityId, false).catch(error =>
+        log.error('Failed to enable:', error),
+      );
     }
   }, [
     participantKey,
@@ -1674,6 +1677,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   }, [messages, personaChangeText, messagesWithDivider, initialScrollTarget]);
 
   const persistMarkAsRead = useCallback(() => {
+    // Derived unread (A5/A2): mark partner-sent messages in THIS conversation
+    // read, fire-and-forget. Reading the chat clears the derived unread badge.
+    if (participantKey) {
+      markConversationMessagesRead(participantKey, ownEntityId).catch(error =>
+        log.error('Failed to mark conversation read:', error),
+      );
+    }
     const msgs = loadedMessagesRef.current;
     if (msgs.length === 0) return;
     const latestTimestamp = msgs[msgs.length - 1]?.created_at.getTime() || 0;
@@ -1685,7 +1695,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     if (isReadyToShowRef.current) {
       setShowDivider(false);
     }
-  }, [routeInteractionId]);
+  }, [participantKey, ownEntityId, routeInteractionId]);
 
   const handleScrollEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {

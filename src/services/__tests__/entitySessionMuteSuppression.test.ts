@@ -1,17 +1,19 @@
 /**
- * EntitySessionService mute suppression (F11/O10).
+ * EntitySessionService incoming-message entity gate (Q8/A5).
  *
- * Muted conversations stay visible in the chat list but must NEVER bump the
- * unread badge when a message arrives. This pins the guard in
- * `handleIncomingMessage`: the badge increment is skipped for muted keys while
- * the incoming message is still stored (conversation stays visible).
+ * The unread-badge increment was REMOVED from the service (unread is now
+ * DERIVED from conversation_messages.is_read — the badge seam lives in
+ * ChatListScreen). What remains in `handleIncomingMessage` is the entity-level
+ * DISABLED drop gate: an incoming message from a disabled partner entity is
+ * dropped before it reaches the database (defense-in-depth). Mute no longer
+ * suppresses anything at the service layer — muted conversations still store
+ * their messages (the badge suppression is a UI concern now, O10).
  */
 
 import { EntitySessionService } from '../EntitySessionService';
 import { EventEmitter } from 'eventemitter3';
-import { getChatConversationSettings, incrementConversationUnread } from '../../database/repositories/chatConversationSettings';
+import { getEntity } from '../../database/repositories/entities';
 import { createConversationMessage } from '../../database/repositories/conversation_messages';
-import { SyncService } from '../SyncService';
 
 let mockConnectionManager: EventEmitter;
 
@@ -80,9 +82,12 @@ jest.mock('../../database/repositories/conversation_messages', () => ({
   getConversationMessage: jest.fn().mockResolvedValue(null),
 }));
 
-jest.mock('../../database/repositories/chatConversationSettings', () => ({
-  getChatConversationSettings: jest.fn(),
-  incrementConversationUnread: jest.fn().mockResolvedValue(undefined),
+jest.mock('../../database/repositories/entities', () => ({
+  getEntity: jest.fn(),
+  getAllEntities: jest.fn().mockResolvedValue([]),
+  setEntityMuted: jest.fn().mockResolvedValue(undefined),
+  setEntityDisabled: jest.fn().mockResolvedValue(undefined),
+  getDisabledEntityIds: jest.fn().mockResolvedValue([]),
 }));
 
 jest.mock('../../database/connection', () => ({
@@ -131,21 +136,19 @@ const incomingUtteranceEvent = {
   },
 };
 
-describe('EntitySessionService mute suppression (F11)', () => {
+describe('EntitySessionService incoming-message entity gate (Q8/A5)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetSingleton();
   });
 
-  it('increments the unread badge for a NON-muted conversation', async () => {
-    (getChatConversationSettings as jest.Mock).mockResolvedValue({
-      participantKey: 'pk',
-      entityId: 'claire',
-      pinned: false,
-      archived: false,
-      muted: false,
-      disabled: false,
-      unreadCount: 0,
+  it('stores the incoming message for a NON-disabled partner (mute is UI-only)', async () => {
+    (getEntity as jest.Mock).mockResolvedValue({
+      id: 'claire',
+      alias: 'Claire',
+      character_profile_id: 'p1',
+      is_muted: 1, // muted — must NOT drop the message
+      is_disabled: 0,
     });
 
     const svc = EntitySessionService.getInstance();
@@ -153,20 +156,18 @@ describe('EntitySessionService mute suppression (F11)', () => {
 
     await (svc as any).handleEntityEvent('claire', incomingUtteranceEvent);
 
-    expect(incrementConversationUnread).toHaveBeenCalledWith('pk', 'claire');
-    // The message is still stored — the conversation stays visible.
+    // Muted partner: message is STILL stored (badge suppression moved to the
+    // UI layer, O10 — the service no longer bumps or suppresses any counter).
     expect(createConversationMessage).toHaveBeenCalled();
   });
 
-  it('suppresses the unread-badge increment for a MUTED conversation', async () => {
-    (getChatConversationSettings as jest.Mock).mockResolvedValue({
-      participantKey: 'pk',
-      entityId: 'claire',
-      pinned: false,
-      archived: false,
-      muted: true,
-      disabled: false,
-      unreadCount: 0,
+  it('drops the incoming message from a DISABLED partner entity', async () => {
+    (getEntity as jest.Mock).mockResolvedValue({
+      id: 'claire',
+      alias: 'Claire',
+      character_profile_id: 'p1',
+      is_muted: 0,
+      is_disabled: 1,
     });
 
     const svc = EntitySessionService.getInstance();
@@ -174,31 +175,21 @@ describe('EntitySessionService mute suppression (F11)', () => {
 
     await (svc as any).handleEntityEvent('claire', incomingUtteranceEvent);
 
-    // Muted ⇒ no badge bump…
-    expect(incrementConversationUnread).not.toHaveBeenCalled();
-    // …but the conversation stays visible: the message is still stored and
-    // the list preview can refresh.
-    expect(createConversationMessage).toHaveBeenCalled();
+    // Disabled partner (defense-in-depth): the message is DROPPED and never
+    // reaches the database.
+    expect(createConversationMessage).not.toHaveBeenCalled();
   });
 
-  it('still suppresses the increment when the conversation is open on screen', async () => {
-    (getChatConversationSettings as jest.Mock).mockResolvedValue({
-      participantKey: 'pk',
-      entityId: 'claire',
-      pinned: false,
-      archived: false,
-      muted: false,
-      disabled: false,
-      unreadCount: 0,
-    });
+  it('drops the incoming message when the partner entity cannot be resolved (unknown)', async () => {
+    (getEntity as jest.Mock).mockResolvedValue(null);
 
     const svc = EntitySessionService.getInstance();
     seedSession(svc as any);
-    svc.registerOpenConversation('pk');
 
     await (svc as any).handleEntityEvent('claire', incomingUtteranceEvent);
 
-    expect(incrementConversationUnread).not.toHaveBeenCalled();
+    // No entity record → treat as not disabled, keep the message flowing (the
+    // primary enforcement is engine-side INIT rejection).
     expect(createConversationMessage).toHaveBeenCalled();
   });
 });

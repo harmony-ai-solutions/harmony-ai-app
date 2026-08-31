@@ -1,33 +1,36 @@
 /**
  * Chat Conversation Settings Repository — client-only per-conversation state.
  *
- * Backs the chat-list long-press actions (pin / archive / mute / disable)
- * plus per-conversation unread counters, mirroring the `character_favorites` /
- * `personas` client-only sidecar pattern: everything here lives in
- * CLIENT-ONLY tables (never synced to the engine — strict schema parity, see
- * docs/schema-parity.md).
+ * Backs the chat-list long-press actions (pin / archive) only. Mute/disable
+ * moved ONTO the entity itself (entities.is_muted / entities.is_disabled,
+ * Q8), unread is DERIVED from conversation_messages.is_read (A5/A2), and the
+ * `'blocked'` store of disabled state is dead. `chat_conversation_settings`
+ * loses `unread_count`, `muted`, `blocked` and gains `reply_mode` + `deleted_at`
+ * (final shape, mirroring the engine).
  *
  * Table: chat_conversation_settings
  *   participant_key TEXT PRIMARY KEY — the stable conversation identifier
  *     (sorted `${entityA}+${entityB}` pair, or the sorted participant set for
  *     groups — same value as `interactions.participant_key`)
- *   entity_id       TEXT — partner entity id (NULL for group chats); lets the
- *     Disabled AIs screen resolve names/avatars without re-parsing the key
- *   pinned / archived / muted / blocked — 0/1 flags (blocked persists the
- *     "disabled" state; the physical column name is kept for migration safety)
- *   unread_count    INTEGER — incremented on incoming messages while the chat
- *     is not open, reset to 0 on open
+ *   entity_id       TEXT — the POV entity (Q6: the user-entity persona the
+ *     conversation is chatted AS; NULL for groups). NEVER the partner —
+ *     partner resolution happens via participant-key derivation where needed.
+ *     (A6: today callers passed the PARTNER id; all surviving writers now pass
+ *     the POV id.)
+ *   pinned / archived — 0/1 flags
+ *   reply_mode      TEXT NOT NULL DEFAULT 'realistic' — chat reply pacing
+ *     (A6). Persisted via ChatPreferencesService; the column carries the value
+ *     for sync-consistency.
  *
  * ⚠️ DATA NOTE (F4/O3): participant_key is derived by
  * `interactions.deriveParticipantKey` — the ENGINE contract where the own
  * entity is part of the key EVERYWHERE. Rows keyed by any OLDER derivation
  * (e.g. pair-key without the own persona entity) are ACCEPTED-LOSS on dev
  * devices: do NOT write a re-key migration. Old rows simply never match a
- * newly-derived key → default (all-off, 0 unread) settings — the same state
- * as a fresh install.
+ * newly-derived key → default (all-off) settings — the same state as a fresh
+ * install.
  *
- * A conversation with no row simply means "not pinned / not archived / not
- * muted / not disabled / zero unread".
+ * A conversation with no row simply means "not pinned / not archived".
  */
 
 import { getDatabase } from '../connection';
@@ -37,9 +40,7 @@ export interface ChatConversationSettings {
   entityId: string | null;
   pinned: boolean;
   archived: boolean;
-  muted: boolean;
-  disabled: boolean;
-  unreadCount: number;
+  replyMode: 'realistic' | 'instant';
 }
 
 interface SettingsRow {
@@ -47,9 +48,7 @@ interface SettingsRow {
   entity_id: string | null;
   pinned: number;
   archived: number;
-  muted: number;
-  blocked: number;
-  unread_count: number;
+  reply_mode: string;
 }
 
 function mapRow(row: SettingsRow): ChatConversationSettings {
@@ -58,15 +57,13 @@ function mapRow(row: SettingsRow): ChatConversationSettings {
     entityId: row.entity_id ?? null,
     pinned: row.pinned === 1,
     archived: row.archived === 1,
-    muted: row.muted === 1,
-    disabled: row.blocked === 1,
-    unreadCount: row.unread_count ?? 0,
+    replyMode: row.reply_mode === 'instant' ? 'instant' : 'realistic',
   };
 }
 
 /**
- * Get the settings for a conversation. Returns the default (all-off, 0 unread)
- * when no row exists — callers never need a null check.
+ * Get the settings for a conversation. Returns the default (all-off, realistic
+ * reply mode) when no row exists — callers never need a null check.
  */
 export async function getChatConversationSettings(
   participantKey: string,
@@ -82,9 +79,7 @@ export async function getChatConversationSettings(
       entityId: null,
       pinned: false,
       archived: false,
-      muted: false,
-      disabled: false,
-      unreadCount: 0,
+      replyMode: 'realistic',
     };
   }
   return mapRow(results.rows.item(0) as SettingsRow);
@@ -92,7 +87,7 @@ export async function getChatConversationSettings(
 
 /**
  * Get settings for many conversations (used by the chat list to render
- * pin/archive/mute/block state and unread badges in one query).
+ * pin/archive state in one query).
  */
 export async function getChatConversationSettingsBatch(
   participantKeys: string[],
@@ -123,39 +118,31 @@ export async function getChatConversationSettingsBatch(
 async function upsertSettings(
   participantKey: string,
   entityId: string | null,
-  patch: Partial<Pick<ChatConversationSettings, 'pinned' | 'archived' | 'muted' | 'disabled' | 'unreadCount'>>,
+  patch: Partial<Pick<ChatConversationSettings, 'pinned' | 'archived'>>,
 ): Promise<void> {
   const db = getDatabase();
   const existing = await getChatConversationSettings(participantKey);
   const next = {
     pinned: patch.pinned ?? existing.pinned,
     archived: patch.archived ?? existing.archived,
-    muted: patch.muted ?? existing.muted,
-    disabled: patch.disabled ?? existing.disabled,
-    unreadCount: patch.unreadCount ?? existing.unreadCount,
   };
   const now = new Date().toISOString();
   await db.executeSql(
     `INSERT INTO chat_conversation_settings (
-       participant_key, entity_id, pinned, archived, muted, blocked,
-       unread_count, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       participant_key, entity_id, pinned, archived, reply_mode, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(participant_key) DO UPDATE SET
        entity_id = excluded.entity_id,
        pinned = excluded.pinned,
        archived = excluded.archived,
-       muted = excluded.muted,
-       blocked = excluded.blocked,
-       unread_count = excluded.unread_count,
+       reply_mode = excluded.reply_mode,
        updated_at = excluded.updated_at`,
     [
       participantKey,
       entityId ?? null,
       next.pinned ? 1 : 0,
       next.archived ? 1 : 0,
-      next.muted ? 1 : 0,
-      next.disabled ? 1 : 0,
-      next.unreadCount,
+      existing.replyMode,
       now,
       now,
     ],
@@ -163,9 +150,10 @@ async function upsertSettings(
 }
 
 // ============================================================================
-// Pin / Archive / Mute / Block
+// Pin / Archive
 // ============================================================================
 
+/** Pin / unpin a conversation. `entityId` is the POV entity (Q6). */
 export async function setConversationPinned(
   participantKey: string,
   entityId: string | null,
@@ -174,6 +162,7 @@ export async function setConversationPinned(
   await upsertSettings(participantKey, entityId, { pinned });
 }
 
+/** Archive / unarchive a conversation. `entityId` is the POV entity (Q6). */
 export async function setConversationArchived(
   participantKey: string,
   entityId: string | null,
@@ -182,75 +171,9 @@ export async function setConversationArchived(
   await upsertSettings(participantKey, entityId, { archived });
 }
 
-export async function setConversationMuted(
-  participantKey: string,
-  entityId: string | null,
-  muted: boolean,
-): Promise<void> {
-  await upsertSettings(participantKey, entityId, { muted });
-}
-
-export async function setConversationDisabled(
-  participantKey: string,
-  entityId: string | null,
-  disabled: boolean,
-): Promise<void> {
-  await upsertSettings(participantKey, entityId, { disabled });
-}
-
-// ============================================================================
-// Unread counters
-// ============================================================================
-
 /**
- * Increment the unread counter for a conversation (incoming message while the
- * chat is not open). Creates the row if it does not exist.
- */
-export async function incrementConversationUnread(
-  participantKey: string,
-  entityId: string | null,
-): Promise<void> {
-  const db = getDatabase();
-  await db.executeSql(
-    `INSERT INTO chat_conversation_settings (
-       participant_key, entity_id, unread_count, created_at, updated_at
-     ) VALUES (?, ?, 1, ?, ?)
-     ON CONFLICT(participant_key) DO UPDATE SET
-       unread_count = chat_conversation_settings.unread_count + 1,
-       updated_at = excluded.updated_at`,
-    [participantKey, entityId ?? null, new Date().toISOString(), new Date().toISOString()],
-  );
-}
-
-/**
- * Reset the unread counter for a conversation (opened / marked read).
- */
-export async function clearConversationUnread(participantKey: string): Promise<void> {
-  const db = getDatabase();
-  await db.executeSql(
-    `UPDATE chat_conversation_settings SET unread_count = 0, updated_at = ?
-     WHERE participant_key = ?`,
-    [new Date().toISOString(), participantKey],
-  );
-}
-
-/**
- * Set the unread counter to an EXACT value (creates the row if missing, keeps
- * the other flags untouched). "Mark unread" from the context menu uses this
- * with `unreadCount = 1` — the badge must SET to 1, never increment, so
- * repeated "mark unread" actions cannot accumulate a bogus count (F10).
- */
-export async function setConversationUnread(
-  participantKey: string,
-  entityId: string | null,
-  unreadCount: number,
-): Promise<void> {
-  await upsertSettings(participantKey, entityId, { unreadCount: Math.max(0, unreadCount) });
-}
-
-/**
- * True when any conversation settings exist with the given flags — used to
- * decide whether the chat list's archive / block sections should be shown.
+ * True when any conversation settings exist with the given entity — used to
+ * decide whether the chat list's archive section should be shown.
  */
 export async function conversationSettingsExistForEntity(
   entityId: string,
@@ -264,11 +187,11 @@ export async function conversationSettingsExistForEntity(
 }
 
 /**
- * List conversations matching a predicate on flags (used by the Disabled AIs
- * screen — `blocked = 1` — and the archived section of the chat list).
+ * List conversations matching a flag predicate (pinned / archived only).
+ * mute/disable/unread lived on this table historically; they are GONE.
  */
 export async function listConversationsByFlag(
-  flag: 'pinned' | 'archived' | 'muted' | 'blocked',
+  flag: 'pinned' | 'archived',
 ): Promise<ChatConversationSettings[]> {
   const db = getDatabase();
   const [results] = await db.executeSql(
@@ -280,29 +203,4 @@ export async function listConversationsByFlag(
     list.push(mapRow(results.rows.item(i) as SettingsRow));
   }
   return list;
-}
-
-/** Get a single disabled conversation (or null). */
-export async function getDisabledConversation(
-  participantKey: string,
-): Promise<ChatConversationSettings | null> {
-  const db = getDatabase();
-  const [results] = await db.executeSql(
-    `SELECT * FROM chat_conversation_settings
-     WHERE participant_key = ? AND blocked = 1`,
-    [participantKey],
-  );
-  if (results.rows.length === 0) return null;
-  return mapRow(results.rows.item(0) as SettingsRow);
-}
-
-/**
- * All disabled conversations that reference a known partner entity — used by
- * the Disabled AIs screen to render names/avatars.
- */
-export async function getDisabledEntityIds(): Promise<string[]> {
-  const settings = await listConversationsByFlag('blocked');
-  return settings
-    .map(s => s.entityId)
-    .filter((id): id is string => Boolean(id));
 }

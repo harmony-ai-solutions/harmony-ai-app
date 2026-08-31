@@ -1,11 +1,10 @@
 /**
- * Persona Repository Tests
+ * Persona Repository (re-export shim) Tests
  *
- * Personas are the identities the user chats AS. They are stored in the
- * client-only `personas` table with ONLY identity fields (name, description,
- * personality, avatar) — no character profile, no AI module configs. Each
- * persona creates a backing entity (alias = name, no profile) so chat
- * INIT_ENTITY resolves it as the "chatting as" identity.
+ * Personas are now USER ENTITIES (entity_type='user') backed by a linked
+ * profile. The `personas` table is gone; these tests exercise the
+ * personas.ts → userEntities.ts shim to prove the export surface still
+ * compiles and behaves (defense cases became entity_type cases, 5-4 §1).
  */
 import {useFreshDatabase} from '../repositoryFixtures';
 import {
@@ -16,14 +15,14 @@ import {
   deletePersona,
   resolvePersonaId,
 } from '../../repositories/personas';
-import {getAllEntities, createEntity} from '../../repositories/entities';
+import {getAllEntities, createEntity, getEntity} from '../../repositories/entities';
 import {createCharacterProfile} from '../../repositories/characters';
 
-describe('personas repository', () => {
+describe('personas repository (shim)', () => {
   const {getDb} = useFreshDatabase();
 
   describe('createPersona', () => {
-    it('creates a persona with identity fields only', async () => {
+    it('creates a persona with identity fields only (user entity + profile)', async () => {
       const persona = await createPersona({
         name: '  Mystic Mara  ',
         description: 'A mystic healer',
@@ -36,12 +35,12 @@ describe('personas repository', () => {
       expect(persona.personality).toBe('Calm, wise');
       expect(persona.avatarUri).toBeNull();
 
-      // Backing entity exists with alias = name and NO character profile
-      const entity = await getAllEntities();
-      const backing = entity.find(e => e.id === persona.id);
+      const entities = await getAllEntities();
+      const backing = entities.find(e => e.id === persona.id);
       expect(backing).toBeDefined();
       expect(backing!.alias).toBe('Mystic Mara');
-      expect(backing!.character_profile_id).toBeNull();
+      expect(backing!.entity_type).toBe('user');
+      expect(backing!.character_profile_id).not.toBeNull();
     });
 
     it('stores an avatar as image data + mime and exposes a data URL', async () => {
@@ -52,7 +51,6 @@ describe('personas repository', () => {
       });
       expect(persona.avatarUri).toBe('data:image/png;base64,aGVsbG8=');
 
-      // Round-trip through the DB
       const fetched = await getPersona(persona.id);
       expect(fetched!.avatarUri).toBe('data:image/png;base64,aGVsbG8=');
     });
@@ -87,32 +85,33 @@ describe('personas repository', () => {
       expect(fetched!.personality).toBe('Updated personality');
       expect(fetched!.avatarUri).toBe('data:image/jpeg;base64,bmV3');
 
-      const entity = await getAllEntities();
-      const backing = entity.find(e => e.id === persona.id);
-      expect(backing!.alias).toBe('New Name');
+      const entity = await getEntity(persona.id);
+      expect(entity!.alias).toBe('New Name');
     });
   });
 
   describe('deletePersona', () => {
-    it('removes the persona and its backing entity', async () => {
+    it('soft-deletes the persona entity and its profile', async () => {
       const persona = await createPersona({name: 'To Delete'});
 
       await deletePersona(persona.id);
 
+      // resolvePersonaId sanitizes it away (soft-deleted user entity)
+      expect(await resolvePersonaId(persona.id)).toBe('user');
       expect(await getPersona(persona.id)).toBeNull();
-      const entity = await getAllEntities();
-      expect(entity.some(e => e.id === persona.id)).toBe(false);
+      const entity = await getEntity(persona.id, true);
+      expect(entity!.deleted_at).not.toBeNull();
     });
   });
 
   describe('resolvePersonaId', () => {
-    it('returns the stored persona id when it is a valid persona', async () => {
+    it('returns the stored persona id when it is a valid user entity', async () => {
       const persona = await createPersona({name: 'Valid Persona'});
       const resolved = await resolvePersonaId(persona.id);
       expect(resolved).toBe(persona.id);
     });
 
-    it('falls back to "user" when the stored id is not a persona', async () => {
+    it('falls back to "user" when the stored id is not a user entity', async () => {
       const resolved = await resolvePersonaId('some-ai-character-id');
       expect(resolved).toBe('user');
     });
@@ -122,11 +121,8 @@ describe('personas repository', () => {
     });
   });
 
-  describe('AI characters are NEVER personas (defense-in-depth)', () => {
-    it('excludes a persona row whose backing entity links a character profile', async () => {
-      // Simulate a leaked row: an entity with a character_profile_id that was
-      // backfilled into personas by an earlier dev migration.
-      const db = getDb();
+  describe('AI characters are NEVER personas (entity_type defense)', () => {
+    it('excludes an AI entity even if a leaked profile link exists', async () => {
       await createCharacterProfile({
         id: 'some-profile-id',
         name: 'My AI Partner',
@@ -146,11 +142,7 @@ describe('personas repository', () => {
         character_profile_id: 'some-profile-id',
         lifecycle_config: '{}',
         rag_reindex_required: 1,
-      });
-      await db.executeSql(
-        `INSERT INTO personas (id, name, description, personality, avatar_image_data, avatar_mime_type, created_at, updated_at)
-         VALUES ('leaked-ai-character', 'My AI Partner', '', '', NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      );
+      }, {entity_type: 'ai'});
 
       const personas = await getAllPersonas();
       expect(personas.some(p => p.id === 'leaked-ai-character')).toBe(false);
@@ -158,7 +150,7 @@ describe('personas repository', () => {
       expect(await resolvePersonaId('leaked-ai-character')).toBe('user');
     });
 
-    it('keeps genuine personas (backing entity has no character profile)', async () => {
+    it('keeps genuine personas (entity_type = user)', async () => {
       const persona = await createPersona({name: 'Genuine Persona'});
       const personas = await getAllPersonas();
       expect(personas.some(p => p.id === persona.id)).toBe(true);

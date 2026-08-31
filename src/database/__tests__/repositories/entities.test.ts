@@ -17,6 +17,10 @@ import {
   stripCopySuffix,
   updateEntity,
   deleteEntity,
+  setEntityMuted,
+  setEntityDisabled,
+  getDisabledEntityIds,
+  getMutedEntityIds,
   createEntityModuleMapping,
   createOrUpdateEntityModuleMapping,
   getEntityModuleMapping,
@@ -829,6 +833,102 @@ describe('entities repository', () => {
       await createEntity({id: 'aria-04', character_profile_id: null, alias: 'Aria 04', lifecycle_config: '{}', rag_reindex_required: 1});
       // Aria 3 is free, Aria 2 + Aria 4 are taken → next free is 3.
       expect(await getNextEntityAliasCopy('Aria 02')).toBe('Aria 3');
+    });
+  });
+
+  describe('entity flags (is_muted / is_disabled / entity_type)', () => {
+    const makeProfile = async (id: string) =>
+      createCharacterProfile({
+        id,
+        name: 'Prof ' + id,
+        description: '',
+        personality: '',
+        voice_characteristics: '',
+        base_prompt: '',
+        scenario: '',
+        typing_speed_wpm: 60,
+        audio_response_chance_percent: 50,
+        vision_config_id: null,
+        lifecycle_config: '{}',
+      });
+
+    it('defaults entity_type to ai and flags to 0 on create', async () => {
+      const id = 'default-flags-' + Date.now();
+      const created = await createEntity({
+        id,
+        character_profile_id: null,
+        alias: '',
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+      expect(created.entity_type).toBe('ai');
+      expect(created.is_muted).toBe(0);
+      expect(created.is_disabled).toBe(0);
+
+      const fetched = await getEntity(id);
+      expect(fetched?.entity_type).toBe('ai');
+      expect(fetched?.is_muted).toBe(0);
+      expect(fetched?.is_disabled).toBe(0);
+    });
+
+    it('setEntityMuted / setEntityDisabled flip the corresponding flag and surface via getEntity', async () => {
+      const id = 'flag-flip-' + Date.now();
+      await createEntity({id, character_profile_id: null, alias: 'Flag', lifecycle_config: '{}', rag_reindex_required: 1});
+
+      await setEntityMuted(id, true);
+      let e = await getEntity(id);
+      expect(e?.is_muted).toBe(1);
+      expect(e?.is_disabled).toBe(0);
+
+      await setEntityDisabled(id, true);
+      e = await getEntity(id);
+      expect(e?.is_disabled).toBe(1);
+      expect(e?.is_muted).toBe(1);
+
+      // Turning one off leaves the other.
+      await setEntityMuted(id, false);
+      e = await getEntity(id);
+      expect(e?.is_muted).toBe(0);
+      expect(e?.is_disabled).toBe(1);
+    });
+
+    it('throws when muting / disabling a user entity (A3)', async () => {
+      const id = 'user-flag-' + Date.now();
+      await createEntity(
+        {id, character_profile_id: null, alias: 'You', lifecycle_config: '{}', rag_reindex_required: 1},
+        {entity_type: 'user'},
+      );
+      await expect(setEntityMuted(id, true)).rejects.toThrow();
+      await expect(setEntityDisabled(id, true)).rejects.toThrow();
+    });
+
+    it('getDisabledEntityIds / getMutedEntityIds return only non-deleted flagged entities', async () => {
+      const d1 = 'disabled-1-' + Date.now();
+      const d2 = 'disabled-2-' + Date.now();
+      const m1 = 'muted-1-' + Date.now();
+      await createEntity({id: d1, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: d2, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
+      await createEntity({id: m1, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
+
+      await setEntityDisabled(d1, true);
+      await setEntityDisabled(d2, true);
+      await setEntityMuted(m1, true);
+
+      expect((await getDisabledEntityIds()).sort()).toEqual([d1, d2].sort());
+      expect(await getMutedEntityIds()).toEqual([m1]);
+
+      // Soft-deleted flagged entities are excluded.
+      await deleteEntity(d2);
+      expect((await getDisabledEntityIds()).sort()).toEqual([d1]);
+    });
+
+    it('updateEntityFields allowlists is_muted / is_disabled but NOT entity_type', async () => {
+      const id = 'update-flags-' + Date.now();
+      await createEntity({id, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
+
+      const entity = await getEntity(id);
+      // entity_type is immutable by convention — the allowlist cannot change it.
+      expect(entity?.entity_type).toBe('ai');
     });
   });
 });

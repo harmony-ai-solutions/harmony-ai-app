@@ -20,18 +20,15 @@ import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { hapticLightPress } from '../../utils/haptics';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { ProfileAvatar } from '../../components/profile/ProfileAvatar';
-import { getEntity } from '../../database/repositories/entities';
-import { getCharacterProfile, getPrimaryImage, imageToDataURL } from '../../database/repositories/characters';
 import {
-  listConversationsByFlag,
-  setConversationDisabled,
-} from '../../database/repositories/chatConversationSettings';
+  getAllEntities,
+  setEntityDisabled,
+} from '../../database/repositories/entities';
+import { getCharacterProfile, getPrimaryImage, imageToDataURL } from '../../database/repositories/characters';
 import { hexToRgba } from '../../utils/colorUtils';
-import EntitySessionService from '../../services/EntitySessionService';
 
 interface DisabledEntry {
-  participantKey: string;
-  entityId: string | null;
+  entityId: string;
   name: string;
   avatarUri: string | null;
 }
@@ -47,28 +44,21 @@ export const DisabledAIsScreen: React.FC = () => {
   const loadDisabled = useCallback(async () => {
     try {
       setLoading(true);
-      const disabled = await listConversationsByFlag('blocked');
+      // Disabled AIs = entities with entity_type='ai' AND is_disabled=1 (Q8).
+      // User entities can never be disabled (A3), so no user filter needed.
+      const entities = await getAllEntities();
+      const disabledAi = entities.filter(e => e.is_disabled === 1 && e.entity_type === 'ai');
       const resolved: DisabledEntry[] = [];
-      for (const settings of disabled) {
-        let name = settings.participantKey;
+      for (const entity of disabledAi) {
+        let name = entity.alias || entity.id;
         let avatarUri: string | null = null;
-        if (settings.entityId) {
-          const entity = await getEntity(settings.entityId);
-          if (entity?.character_profile_id) {
-            const profile = await getCharacterProfile(entity.character_profile_id);
-            if (profile) name = profile.name;
-            const image = await getPrimaryImage(entity.character_profile_id);
-            if (image) avatarUri = imageToDataURL(image);
-          } else if (entity) {
-            name = entity.alias || settings.entityId;
-          }
+        if (entity.character_profile_id) {
+          const profile = await getCharacterProfile(entity.character_profile_id);
+          if (profile) name = profile.name;
+          const image = await getPrimaryImage(entity.character_profile_id);
+          if (image) avatarUri = imageToDataURL(image);
         }
-        resolved.push({
-          participantKey: settings.participantKey,
-          entityId: settings.entityId,
-          name,
-          avatarUri,
-        });
+        resolved.push({ entityId: entity.id, name, avatarUri });
       }
       setEntries(resolved);
     } catch (error) {
@@ -87,10 +77,9 @@ export const DisabledAIsScreen: React.FC = () => {
   const handleEnable = async (entry: DisabledEntry) => {
     hapticLightPress();
     try {
-      // Apply the in-memory override instantly so the send guard allows
-      // messages immediately (no stale DB read delay).
-      EntitySessionService.setDisabledOverride(entry.participantKey, false);
-      await setConversationDisabled(entry.participantKey, entry.entityId, false);
+      // Enable = clear the entity's is_disabled flag (Q8) — the send/incoming
+      // guards read it directly, so no conversation override to seed.
+      await setEntityDisabled(entry.entityId, false);
       showToast(t('disabledAIsEnabledToast'));
       await loadDisabled();
     } catch (error) {
@@ -117,7 +106,7 @@ export const DisabledAIsScreen: React.FC = () => {
         ) : (
           <ThemedCard elevated accentStripe style={styles.card}>
             {entries.map((entry, index) => (
-              <View key={entry.participantKey}>
+              <View key={entry.entityId}>
                 {index > 0 && (
                   <View
                     style={[styles.separator, { backgroundColor: hexToRgba(theme.colors.border.default, 0.3) }]}
@@ -130,7 +119,7 @@ export const DisabledAIsScreen: React.FC = () => {
                       {entry.name}
                     </ThemedText>
                     <ThemedText variant="muted" size={12} numberOfLines={1}>
-                      {entry.participantKey}
+                      {entry.entityId}
                     </ThemedText>
                   </View>
                   <TouchableOpacity
@@ -143,7 +132,7 @@ export const DisabledAIsScreen: React.FC = () => {
                         borderColor: hexToRgba(theme.colors.accent.primary, 0.4),
                       },
                     ]}
-                    testID={`enable-${entry.entityId ?? entry.participantKey}`}
+                    testID={`enable-${entry.entityId}`}
                   >
                     <Icon name="shield-account-outline" size={16} color={theme.colors.accent.primary} />
                     <ThemedText variant="accent" size={13} weight="medium">

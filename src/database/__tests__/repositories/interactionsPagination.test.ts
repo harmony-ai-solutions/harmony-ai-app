@@ -9,10 +9,19 @@
 
 import {useFreshDatabase} from '../repositoryFixtures';
 import {createInteraction, getPhoneConversationsPage} from '../../repositories/interactions';
+import {createEntity} from '../../repositories/entities';
 import {Interaction} from '../../models';
 
 describe('getPhoneConversationsPage', () => {
   const {getDb} = useFreshDatabase();
+
+  beforeEach(async () => {
+    // interactions.entity_id FK-constrains entities(id) — seed the POV entity.
+    await createEntity(
+      {id: 'user', alias: 'user', character_profile_id: null, lifecycle_config: '{}', rag_reindex_required: 1},
+      {entity_type: 'user'},
+    );
+  });
 
   async function seedInteraction(
     id: string,

@@ -18,24 +18,38 @@ import { Entity, EntityModuleMapping } from '../models';
 
 /**
  * Create a new entity
+ *
+ * `entity_type` defaults to 'ai'; `is_muted` / `is_disabled` default 0. The
+ * new columns are optional on the input (pre-000042 construction sites stay
+ * compiling) but always persisted.
  */
 export async function createEntity(
-  entity: Omit<Entity, 'created_at' | 'updated_at' | 'deleted_at'>,
+  entity: Omit<
+    Entity,
+    'created_at' | 'updated_at' | 'deleted_at' | 'entity_type' | 'is_muted' | 'is_disabled'
+  >,
+  opts: { entity_type?: string; is_muted?: number; is_disabled?: number } = {},
 ): Promise<Entity> {
   const db = getDatabase();
+  const entityType = opts.entity_type ?? 'ai';
+  const isMuted = opts.is_muted ?? 0;
+  const isDisabled = opts.is_disabled ?? 0;
 
   return withTransaction(db, async tx => {
     const now = new Date().toISOString();
 
     await tx.executeSql(
-      `INSERT INTO entities (id, alias, character_profile_id, lifecycle_config, rag_reindex_required, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO entities (id, alias, character_profile_id, lifecycle_config, rag_reindex_required, entity_type, is_muted, is_disabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         entity.id,
         entity.alias || '',
         entity.character_profile_id,
         entity.lifecycle_config ?? null,
         entity.rag_reindex_required ?? 1,
+        entityType,
+        isMuted,
+        isDisabled,
         now,
         now,
       ],
@@ -43,6 +57,9 @@ export async function createEntity(
 
     return {
       ...entity,
+      entity_type: entityType,
+      is_muted: isMuted,
+      is_disabled: isDisabled,
       created_at: new Date(now),
       updated_at: new Date(now),
       deleted_at: null,
@@ -77,6 +94,9 @@ export async function getEntity(
     character_profile_id: row.character_profile_id,
     lifecycle_config: row.lifecycle_config ?? null,
     rag_reindex_required: row.rag_reindex_required ?? 1,
+    entity_type: row.entity_type ?? 'ai',
+    is_muted: row.is_muted ?? 0,
+    is_disabled: row.is_disabled ?? 0,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -107,6 +127,9 @@ export async function getAllEntities(
       character_profile_id: row.character_profile_id,
       lifecycle_config: row.lifecycle_config ?? null,
       rag_reindex_required: row.rag_reindex_required ?? 1,
+      entity_type: row.entity_type ?? 'ai',
+      is_muted: row.is_muted ?? 0,
+      is_disabled: row.is_disabled ?? 0,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -152,6 +175,9 @@ export async function getEntityByCharacterProfileId(
     character_profile_id: row.character_profile_id,
     lifecycle_config: row.lifecycle_config ?? null,
     rag_reindex_required: row.rag_reindex_required ?? 1,
+    entity_type: row.entity_type ?? 'ai',
+    is_muted: row.is_muted ?? 0,
+    is_disabled: row.is_disabled ?? 0,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -277,13 +303,16 @@ export async function updateEntity(entity: Entity): Promise<Entity> {
 
 /**
  * Update specific fields on an entity (partial update)
- * Supports updating character_profile_id, alias, and lifecycle_config fields.
+ * Supports updating character_profile_id, alias, lifecycle_config,
+ * rag_reindex_required, is_muted, and is_disabled fields.
+ * `entity_type` is intentionally NOT allowlisted — it is immutable by
+ * convention (the repo never changes it after create).
  * Throws error if entity not found.
  */
 export async function updateEntityFields(
   id: string,
   fields: Partial<
-    Pick<Entity, 'character_profile_id' | 'alias' | 'lifecycle_config' | 'rag_reindex_required'>
+    Pick<Entity, 'character_profile_id' | 'alias' | 'lifecycle_config' | 'rag_reindex_required' | 'is_muted' | 'is_disabled'>
   >,
 ): Promise<void> {
   const db = getDatabase();
@@ -308,6 +337,14 @@ export async function updateEntityFields(
     setClauses.push('rag_reindex_required = ?');
     values.push(fields.rag_reindex_required ?? 1);
   }
+  if ('is_muted' in fields) {
+    setClauses.push('is_muted = ?');
+    values.push(fields.is_muted ? 1 : 0);
+  }
+  if ('is_disabled' in fields) {
+    setClauses.push('is_disabled = ?');
+    values.push(fields.is_disabled ? 1 : 0);
+  }
 
   values.push(id);
 
@@ -319,6 +356,65 @@ export async function updateEntityFields(
   if (result.rowsAffected === 0) {
     throw new Error(`Entity not found: ${id}`);
   }
+}
+
+// ============================================================================
+// Entity flags (Q8) — mute / disable live on the entity, not conversation settings
+// ============================================================================
+
+/**
+ * Throw-safe guard: user entities can NEVER be muted/disabled targets (A3 —
+ * they are chat identities, not chat partners). The init/chat guard surfaces
+ * `entity_disabled` only for `entity_type='ai'`.
+ */
+async function assertEntityFlagTarget(entityId: string): Promise<void> {
+  const entity = await getEntity(entityId);
+  if (!entity) {
+    throw new Error(`Entity not found: ${entityId}`);
+  }
+  if (entity.entity_type === 'user') {
+    throw new Error(
+      `Cannot mute/disable user entity '${entityId}' — user entities are chat identities, not disable targets (A3)`,
+    );
+  }
+}
+
+/** Set an entity's muted flag (global per entity, Q8). Throws for user entities (A3). */
+export async function setEntityMuted(id: string, muted: boolean): Promise<void> {
+  await assertEntityFlagTarget(id);
+  await updateEntityFields(id, { is_muted: muted ? 1 : 0 });
+}
+
+/** Set an entity's disabled flag (global per entity, Q8). Throws for user entities (A3). */
+export async function setEntityDisabled(id: string, disabled: boolean): Promise<void> {
+  await assertEntityFlagTarget(id);
+  await updateEntityFields(id, { is_disabled: disabled ? 1 : 0 });
+}
+
+/** IDs of all non-deleted muted entities. */
+export async function getMutedEntityIds(): Promise<string[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT id FROM entities WHERE is_muted = 1 AND deleted_at IS NULL',
+  );
+  const ids: string[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    ids.push(results.rows.item(i).id);
+  }
+  return ids;
+}
+
+/** IDs of all non-deleted disabled entities. */
+export async function getDisabledEntityIds(): Promise<string[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT id FROM entities WHERE is_disabled = 1 AND deleted_at IS NULL',
+  );
+  const ids: string[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    ids.push(results.rows.item(i).id);
+  }
+  return ids;
 }
 
 /**

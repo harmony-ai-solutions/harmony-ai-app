@@ -490,6 +490,135 @@ export async function deleteConversationByParticipantKey(
   );
 }
 
+// ============================================================================
+// Derived unread (A5 pull-forward) — is_read is the single source of read state
+// ============================================================================
+// Every query scopes `cm.entity_id = own POV` (A2): engine-perspective copies
+// sync in under different uuids joining the same interaction_id; unscoped
+// queries double-count / double-render. Own-sent messages always stay is_read=0.
+
+/**
+ * Mark every partner-sent, unread, non-deleted message in the conversation
+ * (identified by participant_key scoped to the POV entity) as read. Returns the
+ * number of rows updated.
+ *
+ * @param participantKey the conversation key (interactions.participant_key)
+ * @param ownEntityId   the POV entity id (A2 scope)
+ * @param upToMessageId optional boundary — only messages created at-or-before
+ *                      this message's created_at are marked
+ */
+export async function markConversationMessagesRead(
+  participantKey: string,
+  ownEntityId: string,
+  upToMessageId?: string,
+): Promise<number> {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  let sql = `
+    UPDATE conversation_messages
+    SET is_read = 1, updated_at = ?
+    WHERE id IN (
+      SELECT cm.id
+      FROM conversation_messages cm
+      JOIN interactions i ON cm.interaction_id = i.id
+      WHERE i.entity_id = ?
+        AND i.participant_key = ?
+        AND cm.entity_id = ?
+        AND cm.sender_entity_id != ?
+        AND cm.is_read = 0
+        AND cm.deleted_at IS NULL
+    `;
+  const params: any[] = [now, ownEntityId, participantKey, ownEntityId, ownEntityId];
+
+  if (upToMessageId) {
+    sql += ` AND cm.created_at <= (
+        SELECT created_at FROM conversation_messages WHERE id = ?
+      )`;
+    params.push(upToMessageId);
+  }
+
+  sql += ')';
+
+  const [result] = await db.executeSql(sql, params);
+  return result.rowsAffected ?? 0;
+}
+
+/**
+ * Mark the LAST partner-sent message in the conversation as unread (set-to-1
+ * semantics: exactly `count` messages, default 1). Used by the "mark unread"
+ * context-menu action.
+ *
+ * @returns number of rows updated (0 or count)
+ */
+export async function markConversationMessagesUnread(
+  participantKey: string,
+  ownEntityId: string,
+  count: number = 1,
+): Promise<number> {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const [result] = await db.executeSql(
+    `UPDATE conversation_messages
+     SET is_read = 0, updated_at = ?
+     WHERE id IN (
+       SELECT cm.id
+       FROM conversation_messages cm
+       JOIN interactions i ON cm.interaction_id = i.id
+       WHERE i.entity_id = ?
+         AND i.participant_key = ?
+         AND cm.entity_id = ?
+         AND cm.sender_entity_id != ?
+         AND cm.deleted_at IS NULL
+       ORDER BY cm.created_at DESC
+       LIMIT ?
+     )`,
+    [now, ownEntityId, participantKey, ownEntityId, ownEntityId, count],
+  );
+  return result.rowsAffected ?? 0;
+}
+
+/**
+ * Batched unread counts (unread partner-sent, non-deleted, POV-scoped) keyed by
+ * participant_key. Mirrors getChatConversationSettingsBatch's 300-key chunking.
+ *
+ * @param keys         conversation participant keys
+ * @param ownEntityId  the POV entity id (A2 scope)
+ */
+export async function getUnreadCountByParticipantKeys(
+  keys: string[],
+  ownEntityId: string,
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (keys.length === 0) return result;
+
+  const db = getDatabase();
+  const chunkSize = 300;
+  for (let i = 0; i < keys.length; i += chunkSize) {
+    const chunk = keys.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const [results] = await db.executeSql(
+      `SELECT i.participant_key AS participant_key, COUNT(*) AS cnt
+       FROM conversation_messages cm
+       JOIN interactions i ON cm.interaction_id = i.id
+       WHERE i.entity_id = ?
+         AND i.participant_key IN (${placeholders})
+         AND cm.entity_id = ?
+         AND cm.sender_entity_id != ?
+         AND cm.is_read = 0
+         AND cm.deleted_at IS NULL
+       GROUP BY i.participant_key`,
+      [ownEntityId, ...chunk, ownEntityId, ownEntityId],
+    );
+    for (let j = 0; j < results.rows.length; j++) {
+      const row = results.rows.item(j);
+      result.set(row.participant_key, Number(row.cnt) || 0);
+    }
+  }
+  return result;
+}
+
 // Helper function to map DB row to ConversationMessage
 function mapRowToConversationMessage(row: any): ConversationMessage {
   return {

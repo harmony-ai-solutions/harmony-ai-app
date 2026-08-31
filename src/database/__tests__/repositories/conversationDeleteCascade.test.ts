@@ -3,22 +3,24 @@
  *
  * Locks the F3 behavior of `deleteConversationByParticipantKey`: deleting a
  * conversation must ALSO delete its `chat_conversation_settings` row so no
- * stale pinned / muted / archived / disabled / unread state resurrects when
- * the conversation is later re-created. The settings table has no FK to
- * interactions, so this is an explicit repo-level cascade.
+ * stale pinned / archived state resurrects when the conversation is later
+ * re-created. The settings table has no FK to interactions, so this is an
+ * explicit repo-level cascade. (Mute/disable/unread no longer live on the
+ * settings table — they are entity flags / derived, respectively.)
  */
 
 import {useFreshDatabase} from '../repositoryFixtures';
 import {createInteraction, getInteractionById} from '../../repositories/interactions';
+import {createEntity} from '../../repositories/entities';
 import {
   createConversationMessage,
   getConversationMessage,
   deleteConversationByParticipantKey,
+  getUnreadCountByParticipantKeys,
 } from '../../repositories/conversation_messages';
 import {
   getChatConversationSettings,
   setConversationPinned,
-  incrementConversationUnread,
 } from '../../repositories/chatConversationSettings';
 import {Interaction} from '../../models';
 
@@ -49,6 +51,11 @@ describe('deleteConversationByParticipantKey cascade', () => {
   }
 
   it('deletes the chat_conversation_settings row along with messages + interaction', async () => {
+    // interactions.entity_id FK-constrains entities(id) — seed the POV entity.
+    await createEntity(
+      {id: 'user', alias: 'user', character_profile_id: null, lifecycle_config: '{}', rag_reindex_required: 1},
+      {entity_type: 'user'},
+    );
     const participantKey = 'user+e1';
     await createInteraction(makeInteraction('ix-1', participantKey));
 
@@ -74,17 +81,20 @@ describe('deleteConversationByParticipantKey cascade', () => {
       is_pinned: false,
     });
 
-    // Seed settings: pinned + unread — must NOT survive the delete.
+    // Seed settings: pinned — must NOT survive the delete. (Unread is DERIVED
+    // from conversation_messages.is_read now, not a settings column — the
+    // partner-sent msg-1 below is the seeded unread row.)
     await setConversationPinned(participantKey, 'e1', true);
-    await incrementConversationUnread(participantKey, 'e1');
     expect((await getChatConversationSettings(participantKey)).pinned).toBe(true);
 
     await deleteConversationByParticipantKey('user', participantKey);
 
-    // Settings row gone → default all-off, zero unread.
+    // Settings row gone → default all-off; derived unread also gone (message
+    // soft-deleted).
     const settings = await getChatConversationSettings(participantKey);
     expect(settings.pinned).toBe(false);
-    expect(settings.unreadCount).toBe(0);
+    const unread = await getUnreadCountByParticipantKeys([participantKey], 'user');
+    expect(unread.get(participantKey) ?? 0).toBe(0);
 
     // Message soft-deleted (no longer readable).
     expect(await getConversationMessage('msg-1')).toBeNull();
@@ -95,6 +105,10 @@ describe('deleteConversationByParticipantKey cascade', () => {
   });
 
   it('does not touch settings rows for OTHER conversations', async () => {
+    await createEntity(
+      {id: 'user', alias: 'user', character_profile_id: null, lifecycle_config: '{}', rag_reindex_required: 1},
+      {entity_type: 'user'},
+    );
     await createInteraction(makeInteraction('ix-keep', 'user+e1'));
     await createInteraction(makeInteraction('ix-del', 'user+e2'));
 
@@ -109,9 +123,13 @@ describe('deleteConversationByParticipantKey cascade', () => {
   });
 
   it('is a no-op for a conversation with no settings row', async () => {
+    await createEntity(
+      {id: 'user', alias: 'user', character_profile_id: null, lifecycle_config: '{}', rag_reindex_required: 1},
+      {entity_type: 'user'},
+    );
     await createInteraction(makeInteraction('ix-nosettings', 'user+e3'));
     await deleteConversationByParticipantKey('user', 'user+e3');
-    // Just must not throw.
-    expect((await getChatConversationSettings('user+e3')).unreadCount).toBe(0);
+    // Just must not throw; settings fall back to the default (all-off).
+    expect((await getChatConversationSettings('user+e3')).pinned).toBe(false);
   });
 });

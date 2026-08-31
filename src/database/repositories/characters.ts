@@ -786,37 +786,46 @@ export async function getCharacterImagesWithDataURLs(
 // profile with no row is simply "not favorited".
 
 /**
- * True when a character profile is favorited.
+ * True when a character profile is favorited (non-deleted tombstone).
  */
 export async function isCharacterFavorite(profileId: string): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
-    'SELECT 1 FROM character_favorites WHERE profile_id = ?',
+    'SELECT 1 FROM character_favorites WHERE profile_id = ? AND deleted_at IS NULL',
     [profileId],
   );
   return results.rows.length > 0;
 }
 
 /**
- * Favorite a character profile (idempotent).
+ * Favorite a character profile (idempotent). Clears the soft-delete tombstone
+ * on resurrect. Timestamps are supplied explicitly (A1 invariant — never rely
+ * on the dormant DEFAULT CURRENT_TIMESTAMP).
  */
 export async function addCharacterFavorite(profileId: string): Promise<void> {
   const db = getDatabase();
+  const now = new Date().toISOString();
   await db.executeSql(
-    `INSERT OR IGNORE INTO character_favorites (profile_id, favorited_at)
-     VALUES (?, ?)`,
-    [profileId, new Date().toISOString()],
+    `INSERT INTO character_favorites (profile_id, created_at, updated_at, deleted_at)
+     VALUES (?, ?, ?, NULL)
+     ON CONFLICT(profile_id) DO UPDATE SET
+       deleted_at = NULL,
+       updated_at = excluded.updated_at,
+       created_at = COALESCE(character_favorites.created_at, excluded.created_at)`,
+    [profileId, now, now],
   );
 }
 
 /**
- * Remove a character profile from favorites (idempotent).
+ * Remove a character profile from favorites (idempotent) via a soft-delete
+ * tombstone. Timestamps supplied explicitly (A1).
  */
 export async function removeCharacterFavorite(profileId: string): Promise<void> {
   const db = getDatabase();
+  const now = new Date().toISOString();
   await db.executeSql(
-    'DELETE FROM character_favorites WHERE profile_id = ?',
-    [profileId],
+    'UPDATE character_favorites SET deleted_at = ?, updated_at = ? WHERE profile_id = ?',
+    [now, now, profileId],
   );
 }
 
@@ -834,12 +843,14 @@ export async function toggleCharacterFavorite(profileId: string): Promise<boolea
 }
 
 /**
- * All favorite profile IDs, most-recently-favorited first.
+ * All favorite profile IDs, most-recently-favorited first (created_at desc,
+ * non-deleted). `favorited_at` was dropped in the Phase-1 schema — created_at
+ * subsumes it (Q5).
  */
 export async function getFavoriteCharacterProfileIds(): Promise<string[]> {
   const db = getDatabase();
   const [results] = await db.executeSql(
-    'SELECT profile_id FROM character_favorites ORDER BY favorited_at DESC',
+    'SELECT profile_id FROM character_favorites WHERE deleted_at IS NULL ORDER BY created_at DESC',
   );
   const ids: string[] = [];
   for (let i = 0; i < results.rows.length; i++) {

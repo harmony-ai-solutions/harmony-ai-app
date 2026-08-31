@@ -51,6 +51,14 @@ export interface Entity {
   character_profile_id: string | null;
   lifecycle_config: string | null; // Opaque JSON blob
   rag_reindex_required: number; // 0 or 1 flag for RAG vector store re-index
+  // Entity typing / flags (migration 000042). `entity_type` = 'ai' | 'user'
+  // (Q9); `is_muted` / `is_disabled` are 0/1 flags (Q8). Optional (`?`) only
+  // because some in-memory construction sites predate these columns — the same
+  // convention as CharacterProfile's V3 fields; persisted / synced rows always
+  // carry them.
+  entity_type?: string;
+  is_muted?: number;
+  is_disabled?: number;
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -512,6 +520,10 @@ export interface ConversationMessage {
   reactions_json?: string | null;   // JSON array of emoji reaction strings, e.g. '["❤️","👍"]'
   reply_to_message_id?: string | null; // references the message this one replies to (dormant — UI gated off)
   is_pinned?: boolean;              // true if the message is pinned
+
+  // Read flag (Migration 41 / A2): 0/1, born 0, written ONLY by the app read
+  // action. "The counterpart has read it" per-record.
+  is_read?: boolean;
 
   created_at: Date;
   updated_at: Date;

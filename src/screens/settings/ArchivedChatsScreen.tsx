@@ -19,7 +19,11 @@ import { ThemedEmptyState } from '../../components/themed/ThemedEmptyState';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { hapticLightPress } from '../../utils/haptics';
 import { TAB_BAR_CONTENT_PAD } from '../../components/navigation/GlassTabBar';
-import { getAllEntities } from '../../database/repositories/entities';
+import {
+  getAllEntities,
+  setEntityMuted,
+  setEntityDisabled,
+} from '../../database/repositories/entities';
 import { resolvePersonaId } from '../../database/repositories/personas';
 import {
   getPhoneConversationsPage,
@@ -35,12 +39,13 @@ import {
   getChatConversationSettingsBatch,
   setConversationPinned,
   setConversationArchived,
-  setConversationMuted,
-  setConversationDisabled,
-  setConversationUnread,
-  clearConversationUnread,
 } from '../../database/repositories/chatConversationSettings';
-import { deleteConversationByParticipantKey } from '../../database/repositories/conversation_messages';
+import {
+  deleteConversationByParticipantKey,
+  markConversationMessagesRead,
+  markConversationMessagesUnread,
+  getUnreadCountByParticipantKeys,
+} from '../../database/repositories/conversation_messages';
 import { ProfileAvatar } from '../../components/profile/ProfileAvatar';
 import { ChatConversationMenuModal } from '../../components/chat/ChatConversationMenuModal';
 import { useAppAlert } from '../../contexts/AppAlertContext';
@@ -177,25 +182,27 @@ export const ArchivedChatsScreen: React.FC = () => {
           participantKey,
           participantIds,
           isGroup: false,
+          // mute/disabled are ENTITY flags (Q8); unread derived below.
           pinned: false,
-          muted: false,
-          disabled: false,
+          muted: entity?.is_muted === 1,
+          disabled: entity?.is_disabled === 1,
           unreadCount: 0,
         });
       }
 
-      // Filter to archived only
+      // Filter to archived only. pin/archive come from the settings batch;
+      // mute/disabled are entity flags (already set above); unread is derived
+      // from conversation_messages.is_read (A2-scoped).
       const keys = candidates.map(c => c.participantKey);
       const settingsMap = await getChatConversationSettingsBatch(keys);
+      const unreadMap = await getUnreadCountByParticipantKeys(keys, impersonated);
       const archived = candidates.filter(c => settingsMap.get(c.participantKey)?.archived);
       for (const item of archived) {
         const s = settingsMap.get(item.participantKey);
         if (s) {
           item.pinned = s.pinned;
-          item.muted = s.muted;
-          item.disabled = s.disabled;
-          item.unreadCount = s.unreadCount;
         }
+        item.unreadCount = unreadMap.get(item.participantKey) ?? 0;
       }
       archived.sort((a, b) => {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -246,7 +253,9 @@ export const ArchivedChatsScreen: React.FC = () => {
   const handleToggleMute = useCallback(async () => {
     const item = menuItem;
     if (!item) return;
-    await setConversationMuted(item.participantKey, item.entityId || null, !item.muted);
+    // Mute is a per-ENTITY flag (Q8) — no-op for groups (no single partner).
+    if (!item.entityId) return;
+    await setEntityMuted(item.entityId, !item.muted);
     showToast(item.muted ? t('toastUnmuted') : t('toastMuted'));
     reload();
   }, [menuItem, reload, showToast, t]);
@@ -307,13 +316,16 @@ export const ArchivedChatsScreen: React.FC = () => {
   const handleToggleRead = useCallback(async () => {
     const item = menuItem;
     if (!item) return;
+    const ownEntityId = impersonatedEntityIdRef.current;
     if (item.unreadCount > 0) {
-      await clearConversationUnread(item.participantKey);
+      // Mark all partner-sent messages in this conversation read.
+      await markConversationMessagesRead(item.participantKey, ownEntityId);
       showToast(t('toastMarkedRead'));
     } else {
-      // "Mark unread" = SET the badge to exactly 1 (never +1) so repeated
-      // actions cannot accumulate a bogus count (F10).
-      await setConversationUnread(item.participantKey, item.entityId || null, 1);
+      // "Mark unread" = set exactly the LAST partner-sent message unread
+      // (set-to-1 semantics, F10/A5) so repeated actions cannot accumulate a
+      // bogus count.
+      await markConversationMessagesUnread(item.participantKey, ownEntityId, 1);
       showToast(t('toastMarkedUnread'));
     }
     reload();
@@ -322,6 +334,8 @@ export const ArchivedChatsScreen: React.FC = () => {
   const handleToggleDisable = useCallback(async () => {
     const item = menuItem;
     if (!item) return;
+    // Disable is a per-ENTITY flag (Q8) — no-op for groups (no single partner).
+    if (!item.entityId) return;
     const nowDisabled = !item.disabled;
     if (nowDisabled) {
       showAlert(
@@ -333,8 +347,7 @@ export const ArchivedChatsScreen: React.FC = () => {
             text: t('menuDisable'),
             style: 'destructive',
             onPress: async () => {
-              await setConversationDisabled(item.participantKey, item.entityId || null, true);
-              EntitySessionService.setDisabledOverride(item.participantKey, true);
+              await setEntityDisabled(item.entityId, true);
               showToast(t('toastDisabled'));
               reload();
             },
@@ -343,10 +356,9 @@ export const ArchivedChatsScreen: React.FC = () => {
       );
       return;
     }
-    // Apply the override BEFORE the DB write resolves so the send guard
-    // allows messages immediately after enabling.
-    EntitySessionService.setDisabledOverride(item.participantKey, false);
-    await setConversationDisabled(item.participantKey, item.entityId || null, false);
+    // Disabling lives on the entity — no conversation override to seed; the
+    // send/incoming guards read the entity flag directly (Q8).
+    await setEntityDisabled(item.entityId, false);
     showToast(t('toastEnabled'));
     reload();
   }, [menuItem, reload, showAlert, showToast, t]);

@@ -2,7 +2,10 @@
  * Chat Conversation Settings Repository Tests
  *
  * Locks the client-only per-conversation state used by the chat list long-press
- * actions (pin / archive / mute / block) and unread counters.
+ * actions (pin / archive) in their FINAL Phase-1 shape:
+ *   - unread_count / muted / blocked are GONE (derived unread / entity flags)
+ *   - reply_mode added (default 'realistic')
+ *   - entity_id is the POV entity (Q6 — never the partner)
  */
 
 import {useFreshDatabase} from '../repositoryFixtures';
@@ -11,15 +14,8 @@ import {
   getChatConversationSettingsBatch,
   setConversationPinned,
   setConversationArchived,
-  setConversationMuted,
-  setConversationDisabled,
-  incrementConversationUnread,
-  setConversationUnread,
-  clearConversationUnread,
   conversationSettingsExistForEntity,
   listConversationsByFlag,
-  getDisabledConversation,
-  getDisabledEntityIds,
 } from '../../repositories/chatConversationSettings';
 
 describe('chat conversation settings repository', () => {
@@ -32,93 +28,43 @@ describe('chat conversation settings repository', () => {
       entityId: null,
       pinned: false,
       archived: false,
-      muted: false,
-      disabled: false,
-      unreadCount: 0,
+      replyMode: 'realistic',
     });
   });
 
-  it('persists pin / archive / mute / block flags independently', async () => {
-    await setConversationPinned('user+e1', 'e1', true);
-    await setConversationArchived('user+e1', 'e1', false);
-    await setConversationMuted('user+e1', 'e1', true);
-    await setConversationDisabled('user+e1', 'e1', false);
+  it('persists pin / archive flags independently and writes the POV entity id', async () => {
+    await setConversationPinned('user+e1', 'pov-entity', true);
+    await setConversationArchived('user+e1', 'pov-entity', false);
 
     let s = await getChatConversationSettings('user+e1');
     expect(s.pinned).toBe(true);
     expect(s.archived).toBe(false);
-    expect(s.muted).toBe(true);
-    expect(s.disabled).toBe(false);
-    expect(s.entityId).toBe('e1');
+    // A6: entity_id is the POV entity, never the partner.
+    expect(s.entityId).toBe('pov-entity');
+    expect(s.replyMode).toBe('realistic');
 
     // Toggle off pin, keep the rest.
-    await setConversationPinned('user+e1', 'e1', false);
+    await setConversationPinned('user+e1', 'pov-entity', false);
     s = await getChatConversationSettings('user+e1');
     expect(s.pinned).toBe(false);
-    expect(s.muted).toBe(true);
+    expect(s.archived).toBe(false);
   });
 
-  it('increments and clears unread counters', async () => {
-    await incrementConversationUnread('user+e2', 'e2');
-    await incrementConversationUnread('user+e2', 'e2');
-    await incrementConversationUnread('user+e2', 'e2');
-
-    let s = await getChatConversationSettings('user+e2');
-    expect(s.unreadCount).toBe(3);
-
-    await clearConversationUnread('user+e2');
-    s = await getChatConversationSettings('user+e2');
-    expect(s.unreadCount).toBe(0);
-    // Flags survive the clear.
-    expect(s.disabled).toBe(false);
-  });
-
-  it('incrementConversationUnread creates the row for a brand-new key', async () => {
-    await incrementConversationUnread('user+e3', 'e3');
-    const s = await getChatConversationSettings('user+e3');
-    expect(s.unreadCount).toBe(1);
-    expect(s.entityId).toBe('e3');
-  });
-
-  it('setConversationUnread SETS the counter to the exact value (F10 set-to-1 semantics)', async () => {
-    // Seed a counter of 3 via increments.
-    await incrementConversationUnread('user+e14', 'e14');
-    await incrementConversationUnread('user+e14', 'e14');
-    await incrementConversationUnread('user+e14', 'e14');
-    expect((await getChatConversationSettings('user+e14')).unreadCount).toBe(3);
-
-    // "Mark unread" must SET to 1, not +1.
-    await setConversationUnread('user+e14', 'e14', 1);
-    expect((await getChatConversationSettings('user+e14')).unreadCount).toBe(1);
-
-    // A second "mark unread" stays 1 — no accumulation.
-    await setConversationUnread('user+e14', 'e14', 1);
-    expect((await getChatConversationSettings('user+e14')).unreadCount).toBe(1);
-
-    // Explicit 0 (mark read) also works; unrelated flags survive.
-    await setConversationPinned('user+e14', 'e14', true);
-    await setConversationUnread('user+e14', 'e14', 0);
-    const s = await getChatConversationSettings('user+e14');
-    expect(s.unreadCount).toBe(0);
-    expect(s.pinned).toBe(true);
-  });
-
-  it('setConversationUnread creates the row for a brand-new key without a prior row', async () => {
-    await setConversationUnread('user+e15', 'e15', 1);
-    const s = await getChatConversationSettings('user+e15');
-    expect(s.unreadCount).toBe(1);
-    expect(s.entityId).toBe('e15');
-    expect(s.pinned).toBe(false);
+  it('defaults reply_mode to realistic after upsert (no explicit reply_mode column write)', async () => {
+    await setConversationPinned('user+sky', 'pov-sky', true);
+    const s = await getChatConversationSettings('user+sky');
+    expect(s.replyMode).toBe('realistic');
   });
 
   it('batch load returns only keys with rows', async () => {
-    await setConversationPinned('user+e4', 'e4', true);
-    await incrementConversationUnread('user+e5', 'e5');
+    await setConversationPinned('user+e4', 'pov-4', true);
+    await setConversationArchived('user+e5', 'pov-5', true);
 
     const map = await getChatConversationSettingsBatch(['user+e4', 'user+e5', 'user+e6']);
     expect(map.size).toBe(2);
     expect(map.get('user+e4')?.pinned).toBe(true);
-    expect(map.get('user+e5')?.unreadCount).toBe(1);
+    expect(map.get('user+e5')?.archived).toBe(true);
+    expect(map.get('user+e5')?.entityId).toBe('pov-5');
     expect(map.has('user+e6')).toBe(false);
   });
 
@@ -127,40 +73,20 @@ describe('chat conversation settings repository', () => {
     expect(map.size).toBe(0);
   });
 
-  it('lists conversations by flag', async () => {
-    await setConversationDisabled('user+e7', 'e7', true);
-    await setConversationDisabled('user+e8', 'e8', true);
-    await setConversationMuted('user+e9', 'e9', true);
+  it('lists conversations by pinned / archived flags only', async () => {
+    await setConversationPinned('user+e7', 'pov-7', true);
+    await setConversationArchived('user+e8', 'pov-8', true);
 
-    const blocked = await listConversationsByFlag('blocked');
-    const blockedKeys = blocked.map(b => b.participantKey).sort();
-    expect(blockedKeys).toEqual(['user+e7', 'user+e8']);
+    const pinned = await listConversationsByFlag('pinned');
+    expect(pinned.map(p => p.participantKey)).toEqual(['user+e7']);
 
-    const muted = await listConversationsByFlag('muted');
-    expect(muted.map(m => m.participantKey)).toEqual(['user+e9']);
-  });
-
-  it('getDisabledConversation returns the row only when disabled', async () => {
-    await setConversationDisabled('user+e10', 'e10', true);
-    const disabled = await getDisabledConversation('user+e10');
-    expect(disabled?.participantKey).toBe('user+e10');
-
-    // Not disabled yet → null even though a row exists.
-    await setConversationMuted('user+e11', 'e11', true);
-    const notDisabled = await getDisabledConversation('user+e11');
-    expect(notDisabled).toBeNull();
-  });
-
-  it('getDisabledEntityIds returns only non-null entity ids of disabled conversations', async () => {
-    await setConversationDisabled('user+e12', 'e12', true);
-    await setConversationDisabled('group:1+2+3', null, true);
-    const ids = await getDisabledEntityIds();
-    expect(ids).toEqual(['e12']);
+    const archived = await listConversationsByFlag('archived');
+    expect(archived.map(p => p.participantKey)).toEqual(['user+e8']);
   });
 
   it('conversationSettingsExistForEntity reflects row presence', async () => {
     expect(await conversationSettingsExistForEntity('e13')).toBe(false);
-    await setConversationPinned('user+e13', 'e13', true);
-    expect(await conversationSettingsExistForEntity('e13')).toBe(true);
+    await setConversationPinned('user+e13', 'pov-13', true);
+    expect(await conversationSettingsExistForEntity('pov-13')).toBe(true);
   });
 });

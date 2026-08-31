@@ -50,6 +50,7 @@ import { migration039 } from './migrations/000039_device_push_tokens_reserved';
 import { migration040 } from './migrations/000040_lifecycle_state_sync_columns';
 
 import { migration041 } from './migrations/000041_consolidate_senju_features';
+import { migration042 } from './migrations/000042_entity_type_and_flags';
 
 // Migration definition
 export interface Migration {
@@ -264,8 +265,13 @@ export const MIGRATIONS: Migration[] = [
    },
    {
     version: 41,
-    description: 'consolidate_senju_features (personas, favorites, message actions, chat settings)',
+    description: 'consolidate_senju_features (canonical message rebuild, favorites/settings final, §9-A9 reconciliation rebuilds; personas removed)',
     sql: migration041,
+   },
+   {
+    version: 42,
+    description: 'entity_type + is_muted + is_disabled (entity rebuild; Q9 backfill)',
+    sql: migration042,
    },
   ];
 
