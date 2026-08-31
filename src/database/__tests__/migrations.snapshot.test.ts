@@ -51,8 +51,6 @@ describe('migration schema snapshot', () => {
       'entities',
       'provider_config_openai',
       'backend_configs',
-      'sync_devices',     // from migration 000005
-      'sync_history',     // from migration 000005
       'memories',         // from migration 000016
       'conversation_messages',
       'interactions',

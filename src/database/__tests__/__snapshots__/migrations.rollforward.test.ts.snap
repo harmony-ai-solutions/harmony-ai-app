@@ -163,12 +163,6 @@ CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTA
 -- table: stt_configs
 CREATE TABLE stt_configs ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id TEXT NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
 
--- table: sync_devices
-CREATE TABLE sync_devices ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, device_name TEXT NOT NULL, device_type TEXT NOT NULL, device_platform TEXT, is_approved INTEGER NOT NULL DEFAULT 0, approval_requested_at DATETIME, approved_by_user_at DATETIME, last_sync_timestamp INTEGER NOT NULL DEFAULT 0, last_sync_initiated_by TEXT NOT NULL DEFAULT 'local', jwt_token TEXT, jwt_expires_at INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, UNIQUE(device_id, deleted_at) );
-
--- table: sync_history
-CREATE TABLE sync_history ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sync_started_at DATETIME NOT NULL, sync_completed_at DATETIME, records_sent INTEGER NOT NULL DEFAULT 0, records_received INTEGER NOT NULL DEFAULT 0, sync_status TEXT NOT NULL, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
-
 -- table: tts_configs
 CREATE TABLE tts_configs ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
 
@@ -1257,7 +1251,7 @@ CREATE TABLE vision_configs ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, pr
 "
 `;
 
-exports[`migration roll-forward schema at version 42 matches snapshot: v42 1`] = `
+exports[`migration roll-forward schema at version 43 matches snapshot: v43 1`] = `
 "-- index: idx_character_image_primary
 CREATE INDEX idx_character_image_primary ON character_image(character_profile_id, is_primary);
 
@@ -1419,12 +1413,6 @@ CREATE TABLE schema_migrations ( version INTEGER PRIMARY KEY, applied_at TIMESTA
 
 -- table: stt_configs
 CREATE TABLE stt_configs ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, main_stream_time_millis INTEGER NOT NULL DEFAULT 0, transition_stream_time_millis INTEGER NOT NULL DEFAULT 0, max_buffer_count INTEGER NOT NULL DEFAULT 0, transcription_provider TEXT NOT NULL, transcription_provider_config_id TEXT NOT NULL, vad_provider TEXT NOT NULL, vad_provider_config_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
-
--- table: sync_devices
-CREATE TABLE sync_devices ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, device_name TEXT NOT NULL, device_type TEXT NOT NULL, device_platform TEXT, is_approved INTEGER NOT NULL DEFAULT 0, approval_requested_at DATETIME, approved_by_user_at DATETIME, last_sync_timestamp INTEGER NOT NULL DEFAULT 0, last_sync_initiated_by TEXT NOT NULL DEFAULT 'local', jwt_token TEXT, jwt_expires_at INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME, UNIQUE(device_id, deleted_at) );
-
--- table: sync_history
-CREATE TABLE sync_history ( id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, sync_started_at DATETIME NOT NULL, sync_completed_at DATETIME, records_sent INTEGER NOT NULL DEFAULT 0, records_received INTEGER NOT NULL DEFAULT 0, sync_status TEXT NOT NULL, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );
 
 -- table: tts_configs
 CREATE TABLE tts_configs ( id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, provider_config_id TEXT NOT NULL, output_type TEXT NOT NULL DEFAULT '', words_to_replace TEXT NOT NULL DEFAULT '', vocalize_nonverbal INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME );

@@ -434,41 +434,6 @@ export interface CharacterImage {
   deleted_at: Date | null;
 }
 
-// ============================================================================
-// Sync & Chat Models
-// ============================================================================
-
-export interface SyncDevice {
-  device_id: string;
-  device_name: string;
-  device_type: string;
-  device_platform: string | null;
-  is_approved: number;
-  approval_requested_at: Date | null;
-  approved_by_user_at: Date | null;
-  last_sync_timestamp: number;
-  last_sync_initiated_by: string;
-  jwt_token: string | null;
-  jwt_expires_at: number | null;
-  created_at: Date;
-  updated_at: Date;
-  deleted_at: Date | null;
-}
-
-export interface SyncHistory {
-  id: number;
-  device_id: string;
-  sync_started_at: Date;
-  sync_completed_at: Date | null;
-  records_sent: number;
-  records_received: number;
-  sync_status: string;
-  error_message: string | null;
-  created_at: Date;
-  updated_at: Date;
-  deleted_at: Date | null;
-}
-
 export interface Interaction {
   id: string;
   entity_id: string;

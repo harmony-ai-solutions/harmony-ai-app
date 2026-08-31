@@ -9,9 +9,14 @@
       "reason": "Engine push infrastructure; the app's migration 000039 is the reserved-name placeholder that deliberately never creates this table. Stays Go-only in the §9-A14 end state."
     },
     {
+      "key": "table:sync_devices",
+      "kind": "go-only",
+      "reason": "Engine-local sync-infra table; the app copy was dead code and dropped by paired app migration 000043 (zero-caller repo sync.ts deleted). Sanctioned by §9-A14."
+    },
+    {
       "key": "table:sync_history",
-      "kind": "different-sql",
-      "reason": "INTERIM: the app copy is dead code (zero callers per §9-A14) and lacks the engine's updated_at column; it is DROPPED by paired app migration 000043 in phase 4-2 (§9-A14) — this entry converts to a go-only entry then."
+      "kind": "go-only",
+      "reason": "Engine-local sync-infra table; the app copy was dead code and dropped by paired app migration 000043 (zero-caller repo sync.ts deleted). Converted from the interim different-sql entry per §9-A14 sanction."
     }
   ]
 }

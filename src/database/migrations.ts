@@ -51,6 +51,7 @@ import { migration040 } from './migrations/000040_lifecycle_state_sync_columns';
 
 import { migration041 } from './migrations/000041_consolidate_senju_features';
 import { migration042 } from './migrations/000042_entity_type_and_flags';
+import { migration043 } from './migrations/000043_drop_dead_sync_infra';
 
 // Migration definition
 export interface Migration {
@@ -269,9 +270,14 @@ export const MIGRATIONS: Migration[] = [
     sql: migration041,
    },
    {
-    version: 42,
-    description: 'entity_type + is_muted + is_disabled (entity rebuild; Q9 backfill)',
-    sql: migration042,
+     version: 42,
+     description: 'entity_type + is_muted + is_disabled (entity rebuild; Q9 backfill)',
+     sql: migration042,
+   },
+   {
+     version: 43,
+     description: 'drop dead sync-infra tables (sync_devices/sync_history; §9-A14 pair — engine 000043 = synced_tables registry)',
+     sql: migration043,
    },
   ];
 
