@@ -77,14 +77,35 @@ Real divergences — missing columns, missing FOREIGN KEY constraints, missing D
 
 The parity allowlist — `scripts/parity-allowlist.json`, loaded by the comparator from its own directory — is a **versioned registry** of sanctioned, intentional cross-repo schema divergences — not drift. Each entry carries a `key` (`type:name`), a `kind` (`rn-only` / `go-only` / `different-sql`), and a one-line `reason`.
 
-**Today's entries (Phase 1, after §9-A8/A13/A9):**
+**Today's entries (Phase 2 complete — final verified state, 2026-09-01):**
 
 - `table:device_push_tokens` — **Go-only** — engine push infrastructure; the app's `000039` is the reserved-name placeholder that deliberately never creates this table.
-- `table:sync_history` — **different-SQL, INTERIM** — the app copy is dead code (zero callers per §9-A14) and lacks the engine's `updated_at` column; it is DROPPED by paired app migration `000043` in phase 4-2 (§9-A14), at which point this entry converts to a **Go-only** entry.
+- `table:sync_devices` — **Go-only** — engine-local sync-infra table (the engine adds `sync_devices.synced_tables` in `000043`); the app's copy was a mistakenly-ported, zero-caller mirror and is **dropped** by the paired app migration `000043` (§9-A14).
+- `table:sync_history` — **Go-only** — engine-local sync-infra table; the app's copy was a zero-caller mirror and is **dropped** by the same paired app migration `000043` (§9-A14). *(This entry was a different-SQL/interim entry from Phase 1 until 4-2, when the app drop converted it to Go-only.)*
 
-**Removal-only policy:** allowlist entries may only be **REMOVED** (when a drift is reconciled), never **ADDED**, without a senior-dev ruling. The phase 4-2 additions (`table:sync_devices`, and `table:sync_history` converting to go-only) are pre-sanctioned by the engine contract §9-A14 and cited in the entry reasons.
+**Removal-only policy:** allowlist entries may only be **REMOVED** (when a drift is reconciled), never **ADDED**, without a senior-dev ruling. The phase 4-2 additions (`table:sync_devices` as Go-only, and `table:sync_history` converting to Go-only) are pre-sanctioned by the engine contract §9-A14 and cited in the entry reasons.
 
-**End state (after phase 4-2):** the allowlist shrinks to **3 uniform Go-only infra entries** — `device_push_tokens`, `sync_devices`, `sync_history` (engine-local sync infrastructure that the app deliberately does not mirror; the app drops its dead `sync_devices`/`sync_history` copies in `000043`). No RN-only or different-SQL entries remain; every real divergence is a deliberate engine-infrastructure table.
+**End state:** the allowlist is exactly **3 uniform Go-only infra entries** — `device_push_tokens`, `sync_devices`, `sync_history` (engine-local sync infrastructure that the app deliberately does not mirror; the app drops its dead `sync_devices`/`sync_history` copies in the app `000043`). No RN-only or different-SQL entries remain; every real divergence is a deliberate engine-infrastructure table.
+
+### `000043` pair — engine `synced_tables` ↔ app drop migration (§9-A14)
+
+The app `000043` and the engine `000043` are a **numbered pair with deliberately different content** (sanctioned by
+§9-A14): the **app** `000043` is a real `DROP TABLE IF EXISTS sync_devices; DROP TABLE IF EXISTS sync_history;` (plus
+deletion of `src/database/repositories/sync.ts` and the `SyncDevice`/`SyncHistory` model types) — the app never
+needed those engine mirrors (their repo fns had zero callers). The **engine** `000043` adds the
+`sync_devices.synced_tables` per-table backfill registry column (Q7). This pair converts `sync_devices` and
+`sync_history` to Go-only (they were interim different-SQL from Phase 1) and completes the 3-entry end state.
+
+### `000044` pair — favorites become `character_profiles.is_favorite` (§9-A19)
+
+The **app** `000044` (`is_favorite` column on `character_profiles` + drop the `character_favorites` sidecar, with
+in-place `INSERT … SELECT` data carry) and the **engine** `000044` (identical ALTER + sidecar drop) are a pair that
+**supersedes Q5** (user ruling 2026-09-01). The sidecar table is removed on both sides and favorites now ride
+`character_profiles.is_favorite` as a JSON 0/1 number. Because the pair is an **identical ALTER on a previously
+matched table**, `character_profiles` stays **byte-identical** (after comment/quote normalization) — so this pair
+**does not change the allowlist** (no new entry, favorites was never allowlisted). Accepted consequences: row-LWW
+coupling (a favorite toggle bumps the profile row's `updated_at` and rides full-row profile sync) and loss of the
+sidecar's `created_at DESC` recency ordering (no consumer needed it).
 
 ## How to Update Baselines
 
@@ -119,22 +140,30 @@ cd ../harmony-ai-app
 python scripts/compare-schemas.py rn-schema.json go-schema.json
 ```
 
-## Current Divergence State (verified 2026-08-31, fresh dumps)
+## Current Divergence State (verified 2026-09-01, fresh dumps — Phase 2 complete)
 
-A fresh RN dump vs a fresh engine dump currently compare as:
+A fresh RN dump vs a fresh engine dump (both on their Phase-2 branches) compare as:
 
 | Metric | Count |
 |--------|-------|
-| Total RN entries | 58 |
-| Total Go entries | 59 |
-| Matching | 57 |
+| Total RN entries | 55 |
+| Total Go entries | 58 |
+| Matching | **55** |
 | RN-only | 0 |
-| Go-only | 1 (`table:device_push_tokens`) |
-| Different SQL | 1 (`table:sync_history`) |
+| Go-only | 3 (`table:device_push_tokens`, `table:sync_devices`, `table:sync_history`) |
+| Different SQL | 0 |
 
-Both divergences are allowlisted, so the local parity comparator is **green** (exit 0) with exactly **2 `[allowlisted]` entries**. `conversation_messages`, `entities`, `emotion_state`, `entity_emoji_actions`, and `interactions` all **match** — the D3 `conversation_messages` divergence (and the other Phase-1 rebuild targets) have been closed by the canonical rebuilds (§9-A9). RN-only index leaks are zero. After the phase 4-2 pair, the end state is the 3 uniform Go-only infra entries described above per §9-A14.
+All three Go-only divergences are allowlisted, so the local parity comparator is **green** (exit 0) with exactly
+**3 `[allowlisted]` entries** — **55/55 matching**, RN-only 0, different-SQL 0, un-allowlisted 0, stale 0.
+`conversation_messages` is byte-identical (§9-A9, never allowlisted); `character_profiles` stays byte-identical
+through the §9-A19 `000044` ALTER pair; the reconciled Phase-1 targets (`entities`, `emotion_state`,
+`entity_emoji_actions`, `interactions`) all match (§9-A9). RN-only index leaks are zero. This is the end state —
+no further drift is expected until a future schema change.
 
-**Drift-count reconciliation note:** the previous version of this document recorded **10** cosmetic SQL drifts (and the contract's earlier draft said 9). Those 10 cosmetic drifts have all been reconciled — comment-only via §9-A8, quote-only via §9-A13, label/column drifts via §9-A9 — so they are counted as **reconciled**, not pending. They are no longer in the divergence set; only the 2 sanctioned divergences remain.
+**Drift-count reconciliation note:** the previous version of this document recorded **10** cosmetic SQL drifts (and
+the contract's earlier draft said 9). Those 10 cosmetic drifts have all been reconciled — comment-only via §9-A8,
+quote-only via §9-A13, label/column drifts via §9-A9 — so they are counted as **reconciled**, not pending. They are
+no longer in the divergence set; only the 3 sanctioned engine-infra entries remain.
 
 ## CI-Red-by-Design (Q16)
 
@@ -146,4 +175,5 @@ The parity CI workflow pins the engine checkout to **`main`** (`.github/workflow
 - [Phase 5-2: Go Schema Dump Command](../.current_work/test-framework-overhaul/5-2-GoSchemaDumpCommand.md)
 - [Phase 5-3: Parity CI Gate](../.current_work/test-framework-overhaul/5-3-ParityCIGate.md)
 - [Schema Parity Findings](../.current_work/test-framework-overhaul/schema-parity-findings.md)
-- [Engine Contract (Phase 2 rulings, §9-A8/A9/A13/A14/A17)](../.current_work/senju-rebase-integration/21-Engine-Contract-Persona-Enums.md)
+- [Engine Contract (Phase 2 rulings, §9-A8/A9/A13/A14/A17/A19)](../.current_work/senju-rebase-integration/21-Engine-Contract-Persona-Enums.md)
+- [Engine Phase 2 Record (6-2 wrap-up)](../.current_work/senju-rebase-integration/15-Engine-Phase2-Record.md)

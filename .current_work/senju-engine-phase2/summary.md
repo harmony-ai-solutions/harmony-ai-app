@@ -3,7 +3,7 @@
 > Execution plan for the engine track (Track B1/B2/B3 of
 > `.current_work/senju-rebase-integration/02-Followup-Stub-Plan.md`, Phase-2 items 7–10).
 > **Binding contract base:** `.current_work/senju-rebase-integration/21-Engine-Contract-Persona-Enums.md`
-> (all Q1–Q16 rulings, schema/sync/behavior contracts **+ §9 amendments A1–A18, 2026-08-31 — rounds 2 and 3:
+> (all Q1–Q16 rulings, schema/sync/behavior contracts **+ §9 amendments A1–A19, 2026-08-31/09-01 — rounds 2 and 3:
 > A8 comment-insensitive comparator, A9 label-reconciliation sweep (supersedes A1), A10 userEntities
 > pull-forward, A11 lockstep authoring workflow, A12 AI-authored-reactions deferral; A13 identifier-quote
 > normalization, A14 dead sync-infra tables dropped app-side + 000043 pair re-scope, A15 engine dump stdout
@@ -22,9 +22,11 @@
    **D3 closes for real; §9-A9 additionally reconciles `emotion_state`/`entity_emoji_actions`/`interactions`/
    `entities` app-side (§9-A13 quote normalization makes the rebuilds byte-stick; `sync_history` reconciliation
    cancelled by §9-A14) — end-state parity diff = 3 deliberate Go-only infra entries.**
-2. **B2 preferences sync**: `character_favorites` + slimmed `chat_conversation_settings` (POV `entity_id`, pinned,
+2. **B2 preferences sync**: ~~`character_favorites` +~~ slimmed `chat_conversation_settings` (POV `entity_id`, pinned,
    archived, `reply_mode`) become engine-synced tables with watermark contract, per-table initial backfill, and a
-   centralized app PK registry.
+   centralized app PK registry. **§9-A19 (user ruling 2026-09-01) supersedes Q5: favorites moved to
+   `character_profiles.is_favorite` (paired 000044, sidecar dropped both sides, LWW coupling accepted) — only
+   `chat_conversation_settings` remains a synced table from B2.**
 3. **B3 entity typing**: `entities.entity_type` + global `is_muted`/`is_disabled`; personas become user entities
    (linked profiles, default persona "You" engine-seeded and editable); AI-only automation gating; symmetric RAG.
 4. **Parity tooling**: **comment-insensitive + quote-normalized comparator (§9-A8/§9-A13 — both dump writers
@@ -78,12 +80,12 @@ before B2's derived-unread consumers and before settings rows are written withou
 
 ## Implementation Status
 
-- [ ] **Phase 1: Schema Lockstep** — 1-1 ([Engine 000041](1-1-EngineMigration000041.md)) · 1-2 ([App 000041 edit](1-2-AppMigration000041Edit.md)) · 1-3 ([Paired 000042](1-3-PairedMigration000042.md)) · 1-4 ([Parity tooling](1-4-ParityToolingAndBaselines.md))
-- [ ] **Phase 2: B1 Engine** — 2-1 ([Models & queries](2-1-EngineMessageActionModels.md)) · 2-2 ([Sync field-merge](2-2-EngineSyncFieldMerge.md)) · 2-3 ([Reaction awareness](2-3-EngineReactionAwareness.md))
-- [ ] **Phase 3: B1 App** — 3-1 ([Read flags & derived unread](3-1-AppReadFlagsDerivedUnread.md))
-- [ ] **Phase 4: B2 Sync** — 4-1 ([App registration & PK registry](4-1-AppSyncRegistration.md)) · 4-2 ([Engine registration & backfill](4-2-EngineSyncRegistration.md)) · 4-3 ([Engine muted/disabled gates](4-3-EngineMutedDisabledGates.md)) · 4-4 ([App settings rewiring](4-4-AppSettingsRewiring.md))
-- [ ] **Phase 5: B3 Entities** — 5-1 ([Engine entity_type plumbing](5-1-EngineEntityTypePlumbing.md)) · 5-2 ([Engine AI-only gating](5-2-EngineAIOnlyGating.md)) · 5-3 ([Engine user-entity support](5-3-EngineUserEntitySupport.md)) · 5-4 ([App persona rewiring](5-4-AppPersonaRewiring.md))
-- [ ] **Phase 6: Verification** — 6-1 ([Gates](6-1-VerificationGates.md)) · 6-2 ([Records & docs](6-2-RecordsAndDocs.md))
+- [x] **Phase 1: Schema Lockstep** — 1-1 ([Engine 000041](1-1-EngineMigration000041.md)) · 1-2 ([App 000041 edit](1-2-AppMigration000041Edit.md)) · 1-3 ([Paired 000042](1-3-PairedMigration000042.md)) · 1-4 ([Parity tooling](1-4-ParityToolingAndBaselines.md))
+- [x] **Phase 2: B1 Engine** — 2-1 ([Models & queries](2-1-EngineMessageActionModels.md)) · 2-2 ([Sync field-merge](2-2-EngineSyncFieldMerge.md)) · 2-3 ([Reaction awareness](2-3-EngineReactionAwareness.md))
+- [x] **Phase 3: B1 App** — 3-1 ([Read flags & derived unread](3-1-AppReadFlagsDerivedUnread.md))
+- [x] **Phase 4: B2 Sync** — 4-1 ([App registration & PK registry](4-1-AppSyncRegistration.md)) · 4-2 ([Engine registration & backfill](4-2-EngineSyncRegistration.md)) · 4-3 ([Engine muted/disabled gates](4-3-EngineMutedDisabledGates.md)) · 4-4 ([App settings rewiring](4-4-AppSettingsRewiring.md))
+- [x] **Phase 5: B3 Entities** — 5-1 ([Engine entity_type plumbing](5-1-EngineEntityTypePlumbing.md)) · 5-2 ([Engine AI-only gating](5-2-EngineAIOnlyGating.md)) · 5-3 ([Engine user-entity support](5-3-EngineUserEntitySupport.md)) · 5-4 ([App persona rewiring](5-4-AppPersonaRewiring.md))
+- [x] **Phase 6: Verification** — 6-1 ([Gates](6-1-VerificationGates.md)) · 6-2 ([Records & docs](6-2-RecordsAndDocs.md))
 
 ## Codebase-mapping documents consulted
 

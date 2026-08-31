@@ -119,3 +119,5 @@ During execution, per-step record docs will be added (`10-…`, `11-…`, …) d
 | Phase 4: verification gates | ✅ complete — tsc 0, unit 84/84, integration 10/10, parity = D3 only; record 12 |
 | Post-gate mends (E/F/G) | ✅ complete — `53b445e`/`ca9d867`/`fe1408f`; see 12-Record appendix |
 | Branch state | `senju-design-updates-rebase` @ `fe1408f` — awaiting coordinated force-push of her origin branch with senju |
+| Followup Phase 1 (app-side stub/streamline) | ✅ complete — record `14-Followup-Phase1-Record.md` |
+| Followup Phase 2 (engine track) | ✅ complete — record [`15-Engine-Phase2-Record.md`](15-Engine-Phase2-Record.md); engine `feat/engine-track-phase2` (NOT merged to main, Q16); migrations 41–44 both repos; parity 55/55 + 3 Go-only allowlisted; app `senju-design-updates-rebase` @ `4db2ab7`; coordinated mainline merge pending (engine FIRST) |

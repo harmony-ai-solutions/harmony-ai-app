@@ -36,7 +36,7 @@ what kinds of tests exist, and how to add new ones.
 | Smoke | `nodeDatabase.smoke.test.ts` | 3 | `NodeDatabase` basic CRUD |
 | Compat | `compat/nodeSide.test.ts` | 23 | NodeDatabase vs RN behavior compatibility |
 | Snapshot | `migrations.snapshot.test.ts` | 3 | Migration schema snapshots (10 snapshots) |
-| Roll-forward | `migrations.rollforward.test.ts` | 42 | All 28 migrations run forward, verify schema |
+| Roll-forward | `migrations.rollforward.test.ts` | 42 | All 44 migrations run forward, verify schema |
 | Entities | `repositories/entities.test.ts` | 11 | Entity CRUD, CASCADE deletes |
 | Characters | `repositories/characters.test.ts` | 14 | Character profile CRUD |
 | Modules | `repositories/modules.test.ts` | 7 | Module config CRUD |
@@ -299,7 +299,7 @@ appId: ai.soulbits.chat
 
 1. Add a new numbered file in `src/database/migrations/`: `000029_description.ts`
 2. Export the SQL string
-3. Register it in `src/database/migrations/index.ts`
+3. Register it in `src/database/migrations.ts`
 4. Run snapshot update: `npx jest --selectProjects unit --testPathPatterns migrations --updateSnapshot`
 5. Review the snapshot diff carefully
 6. If the schema changed, coordinate with the Go team — update `harmony-link-private` migration too

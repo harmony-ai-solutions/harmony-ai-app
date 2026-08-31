@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### Chat & Messaging
+
+#### Added
+- **Message reactions, pins and replies now sync across your devices** — a message you react to, pin, or reply to on one device carries over to your other paired devices via synchronization (reactions/pins travel as message state; replies are preserved).
+
+#### Changed
+- **Unread count is now derived from the message layer** instead of a per-conversation counter. A conversation is unread when it has partner-sent messages marked unread, and reading it clears them. This fixes the old bug where messages that arrived via background sync never showed a badge: unread state is now always computed from the actual messages, including ones synced in. "Mark unread" still sets exactly one unread message.
+- **Reply mode is now synced per conversation** (instead of a device-only preference) — your instant/realistic reply mode choice follows you across devices and survives a reinstall.
+- **Mute / Disable is now a global setting on the AI entity**, not a per-conversation flag. Muting an AI silences its notifications everywhere; disabling it fully blocks chatting with it and can be re-enabled from the AI's profile.
+- **Personas are now user identities.** You chat as your persona ("You" by default, editable), can create a persona from scratch or **from an existing character card**, and each persona gets its own conversations. The built-in persona can be edited but not deleted.
+- **Favorites now sync via a profile flag** — favoriting an AI character on one device is reflected on your other paired devices (since favorites ride the character profile through sync).
+
+> **Note for testers / dev builds:** if you ran a pre-Phase-2 build on this branch, wipe the app's local database once. Devices that ran an earlier `000041`/`000042` revision, the old settings shape, or the old personas table need the one-time wipe (the amended migrations never re-run on them). Devices already on the current `000041`–`000043` state do **not** need a wipe — `000044` migrates favorites in place.
+
 ### Marketplace, Wallet, Social & Notifications
 #### Added
 - **Community preview data**: the Market, Soul wallet, social feeds and notifications now show **preview content** while the community backend is in development. The Market lists sample characters, the wallet starts with a preview balance, and social/notification feeds display seeded sample content — everything is clearly marked as preview.
