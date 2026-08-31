@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { createLogger } from '../../utils/logger';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedEmptyState } from '../../components/themed/ThemedEmptyState';
@@ -58,6 +59,8 @@ import ChatPreferencesService, { ChatReplyMode } from '../../services/ChatPrefer
 import EntitySessionService from '../../services/EntitySessionService';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { hexToRgba } from '../../utils/colorUtils';
+
+const log = createLogger('[ArchivedChatsScreen]');
 
 interface ArchivedItem {
   interactionId: string;
@@ -202,7 +205,9 @@ export const ArchivedChatsScreen: React.FC = () => {
         if (s) {
           item.pinned = s.pinned;
         }
-        item.unreadCount = unreadMap.get(item.participantKey) ?? 0;
+        item.unreadCount = item.muted
+          ? 0
+          : (unreadMap.get(item.participantKey) ?? 0);
       }
       archived.sort((a, b) => {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -392,8 +397,15 @@ export const ArchivedChatsScreen: React.FC = () => {
     );
   }, [menuItem, showAlert, showToast, t, loadArchived]);
 
-  const handleOpenChat = (item: ArchivedItem) => {
+  const handleOpenChat = async (item: ArchivedItem) => {
     hapticLightPress();
+    // Clear-on-open (derived unread, A5/A2): mark partner-sent messages read so
+    // the archived badge clears immediately (mirrors ChatListScreen.handleChatPress).
+    try {
+      await markConversationMessagesRead(item.participantKey, impersonatedEntityIdRef.current);
+    } catch (error) {
+      log.warn('Failed to mark archived conversation read:', error);
+    }
     navigation.navigate('ChatDetail', {
       interactionId: item.interactionId,
       participantKey: item.participantKey,

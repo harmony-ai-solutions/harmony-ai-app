@@ -43,6 +43,15 @@ interface SyncServiceEvents {
    * `resolveNameClash(resolution, applyToAll)`.
    */
   'sync:nameclash': (clash: NameClashInfo) => void;
+  /**
+   * Emitted after an inbound sync apply COMMITS, carrying the list of tables
+   * that were touched. ChatListScreen (and, in 4-1, any other consumer) reacts
+   * when `conversation_messages` is present by recounting derived unread badges
+   * — the fix for synced-in messages never badging (the increment only lived in
+   * the live-WS path). Payload is a plain `{ tables: string[] }` so the event
+   * can be generalized to `sync:data-applied` later without changing consumers.
+   */
+  'sync:messages-applied': (payload: { tables: string[] }) => void;
 }
 
 export interface SyncSession {
@@ -839,6 +848,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       }
     }
 
+    // Track which tables this apply touches so the post-commit
+    // `sync:messages-applied` event can carry the applied table list (3-1).
+    const appliedTables = new Set<string>();
+
     return new Promise<void>((resolve, reject) => {
       // Sort buffer by dependency order to satisfy FK constraints in correct sequence:
       // 1. Provider configs (no dependencies)
@@ -900,6 +913,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
           // Apply all buffered records synchronously within transaction (sorted by dependency order)
           for (const item of sortedBuffer) {
+            appliedTables.add(item.table);
             const pkField = (item.table === 'entity_module_mappings' || item.table === 'emotion_state' || item.table === 'lifecycle_state') ? 'entity_id' : 'id';
             const pkValue = item.record[pkField];
 
@@ -1081,6 +1095,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
           // Invalidate service caches that may be stale after incoming sync
           EntityEmojiActionService.invalidateAllCaches();
+
+          // Tell consumers (ChatListScreen) which tables changed so they can
+          // recount derived unread badges (3-1 — synced-in messages never
+          // badged because the increment only lived in the live-WS path).
+          if (appliedTables.size > 0) {
+            this.emit('sync:messages-applied', { tables: Array.from(appliedTables) });
+          }
 
           resolve();
         }

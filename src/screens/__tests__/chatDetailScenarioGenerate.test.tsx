@@ -161,8 +161,8 @@ jest.mock('../../services/ChatPreferencesService', () => ({
   default: {
     getReplyMode: jest.fn().mockResolvedValue('realistic'),
     setReplyMode: jest.fn().mockResolvedValue(undefined),
-    getLastReadTimestamp: jest.fn().mockResolvedValue(0),
-    setLastReadTimestamp: jest.fn().mockResolvedValue(undefined),
+    getGlobalImpersonatedEntity: jest.fn().mockResolvedValue(null),
+    setGlobalImpersonatedEntity: jest.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -172,6 +172,9 @@ jest.mock('../../database/repositories/conversation_messages', () => ({
   updateConversationMessage: jest.fn().mockResolvedValue(undefined),
   getConversationMessage: jest.fn().mockResolvedValue(null),
   deleteConversationMessage: jest.fn().mockResolvedValue(undefined),
+  markConversationMessagesRead: jest.fn().mockResolvedValue(0),
+  markConversationMessagesUnread: jest.fn().mockResolvedValue(0),
+  getUnreadCountByParticipantKeys: jest.fn().mockResolvedValue(new Map()),
 }));
 
 jest.mock('../../database/repositories/characters', () => ({
@@ -226,10 +229,17 @@ jest.mock('../../components/chat/TypingIndicator', () => {
   return { __esModule: true, TypingIndicator: () => React.createElement(View, { testID: 'typing-indicator-mock' }) };
 });
 
+const mockDividerProps: any[] = [];
 jest.mock('../../components/chat/NewMessagesDivider', () => {
   const React = require('react');
   const { View } = require('react-native');
-  return { __esModule: true, NewMessagesDivider: () => React.createElement(View, { testID: 'new-messages-divider-mock' }) };
+  return {
+    __esModule: true,
+    NewMessagesDivider: (props: any) => {
+      mockDividerProps.push(props);
+      return React.createElement(View, { testID: 'new-messages-divider-mock' });
+    },
+  };
 });
 
 jest.mock('../../components/emoji/EmojiPickerInline', () => {
@@ -316,6 +326,7 @@ function makeMsg(
     is_recon_followup: false,
     is_edited: false,
     edit_of_message_id: null,
+    is_read: false,
     created_at: new Date(),
     updated_at: new Date(),
     deleted_at: null,
@@ -535,5 +546,75 @@ describe('ChatDetailScreen — scenario generation (§2-4)', () => {
     expect(getRecentConversationMessages).toHaveBeenCalled();
 
     expect(utils.queryByTestId('scenario-preparing')).toBeNull();
+  });
+});
+
+describe('ChatDetailScreen — "new messages" divider derived from first unread (3-1)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockDividerProps.length = 0;
+    mockShowAlert.mockClear();
+    getRecentConversationMessages.mockResolvedValue([]);
+  });
+
+  // helper: a partner/own message with an explicit is_read flag (the page that
+  // drives the derived divider now carries is_read from the repo).
+  function msgWithIsRead(
+    id: string,
+    sender: string,
+    isRead: boolean,
+  ): any {
+    const m = makeMsg(id, { sender, content: id });
+    m.is_read = isRead;
+    return m;
+  }
+
+  it('inserts the divider at the FIRST partner-sent unread message', async () => {
+    // Oldest → newest: a read partner msg, then the first unread partner msg,
+    // then our own reply, then another unread partner msg.
+    const p1Read = msgWithIsRead('m-read', partnerEntityId, true);
+    const p2Unread = msgWithIsRead('m-first-unread', partnerEntityId, false);
+    const ownMsg = msgWithIsRead('m-own', ownEntityId, false);
+    const p3Unread = msgWithIsRead('m-last-unread', partnerEntityId, false);
+    getRecentConversationMessages.mockResolvedValue([
+      p1Read,
+      p2Unread,
+      ownMsg,
+      p3Unread,
+    ]);
+
+    await renderScreen();
+    await act(async () => {});
+
+    // First unread partner message sits at index 1 → divider before it, with
+    // count = messages.length - 1 (everything at-or-after the divider).
+    const divider = mockDividerProps.find((p: any) => p && typeof p.count === 'number');
+    expect(divider).toBeTruthy();
+    expect(divider.count).toBe(3);
+  });
+
+  it('renders no divider when every partner message is already read', async () => {
+    const p1 = msgWithIsRead('m1', partnerEntityId, true);
+    const p2 = msgWithIsRead('m2', partnerEntityId, true);
+    const own = msgWithIsRead('m-own', ownEntityId, false);
+    getRecentConversationMessages.mockResolvedValue([p1, p2, own]);
+
+    await renderScreen();
+    await act(async () => {});
+
+    expect(mockDividerProps).toHaveLength(0);
+  });
+
+  it('renders no divider when the FIRST message in the page is unread', async () => {
+    // firstUnreadIndex === 0 → no "above/below" split to render (matches the
+    // legacy `firstNewPartnerIndex > 0` gate).
+    const p1Unread = msgWithIsRead('m-first', partnerEntityId, false);
+    const p2Unread = msgWithIsRead('m-second', partnerEntityId, false);
+    getRecentConversationMessages.mockResolvedValue([p1Unread, p2Unread]);
+
+    await renderScreen();
+    await act(async () => {});
+
+    expect(mockDividerProps).toHaveLength(0);
   });
 });

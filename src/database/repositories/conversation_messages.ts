@@ -72,7 +72,7 @@ export async function getConversationMessagesByParticipantKey(
            cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
            cm.emotional_state_bits,
            cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
-           cm.reactions_json, cm.reply_to_message_id, cm.is_pinned,
+           cm.reactions_json, cm.reply_to_message_id, cm.is_pinned, cm.is_read,
            cm.created_at, cm.updated_at, cm.deleted_at
     FROM conversation_messages cm
     JOIN interactions i ON cm.interaction_id = i.id
@@ -123,6 +123,7 @@ export async function getConversationMessagesByParticipantKey(
       reactions_json: row.reactions_json || null,
       reply_to_message_id: row.reply_to_message_id || null,
       is_pinned: row.is_pinned === 1,
+      is_read: row.is_read === 1,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -176,7 +177,7 @@ export async function getRecentConversationMessages(
             cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
             cm.emotional_state_bits,
             cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
-            cm.reactions_json, cm.reply_to_message_id, cm.is_pinned,
+            cm.reactions_json, cm.reply_to_message_id, cm.is_pinned, cm.is_read,
             cm.created_at, cm.updated_at, cm.deleted_at
      FROM conversation_messages cm
      WHERE cm.id IN (${placeholders})
@@ -214,6 +215,7 @@ export async function getRecentConversationMessages(
       reactions_json: row.reactions_json || null,
       reply_to_message_id: row.reply_to_message_id || null,
       is_pinned: row.is_pinned === 1,
+      is_read: row.is_read === 1,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -241,7 +243,7 @@ export async function getLastConversationMessage(
             cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
             cm.emotional_state_bits,
             cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
-            cm.reactions_json, cm.reply_to_message_id, cm.is_pinned,
+            cm.reactions_json, cm.reply_to_message_id, cm.is_pinned, cm.is_read,
             cm.created_at, cm.updated_at, cm.deleted_at
      FROM conversation_messages cm
      JOIN interactions i ON cm.interaction_id = i.id
@@ -282,6 +284,7 @@ export async function getLastConversationMessage(
     reactions_json: row.reactions_json || null,
     reply_to_message_id: row.reply_to_message_id || null,
     is_pinned: row.is_pinned === 1,
+    is_read: row.is_read === 1,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -642,6 +645,7 @@ function mapRowToConversationMessage(row: any): ConversationMessage {
     reactions_json: row.reactions_json || null,
     reply_to_message_id: row.reply_to_message_id || null,
     is_pinned: row.is_pinned === 1,
+    is_read: row.is_read === 1,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,

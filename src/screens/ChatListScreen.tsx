@@ -42,6 +42,7 @@ import {
 } from '../database/repositories/characters';
 
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
+import SyncService from '../services/SyncService';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ChatPreferencesService, { ChatReplyMode } from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
@@ -115,6 +116,29 @@ function sortListItems(items: ChatListItem[]): ChatListItem[] {
     return b.lastMessageTime.getTime() - a.lastMessageTime.getTime();
   });
   return items;
+}
+
+/**
+ * Resolve the displayed unread count for a row. Mute (O10 / Q8) is entity-level
+ * and suppresses the badge entirely — the derived count stays but the UI must
+ * NOT show it for a muted partner. Used by BOTH the list-load (recount) path
+ * and the live-update path so mute suppression is consistent (3-1).
+ */
+export function resolveDisplayUnreadCount(
+  derivedCount: number,
+  muted: boolean,
+): number {
+  return muted ? 0 : derivedCount;
+}
+
+/**
+ * Should a `sync:messages-applied` payload (the applied-table list) trigger a
+ * ChatList recount? Only message rows change the derived unread badge. Kept as
+ * a pure predicate so Phase 4-1 can generalize the event to `sync:data-applied`
+ * without touching the consumer (it just passes a longer table list).
+ */
+export function shouldRecountAfterSync(tables: string[]): boolean {
+  return tables.includes('conversation_messages');
 }
 
 interface ChatListItem {
@@ -389,7 +413,10 @@ export const ChatListScreen: React.FC = () => {
           item.pinned = settings.pinned;
           item.archived = settings.archived;
         }
-        item.unreadCount = unreadMap.get(item.participantKey) ?? 0;
+        item.unreadCount = resolveDisplayUnreadCount(
+          unreadMap.get(item.participantKey) ?? 0,
+          item.muted,
+        );
       }
 
       return listItems;
@@ -636,14 +663,26 @@ export const ChatListScreen: React.FC = () => {
         scheduleChatListReload();
       };
 
+      // Sync-apply recount (3-1 — the badge fix): synced-in partner messages
+      // never bump the badge because the increment only lived in the live-WS
+      // path. SyncService emits `sync:messages-applied` after an inbound apply
+      // touches `conversation_messages`; this handler triggers the same
+      // debounced reload (which recounts via getUnreadCountByParticipantKeys).
+      const handleSyncApplied = (payload: { tables: string[] }) => {
+        if (!shouldRecountAfterSync(payload.tables)) return;
+        scheduleChatListReload();
+      };
+
       EntitySessionService.on('message:received', handleMessageReceived);
       EntitySessionService.on('session:started', handleSessionLifecycle);
       EntitySessionService.on('session:stopped', handleSessionLifecycle);
+      SyncService.on('sync:messages-applied', handleSyncApplied);
 
       return () => {
         EntitySessionService.off('message:received', handleMessageReceived);
         EntitySessionService.off('session:started', handleSessionLifecycle);
         EntitySessionService.off('session:stopped', handleSessionLifecycle);
+        SyncService.off('sync:messages-applied', handleSyncApplied);
         if (reloadTimerRef.current) {
           clearTimeout(reloadTimerRef.current);
           reloadTimerRef.current = null;
@@ -1270,6 +1309,7 @@ const ChatRowCard: React.FC<{
                     styles.unreadBadge,
                     { backgroundColor: theme.colors.accent.primary },
                   ]}
+                  testID="chat-unread-badge"
                 >
                   <ThemedText size={11} weight="bold" style={{ color: theme.colors.background.base }}>
                     {item.unreadCount > 99 ? '99+' : item.unreadCount}

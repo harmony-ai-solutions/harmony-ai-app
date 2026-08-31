@@ -178,7 +178,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [partnerName, setPartnerName] = useState<string>('Chat');
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
   const [partnerProfileId, setPartnerProfileId] = useState<string | null>(null);
-  const [lastReadTimestamp, setLastReadTimestamp] = useState<number>(0);
   const [failedTranscriptions, setFailedTranscriptions] = useState<Set<string>>(
     new Set(),
   );
@@ -238,7 +237,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const chatLockedRef = useRef(false);
 
   const flatListRef = useRef<FlatList<any>>(null);
-  const sessionDividerTimestamp = useRef<number>(0);
   const isInitialScrollDone = useRef(false);
   const isArmRevealScheduled = useRef(false);
   const isNearBottom = useRef(true);
@@ -254,7 +252,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // only stop re-pinning once everything has settled.
   const settleUntilRef = useRef(0);
   const loadedMessagesRef = useRef<ConversationMessage[]>([]);
-  const lastReadTimestampRef = useRef<number>(0);
   const [showDivider, setShowDivider] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
   const [personaSwitcherVisible, setPersonaSwitcherVisible] = useState(false);
@@ -465,12 +462,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         setFailedTranscriptions(new Set(stuckTranscriptions));
       }
 
-      const timestamp =
-        await ChatPreferencesService.getLastReadTimestamp(routeInteractionId);
-      setLastReadTimestamp(timestamp);
-      lastReadTimestampRef.current = timestamp;
-      sessionDividerTimestamp.current = timestamp;
-
       // Fallback: if session:started fired before this screen mounted, read
       // has_first_mes straight from the live session (primary path is the
       // session:started listener below).
@@ -536,10 +527,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   useEffect(() => {
     loadedMessagesRef.current = messages;
   }, [messages]);
-
-  useEffect(() => {
-    lastReadTimestampRef.current = lastReadTimestamp;
-  }, [lastReadTimestamp]);
 
   // Track canonical interactionId — temp UUIDv7 is replaced by server's canonical
   // ID when INIT_ENTITY response arrives. This listener updates the ref so all
@@ -1579,21 +1566,24 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       withDivider.push(messages[i]);
     }
 
-    if (sessionDividerTimestamp.current !== 0 && showDivider) {
-      const firstNewPartnerIndex = messages.findIndex(
+    if (showDivider) {
+      // "New messages" divider = the FIRST partner-sent UNREAD message at open,
+      // derived from the loaded page's `is_read` flags (3-1 — no AsyncStorage;
+      // the legacy last-read-timestamp divider-key derivation is gone A5/A2).
+      const firstUnreadIndex = messages.findIndex(
         m =>
-          m.created_at.getTime() > sessionDividerTimestamp.current &&
-          m.sender_entity_id !== ownEntityId,
+          m.sender_entity_id !== ownEntityId &&
+          m.is_read === false,
       );
 
-      if (firstNewPartnerIndex > 0) {
+      if (firstUnreadIndex > 0) {
         // Map the raw-message index to the corresponding index in the
         // day-augmented array (each message has one preceding day-divider).
         const insertionIndex = withDivider.findIndex(
-          (m: any) => m.id === messages[firstNewPartnerIndex].id,
+          (m: any) => m.id === messages[firstUnreadIndex].id,
         );
         if (insertionIndex !== -1) {
-          const newMessageCount = messages.length - firstNewPartnerIndex;
+          const newMessageCount = messages.length - firstUnreadIndex;
           withDivider.splice(insertionIndex, 0, {
             id: 'new-messages-divider',
             type: 'divider',
@@ -1684,18 +1674,14 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         log.error('Failed to mark conversation read:', error),
       );
     }
-    const msgs = loadedMessagesRef.current;
-    if (msgs.length === 0) return;
-    const latestTimestamp = msgs[msgs.length - 1]?.created_at.getTime() || 0;
-    if (latestTimestamp > lastReadTimestampRef.current) {
-      lastReadTimestampRef.current = latestTimestamp;
-      setLastReadTimestamp(latestTimestamp);
-      ChatPreferencesService.setLastReadTimestamp(routeInteractionId, latestTimestamp);
-    }
+    // The legacy last-read-timestamp AsyncStorage key is gone (3-1) — the
+    // divider no longer depends on it; only the derived-first-unread flags
+    // matter. Hide the divider once the reveal settles so it doesn't re-appear
+    // on scroll.
     if (isReadyToShowRef.current) {
       setShowDivider(false);
     }
-  }, [participantKey, ownEntityId, routeInteractionId]);
+  }, [participantKey, ownEntityId]);
 
   const handleScrollEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {

@@ -13,9 +13,29 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ChatPreferencesService, { ChatReplyMode } from '../ChatPreferencesService';
 
-jest.mock('@react-native-async-storage/async-storage', () =>
-  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
-);
+// In-memory AsyncStorage mock with the full key-enumeration surface the sweep
+// needs (getAllKeys / multiRemove) plus per-test isolation. Kept as a plain
+// `mock`-prefixed store so the jest.mock factory may reference it.
+const mockStore = new Map<string, string>();
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: {
+    getItem: jest.fn(async (key: string) => mockStore.get(key) ?? null),
+    setItem: jest.fn(async (key: string, value: string) => {
+      mockStore.set(key, value);
+    }),
+    removeItem: jest.fn(async (key: string) => {
+      mockStore.delete(key);
+    }),
+    multiRemove: jest.fn(async (keys: string[]) => {
+      keys.forEach(key => mockStore.delete(key));
+    }),
+    getAllKeys: jest.fn(async () => Array.from(mockStore.keys())),
+    clear: jest.fn(async () => {
+      mockStore.clear();
+    }),
+  },
+}));
 
 jest.mock('../../utils/logger', () => ({
   createLogger: () => ({
@@ -26,13 +46,18 @@ jest.mock('../../utils/logger', () => ({
   }),
 }));
 
+beforeEach(async () => {
+  jest.clearAllMocks();
+  mockStore.clear();
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
 const REPLY_MODE_PREFIX = '@harmony_chat_reply_mode_';
 
 describe('ChatPreferencesService reply mode', () => {
-  beforeEach(async () => {
-    await AsyncStorage.clear();
-  });
-
   it('defaults to realistic when nothing is stored', async () => {
     expect(await ChatPreferencesService.getReplyMode('max+user')).toBe('realistic');
   });
@@ -79,5 +104,45 @@ describe('ChatPreferencesService reply mode', () => {
   it('setReplyMode type is the ChatReplyMode union', () => {
     const mode: ChatReplyMode = 'instant';
     expect(['instant', 'realistic']).toContain(mode);
+  });
+});
+
+describe('ChatPreferencesService legacy-entity-pref sweep (Q14)', () => {
+  it('removes every `chat_entity_pref_*` key but keeps unrelated ones', async () => {
+    const keys = [
+      'chat_entity_pref_char1',
+      'chat_entity_pref_char2',
+      'chat_global_impersonated_entity',
+      '@harmony_chat_reply_mode_pk',
+    ];
+    const getAllKeys = jest.spyOn(AsyncStorage, 'getAllKeys').mockResolvedValue(keys);
+    const multiRemove = jest.spyOn(AsyncStorage, 'multiRemove').mockResolvedValue(undefined);
+
+    await ChatPreferencesService.sweepLegacyEntityPrefs();
+
+    expect(getAllKeys).toHaveBeenCalled();
+    // Only the dead legacy per-chat persona prefs are swept (Q14); the global
+    // entity key and reply-mode key survive.
+    expect(multiRemove).toHaveBeenCalledWith([
+      'chat_entity_pref_char1',
+      'chat_entity_pref_char2',
+    ]);
+  });
+
+  it('does nothing when there are no legacy keys', async () => {
+    jest.spyOn(AsyncStorage, 'getAllKeys').mockResolvedValue([
+      'chat_global_impersonated_entity',
+      '@harmony_chat_reply_mode_pk',
+    ]);
+    const multiRemove = jest.spyOn(AsyncStorage, 'multiRemove').mockResolvedValue(undefined);
+
+    await ChatPreferencesService.sweepLegacyEntityPrefs();
+
+    expect(multiRemove).not.toHaveBeenCalled();
+  });
+
+  it('does not throw when storage read fails', async () => {
+    jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('boom'));
+    await expect(ChatPreferencesService.sweepLegacyEntityPrefs()).resolves.toBeUndefined();
   });
 });

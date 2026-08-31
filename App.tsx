@@ -29,6 +29,7 @@ import { DynamicBackground } from './src/components/background/DynamicBackground
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadHapticPreference } from './src/utils/haptics';
 import { onBubbleOpen } from './src/services/ChatBubbleService';
+import ChatPreferencesService from './src/services/ChatPreferencesService';
 import type { BubbleConversation } from './src/services/ChatBubbleService';
 
 /**
@@ -65,6 +66,11 @@ function AppShell() {
     // Apply the persisted "Haptic feedback" Settings toggle once at startup
     // so the very first button press respects the user's preference.
     loadHapticPreference();
+    // One-time sweep of dead legacy `chat_entity_pref_*` AsyncStorage keys
+    // (Q14) — best-effort, fire-and-forget. Chosen here (app bootstrap) rather
+    // than the chat-list seam so it runs exactly once per launch regardless of
+    // which screen first touches the preference service.
+    ChatPreferencesService.sweepLegacyEntityPrefs().catch(() => {});
   }, []);
 
   // Floating chat bubble → when the user taps the bubble, bring the app to
