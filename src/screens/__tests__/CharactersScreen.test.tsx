@@ -171,6 +171,9 @@ jest.mock('../../services/SyncService', () => ({
   default: {
     syncAndWait: jest.fn().mockResolvedValue(undefined),
     initiateSync: jest.fn().mockResolvedValue(undefined),
+    // 4-1: CharactersScreen subscribes to sync:data-applied for live favorites.
+    on: jest.fn(),
+    off: jest.fn(),
   },
 }));
 

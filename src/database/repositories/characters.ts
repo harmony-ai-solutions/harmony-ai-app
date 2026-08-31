@@ -777,13 +777,14 @@ export async function getCharacterImagesWithDataURLs(
 }
 
 // ============================================================================
-// Character Favorites (client-only)
+// Character Favorites (synced sidecar)
 // ============================================================================
 //
-// Favorites are stored in the CLIENT-ONLY `character_favorites` sidecar table
-// (never synced to the engine — strict schema parity, see docs/schema-parity.md)
-// and survive as a client-side piece pending the Phase-2 engine mirror. A
-// profile with no row is simply "not favorited".
+// Favorites live in the `character_favorites` sidecar table. Once client-only,
+// it joined engine sync in Phase 2 (4-1): the sync layer registers it
+// (PK = profile_id, watermark triple + soft delete) and the engine mirrors it
+// (Q5 — `favorited_at` dropped; `created_at` subsumes it). A profile with no
+// row is simply "not favorited".
 
 /**
  * True when a character profile is favorited (non-deleted tombstone).

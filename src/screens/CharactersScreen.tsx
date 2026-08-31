@@ -288,6 +288,21 @@ export const CharactersScreen: React.FC = () => {
     }
   }, []);
 
+  // 4-1: live favorites refresh. SyncService emits `sync:data-applied` after an
+  // inbound apply commits; when it touched `character_favorites`, reload the
+  // favorite ids so the favorites filter reflects engine-side changes even if
+  // this screen stays focused (the focus reload above only fires on re-focus).
+  useEffect(() => {
+    const handleSyncApplied = (payload: { tables: string[] }) => {
+      if (!payload.tables.includes('character_favorites')) return;
+      loadFavoritesAndCategories();
+    };
+    syncService.on('sync:data-applied', handleSyncApplied);
+    return () => {
+      syncService.off('sync:data-applied', handleSyncApplied);
+    };
+  }, [loadFavoritesAndCategories]);
+
   // Reload on focus (handles return from edit screen)
   useFocusEffect(
     useCallback(() => {

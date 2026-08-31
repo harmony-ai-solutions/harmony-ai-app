@@ -1,5 +1,5 @@
 /**
- * Chat Conversation Settings Repository — client-only per-conversation state.
+ * Chat Conversation Settings Repository — per-conversation pin/archive/state.
  *
  * Backs the chat-list long-press actions (pin / archive) only. Mute/disable
  * moved ONTO the entity itself (entities.is_muted / entities.is_disabled,
@@ -7,6 +7,9 @@
  * `'blocked'` store of disabled state is dead. `chat_conversation_settings`
  * loses `unread_count`, `muted`, `blocked` and gains `reply_mode` + `deleted_at`
  * (final shape, mirroring the engine).
+ *
+ * Joined engine sync in Phase 2 (4-1): PK = participant_key, watermark triple
+ * + soft delete; pinned/archived ride as JSON 0/1 (no boolean normalization).
  *
  * Table: chat_conversation_settings
  *   participant_key TEXT PRIMARY KEY — the stable conversation identifier

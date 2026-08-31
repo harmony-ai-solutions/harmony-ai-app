@@ -132,13 +132,14 @@ export function resolveDisplayUnreadCount(
 }
 
 /**
- * Should a `sync:messages-applied` payload (the applied-table list) trigger a
- * ChatList recount? Only message rows change the derived unread badge. Kept as
- * a pure predicate so Phase 4-1 can generalize the event to `sync:data-applied`
- * without touching the consumer (it just passes a longer table list).
+ * Should a `sync:data-applied` payload (the applied-table list) trigger a
+ * ChatList reload? Message rows change the derived unread badge and the
+ * last-message preview; `chat_conversation_settings` rows change the pin /
+ * archive state that sorts and filters the list. Kept as a pure predicate so
+ * consumers stay decoupled from the payload shape.
  */
-export function shouldRecountAfterSync(tables: string[]): boolean {
-  return tables.includes('conversation_messages');
+export function shouldReloadAfterSync(tables: string[]): boolean {
+  return tables.includes('conversation_messages') || tables.includes('chat_conversation_settings');
 }
 
 interface ChatListItem {
@@ -663,26 +664,27 @@ export const ChatListScreen: React.FC = () => {
         scheduleChatListReload();
       };
 
-      // Sync-apply recount (3-1 — the badge fix): synced-in partner messages
-      // never bump the badge because the increment only lived in the live-WS
-      // path. SyncService emits `sync:messages-applied` after an inbound apply
-      // touches `conversation_messages`; this handler triggers the same
-      // debounced reload (which recounts via getUnreadCountByParticipantKeys).
+      // Sync-apply refresh (3-1 → 4-1): synced-in partner messages never bump
+      // the badge because the increment only lived in the live-WS path;
+      // synced-in `chat_conversation_settings` rows change pin/archive sort.
+      // SyncService emits `sync:data-applied` after an inbound apply; this
+      // handler triggers the same debounced reload (recounts derived unread via
+      // getUnreadCountByParticipantKeys, re-sorts by pin/recency).
       const handleSyncApplied = (payload: { tables: string[] }) => {
-        if (!shouldRecountAfterSync(payload.tables)) return;
+        if (!shouldReloadAfterSync(payload.tables)) return;
         scheduleChatListReload();
       };
 
       EntitySessionService.on('message:received', handleMessageReceived);
       EntitySessionService.on('session:started', handleSessionLifecycle);
       EntitySessionService.on('session:stopped', handleSessionLifecycle);
-      SyncService.on('sync:messages-applied', handleSyncApplied);
+      SyncService.on('sync:data-applied', handleSyncApplied);
 
       return () => {
         EntitySessionService.off('message:received', handleMessageReceived);
         EntitySessionService.off('session:started', handleSessionLifecycle);
         EntitySessionService.off('session:stopped', handleSessionLifecycle);
-        SyncService.off('sync:messages-applied', handleSyncApplied);
+        SyncService.off('sync:data-applied', handleSyncApplied);
         if (reloadTimerRef.current) {
           clearTimeout(reloadTimerRef.current);
           reloadTimerRef.current = null;

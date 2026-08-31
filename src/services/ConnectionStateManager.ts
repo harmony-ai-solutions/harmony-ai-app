@@ -464,6 +464,65 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
   }
 
   /**
+   * Build the per-source AsyncStorage key for the per-table initial-upload set
+   * (Q7 — the app mirror of the engine's `sync_devices.synced_tables`).
+   */
+  static initialUploadDoneKey(source: SyncSource): string {
+    return `@harmony_sync_initial_upload_done:${source}`;
+  }
+
+  /**
+   * Read the per-table initial-upload set for a source (Q7).
+   *
+   * Returns the JSON array of table names whose initial full upload (since=0)
+   * has completed. An unset or invalid value returns [] — the caller treats
+   * that as "nothing initial-uploaded yet" (every table uploads in full).
+   */
+  async getInitialUploadDoneTables(source: SyncSource): Promise<string[]> {
+    try {
+      const stored = await AsyncStorage.getItem(
+        ConnectionStateManager.initialUploadDoneKey(source),
+      );
+      if (!stored) return [];
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed)
+        ? parsed.filter((x): x is string => typeof x === 'string')
+        : [];
+    } catch (error) {
+      log.warn('Failed to read initial upload set:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Persist the per-table initial-upload set for a source (Q7).
+   */
+  async setInitialUploadDoneTables(
+    source: SyncSource,
+    tables: string[],
+  ): Promise<void> {
+    await AsyncStorage.setItem(
+      ConnectionStateManager.initialUploadDoneKey(source),
+      JSON.stringify(tables),
+    );
+  }
+
+  /**
+   * Mark a set of tables as initial-uploaded (idempotent merge). Returns the
+   * updated set. Called on SYNC_FINALIZE so every registered table is marked
+   * initial-uploaded once the session completes (Q7).
+   */
+  async markTablesInitialUploadDone(
+    source: SyncSource,
+    tables: string[],
+  ): Promise<string[]> {
+    const current = await this.getInitialUploadDoneTables(source);
+    const merged = Array.from(new Set([...current, ...tables]));
+    await this.setInitialUploadDoneTables(source, merged);
+    return merged;
+  }
+
+  /**
    * Clear ALL persisted last-sync timestamps (per-source keys) so the app
    * starts from a clean initial state.
    *

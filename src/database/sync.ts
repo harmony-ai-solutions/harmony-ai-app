@@ -1,4 +1,5 @@
 import { getDatabase } from './connection';
+import { getPkField } from './pkRegistry';
 import { createLogger } from '../utils/logger';
 import type { DatabaseTransaction } from './types';
 
@@ -132,7 +133,7 @@ export async function loadTextColumn(
   columnName: string
 ): Promise<string | null> {
   const db = getDatabase();
-  const pkField = table === 'entity_module_mappings' ? 'entity_id' : 'id';
+  const pkField = getPkField(table);
   
   // Step 1: Check TEXT size using length()
   const [sizeResult] = await db.executeSql(
@@ -222,7 +223,7 @@ async function getChangedRecordsWithText(
   const db = getDatabase();
   const textColumns = TEXT_COLUMNS[table] || [];
   const nonTextColumns = await getNonTextColumns(table);
-  const pkField = table === 'entity_module_mappings' ? 'entity_id' : 'id';
+  const pkField = getPkField(table);
   
   // Phase 1: Get IDs and metadata without TEXT columns
   let metadataQuery: string;
@@ -359,22 +360,6 @@ export const getChangedRecords = async (
 };
 
 /**
- * Get the primary key field name for a table
- */
-const getPrimaryKeyField = (table: string): string => {
-  // entity_module_mappings uses entity_id as primary key
-  if (table === 'entity_module_mappings') {
-    return 'entity_id';
-  }
-  // emotion_state uses entity_id as primary key
-  if (table === 'emotion_state') {
-    return 'entity_id';
-  }
-  // All other tables use id
-  return 'id';
-};
-
-/**
  * Apply sync record using Last-Write-Wins (LWW) conflict resolution
  * 
  * @param table - The table to apply the record to
@@ -388,7 +373,7 @@ export const applySyncRecord = async (
   record: any,
   tx: DatabaseTransaction
 ) => {
-  const pkField = getPrimaryKeyField(table);
+  const pkField = getPkField(table);
   const pkValue = record[pkField];
 
   if (operation === 'delete') {

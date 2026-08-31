@@ -1,9 +1,9 @@
 /**
- * SyncService — `sync:messages-applied` recount event (3-1).
+ * SyncService — `sync:data-applied` recount event (3-1 → 4-1).
  *
  * The badge fix: synced-in partner messages never bumped a badge because the
  * unread increment only lived in the live-WS path. After an inbound sync apply
- * COMMITS, `applyBufferedSyncData` must emit `sync:messages-applied` carrying
+ * COMMITS, `applyBufferedSyncData` must emit `sync:data-applied` carrying
  * the applied table list so ChatListScreen can recount derived unread badges.
  *
  * This test drives the apply to a successful commit with a mocked sync DB and
@@ -86,17 +86,17 @@ function resetSingleton(): void {
   (SyncService as any).instance = null;
 }
 
-describe('SyncService sync:messages-applied emission (3-1)', () => {
+describe('SyncService sync:data-applied emission (3-1 → 4-1)', () => {
   beforeEach(() => {
     mockConnectionManager.removeAllListeners();
     jest.clearAllMocks();
     resetSingleton();
   });
 
-  it('emits sync:messages-applied with the applied tables after a successful commit', async () => {
+  it('emits sync:data-applied with the applied tables after a successful commit', async () => {
     const svc = SyncService.getInstance();
     const handler = jest.fn();
-    svc.on('sync:messages-applied', handler);
+    svc.on('sync:data-applied', handler);
 
     (svc as any).incomingDataBuffer = [
       {
@@ -115,7 +115,7 @@ describe('SyncService sync:messages-applied emission (3-1)', () => {
     await (svc as any).applyBufferedSyncData();
 
     expect(handler).toHaveBeenCalledTimes(1);
-    // Both applied tables are carried (generalizable to sync:data-applied).
+    // Both applied tables are carried (generalized to sync:data-applied).
     const tables = handler.mock.calls[0][0].tables as string[];
     expect(tables).toContain('conversation_messages');
     expect(tables).toContain('entities');
@@ -124,7 +124,7 @@ describe('SyncService sync:messages-applied emission (3-1)', () => {
   it('does NOT emit when the buffered data is empty', async () => {
     const svc = SyncService.getInstance();
     const handler = jest.fn();
-    svc.on('sync:messages-applied', handler);
+    svc.on('sync:data-applied', handler);
 
     (svc as any).incomingDataBuffer = [];
 

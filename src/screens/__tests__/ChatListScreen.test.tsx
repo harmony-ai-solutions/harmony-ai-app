@@ -7,16 +7,17 @@
  * The two behaviors are instead pinned at their pure seams:
  *  - `resolveDisplayUnreadCount` — mute (O10/Q8) suppresses the derived badge
  *    on the recount/load path.
- *  - `shouldRecountAfterSync` — the sync-apply handler gate (a
- *    `sync:messages-applied` payload only triggers a recount when the message
- *    table actually changed).
+ *  - `shouldReloadAfterSync` — the sync-apply handler gate (a
+ *    `sync:data-applied` payload only triggers a reload when a list-affecting
+ *    table changed: `conversation_messages` for unread/last-message,
+ *    `chat_conversation_settings` for pin/archive sort, 4-1).
  *
  * The producer of the event is pinned separately (syncMessagesApplied.test.ts).
  */
 
 import {
   resolveDisplayUnreadCount,
-  shouldRecountAfterSync,
+  shouldReloadAfterSync,
 } from '../ChatListScreen';
 
 describe('ChatListScreen derived-unread badge seam (3-1)', () => {
@@ -34,14 +35,20 @@ describe('ChatListScreen derived-unread badge seam (3-1)', () => {
   });
 });
 
-describe('ChatListScreen sync-apply recount gate (3-1)', () => {
-  it('recounts when conversation_messages was applied', () => {
-    expect(shouldRecountAfterSync(['conversation_messages'])).toBe(true);
-    expect(shouldRecountAfterSync(['entities', 'conversation_messages'])).toBe(true);
+describe('ChatListScreen sync-apply reload gate (3-1 → 4-1)', () => {
+  it('reloads when conversation_messages was applied', () => {
+    expect(shouldReloadAfterSync(['conversation_messages'])).toBe(true);
+    expect(shouldReloadAfterSync(['entities', 'conversation_messages'])).toBe(true);
   });
 
-  it('does NOT recount when only non-message tables were applied', () => {
-    expect(shouldRecountAfterSync(['entities'])).toBe(false);
-    expect(shouldRecountAfterSync([])).toBe(false);
+  it('reloads when chat_conversation_settings was applied (pin/archive, 4-1)', () => {
+    expect(shouldReloadAfterSync(['chat_conversation_settings'])).toBe(true);
+    expect(shouldReloadAfterSync(['entities', 'chat_conversation_settings'])).toBe(true);
+  });
+
+  it('does NOT reload when only non-list-affecting tables were applied', () => {
+    expect(shouldReloadAfterSync(['entities'])).toBe(false);
+    expect(shouldReloadAfterSync(['entity_module_mappings'])).toBe(false);
+    expect(shouldReloadAfterSync([])).toBe(false);
   });
 });

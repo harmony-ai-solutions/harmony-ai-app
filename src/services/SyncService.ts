@@ -3,6 +3,7 @@ import DeviceInfo from 'react-native-device-info';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SyncHelpers from '../database/sync';
+import { getPkField } from '../database/pkRegistry';
 import ConnectionStateManager from './ConnectionStateManager';
 import connectionManagerInstance from './connection/ConnectionManager';
 import type { ConnectionManager } from './connection/ConnectionManager';
@@ -45,13 +46,14 @@ interface SyncServiceEvents {
   'sync:nameclash': (clash: NameClashInfo) => void;
   /**
    * Emitted after an inbound sync apply COMMITS, carrying the list of tables
-   * that were touched. ChatListScreen (and, in 4-1, any other consumer) reacts
-   * when `conversation_messages` is present by recounting derived unread badges
-   * — the fix for synced-in messages never badging (the increment only lived in
-   * the live-WS path). Payload is a plain `{ tables: string[] }` so the event
-   * can be generalized to `sync:data-applied` later without changing consumers.
+   * that were touched. Consumers (ChatListScreen, CharactersScreen) react
+   * based on which tables are present:
+   *   - `conversation_messages` → ChatList recounts derived unread badges (3-1)
+   *   - `chat_conversation_settings` → ChatList debounced reload (4-1, pin/archive)
+   *   - `character_favorites` → CharactersScreen favorite-ids refresh (4-1)
+   * Payload is a plain `{ tables: string[] }`.
    */
-  'sync:messages-applied': (payload: { tables: string[] }) => void;
+  'sync:data-applied': (payload: { tables: string[] }) => void;
 }
 
 export interface SyncSession {
@@ -64,6 +66,82 @@ export interface SyncSession {
   recordsReceived: number;
   error?: string;
   forceFullSync?: boolean;
+}
+
+/**
+ * The full local-changes upload list, in FK-safe send order (provider configs →
+ * module configs → character data → interactions → conversation/state data).
+ * Used by both the upload phase (sendLocalChangesSequentially) and to mark the
+ * per-table initial-upload set complete on SYNC_FINALIZE (Q7).
+ *
+ * 4-1: `character_favorites` rides after `character_profiles` (its FK target),
+ * and `chat_conversation_settings` after `conversation_messages`.
+ */
+const SYNC_TABLES: string[] = [
+  // Provider configs first (no FK dependencies)
+  'provider_config_openai',
+  'provider_config_ollama',
+  'provider_config_openaicompatible',
+  'provider_config_openrouter',
+  'provider_config_harmonyspeech',
+  'provider_config_elevenlabs',
+  'provider_config_kindroid',
+  'provider_config_kajiwoto',
+  'provider_config_characterai',
+  'provider_config_localai',
+  'provider_config_mistral',
+  'provider_config_comfyui',
+  'provider_config_xai',
+  'provider_config_google',
+  'provider_config_anthropic',
+  'provider_config_soulbitscloud',
+  // Module configs (reference provider configs)
+  'backend_configs',
+  'cognition_configs',
+  'movement_configs',
+  'rag_configs',
+  'stt_configs',
+  'tts_configs',
+  'vision_configs',
+  'imagination_configs',
+  // Character and entity data
+  'character_profiles',
+  'character_favorites', // 4-1: references character_profiles(id)
+  'character_image',
+  'entities',
+  'entity_module_mappings',
+  // Interactions (referenced by conversation_messages)
+  'interactions',
+  // Conversation and state data
+  'conversation_messages',
+  'chat_conversation_settings', // 4-1: after messages (participant_key semantics)
+  'emotion_state',
+  'lifecycle_state',
+  'entity_emoji_actions',
+  'memories',
+];
+
+/**
+ * Resolve the sync watermark for a single table given the per-table
+ * initial-upload set (Q7).
+ *
+ * A table NOT yet in the set uploads with `since = 0` (full) exactly once; once
+ * it has been marked initial-uploaded (on SYNC_FINALIZE), subsequent syncs use
+ * the session watermark so only rows changed since the last sync are sent.
+ *
+ * Contract: re-sends are harmless (LWW apply). The set exists purely to avoid
+ * re-uploading every table in full on every sync.
+ *
+ * @param table - The registered sync table.
+ * @param lastSync - The session watermark (already 0 for a force-full-sync).
+ * @param initialUploadDone - The tables whose initial full upload completed.
+ */
+export function resolveTableSyncSince(
+  table: string,
+  lastSync: number,
+  initialUploadDone: string[],
+): number {
+  return initialUploadDone.includes(table) ? lastSync : 0;
 }
 
 export class SyncService extends EventEmitter<SyncServiceEvents> {
@@ -798,7 +876,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     log.info(`Applying ${recordCount} buffered sync records in transaction`);
     log.info('Buffer contents:');
     this.incomingDataBuffer.forEach((item, index) => {
-      const pkField = (item.table === 'entity_module_mappings' || item.table === 'emotion_state' || item.table === 'lifecycle_state') ? 'entity_id' : 'id';
+      const pkField = getPkField(item.table);
       const pkValue = item.record[pkField];
       log.info(`  [${index + 1}/${recordCount}] ${item.table}.${item.operation} (${pkField}=${pkValue})`);
     });
@@ -849,7 +927,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     }
 
     // Track which tables this apply touches so the post-commit
-    // `sync:messages-applied` event can carry the applied table list (3-1).
+    // `sync:data-applied` event can carry the applied table list (3-1 → 4-1).
     const appliedTables = new Set<string>();
 
     return new Promise<void>((resolve, reject) => {
@@ -887,11 +965,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         'vision_configs': 2,
         'imagination_configs': 2,
         'character_profiles': 3,
+        'character_favorites': 4, // 4-1: references character_profiles(id)
         'character_image': 4,
         'entities': 5,
         'entity_module_mappings': 6,
         'interactions': 7,
         'conversation_messages': 8,
+        'chat_conversation_settings': 8, // 4-1: no FK; after messages (participant_key)
         'emotion_state': 8,
         'lifecycle_state': 8,
         'entity_emoji_actions': 8,
@@ -914,7 +994,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
           // Apply all buffered records synchronously within transaction (sorted by dependency order)
           for (const item of sortedBuffer) {
             appliedTables.add(item.table);
-            const pkField = (item.table === 'entity_module_mappings' || item.table === 'emotion_state' || item.table === 'lifecycle_state') ? 'entity_id' : 'id';
+            const pkField = getPkField(item.table);
             const pkValue = item.record[pkField];
 
             // ── Name-clash resolutions ────────────────────────────────────
@@ -1096,11 +1176,11 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
           // Invalidate service caches that may be stale after incoming sync
           EntityEmojiActionService.invalidateAllCaches();
 
-          // Tell consumers (ChatListScreen) which tables changed so they can
-          // recount derived unread badges (3-1 — synced-in messages never
-          // badged because the increment only lived in the live-WS path).
+          // Tell consumers (ChatListScreen, CharactersScreen) which tables
+          // changed so they can refresh derived unread / pin-archive / favorite
+          // state (3-1 → 4-1: generalized event, per-table consumption).
           if (appliedTables.size > 0) {
-            this.emit('sync:messages-applied', { tables: Array.from(appliedTables) });
+            this.emit('sync:data-applied', { tables: Array.from(appliedTables) });
           }
 
           resolve();
@@ -1131,51 +1211,20 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
     try {
       // Define table order respecting FK dependencies (must match server send order)
-      const tables = [
-        // Provider configs first (no FK dependencies)
-        'provider_config_openai',
-        'provider_config_ollama',
-        'provider_config_openaicompatible',
-        'provider_config_openrouter',
-        'provider_config_harmonyspeech',
-        'provider_config_elevenlabs',
-        'provider_config_kindroid',
-        'provider_config_kajiwoto',
-        'provider_config_characterai',
-        'provider_config_localai',
-        'provider_config_mistral',
-        'provider_config_comfyui',
-        'provider_config_xai',        // NEW
-        'provider_config_google',     // NEW
-        'provider_config_anthropic',  // NEW
-        'provider_config_soulbitscloud',
-        // Module configs (reference provider configs)
-        'backend_configs',
-        'cognition_configs',
-        'movement_configs',
-        'rag_configs',
-        'stt_configs',
-        'tts_configs',
-        'vision_configs',
-        'imagination_configs',
-        // Character and entity data
-        'character_profiles',
-        'character_image',
-        'entities',
-        'entity_module_mappings',
-        // Interactions (referenced by conversation_messages)
-        'interactions',
-        // Conversation and state data
-        'conversation_messages',
-        'emotion_state',
-        'lifecycle_state',
-        'entity_emoji_actions',  // emoji action mappings
-        'memories',
-      ];
+      const tables = SYNC_TABLES;
+
+      // Per-table initial upload set (Q7): a table NOT yet initial-uploaded
+      // sends with since = 0 (full) exactly once; after SYNC_FINALIZE marks it
+      // done, subsequent syncs are incremental. LWW apply makes any re-send
+      // harmless — the set exists purely to avoid full re-uploads every sync.
+      const source = await ConnectionStateManager.getCurrentSource();
+      const initialUploadDone =
+        await ConnectionStateManager.getInitialUploadDoneTables(source);
 
       // Send each table's records sequentially
       for (const table of tables) {
-        const records = await SyncHelpers.getChangedRecords(table, lastSync);
+        const tableSince = resolveTableSyncSince(table, lastSync, initialUploadDone);
+        const records = await SyncHelpers.getChangedRecords(table, tableSince);
         log.info(`Found ${records.length} changes in ${table}`);
 
         // Filter out records that were received from the server this session
@@ -1183,7 +1232,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         // EXCEPTION: locally-deleted records must still be pushed so the server learns about
         // the deletion, even if the server sent the record back during the pull phase (LWW
         // would have kept the local version because its updated_at is newer).
-        const pkField = (table === 'entity_module_mappings' || table === 'emotion_state' || table === 'lifecycle_state') ? 'entity_id' : 'id';
+        const pkField = getPkField(table);
         const filteredRecords = records.filter(record => {
           const recordKey = `${table}:${record[pkField]}`;
           if (this.serverRecordIds.has(recordKey)) {
@@ -1269,8 +1318,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       const mbSize = byteSize / (1024 * 1024);
       log.debug(`📊 SYNC_DATA payload size: ${table} ${operation} - ${mbSize.toFixed(2)} MB (${byteSize} bytes)`);
 
-      // Use correct primary key field for tables using entity_id (entity_module_mappings, emotion_state) vs others (id)
-      const pkField = (table === 'entity_module_mappings' || table === 'emotion_state') ? 'entity_id' : 'id';
+      // Resolve the PK via the centralized registry (4-1) — tables with a
+      // non-`id` PK (entity_module_mappings, emotion_state, lifecycle_state,
+      // character_favorites, chat_conversation_settings) key correctly.
+      const pkField = getPkField(table);
       log.info(`Sending sync data for ${table}:${record[pkField] || 'undefined'}, eventId: ${eventId}`);
       this.connectionManager.sendEvent('sync', event).catch(reject);
 
@@ -1286,8 +1337,9 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
   private async handleIncomingSyncData(payload: any): Promise<void> {
     try {
-      // Better logging for primary key (handle both 'id' and 'entity_id' for mapping/state tables)
-      const pkField = (payload.table === 'entity_module_mappings' || payload.table === 'emotion_state') ? 'entity_id' : 'id';
+      // Resolve the PK via the centralized registry (4-1) for accurate logging
+      // and server-record exclusion keys.
+      const pkField = getPkField(payload.table);
       const pkValue = payload.record?.[pkField] || 'undefined';
       log.info(`Buffering sync data for ${payload.table}:${pkValue}`);
 
@@ -1304,7 +1356,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       });
 
       // Track server record IDs to exclude from local changes later
-      const recordPkField = (payload.table === 'entity_module_mappings' || payload.table === 'emotion_state') ? 'entity_id' : 'id';
+      const recordPkField = getPkField(payload.table);
       if (payload.record?.[recordPkField]) {
         this.serverRecordIds.add(`${payload.table}:${payload.record[recordPkField]}`);
       }
@@ -1483,6 +1535,18 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
     await this.updateLastSyncTimestamp(this.currentSession.startTime);
 
+    // Per-table initial upload set (Q7): on SYNC_FINALIZE the session is
+    // complete, so every registered table is marked initial-uploaded. Future
+    // syncs upload only rows changed since the watermark (incremental), not a
+    // full re-upload. LWW apply makes any re-send harmless.
+    try {
+      const source = await ConnectionStateManager.getCurrentSource();
+      await ConnectionStateManager.markTablesInitialUploadDone(source, SYNC_TABLES);
+    } catch (error) {
+      log.warn('Failed to mark initial upload set complete:', error);
+      // Best-effort — a stale set only causes a harmless full re-upload.
+    }
+
     await this.cleanupSoftDeletedRecords(this.currentSession.startTime);
 
     // Clean up orphaned memories
@@ -1543,6 +1607,8 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       'tts_configs',
       'vision_configs',
       'imagination_configs',
+      'character_favorites', // 4-1: soft-delete cleanup
+      'chat_conversation_settings', // 4-1: soft-delete cleanup
     ];
 
     const db = getDatabase();
@@ -1592,6 +1658,7 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       ],
       'interactions': ['entity_id', 'memory_id'],
       'lifecycle_state': ['entity_id'],
+      'character_favorites': ['profile_id'], // 4-1: references character_profiles(id)
       'backend_configs': ['provider_config_id'],
       'vision_configs': ['provider_config_id'],
       'imagination_configs': ['provider_config_id'],
