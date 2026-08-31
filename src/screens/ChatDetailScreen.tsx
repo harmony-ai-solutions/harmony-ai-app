@@ -69,7 +69,7 @@ import {
   setEntityDisabled,
 } from '../database/repositories/entities';
 import { getReplyMode } from '../database/repositories/chatConversationSettings';
-import { getPersona } from '../database/repositories/personas';
+import { getUserPersona } from '../database/repositories/userEntities';
 import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
@@ -1506,7 +1506,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           return;
         }
 
-        const persona = await getPersona(personaId);
+        const persona = await getUserPersona(personaId);
         await ChatPreferencesService.setGlobalImpersonatedEntity(personaId);
 
         setPersonaChangeText(t('personaChanged', { name: persona?.name ?? personaId }));

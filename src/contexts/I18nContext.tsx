@@ -38,6 +38,7 @@ import moduleConfig from '../i18n/locales/en/moduleConfig.json';
 import syncConnection from '../i18n/locales/en/syncConnection.json';
 import scenario from '../i18n/locales/en/scenario.json';
 import market from '../i18n/locales/en/market.json';
+import persona from '../i18n/locales/en/persona.json';
 
 // ── Storage key ─────────────────────────────────────────────────────────────
 
@@ -91,6 +92,7 @@ const resources = {
     syncConnection,
     scenario,
     market,
+    persona,
   },
 };
 
@@ -124,6 +126,7 @@ const i18nConfig: InitOptions = {
     'syncConnection',
     'scenario',
     'market',
+    'persona',
   ],
   interpolation: {
     escapeValue: false, // React already escapes

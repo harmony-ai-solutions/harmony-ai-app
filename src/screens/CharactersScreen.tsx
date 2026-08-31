@@ -83,7 +83,7 @@ import {
 } from '../database/repositories/interactions';
 import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from '../services/ChatPreferencesService';
-import { resolvePersonaId } from '../database/repositories/personas';
+import { resolvePersonaId } from '../database/repositories/userEntities';
 import { filterBlockedCharacterProfiles } from '../utils/blockedContentFilters';
 import * as SocialService from '../services/social/SocialService';
 import { CharacterProfile } from '../database/models';
@@ -531,6 +531,26 @@ export const CharactersScreen: React.FC = () => {
 
   const handleMenuAddToCategory = (profile: CharacterProfile) => {
     setCategoryPickProfile(profile);
+  };
+
+  /**
+   * "Create persona from this card" (5-4 §3). P1 copy semantics: a persona is a
+   * MINIMAL identity copy of the source card — name/description/personality/
+   * avatar only. Deliberately NO lore, character_book or AI module configs: a
+   * persona is the identity the user chats AS, not an AI character. The source
+   * card is untouched; PersonaEdit's create mode prefills the form and, on
+   * save, createUserPersona makes a fresh user entity + minimal profile.
+   */
+  const handleCreatePersonaFromCard = (profile: CharacterProfile) => {
+    closeMenu();
+    navigation.navigate('PersonaEdit', {
+      prefill: {
+        name: profile.name,
+        description: profile.description,
+        personality: profile.personality,
+        avatarUri: primaryImages[profile.id] ?? null,
+      },
+    });
   };
 
   const closeCategoryPick = () => setCategoryPickProfile(null);
@@ -1124,6 +1144,7 @@ export const CharactersScreen: React.FC = () => {
         onEdit={() => menuProfile && handleEdit(menuProfile)}
         onDelete={() => menuProfile && handleDeleteProfile(menuProfile)}
         onAddToCategory={() => menuProfile && handleMenuAddToCategory(menuProfile)}
+        onCreatePersonaFromCard={() => menuProfile && handleCreatePersonaFromCard(menuProfile)}
       />
 
       {/* Add-to-category picker (from long-press menu) */}

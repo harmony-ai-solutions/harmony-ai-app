@@ -223,8 +223,14 @@ function parseTagsColumn(col: string | null | undefined): string[] {
 }
 
 /**
- * Get all character profiles
+ * Get all AI character profiles.
  * Returns empty array if none found. Filters out soft deleted by default.
+ *
+ * §9-A3: a profile is an "AI character" (a chat partner) precisely when it is
+ * NOT linked to an entity with `entity_type = 'user'`. User persona profiles
+ * (the identity the user chats AS — including the engine-seeded built-in "You"
+ * profile) are NEVER returned here, so no AI-partner surface can ever offer a
+ * user entity as a chat option.
  */
 export async function getAllCharacterProfiles(includeDeleted = false): Promise<CharacterProfile[]> {
   const db = getDatabase();
@@ -237,10 +243,13 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
               first_mes, mes_example, alternate_greetings, post_history_instructions,
               creator_notes, creator, character_version, nickname,
               tags, group_only_greetings, extensions, assets,
-              card_provenance, character_book, is_favorite,
-              created_at, updated_at, deleted_at
-       FROM character_profiles
-       ORDER BY name`
+               card_provenance, character_book, is_favorite,
+               created_at, updated_at, deleted_at
+        FROM character_profiles
+        WHERE NOT EXISTS (SELECT 1 FROM entities e
+                          WHERE e.character_profile_id = character_profiles.id
+                            AND e.entity_type = 'user')
+        ORDER BY name`
     : `SELECT id, name, description, personality,
               voice_characteristics, base_prompt, scenario,
               typing_speed_wpm, audio_response_chance_percent, vision_config_id,
@@ -248,11 +257,14 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
               first_mes, mes_example, alternate_greetings, post_history_instructions,
               creator_notes, creator, character_version, nickname,
               tags, group_only_greetings, extensions, assets,
-              card_provenance, character_book, is_favorite,
-              created_at, updated_at, deleted_at
-       FROM character_profiles
-       WHERE deleted_at IS NULL
-       ORDER BY name`;
+               card_provenance, character_book, is_favorite,
+               created_at, updated_at, deleted_at
+        FROM character_profiles
+        WHERE deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM entities e
+                          WHERE e.character_profile_id = character_profiles.id
+                            AND e.entity_type = 'user')
+        ORDER BY name`;
 
   const [results] = await db.executeSql(query);
 

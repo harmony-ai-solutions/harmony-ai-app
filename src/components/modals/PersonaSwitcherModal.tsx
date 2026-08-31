@@ -24,7 +24,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
-import { getAllPersonas, Persona } from '../../database/repositories/personas';
+import { getUserEntities, Persona } from '../../database/repositories/userEntities';
 import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 
@@ -54,7 +54,7 @@ export const PersonaSwitcherModal: React.FC<PersonaSwitcherModalProps> = ({
     if (!visible) return;
     setLoading(true);
     try {
-      const all = await getAllPersonas();
+      const all = await getUserEntities();
       setPersonas(all);
     } catch (err) {
       log.error('Failed to load personas:', err);
@@ -81,6 +81,20 @@ export const PersonaSwitcherModal: React.FC<PersonaSwitcherModalProps> = ({
     onClose();
     navigation.navigate('PersonaEdit');
   };
+
+  // §9-A3 + 5-4 §2: the built-in `user` entity IS the "chat as my own profile"
+  // identity. It renders in the dedicated default row below (with its real
+  // profile name + avatar from getUserEntities — the engine-seeded "You"
+  // profile once synced), and is excluded from the persona list so the user
+  // row is never duplicated.
+  const builtIn = personas.find(p => p.id === 'user') ?? null;
+  const personaList = personas.filter(p => p.id !== 'user');
+  // Fall back to the i18n "You" label until a profile is linked (pre-seeder),
+  // at which point getUserEntities returns the real profile name.
+  const builtInName =
+    builtIn && builtIn.name && builtIn.name !== builtIn.id
+      ? builtIn.name
+      : t('persona:builtInName');
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -130,14 +144,23 @@ export const PersonaSwitcherModal: React.FC<PersonaSwitcherModalProps> = ({
                 activeOpacity={0.7}
                 testID="persona-switcher-user"
               >
-                <View
-                  style={[
-                    styles.userBadge,
-                    { backgroundColor: theme.colors.accent.primary + '1A' },
-                  ]}
-                >
-                  <Icon name="account-outline" size={22} color={theme.colors.accent.primary} />
-                </View>
+                {builtIn ? (
+                  <ProfileAvatar
+                    name={builtIn.name}
+                    uri={builtIn.avatarUri}
+                    size={44}
+                    showRing={false}
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.userBadge,
+                      { backgroundColor: theme.colors.accent.primary + '1A' },
+                    ]}
+                  >
+                    <Icon name="account-outline" size={22} color={theme.colors.accent.primary} />
+                  </View>
+                )}
                 <View style={styles.rowInfo}>
                   <ThemedText
                     size={15}
@@ -148,7 +171,7 @@ export const PersonaSwitcherModal: React.FC<PersonaSwitcherModalProps> = ({
                     }
                     numberOfLines={1}
                   >
-                    {t('personaSwitcherUser')}
+                    {builtInName}
                   </ThemedText>
                   <ThemedText size={12} variant="muted" numberOfLines={1}>
                     {t('personaSwitcherUserCaption')}
@@ -163,13 +186,13 @@ export const PersonaSwitcherModal: React.FC<PersonaSwitcherModalProps> = ({
               <View style={[styles.separator, { backgroundColor: theme.colors.border.default + '55' }]} />
 
               {/* Persona list */}
-              {personas.length === 0 && !loading ? (
+              {personaList.length === 0 && !loading ? (
                 <ThemedText size={13} variant="muted" style={styles.emptyText}>
                   {t('personaSwitcherEmpty')}
                 </ThemedText>
               ) : (
                 <FlatList
-                  data={personas}
+                  data={personaList}
                   keyExtractor={p => p.id}
                   style={styles.list}
                   contentContainerStyle={styles.listContent}

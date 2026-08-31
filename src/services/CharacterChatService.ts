@@ -34,7 +34,7 @@ import {
 } from '../database/repositories/interactions';
 import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from './ChatPreferencesService';
-import { resolvePersonaId } from '../database/repositories/personas';
+import { resolvePersonaId } from '../database/repositories/userEntities';
 import syncService from './SyncService';
 import { isChatLocked } from './marketplace/MarketplaceService';
 import type { CharacterProfile } from '../database/models';

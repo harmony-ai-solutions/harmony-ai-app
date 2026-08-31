@@ -106,6 +106,7 @@ import {
   getNextEntityAliasCopy,
   updateEntityFields,
 } from '../database/repositories/entities';
+import { getUserPersona } from '../database/repositories/userEntities';
 import { getActiveInteractionsByEntity } from '../database/repositories/interactions';
 import { createDataURL } from '../database/base64';
 import {
@@ -662,15 +663,19 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       try {
         const allEntities = await getAllEntities();
         const stored = await ChatPreferencesService.getGlobalImpersonatedEntity();
+        // $9-A3/A7: only `entity_type='user'` entities are valid impersonation
+        // identities — AI characters are partners, never the persona.
         const id =
-          stored && allEntities.some(e => e.id === stored)
+          stored && allEntities.some(e => e.id === stored && e.entity_type === 'user')
             ? stored
-            : (allEntities.find(e => e.id === 'user')?.id ??
-              allEntities[0]?.id ??
+            : (allEntities.find(e => e.id === 'user' && e.entity_type === 'user')?.id ??
+              allEntities.find(e => e.entity_type === 'user')?.id ??
               'user');
-        const ent = allEntities.find(e => e.id === id);
+        // Resolve the {{user}} macro to the user entity's PROFILE name (the
+        // engine-seeded "You" profile now syncs down); fall back to the raw id.
+        const persona = await getUserPersona(id);
         setImpersonatedEntityId(id);
-        setImpersonatedEntityName(ent?.alias ?? id);
+        setImpersonatedEntityName(persona?.name ?? id);
       } catch {
         setImpersonatedEntityId('user');
         setImpersonatedEntityName('{{user}}');

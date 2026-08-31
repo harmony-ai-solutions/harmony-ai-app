@@ -50,7 +50,7 @@ import { ProfileTabs, ProfileTabKey, ProfileTabDef } from '../components/profile
 import { getUserCharacterProfiles } from '../database/repositories/characters';
 import * as SocialService from '../services/social/SocialService';
 import type { StubPost } from '../services/social/SocialService';
-import { getAllPersonas, Persona } from '../database/repositories/personas';
+import { getUserEntities, Persona } from '../database/repositories/userEntities';
 import { CharacterProfile } from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import ProfileExtrasService from '../services/profile/ProfileExtrasService';
@@ -147,7 +147,7 @@ export const MyProfileScreen: React.FC = () => {
   const loadPersonas = useCallback(async () => {
     try {
       const stored = await ChatPreferencesService.getGlobalImpersonatedEntity();
-      const all = await getAllPersonas();
+      const all = await getUserEntities();
       const active = stored && all.some(p => p.id === stored) ? stored : null;
       setActivePersonaId(active);
       setPersonas(all.map(p => ({ ...p, isActive: p.id === active })));

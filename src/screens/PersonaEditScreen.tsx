@@ -39,12 +39,13 @@ import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import {
-  createPersona,
-  getPersona,
-  updatePersona,
-  deletePersona,
-} from '../database/repositories/personas';
+  createUserPersona,
+  getUserPersona,
+  updateUserPersona,
+  deleteUserPersona,
+} from '../database/repositories/userEntities';
 import syncService from '../services/SyncService';
+import ChatPreferencesService from '../services/ChatPreferencesService';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
 
@@ -70,12 +71,19 @@ export const PersonaEditScreen: React.FC = () => {
 
   const personaId = route.params?.entityId;
   const isEdit = !!personaId;
+  // Built-in identity (A1): the `user` entity is load-bearing — its id is
+  // FROZEN, it can never be deleted, but its name/description/personality/
+  // avatar ARE editable (the engine-seeded "You" profile syncs down).
+  const isBuiltIn = personaId === 'user';
+  // Create-mode prefill ("create persona from this card", 5-4 §3) — identity
+  // fields only; the source character card is untouched (P1).
+  const prefill = route.params?.prefill;
 
   // ── Form state ─────────────────────────────────────────────────────────
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [personality, setPersonality] = useState('');
-  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [name, setName] = useState(() => prefill?.name ?? '');
+  const [description, setDescription] = useState(() => prefill?.description ?? '');
+  const [personality, setPersonality] = useState(() => prefill?.personality ?? '');
+  const [avatarUri, setAvatarUri] = useState<string | null>(() => prefill?.avatarUri ?? null);
   const [isSaving, setIsSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -91,7 +99,7 @@ export const PersonaEditScreen: React.FC = () => {
         return;
       }
       try {
-        const persona = await getPersona(personaId!);
+        const persona = await getUserPersona(personaId!);
         if (!cancelled && persona) {
           setName(persona.name);
           setDescription(persona.description ?? '');
@@ -149,31 +157,27 @@ export const PersonaEditScreen: React.FC = () => {
 
     setIsSaving(true);
     try {
-      let avatarImageData: string | null = null;
-      let avatarMimeType: string | null = null;
+      let avatar: { image_data: string; mime_type: string } | null = null;
       if (avatarUri?.startsWith('data:')) {
         const split = splitDataUrl(avatarUri);
         if (split) {
-          avatarImageData = split.base64;
-          avatarMimeType = split.mimeType;
+          avatar = { image_data: split.base64, mime_type: split.mimeType };
         }
       }
 
       if (isEdit) {
-        await updatePersona(personaId!, {
+        await updateUserPersona(personaId!, {
           name: name.trim(),
           description: description.trim(),
           personality: personality.trim(),
-          avatar_image_data: avatarImageData,
-          avatar_mime_type: avatarMimeType,
+          avatar,
         });
       } else {
-        await createPersona({
+        await createUserPersona({
           name: name.trim(),
           description: description.trim(),
           personality: personality.trim(),
-          avatar_image_data: avatarImageData,
-          avatar_mime_type: avatarMimeType,
+          avatar,
         });
       }
 
@@ -198,6 +202,11 @@ export const PersonaEditScreen: React.FC = () => {
   // ── Delete persona ─────────────────────────────────────────────────────
   const handleDelete = useCallback(() => {
     if (!isEdit || !personaId) return;
+    if (isBuiltIn) {
+      // A1: the built-in `user` identity is load-bearing and never deletable.
+      showAlert(t('persona:deleteProtected'));
+      return;
+    }
     showAlert(t('personaDeleteConfirm'), t('personaDeleteConfirmHint'), [
       { text: t('common:cancel'), style: 'cancel' },
       {
@@ -205,7 +214,17 @@ export const PersonaEditScreen: React.FC = () => {
         style: 'destructive',
         onPress: async () => {
           try {
-            await deletePersona(personaId);
+            await deleteUserPersona(personaId);
+            // 5-4 §2: if the deleted persona was the global impersonated
+            // identity, reset the preference to the built-in 'user'.
+            try {
+              const stored = await ChatPreferencesService.getGlobalImpersonatedEntity();
+              if (stored === personaId) {
+                await ChatPreferencesService.setGlobalImpersonatedEntity('user');
+              }
+            } catch (prefErr) {
+              log.warn('Failed to reset impersonation pref after persona delete:', prefErr);
+            }
             showAlert(t('personaDeleted'), undefined, [{ text: 'OK' }]);
             navigation.goBack();
           } catch (err) {
@@ -215,7 +234,7 @@ export const PersonaEditScreen: React.FC = () => {
         },
       },
     ]);
-  }, [isEdit, personaId, navigation, showAlert, t]);
+  }, [isEdit, isBuiltIn, personaId, navigation, showAlert, t]);
 
   if (!theme || !loaded) return null;
 
@@ -231,7 +250,7 @@ export const PersonaEditScreen: React.FC = () => {
         title={isEdit ? t('personaEditTitle') : t('personaCreateTitle')}
         onBack={() => navigation.goBack()}
         right={
-          isEdit ? (
+          isEdit && !isBuiltIn ? (
             <TouchableOpacity
               onPress={handleDelete}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

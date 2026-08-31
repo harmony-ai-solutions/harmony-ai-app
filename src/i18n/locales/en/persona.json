@@ -1,0 +1,6 @@
+{
+  "builtInName": "You",
+  "builtInDesc": "Your default persona — the identity you chat as when no persona is selected.",
+  "createPersonaFromCard": "Create persona from this card",
+  "deleteProtected": "The built-in 'You' persona can't be deleted. It's the default identity you chat as."
+}

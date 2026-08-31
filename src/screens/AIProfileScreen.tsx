@@ -333,6 +333,26 @@ export const AIProfileScreen: React.FC = () => {
     navigation.navigate('CreateAI', { editProfileId: profileId });
   };
 
+  /**
+   * "Create persona from this card" (5-4 §3). P1 copy semantics: a persona is a
+   * MINIMAL identity copy of the source card — name/description/personality/
+   * avatar only. Deliberately NO lore, character_book or AI module configs: a
+   * persona is the identity the user chats AS, not an AI character. The source
+   * card is untouched; PersonaEdit's create mode prefills the form and, on
+   * save, createUserPersona makes a fresh user entity + minimal profile.
+   */
+  const handleCreatePersonaFromCard = () => {
+    if (!profile) return;
+    navigation.navigate('PersonaEdit', {
+      prefill: {
+        name: profile.name,
+        description: profile.description,
+        personality: profile.personality,
+        avatarUri,
+      },
+    });
+  };
+
   const handleChat = async () => {
     if (!profile || chatting) return;
     setChatting(true);
@@ -808,6 +828,32 @@ export const AIProfileScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
+            {/* ── Create persona from this card (5-4 §3) ── */}
+            {profile && (
+              <TouchableOpacity
+                onPress={() => {
+                  hapticLightPress();
+                  handleCreatePersonaFromCard();
+                }}
+                activeOpacity={0.7}
+                style={[
+                  styles.fromCardPill,
+                  {
+                    backgroundColor: hexToRgba(accent, 0.12),
+                    borderColor: hexToRgba(accent, 0.3),
+                  },
+                ]}
+                testID="ai-profile-create-persona-button"
+                accessibilityRole="button"
+                accessibilityLabel={t('persona:createPersonaFromCard')}
+              >
+                <Icon name="account-edit-outline" size={15} color={accent} />
+                <ThemedText size={13} weight="medium" style={{ color: accent }}>
+                  {t('persona:createPersonaFromCard')}
+                </ThemedText>
+              </TouchableOpacity>
+            )}
+
             {/* ── Entity status chip row (Q8) — disable / mute, global per entity ── */}
             {aiEntityId && (
               <View style={styles.entityChipRow}>
@@ -1125,6 +1171,19 @@ const styles = StyleSheet.create({
     marginTop: 18,
     paddingHorizontal: 16,
     gap: 10,
+  },
+  fromCardPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 10,
+    marginHorizontal: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   chatButton: {
     flex: 1,

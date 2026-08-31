@@ -27,7 +27,7 @@ import {
   setEntityDisabled,
   getDisabledEntityIds,
 } from '../database/repositories/entities';
-import { resolvePersonaId } from '../database/repositories/personas';
+import { resolvePersonaId } from '../database/repositories/userEntities';
 import {
   getPhoneConversationsPage,
   PhoneConversationPageRow,

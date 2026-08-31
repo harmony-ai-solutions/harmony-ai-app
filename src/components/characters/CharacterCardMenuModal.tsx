@@ -38,6 +38,8 @@ interface CharacterCardMenuModalProps {
   onDelete: () => void;
   /** Open the "add to category" picker */
   onAddToCategory: () => void;
+  /** Create a persona from this card (identity-fields copy, P1) */
+  onCreatePersonaFromCard: () => void;
 }
 
 export const CharacterCardMenuModal: React.FC<CharacterCardMenuModalProps> = ({
@@ -47,6 +49,7 @@ export const CharacterCardMenuModal: React.FC<CharacterCardMenuModalProps> = ({
   onEdit,
   onDelete,
   onAddToCategory,
+  onCreatePersonaFromCard,
 }) => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
@@ -149,6 +152,26 @@ export const CharacterCardMenuModal: React.FC<CharacterCardMenuModalProps> = ({
                   <Icon name="shape-outline" size={20} color={accent} />
                   <ThemedText size={15} variant="primary" weight="medium" style={styles.actionLabel}>
                     {t('cardMenuAddToCategory')}
+                  </ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLightPress();
+                    onClose();
+                    onCreatePersonaFromCard();
+                  }}
+                  activeOpacity={0.7}
+                  style={[
+                    styles.actionRow,
+                    { backgroundColor: theme.colors.background.base + '55', borderColor: theme.colors.border.default + '66' },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Create a persona from ${characterName}`}
+                >
+                  <Icon name="account-edit-outline" size={20} color={accent} />
+                  <ThemedText size={15} variant="primary" weight="medium" style={styles.actionLabel}>
+                    {t('persona:createPersonaFromCard')}
                   </ThemedText>
                 </TouchableOpacity>
 

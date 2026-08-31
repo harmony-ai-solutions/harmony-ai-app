@@ -96,6 +96,9 @@ export const ForwardPickerModal: React.FC<ForwardPickerModalProps> = ({
         if (!partnerEntityId) continue;
         const entity = entityMap.get(partnerEntityId);
         if (!entity) continue; // skip deleted entities
+        // §9-A3: user entities are identities (the persona the user chats AS),
+        // never chat partners — a user entity can never be a forward target.
+        if (entity.entity_type === 'user') continue;
 
         // Display name: alias > character profile name > entity id
         let characterName = entity.alias || partnerEntityId;
