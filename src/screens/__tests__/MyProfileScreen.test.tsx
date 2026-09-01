@@ -216,7 +216,7 @@ async function flush() {
 }
 
 describe('MyProfileScreen — personas tab (5-4 §2)', () => {
-  it('lists user entities (including the built-in user) in the Personas grid', async () => {
+  it('lists user entities (including the built-in user) as Persona rows', async () => {
     mockGetUserEntities.mockResolvedValue([USER_ENTITY, MARA]);
 
     const utils = await render(<MyProfileScreen />);
@@ -226,9 +226,9 @@ describe('MyProfileScreen — personas tab (5-4 §2)', () => {
     await fireEvent.press(utils.getByTestId('profile-tab-personas'));
     await flush();
 
-    // Both the built-in user and the authored persona render as cells.
-    const cells = utils.getAllByTestId('profile-persona-cell');
-    expect(cells).toHaveLength(2);
+    // Both the built-in user and the authored persona render as rows.
+    const rows = utils.getAllByTestId('persona-row');
+    expect(rows).toHaveLength(2);
     expect(utils.getByText('You')).toBeTruthy();
     expect(utils.getByText('Mystic Mara')).toBeTruthy();
   });

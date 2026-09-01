@@ -46,6 +46,7 @@ import { HeaderNotificationButton } from '../components/navigation/HeaderNotific
 import { TAB_BAR_CONTENT_PAD } from '../components/navigation/GlassTabBar';
 import { hapticLightPress } from '../utils/haptics';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
+import { PersonaRow } from '../components/profile/PersonaRow';
 import { ProfileTabs, ProfileTabKey, ProfileTabDef } from '../components/profile/ProfileTabs';
 import { getUserCharacterProfiles } from '../database/repositories/characters';
 import * as SocialService from '../services/social/SocialService';
@@ -636,50 +637,25 @@ export const MyProfileScreen: React.FC = () => {
               />
             ) : (
               <>
-                <View style={styles.grid}>
+                <View style={styles.personaList}>
                   {personas.map(p => {
                     const isActive = p.id === activePersonaId;
                     return (
-                      <TouchableOpacity
+                      <PersonaRow
                         key={p.id}
+                        name={p.name}
+                        description={p.description}
+                        avatarUri={p.avatarUri}
+                        isActive={isActive}
                         onPress={() => {
+                          hapticLightPress();
+                          handleSetActivePersona(p.id);
+                        }}
+                        onEditPress={() => {
                           hapticLightPress();
                           handleOpenPersonaEdit(p.id);
                         }}
-                        onLongPress={() => handleSetActivePersona(p.id)}
-                        activeOpacity={0.75}
-                        style={styles.gridItem}
-                        testID="profile-persona-cell"
-                        accessibilityLabel={`${p.name}${isActive ? ' (active)' : ''}`}
-                        accessibilityRole="button"
-                      >
-                        <View style={styles.gridAvatarWrap}>
-                          <ProfileAvatar
-                            name={p.name}
-                            uri={p.avatarUri}
-                            size={72}
-                            showRing={false}
-                          />
-                          {isActive && (
-                            <View
-                              style={[
-                                styles.activeBadge,
-                                { backgroundColor: theme.colors.accent.primary },
-                              ]}
-                            >
-                              <Icon name="check" size={12} color="#fff" />
-                            </View>
-                          )}
-                        </View>
-                        <ThemedText
-                          size={12}
-                          weight="medium"
-                          numberOfLines={1}
-                          style={styles.gridItemName}
-                        >
-                          {p.name}
-                        </ThemedText>
-                      </TouchableOpacity>
+                      />
                     );
                   })}
                 </View>
@@ -832,6 +808,9 @@ const styles = StyleSheet.create({
   },
   gridItemName: {
     textAlign: 'center',
+  },
+  personaList: {
+    gap: 4,
   },
   activeBadge: {
     position: 'absolute',

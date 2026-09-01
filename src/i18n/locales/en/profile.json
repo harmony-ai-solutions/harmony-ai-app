@@ -70,6 +70,7 @@
   "personasHint": "The identities you chat as.",
   "newPersona": "New Persona",
   "personaActive": "Active",
+  "personaActiveChip": "Active",
   "personaSetActive": "Chat as {{name}}",
   "personaSetActiveDone": "Now chatting as {{name}}",
 
