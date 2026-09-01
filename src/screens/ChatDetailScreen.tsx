@@ -136,6 +136,29 @@ export function shouldUseGenerateGreeting(
   );
 }
 
+/**
+ * Session-INIT gate (Q8 / review). The screen must NEVER send INIT for a
+ * disabled partner (the engine would reject with ErrEntityDisabled and the user
+ * would see an error toast) and must never INIT before the partner's disabled
+ * flag has loaded — `disabledLoaded` closes the async `getEntity`-on-mount
+ * race (the init effect can run BEFORE the flag loads and otherwise see the
+ * stale `isDisabled=false` default). `chatLocked` guards the marketplace
+ * preview lock.
+ */
+export function shouldInitializeEntitySession(params: {
+  chatLocked: boolean;
+  isConnected: boolean;
+  participantKey: string | null;
+  disabledLoaded: boolean;
+  isDisabled: boolean;
+}): boolean {
+  if (params.chatLocked) return false;
+  if (!params.isConnected || !params.participantKey) return false;
+  if (!params.disabledLoaded) return false;
+  if (params.isDisabled) return false;
+  return true;
+}
+
 // After revealing the conversation (list made visible), keep re-pinning to the
 // bottom for this long so async content growth (message images decoding, rows
 // rendering in later batches) doesn't leave the viewport stranded partway up
@@ -223,6 +246,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [forwardPickerVisible, setForwardPickerVisible] = useState(false);
   const [forwardMessageText, setForwardMessageText] = useState('');
   const [isDisabled, setIsDisabled] = useState(false);
+  // True once the partner entity's disabled flag has been read from the DB.
+  // The init effect gates on this so it never sends INIT while the flag is
+  // still loading (see shouldInitializeEntitySession — Q8).
+  const [disabledLoaded, setDisabledLoaded] = useState(false);
 
   // Track the canonical interactionId — starts as temp UUIDv7 from route params,
   // updated to the server-assigned canonical ID when INIT_ENTITY response arrives.
@@ -493,6 +520,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       } catch (error) {
         log.error('Failed to load disabled state:', error);
+      } finally {
+        // Always mark the flag as read (even on error) so the init effect is
+        // never blocked waiting on this load — on error we fall back to the
+        // safe default (not disabled) and let the engine guard downstream.
+        if (mounted) setDisabledLoaded(true);
       }
     };
     loadDisabled();
@@ -570,13 +602,25 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   useEffect(() => {
     let mounted = true;
 
-    // HARD GATE — marketplace preview lock: never start a session for a locked
-    // marketplace conversation (the header-resolution gate set the ref).
-    if (chatLockedRef.current) {
-      return;
-    }
-
-    if (!isConnected || !participantKey) {
+    // GATE (shouldInitializeEntitySession, Q8 / review): never send INIT for a
+    // locked marketplace conversation, while disconnected/un-ready, before the
+    // partner's disabled flag has loaded, or for a DISABLED partner — the
+    // engine would reject with ErrEntityDisabled and the user would see an
+    // error toast. Silent skip (debug log, no toast); re-inits when the flag
+    // loads or when the user re-enables from the chat menu (`isDisabled` is a
+    // dep so the toggle immediately restarts the session).
+    if (
+      !shouldInitializeEntitySession({
+        chatLocked: chatLockedRef.current,
+        isConnected,
+        participantKey,
+        disabledLoaded,
+        isDisabled,
+      })
+    ) {
+      if (isDisabled) {
+        log.debug('Skipping session INIT: partner entity is disabled');
+      }
       return;
     }
 
@@ -605,7 +649,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => {
       mounted = false;
     };
-  }, [routeInteractionId, ownEntityId, participantIds, isConnected, participantKey]);
+  }, [
+    routeInteractionId,
+    ownEntityId,
+    participantIds,
+    isConnected,
+    participantKey,
+    isDisabled,
+    disabledLoaded,
+  ]);
 
   // Listen for new messages and typing indicator
   useEffect(() => {
