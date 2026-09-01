@@ -134,6 +134,7 @@ jest.mock('../../database/repositories/userEntities', () => ({
   updateUserPersona: jest.fn(),
   getUserPersona: jest.fn(),
   deleteUserPersona: jest.fn(),
+  resolvePersonaId: jest.fn(),
 }));
 
 jest.mock('../../services/SyncService', () => ({
@@ -153,11 +154,17 @@ import {
   createUserPersona,
   updateUserPersona,
   getUserPersona,
+  resolvePersonaId,
 } from '../../database/repositories/userEntities';
+import ChatPreferencesService from '../../services/ChatPreferencesService';
 
 const mockCreate = createUserPersona as jest.Mock;
 const mockUpdate = updateUserPersona as jest.Mock;
 const mockGet = getUserPersona as jest.Mock;
+const mockResolve = resolvePersonaId as jest.Mock;
+const mockGetGlobalImpersonated = (
+  ChatPreferencesService.getGlobalImpersonatedEntity as jest.Mock
+);
 
 async function flush() {
   for (let i = 0; i < 8; i++) {
@@ -173,10 +180,13 @@ beforeEach(() => {
   mockCreate.mockResolvedValue({ id: 'Mara', name: 'Mara', description: 'd', personality: 'p', avatarUri: null });
   mockUpdate.mockResolvedValue(undefined);
   mockGet.mockResolvedValue(null);
+  // Default: no impersonation set → resolvePersonaId(null) === 'user'.
+  mockGetGlobalImpersonated.mockResolvedValue(null);
+  mockResolve.mockResolvedValue('user');
 });
 
 describe('PersonaEditScreen — built-in user mode (A1)', () => {
-  it('loads the built-in "user" persona and HIDES the delete button', async () => {
+  it('loads the built-in "user" persona and renders a DISABLED delete + hint', async () => {
     mockRouteParams = { entityId: 'user' };
     mockGet.mockResolvedValue({
       id: 'user',
@@ -189,13 +199,16 @@ describe('PersonaEditScreen — built-in user mode (A1)', () => {
     const utils = await render(<PersonaEditScreen />);
     await flush();
 
-    // Delete button is hidden for the built-in identity.
-    expect(utils.queryByTestId('delete-persona-button')).toBeNull();
+    // Delete button is now rendered DISABLED for the built-in identity (A1),
+    // with the muted delete-protected hint below.
+    const del = utils.getByTestId('delete-persona-button');
+    expect(del.props.accessibilityState.disabled).toBe(true);
+    expect(utils.getByText('persona:deleteProtected')).toBeTruthy();
     // The built-in persona's name is loaded into the editable name field.
     expect(utils.getByDisplayValue('You')).toBeTruthy();
   });
 
-  it('loads a regular persona in edit mode with the delete button visible', async () => {
+  it('loads a regular persona in edit mode with the delete button enabled', async () => {
     mockRouteParams = { entityId: 'Mystic Mara' };
     mockGet.mockResolvedValue({
       id: 'Mystic Mara',
@@ -208,8 +221,53 @@ describe('PersonaEditScreen — built-in user mode (A1)', () => {
     const utils = await render(<PersonaEditScreen />);
     await flush();
 
-    expect(utils.getByTestId('delete-persona-button')).toBeTruthy();
+    const del = utils.getByTestId('delete-persona-button');
+    expect(del.props.accessibilityState.disabled).toBe(false);
     expect(utils.getByDisplayValue('Mystic Mara')).toBeTruthy();
+  });
+});
+
+describe('PersonaEditScreen — active-persona delete gate (review 2a)', () => {
+  it('blocks delete for the currently-active non-built-in persona', async () => {
+    mockRouteParams = { entityId: 'Mystic Mara' };
+    mockGet.mockResolvedValue({
+      id: 'Mystic Mara',
+      name: 'Mystic Mara',
+      description: 'A mystic healer',
+      personality: 'Calm, wise',
+      avatarUri: null,
+    });
+    // The edited persona IS the global impersonated identity.
+    mockGetGlobalImpersonated.mockResolvedValue('Mystic Mara');
+    mockResolve.mockResolvedValue('Mystic Mara');
+
+    const utils = await render(<PersonaEditScreen />);
+    await flush();
+
+    const del = utils.getByTestId('delete-persona-button');
+    expect(del.props.accessibilityState.disabled).toBe(true);
+    expect(utils.getByText('persona:deleteActiveProtected')).toBeTruthy();
+  });
+
+  it('still allows delete for a persona that is NOT active', async () => {
+    mockRouteParams = { entityId: 'Mystic Mara' };
+    mockGet.mockResolvedValue({
+      id: 'Mystic Mara',
+      name: 'Mystic Mara',
+      description: 'A mystic healer',
+      personality: 'Calm, wise',
+      avatarUri: null,
+    });
+    // Active persona is someone else (default 'user').
+    mockGetGlobalImpersonated.mockResolvedValue(null);
+    mockResolve.mockResolvedValue('user');
+
+    const utils = await render(<PersonaEditScreen />);
+    await flush();
+
+    const del = utils.getByTestId('delete-persona-button');
+    expect(del.props.accessibilityState.disabled).toBe(false);
+    expect(utils.queryByText('persona:deleteActiveProtected')).toBeNull();
   });
 });
 

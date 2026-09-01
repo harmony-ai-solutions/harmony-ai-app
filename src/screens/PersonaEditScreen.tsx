@@ -43,6 +43,7 @@ import {
   getUserPersona,
   updateUserPersona,
   deleteUserPersona,
+  resolvePersonaId,
 } from '../database/repositories/userEntities';
 import syncService from '../services/SyncService';
 import ChatPreferencesService from '../services/ChatPreferencesService';
@@ -86,9 +87,31 @@ export const PersonaEditScreen: React.FC = () => {
   const [avatarUri, setAvatarUri] = useState<string | null>(() => prefill?.avatarUri ?? null);
   const [isSaving, setIsSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // The resolved global "Chatting as" identity id (used to block deleting the
+  // currently-active persona — review 2a). Loaded the same way ChatListScreen
+  // does (`getGlobalImpersonatedEntity` + `resolvePersonaId`).
+  const [activePersonaId, setActivePersonaId] = useState<string | null>(null);
 
   const descriptionRef = useRef<TextInput>(null);
   const personalityRef = useRef<TextInput>(null);
+
+  // ── Load the active persona id (delete gate) ────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const stored = await ChatPreferencesService.getGlobalImpersonatedEntity();
+        const resolved = await resolvePersonaId(stored);
+        if (!cancelled) setActivePersonaId(resolved);
+      } catch (err) {
+        log.error('Failed to load active persona:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Load existing persona for edit ─────────────────────────────────────
   useEffect(() => {
@@ -199,12 +222,28 @@ export const PersonaEditScreen: React.FC = () => {
     }
   }, [isEdit, personaId, name, description, personality, avatarUri, navigation, showAlert, t]);
 
+  // ── Delete gate (review 2a) ────────────────────────────────────────────
+  // A non-built-in persona that is the CURRENTLY-ACTIVE global impersonated
+  // identity cannot be deleted (would strand the user with a stale pref).
+  const isActivePersona = !!personaId && activePersonaId === personaId;
+  const canDelete = isEdit && !isBuiltIn && !isActivePersona;
+  const deleteHint = isBuiltIn
+    ? t('persona:deleteProtected')
+    : isActivePersona
+      ? t('persona:deleteActiveProtected')
+      : null;
+
   // ── Delete persona ─────────────────────────────────────────────────────
   const handleDelete = useCallback(() => {
     if (!isEdit || !personaId) return;
     if (isBuiltIn) {
       // A1: the built-in `user` identity is load-bearing and never deletable.
       showAlert(t('persona:deleteProtected'));
+      return;
+    }
+    if (isActivePersona) {
+      // Review 2a: the currently-active persona can't be deleted mid-identity.
+      showAlert(t('persona:deleteActiveProtected'));
       return;
     }
     showAlert(t('personaDeleteConfirm'), t('personaDeleteConfirmHint'), [
@@ -234,7 +273,7 @@ export const PersonaEditScreen: React.FC = () => {
         },
       },
     ]);
-  }, [isEdit, isBuiltIn, personaId, navigation, showAlert, t]);
+  }, [isEdit, isBuiltIn, isActivePersona, personaId, navigation, showAlert, t]);
 
   if (!theme || !loaded) return null;
 
@@ -250,13 +289,20 @@ export const PersonaEditScreen: React.FC = () => {
         title={isEdit ? t('personaEditTitle') : t('personaCreateTitle')}
         onBack={() => navigation.goBack()}
         right={
-          isEdit && !isBuiltIn ? (
+          isEdit ? (
             <TouchableOpacity
               onPress={handleDelete}
+              disabled={!canDelete}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               testID="delete-persona-button"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canDelete }}
             >
-              <Icon name="trash-can-outline" size={22} color={theme.colors.status.error} />
+              <Icon
+                name="trash-can-outline"
+                size={22}
+                color={!canDelete ? theme.colors.text.disabled : theme.colors.status.error}
+              />
             </TouchableOpacity>
           ) : undefined
         }
@@ -355,6 +401,18 @@ export const PersonaEditScreen: React.FC = () => {
             </View>
           </ThemedCard>
 
+          {/* ── Delete-protection hint (built-in / active persona) ── */}
+          {deleteHint ? (
+            <ThemedText
+              size={12}
+              variant="muted"
+              style={styles.deleteHint}
+              testID="delete-persona-hint"
+            >
+              {deleteHint}
+            </ThemedText>
+          ) : null}
+
           {/* ── Save ── */}
           <ThemedButton
             label={isSaving ? '…' : t('saveChanges')}
@@ -419,6 +477,10 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     marginTop: 20,
+  },
+  deleteHint: {
+    marginTop: 16,
+    textAlign: 'center',
   },
 });
 

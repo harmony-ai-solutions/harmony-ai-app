@@ -327,6 +327,9 @@ migration headers and the `CHANGELOG.md` dev-build hint.
   stale artifact (pre-existing, outside jest gates, flagged not fixed in Phase 1).
 - **`is_read` read-receipts for AI-authored/synced engine rows** — read-by-AI deferred (A2/Q2), so no engine→app
   read state exists by design.
+- **2026-09-07 — remove transitional legacy sweeps** — `sweepLegacyEntityPrefs` (ChatPreferencesService) +
+  `LEGACY_REPLY_MODE_PREFIX` fallback in `getReplyMode` + their tests (Q14/A17 migration window closes once the
+  team is on the new build).
 
 ---
 
