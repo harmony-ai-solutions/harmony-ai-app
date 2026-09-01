@@ -78,7 +78,7 @@ export interface SyncSession {
  * Favorites are no longer a sync table: they ride inside `character_profiles`
  * as the `is_favorite` flag (000044), so the favorites sidecar is gone.
  */
-const SYNC_TABLES: string[] = [
+export const SYNC_TABLES: string[] = [
   // Provider configs first (no FK dependencies)
   'provider_config_openai',
   'provider_config_ollama',
@@ -120,6 +120,17 @@ const SYNC_TABLES: string[] = [
   'entity_emoji_actions',
   'memories',
 ];
+
+/**
+ * Per-table sort rank for buffered-apply FK-safe ordering (see
+ * applyBufferedSyncData). DERIVED from SYNC_TABLES (rank = array index + 1) so
+ * the two lists are a single source of truth and can never drift (review fix).
+ * A table not in SYNC_TABLES sorts last via the `?? 99` fallback at the sort
+ * site (unknown tables are never part of the allowed sync set).
+ */
+export const TABLE_ORDER: Record<string, number> = Object.fromEntries(
+  SYNC_TABLES.map((table, i) => [table, i + 1]),
+);
 
 /**
  * Resolve the sync watermark for a single table given the per-table
@@ -931,52 +942,19 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     const appliedTables = new Set<string>();
 
     return new Promise<void>((resolve, reject) => {
-      // Sort buffer by dependency order to satisfy FK constraints in correct sequence:
-      // 1. Provider configs (no dependencies)
-      // 2. Module configs (reference provider configs)
-      // 3. character_profiles (no FK deps)
-      // 4. character_image (references character_profiles)
-      // 5. entities (references character_profiles)
-      // 6. entity_module_mappings (references entities + module configs)
-      // 7. conversation_messages, emotion_state, memories (reference entities)
-      const TABLE_ORDER: Record<string, number> = {
-        'provider_config_openai': 1,
-        'provider_config_ollama': 1,
-        'provider_config_openaicompatible': 1,
-        'provider_config_openrouter': 1,
-        'provider_config_harmonyspeech': 1,
-        'provider_config_elevenlabs': 1,
-        'provider_config_kindroid': 1,
-        'provider_config_kajiwoto': 1,
-        'provider_config_characterai': 1,
-        'provider_config_localai': 1,
-        'provider_config_mistral': 1,
-        'provider_config_comfyui': 1,
-        'provider_config_xai': 1,
-        'provider_config_google': 1,
-        'provider_config_anthropic': 1,
-        'provider_config_soulbitscloud': 1,
-        'backend_configs': 2,
-        'cognition_configs': 2,
-        'movement_configs': 2,
-        'rag_configs': 2,
-        'stt_configs': 2,
-        'tts_configs': 2,
-        'vision_configs': 2,
-        'imagination_configs': 2,
-        'character_profiles': 3,
-        'character_image': 4,
-        'entities': 5,
-        'entity_module_mappings': 6,
-        'interactions': 7,
-        'conversation_messages': 8,
-        'chat_conversation_settings': 8, // 4-1: no FK; after messages (participant_key)
-        'emotion_state': 8,
-        'lifecycle_state': 8,
-        'entity_emoji_actions': 8,
-        'memories': 8,
-      };
-
+      // Sort buffer by dependency order to satisfy FK constraints in correct
+      // sequence (single source of truth: TABLE_ORDER is DERIVED from
+      // SYNC_TABLES above — never maintain a second hand-written list):
+      //   1. Provider configs (no dependencies)
+      //   2. Module configs (reference provider configs)
+      //   3. character_profiles (no FK deps)
+      //   4. character_image (references character_profiles)
+      //   5. entities (references character_profiles)
+      //   6. entity_module_mappings (references entities + module configs)
+      //   7. interactions (referenced by conversation_messages)
+      //   8. conversation_messages, chat_conversation_settings, emotion_state,
+      //      lifecycle_state, entity_emoji_actions, memories (reference
+      //      entities / no FKs) — ride after the interactions tier.
       const sortedBuffer = [...this.incomingDataBuffer].sort((a, b) => {
         const orderA = TABLE_ORDER[a.table] ?? 99;
         const orderB = TABLE_ORDER[b.table] ?? 99;

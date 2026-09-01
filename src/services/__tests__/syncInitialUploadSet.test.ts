@@ -12,7 +12,12 @@
  * since-resolution (`resolveTableSyncSince`).
  */
 
-import {SyncService, resolveTableSyncSince} from '../SyncService';
+import {
+  SyncService,
+  resolveTableSyncSince,
+  SYNC_TABLES,
+  TABLE_ORDER,
+} from '../SyncService';
 import ConnectionStateManager from '../ConnectionStateManager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {EventEmitter} from 'eventemitter3';
@@ -146,6 +151,44 @@ describe('per-table initial upload set (4-1, Q7)', () => {
       expect(typeof resolveTableSyncSince).toBe('function');
       // Sanity: SyncService module imports resolve cleanly under the mocks.
       expect(SyncService).toBeTruthy();
+    });
+  });
+
+  // Review fix — single source of truth: TABLE_ORDER must be DERIVED from
+  // SYNC_TABLES so the two hand-maintained lists can never drift.
+  describe('SYNC_TABLES / TABLE_ORDER derivation (single source of truth)', () => {
+    it('every SYNC_TABLES entry has a positive rank in TABLE_ORDER', () => {
+      for (const table of SYNC_TABLES) {
+        expect(TABLE_ORDER[table]).toBeGreaterThan(0);
+      }
+    });
+
+    it('ranks are strictly increasing along the SYNC_TABLES array (rank = index + 1)', () => {
+      SYNC_TABLES.forEach((table, i) => {
+        expect(TABLE_ORDER[table]).toBe(i + 1);
+      });
+      // Strictly increasing property (redundant with the above, but pins intent).
+      let prev = 0;
+      for (const table of SYNC_TABLES) {
+        const rank = TABLE_ORDER[table];
+        expect(rank).toBeGreaterThan(prev);
+        prev = rank;
+      }
+    });
+
+    it('pins the tier invariants (provider configs ... chat settings)', () => {
+      const rank = (t: string) => TABLE_ORDER[t];
+      const providerRanks = SYNC_TABLES.filter(t => t.startsWith('provider_config_')).map(rank);
+      const maxProvider = Math.max(...providerRanks);
+      expect(maxProvider).toBeLessThan(rank('backend_configs'));
+      expect(rank('backend_configs')).toBeLessThan(rank('character_profiles'));
+      expect(rank('character_profiles')).toBeLessThan(rank('entities'));
+      expect(rank('entities')).toBeLessThan(rank('entity_module_mappings'));
+      expect(rank('entity_module_mappings')).toBeLessThan(rank('interactions'));
+      expect(rank('interactions')).toBeLessThan(rank('conversation_messages'));
+      expect(rank('conversation_messages')).toBeLessThanOrEqual(
+        rank('chat_conversation_settings'),
+      );
     });
   });
 });
