@@ -1,12 +1,15 @@
 /**
- * TtsTestPanel — TTS playback test block (persona-modules 2-3).
+ * TtsTestPanel — TTS playback test block (persona-modules 2-3, reworked).
  *
  * Verifies:
  *  - offline state renders "Connect to Harmony Link to test" and never plays
- *  - Play synthesizes via the engine test client and plays via AudioPlayer
+ *  - no-entity state renders the disabled hint (ModuleConfigEditScreen has no
+ *    entity binding) and never synthesizes
+ *  - Play INITs a debug session, sends TTS_GENERATE_SPEECH 'binary', awaits
+ *    ENTITY_UTTERANCE and plays the inline audio via AudioPlayer
  *  - Stop during playback stops AudioPlayer
- *  - the endpoint error message surfaces in the error state
- * (client + player mocked; contract-shaped fixtures, no live engine)
+ *  - the session-service error message surfaces in the error state
+ *  (session service + player mocked; contract-shaped fixtures, no live engine)
  */
 
 import React from 'react';
@@ -70,23 +73,29 @@ jest.mock('../../../services/AudioPlayer', () => ({
   default: { playAudio: jest.fn(), stop: jest.fn() },
 }));
 
-jest.mock('../../../services/voiceInput/moduleTestClient', () => {
-  const actual = jest.requireActual('../../../services/voiceInput/moduleTestClient');
-  return { ...actual, testTts: jest.fn() };
+let mockRunTest: jest.Mock;
+let mockCapturedSendEvents: any[];
+jest.mock('../../../services/voiceInput/moduleTestSessionService', () => {
+  const actual = jest.requireActual('../../../services/voiceInput/moduleTestSessionService');
+  class ModuleTestSessionError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'ModuleTestSessionError';
+    }
+  }
+  return {
+    __esModule: true,
+    runTest: jest.fn(),
+    ModuleTestSessionError: actual.ModuleTestSessionError ?? ModuleTestSessionError,
+  };
 });
 
 import AudioPlayer from '../../../services/AudioPlayer';
-import { testTts, ModuleTestError } from '../../../services/voiceInput/moduleTestClient';
+import { runTest, ModuleTestSessionError } from '../../../services/voiceInput/moduleTestSessionService';
 
 const mockPlayAudio = (AudioPlayer as any).playAudio as jest.Mock;
 const mockStop = (AudioPlayer as any).stop as jest.Mock;
-const mockTestTts = testTts as jest.Mock;
-
-const draftConfig = {
-  provider_type: 'elevenlabs',
-  provider_config_id: 7,
-  module_config: { output_type: 'mp3' },
-};
+mockRunTest = runTest as jest.Mock;
 
 async function flush() {
   for (let i = 0; i < 8; i++) {
@@ -99,36 +108,67 @@ async function flush() {
 beforeEach(() => {
   jest.clearAllMocks();
   mockIsConnected = true;
+  mockCapturedSendEvents = [];
   mockPlayAudio.mockResolvedValue(undefined);
   mockStop.mockResolvedValue(undefined);
-  mockTestTts.mockResolvedValue({ audio_base64: 'QUJDRA==', mime_type: 'audio/mpeg' });
+  mockRunTest.mockImplementation(async (_entityId: string, fn: any) => {
+    mockCapturedSendEvents = [];
+    return fn({
+      sendEvent: async (ev: any) => { mockCapturedSendEvents.push(ev); },
+      awaitEvent: async () => ({
+        event_type: 'ENTITY_UTTERANCE',
+        status: 'NEW',
+        payload: { message_id: 'tts-msg', content: 'Hello there', audio: 'QUJDRA==', audio_type: 'audio/mpeg' },
+      }),
+    });
+  });
 });
 
 describe('TtsTestPanel — synthesize + playback', () => {
   it('renders the offline state and never plays when disconnected', async () => {
     mockIsConnected = false;
-    const utils = await render(<TtsTestPanel draftConfig={draftConfig} />);
+    const utils = await render(<TtsTestPanel entityId="ai-1" />);
     await flush();
 
     expect(utils.getByText('ttsOfflineTitle')).toBeTruthy();
     expect(utils.queryByTestId('tts-play-button')).toBeNull();
-    expect(mockTestTts).not.toHaveBeenCalled();
+    expect(mockRunTest).not.toHaveBeenCalled();
   });
 
-  it('synthesizes the typed text and plays the returned audio', async () => {
-    const utils = await render(<TtsTestPanel draftConfig={draftConfig} />);
+  it('renders the entity-context hint and never synthesizes without an entityId', async () => {
+    const utils = await render(<TtsTestPanel />);
+    await flush();
+
+    expect(utils.getByTestId('tts-needs-entity')).toBeTruthy();
+    expect(utils.getByText('ttsNeedsEntityHint')).toBeTruthy();
+    expect(utils.queryByTestId('tts-play-button')).toBeNull();
+    expect(mockRunTest).not.toHaveBeenCalled();
+  });
+
+  it('synthesizes via TTS_GENERATE_SPEECH binary and plays the returned audio', async () => {
+    const utils = await render(<TtsTestPanel entityId="ai-entity-1" />);
     await flush();
 
     await fireEvent.changeText(utils.getByTestId('tts-text-input'), 'Hello there');
     await fireEvent.press(utils.getByTestId('tts-play-button'));
     await flush();
 
-    expect(mockTestTts).toHaveBeenCalledWith(draftConfig, 'Hello there');
+    expect(mockRunTest).toHaveBeenCalledWith('ai-entity-1', expect.any(Function));
+
+    const ttsEvent = mockCapturedSendEvents.find((e: any) => e.event_type === 'TTS_GENERATE_SPEECH');
+    expect(ttsEvent).toBeTruthy();
+    expect(ttsEvent.payload.tts_output_type).toBe('binary');
+    expect(ttsEvent.payload.utterance).toEqual({
+      type: 'UTTERANCE_COMBINED',
+      content: 'Hello there',
+      entity_id: 'ai-entity-1',
+    });
+
     expect(mockPlayAudio).toHaveBeenCalledWith('QUJDRA==', 'audio/mpeg');
   });
 
   it('stops playback when pressed again while playing', async () => {
-    const utils = await render(<TtsTestPanel draftConfig={draftConfig} />);
+    const utils = await render(<TtsTestPanel entityId="ai-entity-1" />);
     await flush();
 
     await fireEvent.press(utils.getByTestId('tts-play-button'));
@@ -141,9 +181,9 @@ describe('TtsTestPanel — synthesize + playback', () => {
     expect(mockStop).toHaveBeenCalledTimes(1);
   });
 
-  it('surfaces the engine endpoint error message', async () => {
-    mockTestTts.mockRejectedValue(new ModuleTestError('unknown provider_type'));
-    const utils = await render(<TtsTestPanel draftConfig={draftConfig} />);
+  it('surfaces the session-service error message', async () => {
+    mockRunTest.mockRejectedValue(new ModuleTestSessionError('unknown provider_type'));
+    const utils = await render(<TtsTestPanel entityId="ai-entity-1" />);
     await flush();
 
     await fireEvent.press(utils.getByTestId('tts-play-button'));

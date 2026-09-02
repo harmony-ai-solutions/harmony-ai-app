@@ -54,8 +54,8 @@ Track the completion of each phase as implementation progresses:
   - [x] Debug session type + HTTP endpoint removal ([1-3-EngineDebugSessionType.md](1-3-EngineDebugSessionType.md))
 - [ ] **Phase 2: App**
   - [x] Voice input settings screen ([2-1-AppVoiceInputSettings.md](2-1-AppVoiceInputSettings.md))
-  - [ ] STT/VAD recorder test block — **eventserver rework** (HTTP approach reverted) ([2-2-AppSTTVADTestBlock.md](2-2-AppSTTVADTestBlock.md))
-  - [ ] TTS playback test block — **eventserver rework** (HTTP approach reverted) ([2-3-AppTTSTestBlock.md](2-3-AppTTSTestBlock.md))
+  - [x] STT/VAD recorder test block — **eventserver rework** (HTTP approach reverted) ([2-2-AppSTTVADTestBlock.md](2-2-AppSTTVADTestBlock.md))
+  - [x] TTS playback test block — **eventserver rework** (HTTP approach reverted) ([2-3-AppTTSTestBlock.md](2-3-AppTTSTestBlock.md))
 - [x] **Phase 3: Engine frontend**
   - [x] Personas tab + entities filter ([3-1-EngineFrontendPersonasTab.md](3-1-EngineFrontendPersonasTab.md))
   - [x] Characters badges + persona-from-card ([3-2-EngineFrontendCharactersBadges.md](3-2-EngineFrontendCharactersBadges.md))

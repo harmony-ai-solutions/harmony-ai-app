@@ -1,38 +1,45 @@
-# 2-3 — App: TTS Playback Test Block
+# 2-3 — App: TTS Playback Test Block (eventserver transport)
 
-> Repo: `harmony-ai-app` (branch `senju-design-updates-rebase`). Protocol + gates as 2-1. Consumes the PINNED contract from `1-2-EngineModuleTestAPI.md`.
+> Repo: `harmony-ai-app` (branch `senju-design-updates-rebase`). **REWORKED 2026-09-02** — same correction as 2-2: eventserver protocol, no HTTP. TTS only works in the context of an AI entity + its module config → the AI entity is initialized in a transient `debug` session (engine 1-3; non-phone → no lifecycle, immediate cleanup).
 
-## Objective
+## Pinned event contract (verified engine-side)
 
-A test block on the TTS config editor (`ModuleConfigEditScreen`, `moduleType === 'tts'` — used for AI entities; personas never speak, confirmed ruling): text input → "Play" → engine synthesizes with the *draft* config → playback via the existing audio player. Users hear exactly what the entity would produce.
+- INIT_ENTITY for the AI entity with `device_type: "debug"`.
+- `TTS_GENERATE_SPEECH` payload: `TTSGenerateRequest { "utterance": { …Utterance fields… }, "tts_output_type": "binary" }` (inline audio; `"file"` writes a file — use `"binary"`).
+- Response: `ENTITY_UTTERANCE` event carrying the synthesized audio (binary/base64 payload — inspect `GenerateAISpeechEvent` output shape engine-side and parse accordingly; document the exact response fields you consumed in deviations).
 
 ## Implementation steps (TDD)
 
-1. Extend `moduleTestClient` (from 2-2) with `testTts(cfg, text)` → `{ audio_base64, mime_type }` per pinned contract; tests with contract-shaped mocks (happy + error).
-2. **`<TtsTestPanel />`** (same location convention as SttTestPanel): props `{ draftConfig }`; text input (multiline, sensible default sample text via i18n), Play/Stop button, loading state, playback via the app's existing player (`AudioPlayer`/TrackPlayer — reuse the chat playback path; base64 data-URL handling as done for avatars/audio elsewhere), error state with endpoint message, offline state ("Connect to Harmony Link to test").
-3. Mount into `ModuleConfigEditScreen` when `moduleType === 'tts'`, passing current draft form state.
-4. i18n keys (en).
-
-## Files
-
-- `moduleTestClient` (+ tests), `<TtsTestPanel />` (+ tests where feasible)
-- `src/screens/config/ModuleConfigEditScreen.tsx` (mount)
-- i18n locale files
+1. Extend `ModuleTestSessionService` usage (from 2-2): `runTest(aiEntityId, …)`.
+2. **Panel rework `<TtsTestPanel />`:** needs the AI entity context — the panel lives on `ModuleConfigEditScreen` TTS branch; resolve the entity whose config is being edited (the screen is opened in an entity context via CreateAIScreen/entity wiring — pass/derive the entity id; if the screen genuinely lacks an entity binding in some entry paths, disable the panel with a hint "Open this editor from an entity to test" and document).
+3. Send `TTS_GENERATE_SPEECH` with the entered text + `tts_output_type: 'binary'`; await `ENTITY_UTTERANCE`; play via `AudioPlayer` (data-URL handling as before); loading/error/offline states; disconnect after the test (guaranteed cleanup — service handles it).
+4. Note: the test synthesizes with the entity's SAVED synced TTS config (eventserver path can't test unsaved drafts) — same UI-copy note as 2-2; document in deviations.
+5. i18n adjustments.
 
 ## Gates
 
-- tsc = 0 · targeted + full jest green
-- Commit: `feat(config): TTS playback test panel - synthesize and listen via engine (persona modules 2-3)`
+- tsc = 0 · targeted + full jest green · grep: no `/api/modules/test` refs
+- Commit: `refactor(config): TTS playback test panel via eventserver debug session (persona modules 2-3)`
 
 ## Checklist
 
-- [x] RED client tests for testTts
-- [x] Panel: input, play/stop, loading, playback, error, offline
-- [x] Mounted on TTS editor, i18n, gates green, committed, docs updated
+- [x] Entity-context resolution (or documented disable-with-hint) — **documented disable** (see Deviations)
+- [x] TTS_GENERATE_SPEECH 'binary' → ENTITY_UTTERANCE → playback (mocked tests RED first)
+- [x] Guaranteed disconnect; saved-config copy note
+- [x] Gates green, committed, phase doc + summary.md updated
 
-## Deviations
+## ENTITY_UTTERANCE response fields consumed (verified engine-side `modules/tts.go` + `events/events.go`)
 
-- **Reuses the same engine-HTTP client (`moduleTestClient`) as 2-2** — `testTts` was added to the existing client (single source of truth; the engine HTTP/`/events`-strip + Bearer JWT pattern documented in 2-2 applies wholesale to TTS). Tests use contract-shaped mocked HTTP (`audio_base64` + `mime_type`), no live engine.
-- **Playback** reuses the existing `AudioPlayer` (TrackPlayer) via `playAudio(base64, mime_type)` — the same data-URL handling used for chat voice messages (`data:${mimeType};base64,${...}` is built inside `AudioPlayer`). "Stop" calls `AudioPlayer.stop()`.
-- **Mount on the TTS config editor** is gated on a selected provider (`buildTtsTestDraft` returns null until `formValues.provider` is set), consistent with the 2-2 STT mount. Personas never speak (confirmed ruling), so the panel only appears in the AI-entity TTS editor — not the Voice input screen.
-- **Default sample text** is a `moduleConfig` i18n key; the panel uses the `moduleConfig` namespace (matches the config-editor context).
+The engine's `GenerateAISpeechEvent` (engine `modules/tts.go:151-223`) marshals the updated `Utterance` as the `ENTITY_UTTERANCE` payload. For `tts_output_type: "binary"` it sets `utterance.Audio = renderResult.DataB64` and `utterance.AudioType = renderResult.DataType` (engine `events/events.go:147-166`). The app consumes:
+
+- `payload.audio` — base64 inline synth audio (`Utterance.Audio`; set only for `binary`).
+- `payload.audio_type` — MIME type (`Utterance.AudioType`, e.g. `audio/mpeg` / `audio/wav`); falls back to `audio/wav` when absent.
+- `payload.content` — the synthesized text echo (not used for playback).
+- `payload.message_id` / `payload.entity_id` — correlation (not required for playback; the panel keys off `payload.audio`).
+- `payload.audio_file` — empty for `binary`; the file-write path (`tts_output_type: "file"`) is NOT used.
+
+## Deviations (documented)
+
+- **Entity-context finding:** `ModuleConfigEditScreen` is opened with route params `{ moduleType, configId }` ONLY. Verified entry paths: `EntityModuleSelectorWithActions` (from `CreateAIScreen`, passes `moduleType`+`configId` only) and `VoiceInputSettingsScreen` (pinned `moduleType='stt'`). **No entry path carries an AI entity id.** The screen genuinely has no entity binding, so the TTS panel is **disabled with a hint** ("Open this config from an AI profile to test."). `TtsTestPanel` accepts an optional `entityId` prop so a future entity-bound entry path (e.g. editing a specific AI's TTS config) can enable it. Threading `entityId` through the whole nav stack was judged out of scope for this rework (would touch `AppNavigator`/`EntityModuleSelectorWithActions`/`CreateAIScreen` and is not reliable from create-mode where the entity doesn't exist yet).
+- **Config transport delta:** the eventserver `debug` session synthesizes with the entity's **SYNCED** TTS config. Unsaved draft changes are NOT applied; UI copy notes this ("Tests your saved configuration…").
+- **Two source files shared with 2-2:** `ModuleConfigEditScreen.tsx` and `moduleTestSessionService.ts` are shared, so this commit builds on the 2-2 commit (see 2-2 Deviations).
