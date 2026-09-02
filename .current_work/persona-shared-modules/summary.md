@@ -25,12 +25,13 @@ Approved design (user rulings 2026-09-02):
 ## Phases
 
 - **Phase 1 — Engine backend**
-  - 1-1 Canonical module inheritance for user entities + management-API guard
-  - 1-2 Module test API (STT transcribe / TTS synthesize) — pinned contract
+  - 1-1 Canonical module inheritance for user entities + management-API guard — **DONE**
+  - 1-2 Module test API (HTTP) — **REMOVED** (user correction 2026-09-02: management server not cloud-reachable; eventserver protocol is the transport)
+  - 1-3 Debug session type + HTTP endpoint removal (replaces 1-2)
 - **Phase 2 — App**
-  - 2-1 "Voice input" settings screen (resolution semantics, first-save provisioning, switch = sentinel, entry points, i18n)
-  - 2-2 STT/VAD recorder test block (consumes 1-2 contract)
-  - 2-3 TTS playback test block (consumes 1-2 contract)
+  - 2-1 "Voice input" settings screen — **DONE** (transport-independent)
+  - 2-2 STT/VAD recorder test block — **rework**: eventserver transport (was HTTP; see rewritten doc)
+  - 2-3 TTS playback test block — **rework**: eventserver transport (was HTTP; see rewritten doc)
 - **Phase 3 — Engine frontend (Wails/React)**
   - 3-1 Personas tab + AI-entities filter + "Shared user modules" card
   - 3-2 Characters tab "used-by" badges + create-persona-from-card
@@ -49,11 +50,12 @@ Track the completion of each phase as implementation progresses:
 
 - [x] **Phase 1: Engine backend**
   - [x] Canonical inheritance + API guard ([1-1-EngineCanonicalInheritance.md](1-1-EngineCanonicalInheritance.md))
-  - [x] Module test API ([1-2-EngineModuleTestAPI.md](1-2-EngineModuleTestAPI.md))
+  - [x] ~~Module test API~~ **REMOVED by user correction 2026-09-02** — management server not cloud-reachable; eventserver protocol is the transport ([1-2-EngineModuleTestAPI.md](1-2-EngineModuleTestAPI.md))
+  - [x] Debug session type + HTTP endpoint removal ([1-3-EngineDebugSessionType.md](1-3-EngineDebugSessionType.md))
 - [ ] **Phase 2: App**
   - [x] Voice input settings screen ([2-1-AppVoiceInputSettings.md](2-1-AppVoiceInputSettings.md))
-  - [x] STT/VAD recorder test block ([2-2-AppSTTVADTestBlock.md](2-2-AppSTTVADTestBlock.md))
-  - [x] TTS playback test block ([2-3-AppTTSTestBlock.md](2-3-AppTTSTestBlock.md))
+  - [ ] STT/VAD recorder test block — **eventserver rework** (HTTP approach reverted) ([2-2-AppSTTVADTestBlock.md](2-2-AppSTTVADTestBlock.md))
+  - [ ] TTS playback test block — **eventserver rework** (HTTP approach reverted) ([2-3-AppTTSTestBlock.md](2-3-AppTTSTestBlock.md))
 - [x] **Phase 3: Engine frontend**
   - [x] Personas tab + entities filter ([3-1-EngineFrontendPersonasTab.md](3-1-EngineFrontendPersonasTab.md))
   - [x] Characters badges + persona-from-card ([3-2-EngineFrontendCharactersBadges.md](3-2-EngineFrontendCharactersBadges.md))
