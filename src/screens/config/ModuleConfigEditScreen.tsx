@@ -41,6 +41,7 @@ import { isSimpleFieldKey, isManagedCloudField } from '../../constants/moduleCon
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { SttTestPanel } from '../../components/config/SttTestPanel';
+import { TtsTestPanel } from '../../components/config/TtsTestPanel';
 import type { ModuleTestDraftConfig } from '../../services/voiceInput/moduleTestClient';
 import { CLOUD_HOSTS } from '../../config/cloud';
 import { injectSoulbitsToken } from '../../services/cloud/soulbitsTokenSync';
@@ -144,6 +145,29 @@ function buildSttTestDraft(
       main_stream_time_millis: formValues.main_stream_time_millis,
       transition_stream_time_millis: formValues.transition_stream_time_millis,
       max_buffer_count: formValues.max_buffer_count,
+    },
+  };
+}
+
+/**
+ * Build the TTS test block's draft config from the editable form state (2-3).
+ * Passes the current draft (possibly unsaved) TTS config so the engine runs the
+ * *configured* provider end-to-end. Returns null until a provider is selected.
+ */
+function buildTtsTestDraft(
+  formValues: Record<string, any>,
+  providerConfigId: string | null | undefined,
+): ModuleTestDraftConfig | null {
+  if (!formValues.provider) return null;
+  return {
+    provider_type: formValues.provider,
+    provider_config_id: providerConfigId ?? null,
+    module_config: {
+      provider: formValues.provider,
+      provider_config_id: providerConfigId ?? null,
+      output_type: formValues.output_type ?? null,
+      words_to_replace: formValues.words_to_replace ?? null,
+      vocalize_nonverbal: formValues.vocalize_nonverbal ?? null,
     },
   };
 }
@@ -946,6 +970,24 @@ export const ModuleConfigEditScreen: React.FC = () => {
           'Provider Settings',
           formValues.provider,
         )}
+
+        {/* ── TTS playback test block (2-3) — tests the configured / draft provider ── */}
+        {moduleType === 'tts' &&
+          (() => {
+            const ttsDraft = buildTtsTestDraft(
+              formValues,
+              providerForms['provider']?.providerConfigId,
+            );
+            if (!ttsDraft) return null;
+            return (
+              <ThemedCard elevated accentStripe style={styles.section}>
+                <SectionHeader title={t('testConfiguration')} />
+                <View style={styles.sectionContent}>
+                  <TtsTestPanel draftConfig={ttsDraft} />
+                </View>
+              </ThemedCard>
+            );
+          })()}
       </>
     );
   };

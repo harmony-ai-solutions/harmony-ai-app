@@ -59,6 +59,7 @@ export class ModuleTestError extends Error {
 }
 
 const ENGINE_TEST_PATH = '/modules/test/stt';
+const ENGINE_TTS_TEST_PATH = '/modules/test/tts';
 
 /**
  * Derive the engine's HTTP base URL from the stored WSS/WS URL.
@@ -134,4 +135,56 @@ export async function testStt(
   }
 
   return data as SttTestResult;
+}
+
+/**
+ * POST to the engine's TTS module-test endpoint (PINNED contract, phase 1-2).
+ *
+ * @param draft  The draft config to execute against (provider_type,
+ *               provider_config_id, module_config).
+ * @param text   The text to synthesize.
+ * @returns The synthesized audio (base64) + MIME type.
+ * @throws ModuleTestError on engine 4xx `{ error }` or when the engine is
+ *         unreachable.
+ */
+export async function testTts(
+  draft: ModuleTestDraftConfig,
+  text: string,
+): Promise<TtsTestResult> {
+  const base = await resolveEngineHttpBaseUrl();
+  if (!base) {
+    throw new ModuleTestError('Not connected to Harmony Link');
+  }
+
+  const jwt = ConnectionStateManager.getJWTToken();
+  const url = `${base}${ENGINE_TTS_TEST_PATH}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+      },
+      body: JSON.stringify({
+        provider_type: draft.provider_type,
+        provider_config_id: draft.provider_config_id,
+        module_config: draft.module_config,
+        text,
+      }),
+    });
+  } catch (err) {
+    log.error('TTS test request failed:', err);
+    throw new ModuleTestError('Could not reach Harmony Link');
+  }
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const message = (data && (data as any).error) || `TTS test failed (${res.status})`;
+    throw new ModuleTestError(String(message));
+  }
+
+  return data as TtsTestResult;
 }

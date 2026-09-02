@@ -53,7 +53,7 @@ Track the completion of each phase as implementation progresses:
 - [ ] **Phase 2: App**
   - [x] Voice input settings screen ([2-1-AppVoiceInputSettings.md](2-1-AppVoiceInputSettings.md))
   - [x] STT/VAD recorder test block ([2-2-AppSTTVADTestBlock.md](2-2-AppSTTVADTestBlock.md))
-  - [ ] TTS playback test block ([2-3-AppTTSTestBlock.md](2-3-AppTTSTestBlock.md))
+  - [x] TTS playback test block ([2-3-AppTTSTestBlock.md](2-3-AppTTSTestBlock.md))
 - [ ] **Phase 3: Engine frontend**
   - [ ] Personas tab + entities filter ([3-1-EngineFrontendPersonasTab.md](3-1-EngineFrontendPersonasTab.md))
   - [ ] Characters badges + persona-from-card ([3-2-EngineFrontendCharactersBadges.md](3-2-EngineFrontendCharactersBadges.md))

@@ -13,6 +13,7 @@
 
 import {
   testStt,
+  testTts,
   resolveEngineHttpBaseUrl,
   ModuleTestError,
 } from '../moduleTestClient';
@@ -136,5 +137,44 @@ describe('testStt — contract-shaped HTTP', () => {
     await expect(testStt(draftConfig, 'QUJDRA==', 'audio/wav')).rejects.toBeInstanceOf(
       ModuleTestError,
     );
+  });
+});
+
+describe('testTts — contract-shaped HTTP', () => {
+  it('POSTs to /modules/test/tts and returns the synthesized audio', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ audio_base64: 'QUJDRA==', mime_type: 'audio/mpeg' }),
+    });
+
+    const result = await testTts(draftConfig, 'Hello, this is a test.');
+
+    expect(result).toEqual({ audio_base64: 'QUJDRA==', mime_type: 'audio/mpeg' });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://engine.local:8081/modules/test/tts');
+    expect(init.method).toBe('POST');
+    expect(init.headers.Authorization).toBe('Bearer jwt-token');
+    const body = JSON.parse(init.body);
+    expect(body.provider_type).toBe('openai');
+    expect(body.provider_config_id).toBe(42);
+    expect(body.text).toBe('Hello, this is a test.');
+  });
+
+  it('throws the engine error message on a 4xx { error } response', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'unknown provider_type' }),
+    });
+
+    await expect(testTts(draftConfig, 'Hello')).rejects.toThrow(/unknown provider_type/);
+  });
+
+  it('throws a ModuleTestError when the engine is unreachable (no base url)', async () => {
+    mockGetWSSUrl.mockResolvedValue(null);
+    mockGetWSUrl.mockResolvedValue(null);
+
+    await expect(testTts(draftConfig, 'Hello')).rejects.toBeInstanceOf(ModuleTestError);
   });
 });

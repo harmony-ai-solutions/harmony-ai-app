@@ -22,5 +22,12 @@
   "modeAdvanced": "Advanced",
   "modeSimpleHint": "Just the essentials — provider, model and credentials.",
   "modeAdvancedHint": "Full control over sampling, limits and credentials.",
-  "testConfiguration": "Test your configuration"
+  "testConfiguration": "Test your configuration",
+  "sampleText": "Hello, this is what your character sounds like.",
+  "play": "Play",
+  "stop": "Stop",
+  "synthesizing": "Synthesizing…",
+  "ttsOfflineTitle": "Connect to Harmony Link to test",
+  "ttsOfflineHint": "The test panel runs the engine's configured TTS provider. Connect to Harmony Link to try it.",
+  "ttsError": "The test failed: {{message}}"
 }
