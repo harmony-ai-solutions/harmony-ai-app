@@ -925,20 +925,13 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       this.cancelReconnectsForInteraction(interactionId);
 
       // Disconnect ALL connections — fault-isolated per connection so one
-      // failing ENTITY_SESSION_END/disconnect can't strand the remaining
-      // connections (same leak class as the audio error above).
+      // failing disconnect can't strand the remaining connections (same leak
+      // class as the audio error above). Intentional: no end-of-session event
+      // is sent — the engine has no receiver for it; the socket close itself
+      // triggers the engine suspend path.
       for (const [entityId, conn] of session.connections.entries()) {
         try {
           if (this.connectionManager.isConnected(conn.connectionId)) {
-            await this.connectionManager.sendEvent(
-              conn.connectionId,
-              {
-                event_id: this.generateEventId(),
-                event_type: 'ENTITY_SESSION_END',
-                status: 'NEW',
-                payload: { session_id: interactionId }
-              }
-            );
             this.connectionManager.disconnectConnection(conn.connectionId);
           }
 

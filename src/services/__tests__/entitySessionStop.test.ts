@@ -134,17 +134,22 @@ describe('EntitySessionService.stopInteractionSession teardown', () => {
     // The audio error must not skip connection teardown (the on-device bug).
     expect(mockConnectionManager.disconnectConnection).toHaveBeenCalledWith('entity-claire');
     expect(mockConnectionManager.disconnectConnection).toHaveBeenCalledWith('entity-user');
+    // Dead protocol removed: the socket close itself triggers the engine
+    // suspend path — no end-of-session event may be sent.
+    expect(mockConnectionManager.sendEvent).not.toHaveBeenCalled();
     // Session is still cleaned up and the stopped event still fires.
     expect(stoppedEvents).toEqual(['ix-1']);
     expect((svc as any).sessions.has('ix-1')).toBe(false);
   });
 
   it('continues tearing down remaining connections when one disconnect fails', async () => {
-    // First connection's ENTITY_SESSION_END send fails — the second connection
-    // must still be disconnected (per-connection fault isolation).
-    mockConnectionManager.sendEvent
-      .mockRejectedValueOnce(new Error('socket dead'))
-      .mockResolvedValue(undefined);
+    // First connection's disconnect throws synchronously — the second
+    // connection must still be disconnected (per-connection fault isolation).
+    mockConnectionManager.disconnectConnection
+      .mockImplementationOnce(() => {
+        throw new Error('socket dead');
+      })
+      .mockImplementation(() => undefined);
 
     const svc = EntitySessionService.getInstance();
     seedSession(svc as any, 'ix-2');
@@ -155,6 +160,7 @@ describe('EntitySessionService.stopInteractionSession teardown', () => {
     await svc.stopInteractionSession('ix-2');
 
     expect(mockConnectionManager.disconnectConnection).toHaveBeenCalledWith('entity-user');
+    expect(mockConnectionManager.sendEvent).not.toHaveBeenCalled();
     expect(stoppedEvents).toEqual(['ix-2']);
     expect((svc as any).sessions.has('ix-2')).toBe(false);
   });

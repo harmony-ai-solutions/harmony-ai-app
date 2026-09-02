@@ -149,8 +149,8 @@ describe('EntitySessionService background WS policy (D1-5)', () => {
     getAppStateHandler()('background');
     await Promise.resolve();
 
-    // The purge guard must skip closeAllSessions entirely — no
-    // ENTITY_SESSION_END sends and no connection teardown.
+    // The purge guard must skip closeAllSessions entirely — no session stop
+    // events and no connection teardown.
     expect(mockConnectionManager.sendEvent).not.toHaveBeenCalled();
     expect(mockConnectionManager.disconnectConnection).not.toHaveBeenCalled();
     expect((svc as any).sessions.has('ix-1')).toBe(true);
@@ -164,7 +164,7 @@ describe('EntitySessionService background WS policy (D1-5)', () => {
 
     getAppStateHandler()('background');
     // Let closeAllSessions → stopInteractionSession microtasks settle
-    // (AudioPlayer.stop → ENTITY_SESSION_END send → disconnect, per conn).
+    // (AudioPlayer.stop → disconnect, per conn).
     await new Promise(resolve => setTimeout(resolve, 0));
     await new Promise(resolve => setTimeout(resolve, 0));
 
