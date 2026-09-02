@@ -2216,8 +2216,8 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
             >
               <LinearGradient
                 colors={[
-                  (theme?.colors.accent.primary ?? '#7c3aed') + 'E6',
-                  ((theme?.colors.accent.secondary ?? theme?.colors.accent.primaryHover ?? '#7c3aed') + '80'),
+                  (theme?.colors.status.success ?? '#10b981') + 'E6',
+                  (theme?.colors.status.success ?? '#10b981') + '80',
                 ]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
@@ -2785,8 +2785,9 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
   },
+  // Semantic "connected" dot (review): success green instead of brand violet.
   statusDotOnline: {
-    shadowColor: '#7c3aed',
+    shadowColor: '#10b981',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.6,
     shadowRadius: 4,
