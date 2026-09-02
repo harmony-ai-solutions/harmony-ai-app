@@ -103,6 +103,8 @@
   "signInHint": "Sign in to view and manage your profile, characters and personas.",
   "signInButton": "Sign In",
   "notSignedIn": "Not signed in",
+  "editProfileSignInHint": "Sign in to edit your cloud profile",
+  "statsSignInHint": "Sign in to sync your social stats",
 
   "notificationsTitle": "Notifications",
   "notificationsEmpty": "No notifications yet",

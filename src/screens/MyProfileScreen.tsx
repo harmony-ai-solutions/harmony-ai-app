@@ -11,13 +11,20 @@
  * All profile text (name, handle, bio, stats) is raw floating text directly
  * on the screen background — no background cards / containers / boxes.
  *
- * All data is cloud-first: the UserProfile from useAuth() is the single source
- * for the display name (graceful "User" fallback), characters come from the
- * character_profiles repository (local), follower/following stats and the
- * Posts/Saved tabs come from the SocialService stub, and personas are entities
- * linked to user-tagged character profiles (see personas repo). Username / bio
- * / avatar are per-device extras merged in from the ProfileExtrasService stub
- * seam (the locally-picked avatar overrides the cloud avatar_url).
+ * Data is a mix of local and cloud: the UserProfile from useAuth() is the
+ * single source for the display name (graceful "User" fallback), characters
+ * come from the character_profiles repository (local), follower/following stats
+ * and the Posts/Saved tabs come from the SocialService stub (in-memory, works
+ * offline), and personas are entities linked to user-tagged character profiles
+ * (see personas repo). Username / bio / avatar are per-device extras merged in
+ * from the ProfileExtrasService stub seam (the locally-picked avatar overrides
+ * the cloud avatar_url).
+ *
+ * The screen ALWAYS renders in local mode (review): personas, AI Characters and
+ * (stub-local) Saved are fully functional without auth. Cloud-bound affordances
+ * — the edit-profile entry (display name persists via auth PATCH /v1/auth/me),
+ * the social Following/Followers stats, and the Posts tab — are greyed out with
+ * a sign-in hint (never hidden) when the user is unauthenticated.
  */
 
 import React, { useState, useCallback } from 'react';
@@ -331,46 +338,9 @@ export const MyProfileScreen: React.FC = () => {
     },
   ];
 
-  // ── Unauthenticated state ──────────────────────────────────────────────
-  if (!isAuthed) {
-    return (
-      <ThemedView variant="base" style={styles.container}>
-        <ScreenHeader
-          title={t('title')}
-          right={
-            <View style={styles.headerRightRow}>
-              <HeaderNotificationButton />
-              <HeaderMenuButton />
-            </View>
-          }
-        />
-        <ScrollView
-          contentContainerStyle={[
-            styles.scrollContent,
-            { paddingBottom: TAB_BAR_CONTENT_PAD + safeBottom },
-          ]}
-        >
-          <ThemedEmptyState
-            icon="account-circle-outline"
-            title={t('signInTitle')}
-            subtitle={t('signInHint')}
-            style={styles.authEmpty}
-            testID="profile-not-signed-in"
-          />
-          <View style={styles.authAction}>
-            <ThemedButton
-              label={t('signInButton')}
-              onPress={() => navigation.navigate('Login')}
-              icon="login"
-              testID="profile-sign-in-button"
-            />
-          </View>
-        </ScrollView>
-      </ThemedView>
-    );
-  }
-
-  // ── Authenticated profile ──────────────────────────────────────────────
+  // ── Profile (always rendered — personas / characters / stub Saved are
+  //    fully local; cloud-bound affordances are greyed with a sign-in hint
+  //    when unauthenticated rather than blocking the whole screen) ──────────
   return (
     <ThemedView variant="base" style={styles.container}>
       {/* Header (title + bell + hamburger menu) */}
@@ -437,31 +407,43 @@ export const MyProfileScreen: React.FC = () => {
               </ThemedText>
             )}
 
-            {/* Compact Edit Profile pill */}
+            {/* Compact Edit Profile pill — cloud-first (display name persists
+                via auth PATCH /v1/auth/me). Greys out with a sign-in hint when
+                unauthenticated instead of being hidden. */}
             <TouchableOpacity
               onPress={() => {
+                if (!isAuthed) return;
                 hapticLightPress();
                 handleOpenEditProfile();
               }}
+              disabled={!isAuthed}
               activeOpacity={0.7}
-              style={styles.editPill}
+              style={[styles.editPill, !isAuthed && styles.editPillDisabled]}
               testID="profile-edit-button"
               accessibilityRole="button"
               accessibilityLabel={t('editProfile')}
+              accessibilityState={{ disabled: !isAuthed }}
             >
               <Icon
                 name="account-edit-outline"
                 size={14}
-                color={theme.colors.accent.primary}
+                color={isAuthed ? theme.colors.accent.primary : theme.colors.text.muted}
               />
               <ThemedText
                 size={12}
                 weight="medium"
-                style={{ color: theme.colors.accent.primary }}
+                style={{ color: isAuthed ? theme.colors.accent.primary : theme.colors.text.muted }}
               >
                 {t('editProfile')}
               </ThemedText>
             </TouchableOpacity>
+
+            {/* Sign-in hint for the cloud-bound edit entry (local mode) */}
+            {!isAuthed && (
+              <ThemedText variant="muted" size={11} style={styles.editSignInHint}>
+                {t('editProfileSignInHint')}
+              </ThemedText>
+            )}
 
             {/* Bio — clean left-aligned floating text, directly under the
                 edit button. Rendered only when the user has written one. */}
@@ -486,18 +468,32 @@ export const MyProfileScreen: React.FC = () => {
           />
         </View>
 
-        {/* ── Stats row (raw floating text — no card) ── */}
+        {/* ── Stats row (raw floating text — no card). Following / Followers
+            are social (cloud) stats → greyed + zeroed in local mode with a
+            sign-in hint; AI Characters is fully local and stays functional. ── */}
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <ThemedText variant="primary" size={18} weight="bold" hierarchy="header">
-              {followingCount}
+            <ThemedText
+              variant="primary"
+              size={18}
+              weight="bold"
+              hierarchy="header"
+              style={!isAuthed ? { color: theme.colors.text.muted } : undefined}
+            >
+              {isAuthed ? followingCount : 0}
             </ThemedText>
             <ThemedText variant="muted" size={12} hierarchy="caption">
               {t('following')}
             </ThemedText>
           </View>
           <View style={styles.statItem}>
-            <ThemedText variant="primary" size={18} weight="bold" hierarchy="header">
+            <ThemedText
+              variant="primary"
+              size={18}
+              weight="bold"
+              hierarchy="header"
+              style={!isAuthed ? { color: theme.colors.text.muted } : undefined}
+            >
               0
             </ThemedText>
             <ThemedText variant="muted" size={12} hierarchy="caption">
@@ -513,62 +509,87 @@ export const MyProfileScreen: React.FC = () => {
             </ThemedText>
           </View>
         </View>
+        {!isAuthed && (
+          <ThemedText variant="muted" size={11} style={styles.statsSignInHint}>
+            {t('statsSignInHint')}
+          </ThemedText>
+        )}
 
         {/* ── Tab bar — icon-only with active underline ── */}
         <ProfileTabs active={activeTab} onChange={setActiveTab} tabs={tabs} />
 
         {/* ── Content grid — 3-column media grid for the active tab ── */}
         <View style={styles.gridContent}>
-          {activeTab === 'posts' && (
-            <>
-              {/* "New Post" button */}
-              <TouchableOpacity
-                onPress={() => {
-                  hapticLightPress();
-                  setCreatePostVisible(true);
-                }}
-                activeOpacity={0.7}
-                style={styles.newPostPill}
-                testID="new-post-button"
-                accessibilityRole="button"
-                accessibilityLabel={t('newPost')}
-              >
-                <Icon name="plus" size={16} color={theme.colors.accent.primary} />
-                <ThemedText size={13} weight="medium" style={{ color: theme.colors.accent.primary }}>
-                  {t('newPost')}
-                </ThemedText>
-              </TouchableOpacity>
+          {activeTab === 'posts' &&
+            (isAuthed ? (
+              <>
+                {/* "New Post" button */}
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLightPress();
+                    setCreatePostVisible(true);
+                  }}
+                  activeOpacity={0.7}
+                  style={styles.newPostPill}
+                  testID="new-post-button"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('newPost')}
+                >
+                  <Icon name="plus" size={16} color={theme.colors.accent.primary} />
+                  <ThemedText size={13} weight="medium" style={{ color: theme.colors.accent.primary }}>
+                    {t('newPost')}
+                  </ThemedText>
+                </TouchableOpacity>
 
-              {posts.length === 0 ? (
-                <ThemedEmptyState
-                  icon="post-outline"
-                  title={t('tabPostsEmpty')}
-                  subtitle={t('tabPostsEmptyHint')}
-                  compact
-                  style={styles.gridEmpty}
-                />
-              ) : (
-                <View style={styles.postsFeed}>
-                  {posts.map(post => {
-                    const state = postState[post.id] ?? { liked: false, likes: 0, commentCount: 0 };
-                    return (
-                      <PostCard
-                        key={post.id}
-                        post={post}
-                        liked={state.liked}
-                        likes={state.likes}
-                        commentCount={state.commentCount}
-                        onToggleLike={() => handleTogglePostLike(post.id)}
-                        onOpenComments={() => handleOpenPostComments(post.id)}
-                        showAuthor={false}
-                        onDeletePost={() => handleDeletePost(post.id)}
-                      />
-                    );
-                  })}
-                </View>
-              )}
-            </>
-          )}
+                {posts.length === 0 ? (
+                  <ThemedEmptyState
+                    icon="post-outline"
+                    title={t('tabPostsEmpty')}
+                    subtitle={t('tabPostsEmptyHint')}
+                    compact
+                    style={styles.gridEmpty}
+                  />
+                ) : (
+                  <View style={styles.postsFeed}>
+                    {posts.map(post => {
+                      const state = postState[post.id] ?? { liked: false, likes: 0, commentCount: 0 };
+                      return (
+                        <PostCard
+                          key={post.id}
+                          post={post}
+                          liked={state.liked}
+                          likes={state.likes}
+                          commentCount={state.commentCount}
+                          onToggleLike={() => handleTogglePostLike(post.id)}
+                          onOpenComments={() => handleOpenPostComments(post.id)}
+                          showAuthor={false}
+                          onDeletePost={() => handleDeletePost(post.id)}
+                        />
+                      );
+                    })}
+                  </View>
+                )}
+              </>
+            ) : (
+              // Posts are social/cloud-bound (loadPosts early-returns without a
+              // user). In local mode the tab shows the sign-in empty state +
+              // button instead of a blank feed.
+              <ThemedEmptyState
+                icon="account-circle-outline"
+                title={t('signInTitle')}
+                subtitle={t('signInHint')}
+                style={styles.authEmpty}
+                testID="profile-not-signed-in"
+                action={
+                  <ThemedButton
+                    label={t('signInButton')}
+                    onPress={() => navigation.navigate('Login')}
+                    icon="login"
+                    testID="profile-sign-in-button"
+                  />
+                }
+              />
+            ))}
 
           {activeTab === 'saved' &&
             (savedCharacters.length === 0 ? (
@@ -753,6 +774,14 @@ const styles = StyleSheet.create({
     borderColor: '#7c3aed' + '55',
     backgroundColor: '#7c3aed' + '18',
   },
+  // Greys the edit pill out (disabled) in local/unauth mode.
+  editPillDisabled: {
+    opacity: 0.55,
+  },
+  editSignInHint: {
+    marginTop: 4,
+    textAlign: 'left',
+  },
   // ── Stats (floating text, no card) ──
   statsRow: {
     flexDirection: 'row',
@@ -764,6 +793,10 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     gap: 2,
+  },
+  statsSignInHint: {
+    marginTop: 8,
+    textAlign: 'center',
   },
   // ── Bio ──
   bioText: {
@@ -837,13 +870,9 @@ const styles = StyleSheet.create({
     borderColor: '#7c3aed' + '55',
     backgroundColor: '#7c3aed' + '18',
   },
-  // ── Unauthenticated ──
+  // ── Unauthenticated (per-tab sign-in empty state) ──
   authEmpty: {
     paddingTop: 80,
-  },
-  authAction: {
-    marginTop: 16,
-    marginHorizontal: 48,
   },
 });
 

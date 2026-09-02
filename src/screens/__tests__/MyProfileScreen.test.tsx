@@ -66,7 +66,7 @@ jest.mock('../../contexts/AppToastContext', () => ({
 }));
 
 jest.mock('../../contexts/AuthContext', () => ({
-  useAuth: () => ({ user: MOCK_USER, status: 'authenticated' }),
+  useAuth: jest.fn(),
 }));
 
 // Stable identity so the focus-effect loaders (depends on `user`) don't loop.
@@ -187,8 +187,10 @@ jest.mock('../../services/social/SocialService', () => ({
 }));
 
 import { getUserEntities } from '../../database/repositories/userEntities';
+import { useAuth } from '../../contexts/AuthContext';
 
 const mockGetUserEntities = getUserEntities as jest.Mock;
+const mockUseAuth = useAuth as jest.Mock;
 
 const USER_ENTITY: Persona = {
   id: 'user',
@@ -215,7 +217,12 @@ async function flush() {
   }
 }
 
-describe('MyProfileScreen — personas tab (5-4 §2)', () => {
+describe('MyProfileScreen — unauthenticated local mode + personas tab (5-4 §2)', () => {
+  beforeEach(() => {
+    // Default every test to authenticated; unauthenticated tests override.
+    mockUseAuth.mockReturnValue({ user: MOCK_USER, status: 'authenticated' });
+  });
+
   it('lists user entities (including the built-in user) as Persona rows', async () => {
     mockGetUserEntities.mockResolvedValue([USER_ENTITY, MARA]);
 
@@ -227,6 +234,49 @@ describe('MyProfileScreen — personas tab (5-4 §2)', () => {
     await flush();
 
     // Both the built-in user and the authored persona render as rows.
+    const rows = utils.getAllByTestId('persona-row');
+    expect(rows).toHaveLength(2);
+    expect(utils.getByText('You')).toBeTruthy();
+    expect(utils.getByText('Mystic Mara')).toBeTruthy();
+  });
+
+  it('renders the full screen (tab bar) when unauthenticated instead of the old whole-screen sign-in gate', async () => {
+    mockUseAuth.mockReturnValue({ user: null, status: 'unauthenticated' });
+
+    const utils = await render(<MyProfileScreen />);
+    await flush();
+
+    // The tab bar is always rendered (local mode — personas / Saved / etc.).
+    expect(utils.getByTestId('profile-tab-posts')).toBeTruthy();
+    expect(utils.getByTestId('profile-tab-saved')).toBeTruthy();
+    expect(utils.getByTestId('profile-tab-personas')).toBeTruthy();
+    // The local fallback identity still shows.
+    expect(utils.getByText('User')).toBeTruthy();
+  });
+
+  it('shows the sign-in empty state in the Posts tab when unauthenticated', async () => {
+    mockUseAuth.mockReturnValue({ user: null, status: 'unauthenticated' });
+
+    const utils = await render(<MyProfileScreen />);
+    await flush();
+
+    // Default (focused) tab is Posts — should show the sign-in state.
+    expect(utils.getByTestId('profile-not-signed-in')).toBeTruthy();
+    // Cloud-bound affordances are greyed with hints, never hidden.
+    expect(utils.getByText('editProfileSignInHint')).toBeTruthy();
+    expect(utils.getByText('statsSignInHint')).toBeTruthy();
+  });
+
+  it('still renders persona rows when unauthenticated (personas are purely local)', async () => {
+    mockUseAuth.mockReturnValue({ user: null, status: 'unauthenticated' });
+    mockGetUserEntities.mockResolvedValue([USER_ENTITY, MARA]);
+
+    const utils = await render(<MyProfileScreen />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('profile-tab-personas'));
+    await flush();
+
     const rows = utils.getAllByTestId('persona-row');
     expect(rows).toHaveLength(2);
     expect(utils.getByText('You')).toBeTruthy();
