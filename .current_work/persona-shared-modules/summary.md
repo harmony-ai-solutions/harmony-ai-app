@@ -12,7 +12,7 @@ Approved design (user rulings 2026-09-02):
 - **RAG:** NOT for user entities — no UI for it on any user-entity view.
 - **TTS:** personas never speak (mic-only). TTS stays AI-only.
 - **App UX:** "Voice input" is a *global user setting* (Settings entry + PersonaEdit info link), never per-persona editing. On/off switch maps to the engine provider sentinel (`ProviderDisabled = "disabled"`).
-- **Test blocks:** STT/VAD config editor gets a recorder test (record → transcribe → VAD segments); TTS config editor gets a playback test (text → synthesize → listen). Both execute against the *configured* provider via new engine test endpoints — real end-to-end fidelity, local + cloud.
+- **Test blocks:** STT/VAD config editor gets a recorder test (record → transcribe → VAD segments); TTS config editor gets a playback test (text → synthesize → listen). Both execute against the *configured* provider via the eventserver `debug` session protocol (existing STT/TTS events; the interim HTTP test API was removed — management server is not cloud-reachable) — real end-to-end fidelity, local + cloud.
 - **Engine frontend:** Entities tab filters to AI entities; new Personas tab (identity CRUD + ONE tab-level "Shared user modules" card, STT-only); Characters tab gets "used-by" badges + create-persona-from-card (copy semantics).
 
 ## Critical design constraints
@@ -52,12 +52,12 @@ Track the completion of each phase as implementation progresses:
   - [x] Canonical inheritance + API guard ([1-1-EngineCanonicalInheritance.md](1-1-EngineCanonicalInheritance.md))
   - [x] ~~Module test API~~ **REMOVED by user correction 2026-09-02** — management server not cloud-reachable; eventserver protocol is the transport ([1-2-EngineModuleTestAPI.md](1-2-EngineModuleTestAPI.md))
   - [x] Debug session type + HTTP endpoint removal ([1-3-EngineDebugSessionType.md](1-3-EngineDebugSessionType.md))
-- [ ] **Phase 2: App**
+- [x] **Phase 2: App**
   - [x] Voice input settings screen ([2-1-AppVoiceInputSettings.md](2-1-AppVoiceInputSettings.md))
   - [x] STT/VAD recorder test block — **eventserver rework** (HTTP approach reverted) ([2-2-AppSTTVADTestBlock.md](2-2-AppSTTVADTestBlock.md))
   - [x] TTS playback test block — **eventserver rework** (HTTP approach reverted) ([2-3-AppTTSTestBlock.md](2-3-AppTTSTestBlock.md))
 - [x] **Phase 3: Engine frontend**
   - [x] Personas tab + entities filter ([3-1-EngineFrontendPersonasTab.md](3-1-EngineFrontendPersonasTab.md))
   - [x] Characters badges + persona-from-card ([3-2-EngineFrontendCharactersBadges.md](3-2-EngineFrontendCharactersBadges.md))
-- [ ] **Phase 4: Docs & verification**
-  - [ ] Docs, memory bank, gates ([4-1-DocsAndVerification.md](4-1-DocsAndVerification.md))
+- [x] **Phase 4: Docs & verification**
+  - [x] Docs, memory bank, gates ([4-1-DocsAndVerification.md](4-1-DocsAndVerification.md))

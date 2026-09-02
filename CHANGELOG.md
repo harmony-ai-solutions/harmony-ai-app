@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### Voice & Speech
+
+#### Added
+- **Voice input is now a shared setting for all personas** — switch speech-to-text on or off once from Settings (with a pointer from a persona's edit screen), and every persona uses it. Identity and memories stay per-persona; the input pipeline is shared.
+- **Record-and-test your speech-to-text setup** — from the voice settings you can record a capture and have it transcribed through your configured engine to confirm the setup works before you rely on it in chat.
+- **Known limitation:** testing text-to-speech needs a config entry that is bound to an entity, so the TTS test is not available from the settings screen until that wiring lands.
+
 ### Chat & Messaging
 
 #### Added
