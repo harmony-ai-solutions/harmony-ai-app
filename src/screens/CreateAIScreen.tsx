@@ -2053,6 +2053,7 @@ const focused = focusedField === field;
                   selectedId={backendConfigId}
                   onChange={setBackendConfigId}
                   isLoading={hasAnyConfigs === null}
+                  entityId={editEntityId ?? undefined}
                 />
                 <EntityModuleSelectorWithActions
                   label={t('moduleCognition')}
@@ -2061,6 +2062,7 @@ const focused = focusedField === field;
                   selectedId={cognitionConfigId}
                   onChange={setCognitionConfigId}
                   isLoading={hasAnyConfigs === null}
+                  entityId={editEntityId ?? undefined}
                 />
 
                 <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
@@ -2073,6 +2075,7 @@ const focused = focusedField === field;
                   selectedId={ttsConfigId}
                   onChange={setTtsConfigId}
                   isLoading={hasAnyConfigs === null}
+                  entityId={editEntityId ?? undefined}
                 />
                 <EntityModuleSelectorWithActions
                   label={t('moduleSTT')}
@@ -2081,6 +2084,7 @@ const focused = focusedField === field;
                   selectedId={sttConfigId}
                   onChange={setSttConfigId}
                   isLoading={hasAnyConfigs === null}
+                  entityId={editEntityId ?? undefined}
                 />
 
                 <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
@@ -2093,6 +2097,7 @@ const focused = focusedField === field;
                   selectedId={ragConfigId}
                   onChange={setRagConfigId}
                   isLoading={hasAnyConfigs === null}
+                  entityId={editEntityId ?? undefined}
                 />
                 <EntityModuleSelectorWithActions
                   label={t('moduleMovement')}
@@ -2101,6 +2106,7 @@ const focused = focusedField === field;
                   selectedId={movementConfigId}
                   onChange={setMovementConfigId}
                   isLoading={hasAnyConfigs === null}
+                  entityId={editEntityId ?? undefined}
                 />
                 <EntityModuleSelectorWithActions
                   label={t('moduleVision')}
@@ -2109,6 +2115,7 @@ const focused = focusedField === field;
                   selectedId={visionConfigId}
                   onChange={setVisionConfigId}
                   isLoading={hasAnyConfigs === null}
+                  entityId={editEntityId ?? undefined}
                 />
                 <EntityModuleSelectorWithActions
                   label={t('moduleImagination')}
@@ -2117,6 +2124,7 @@ const focused = focusedField === field;
                   selectedId={imaginationConfigId}
                   onChange={setImaginationConfigId}
                   isLoading={hasAnyConfigs === null}
+                  entityId={editEntityId ?? undefined}
                 />
 
               </View>

@@ -250,6 +250,22 @@ describe('SttTestPanel — state machine + offline handling', () => {
     expect(utils.getByText('hello world')).toBeTruthy();
   });
 
+  it('uses the explicit entityId override when present (skips persona resolution)', async () => {
+    const utils = await render(<SttTestPanel enabled entityId="ai-entity-1" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('stt-record-button'));
+    await flush();
+    await fireEvent.press(utils.getByTestId('stt-record-button'));
+    await flush();
+
+    // No persona resolution — the explicit entity context wins.
+    expect(ChatPreferencesService.getGlobalImpersonatedEntity).not.toHaveBeenCalled();
+    expect(resolvePersonaId).not.toHaveBeenCalled();
+    // The entity whose STT config is tested is the threaded entity id.
+    expect(mockRunTest).toHaveBeenCalledWith('ai-entity-1', expect.any(Function));
+  });
+
   it('renders the "no VAD segments" note (one-shot mode has no live VAD segments)', async () => {
     const utils = await render(<SttTestPanel />);
     await flush();

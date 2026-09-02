@@ -50,6 +50,10 @@ type RecorderPhase = 'idle' | 'recording' | 'processing' | 'done' | 'error';
 
 interface SttTestPanelProps {
   enabled?: boolean;
+  /** Explicit entity context (edit-mode CreateAI threads the AI entity id).
+   *  When present the STT config is tested against THAT entity; when absent the
+   *  (shared) persona is resolved as today. */
+  entityId?: string;
 }
 
 export interface VadSegment {
@@ -115,6 +119,7 @@ export function computeVadBars(
 
 export const SttTestPanel: React.FC<SttTestPanelProps> = ({
   enabled = true,
+  entityId,
 }) => {
   const { theme } = useAppTheme();
   const { t } = useTranslation('voiceInput');
@@ -174,19 +179,20 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
       const recorded = await AudioRecorder.stopRecording();
       setPhase('processing');
 
-      // Resolve the persona the user currently chats as — the entity whose
-      // (shared) STT config is tested. resolvePersonaId sanitizes a stale or
+      // Resolve the entity whose (shared) STT config is tested. An explicit
+      // entityId (edit-mode CreateAI) overrides; otherwise resolve the persona
+      // the user currently chats as. resolvePersonaId sanitizes a stale or
       // AI-character stored id to `'user'`, so this always yields a valid user
       // entity.
-      const stored = await ChatPreferencesService.getGlobalImpersonatedEntity();
-      const personaId = await resolvePersonaId(stored);
+      const testEntityId =
+        entityId ?? (await resolvePersonaId(await ChatPreferencesService.getGlobalImpersonatedEntity()));
 
       // Derive WAV parameters from the recorder output header (fallback to the
       // recorder's fixed 16 kHz / 16-bit / mono).
       const params = parseWavAudioParams(recorded.data) ?? DEFAULT_WAV_PARAMS;
 
       const messageId = uuidv7();
-      const transcript = await runTest(personaId, async ({ sendEvent, awaitEvent }) => {
+      const transcript = await runTest(testEntityId, async ({ sendEvent, awaitEvent }) => {
         await sendEvent({
           event_type: 'STT_INPUT_AUDIO',
           payload: {
@@ -221,7 +227,7 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
       );
       log.error('STT test failed:', err);
     }
-  }, [phase, stopTimer, t]);
+  }, [phase, stopTimer, t, entityId]);
 
   const handlePress = useCallback(() => {
     if (phase === 'recording') {

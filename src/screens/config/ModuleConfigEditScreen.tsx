@@ -108,6 +108,9 @@ type RootStackParamList = {
   ModuleConfigEdit: {
     moduleType: string;
     configId?: string;
+    /** The AI entity this config is wired to (edit-mode CreateAI). Enables
+     *  entity-bound test panels (TTS) — absent in create mode. */
+    entityId?: string;
   };
 };
 
@@ -192,7 +195,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
   // the momentary WS connection state.
   const isCloudMode = connectionStatus?.mode === 'cloud';
   
-  const { moduleType, configId } = route.params;
+  const { moduleType, configId, entityId } = route.params;
   const isCreate = !configId;
   const isSTT = moduleType === 'stt';
   
@@ -857,7 +860,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
             <ThemedCard elevated accentStripe style={styles.section}>
               <SectionHeader title={t('testConfiguration')} />
               <View style={styles.sectionContent}>
-                <SttTestPanel enabled={!!formValues.transcription_provider} />
+                <SttTestPanel enabled={!!formValues.transcription_provider} entityId={entityId} />
               </View>
             </ThemedCard>
           )}
@@ -914,14 +917,15 @@ export const ModuleConfigEditScreen: React.FC = () => {
           formValues.provider,
         )}
 
-        {/* ── TTS playback test block (2-3) — eventserver debug session. This
-            editor has NO entity binding (route params are moduleType+configId
-            only), so the panel renders its disabled hint; see TtsTestPanel doc. ── */}
+        {/* ── TTS playback test block (2-3) — eventserver debug session. The
+            editor threads the optional `entityId` route param (edit-mode
+            CreateAI) into the panel: with an entity the test is ENABLED, in
+            create mode (no entity) it shows the disabled hint; see TtsTestPanel doc. ── */}
         {moduleType === 'tts' && formValues.provider && (
           <ThemedCard elevated accentStripe style={styles.section}>
             <SectionHeader title={t('testConfiguration')} />
             <View style={styles.sectionContent}>
-              <TtsTestPanel />
+              <TtsTestPanel entityId={entityId} />
             </View>
           </ThemedCard>
         )}

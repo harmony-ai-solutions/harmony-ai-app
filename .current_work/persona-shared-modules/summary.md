@@ -36,7 +36,10 @@ Approved design (user rulings 2026-09-02):
   - 3-1 Personas tab + AI-entities filter + "Shared user modules" card
   - 3-2 Characters tab "used-by" badges + create-persona-from-card
 - **Phase 4 — Docs & verification**
-  - 4-1 Memory bank, CHANGELOG, docs, final gates
+  - 4-1 Memory bank, CHANGELOG, docs, final gates — **DONE**
+- **Phase 5 — Follow-up (user rulings 2026-09-02, post smoke-test)**
+  - 5-1 Entity-context threading (enable TTS test in AI edit mode; create-mode stays disabled by design)
+  - 5-2 Reusable streaming service (live VAD/transcription, engine pull protocol, video-extensible)
 
 ## Execution order
 
@@ -61,3 +64,6 @@ Track the completion of each phase as implementation progresses:
   - [x] Characters badges + persona-from-card ([3-2-EngineFrontendCharactersBadges.md](3-2-EngineFrontendCharactersBadges.md))
 - [x] **Phase 4: Docs & verification**
   - [x] Docs, memory bank, gates ([4-1-DocsAndVerification.md](4-1-DocsAndVerification.md))
+- [ ] **Phase 5: Follow-up**
+  - [x] Entity-context threading ([5-1-AppEntityContextThreading.md](5-1-AppEntityContextThreading.md))
+  - [ ] Reusable streaming service ([5-2-AppStreamingService.md](5-2-AppStreamingService.md))

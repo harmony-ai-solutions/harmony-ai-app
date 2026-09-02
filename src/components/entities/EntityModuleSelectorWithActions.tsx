@@ -24,6 +24,7 @@ type RootStackParamList = {
   ModuleConfigEdit: {
     moduleType: string;
     configId?: string;
+    entityId?: string;
   };
 };
 
@@ -36,6 +37,9 @@ interface EntityModuleSelectorWithActionsProps {
   selectedId: string;
   onChange: (id: string) => void;
   isLoading?: boolean;
+  /** The AI entity this config is being wired to (edit mode). When present it is
+   *  threaded into ModuleConfigEdit so entity-bound test panels (TTS) can run. */
+  entityId?: string;
 }
 
 export const EntityModuleSelectorWithActions: React.FC<
@@ -47,6 +51,7 @@ export const EntityModuleSelectorWithActions: React.FC<
   selectedId,
   onChange,
   isLoading = false,
+  entityId,
 }) => {
   const { theme } = useAppTheme();
   const navigation = useNavigation<NavigationProp>();
@@ -56,6 +61,7 @@ export const EntityModuleSelectorWithActions: React.FC<
       navigation.navigate('ModuleConfigEdit', {
         moduleType,
         configId: selectedId,
+        ...(entityId ? { entityId } : {}),
       });
     }
   };
@@ -63,6 +69,7 @@ export const EntityModuleSelectorWithActions: React.FC<
   const handleCreate = () => {
     navigation.navigate('ModuleConfigEdit', {
       moduleType,
+      ...(entityId ? { entityId } : {}),
     });
   };
 
