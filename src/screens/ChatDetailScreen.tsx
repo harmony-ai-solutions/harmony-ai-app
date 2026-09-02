@@ -29,6 +29,7 @@ import { ScreenHeader } from '../components/themed/ScreenHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
+import { v7 as uuidv7 } from 'uuid';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
@@ -40,7 +41,6 @@ import { ChatBubble, isPartnerMessage } from '../components/chat/ChatBubble';
 import { ChatInputBar, PickedImage } from '../components/chat/ChatInputBar';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewMessagesDivider } from '../components/chat/NewMessagesDivider';
-import { PersonaChangeDivider } from '../components/chat/PersonaChangeDivider';
 import { AlternateGreetingSwiper, parseAlternateGreetings } from '../components/chat/AlternateGreetingSwiper';
 import { EmptyChatCTA } from '../components/chat/EmptyChatCTA';
 import { GreetingBubble } from '../components/chat/GreetingBubble';
@@ -157,6 +157,72 @@ export function shouldInitializeEntitySession(params: {
   if (!params.disabledLoaded) return false;
   if (params.isDisabled) return false;
   return true;
+}
+
+/**
+ * Persona-switch decision (review): the persona switcher must navigate to the
+ * persona's OWN thread — the data model is thread-per-persona (`participant_key`
+ * includes the own identity; the engine's FindResumableSession matches exact
+ * participant sets). This pure helper decides between a no-op and a
+ * replace-target param set for the persona's own thread, so the switch logic is
+ * unit-testable without a screen render harness (RN 0.86 node-env crash).
+ *
+ * - Selecting the currently-active persona → `noop` (the caller just closes the
+ *   modal; this early-return happens BEFORE any state changes).
+ * - A new persona / 'user' ("chat as myself") → `switch` with the replace
+ *   params: the own identity is swapped for the persona, every OTHER participant
+ *   (the partner in a private chat, all other members in a group chat) is kept,
+ *   and the participant_key is re-derived so it becomes a distinct thread.
+ */
+export type PersonaSwitchPlan =
+  | { action: 'noop' }
+  | {
+      action: 'switch';
+      params: {
+        interactionId: string;
+        participantKey: string;
+        participantIds: string[];
+        entityId: string;
+        entityName?: string;
+      };
+    };
+
+export function buildPersonaSwitchPlan(input: {
+  personaId: string;
+  currentOwnEntityId: string;
+  currentParticipantIds: string[];
+  partnerEntityName?: string;
+  newInteractionId: string;
+}): PersonaSwitchPlan {
+  const {
+    personaId,
+    currentOwnEntityId,
+    currentParticipantIds,
+    partnerEntityName,
+    newInteractionId,
+  } = input;
+
+  // Selecting the currently-active persona → no-op (modal already closed).
+  if (personaId === currentOwnEntityId) {
+    return { action: 'noop' };
+  }
+
+  // Replace the own identity, keep every OTHER participant.
+  const others = currentParticipantIds.filter(id => id !== currentOwnEntityId);
+  const newParticipantIds = [personaId, ...others];
+  const scope = deriveScopeFromParticipants(newParticipantIds);
+  const participantKey = deriveParticipantKey(newParticipantIds, personaId, scope);
+
+  return {
+    action: 'switch',
+    params: {
+      interactionId: newInteractionId,
+      participantKey,
+      participantIds: newParticipantIds,
+      entityId: personaId,
+      entityName: partnerEntityName,
+    },
+  };
 }
 
 // After revealing the conversation (list made visible), keep re-pinning to the
@@ -283,8 +349,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [showDivider, setShowDivider] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
   const [personaSwitcherVisible, setPersonaSwitcherVisible] = useState(false);
-  // In-chat persona switch confirmation (rendered like a date/divider row)
-  const [personaChangeText, setPersonaChangeText] = useState<string | null>(null);
   const [isGroupChat, setIsGroupChat] = useState(false);
   const [headerName, setHeaderName] = useState<string>('Chat');
 
@@ -1545,28 +1609,54 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   }, []);
 
   // Switch the active persona for this chat ('user' = chat as own profile).
-  // Persists the global preference and renders an in-chat divider
-  // ("Now chatting as X") matching the app's divider/date-row design language.
+  // Persists the global preference, stops the OLD session, and navigates to the
+  // persona's OWN thread (thread-per-persona — the participant_key includes the
+  // own identity, so each persona/partner pair is its own conversation; the
+  // engine resolves the resumable session on INIT). The old in-chat
+  // "Now chatting as X" divider is gone (review) — confirmation is a toast.
   const handleSwitchPersona = useCallback(
     async (personaId: string) => {
       setPersonaSwitcherVisible(false);
       try {
-        if (personaId === 'user') {
-          // Chat as my own profile — clear the stored persona preference.
-          await ChatPreferencesService.setGlobalImpersonatedEntity('user');
-          setPersonaChangeText(t('personaChangedUser'));
+        const plan = buildPersonaSwitchPlan({
+          personaId,
+          currentOwnEntityId: ownEntityId,
+          currentParticipantIds: participantIds,
+          partnerEntityName: partnerName,
+          newInteractionId: uuidv7(),
+        });
+        // Selecting the currently-active persona → no-op (modal already closed).
+        if (plan.action === 'noop') {
           return;
         }
 
-        const persona = await getUserPersona(personaId);
+        // Resolve the persona display name for the confirmation toast.
+        let personaName = personaId;
+        if (personaId !== 'user') {
+          const persona = await getUserPersona(personaId);
+          personaName = persona?.name ?? personaId;
+        }
+
+        // 1. Persist the global impersonation pref ('user' clears it).
         await ChatPreferencesService.setGlobalImpersonatedEntity(personaId);
 
-        setPersonaChangeText(t('personaChanged', { name: persona?.name ?? personaId }));
+        // 2. Stop the OLD session before navigating to the new thread.
+        stopInteractionSession(currentInteractionIdRef.current).catch(() => {});
+
+        // 3. Navigate to the persona's own thread.
+        navigation.replace('ChatDetail', plan.params);
+
+        // 4. Confirmation toast.
+        showToast(
+          personaId === 'user'
+            ? t('personaChangedUser')
+            : t('personaChanged', { name: personaName }),
+        );
       } catch (err) {
         log.error('Failed to switch persona:', err);
       }
     },
-    [t],
+    [t, ownEntityId, participantIds, partnerName, navigation, stopInteractionSession],
   );
 
   // Open settings for the OTHER participant (partner/character) in this chat.
@@ -1610,15 +1700,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // Calculate messages with divider AND compute the initial scroll target
   const { messagesWithDivider, initialScrollTarget } = useMemo(() => {
-    if (messages.length === 0 && !personaChangeText) {
+    if (messages.length === 0) {
       return { messagesWithDivider: messages, initialScrollTarget: 'bottom' as const };
     }
 
     // Insert a calendar-day divider before the first message of each new day.
     // This runs on the raw messages so dividers stay stable regardless of the
-    // session/persona divider insertion below. D1-8: also emit a divider for
-    // the FIRST message (i === 0) so a freshly opened conversation shows its
-    // start date ("Today"/"Yesterday"/date) like mainstream chat apps.
+    // session/divider insertion below. D1-8: also emit a divider for the FIRST
+    // message (i === 0) so a freshly opened conversation shows its start date
+    // ("Today"/"Yesterday"/date) like mainstream chat apps.
     let withDivider: any[] = [];
     for (let i = 0; i < messages.length; i++) {
       if (
@@ -1661,19 +1751,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     }
 
-    // Append the in-chat persona-switch confirmation at the very bottom
-    // (rendered like a date/divider row, matching the chat's divider rhythm).
-    if (personaChangeText) {
-      withDivider = [
-        ...withDivider,
-        {
-          id: 'persona-change-divider',
-          type: 'personaChange',
-          personaName: personaChangeText,
-        },
-      ];
-    }
-
     // ALWAYS open the conversation at the most recent (bottom) message. The
     // "new messages" divider is still inserted above so it stays visible for
     // context when the user scrolls up, but the initial viewport must land on
@@ -1681,7 +1758,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // reported bug, so the scroll target is never a divider index.
     return { messagesWithDivider: withDivider, initialScrollTarget: 'bottom' as const };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, showDivider, ownEntityId, personaChangeText]);
+  }, [messages, showDivider, ownEntityId]);
 
   useEffect(() => {
     if (!isInitialScrollDone.current) {
@@ -1702,7 +1779,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // init so a late-arriving message still re-anchors the viewport to the bottom.
   useEffect(() => {
     const hasRealContent =
-      messages.length > 0 || Boolean(personaChangeText);
+      messages.length > 0;
     if (
       !isReadyToShowRef.current &&
       !isInitialScrollDone.current &&
@@ -1732,7 +1809,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }, 60);
       }
     }
-  }, [messages, personaChangeText, messagesWithDivider, initialScrollTarget]);
+  }, [messages, messagesWithDivider, initialScrollTarget]);
 
   const persistMarkAsRead = useCallback(() => {
     // Derived unread (A5/A2): mark partner-sent messages in THIS conversation
@@ -1969,9 +2046,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     ({ item }: { item: any }) => {
       if (item.type === 'divider') {
         return <NewMessagesDivider count={item.count} theme={theme!} />;
-      }
-      if (item.type === 'personaChange') {
-        return <PersonaChangeDivider personaName={item.personaName} theme={theme!} />;
       }
       if (item.type === 'day') {
         return <DayDivider date={item.date} theme={theme!} />;
