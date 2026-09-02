@@ -28,6 +28,7 @@ import { BackgroundSettingsScreen } from '../screens/settings/BackgroundSettings
 import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen';
 import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen';
 import { AppearanceSettingsScreen } from '../screens/settings/AppearanceSettingsScreen';
+import { VoiceInputSettingsScreen } from '../screens/settings/VoiceInputSettingsScreen';
 import { HelpSupportSettingsScreen } from '../screens/settings/HelpSupportSettingsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
@@ -121,6 +122,8 @@ export type RootStackParamList = {
   DatabaseTableViewer?: undefined;
   AccountSettings: undefined;
   AppearanceSettings: undefined;
+  /** Voice input — the single global shared-persona STT config surface (2-1). */
+  VoiceInputSettings: undefined;
   HelpSupportSettings: undefined;
   /** Notification feed — pushed over the tabs from the header bell */
   Notifications: undefined;
@@ -216,6 +219,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
         <Stack.Screen name="PersonaEdit" component={PersonaEditScreen} />
         <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
         <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
+        <Stack.Screen name="VoiceInputSettings" component={VoiceInputSettingsScreen} />
         <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />
         <Stack.Screen name="DisabledAIs" component={DisabledAIsScreen} />
         <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />

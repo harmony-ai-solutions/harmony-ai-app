@@ -91,5 +91,7 @@
   "disabledAIsEnable": "Enable",
   "disabledAIsEnabledToast": "AI enabled",
   "blockedUsersTitle": "Blocked Users",
-  "marketLibraryTitle": "My Library"
+  "marketLibraryTitle": "My Library",
+  "voiceInputGroup": "Voice",
+  "voiceInput": "Voice input"
 }

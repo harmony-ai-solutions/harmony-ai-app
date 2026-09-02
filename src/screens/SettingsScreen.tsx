@@ -217,6 +217,17 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
+        {/* ── Voice input (shared-persona STT) — single global surface (2-1) ── */}
+        <ThemedCard elevated accentStripe style={styles.card}>
+          <SectionHeader title={t('voiceInputGroup')} style={styles.sectionHeader} />
+          <SettingsLinkRow
+            icon="microphone-outline"
+            label={t('voiceInput')}
+            onPress={() => navigation.navigate('VoiceInputSettings')}
+            theme={theme}
+          />
+        </ThemedCard>
+
         {/* ── Notifications & Feedback (inline toggles) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('notifications')} style={styles.sectionHeader} />

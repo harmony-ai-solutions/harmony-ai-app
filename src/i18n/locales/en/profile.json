@@ -80,6 +80,8 @@
 
   "personaEditTitle": "Edit Persona",
   "personaCreateTitle": "New Persona",
+  "voiceInputSharedHint": "Voice input is shared across all personas",
+  "voiceInputManage": "Manage",
   "personaName": "Persona Name",
   "personaNamePlaceholder": "e.g. Mystic Mara",
   "personaDescription": "Description",

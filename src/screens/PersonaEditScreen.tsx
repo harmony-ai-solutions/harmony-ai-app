@@ -26,6 +26,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -64,7 +65,7 @@ function splitDataUrl(url: string): { mimeType: string; base64: string } | null 
 export const PersonaEditScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
-  const navigation = useNavigation();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<PersonaEditRouteProp>();
   const { t } = useTranslation('profile');
   const { showAlert } = useAppAlert();
@@ -401,6 +402,33 @@ export const PersonaEditScreen: React.FC = () => {
             </View>
           </ThemedCard>
 
+          {/* ── Voice input (shared across all personas) — read-only info row.
+                 Explicitly NOT per-persona editing (persona-modules 2-1). ── */}
+          <ThemedCard style={styles.formCard}>
+            <View style={styles.voiceInputRow}>
+              <Icon
+                name="microphone-outline"
+                size={18}
+                color={theme.colors.accent.primary}
+              />
+              <View style={styles.voiceInputCopy}>
+                <ThemedText size={13} variant="secondary">
+                  {t('voiceInputSharedHint')}
+                </ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('VoiceInputSettings')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                testID="persona-voice-input-manage"
+                accessibilityRole="button"
+              >
+                <ThemedText size={13} variant="accent" weight="medium">
+                  {t('voiceInputManage')}
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+          </ThemedCard>
+
           {/* ── Delete-protection hint (built-in / active persona) ── */}
           {deleteHint ? (
             <ThemedText
@@ -481,6 +509,15 @@ const styles = StyleSheet.create({
   deleteHint: {
     marginTop: 16,
     textAlign: 'center',
+  },
+  voiceInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 4,
+  },
+  voiceInputCopy: {
+    flex: 1,
   },
 });
 
