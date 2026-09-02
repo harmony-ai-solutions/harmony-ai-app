@@ -80,6 +80,13 @@ export interface ModuleTestSession extends ModuleTestSessionHelpers {
   connectionId: string;
   entityId: string;
   disconnect: () => Promise<void>;
+  /**
+   * Attach a persistent sink invoked for EVERY incoming event (before waiter
+   * resolution). Used by the streaming service to observe a continuous event
+   * stream (STT_FETCH_MICROPHONE / STT_OUTPUT_TEXT) without a one-shot await.
+   * Returns an unsubscribe function.
+   */
+  subscribeEvents: (handler: (event: ModuleTestEvent) => void) => () => void;
 }
 
 /** Resolve the engine WebSocket URL + security mode, mirroring startInteractionSession. */
@@ -109,6 +116,7 @@ class TestSession implements ModuleTestSession {
   private socket: any;
   private pendingEvents: ModuleTestEvent[] = [];
   private waiters: PendingWaiter[] = [];
+  private eventSinks: Array<(event: ModuleTestEvent) => void> = [];
   private detached = false;
 
   constructor(connectionId: string, entityId: string, socket: any) {
@@ -123,6 +131,12 @@ class TestSession implements ModuleTestSession {
   }
 
   private onEvent = (event: ModuleTestEvent): void => {
+    // Persistent sinks first — a streaming responder observes every event
+    // regardless of whether a one-shot waiter also claims it.
+    for (const sink of this.eventSinks) {
+      sink(event);
+    }
+
     // Resolve a matching waiting waiter first; otherwise queue for a later await.
     for (let i = 0; i < this.waiters.length; i++) {
       const waiter = this.waiters[i];
@@ -137,6 +151,14 @@ class TestSession implements ModuleTestSession {
     }
     this.pendingEvents.push(event);
   };
+
+  subscribeEvents(handler: (event: ModuleTestEvent) => void): () => void {
+    this.eventSinks.push(handler);
+    return () => {
+      const at = this.eventSinks.indexOf(handler);
+      if (at >= 0) this.eventSinks.splice(at, 1);
+    };
+  }
 
   async sendEvent(event: { event_type: string; payload?: any; status?: string; event_id?: string }): Promise<void> {
     const envelope = {
@@ -199,10 +221,15 @@ class TestSession implements ModuleTestSession {
 /**
  * Open a transient module-test session for `entityId`:
  *  1. open an OWN WebSocket connection (unique connection id);
- *  2. INIT_ENTITY with `device_type: 'debug'` (pinned contract, engine 1-3);
+ *  2. INIT_ENTITY with `device_type` (default `'debug'`, pinned contract engine
+ *     1-3; a caller such as the streaming service may pass another device type
+ *     for a future live-call session — never hardcode debug);
  *  3. await the INIT_ENTITY SUCCESS (throw a ModuleTestSessionError on ERROR).
  */
-export async function openTestSession(entityId: string): Promise<ModuleTestSession> {
+export async function openTestSession(
+  entityId: string,
+  opts?: { deviceType?: string },
+): Promise<ModuleTestSession> {
   const { url, mode } = await resolveEngineConnection();
   const connectionId = `debug-module-test-${entityId}-${uuidv7()}`;
   const deviceId = await DeviceInfo.getUniqueId();
@@ -225,7 +252,7 @@ export async function openTestSession(entityId: string): Promise<ModuleTestSessi
       payload: {
         entity_id: entityId,
         participant_ids: [entityId], // Single-entity debug session (no chat partner)
-        device_type: DEBUG_DEVICE_TYPE,
+        device_type: opts?.deviceType ?? DEBUG_DEVICE_TYPE,
         device_id: deviceId,
         device_platform: Platform.OS,
         capabilities: ['chat'],

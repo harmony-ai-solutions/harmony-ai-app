@@ -72,6 +72,8 @@ jest.mock('../../../services/AudioRecorder', () => ({
   default: {
     startRecording: jest.fn(),
     stopRecording: jest.fn(),
+    subscribeLivePcm: jest.fn(),
+    getRecordingStatus: jest.fn(() => false),
   },
 }));
 
@@ -101,14 +103,22 @@ jest.mock('../../../services/voiceInput/moduleTestSessionService', () => {
   };
 });
 
+jest.mock('../../../services/streaming/streamingService', () => ({
+  __esModule: true,
+  startAudioStream: jest.fn(),
+}));
+
 import AudioRecorder from '../../../services/AudioRecorder';
 import ChatPreferencesService from '../../../services/ChatPreferencesService';
 import { resolvePersonaId } from '../../../database/repositories/userEntities';
 import { runTest, ModuleTestSessionError } from '../../../services/voiceInput/moduleTestSessionService';
+import { startAudioStream } from '../../../services/streaming/streamingService';
 
 const mockStartRecording = (AudioRecorder as any).startRecording as jest.Mock;
 const mockStopRecording = (AudioRecorder as any).stopRecording as jest.Mock;
+const mockSubscribeLivePcm = (AudioRecorder as any).subscribeLivePcm as jest.Mock;
 mockRunTest = runTest as jest.Mock;
+const mockStartAudioStream = startAudioStream as jest.Mock;
 
 async function flush() {
   for (let i = 0; i < 8; i++) {
@@ -186,12 +196,26 @@ describe('computeVadBars — pure VAD layout helper', () => {
 });
 
 describe('SttTestPanel — state machine + offline handling', () => {
+  let liveStreamHandle: {
+    entityId: string;
+    feedAudio: jest.Mock;
+    stop: jest.Mock;
+  };
+  const liveHandle = () => ({
+    entityId: 'claire',
+    feedAudio: jest.fn(),
+    stop: jest.fn().mockResolvedValue(undefined),
+  });
+
   beforeEach(() => {
     mockIsConnected = true;
     jest.clearAllMocks();
     mockCapturedSendEvents = [];
+    liveStreamHandle = liveHandle();
     mockStartRecording.mockResolvedValue(undefined);
     mockStopRecording.mockResolvedValue({ data: wavBase64, mimeType: 'audio/wav', duration: 1.5 });
+    mockSubscribeLivePcm.mockReturnValue(() => undefined);
+    mockStartAudioStream.mockResolvedValue(liveStreamHandle);
     mockRunTest.mockImplementation(async (_entityId: string, fn: any) => {
       mockCapturedSendEvents = [];
       return fn({
@@ -216,8 +240,64 @@ describe('SttTestPanel — state machine + offline handling', () => {
     expect(mockStartRecording).not.toHaveBeenCalled();
   });
 
-  it('resolves the active persona, INITs a debug session, sends STT_INPUT_AUDIO, renders the transcript', async () => {
+  // ── Live test (default primary mode) ─────────────────────────────────────────
+  it('live mode opens a streaming session, feeds LIVE PCM, teardown on stop', async () => {
+    const utils = await render(<SttTestPanel enabled />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('stt-record-button'));
+    await flush();
+
+    // The streaming service is called with the resolved persona entity + the
+    // engine's pinned format + pull options.
+    expect(mockStartAudioStream).toHaveBeenCalledTimes(1);
+    const opts = mockStartAudioStream.mock.calls[0][0];
+    expect(opts.entityId).toBe('claire');
+    expect(opts.deviceType).toBe('debug');
+    expect(opts.format).toEqual({ channels: 1, bitDepth: 16, sampleRate: 16000 });
+    expect(opts.autoVad).toBe(true);
+    expect(opts.resultMode).toBe('return');
+
+    // The mic feed is wired live: subscribeLivePcm → handle.feedAudio.
+    expect(AudioRecorder.startRecording).toHaveBeenCalledTimes(1);
+    expect(mockSubscribeLivePcm).toHaveBeenCalledTimes(1);
+    const feed = mockSubscribeLivePcm.mock.calls[0][0];
+    feed(new Uint8Array([1, 2, 3, 4]));
+    expect(liveStreamHandle.feedAudio).toHaveBeenCalledWith(new Uint8Array([1, 2, 3, 4]));
+
+    // A streamed transcript accumulates live.
+    const onTranscript = mockStartAudioStream.mock.calls[0][0].onTranscript;
+    await act(async () => onTranscript({ text: 'hello live' }));
+    expect(utils.getByTestId('stt-live-transcript')).toBeTruthy();
+    expect(utils.getByText('hello live')).toBeTruthy();
+
+    // Stop → STOP_LISTEN teardown + mic release.
+    await fireEvent.press(utils.getByTestId('stt-record-button'));
+    await flush();
+    expect(liveStreamHandle.stop).toHaveBeenCalledTimes(1);
+    expect(mockStopRecording).toHaveBeenCalledTimes(1);
+    // One-shot path not used.
+    expect(mockRunTest).not.toHaveBeenCalled();
+  });
+
+  it('live mode uses the explicit entityId override (skips persona resolution)', async () => {
+    const utils = await render(<SttTestPanel enabled entityId="ai-entity-1" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('stt-record-button'));
+    await flush();
+
+    expect(mockStartAudioStream.mock.calls[0][0].entityId).toBe('ai-entity-1');
+    expect(ChatPreferencesService.getGlobalImpersonatedEntity).not.toHaveBeenCalled();
+    expect(resolvePersonaId).not.toHaveBeenCalled();
+  });
+
+  // ── Quick test (secondary one-shot path) ─────────────────────────────────────
+  it('quick mode resolves the active persona, sends STT_INPUT_AUDIO, renders the transcript', async () => {
     const utils = await render(<SttTestPanel />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('stt-mode-quick'));
     await flush();
 
     await fireEvent.press(utils.getByTestId('stt-record-button'));
@@ -229,6 +309,7 @@ describe('SttTestPanel — state machine + offline handling', () => {
     await flush();
 
     expect(mockStopRecording).toHaveBeenCalledTimes(1);
+    expect(mockStartAudioStream).not.toHaveBeenCalled(); // one-shot path, not live
 
     // The session service is called with the resolved persona entity id.
     expect(ChatPreferencesService.getGlobalImpersonatedEntity).toHaveBeenCalledTimes(1);
@@ -250,8 +331,11 @@ describe('SttTestPanel — state machine + offline handling', () => {
     expect(utils.getByText('hello world')).toBeTruthy();
   });
 
-  it('uses the explicit entityId override when present (skips persona resolution)', async () => {
+  it('quick mode uses the explicit entityId override when present (skips persona resolution)', async () => {
     const utils = await render(<SttTestPanel enabled entityId="ai-entity-1" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('stt-mode-quick'));
     await flush();
 
     await fireEvent.press(utils.getByTestId('stt-record-button'));
@@ -262,12 +346,14 @@ describe('SttTestPanel — state machine + offline handling', () => {
     // No persona resolution — the explicit entity context wins.
     expect(ChatPreferencesService.getGlobalImpersonatedEntity).not.toHaveBeenCalled();
     expect(resolvePersonaId).not.toHaveBeenCalled();
-    // The entity whose STT config is tested is the threaded entity id.
     expect(mockRunTest).toHaveBeenCalledWith('ai-entity-1', expect.any(Function));
   });
 
-  it('renders the "no VAD segments" note (one-shot mode has no live VAD segments)', async () => {
+  it('quick mode renders the "no VAD segments" note (one-shot mode has no live VAD segments)', async () => {
     const utils = await render(<SttTestPanel />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('stt-mode-quick'));
     await flush();
 
     await fireEvent.press(utils.getByTestId('stt-record-button'));
@@ -279,9 +365,12 @@ describe('SttTestPanel — state machine + offline handling', () => {
     expect(utils.queryByTestId('stt-vad-timeline')).toBeNull();
   });
 
-  it('surfaces the session-service error message', async () => {
+  it('quick mode surfaces the session-service error message', async () => {
     mockRunTest.mockRejectedValue(new ModuleTestSessionError('undecodable audio'));
     const utils = await render(<SttTestPanel />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('stt-mode-quick'));
     await flush();
 
     await fireEvent.press(utils.getByTestId('stt-record-button'));

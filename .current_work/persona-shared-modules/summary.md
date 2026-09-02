@@ -64,6 +64,6 @@ Track the completion of each phase as implementation progresses:
   - [x] Characters badges + persona-from-card ([3-2-EngineFrontendCharactersBadges.md](3-2-EngineFrontendCharactersBadges.md))
 - [x] **Phase 4: Docs & verification**
   - [x] Docs, memory bank, gates ([4-1-DocsAndVerification.md](4-1-DocsAndVerification.md))
-- [ ] **Phase 5: Follow-up**
+- [x] **Phase 5: Follow-up**
   - [x] Entity-context threading ([5-1-AppEntityContextThreading.md](5-1-AppEntityContextThreading.md))
-  - [ ] Reusable streaming service ([5-2-AppStreamingService.md](5-2-AppStreamingService.md))
+  - [x] Reusable streaming service ([5-2-AppStreamingService.md](5-2-AppStreamingService.md))

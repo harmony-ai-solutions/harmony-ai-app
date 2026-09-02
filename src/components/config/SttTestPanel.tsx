@@ -1,28 +1,28 @@
 /**
  * SttTestPanel — self-contained "Test your configuration" block for STT/VAD
- * config UIs (persona-modules 2-2, reworked 2026-09-02).
+ * config UIs (persona-modules 2-2 rework, live streaming 5-2).
  *
  * ## Transport (eventserver, NOT HTTP)
  *
  * The app must NOT call the engine's management server over HTTP (not
- * cloud-reachable). This panel records from the mic → INITs the currently
- * selected persona entity in a transient `debug` session (engine 1-3) → sends
- * the EXISTING `STT_INPUT_AUDIO` one-shot transcript event (`result_mode:
- * "return"`) → renders the `STT_OUTPUT_TEXT` transcript. The engine runs the
- * persona entity's SYNCED STT config.
+ * cloud-reachable). This panel drives the EXISTING STT events over a transient
+ * `debug` engine session (engine 1-3); the engine runs the entity's SYNCED STT
+ * config.
  *
- * ## VAD decision (documented in the phase doc)
+ * ## Modes (UX documented in the phase doc)
  *
- * v1 ships the ONE-SHOT `STT_INPUT_AUDIO` transcript path only. Live VAD
- * streaming (`STT_START_LISTEN` → chunks → `STT_STOP_LISTEN` →
- * `STT_FETCH_MICROPHONE_RESULT`) is a heavier wiring (chunked PCM transport +
- * VAD segment reconstruction) that is disproportionate for the panel's v1 UX;
- * it is noted as a follow-up. The panel therefore always renders `[]` VAD
- * segments (the "This provider doesn't report VAD segments." note).
+ * - **Live test (primary, default):** a reusable streaming session (5-2) pushes
+ *   the mic's LIVE raw PCM chunks into a ring buffer while the engine pulls via
+ *   `STT_FETCH_MICROPHONE` → `STT_FETCH_MICROPHONE_RESULT`; transcripts stream
+ *   back as `STT_OUTPUT_TEXT` and accumulate live with an activity indicator.
+ * - **Quick test (secondary):** the original one-shot `STT_INPUT_AUDIO` record
+ *   → transcribe path — useful when no VAD is configured or for a single
+ *   utterance. It renders `[]` VAD segments (no live VAD timeline in one-shot).
  *
- * Props: an optional `enabled` flag (defaults true). When offline it renders an
- * informative "Connect to Harmony Link to test" state — it never fabricates a
- * result.
+ * Props: optional `enabled` (defaults true) and optional `entityId` (threaded by
+ * edit-mode CreateAI, 5-1) — an explicit entity overrides persona resolution.
+ * When offline it renders an informative "Connect to Harmony Link to test"
+ * state — it never fabricates a result.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -41,12 +41,15 @@ import AudioRecorder from '../../services/AudioRecorder';
 import ChatPreferencesService from '../../services/ChatPreferencesService';
 import { resolvePersonaId } from '../../database/repositories/userEntities';
 import { runTest, ModuleTestSessionError } from '../../services/voiceInput/moduleTestSessionService';
+import { startAudioStream } from '../../services/streaming/streamingService';
+import type { AudioStreamHandle } from '../../services/streaming/types';
 import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[SttTestPanel]');
 
 type RecorderPhase = 'idle' | 'recording' | 'processing' | 'done' | 'error';
+type TestMode = 'live' | 'quick';
 
 interface SttTestPanelProps {
   enabled?: boolean;
@@ -125,12 +128,18 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
   const { t } = useTranslation('voiceInput');
   const { isConnected } = useSyncConnection();
 
+  const [mode, setMode] = useState<TestMode>('live');
   const [phase, setPhase] = useState<RecorderPhase>('idle');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SttTestPanelResult | null>(null);
+  // Live-stream accumulated transcript + activity indicator.
+  const [liveText, setLiveText] = useState('');
+  const [liveListening, setLiveListening] = useState(false);
   const [recordingMs, setRecordingMs] = useState(0);
   const recordingStartRef = useRef(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamHandleRef = useRef<AudioStreamHandle | null>(null);
+  const unsubPcmRef = useRef<(() => void) | null>(null);
 
   if (!theme) return null;
 
@@ -156,36 +165,95 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
   // the Jest timer out of the way).
   useEffect(() => stopTimer, [stopTimer]);
 
+  // Resolve the entity whose (shared) STT config is tested. An explicit entityId
+  // (edit-mode CreateAI) overrides; otherwise resolve the persona the user chats
+  // as. resolvePersonaId sanitizes a stale/AI-character id to 'user'.
+  const resolveTestEntityId = useCallback(async () => {
+    return entityId ?? (await resolvePersonaId(await ChatPreferencesService.getGlobalImpersonatedEntity()));
+  }, [entityId]);
+
+  // ── Live test: open the streaming session, feed LIVE raw PCM from the mic ───
+  const startLive = useCallback(async () => {
+    const testEntityId = await resolveTestEntityId();
+    // Open the engine stream session (STT_START_LISTEN) FIRST — the engine pulls
+    // immediately, so the ring buffer's read-ahead wait holds until the mic feeds.
+    const handle = await startAudioStream({
+      entityId: testEntityId,
+      deviceType: 'debug',
+      format: DEFAULT_WAV_PARAMS,
+      autoVad: true,
+      resultMode: 'return',
+      onTranscript: (transcript) => {
+        setLiveText((prev) => (prev ? `${prev} ${transcript.text}` : transcript.text));
+      },
+      onError: (err) => log.error('Live stream error:', err),
+    });
+    streamHandleRef.current = handle;
+    // Register the live PCM feed BEFORE the mic starts recording so no early chunk
+    // is lost. The native `data` event is raw 16-bit PCM (no WAV header).
+    unsubPcmRef.current = AudioRecorder.subscribeLivePcm((pcm) => handle.feedAudio(pcm));
+    await AudioRecorder.startRecording();
+    setPhase('recording');
+    setLiveListening(true);
+    startTimer();
+  }, [resolveTestEntityId, startTimer]);
+
+  const stopLive = useCallback(async () => {
+    unsubPcmRef.current?.();
+    unsubPcmRef.current = null;
+    try {
+      if (streamHandleRef.current) await streamHandleRef.current.stop();
+    } catch (err) {
+      log.warn('Live stream stop failed:', err);
+    }
+    streamHandleRef.current = null;
+    try {
+      await AudioRecorder.stopRecording();
+    } catch (err) {
+      log.warn('Failed to stop recorder:', err);
+    }
+    setLiveListening(false);
+    setPhase('done');
+  }, []);
+
   const handleStart = useCallback(async () => {
     if (!enabled || isBusy) return;
     try {
       hapticLightPress();
-      await AudioRecorder.startRecording();
-      setPhase('recording');
       setError(null);
       setResult(null);
-      startTimer();
+      setLiveText('');
+      if (mode === 'live') {
+        await startLive();
+      } else {
+        await AudioRecorder.startRecording();
+        setPhase('recording');
+        startTimer();
+      }
     } catch (err: any) {
       setPhase('error');
-      setError(t('permissionDenied'));
-      log.error('Failed to start recording:', err);
+      const message = err?.message ?? '';
+      setError(message.toLowerCase().includes('permission') ? t('permissionDenied') : t('testError', { message }));
+      log.error('Failed to start test:', err);
     }
-  }, [enabled, isBusy, startTimer, t]);
+  }, [enabled, isBusy, mode, startLive, startTimer, t]);
 
   const handleStop = useCallback(async () => {
     if (phase !== 'recording') return;
     try {
       stopTimer();
+
+      // ── Live path: teardown the stream + release the mic ──
+      if (mode === 'live') {
+        await stopLive();
+        return;
+      }
+
+      // ── Quick path: one-shot record → transcribe ──
       const recorded = await AudioRecorder.stopRecording();
       setPhase('processing');
 
-      // Resolve the entity whose (shared) STT config is tested. An explicit
-      // entityId (edit-mode CreateAI) overrides; otherwise resolve the persona
-      // the user currently chats as. resolvePersonaId sanitizes a stale or
-      // AI-character stored id to `'user'`, so this always yields a valid user
-      // entity.
-      const testEntityId =
-        entityId ?? (await resolvePersonaId(await ChatPreferencesService.getGlobalImpersonatedEntity()));
+      const testEntityId = await resolveTestEntityId();
 
       // Derive WAV parameters from the recorder output header (fallback to the
       // recorder's fixed 16 kHz / 16-bit / mono).
@@ -227,7 +295,7 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
       );
       log.error('STT test failed:', err);
     }
-  }, [phase, stopTimer, t, entityId]);
+  }, [phase, stopTimer, mode, stopLive, resolveTestEntityId, t]);
 
   const handlePress = useCallback(() => {
     if (phase === 'recording') {
@@ -236,6 +304,20 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
       handleStart();
     }
   }, [phase, handleStart, handleStop]);
+
+  // Guaranteed teardown on unmount (best-effort; never leaves the mic/stream up).
+  useEffect(() => {
+    return () => {
+      unsubPcmRef.current?.();
+      if (streamHandleRef.current) {
+        streamHandleRef.current.stop().catch(() => undefined);
+        streamHandleRef.current = null;
+      }
+      if (AudioRecorder.getRecordingStatus()) {
+        AudioRecorder.stopRecording().catch(() => undefined);
+      }
+    };
+  }, []);
 
   // ── Offline state ──
   if (isOffline) {
@@ -263,6 +345,41 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
         {t('usesSavedConfig')}
       </ThemedText>
 
+      {/* ── Mode segmented control: Live test (primary) / Quick test ── */}
+      <View style={styles.modeSegmented}>
+        {(['live', 'quick'] as TestMode[]).map((m) => (
+          <TouchableOpacity
+            key={m}
+            style={[styles.modeSegment, mode === m && { backgroundColor: theme.colors.accent.primary }]}
+            onPress={() => {
+              if (phase !== 'recording' && phase !== 'processing') {
+                hapticLightPress();
+                setMode(m);
+                setError(null);
+                setResult(null);
+                setLiveText('');
+              }
+            }}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityState={{ selected: mode === m }}
+            testID={`stt-mode-${m}`}
+          >
+            <ThemedText
+              size={13}
+              weight="medium"
+              variant={mode === m ? 'primary' : 'secondary'}
+              style={mode === m ? styles.modeSegmentActiveText : undefined}
+            >
+              {m === 'live' ? t('liveTestLabel') : t('quickTestLabel')}
+            </ThemedText>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <ThemedText size={12} variant="muted">
+        {mode === 'live' ? t('liveTestHint') : t('quickTestHint')}
+      </ThemedText>
+
       {/* ── Record / Stop button ── */}
       <View style={styles.actionsRow}>
         <ThemedButton
@@ -271,7 +388,9 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
               ? t('stopButton')
               : phase === 'processing'
                 ? t('processing')
-                : t('recordButton')
+                : mode === 'live'
+                  ? t('liveRecordButton')
+                  : t('recordButton')
           }
           onPress={handlePress}
           disabled={phase === 'processing' || !enabled}
@@ -287,10 +406,28 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
         {phase === 'processing' && (
           <ActivityIndicator size="small" color={theme.colors.accent.primary} />
         )}
+        {phase === 'recording' && mode === 'live' && liveListening && (
+          <View style={styles.liveActivityRow}>
+            <Icon name="waveform" size={16} color={theme.colors.accent.primary} />
+            <ThemedText size={12} variant="accent">{t('liveListening')}</ThemedText>
+          </View>
+        )}
       </View>
 
-      {/* ── Result: transcript / duration / VAD bars ── */}
-      {phase === 'done' && result && (
+      {/* ── Live result: accumulated live transcript (visible while streaming) ── */}
+      {(phase === 'recording' || phase === 'done') && mode === 'live' && (
+        <View style={styles.resultSection}>
+          <View style={styles.resultRow}>
+            <ThemedText size={13} variant="secondary">{t('liveTranscriptLabel')}</ThemedText>
+            <ThemedText size={14} weight="medium" style={styles.resultValue} testID="stt-live-transcript">
+              {liveText || t('emptyTranscript')}
+            </ThemedText>
+          </View>
+        </View>
+      )}
+
+      {/* ── Quick result: transcript / duration / VAD bars ── */}
+      {phase === 'done' && mode === 'quick' && result && (
         <View style={styles.resultSection}>
           <View style={styles.resultRow}>
             <ThemedText size={13} variant="secondary">{t('transcriptLabel')}</ThemedText>
@@ -344,6 +481,23 @@ const styles = StyleSheet.create({
   duration: { minWidth: 36 },
   offlineRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   offlineText: { flex: 1 },
+  modeSegmented: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    padding: 3,
+    gap: 3,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(127,127,127,0.15)',
+  },
+  modeSegment: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  modeSegmentActiveText: {
+    color: '#FFFFFF',
+  },
+  liveActivityRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   resultSection: { gap: 10 },
   resultRow: { gap: 4 },
   resultValue: { lineHeight: 20 },
