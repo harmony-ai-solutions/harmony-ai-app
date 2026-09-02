@@ -47,9 +47,9 @@ Approved design (user rulings 2026-09-02):
 
 Track the completion of each phase as implementation progresses:
 
-- [ ] **Phase 1: Engine backend**
-  - [ ] Canonical inheritance + API guard ([1-1-EngineCanonicalInheritance.md](1-1-EngineCanonicalInheritance.md))
-  - [ ] Module test API ([1-2-EngineModuleTestAPI.md](1-2-EngineModuleTestAPI.md))
+- [x] **Phase 1: Engine backend**
+  - [x] Canonical inheritance + API guard ([1-1-EngineCanonicalInheritance.md](1-1-EngineCanonicalInheritance.md))
+  - [x] Module test API ([1-2-EngineModuleTestAPI.md](1-2-EngineModuleTestAPI.md))
 - [ ] **Phase 2: App**
   - [x] Voice input settings screen ([2-1-AppVoiceInputSettings.md](2-1-AppVoiceInputSettings.md))
   - [ ] STT/VAD recorder test block ([2-2-AppSTTVADTestBlock.md](2-2-AppSTTVADTestBlock.md))
