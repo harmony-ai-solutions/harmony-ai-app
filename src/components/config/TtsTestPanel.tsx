@@ -1,12 +1,26 @@
 /**
  * TtsTestPanel — TTS playback test block for the TTS config editor
- * (persona-modules 2-3). Type text → "Play" → the engine synthesizes with the
- * *draft* config → playback via the app's existing audio player. Users hear
- * exactly what the entity would produce.
+ * (persona-modules 2-3, reworked 2026-09-02).
  *
- * Props: `draftConfig` (provider_type / provider_config_id / module_config).
- * Offline → an informative "Connect to Harmony Link to test" state (never
- * fabricates audio).
+ * ## Transport (eventserver, NOT HTTP)
+ *
+ * The app must NOT call the engine's management server over HTTP (not
+ * cloud-reachable). This panel INITs an AI entity in a transient `debug`
+ * session (engine 1-3) → sends the EXISTING `TTS_GENERATE_SPEECH` event with
+ * `tts_output_type: "binary"` → awaits the `ENTITY_UTTERANCE` response → plays
+ * the inline audio via the app's existing AudioPlayer. The engine synthesizes
+ * with the entity's SYNCED TTS config.
+ *
+ * ## Entity context (documented finding)
+ *
+ * TTS only works in the context of an AI entity + its module config. The panel
+ * lives on ModuleConfigEditScreen's TTS branch, but that screen is opened with
+ * route params `{ moduleType, configId }` ONLY — there is no entity binding in
+ * any current entry path (CreateAIScreen / EntityModuleSelectorWithActions and
+ * VoiceInputSettingsScreen both omit it). Because the screen genuinely has no
+ * AI entity context, the panel is DISABLED there with a hint ("Open this
+ * config from an AI profile to test"). The panel accepts an optional `entityId`
+ * prop so a future entity-bound entry path can enable it.
  */
 
 import React, { useCallback, useState } from 'react';
@@ -18,7 +32,7 @@ import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
 import AudioPlayer from '../../services/AudioPlayer';
-import { testTts, ModuleTestError, ModuleTestDraftConfig } from '../../services/voiceInput/moduleTestClient';
+import { runTest, ModuleTestSessionError } from '../../services/voiceInput/moduleTestSessionService';
 import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 
@@ -27,10 +41,11 @@ const log = createLogger('[TtsTestPanel]');
 type TtsPhase = 'idle' | 'synthesizing' | 'playing' | 'error';
 
 interface TtsTestPanelProps {
-  draftConfig: ModuleTestDraftConfig;
+  /** The AI entity whose saved TTS config should be tested. Disables when absent. */
+  entityId?: string;
 }
 
-export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({ draftConfig }) => {
+export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({ entityId }) => {
   const { theme } = useAppTheme();
   const { t } = useTranslation('moduleConfig');
   const { isConnected } = useSyncConnection();
@@ -55,25 +70,48 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({ draftConfig }) => {
       return;
     }
 
+    // No entity context → nothing to INIT, no way to synthesize.
+    if (!entityId) return;
+
     if (!text.trim()) return;
 
     hapticLightPress();
     setPhase('synthesizing');
     setError(null);
     try {
-      const res = await testTts(draftConfig, text.trim());
-      await AudioPlayer.playAudio(res.audio_base64, res.mime_type);
+      const payload = await runTest(entityId, async ({ sendEvent, awaitEvent }) => {
+        await sendEvent({
+          event_type: 'TTS_GENERATE_SPEECH',
+          payload: {
+            utterance: {
+              type: 'UTTERANCE_COMBINED',
+              content: text.trim(),
+              entity_id: entityId,
+            },
+            tts_output_type: 'binary',
+          },
+        });
+        const resp = await awaitEvent('ENTITY_UTTERANCE', {
+          predicate: (e) => e.payload?.audio,
+        });
+        return resp?.payload ?? null;
+      });
+
+      if (!payload?.audio) {
+        throw new ModuleTestSessionError('No audio returned');
+      }
+      await AudioPlayer.playAudio(payload.audio, payload.audio_type || 'audio/wav');
       setPhase('playing');
     } catch (err: any) {
       setPhase('error');
       setError(
-        err instanceof ModuleTestError
+        err instanceof ModuleTestSessionError
           ? err.message
           : t('ttsError', { message: err?.message ?? '' }),
       );
       log.error('TTS test failed:', err);
     }
-  }, [phase, text, draftConfig, t]);
+  }, [phase, text, entityId, t]);
 
   if (isOffline) {
     return (
@@ -93,8 +131,30 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({ draftConfig }) => {
 
   const isBusy = phase === 'synthesizing';
 
+  // ── No entity context → disabled test panel with a hint ──
+  if (!entityId) {
+    return (
+      <View style={styles.wrapper}>
+        <View style={styles.offlineRow}>
+          <Icon name="information-outline" size={20} color={theme.colors.text.muted} />
+          <ThemedText size={13} variant="muted" style={styles.offlineText} testID="tts-needs-entity">
+            {t('ttsNeedsEntityHint')}
+          </ThemedText>
+        </View>
+        <ThemedText size={12} variant="muted">
+          {t('usesSavedConfig')}
+        </ThemedText>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.wrapper}>
+      {/* ── Saved-config note (eventserver transport tests the SYNCED config) ── */}
+      <ThemedText size={12} variant="muted">
+        {t('usesSavedConfig')}
+      </ThemedText>
+
       {/* ── Sample text input ── */}
       <TextInput
         style={[

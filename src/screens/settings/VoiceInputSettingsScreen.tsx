@@ -62,7 +62,6 @@ import {
 } from '../../database/repositories/modules';
 import { resolveVoiceInputState } from '../../services/voiceInput/resolveVoiceInputState';
 import { SttTestPanel } from '../../components/config/SttTestPanel';
-import type { ModuleTestDraftConfig } from '../../services/voiceInput/moduleTestClient';
 import type { Entity, EntityModuleMapping, STTConfig } from '../../database/models';
 import { createLogger } from '../../utils/logger';
 
@@ -205,24 +204,9 @@ export const VoiceInputSettingsScreen: React.FC = () => {
     name: c.name,
   }));
 
-  // Draft config for the STT test block (2-2): the engine runs the *configured*
-  // provider. provider_config_id is resolved server-side; never echo credentials.
-  const testDraftConfig: ModuleTestDraftConfig | null = sttConfig
-    ? {
-        provider_type: sttConfig.transcription_provider,
-        provider_config_id: sttConfig.transcription_provider_config_id,
-        module_config: {
-          transcription_provider: sttConfig.transcription_provider,
-          transcription_provider_config_id: sttConfig.transcription_provider_config_id,
-          vad_provider: sttConfig.vad_provider,
-          vad_provider_config_id: sttConfig.vad_provider_config_id,
-          main_stream_time_millis: sttConfig.main_stream_time_millis,
-          transition_stream_time_millis: sttConfig.transition_stream_time_millis,
-          max_buffer_count: sttConfig.max_buffer_count,
-        },
-      }
-    : null;
-
+  // NB: the STT test block (2-2) no longer receives a draft config — the
+  // eventserver debug session INITs the persona entity and the engine runs its
+  // SYNCED STT config (drafts can't be tested over the eventserver transport).
   return (
     <ThemedView style={styles.container}>
       <ScreenHeader
@@ -307,11 +291,11 @@ export const VoiceInputSettingsScreen: React.FC = () => {
             </ThemedCard>
 
             {/* ── STT/VAD test block (phase 2-2) ── */}
-            {state.enabled && testDraftConfig && (
+            {state.enabled && (
               <ThemedCard elevated accentStripe style={styles.card}>
                 <SectionHeader title={t('testSection')} />
                 <View style={styles.sectionContent}>
-                  <SttTestPanel draftConfig={testDraftConfig} />
+                  <SttTestPanel />
                 </View>
               </ThemedCard>
             )}

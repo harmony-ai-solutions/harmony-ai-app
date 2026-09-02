@@ -21,6 +21,7 @@
   "noVadSegments": "This provider doesn't report VAD segments.",
   "offlineTitle": "Connect to Harmony Link to test",
   "offlineHint": "The test panel runs the engine's configured STT provider. Connect to Harmony Link to try it.",
+  "usesSavedConfig": "Tests your saved voice input configuration (unsaved draft changes aren't applied).",
   "permissionDenied": "Microphone permission is required to record.",
   "testError": "The test failed: {{message}}",
   "emptyTranscript": "Nothing transcribed — try again."

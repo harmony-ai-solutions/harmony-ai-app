@@ -1,11 +1,26 @@
 /**
  * SttTestPanel — self-contained "Test your configuration" block for STT/VAD
- * config UIs (persona-modules 2-2). Records from the mic → POSTs to the engine
- * test endpoint (phase 1-2 pinned contract) → renders the transcript, duration
- * and VAD segment bars. The engine runs the *configured* provider.
+ * config UIs (persona-modules 2-2, reworked 2026-09-02).
  *
- * Props: `draftConfig` (provider_type / provider_config_id / module_config) and
- * an optional `enabled` flag (defaults true). When offline, it renders an
+ * ## Transport (eventserver, NOT HTTP)
+ *
+ * The app must NOT call the engine's management server over HTTP (not
+ * cloud-reachable). This panel records from the mic → INITs the currently
+ * selected persona entity in a transient `debug` session (engine 1-3) → sends
+ * the EXISTING `STT_INPUT_AUDIO` one-shot transcript event (`result_mode:
+ * "return"`) → renders the `STT_OUTPUT_TEXT` transcript. The engine runs the
+ * persona entity's SYNCED STT config.
+ *
+ * ## VAD decision (documented in the phase doc)
+ *
+ * v1 ships the ONE-SHOT `STT_INPUT_AUDIO` transcript path only. Live VAD
+ * streaming (`STT_START_LISTEN` → chunks → `STT_STOP_LISTEN` →
+ * `STT_FETCH_MICROPHONE_RESULT`) is a heavier wiring (chunked PCM transport +
+ * VAD segment reconstruction) that is disproportionate for the panel's v1 UX;
+ * it is noted as a follow-up. The panel therefore always renders `[]` VAD
+ * segments (the "This provider doesn't report VAD segments." note).
+ *
+ * Props: an optional `enabled` flag (defaults true). When offline it renders an
  * informative "Connect to Harmony Link to test" state — it never fabricates a
  * result.
  */
@@ -14,6 +29,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { Buffer } from 'buffer';
+import { v7 as uuidv7 } from 'uuid';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 // Base tint for the VAD timeline track (bar colors are inline via theme).
@@ -21,7 +38,9 @@ const VAD_TRACK_TINT = 'rgba(127,127,127,0.2)';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
 import AudioRecorder from '../../services/AudioRecorder';
-import { testStt, ModuleTestError, VadSegment, ModuleTestDraftConfig } from '../../services/voiceInput/moduleTestClient';
+import ChatPreferencesService from '../../services/ChatPreferencesService';
+import { resolvePersonaId } from '../../database/repositories/userEntities';
+import { runTest, ModuleTestSessionError } from '../../services/voiceInput/moduleTestSessionService';
 import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 
@@ -30,14 +49,49 @@ const log = createLogger('[SttTestPanel]');
 type RecorderPhase = 'idle' | 'recording' | 'processing' | 'done' | 'error';
 
 interface SttTestPanelProps {
-  draftConfig: ModuleTestDraftConfig;
   enabled?: boolean;
+}
+
+export interface VadSegment {
+  start_ms: number;
+  end_ms: number;
 }
 
 export interface SttTestPanelResult {
   transcript: string;
   vad_segments: VadSegment[];
   duration_ms: number;
+}
+
+export interface WavAudioParams {
+  channels: number;
+  bitDepth: number;
+  sampleRate: number;
+}
+
+/** Fallback recorder params — the app records 16 kHz / 16-bit / mono (AudioRecorder). */
+const DEFAULT_WAV_PARAMS: WavAudioParams = { channels: 1, bitDepth: 16, sampleRate: 16000 };
+
+/**
+ * Read the channels / bits-per-sample / sample-rate from a base64 WAV header
+ * (RIFF). Pure + exported for unit testing. Returns null when the buffer is too
+ * short or is not a RIFF/WAVE payload — callers fall back to DEFAULT_WAV_PARAMS.
+ */
+export function parseWavAudioParams(base64: string): WavAudioParams | null {
+  try {
+    const buffer = Buffer.from(base64, 'base64');
+    if (buffer.length < 44) return null;
+    const riff = buffer.toString('ascii', 0, 4);
+    const wave = buffer.toString('ascii', 8, 12);
+    if (riff !== 'RIFF' || wave !== 'WAVE') return null;
+    return {
+      channels: buffer.readUInt16LE(22),
+      sampleRate: buffer.readUInt32LE(24),
+      bitDepth: buffer.readUInt16LE(34),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -60,7 +114,6 @@ export function computeVadBars(
 }
 
 export const SttTestPanel: React.FC<SttTestPanelProps> = ({
-  draftConfig,
   enabled = true,
 }) => {
   const { theme } = useAppTheme();
@@ -120,19 +173,55 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
       stopTimer();
       const recorded = await AudioRecorder.stopRecording();
       setPhase('processing');
-      const res = await testStt(draftConfig, recorded.data, recorded.mimeType);
-      setResult(res);
+
+      // Resolve the persona the user currently chats as — the entity whose
+      // (shared) STT config is tested. resolvePersonaId sanitizes a stale or
+      // AI-character stored id to `'user'`, so this always yields a valid user
+      // entity.
+      const stored = await ChatPreferencesService.getGlobalImpersonatedEntity();
+      const personaId = await resolvePersonaId(stored);
+
+      // Derive WAV parameters from the recorder output header (fallback to the
+      // recorder's fixed 16 kHz / 16-bit / mono).
+      const params = parseWavAudioParams(recorded.data) ?? DEFAULT_WAV_PARAMS;
+
+      const messageId = uuidv7();
+      const transcript = await runTest(personaId, async ({ sendEvent, awaitEvent }) => {
+        await sendEvent({
+          event_type: 'STT_INPUT_AUDIO',
+          payload: {
+            message_id: messageId,
+            audio_data: {
+              audio_bytes: recorded.data,
+              channels: params.channels,
+              bit_depth: params.bitDepth,
+              sample_rate: params.sampleRate,
+            },
+            result_mode: 'return',
+          },
+        });
+        const resp = await awaitEvent('STT_OUTPUT_TEXT', {
+          predicate: (e) => e.payload?.message_id === messageId,
+        });
+        return resp?.payload?.content ?? '';
+      });
+
+      setResult({
+        transcript,
+        vad_segments: [], // one-shot mode — VAD segments are a follow-up
+        duration_ms: Math.round(recorded.duration * 1000),
+      });
       setPhase('done');
     } catch (err: any) {
       setPhase('error');
       setError(
-        err instanceof ModuleTestError
+        err instanceof ModuleTestSessionError
           ? err.message
           : t('testError', { message: err?.message ?? '' }),
       );
       log.error('STT test failed:', err);
     }
-  }, [phase, draftConfig, stopTimer, t]);
+  }, [phase, stopTimer, t]);
 
   const handlePress = useCallback(() => {
     if (phase === 'recording') {
@@ -163,6 +252,11 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
 
   return (
     <View style={styles.wrapper}>
+      {/* ── Saved-config note (eventserver transport tests the SYNCED config) ── */}
+      <ThemedText size={12} variant="muted">
+        {t('usesSavedConfig')}
+      </ThemedText>
+
       {/* ── Record / Stop button ── */}
       <View style={styles.actionsRow}>
         <ThemedButton

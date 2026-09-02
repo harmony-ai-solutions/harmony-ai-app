@@ -29,5 +29,7 @@
   "synthesizing": "Synthesizing…",
   "ttsOfflineTitle": "Connect to Harmony Link to test",
   "ttsOfflineHint": "The test panel runs the engine's configured TTS provider. Connect to Harmony Link to try it.",
+  "usesSavedConfig": "Tests your saved configuration (unsaved draft changes aren't applied).",
+  "ttsNeedsEntityHint": "Open this config from an AI profile to test.",
   "ttsError": "The test failed: {{message}}"
 }

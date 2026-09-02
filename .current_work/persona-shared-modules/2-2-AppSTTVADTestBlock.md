@@ -1,55 +1,40 @@
-# 2-2 — App: STT/VAD Recorder Test Block
+# 2-2 — App: STT/VAD Recorder Test Block (eventserver transport)
 
-> Repo: `harmony-ai-app` (branch `senju-design-updates-rebase`). Protocol + gates as 2-1. Consumes the PINNED contract from `1-2-EngineModuleTestAPI.md`.
+> Repo: `harmony-ai-app` (branch `senju-design-updates-rebase`). **REWORKED 2026-09-02** per user correction: NO HTTP/management-server calls (not cloud-reachable). Transport = the eventserver WebSocket protocol with EXISTING STT events; the persona entity is initialized in a transient `debug` session (engine 1-3). Protocol: impact → edit → detect_changes → commit, TDD.
 
-## Objective
+## Objective (UX unchanged)
 
-A self-contained "Test your configuration" block for STT/VAD config UIs: record from the mic → POST to the engine test endpoint → show transcript, duration, and VAD segment bars. True end-to-end: the engine runs the *configured* provider.
+`<SttTestPanel />` with the same UX as before — record from the mic, then show transcript (+ VAD indication where available) — but executed by INITing the **currently selected persona entity** in a `debug` session and driving the EXISTING STT events through the app's normal eventserver connection layer.
 
-## Component contract
+## Pinned event contract (verified engine-side — do not invent new events)
 
-`<SttTestPanel />` (new, `src/components/config/` or `src/services/voiceInput/` — follow component conventions): props = `{ draftConfig: { provider_type, provider_config_id, module_config }, enabled?: boolean }`. Renders: record/stop button (state machine idle→recording→processing→done/error), duration, transcript text, VAD segment visualization (simple horizontal bar timeline; `vad_segments: []` → transcript only + note), error state with the endpoint's `error` message.
+- INIT_ENTITY for the persona entity id with `device_type: "debug"` (transient; engine skips interaction/memories/lifecycle; immediate cleanup on disconnect).
+- One-shot transcription: `STT_INPUT_AUDIO` payload `{ "message_id": <uuid>, "audio_data": { "audio_bytes": <base64>, "channels": <n>, "bit_depth": <n>, "sample_rate": <n> }, "result_mode": "return" }` → transcript in the response/result.
+- VAD streaming (optional richer mode — study before deciding): `STT_START_LISTEN` (`ListenParams`: `auto_vad`, `result_mode`, `channels`, `bit_depth`, `sample_rate`) → stream chunks → `STT_STOP_LISTEN` → `STT_FETCH_MICROPHONE_RESULT` (`{ start_byte, bytes_count }`). If wiring live VAD into the panel is disproportionate for v1, ship one-shot `STT_INPUT_AUDIO` (transcript) and note VAD live-testing as a follow-up — document the decision here.
 
 ## Implementation steps (TDD)
 
-1. **Client call** (`src/services/voiceInput/moduleTestClient.ts` or existing engine-HTTP client location — investigate how the app reaches engine HTTP today: pairing/connection plumbing, `ConnectionStateManager`, or an existing management client; document the found pattern): `testStt(cfg, audioBase64, mimeType)` → typed response per pinned contract. **Mock the HTTP layer in tests with contract-shaped fixtures** (no live engine in unit tests).
-2. **Request/response mapping tests first:** happy path, error shape, empty `vad_segments`.
-3. **Mic capture:** reuse the existing voice-message recording path (ChatInputBar / EntitySessionService audio recording — find the capture util; WAV preferred; note the actual container the existing recorder produces and send the matching `mime_type`).
-4. **Panel UI:** record button (permission request flow mirrors the chat mic permission handling), processing spinner, results layout as above, disabled/offline state ("Connect to Harmony Link to test") when no engine connection.
-5. **Mount into** the Voice input screen (2-1) — and into `ModuleConfigEditScreen` when `moduleType === 'stt'` (benefits AI STT config too; pass the current draft form state as `draftConfig`).
-6. i18n keys (en).
-
-## Files
-
-- `src/services/voiceInput/moduleTestClient.ts` (+ tests), `<SttTestPanel />` (+ tests where feasible)
-- `src/screens/config/ModuleConfigEditScreen.tsx`, `VoiceInputSettingsScreen.tsx` (mount points)
-- i18n locale files
+1. **DELETE the HTTP client** `src/services/voiceInput/moduleTestClient.ts` (+ tests) from the previous approach — grep `fetch(` under `src/services/voiceInput/` → zero.
+2. **New `ModuleTestSessionService`** (`src/services/voiceInput/`): minimal standalone session on top of the EXISTING connection primitives (study `EntitySessionService.startInteractionSession` internals: connection creation via ConnectionStateManager, JWT, INIT payload construction — reuse, don't duplicate): `runTest(entityId, fn)` → open connection → INIT with `device_type: 'debug'` → run fn(sendEvent/awaitEvent helpers) → disconnect. MUST NOT touch live chat sessions (own connection, own interaction id namespace). Unit tests with mocked connection layer (contract-shaped: INIT payload assertions incl. device_type, event round-trip, guaranteed disconnect on error).
+3. **Panel rework:** resolve the active persona id (`ChatPreferencesService.getGlobalImpersonatedEntity` + `resolvePersonaId` — the entity the user currently chats as); record via the existing `AudioRecorder` (WAV; extract channels/bit_depth/sample_rate from the recorder output or WAV header for the payload); base64; `STT_INPUT_AUDIO` with `result_mode: 'return'`; render transcript (+ VAD affordance if implemented); error/offline states as before.
+4. Keep the existing mounts: Voice input screen + `ModuleConfigEditScreen` STT branch (draft config reminder: with the eventserver transport the test runs against the persona entity's SYNCED config — for unsaved drafts note in UI copy that the test uses the saved configuration; document this delta in deviations).
+5. i18n adjustments if any copy changes.
 
 ## Gates
 
-- tsc = 0 · targeted + full jest green · grep: no direct `fetch` bypassing the chosen engine-client pattern
-- Commit: `feat(config): STT/VAD recorder test panel - record, transcribe, VAD segments via engine (persona modules 2-2)`
+- tsc = 0 · targeted jest green · full `npm.cmd test` green (known flakes: nodeSide/nodeDatabase.smoke — verify isolated)
+- Grep: no engine HTTP fetch; no `/api/modules/test` references anywhere
+- Commit: `refactor(config): STT/VAD test panel via eventserver debug session - remove HTTP client (persona modules 2-2)`
 
 ## Checklist
 
-- [x] Engine-HTTP access pattern investigated + documented here
-- [x] RED client tests (contract-shaped)
-- [x] Mic capture reused, mime_type correct
-- [x] Panel states + VAD visualization + offline handling
-- [x] Mounted in both surfaces, i18n, gates green, committed, docs updated
+- [x] HTTP client deleted (grep clean) — `moduleTestClient.ts` + test removed; `fetch(` in `src/services/voiceInput/` = 0; `/api/modules/test` repo-wide = 0
+- [x] ModuleTestSessionService (mocked-connection tests RED first) — `moduleTestSessionService.ts` + 7-test suite green
+- [x] Panel on existing events; persona resolution; WAV params correct
+- [x] Gates green, committed, phase doc + summary.md updated (+ deviations: VAD live mode decision, saved-vs-draft copy)
 
-## Engine-HTTP access pattern (investigated + documented)
+## Deviations (documented)
 
-**Finding:** the app reaches Harmony Link (the engine) **only over WebSocket** today — WSS `/events` (`harmony_wss_url` / `harmony_ws_url` in AsyncStorage), authenticated with the stored `harmony_jwt`. There is **no pre-existing engine HTTP client** (the app has no management REST client; the only `fetch` usages are cloud/Soulbits auth in `authFetch.ts`/`AuthService.ts`, which target `CLOUD_HOSTS`, not the engine).
-
-**Decision:** introduce a minimal engine HTTP client in `src/services/voiceInput/moduleTestClient.ts`, consistent with the existing config/host handling:
-- `resolveEngineHttpBaseUrl()` derives the HTTP base URL from the stored WSS/WS URL by swapping `wss://` → `https://` (and `ws://` → `http://`) and stripping the `/events` path — so `wss://host:8081/events` → `https://host:8081`.
-- Auth = the same stored Harmony Link JWT as a `Bearer` token (the exact credential the WebSocket connection uses).
-- Payload = the PINNED contract from `1-2-EngineModuleTestAPI.md`; credentials are never echoed in the request (only `provider_config_id`, resolved server-side).
-- Gate verified: the only `fetch(` in `src/services/voiceInput/` is inside `moduleTestClient.ts` (no bypass).
-
-## Deviations
-
-- **Mic capture reused as-is (no wrapper):** the panel calls the existing `AudioRecorder` singleton (the chat voice-message capture util). It produces `audio/wav` (`mimeType: 'audio/wav'`), which is exactly what the panel forwards as the request `mime_type`. No new capture code was introduced.
-- **`ModuleConfigEditScreen` STT mount renders the panel only when a transcription provider is selected** (draft config is `null` until then), with `enabled` driven by the same condition. `VoiceInputSettingsScreen` mounts it only in the `state.enabled` branch.
-- **Panel's VAD timeline** uses a pure exported helper `computeVadBars(segments, durationMs)` for the percentage layout — unit-tested. `vad_segments: []` renders a "no VAD segments" note (no timeline).
+- **VAD live-vs-one-shot decision:** v1 ships the ONE-SHOT `STT_INPUT_AUDIO` (`result_mode: "return"`) path and renders the transcript; the panel always reports `[]` VAD segments. Live VAD streaming (`STT_START_LISTEN` → chunks → `STT_STOP_LISTEN` → `STT_FETCH_MICROPHONE_RESULT`) is a heavier wiring — chunked PCM transport + VAD segment reconstruction — that is disproportionate for the panel's v1 UX. **Follow-up:** live VAD streaming with segment bars.
+- **Config transport delta:** the eventserver `debug` session tests the persona entity's **SYNCED** STT config. Unsaved draft changes in the editor are NOT applied (the engine has no draft config over eventserver). UI copy notes this ("Tests your saved voice input configuration…"). The screen still passes only `enabled` (no draft config prop anymore).
+- **Two source files touched by both 2-2/2-3:** `ModuleConfigEditScreen.tsx` and `src/services/voiceInput/moduleTestSessionService.ts` are SHARED by the STT and TTS panels, so the second commit rides on the first (they cannot be tsc-disjoint).

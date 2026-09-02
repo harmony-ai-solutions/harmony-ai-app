@@ -42,7 +42,6 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { SttTestPanel } from '../../components/config/SttTestPanel';
 import { TtsTestPanel } from '../../components/config/TtsTestPanel';
-import type { ModuleTestDraftConfig } from '../../services/voiceInput/moduleTestClient';
 import { CLOUD_HOSTS } from '../../config/cloud';
 import { injectSoulbitsToken } from '../../services/cloud/soulbitsTokenSync';
 import AuthService from '../../services/auth/AuthService';
@@ -120,56 +119,6 @@ const OPENAI_FAMILY = ['openai', 'openaicompatible', 'openrouter', 'google', 'xa
 /** Beta-aware inference host, used to prefill the Soulbits Cloud base_url when connected. */
 function soulbitsCloudBaseUrl(cloudConnected: boolean): string | undefined {
   return cloudConnected ? CLOUD_HOSTS.inference : undefined;
-}
-
-/**
- * Build the STT test block's draft config from the editable form state (2-2).
- * Passes the current draft (possibly unsaved) STT config so the engine runs the
- * *configured* provider end-to-end. provider_config_id is resolved server-side.
- * Returns null until a transcription provider is selected.
- */
-function buildSttTestDraft(
-  formValues: Record<string, any>,
-  txConfigId: string | null | undefined,
-  vadConfigId: string | null | undefined,
-): ModuleTestDraftConfig | null {
-  if (!formValues.transcription_provider) return null;
-  return {
-    provider_type: formValues.transcription_provider,
-    provider_config_id: txConfigId ?? null,
-    module_config: {
-      transcription_provider: formValues.transcription_provider,
-      transcription_provider_config_id: txConfigId ?? null,
-      vad_provider: formValues.vad_provider ?? '',
-      vad_provider_config_id: vadConfigId ?? null,
-      main_stream_time_millis: formValues.main_stream_time_millis,
-      transition_stream_time_millis: formValues.transition_stream_time_millis,
-      max_buffer_count: formValues.max_buffer_count,
-    },
-  };
-}
-
-/**
- * Build the TTS test block's draft config from the editable form state (2-3).
- * Passes the current draft (possibly unsaved) TTS config so the engine runs the
- * *configured* provider end-to-end. Returns null until a provider is selected.
- */
-function buildTtsTestDraft(
-  formValues: Record<string, any>,
-  providerConfigId: string | null | undefined,
-): ModuleTestDraftConfig | null {
-  if (!formValues.provider) return null;
-  return {
-    provider_type: formValues.provider,
-    provider_config_id: providerConfigId ?? null,
-    module_config: {
-      provider: formValues.provider,
-      provider_config_id: providerConfigId ?? null,
-      output_type: formValues.output_type ?? null,
-      words_to_replace: formValues.words_to_replace ?? null,
-      vocalize_nonverbal: formValues.vocalize_nonverbal ?? null,
-    },
-  };
 }
 
 /**
@@ -901,23 +850,17 @@ export const ModuleConfigEditScreen: React.FC = () => {
             </View>
           </ThemedCard>
 
-          {/* ── STT/VAD recorder test block (2-2) — tests the configured / draft provider ── */}
-          {(() => {
-            const sttDraft = buildSttTestDraft(
-              formValues,
-              providerForms['transcription']?.providerConfigId,
-              providerForms['vad']?.providerConfigId,
-            );
-            if (!sttDraft) return null;
-            return (
-              <ThemedCard elevated accentStripe style={styles.section}>
-                <SectionHeader title={t('testConfiguration')} />
-                <View style={styles.sectionContent}>
-                  <SttTestPanel draftConfig={sttDraft} enabled={!!formValues.transcription_provider} />
-                </View>
-              </ThemedCard>
-            );
-          })()}
+          {/* ── STT/VAD recorder test block (2-2) — eventserver debug session. The
+              engine runs the entity's SYNCED STT config (draft configs can't be
+              tested over the eventserver transport) — see SttTestPanel doc. ── */}
+          {formValues.transcription_provider && (
+            <ThemedCard elevated accentStripe style={styles.section}>
+              <SectionHeader title={t('testConfiguration')} />
+              <View style={styles.sectionContent}>
+                <SttTestPanel enabled={!!formValues.transcription_provider} />
+              </View>
+            </ThemedCard>
+          )}
         </>
       );
     }
@@ -971,23 +914,17 @@ export const ModuleConfigEditScreen: React.FC = () => {
           formValues.provider,
         )}
 
-        {/* ── TTS playback test block (2-3) — tests the configured / draft provider ── */}
-        {moduleType === 'tts' &&
-          (() => {
-            const ttsDraft = buildTtsTestDraft(
-              formValues,
-              providerForms['provider']?.providerConfigId,
-            );
-            if (!ttsDraft) return null;
-            return (
-              <ThemedCard elevated accentStripe style={styles.section}>
-                <SectionHeader title={t('testConfiguration')} />
-                <View style={styles.sectionContent}>
-                  <TtsTestPanel draftConfig={ttsDraft} />
-                </View>
-              </ThemedCard>
-            );
-          })()}
+        {/* ── TTS playback test block (2-3) — eventserver debug session. This
+            editor has NO entity binding (route params are moduleType+configId
+            only), so the panel renders its disabled hint; see TtsTestPanel doc. ── */}
+        {moduleType === 'tts' && formValues.provider && (
+          <ThemedCard elevated accentStripe style={styles.section}>
+            <SectionHeader title={t('testConfiguration')} />
+            <View style={styles.sectionContent}>
+              <TtsTestPanel />
+            </View>
+          </ThemedCard>
+        )}
       </>
     );
   };
