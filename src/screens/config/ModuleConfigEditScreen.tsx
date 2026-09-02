@@ -40,6 +40,8 @@ import { PROVIDER_SCHEMAS } from '../../constants/providerFieldSchemas';
 import { isSimpleFieldKey, isManagedCloudField } from '../../constants/moduleConfigVisibility';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
+import { SttTestPanel } from '../../components/config/SttTestPanel';
+import type { ModuleTestDraftConfig } from '../../services/voiceInput/moduleTestClient';
 import { CLOUD_HOSTS } from '../../config/cloud';
 import { injectSoulbitsToken } from '../../services/cloud/soulbitsTokenSync';
 import AuthService from '../../services/auth/AuthService';
@@ -117,6 +119,33 @@ const OPENAI_FAMILY = ['openai', 'openaicompatible', 'openrouter', 'google', 'xa
 /** Beta-aware inference host, used to prefill the Soulbits Cloud base_url when connected. */
 function soulbitsCloudBaseUrl(cloudConnected: boolean): string | undefined {
   return cloudConnected ? CLOUD_HOSTS.inference : undefined;
+}
+
+/**
+ * Build the STT test block's draft config from the editable form state (2-2).
+ * Passes the current draft (possibly unsaved) STT config so the engine runs the
+ * *configured* provider end-to-end. provider_config_id is resolved server-side.
+ * Returns null until a transcription provider is selected.
+ */
+function buildSttTestDraft(
+  formValues: Record<string, any>,
+  txConfigId: string | null | undefined,
+  vadConfigId: string | null | undefined,
+): ModuleTestDraftConfig | null {
+  if (!formValues.transcription_provider) return null;
+  return {
+    provider_type: formValues.transcription_provider,
+    provider_config_id: txConfigId ?? null,
+    module_config: {
+      transcription_provider: formValues.transcription_provider,
+      transcription_provider_config_id: txConfigId ?? null,
+      vad_provider: formValues.vad_provider ?? '',
+      vad_provider_config_id: vadConfigId ?? null,
+      main_stream_time_millis: formValues.main_stream_time_millis,
+      transition_stream_time_millis: formValues.transition_stream_time_millis,
+      max_buffer_count: formValues.max_buffer_count,
+    },
+  };
 }
 
 /**
@@ -847,6 +876,24 @@ export const ModuleConfigEditScreen: React.FC = () => {
               )}
             </View>
           </ThemedCard>
+
+          {/* ── STT/VAD recorder test block (2-2) — tests the configured / draft provider ── */}
+          {(() => {
+            const sttDraft = buildSttTestDraft(
+              formValues,
+              providerForms['transcription']?.providerConfigId,
+              providerForms['vad']?.providerConfigId,
+            );
+            if (!sttDraft) return null;
+            return (
+              <ThemedCard elevated accentStripe style={styles.section}>
+                <SectionHeader title={t('testConfiguration')} />
+                <View style={styles.sectionContent}>
+                  <SttTestPanel draftConfig={sttDraft} enabled={!!formValues.transcription_provider} />
+                </View>
+              </ThemedCard>
+            );
+          })()}
         </>
       );
     }

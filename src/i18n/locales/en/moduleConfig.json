@@ -21,5 +21,6 @@
   "modeSimple": "Simple",
   "modeAdvanced": "Advanced",
   "modeSimpleHint": "Just the essentials — provider, model and credentials.",
-  "modeAdvancedHint": "Full control over sampling, limits and credentials."
+  "modeAdvancedHint": "Full control over sampling, limits and credentials.",
+  "testConfiguration": "Test your configuration"
 }

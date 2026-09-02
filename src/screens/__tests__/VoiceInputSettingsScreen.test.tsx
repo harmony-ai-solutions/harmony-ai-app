@@ -134,6 +134,13 @@ jest.mock('../../components/entities/EntityModuleSelectorWithActions', () => {
   };
 });
 
+// SttTestPanel — the screen just delegates; it is exercised by its own suite.
+jest.mock('../../components/config/SttTestPanel', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return { __esModule: true, SttTestPanel: () => React.createElement(View, { testID: 'stt-test-panel' }) };
+});
+
 jest.mock('../../database/repositories/entities', () => ({
   getEntity: jest.fn(),
   getEntityModuleMapping: jest.fn(),
