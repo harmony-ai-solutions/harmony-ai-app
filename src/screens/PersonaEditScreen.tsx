@@ -284,7 +284,7 @@ export const PersonaEditScreen: React.FC = () => {
       try {
         const persona = await getUserPersona(personaId!);
         if (!cancelled && !persona) {
-          showAlert(t('common:error'), t('personaSaveFailed', { message: 'Persona not found' }));
+          showAlert(t('common:error'), t('persona:personaNotFound'));
           navigation.goBack();
           return;
         }
@@ -301,7 +301,7 @@ export const PersonaEditScreen: React.FC = () => {
           const profile = await getCharacterProfile(profileId);
           if (cancelled) return;
           if (!profile) {
-            showAlert(t('common:error'), t('personaSaveFailed', { message: 'Persona not found' }));
+            showAlert(t('common:error'), t('persona:personaNotFound'));
             navigation.goBack();
             return;
           }
@@ -370,7 +370,7 @@ export const PersonaEditScreen: React.FC = () => {
       } catch (err) {
         log.error('Failed to load persona for edit:', err);
         if (!cancelled) {
-          showAlert(t('common:error'), t('personaSaveFailed', { message: '' }));
+          showAlert(t('common:error'), t('personaSaveFailed'));
           navigation.goBack();
         }
       }
@@ -680,12 +680,12 @@ export const PersonaEditScreen: React.FC = () => {
     // Numeric validation (CreateAI parity — alert instead of silent clamp).
     const typingWpm = parseInt(typingSpeedWpm, 10);
     if (isNaN(typingWpm) || typingWpm < 1 || typingWpm > 200) {
-      showAlert('Validation', t('characters:validationTypingSpeed'));
+      showAlert(t('common:validation'), t('characters:validationTypingSpeed'));
       return;
     }
     const audioChance = parseInt(audioResponseChance, 10);
     if (isNaN(audioChance) || audioChance < 0 || audioChance > 100) {
-      showAlert('Validation', t('characters:validationAudioChance'));
+      showAlert(t('common:validation'), t('characters:validationAudioChance'));
       return;
     }
 
@@ -816,11 +816,11 @@ export const PersonaEditScreen: React.FC = () => {
         log.warn('Auto-sync after persona save failed (non-critical):', syncErr);
       }
 
-      showAlert(t('personaSaved'), undefined, [{ text: 'OK' }]);
+      showAlert(t('personaSaved'), undefined, [{ text: t('common:ok') }]);
       navigation.goBack();
     } catch (err) {
       log.error('Failed to save persona:', err);
-      showAlert(t('common:error'), t('personaSaveFailed', { message: ' ' }));
+      showAlert(t('common:error'), t('personaSaveFailed'));
     } finally {
       setIsSaving(false);
     }
@@ -829,7 +829,7 @@ export const PersonaEditScreen: React.FC = () => {
   // ── Export (JSON / PNG ccv3) — lifts the CURRENT form state ──────────────
   const handleExport = async (kind: 'json' | 'png') => {
     if (!name.trim()) {
-      showAlert('Validation', t('characters:validationName'));
+      showAlert(t('common:validation'), t('characters:validationName'));
       return;
     }
     try {
@@ -910,7 +910,7 @@ export const PersonaEditScreen: React.FC = () => {
             } catch (prefErr) {
               log.warn('Failed to reset impersonation pref after persona delete:', prefErr);
             }
-            showAlert(t('personaDeleted'), undefined, [{ text: 'OK' }]);
+            showAlert(t('personaDeleted'), undefined, [{ text: t('common:ok') }]);
             navigation.goBack();
           } catch (err) {
             log.error('Failed to delete persona:', err);

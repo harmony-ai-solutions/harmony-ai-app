@@ -98,7 +98,7 @@
   "personaDeleteConfirmHint": "This permanently removes the persona, its card, and card images. This cannot be undone.",
   "personaDelete": "Delete",
   "personaDeleteFailed": "Failed to delete persona",
-  "personaSaveFailed": "Failed to save persona: {{message}}",
+  "personaSaveFailed": "Failed to save persona",
   "personaAliasConflict": "A persona with this name already exists. Choose another name.",
 
   "signInTitle": "Sign in to see your profile",
