@@ -20,6 +20,18 @@ import {
 import {getAllEntities, createEntity, getEntity} from '../../repositories/entities';
 import {createCharacterProfile} from '../../repositories/characters';
 
+// 3-2-A: deleteUserPersona fires a non-blocking sync trigger (decision 15).
+// Stub the SyncService singleton so unit tests never touch the real sync
+// stack (its logger transport leaves timers that fail fast suites).
+jest.mock('../../../services/SyncService', () => {
+  const initiateSync = jest.fn(() => Promise.resolve());
+  return {
+    SyncService: {
+      getInstance: () => ({initiateSync}),
+    },
+  };
+});
+
 describe('personas repository (user entities)', () => {
   const {getDb} = useFreshDatabase();
 

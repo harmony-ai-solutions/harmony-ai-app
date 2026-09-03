@@ -23,11 +23,14 @@ import {
   createCharacterProfile,
   updateCharacterProfile,
   createCharacterImage,
+  getCharacterImages,
+  deleteCharacterImage,
   getPrimaryImage,
   getCharacterProfile,
   deleteCharacterProfile,
   imageToDataURL,
 } from './characters';
+import type { CharacterProfile } from '../models';
 
 /** Display-ready persona. */
 export interface Persona {
@@ -170,26 +173,111 @@ function minimalProfileColumns() {
   };
 }
 
+/**
+ * The full Character Card V3 + Soulbits profile field set a persona write can
+ * carry (3-2-A). Everything except `name`/`description`/`personality` is
+ * optional — omitted fields fall back to the minimal defaults on create and
+ * round-trip untouched on update.
+ */
+type PersonaProfileFieldKeys =
+  | 'voice_characteristics'
+  | 'base_prompt'
+  | 'scenario'
+  | 'typing_speed_wpm'
+  | 'audio_response_chance_percent'
+  | 'vision_config_id'
+  | 'lifecycle_config'
+  | 'first_mes'
+  | 'mes_example'
+  | 'alternate_greetings'
+  | 'post_history_instructions'
+  | 'creator_notes'
+  | 'creator'
+  | 'character_version'
+  | 'nickname'
+  | 'tags'
+  | 'group_only_greetings'
+  | 'extensions'
+  | 'assets'
+  | 'card_provenance'
+  | 'character_book';
+
+/** Optional subset of the profile row accepted by persona create/update. */
+export type UserPersonaProfileFields = Pick<Partial<CharacterProfile>, PersonaProfileFieldKeys>;
+
+/** The runtime keys of {@link UserPersonaProfileFields} (single source for the pick helper). */
+const FULL_PROFILE_KEYS: PersonaProfileFieldKeys[] = [
+  'voice_characteristics',
+  'base_prompt',
+  'scenario',
+  'typing_speed_wpm',
+  'audio_response_chance_percent',
+  'vision_config_id',
+  'lifecycle_config',
+  'first_mes',
+  'mes_example',
+  'alternate_greetings',
+  'post_history_instructions',
+  'creator_notes',
+  'creator',
+  'character_version',
+  'nickname',
+  'tags',
+  'group_only_greetings',
+  'extensions',
+  'assets',
+  'card_provenance',
+  'character_book',
+];
+
+/**
+ * Pick the explicitly-provided full-profile fields from a persona input.
+ * Fields whose value is `undefined` are omitted so callers can distinguish
+ * "not provided" (keep the default / round-trip) from "explicitly cleared"
+ * (e.g. `vision_config_id: null`).
+ */
+function pickProfileFields(input: UserPersonaProfileFields): Partial<CharacterProfile> {
+  const picked: Partial<CharacterProfile> = {};
+  for (const key of FULL_PROFILE_KEYS) {
+    if (input[key] !== undefined) {
+      (picked as Record<string, unknown>)[key] = input[key];
+    }
+  }
+  return picked;
+}
+
 /** Avatar input for create/update. */
 export interface UserPersonaAvatar {
   image_data: string; // base64 (no data: prefix)
   mime_type: string;
 }
 
+/** Input for {@link createUserPersona}: identity + avatar + optional full profile fields. */
+export interface CreateUserPersonaInput extends UserPersonaProfileFields {
+  name: string;
+  description?: string;
+  personality?: string;
+  avatar?: UserPersonaAvatar | null;
+}
+
+/** Input for {@link updateUserPersona}: name required (rename), everything else optional. */
+export interface UpdateUserPersonaInput extends UserPersonaProfileFields {
+  name: string;
+  description?: string;
+  personality?: string;
+  avatar?: UserPersonaAvatar | null;
+}
+
 /**
- * Create a persona: minimal character_profiles row + primary avatar image row
+ * Create a persona: a character_profiles row (minimal defaults, overlaid with
+ * any full V3 + Soulbits fields the caller provides) + primary avatar image row
  * (if any) + a `user` entity (id = name, unique-checked via
  * getNextEntityAliasCopy; alias = name, entity id FROZEN after create).
  *
  * The caller (screen) is responsible for the fire-and-forget `syncAndWait`
  * (PersonaEdit pattern) — this repo stays layering-clean.
  */
-export async function createUserPersona(input: {
-  name: string;
-  description?: string;
-  personality?: string;
-  avatar?: UserPersonaAvatar | null;
-}): Promise<Persona> {
+export async function createUserPersona(input: CreateUserPersonaInput): Promise<Persona> {
   const name = input.name.trim();
   const description = input.description?.trim() ?? '';
   const personality = input.personality?.trim() ?? '';
@@ -208,6 +296,7 @@ export async function createUserPersona(input: {
     description,
     personality,
     ...minimalProfileColumns(),
+    ...pickProfileFields(input),
   });
 
   await createEntity(
@@ -247,20 +336,19 @@ export async function createUserPersona(input: {
 /**
  * Update a persona's profile fields (and optionally avatar).
  * Rename = profile name + entity alias sync; the entity id is FROZEN.
- * Avatars reconcile diff-based: a new/different primary image replaces the old
- * (which is soft-deleted); no avatar passed leaves images untouched.
+ * Full V3 + Soulbits fields are accepted; fields NOT provided round-trip
+ * untouched (the existing row is spread first, then the provided fields are
+ * overlaid). Avatars reconcile diff-based: a new/different primary image
+ * replaces the old (which is soft-deleted); no avatar passed leaves images
+ * untouched.
  *
  * @param id persona entity id
- * @param fields name/description/personality/avatar
+ * @param input name (required — rename), description/personality/avatar + any
+ *   full-profile field from {@link UserPersonaProfileFields}
  */
 export async function updateUserPersona(
   id: string,
-  input: {
-    name: string;
-    description?: string;
-    personality?: string;
-    avatar?: UserPersonaAvatar | null;
-  },
+  input: UpdateUserPersonaInput,
 ): Promise<void> {
   const entity = await getEntity(id);
   if (!entity || entity.entity_type !== 'user') {
@@ -278,6 +366,7 @@ export async function updateUserPersona(
     name: input.name.trim(),
     description: input.description?.trim() ?? profile.description,
     personality: input.personality?.trim() ?? profile.personality,
+    ...pickProfileFields(input),
   });
 
   // Keep entity alias in sync with the renamed profile; id frozen.
@@ -326,9 +415,146 @@ export async function updateUserPersona(
 }
 
 /**
- * Delete a persona: soft-delete the entity (cascades its child rows) and the
- * linked profile. `'user'` is protected (A1 — the built-in identity is
- * load-bearing and never deletable).
+ * Create a persona by FULL-copying an existing character card — the RN
+ * equivalent of the engine 1-3 duplicate endpoint, persona-targeted (decisions
+ * 4/6/7/9). The source card is untouched.
+ *
+ * Copy semantics (mirrors the engine's field matrix):
+ *   - ALL Character Card V3 spec + Soulbits fields copied verbatim, including
+ *     `card_provenance` AS-IS (decision 6).
+ *   - Fresh ids everywhere (profile + entity + images) — never reuses a row.
+ *   - `name` deduped via the entity copy-suffix convention
+ *     (`getNextEntityAliasCopy`, "Max" → "Max 2").
+ *   - `is_favorite` reset to 0 (a persona copy is never auto-favorited).
+ *   - `lifecycle_config` reset to `{}` (a persona has no AI lifecycle).
+ *   - ALL `character_image` rows copied with the primary flag preserved
+ *     (decision 9).
+ *   - A `user` entity is created linking the fresh profile (id = name,
+ *     alias = id, frozen after create).
+ *
+ * @param sourceProfileId the character card profile to copy
+ * @param options.name optional copy base name (defaults to the source name)
+ * @returns the new Persona (entity id, name, description, personality, avatar)
+ */
+export async function createUserPersonaFromCard(
+  sourceProfileId: string,
+  options: { name?: string } = {},
+): Promise<Persona> {
+  const source = await getCharacterProfile(sourceProfileId);
+  if (!source) {
+    throw new Error(`Character profile not found: ${sourceProfileId}`);
+  }
+
+  const baseName = (options.name ?? source.name).trim();
+  const existing = await getEntity(baseName);
+  const entityId = existing ? await getNextEntityAliasCopy(baseName) : baseName;
+  const personaName = entityId; // id = name convention for personas
+
+  const profileId = generateId();
+
+  // Full-field copy: every V3 + Soulbits column copied verbatim from the
+  // source (getCharacterProfile already normalizes nulls → ''), `is_favorite`
+  // + `lifecycle_config` reset per the engine field matrix, `card_provenance`
+  // copied AS-IS (decision 6).
+  await createCharacterProfile({
+    id: profileId,
+    name: personaName,
+    description: source.description ?? '',
+    personality: source.personality ?? '',
+    voice_characteristics: source.voice_characteristics ?? '',
+    base_prompt: source.base_prompt ?? '',
+    scenario: source.scenario ?? '',
+    typing_speed_wpm: source.typing_speed_wpm ?? 60,
+    audio_response_chance_percent: source.audio_response_chance_percent ?? 50,
+    vision_config_id: source.vision_config_id ?? null,
+    lifecycle_config: '{}', // reset
+    first_mes: source.first_mes ?? '',
+    mes_example: source.mes_example ?? '',
+    alternate_greetings: source.alternate_greetings ?? '[]',
+    post_history_instructions: source.post_history_instructions ?? '',
+    creator_notes: source.creator_notes ?? '',
+    creator: source.creator ?? '',
+    character_version: source.character_version ?? '',
+    nickname: source.nickname ?? '',
+    tags: source.tags ?? '[]',
+    group_only_greetings: source.group_only_greetings ?? '[]',
+    extensions: source.extensions ?? '{}',
+    assets: source.assets ?? '[]',
+    card_provenance: source.card_provenance ?? '{}', // AS-IS
+    character_book: source.character_book ?? '{}',
+    is_favorite: 0, // reset
+  });
+
+  // Copy ALL images with the primary flag preserved (fresh image ids).
+  const images = await getCharacterImages(sourceProfileId);
+  for (const image of images) {
+    await createCharacterImage({
+      character_profile_id: profileId,
+      image_data: image.image_data,
+      mime_type: image.mime_type,
+      description: image.description,
+      is_primary: image.is_primary,
+      display_order: image.display_order,
+      vl_model_interpretation: image.vl_model_interpretation,
+      vl_model: image.vl_model,
+      updated_at: new Date(),
+    });
+  }
+
+  await createEntity(
+    {
+      id: entityId,
+      character_profile_id: profileId,
+      alias: entityId,
+      lifecycle_config: '{}',
+      rag_reindex_required: 1,
+    },
+    { entity_type: 'user' },
+  );
+
+  const primary = await getPrimaryImage(profileId);
+  return {
+    id: entityId,
+    name: personaName,
+    description: source.description ?? '',
+    personality: source.personality ?? '',
+    avatarUri: primary ? imageToDataURL(primary) : null,
+  };
+}
+
+/**
+ * Fire a NON-BLOCKING sync after a persona delete (decision 15). The sync
+ * stack is lazy-required so its module graph (ConnectionManager + timers +
+ * real logger transport) never loads for callers that only read/write
+ * personas. Best-effort: `initiateSync` self-guards when the connection is
+ * unavailable or a sync is already in flight, and any failure is swallowed —
+ * the next opportunistic sync picks the tombstones up.
+ */
+function firePersonaDeleteSync(): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { SyncService } = require('../../services/SyncService') as typeof import('../../services/SyncService');
+    SyncService.getInstance()
+      .initiateSync()
+      .catch(() => {
+        // Best-effort — swallow.
+      });
+  } catch {
+    // SyncService unavailable (e.g. a unit-test environment) — nothing to do.
+  }
+}
+
+/**
+ * Delete a persona: soft-delete the entity (cascades its child rows), the
+ * persona's `character_image` rows, and the linked profile. `'user'` is
+ * protected (A1 — the built-in identity is load-bearing and never deletable).
+ *
+ * Mirroring the engine 1-2 cascade locally (tombstoning the images too) means
+ * no live avatar rows linger between the local delete and the engine's
+ * round-tripped tombstones. After the local delete, a NON-BLOCKING
+ * `syncService.initiateSync()` fires (decision 15) so the tombstones reach the
+ * engine ASAP — every caller benefits because the trigger lives in the repo
+ * layer.
  */
 export async function deleteUserPersona(id: string): Promise<void> {
   if (id === 'user') {
@@ -339,10 +565,20 @@ export async function deleteUserPersona(id: string): Promise<void> {
   if (entity.entity_type !== 'user') {
     throw new Error(`Cannot delete non-user persona: ${id}`);
   }
+
+  if (entity.character_profile_id) {
+    const images = await getCharacterImages(entity.character_profile_id);
+    for (const image of images) {
+      await deleteCharacterImage(image.id);
+    }
+  }
+
   await deleteEntity(id);
   if (entity.character_profile_id) {
     await deleteCharacterProfile(entity.character_profile_id);
   }
+
+  firePersonaDeleteSync();
 }
 
 /**

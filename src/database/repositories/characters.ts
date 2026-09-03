@@ -325,6 +325,35 @@ export async function getUserCharacterProfiles(
 }
 
 /**
+ * Get a SINGLE AI character profile by id, excluding persona-owned profiles
+ * (3-2-A read guard).
+ *
+ * The plain `getCharacterProfile(id)` is an unfiltered single-row getter: any
+ * caller that passes a raw profile id (deep links, a future Discover →
+ * AIProfile routing) could render a persona's card as an AI partner. This
+ * variant applies the same persona-owned exclusion as
+ * `getAllCharacterProfiles` (§9-A3) to the single-row read — a profile linked
+ * to any `entity_type = 'user'` entity returns null.
+ *
+ * Consumers that already obtain ids from filtered sources (entity-driven
+ * lookups such as ChatDetailScreen / DisabledAIsScreen / ArchivedChatsScreen)
+ * may keep using the unfiltered getter; surfaces that accept an arbitrary
+ * profile id (AIProfileScreen's route param) should use this one.
+ */
+export async function getAICharacterProfile(id: string): Promise<CharacterProfile | null> {
+  const profile = await getCharacterProfile(id);
+  if (!profile) return null;
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    `SELECT 1 FROM entities e
+     WHERE e.character_profile_id = ? AND e.entity_type = 'user'`,
+    [id],
+  );
+  if (results.rows.length > 0) return null;
+  return profile;
+}
+
+/**
  * Update an existing character profile
  * Throws error if profile not found
  */

@@ -10,6 +10,7 @@ import {
   createCharacterProfile,
   getCharacterProfile,
   getAllCharacterProfiles,
+  getAICharacterProfile,
   updateCharacterProfile,
   deleteCharacterProfile,
   deleteCharacterProfileCascade,
@@ -109,6 +110,52 @@ describe('characters repository', () => {
       expect(all.length).toBeGreaterThanOrEqual(3);
       const names = all.map(p => p.name);
       expect(names).toContain('Test Character');
+    });
+  });
+
+  describe('getAICharacterProfile (persona-owned read guard, 3-2-A)', () => {
+    it('returns a plain AI profile (no user entity linkage)', async () => {
+      await createMinimalProfile('ai-guard-1');
+      const profile = await getAICharacterProfile('ai-guard-1');
+      expect(profile?.id).toBe('ai-guard-1');
+    });
+
+    it('returns null for a persona-owned profile (linked to a user entity)', async () => {
+      await createMinimalProfile('persona-guard-1');
+      await createEntity(
+        {
+          id: 'persona-guard-entity',
+          alias: 'persona-guard-entity',
+          character_profile_id: 'persona-guard-1',
+          lifecycle_config: '{}',
+          rag_reindex_required: 1,
+        },
+        {entity_type: 'user'},
+      );
+      // The persona-owned card must never surface through the AI-profile read.
+      expect(await getAICharacterProfile('persona-guard-1')).toBeNull();
+    });
+
+    it('returns null for a missing profile and for a soft-deleted profile', async () => {
+      expect(await getAICharacterProfile('missing-guard')).toBeNull();
+      await createMinimalProfile('ai-guard-del');
+      await deleteCharacterProfile('ai-guard-del');
+      expect(await getAICharacterProfile('ai-guard-del')).toBeNull();
+    });
+
+    it('does not hide a profile linked only to an AI entity', async () => {
+      await createMinimalProfile('ai-guard-linked');
+      await createEntity(
+        {
+          id: 'ai-guard-entity',
+          alias: 'ai-guard-entity',
+          character_profile_id: 'ai-guard-linked',
+          lifecycle_config: '{}',
+          rag_reindex_required: 1,
+        },
+        {entity_type: 'ai'},
+      );
+      expect((await getAICharacterProfile('ai-guard-linked'))?.id).toBe('ai-guard-linked');
     });
   });
 
