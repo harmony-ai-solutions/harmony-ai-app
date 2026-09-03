@@ -103,6 +103,7 @@ import {
   getAllEntities,
   getEntityByCharacterProfileId,
   getEntityModuleMapping,
+  resolveNextEntityIdCopy,
   updateEntityFields,
 } from '../database/repositories/entities';
 import { getUserPersona } from '../database/repositories/userEntities';
@@ -1046,8 +1047,11 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      // The entity id doubles as the display name (name-like ids).
-      const entityId = trimmedName;
+      // The entity id doubles as the display name (name-like ids). Resolve it
+      // ghost-aware (engine ResolveEntityID parity — resolveNextEntityIdCopy):
+      // the requested name is kept verbatim when free, and a soft-deleted id
+      // still reserves the TEXT PRIMARY KEY, so taken names walk "<base> <N>".
+      const entityId = await resolveNextEntityIdCopy(trimmedName);
 
       // 1. Either link an existing character profile (from the "From an
       //    Existing One" flow) or create a brand-new one.
@@ -1138,9 +1142,14 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           rag_reindex_required: 1,
         });
       } catch (err: any) {
-        // SQLite unique constraint violation on alias
+        // Alias-unique violation ONLY (idx_entities_alias_unique is a live-only
+        // partial index): another AI partner already uses this name. Ghost-id
+        // collisions already auto-resolved above via resolveNextEntityIdCopy,
+        // so any remaining UNIQUE failure on the id itself (or any non-unique
+        // error) must NOT be mislabeled — it falls through to the generic
+        // createFailed alert below.
         if (
-          err?.message?.includes('UNIQUE') ||
+          err?.message?.includes('UNIQUE') &&
           err?.message?.includes('alias')
         ) {
           // Roll back ONLY the brand-new profile created in step 1 so a failed

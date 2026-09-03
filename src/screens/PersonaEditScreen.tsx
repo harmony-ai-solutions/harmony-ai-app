@@ -820,7 +820,16 @@ export const PersonaEditScreen: React.FC = () => {
       navigation.goBack();
     } catch (err) {
       log.error('Failed to save persona:', err);
-      showAlert(t('common:error'), t('personaSaveFailed'));
+      // Alias-unique failures (rename or create) are user-presentable: another
+      // live entity already owns that name. SQLite surfaces them as UNIQUE
+      // violations on idx_entities_alias_unique. Everything else — persona
+      // not found, storage, sync — keeps the generic message.
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('UNIQUE')) {
+        showAlert(t('common:error'), t('personaAliasConflict'));
+      } else {
+        showAlert(t('common:error'), t('personaSaveFailed'));
+      }
     } finally {
       setIsSaving(false);
     }

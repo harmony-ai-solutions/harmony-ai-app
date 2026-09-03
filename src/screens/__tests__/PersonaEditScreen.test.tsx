@@ -457,6 +457,51 @@ describe('PersonaEditScreen — edit mode (full editor)', () => {
     const [path] = mockWriteFile.mock.calls[0];
     expect(path).toMatch(/\.json$/);
   });
+
+  it('rename hitting the alias UNIQUE index shows the personaAliasConflict alert', async () => {
+    const { getCharacterProfile } = require('../../database/repositories/characters');
+    (getCharacterProfile as jest.Mock).mockResolvedValue(profile('profile-1', 'Mystic Mara'));
+    mockUpdate.mockRejectedValue(
+      new Error("UNIQUE constraint failed: index 'idx_entities_alias_unique'"),
+    );
+
+    const utils = await render(<PersonaEditScreen />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('save-persona-button'));
+    await flush();
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockShowAlert).toHaveBeenCalledWith(
+      'common:error',
+      'personaAliasConflict',
+    );
+    expect(mockShowAlert).not.toHaveBeenCalledWith(
+      'common:error',
+      'personaSaveFailed',
+    );
+  });
+
+  it('non-conflict save failures keep the generic personaSaveFailed alert', async () => {
+    const { getCharacterProfile } = require('../../database/repositories/characters');
+    (getCharacterProfile as jest.Mock).mockResolvedValue(profile('profile-1', 'Mystic Mara'));
+    mockUpdate.mockRejectedValue(new Error('User persona not found: Mystic Mara'));
+
+    const utils = await render(<PersonaEditScreen />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('save-persona-button'));
+    await flush();
+
+    expect(mockShowAlert).toHaveBeenCalledWith(
+      'common:error',
+      'personaSaveFailed',
+    );
+    expect(mockShowAlert).not.toHaveBeenCalledWith(
+      'common:error',
+      'personaAliasConflict',
+    );
+  });
 });
 
 describe('PersonaEditScreen — built-in user mode (A1 / decision 8)', () => {

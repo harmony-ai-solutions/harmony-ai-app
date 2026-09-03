@@ -715,6 +715,9 @@ export const ChatListScreen: React.FC = () => {
       });
     } catch (err) {
       log.error('Failed to open chat from picker:', err);
+      // Same failure the Characters / AI Profile screens alert on — the picker
+      // gives no other feedback, so surface it instead of dying silently.
+      showAlert(t('common:error'), t('characters:chatOpenFailed'));
     }
   };
 
