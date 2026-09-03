@@ -1552,9 +1552,16 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     olderThanTimestamp: number,
   ): Promise<void> {
     const tables = [
+      // `entities` is purged BEFORE `character_profiles`: the profile→entity
+      // FK (entities.character_profile_id → character_profiles.id, migration
+      // 000002) is ON DELETE RESTRICT, so a soft-deleted persona/entity row
+      // blocks its profile's DELETE. Purging entities first lets a persona
+      // cascade (entity + profile + images) be physically removed in ONE cycle
+      // (persona cards 3-4). character_image rides an ON DELETE CASCADE, so its
+      // own purge row is order-independent.
+      'entities',
       'character_profiles',
       'character_image',
-      'entities',
       'entity_module_mappings',
       'interactions',
       'conversation_messages',

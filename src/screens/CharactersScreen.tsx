@@ -291,32 +291,7 @@ export const CharactersScreen: React.FC = () => {
     }
   }, []);
 
-  // 4-1 / 000044: live favorites refresh. SyncService emits `sync:data-applied`
-  // after an inbound apply commits; when it touched `character_profiles`, reload
-  // the favorite ids so the favorites filter reflects engine-side changes even if
-  // this screen stays focused (the focus reload above only fires on re-focus).
-  // Favorites now ride inside the profile row as `is_favorite`, so the profile
-  // table filter covers them (the old favorites sidecar table is gone).
-  useEffect(() => {
-    const handleSyncApplied = (payload: { tables: string[] }) => {
-      if (!payload.tables.includes('character_profiles')) return;
-      loadFavoritesAndCategories();
-    };
-    syncService.on('sync:data-applied', handleSyncApplied);
-    return () => {
-      syncService.off('sync:data-applied', handleSyncApplied);
-    };
-  }, [loadFavoritesAndCategories]);
-
-  // Reload on focus (handles return from edit screen)
-  useFocusEffect(
-    useCallback(() => {
-      loadProfiles();
-      loadFavoritesAndCategories();
-    }, [loadFavoritesAndCategories]),
-  );
-
-  const loadProfiles = async () => {
+  const loadProfiles = useCallback(async () => {
     try {
       let data = await getAllCharacterProfiles();
       // Hide AI characters created by blocked users app-wide. The stub block
@@ -361,7 +336,42 @@ export const CharactersScreen: React.FC = () => {
       setIsLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
+
+  // 4-1 / 000044: live favorites refresh. SyncService emits `sync:data-applied`
+  // after an inbound apply commits; when it touched `character_profiles`, reload
+  // the favorite ids so the favorites filter reflects engine-side changes even if
+  // this screen stays focused (the focus reload above only fires on re-focus).
+  // Favorites now ride inside the profile row as `is_favorite`, so the profile
+  // table filter covers them (the old favorites sidecar table is gone).
+  // 3-4: persona-cascade tombstones (`entities`) and avatar churn
+  // (`character_image`) can also go stale while focused — reload the profile
+  // list so freed persona-owned cards and changed avatars surface immediately.
+  useEffect(() => {
+    const handleSyncApplied = (payload: { tables: string[] }) => {
+      if (payload.tables.includes('character_profiles')) {
+        loadFavoritesAndCategories();
+      }
+      if (
+        payload.tables.includes('entities') ||
+        payload.tables.includes('character_image')
+      ) {
+        loadProfiles();
+      }
+    };
+    syncService.on('sync:data-applied', handleSyncApplied);
+    return () => {
+      syncService.off('sync:data-applied', handleSyncApplied);
+    };
+  }, [loadFavoritesAndCategories, loadProfiles]);
+
+  // Reload on focus (handles return from edit screen)
+  useFocusEffect(
+    useCallback(() => {
+      loadProfiles();
+      loadFavoritesAndCategories();
+    }, [loadFavoritesAndCategories]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

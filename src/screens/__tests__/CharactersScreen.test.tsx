@@ -173,13 +173,20 @@ jest.mock('../../services/ChatPreferencesService', () => ({
   },
 }));
 
+// Captured `sync:data-applied` handler so tests can drive the reload triggers
+// (4-1 / 3-4) from the mocked SyncService.
+let syncDataAppliedHandler: ((payload: { tables: string[] }) => void) | null = null;
+
 jest.mock('../../services/SyncService', () => ({
   __esModule: true,
   default: {
     syncAndWait: jest.fn().mockResolvedValue(undefined),
     initiateSync: jest.fn().mockResolvedValue(undefined),
     // 4-1: CharactersScreen subscribes to sync:data-applied for live favorites.
-    on: jest.fn(),
+    // 3-4: entity / character_image applies also reload the profile list.
+    on: (event: string, handler: any) => {
+      if (event === 'sync:data-applied') syncDataAppliedHandler = handler;
+    },
     off: jest.fn(),
   },
 }));
@@ -546,5 +553,74 @@ describe('CharactersScreen — create persona from card (decision 4/7/12)', () =
       'PersonaEdit',
       expect.objectContaining({ prefill: expect.anything() }),
     );
+  });
+});
+
+describe('CharactersScreen — sync:data-applied reload triggers (4-1 / 3-4)', () => {
+  const { getFavoriteCharacterProfileIds } =
+    require('../../database/repositories/characters');
+
+  beforeEach(() => {
+    syncDataAppliedHandler = null;
+    mockGetAll.mockClear();
+    (getFavoriteCharacterProfileIds as jest.Mock).mockClear();
+  });
+
+  it('reloads the profile list when entities was applied (persona-cascade tombstones)', async () => {
+    await renderScreen();
+    expect(mockGetAll).toHaveBeenCalled(); // initial load
+
+    mockGetAll.mockClear();
+    await act(async () => {
+      syncDataAppliedHandler?.({ tables: ['entities'] });
+    });
+    await flush();
+    // Persona delete over sync touches `entities` — the list must re-read so
+    // freed persona-owned cards and avatar state refresh while focused (3-4).
+    expect(mockGetAll).toHaveBeenCalled();
+  });
+
+  it('reloads the profile list when character_image was applied (avatar churn)', async () => {
+    await renderScreen();
+    mockGetAll.mockClear();
+    await act(async () => {
+      syncDataAppliedHandler?.({ tables: ['character_image'] });
+    });
+    await flush();
+    expect(mockGetAll).toHaveBeenCalled();
+  });
+
+  it('does NOT reload the profile list when only unrelated tables were applied', async () => {
+    await renderScreen();
+    mockGetAll.mockClear();
+    await act(async () => {
+      syncDataAppliedHandler?.({ tables: ['conversation_messages', 'interactions'] });
+    });
+    await flush();
+    expect(mockGetAll).not.toHaveBeenCalled();
+  });
+
+  it('still reloads favorites/categories when character_profiles was applied (4-1)', async () => {
+    await renderScreen();
+    (getFavoriteCharacterProfileIds as jest.Mock).mockClear();
+    await act(async () => {
+      syncDataAppliedHandler?.({ tables: ['character_profiles'] });
+    });
+    await flush();
+    expect(getFavoriteCharacterProfileIds).toHaveBeenCalled();
+  });
+
+  it('fires BOTH reloads when a persona-cascade batch applied (entity + profile + images)', async () => {
+    await renderScreen();
+    mockGetAll.mockClear();
+    (getFavoriteCharacterProfileIds as jest.Mock).mockClear();
+    await act(async () => {
+      syncDataAppliedHandler?.({
+        tables: ['entities', 'character_profiles', 'character_image'],
+      });
+    });
+    await flush();
+    expect(mockGetAll).toHaveBeenCalled();
+    expect(getFavoriteCharacterProfileIds).toHaveBeenCalled();
   });
 });

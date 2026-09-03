@@ -14,5 +14,5 @@ Commit: `fix(sync): persona delete sync trigger + stale-surface reload polish (p
 
 ## Checklist
 
-- [ ] Reload triggers audited/extended
-- [ ] Gates green, committed
+- [x] Reload triggers audited/extended
+- [x] Gates green, committed

@@ -10,12 +10,12 @@
  * Two phases are pinned:
  *   - APPLY: tombstones land (rows soft-deleted, read surfaces exclude them).
  *   - PURGE: `cleanupSoftDeletedRecords` physically removes the tombstones.
- *     Note: `character_profiles` cleanup is FK-RESTRICT-gated by
- *     `entities.character_profile_id` (migration 000002, ON DELETE RESTRICT),
- *     and `cleanupSoftDeletedRecords` iterates character_profiles BEFORE
- *     entities — so a persona's profile is physically purged one sync cycle
- *     after its entity. This is pre-existing cleanup-order behavior; the test
- *     documents it and asserts the eventual clean state.
+ *     `entities.character_profile_id` is FK-RESTRICT-gated
+ *     (migration 000002, ON DELETE RESTRICT) and `character_image` rides a
+ *     CASCADE — the purge order is `entities` → `character_image` →
+ *     `character_profiles` so a persona cascade is physically gone in ONE
+ *     cycle (3-4 fix; previously `character_profiles` was iterated first and
+ *     its purge was deferred one cycle by the still-present entity).
  */
 
 import {SyncService} from '../../src/services/SyncService';
@@ -248,7 +248,7 @@ describe('persona-cascade sync (entity + profile + images)', () => {
     expect(await getCharacterImages(profileId)).toEqual([]);
   }, 20000);
 
-  it('purges persona-cascade tombstones cleanly — no ghost rows remain', async () => {
+  it('purges persona-cascade tombstones in ONE cycle — no ghost rows remain (3-4)', async () => {
     const {personaId, profileId, imageIds} = await seedPersonaWithImages('Cascade Purge');
 
     // Past deleted_at → cleanupSoftDeletedRecords purges after each sync.
@@ -258,21 +258,9 @@ describe('persona-cascade sync (entity + profile + images)', () => {
     await runFullSync(syncService);
     await new Promise(r => setTimeout(r, 200));
 
-    // Sync 1: entity + images purged (cleanup deletes them in this cycle).
-    expect(await getEntity(personaId, true)).toBeNull();
-    for (const imageId of imageIds) {
-      expect(await getCharacterImage(imageId, true)).toBeNull();
-    }
-    // The profile purge is deferred one cycle: cleanupSoftDeletedRecords
-    // deletes character_profiles BEFORE entities, and the still-present
-    // (soft-deleted) entity row blocks the profile's DELETE via FK RESTRICT.
-    expect((await getCharacterProfile(profileId, true))!.deleted_at).not.toBeNull();
-
-    // Sync 2: the referencing entity is gone → the profile purge succeeds.
-    await runFullSync(syncService);
-    await new Promise(r => setTimeout(r, 200));
-
-    // (d) no ghost rows remain in ANY of the three tables.
+    // Sync 1 ALONE physically purges all three tables: cleanup deletes
+    // `entities` BEFORE `character_profiles` (3-4), so the RESTRICT FK no
+    // longer defers the profile purge to a second cycle.
     expect(await getEntity(personaId, true)).toBeNull();
     expect(await getCharacterProfile(profileId, true)).toBeNull();
     for (const imageId of imageIds) {
