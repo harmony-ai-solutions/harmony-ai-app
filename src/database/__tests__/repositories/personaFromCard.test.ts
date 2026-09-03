@@ -18,7 +18,7 @@ import {
   getPrimaryImage,
   createCharacterImage,
 } from '../../repositories/characters';
-import {getEntity, getAllEntities} from '../../repositories/entities';
+import {getEntity, getAllEntities, createEntity, deleteEntity} from '../../repositories/entities';
 import type {CharacterProfile} from '../../models';
 
 describe('persona from card (createUserPersonaFromCard)', () => {
@@ -208,6 +208,48 @@ describe('persona from card (createUserPersonaFromCard)', () => {
     await expect(createUserPersonaFromCard('missing-card')).rejects.toThrow(
       /not found/i,
     );
+  });
+
+  it('rejects a persona-owned source card (1:1 — personas never copy personas, 3-3)', async () => {
+    await seedSourceCard('src-persona-owned');
+    // A persona (user entity) owns the source card.
+    await createEntity(
+      {
+        id: 'src-persona-owner',
+        character_profile_id: 'src-persona-owned',
+        alias: 'src-persona-owner',
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      },
+      {entity_type: 'user'},
+    );
+
+    await expect(createUserPersonaFromCard('src-persona-owned')).rejects.toThrow(
+      /owned by a persona/i,
+    );
+
+    // Nothing was copied — no new user entity appeared.
+    const entities = await getAllEntities();
+    expect(entities.some(e => e.id === 'src-persona-owner')).toBe(true);
+    expect(entities.filter(e => e.entity_type === 'user').length).toBe(1);
+  });
+
+  it('allows copying a card whose owner is a SOFT-DELETED persona (mirrors the engine deleted_at IS NULL filter)', async () => {
+    await seedSourceCard('src-freed-card');
+    await createEntity(
+      {
+        id: 'src-freed-owner',
+        character_profile_id: 'src-freed-card',
+        alias: 'src-freed-owner',
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      },
+      {entity_type: 'user'},
+    );
+    await deleteEntity('src-freed-owner');
+
+    const persona = await createUserPersonaFromCard('src-freed-card');
+    expect(persona.id).toBe('Source Card');
   });
 
   it('copies a card with NO images into a persona with a null avatar', async () => {

@@ -16,6 +16,7 @@ import {
   getNextEntityAliasCopy,
   stripCopySuffix,
   updateEntity,
+  updateEntityFields,
   deleteEntity,
   setEntityMuted,
   setEntityDisabled,
@@ -929,6 +930,127 @@ describe('entities repository', () => {
       const entity = await getEntity(id);
       // entity_type is immutable by convention — the allowlist cannot change it.
       expect(entity?.entity_type).toBe('ai');
+    });
+  });
+
+  describe('profile-assignment guards (persona cards 3-3 / engine 1-1 parity)', () => {
+    const makeProfile = async (id: string) =>
+      createCharacterProfile({
+        id,
+        name: 'Prof ' + id,
+        description: '',
+        personality: '',
+        voice_characteristics: '',
+        base_prompt: '',
+        scenario: '',
+        typing_speed_wpm: 60,
+        audio_response_chance_percent: 50,
+        vision_config_id: null,
+        lifecycle_config: '{}',
+      });
+
+    const makeEntity = (
+      id: string,
+      character_profile_id: string | null,
+      entityType: 'ai' | 'user',
+    ) =>
+      createEntity(
+        {id, character_profile_id, alias: '', lifecycle_config: '{}', rag_reindex_required: 1},
+        {entity_type: entityType},
+      );
+
+    it('rejects an AI entity linking a persona-owned profile (AI guard)', async () => {
+      await makeProfile('guard-persona-profile');
+      // A persona (user entity) owns the profile.
+      await makeEntity('guard-persona', 'guard-persona-profile', 'user');
+
+      await expect(
+        makeEntity('guard-ai', 'guard-persona-profile', 'ai'),
+      ).rejects.toThrow(/owned by a persona/i);
+    });
+
+    it('allows an AI entity linking a fresh (non-persona) profile', async () => {
+      await makeProfile('guard-fresh-profile');
+      const created = await makeEntity('guard-ai-fresh', 'guard-fresh-profile', 'ai');
+      expect(created.entity_type).toBe('ai');
+      expect(created.character_profile_id).toBe('guard-fresh-profile');
+    });
+
+    it('rejects a persona (user entity) linking a profile owned by ANOTHER persona (1:1)', async () => {
+      await makeProfile('guard-shared-profile');
+      await makeEntity('guard-persona-one', 'guard-shared-profile', 'user');
+
+      await expect(
+        makeEntity('guard-persona-two', 'guard-shared-profile', 'user'),
+      ).rejects.toThrow(/assigned to another persona/i);
+    });
+
+    it('allows a persona linking its own fresh profile (self-reference passes)', async () => {
+      await makeProfile('guard-own-profile');
+      const created = await makeEntity('guard-persona-self', 'guard-own-profile', 'user');
+      expect(created.entity_type).toBe('user');
+    });
+
+    it('allows multiple AI entities sharing one profile (AI entities are not 1:1)', async () => {
+      await makeProfile('guard-ai-shared');
+      await makeEntity('guard-ai-1', 'guard-ai-shared', 'ai');
+      const second = await makeEntity('guard-ai-2', 'guard-ai-shared', 'ai');
+      expect(second.character_profile_id).toBe('guard-ai-shared');
+    });
+
+    it('ignores SOFT-DELETED persona owners (mirrors the engine deleted_at IS NULL filter)', async () => {
+      await makeProfile('guard-deleted-persona-profile');
+      await makeEntity('guard-deleted-persona', 'guard-deleted-persona-profile', 'user');
+      await deleteEntity('guard-deleted-persona');
+
+      // The persona is gone → the freed profile is linkable to an AI entity.
+      const created = await makeEntity('guard-ai-after-delete', 'guard-deleted-persona-profile', 'ai');
+      expect(created.character_profile_id).toBe('guard-deleted-persona-profile');
+    });
+
+    it('updateEntityFields rejects assigning a persona-owned profile to an AI entity', async () => {
+      await makeProfile('guard-update-persona-profile');
+      await makeEntity('guard-update-persona', 'guard-update-persona-profile', 'user');
+      await makeEntity('guard-update-ai', null, 'ai');
+
+      await expect(
+        updateEntityFields('guard-update-ai', {character_profile_id: 'guard-update-persona-profile'}),
+      ).rejects.toThrow(/owned by a persona/i);
+    });
+
+    it('updateEntityFields allows an AI entity to assign a non-persona profile', async () => {
+      await makeProfile('guard-update-fresh');
+      await makeEntity('guard-update-ai-2', null, 'ai');
+
+      await updateEntityFields('guard-update-ai-2', {character_profile_id: 'guard-update-fresh'});
+      expect((await getEntity('guard-update-ai-2'))!.character_profile_id).toBe('guard-update-fresh');
+    });
+
+    it('updateEntityFields allows a persona to self-reference its own profile (no-op)', async () => {
+      await makeProfile('guard-self-profile');
+      await makeEntity('guard-self-persona', 'guard-self-profile', 'user');
+
+      // No-op re-assign of its own profile passes the 1:1 guard.
+      await updateEntityFields('guard-self-persona', {character_profile_id: 'guard-self-profile'});
+      expect((await getEntity('guard-self-persona'))!.character_profile_id).toBe('guard-self-profile');
+    });
+
+    it('updateEntityFields rejects a persona taking ANOTHER persona profile (1:1)', async () => {
+      await makeProfile('guard-other-profile');
+      await makeEntity('guard-other-persona', 'guard-other-profile', 'user');
+      await makeEntity('guard-other-persona-2', null, 'user');
+
+      await expect(
+        updateEntityFields('guard-other-persona-2', {character_profile_id: 'guard-other-profile'}),
+      ).rejects.toThrow(/assigned to another persona/i);
+    });
+
+    it('updateEntityFields allows unlinking a profile (character_profile_id → null)', async () => {
+      await makeProfile('guard-unlink');
+      await makeEntity('guard-unlink-ai', 'guard-unlink', 'ai');
+
+      await updateEntityFields('guard-unlink-ai', {character_profile_id: null});
+      expect((await getEntity('guard-unlink-ai'))!.character_profile_id).toBeNull();
     });
   });
 });

@@ -15,6 +15,6 @@ Commit: `feat(personas): app-side guard - persona cards cannot link to AI entiti
 
 ## Checklist
 
-- [ ] Write guards + tests
-- [ ] Read-side pin
-- [ ] Gates green, committed
+- [x] Write guards + tests
+- [x] Read-side pin
+- [x] Gates green, committed (`9e54702`)

@@ -18,7 +18,14 @@
 import { getDatabase } from '../connection';
 import { createDataURL } from '../base64';
 import { generateId } from '../../utils/uuid';
-import { getEntity, createEntity, getNextEntityAliasCopy, deleteEntity } from './entities';
+import {
+  getEntity,
+  createEntity,
+  getNextEntityAliasCopy,
+  deleteEntity,
+  isProfilePersonaOwned,
+  ERR_PROFILE_OWNED_BY_PERSONA,
+} from './entities';
 import {
   createCharacterProfile,
   updateCharacterProfile,
@@ -443,6 +450,17 @@ export async function createUserPersonaFromCard(
   const source = await getCharacterProfile(sourceProfileId);
   if (!source) {
     throw new Error(`Character profile not found: ${sourceProfileId}`);
+  }
+
+  // 1:1 ownership guard (3-3 / decisions 1/10): the from-card flow copies an
+  // AI card into a persona. A persona-owned source is never copyable — it would
+  // mint a second persona from a persona's card (dual-reference state, which
+  // decisions 1/10 make impossible going forward). AI-only surfaces already
+  // hide persona cards, so this is defense-in-depth for stale/deep-link ids.
+  if (await isProfilePersonaOwned(sourceProfileId)) {
+    throw new Error(
+      `${ERR_PROFILE_OWNED_BY_PERSONA} — cannot create a persona from a persona-owned card`,
+    );
   }
 
   const baseName = (options.name ?? source.name).trim();

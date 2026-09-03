@@ -13,6 +13,88 @@ import {
 import { Entity, EntityModuleMapping } from '../models';
 
 // ============================================================================
+// Profile-assignment guards (persona cards 3-3 / engine 1-1 parity)
+// ============================================================================
+
+/**
+ * Sentinel error messages mirroring the engine's persona-card assignment guards
+ * (harmony-link-private management/routes_entities.go, 1-1). The engine returns
+ * these as 400s; the RN repo throws them so callers can surface the same text.
+ */
+export const ERR_PROFILE_OWNED_BY_PERSONA =
+  'character profile is owned by a persona';
+export const ERR_PROFILE_ASSIGNED_TO_ANOTHER_PERSONA =
+  'character profile is already assigned to another persona';
+
+/**
+ * List the NON-deleted entities currently referencing a character profile
+ * (mirrors the engine's `ListEntitiesByCharacterProfileID` — `deleted_at IS
+ * NULL`, so a soft-deleted owner frees the profile).
+ */
+async function listProfileOwnerEntities(
+  profileId: string,
+): Promise<Array<{ id: string; entity_type: string }>> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    `SELECT id, entity_type FROM entities
+     WHERE character_profile_id = ? AND deleted_at IS NULL`,
+    [profileId],
+  );
+  const owners: Array<{ id: string; entity_type: string }> = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    owners.push({
+      id: results.rows.item(i).id,
+      entity_type: results.rows.item(i).entity_type ?? 'ai',
+    });
+  }
+  return owners;
+}
+
+/**
+ * True when a NON-deleted user-type entity owns the profile (a "persona-owned"
+ * card). Used by the persona-from-card copy helper (3-3) so a persona is never
+ * created from another persona's card (1:1 ownership, decisions 1/10).
+ */
+export async function isProfilePersonaOwned(profileId: string): Promise<boolean> {
+  const owners = await listProfileOwnerEntities(profileId);
+  return owners.some(owner => owner.entity_type === 'user');
+}
+
+/**
+ * Mirrors the engine 1-1 `enforceProfileAssignmentGuard` against live DB state:
+ *
+ *   - AI target: reject when the supplied profile is referenced by ANY user-type
+ *     entity (a persona-owned card is never linkable to an AI entity).
+ *   - user target: reject when the profile is already referenced by a DIFFERENT
+ *     user entity (persona↔profile 1:1); the entity's own reference is a no-op
+ *     and passes.
+ *
+ * @throws {@link ERR_PROFILE_OWNED_BY_PERSONA} /
+ *   {@link ERR_PROFILE_ASSIGNED_TO_ANOTHER_PERSONA} on a guard rejection.
+ */
+async function enforceProfileAssignmentGuard(
+  profileId: string,
+  targetEntityId: string,
+  targetEntityType: string,
+): Promise<void> {
+  const owners = await listProfileOwnerEntities(profileId);
+  for (const owner of owners) {
+    if (targetEntityType === 'user') {
+      // Persona 1:1 guard: any OTHER user entity owning the profile is a
+      // conflict; the entity's own reference passes (no-op).
+      if (owner.entity_type === 'user' && owner.id !== targetEntityId) {
+        throw new Error(ERR_PROFILE_ASSIGNED_TO_ANOTHER_PERSONA);
+      }
+    } else {
+      // AI entity guard: a persona-owned profile is never linkable to AI.
+      if (owner.entity_type === 'user') {
+        throw new Error(ERR_PROFILE_OWNED_BY_PERSONA);
+      }
+    }
+  }
+}
+
+// ============================================================================
 // Entity CRUD Operations
 // ============================================================================
 
@@ -34,6 +116,18 @@ export async function createEntity(
   const entityType = opts.entity_type ?? 'ai';
   const isMuted = opts.is_muted ?? 0;
   const isDisabled = opts.is_disabled ?? 0;
+
+  // Profile-assignment guard (persona cards 3-3 / engine 1-1): an AI entity
+  // must never link a persona-owned card, and a persona must never take a card
+  // already owned by a different persona. Fresh profiles have no owners, so the
+  // standard create paths (createPartner / createUserPersona / from-card) pass.
+  if (entity.character_profile_id) {
+    await enforceProfileAssignmentGuard(
+      entity.character_profile_id,
+      entity.id,
+      entityType,
+    );
+  }
 
   return withTransaction(db, async tx => {
     const now = new Date().toISOString();
@@ -316,6 +410,22 @@ export async function updateEntityFields(
   >,
 ): Promise<void> {
   const db = getDatabase();
+
+  // Profile-assignment guard (persona cards 3-3 / engine 1-1): the target
+  // entity's type is immutable, so the guard branch follows the EXISTING row.
+  // Unlinking (`character_profile_id → null`) assigns no profile and always
+  // passes. Self-reference re-assignment is a no-op and passes.
+  if ('character_profile_id' in fields && fields.character_profile_id) {
+    const existing = await getEntity(id);
+    if (!existing) {
+      throw new Error(`Entity not found: ${id}`);
+    }
+    await enforceProfileAssignmentGuard(
+      fields.character_profile_id,
+      id,
+      existing.entity_type ?? 'ai',
+    );
+  }
 
   const now = new Date().toISOString();
   const setClauses: string[] = ['updated_at = ?'];

@@ -32,7 +32,7 @@ import {
   getSiblingCharacterProfiles,
   getCharacterStats,
 } from '../../repositories/characters';
-import {createEntity, getEntity} from '../../repositories/entities';
+import {createEntity, getEntity, deleteEntity} from '../../repositories/entities';
 import {createInteraction} from '../../repositories/interactions';
 import {createConversationMessage} from '../../repositories/conversation_messages';
 import type {CharacterImage, Interaction} from '../../models';
@@ -110,6 +110,30 @@ describe('characters repository', () => {
       expect(all.length).toBeGreaterThanOrEqual(3);
       const names = all.map(p => p.name);
       expect(names).toContain('Test Character');
+    });
+
+    // Read-side completeness pin (persona cards 3-3): the Characters list must
+    // never surface a persona-owned card — even when a soft-deleted user entity
+    // still references it (the NOT EXISTS subquery ignores deleted_at).
+    it('excludes persona-owned profiles (user entity linkage) from the list', async () => {
+      await createMinimalProfile('profile-persona-hidden');
+      await createEntity(
+        {
+          id: 'profile-persona-owner',
+          character_profile_id: 'profile-persona-hidden',
+          alias: 'profile-persona-owner',
+          lifecycle_config: '{}',
+          rag_reindex_required: 1,
+        },
+        {entity_type: 'user'},
+      );
+      await deleteEntity('profile-persona-owner'); // soft-deleted owner still hides it
+
+      const visible = await getAllCharacterProfiles();
+      expect(visible.some(p => p.id === 'profile-persona-hidden')).toBe(false);
+      // A plain AI profile still surfaces alongside.
+      await createMinimalProfile('profile-ai-visible');
+      expect((await getAllCharacterProfiles()).some(p => p.id === 'profile-ai-visible')).toBe(true);
     });
   });
 
