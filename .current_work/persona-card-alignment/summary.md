@@ -34,19 +34,29 @@ Personas currently reuse the shared `character_profiles` table with copy-on-crea
 10. **No dual-referenced profiles exist today** (user-verified) → no stale-data treatment/migration needed; 1-1 guards make the state impossible going forward. Persona delete cascade is unconditional.
 11. Persona create UX: 3-field modal **fully replaced** by the full editor.
 
-## Phases
+## Phases & agent assignment
 
-- **Phase 1 — Engine (Go + tests)** — branch `feat/engine-track-phase2`
+Standing rule (user, 2026-09-03): **UI component work → `ui-ux-expert`; backend + raw service code → `code-expert`**. Mixed tasks get split along that seam.
+
+- **Phase 1 — Engine (Go + tests)** — branch `feat/engine-track-phase2` — **code-expert**
   - 1-1 Profile-assignment guards (AI entity cannot take user-referenced profile; user-entity profile 1:1)
   - 1-2 Persona delete cascade (user-entity delete removes owned profile + images)
   - 1-3 Profile duplicate endpoint (full-card copy incl. images) — foundation for from-card + reusable
 - **Phase 2 — Engine frontend (Wails, nested repo)** — branch `feat/engine-track-phase2`
-  - 2-1 Characters tab: hide persona-owned profiles
-  - 2-2 AI entity screens: exclude persona cards from profile selector (+ stale-assignment hint)
-  - 2-3 Persona editor: full `CharacterProfileEditor` in personaMode (hide lifecycle+advanced; rename wiring; built-in locks)
-  - 2-4 Persona export + full-copy from-card flow + delete copy
-- **Phase 3 — RN app** — branch `senju-design-updates-rebase` (separate agent)
-  - 3-1 Persona surface investigation → alignment proposal (3-2+ defined after findings, user sign-off before dispatch)
+  - 2-0 Duplicate-profile service wrapper — **code-expert** (service code)
+  - 2-1 Characters tab: hide persona-owned profiles — **ui-ux-expert**
+  - 2-2 AI entity screens: exclude persona cards from profile selector (+ stale hint) — **ui-ux-expert**
+  - 2-3 Persona editor: full `CharacterProfileEditor` in personaMode — **ui-ux-expert**
+  - 2-4 Persona export + full-copy from-card flow + delete copy — **ui-ux-expert**
+- **Phase 3 — RN app** — branch `senju-design-updates-rebase`
+  - 3-1 Persona surface investigation — **general** (research only; no code)
+  - 3-2+ Defined after 3-1 findings + user sign-off; expected seam: stores/services/sync → **code-expert**, screens/components → **ui-ux-expert**
+
+## Dispatch waves
+
+- **Wave 1 (parallel, different repos)**: Phase 1 agent (code-expert, engine) ∥ 3-1 research agent (general, app repo).
+- **Wave 2 (sequential within the FE repo — single working tree)**: 2-0 (code-expert) → 2-1…2-4 (ui-ux-expert, one agent, sequential commits).
+- **Wave 3 (after 3-1 sign-off)**: RN implementation agents per the 3-2+ seam split.
 
 ## Open questions
 
