@@ -38,6 +38,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/AppToastContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedEmptyState } from '../components/themed/ThemedEmptyState';
@@ -56,6 +57,7 @@ import {
   CharacterStats,
 } from '../database/repositories/characters';
 import {
+  duplicateAIPartner,
   getEntityByCharacterProfileId,
   setEntityDisabled,
   setEntityMuted,
@@ -102,6 +104,7 @@ export const AIProfileScreen: React.FC = () => {
   const { showToast } = useToast();
 
   const { profileId } = route.params;
+  const { showAlert } = useAppAlert();
 
   // ── Data state ─────────────────────────────────────────────────────────
   const [refreshing, setRefreshing] = useState(false);
@@ -143,6 +146,8 @@ export const AIProfileScreen: React.FC = () => {
   const [commentImageId, setCommentImageId] = useState<string | null>(null);
   const [commentVisible, setCommentVisible] = useState(false);
   const [chatting, setChatting] = useState(false);
+  // One-click Duplicate in flight (engine-parity entity copy).
+  const [duplicating, setDuplicating] = useState(false);
 
   // ── Loaders ────────────────────────────────────────────────────────────
   const loadProfile = useCallback(async () => {
@@ -352,6 +357,34 @@ export const AIProfileScreen: React.FC = () => {
     } catch (err) {
       log.error('Failed to create persona from card:', err);
       showToast(t('persona:personaCreateFromCardFailed'));
+    }
+  };
+
+  /**
+   * Engine-parity "Duplicate AI" (one-click). `duplicateAIPartner` atomically
+   * copies this AI's ENTITY: same shared character profile (LIVE link — no
+   * card copy), all 8 module-mapping slots + lifecycle verbatim, ghost-aware
+   * id + live-alias dedupe ("Max" → "Max 2"). The copy surfaces wherever
+   * entities are listed (chats); this screen reloads so entity-derived state
+   * (stats, chips) reflects the new partner.
+   */
+  const handleDuplicateAI = async () => {
+    if (!aiEntityId || duplicating) return;
+    setDuplicating(true);
+    try {
+      const created = await duplicateAIPartner(aiEntityId);
+      showToast(t('aiDuplicateDone', { name: created.alias || created.id }));
+      await loadProfile();
+    } catch (err) {
+      log.error('Failed to duplicate AI:', err);
+      showAlert(
+        t('common:error'),
+        t('aiDuplicateFailed', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    } finally {
+      setDuplicating(false);
     }
   };
 
@@ -852,6 +885,41 @@ export const AIProfileScreen: React.FC = () => {
                 <Icon name="account-edit-outline" size={15} color={accent} />
                 <ThemedText size={13} weight="medium" style={{ color: accent }}>
                   {t('persona:createPersonaFromCard')}
+                </ThemedText>
+              </TouchableOpacity>
+            )}
+
+            {/* ── One-click "Duplicate AI" (engine duplicate parity) — the
+                copy shares this character card (LIVE link). Only for profiles
+                with a linked AI entity; persona-owned profiles never reach
+                this branch (3-2-A read guard) and the repo throws on user
+                personas as defense in depth. ── */}
+            {profile && aiEntityId && (
+              <TouchableOpacity
+                onPress={() => {
+                  hapticLightPress();
+                  handleDuplicateAI();
+                }}
+                activeOpacity={0.7}
+                disabled={duplicating}
+                style={[
+                  styles.fromCardPill,
+                  {
+                    backgroundColor: hexToRgba(accent, 0.12),
+                    borderColor: hexToRgba(accent, 0.3),
+                  },
+                ]}
+                testID="ai-profile-duplicate-button"
+                accessibilityRole="button"
+                accessibilityLabel={t('aiDuplicate')}
+              >
+                <Icon
+                  name="content-duplicate"
+                  size={15}
+                  color={accent}
+                />
+                <ThemedText size={13} weight="medium" style={{ color: accent }}>
+                  {t('aiDuplicate')}
                 </ThemedText>
               </TouchableOpacity>
             )}

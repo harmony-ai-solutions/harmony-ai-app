@@ -35,7 +35,6 @@ import { ThemedCard } from '../components/themed/ThemedCard';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { v4 as uuidv4 } from 'uuid';
@@ -58,7 +57,7 @@ import { EntityModuleSelectorWithActions } from '../components/entities/EntityMo
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
-import type { CharacterProfile, CharacterImage } from '../database/models';
+import type { CharacterImage } from '../database/models';
 import { ProfileImagePicker } from '../components/characters/ProfileImagePicker';
 import { MacroHighlighter } from '../components/character-card/MacroHighlighter';
 import { parseJsonColumn } from '../components/character-card/lorebook';
@@ -103,6 +102,7 @@ import {
   getAllEntities,
   getEntityByCharacterProfileId,
   getEntityModuleMapping,
+  isProfilePersonaOwned,
   resolveNextEntityIdCopy,
   updateEntityFields,
 } from '../database/repositories/entities';
@@ -259,6 +259,11 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [editLoaded, setEditLoaded] = useState(false);
   const [editEntityId, setEditEntityId] = useState<string | null>(null);
   const [editOriginalName, setEditOriginalName] = useState('');
+  // Batch D.2 (engine-FE parity nicety): the loaded edit card is owned by a
+  // user persona. Local write-guards make this state near-impossible to
+  // create on-device — it can only appear from data synced before the guards
+  // existed — so it only earns a muted hint, not a lock.
+  const [editPersonaOwned, setEditPersonaOwned] = useState(false);
 
   // ── "From an existing one" — prefillProfileId links an existing profile ──────
   // LIVE LINK (engine parity): the new AI entity references the SAME character
@@ -386,6 +391,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     try {
       const profile = await getCharacterProfile(editProfileId);
       if (!profile) return;
+
+      setEditPersonaOwned(false);
+      try {
+        setEditPersonaOwned(await isProfilePersonaOwned(profile.id));
+      } catch (ownErr) {
+        log.warn('Failed to check persona ownership:', ownErr);
+      }
 
       setName(profile.name);
       setDescription(profile.description ?? '');
@@ -1368,6 +1380,18 @@ const focused = focusedField === field;
                 <Icon name="link-variant" size={14} color={theme.colors.text.muted} />
                 <ThemedText size={12} variant="muted" style={styles.sharedCardHintText}>
                   {t('sharedCardHint')}
+                </ThemedText>
+              </View>
+            )}
+
+            {/* Edit mode, stale-synced data only: the card is owned by a user
+                persona (D.2). Local writes can't produce this state — muted
+                hint, no lock. */}
+            {editProfileId && editPersonaOwned && (
+              <View style={styles.sharedCardHint} testID="persona-owned-hint">
+                <Icon name="account-off-outline" size={14} color={theme.colors.text.muted} />
+                <ThemedText size={12} variant="muted" style={styles.sharedCardHintText}>
+                  {t('personaOwnedHint')}
                 </ThemedText>
               </View>
             )}

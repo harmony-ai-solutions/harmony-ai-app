@@ -52,6 +52,9 @@
   "aiUnlikedToast": "Removed like from {{name}}",
   "aiSavedToast": "Saved {{name}} to your profile",
   "aiUnsavedToast": "Removed {{name}} from saved",
+  "aiDuplicate": "Duplicate",
+  "aiDuplicateDone": "Created a copy — {{name}}",
+  "aiDuplicateFailed": "Failed to duplicate AI: {{message}}",
 
   "sections": "Sections",
   "tabPosts": "Posts",
