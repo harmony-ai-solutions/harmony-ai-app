@@ -888,6 +888,17 @@ describe('entities repository', () => {
       expect(await resolveNextEntityIdCopy('Max')).toBe('Max');
     });
 
+    it('returns a FREE suffixed requested id verbatim (engine ResolveEntityID ordering — strip only when taken)', async () => {
+      // "Max 2" is deliberately requested and free: it must NOT be collapsed
+      // to the stripped base "Max" (which also happens to be free here).
+      expect(await resolveNextEntityIdCopy('Max 2')).toBe('Max 2');
+    });
+
+    it('keeps a free requested id even when its stripped base is taken', async () => {
+      await makeEntity('Max', 'Max');
+      expect(await resolveNextEntityIdCopy('Max 2')).toBe('Max 2');
+    });
+
     it('resolves a soft-deleted (ghost) base to "<base> 2"', async () => {
       await makeEntity('Max', 'Max');
       await deleteEntity('Max');

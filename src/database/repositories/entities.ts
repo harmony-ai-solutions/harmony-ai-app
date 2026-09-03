@@ -384,17 +384,18 @@ export async function entityIdExists(id: string): Promise<boolean> {
 /**
  * Resolve a collision-free entity id for a name-like base ("Max", "Max 2").
  *
- * Mirrors the engine's `ResolveEntityID` (harmony-link-private/database/
- * controllers/entity_controller.go) with the RN naming convention (ids here
- * are name-like; spaces are legal):
+ * Mirrors the engine's `ResolveEntityID` ordering (harmony-link-private/
+ * database/controllers/entity_controller.go) with the RN naming convention
+ * (ids here are name-like; spaces are legal):
  *
- *   1. Strip ONE trailing copy suffix (same separator class as
+ *   1. If the REQUESTED id (trimmed) is free — no live AND no ghost row,
+ *      probed via {@link entityIdExists} — return it VERBATIM. A deliberately
+ *      suffixed name ("Max 2" typed while free) is never collapsed to "Max".
+ *   2. Taken → strip ONE trailing copy suffix (same separator class as
  *      `getNextEntityAliasCopy`'s slot regex: space/dash/underscore + digits)
  *      to recover the TRUE base — "Max 2" as input never yields "Max 2 2".
- *   2. If the base id is free (no live AND no ghost row — probed via
- *      {@link entityIdExists}), return it VERBATIM.
- *   3. Otherwise walk the smallest `N ≥ 2` whose id `<base> <N>` is free
- *      (space separator, unpadded), emitting the same shape
+ *   3. Walk the smallest `N ≥ 2` whose id `<base> <N>` is free (space
+ *      separator, unpadded), emitting the same shape
  *      `getNextEntityAliasCopy` produces.
  *
  * The probe is ID-based (live+ghost), never alias-based: alias dedupe can
@@ -402,11 +403,14 @@ export async function entityIdExists(id: string): Promise<boolean> {
  * id space and alias space may diverge.
  */
 export async function resolveNextEntityIdCopy(base: string): Promise<string> {
-  // Recover the true base when the source is itself a copy ("Max 2" → "Max").
-  const baseId = stripCopySuffix(base.trim());
-  if (!(await entityIdExists(baseId))) {
-    return baseId;
+  // Requested id free (live + ghost) → verbatim. The suffix is stripped ONLY
+  // when the requested id is taken (engine ResolveEntityID ordering).
+  const requested = base.trim();
+  if (!(await entityIdExists(requested))) {
+    return requested;
   }
+  // Recover the true base when the source is itself a copy ("Max 2" → "Max").
+  const baseId = stripCopySuffix(requested);
   let n = 2;
   while (await entityIdExists(`${baseId} ${n}`)) {
     n += 1;
