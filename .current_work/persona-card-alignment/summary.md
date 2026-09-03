@@ -90,6 +90,14 @@ Standing rule (user, 2026-09-03): **UI component work → `ui-ux-expert`; backen
 
 None. Round-3 RN questions resolved → decisions 12–15; 3-1 signed off (2026-09-03). Wave 3 cleared.
 
+## Wave 3 — DONE (2026-09-03) — PLAN COMPLETE
+
+- **3-2-A** `dd479ce` data layer (full-field writes, `createUserPersonaFromCard`, delete parity + `initiateSync`, `getAICharacterProfile` guard, cascade sync tests; 19 new tests). Deviation: lazy sync import for test isolation.
+- **3-2-B** `4cea501` personaMode full editor (composition of CreateAIScreen's editor-sections; lifecycle+advanced never render, greeting TEST hidden; built-in locks + pre-seed state; reserved-`user` block; from-card immediate copy; export JSON/PNG; AIProfileScreen read-guard wiring; 19 tests).
+- **3-3** `4c81c4c` app-side write guards mirroring engine 1-1 (AI↔persona card assignment, persona 1:1, from-card source guard; 14 tests). CRITICAL/HIGH impact warnings verified safe (additive guards, legit flows pass).
+- **3-4** `b1b8340` purge-order fix (entities before character_profiles → persona cascade purges in ONE sync cycle; fixed 3-2-A deviation 2) + CharactersScreen reload triggers (`entities`/`character_image`; 6 tests).
+- Final gates: app tsc 0, full suite 124/1078 unit + 52+1skip integration, parity 55/55 exit 0; engine build/vet/test 0; FE builds 0. All trees clean, nothing pushed.
+
 ## Open questions
 
 None — all resolved (decisions 6–11). Awaiting explicit user GO to start dispatching.
