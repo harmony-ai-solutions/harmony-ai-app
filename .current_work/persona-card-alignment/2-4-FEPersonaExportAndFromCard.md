@@ -21,8 +21,8 @@ Commit: `feat(frontend): persona export, full-copy create-from-card, cascade-awa
 
 ## Checklist
 
-- [ ] Export button works (png/json)
-- [ ] From-card = duplicate + entity create + editor open
-- [ ] Prefill flow removed
-- [ ] Delete copy + i18n
-- [ ] Build green, committed
+- [x] Export button works (png/json)
+- [x] From-card = duplicate + entity create + editor open
+- [x] Prefill flow removed
+- [x] Delete copy + i18n
+- [x] Build green, committed

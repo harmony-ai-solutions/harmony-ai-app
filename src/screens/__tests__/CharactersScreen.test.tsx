@@ -63,10 +63,12 @@ jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: null }),
 }));
 
+// Stable navigation mock — the from-card test asserts the navigate call.
+const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => {
   const React = require('react');
   return {
-    useNavigation: () => ({ navigate: jest.fn() }),
+    useNavigation: () => ({ navigate: mockNavigate }),
     useFocusEffect: (cb: () => void) => React.useEffect(cb, [cb]),
   };
 });
@@ -159,6 +161,11 @@ jest.mock('../../database/repositories/interactions', () => ({
   deriveScopeFromParticipants: jest.fn().mockReturnValue('one_on_one'),
 }));
 
+jest.mock('../../database/repositories/userEntities', () => ({
+  resolvePersonaId: jest.fn().mockResolvedValue('user'),
+  createUserPersonaFromCard: jest.fn(),
+}));
+
 jest.mock('../../services/ChatPreferencesService', () => ({
   __esModule: true,
   default: {
@@ -234,17 +241,26 @@ jest.mock('../../components/character-card/TagChips', () => {
 });
 
 // CharacterProfileCard mock: a card shell + a tappable creator attribution
-// (drives the screen's creator filter — the wiring under test).
+// (drives the screen's creator filter — the wiring under test) + a long-press
+// target (drives the context menu).
 jest.mock('../../components/characters/CharacterProfileCard', () => {
   const React = require('react');
   const { View, Text } = require('react-native');
   return {
     __esModule: true,
-    CharacterProfileCard: ({ profile, onCreatorPress }: any) =>
+    CharacterProfileCard: ({ profile, onCreatorPress, onLongPress }: any) =>
       React.createElement(
         View,
         { testID: `card-${profile.id}` },
         React.createElement(Text, null, profile.name),
+        React.createElement(
+          View,
+          {
+            testID: `longpress-${profile.id}`,
+            onPress: () => onLongPress?.(profile),
+            accessibilityRole: 'button',
+          },
+        ),
         React.createElement(
           View,
           {
@@ -255,6 +271,28 @@ jest.mock('../../components/characters/CharacterProfileCard', () => {
           React.createElement(Text, null, `by ${profile.creator}`),
         ),
       ),
+  };
+});
+
+// Long-press context menu: expose the "Create persona from this card" action
+// (decision 4/7/12 — immediate full-copy → editor).
+jest.mock('../../components/characters/CharacterCardMenuModal', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return {
+    __esModule: true,
+    CharacterCardMenuModal: ({ visible, onCreatePersonaFromCard }: any) =>
+      visible
+        ? React.createElement(
+            View,
+            { testID: 'card-menu-modal' },
+            React.createElement(View, {
+              testID: 'menu-create-persona',
+              onPress: () => onCreatePersonaFromCard(),
+              accessibilityRole: 'button',
+            }),
+          )
+        : null,
   };
 });
 
@@ -470,5 +508,43 @@ describe('CharactersScreen — reduced motion (4-3)', () => {
     await user.press(utils.getByTestId('creator-attribution-p1'));
     expect(utils.getByTestId('active-filter-banner-static')).toBeTruthy();
     expect(utils.queryByTestId('active-filter-banner-animated')).toBeNull();
+  });
+});
+
+describe('CharactersScreen — create persona from card (decision 4/7/12)', () => {
+  beforeEach(() => {
+    mockNavigate.mockClear();
+    const { createUserPersonaFromCard } =
+      require('../../database/repositories/userEntities');
+    (createUserPersonaFromCard as jest.Mock).mockResolvedValue({
+      id: 'Aria 2',
+      name: 'Aria 2',
+      description: 'Aria description',
+      personality: 'Aria personality',
+      avatarUri: null,
+    });
+  });
+
+  it('immediately full-copies the card and opens the persona editor on the new persona', async () => {
+    const { createUserPersonaFromCard } =
+      require('../../database/repositories/userEntities');
+    const utils = await renderScreen();
+
+    // Long-press a card → context menu.
+    await fireEvent.press(utils.getByTestId('longpress-p1'));
+    expect(utils.getByTestId('card-menu-modal')).toBeTruthy();
+
+    // "Create persona from this card" → immediate full copy + editor opens.
+    await fireEvent.press(utils.getByTestId('menu-create-persona'));
+    await flush();
+
+    expect(createUserPersonaFromCard).toHaveBeenCalledWith('p1');
+    expect(mockNavigate).toHaveBeenCalledWith('PersonaEdit', { entityId: 'Aria 2' });
+    // The editor opens on the NEW persona (id) — the identity-only prefill
+    // path is retired.
+    expect(mockNavigate).not.toHaveBeenCalledWith(
+      'PersonaEdit',
+      expect.objectContaining({ prefill: expect.anything() }),
+    );
   });
 });

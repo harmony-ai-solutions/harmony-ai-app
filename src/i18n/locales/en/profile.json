@@ -95,7 +95,7 @@
   "personaSaved": "Persona saved",
   "personaDeleted": "Persona deleted",
   "personaDeleteConfirm": "Delete this persona?",
-  "personaDeleteConfirmHint": "This cannot be undone. Chat history with this identity stays.",
+  "personaDeleteConfirmHint": "This permanently removes the persona, its card, and card images. This cannot be undone.",
   "personaDelete": "Delete",
   "personaDeleteFailed": "Failed to delete persona",
   "personaSaveFailed": "Failed to save persona: {{message}}",

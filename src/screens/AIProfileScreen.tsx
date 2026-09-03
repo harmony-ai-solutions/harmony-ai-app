@@ -49,7 +49,7 @@ import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { ProfileTabs } from '../components/profile/ProfileTabs';
 import { ImageCommentModal } from '../components/characters/ImageCommentModal';
 import {
-  getCharacterProfile,
+  getAICharacterProfile,
   getCharacterImages,
   getSiblingCharacterProfiles,
   getCharacterStats,
@@ -60,6 +60,7 @@ import {
   setEntityDisabled,
   setEntityMuted,
 } from '../database/repositories/entities';
+import { createUserPersonaFromCard } from '../database/repositories/userEntities';
 import * as SocialService from '../services/social/SocialService';
 import type { StubCharacterCreator } from '../services/social/SocialService';
 import { openCharacterChat } from '../services/CharacterChatService';
@@ -146,7 +147,10 @@ export const AIProfileScreen: React.FC = () => {
   // ── Loaders ────────────────────────────────────────────────────────────
   const loadProfile = useCallback(async () => {
     try {
-      const data = await getCharacterProfile(profileId);
+      // Read guard (3-2-A): persona-owned profiles return null here — a
+      // persona's card must never render as an AI partner. The graceful
+      // not-found state below handles null (persona-owned OR missing).
+      const data = await getAICharacterProfile(profileId);
       setProfile(data);
       if (!data) return;
 
@@ -334,23 +338,21 @@ export const AIProfileScreen: React.FC = () => {
   };
 
   /**
-   * "Create persona from this card" (5-4 §3). P1 copy semantics: a persona is a
-   * MINIMAL identity copy of the source card — name/description/personality/
-   * avatar only. Deliberately NO lore, character_book or AI module configs: a
-   * persona is the identity the user chats AS, not an AI character. The source
-   * card is untouched; PersonaEdit's create mode prefills the form and, on
-   * save, createUserPersona makes a fresh user entity + minimal profile.
+   * "Create persona from this card" (decision 4/7/12). IMMEDIATE full-copy
+   * create: `createUserPersonaFromCard` copies the FULL card (all V3 +
+   * Soulbits fields, all images with the primary flag preserved, provenance
+   * as-is, name deduped) into a fresh `user` entity, then the persona editor
+   * opens on the new persona. The old identity-only prefill path is retired.
    */
-  const handleCreatePersonaFromCard = () => {
+  const handleCreatePersonaFromCard = async () => {
     if (!profile) return;
-    navigation.navigate('PersonaEdit', {
-      prefill: {
-        name: profile.name,
-        description: profile.description,
-        personality: profile.personality,
-        avatarUri,
-      },
-    });
+    try {
+      const persona = await createUserPersonaFromCard(profile.id);
+      navigation.navigate('PersonaEdit', { entityId: persona.id });
+    } catch (err) {
+      log.error('Failed to create persona from card:', err);
+      showToast(t('persona:personaCreateFromCardFailed'));
+    }
   };
 
   const handleChat = async () => {

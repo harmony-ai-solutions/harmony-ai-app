@@ -21,6 +21,6 @@ Commit (nested repo): `feat(frontend): characters tab hides persona-owned profil
 
 ## Checklist
 
-- [ ] Filter + search interplay
-- [ ] Empty-state hint + i18n
-- [ ] Build green, self-review, committed
+- [x] Filter + search interplay
+- [x] Empty-state hint + i18n
+- [x] Build green, self-review, committed

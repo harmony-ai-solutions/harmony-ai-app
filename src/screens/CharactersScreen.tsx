@@ -83,7 +83,10 @@ import {
 } from '../database/repositories/interactions';
 import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from '../services/ChatPreferencesService';
-import { resolvePersonaId } from '../database/repositories/userEntities';
+import {
+  resolvePersonaId,
+  createUserPersonaFromCard,
+} from '../database/repositories/userEntities';
 import { filterBlockedCharacterProfiles } from '../utils/blockedContentFilters';
 import * as SocialService from '../services/social/SocialService';
 import { CharacterProfile } from '../database/models';
@@ -534,23 +537,21 @@ export const CharactersScreen: React.FC = () => {
   };
 
   /**
-   * "Create persona from this card" (5-4 §3). P1 copy semantics: a persona is a
-   * MINIMAL identity copy of the source card — name/description/personality/
-   * avatar only. Deliberately NO lore, character_book or AI module configs: a
-   * persona is the identity the user chats AS, not an AI character. The source
-   * card is untouched; PersonaEdit's create mode prefills the form and, on
-   * save, createUserPersona makes a fresh user entity + minimal profile.
+   * "Create persona from this card" (decision 4/7/12). IMMEDIATE full-copy
+   * create: `createUserPersonaFromCard` copies the FULL card (all V3 +
+   * Soulbits fields, all images with the primary flag preserved, provenance
+   * as-is, name deduped) into a fresh `user` entity, then the persona editor
+   * opens on the new persona. The old identity-only prefill path is retired.
    */
-  const handleCreatePersonaFromCard = (profile: CharacterProfile) => {
+  const handleCreatePersonaFromCard = async (profile: CharacterProfile) => {
     closeMenu();
-    navigation.navigate('PersonaEdit', {
-      prefill: {
-        name: profile.name,
-        description: profile.description,
-        personality: profile.personality,
-        avatarUri: primaryImages[profile.id] ?? null,
-      },
-    });
+    try {
+      const persona = await createUserPersonaFromCard(profile.id);
+      navigation.navigate('PersonaEdit', { entityId: persona.id });
+    } catch (err) {
+      log.error('Failed to create persona from card:', err);
+      showAlert(t('common:error'), t('persona:personaCreateFromCardFailed'));
+    }
   };
 
   const closeCategoryPick = () => setCategoryPickProfile(null);

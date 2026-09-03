@@ -41,20 +41,6 @@ import { MyLibraryScreen } from '../screens/MyLibraryScreen';
 import { MyListingsScreen } from '../screens/MyListingsScreen';
 import { ContentAssetScreen } from '../screens/ContentAssetScreen';
 
-/**
- * Prefill payload for the PersonaEdit screen's create mode (the "create a
- * persona from this card" flow, 5-4 §3). Identity fields only — deliberately
- * NO lore / character_book / module configs: a persona is a minimal identity
- * copy, never a full AI-character copy (P1).
- */
-export interface PersonaEditPrefill {
-  name: string;
-  description?: string;
-  personality?: string;
-  /** Base64 data URL of the source card's primary image (or null). */
-  avatarUri?: string | null;
-}
-
 export type RootStackParamList = {
   /** Tab container — the primary navigation surface (5-tab layout) */
   MainTabs: NavigatorScreenParams<MainTabParamList> | undefined;
@@ -109,7 +95,10 @@ export type RootStackParamList = {
   BiometricLockSettings: undefined;
   ProfileSettings: undefined;
   EditProfile: undefined;
-  PersonaEdit: { entityId?: string; prefill?: PersonaEditPrefill } | undefined;
+  /** PersonaEdit — the full persona editor (personaMode). entityId opens the
+   *  editor in edit mode; absent = create mode. The from-card flow creates the
+   *  full copy BEFORE navigating here (decision 7/12) — no prefill payload. */
+  PersonaEdit: { entityId?: string } | undefined;
   ComingSoon: {
     titleKey: string;
     icon: string;

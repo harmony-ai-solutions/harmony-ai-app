@@ -29,5 +29,5 @@ Commit: `feat(entities): persona delete cascades owned character profile and ima
 ## Checklist
 
 - [ ] Cascade + FK ordering verified
-- [ ] Stale dual-reference skip case tested
+- [x] No stale-data handling needed (decision 10: unconditional cascade; FK error path surfaces if ever hit)
 - [ ] Gates green, committed

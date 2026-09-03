@@ -34,6 +34,13 @@ Personas currently reuse the shared `character_profiles` table with copy-on-crea
 10. **No dual-referenced profiles exist today** (user-verified) → no stale-data treatment/migration needed; 1-1 guards make the state impossible going forward. Persona delete cascade is unconditional.
 11. Persona create UX: 3-field modal **fully replaced** by the full editor.
 
+## Decisions (user, 2026-09-03 — round 3, RN questions resolved)
+
+12. RN from-card: **immediate full copy → editor opens** (Wails parity).
+13. PersonaMode: **greeting test disabled** — personas never generate greetings; greeting content may exist in the card only via import/copy and round-trips untouched.
+14. Built-in `user`: **persona editor enabled** for it; users must be **prevented from creating a persona/entity named "user"** themselves (reserved-name validation, client-side in both frontends; engine PK collision stays as backstop).
+15. RN `deleteUserPersona` **fires `initiateSync`** (non-blocking) after delete.
+
 ## Phases & agent assignment
 
 Standing rule (user, 2026-09-03): **UI component work → `ui-ux-expert`; backend + raw service code → `code-expert`**. Mixed tasks get split along that seam.
@@ -48,15 +55,40 @@ Standing rule (user, 2026-09-03): **UI component work → `ui-ux-expert`; backen
   - 2-2 AI entity screens: exclude persona cards from profile selector (+ stale hint) — **ui-ux-expert**
   - 2-3 Persona editor: full `CharacterProfileEditor` in personaMode — **ui-ux-expert**
   - 2-4 Persona export + full-copy from-card flow + delete copy — **ui-ux-expert**
-- **Phase 3 — RN app** — branch `senju-design-updates-rebase`
-  - 3-1 Persona surface investigation — **general** (research only; no code)
-  - 3-2+ Defined after 3-1 findings + user sign-off; expected seam: stores/services/sync → **code-expert**, screens/components → **ui-ux-expert**
+- **Phase 3 — RN app** — branch `senju-design-updates-rebase` — signed off 2026-09-03 (decisions 12–15)
+  - 3-1 Investigation — **DONE** (`3-1-RN-Findings.md`)
+  - 3-2-A Data layer (full-profile writes, copy helper, delete parity, sync test) — **code-expert**
+  - 3-2-B Editor UI (personaMode, from-card, export, locks) — **ui-ux-expert** (after 3-2-A)
+  - 3-3 Write-guard parity — **code-expert**
+  - 3-4 Sync polish — **code-expert** (may fold into 3-2-A)
 
 ## Dispatch waves
 
-- **Wave 1 (parallel, different repos)**: Phase 1 agent (code-expert, engine) ∥ 3-1 research agent (general, app repo).
+- **Wave 1 (parallel, different repos)**: Phase 1 agent (code-expert, engine) ∥ 3-1 research agent (code-expert, app repo).
 - **Wave 2 (sequential within the FE repo — single working tree)**: 2-0 (code-expert) → 2-1…2-4 (ui-ux-expert, one agent, sequential commits).
 - **Wave 3 (after 3-1 sign-off)**: RN implementation agents per the 3-2+ seam split.
+
+## Wave 1 — DONE (2026-09-03)
+
+- **Phase 1 (engine, code-expert)** — 3 commits, all gates exit 0 (management suite 21/21):
+  - `be1fa62` (1-1 guards) · `1cedcc3` (1-2 cascade) · `28847da` (1-3 duplicate endpoint)
+  - **Endpoint contract for FE**: `POST /api/v1/character-profiles/:id/duplicate`, optional body `{"name"}`, 201 + full `CharacterProfileConfig` JSON (no images/is_favorite in DTO — FE GETs images separately); name dedupe mirrors RN's `getNextEntityAliasCopy` (`"Max" → "Max 2"`, copy-suffix stripped first); images copied via internal repo helper (bytes/metadata/primary/display_order/VL preserved), fresh ids.
+- **3-1 (RN investigation, code-expert — research only, zero prod changes)**:
+  - Findings: `3-1-RN-Findings.md`. Key: RN already uses the user-entity persona model; `getAllCharacterProfiles()` already excludes persona-owned profiles (leaks mostly closed; one latent hole `getCharacterProfile(id)` used by AIProfileScreen — defensive guard recommended); RN calls **no management REST API** for entities/profiles (all sync tables) → RN needs a **local** full-copy helper (engine 1-3 is Wails-oriented); cascade deletes would propagate cleanly via tombstones but `deleteUserPersona` doesn't soft-delete images nor trigger sync; chat gates confirmed closed; no rename UI app-side.
+  - **Proposal for 3-2+** (in findings doc, seam-split): 3-2-A (code-expert: full-profile persona writes, local full-card copy, delete parity, cascade sync test, defensive read guard), 3-2-B (ui-ux-expert: full editor personaMode, from-card immediate copy, built-in editor, persona export), 3-3 (write-side guard parity + filter hardening), 3-4 (sync trigger + reload polish).
+
+## Wave 2 — DONE (2026-09-03)
+
+- **2-0** `6aee7d3` service wrapper (note: real route is `/api/character-profiles/:id/duplicate` — no `/v1`).
+- **2-1** `ed28e84` Characters tab filter (+ shared `personaProfileUtils.personaOwnedProfileIds`) + empty-state hint.
+- **2-2** `e9fcb34` AI entity selector exclusion + stale-assignment warning; audit: only `EntitySettingsView` serves a profile picker.
+- **2-3** `3265f1e` full personaMode editor (lifecycle+advanced hidden), rename-first wiring, built-in locks, reserved-name `user` block. **Latent bug found+fixed: editor saves previously wiped `card_provenance`** (all management-API profile saves affected).
+- **2-4** `0ab51ed` persona export (PNG/JSON), immediate full-copy from-card → editor opens, prefill flow retired, cascade-aware delete copy. Greeting TEST affordance: none exists in the Wails editor (decision 13 trivially satisfied).
+- FE tree clean (tooling artifacts reverted); builds exit 0 per commit.
+
+## Open questions
+
+None. Round-3 RN questions resolved → decisions 12–15; 3-1 signed off (2026-09-03). Wave 3 cleared.
 
 ## Open questions
 

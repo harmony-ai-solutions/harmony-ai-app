@@ -32,6 +32,12 @@ export interface GreetingEditorSectionProps {
   onTestScenario: () => void;
   onUseTestGreeting: () => void;
   onDiscardTestGreeting: () => void;
+  /**
+   * personaMode (decision 13): hides the [Test scenario generation] button —
+   * personas never generate greetings (they are identities, not chat partners).
+   * [Preview opening] stays; greeting content round-trips untouched.
+   */
+  testDisabled?: boolean;
 }
 
 export const GreetingEditorSection: React.FC<GreetingEditorSectionProps> = ({
@@ -44,6 +50,7 @@ export const GreetingEditorSection: React.FC<GreetingEditorSectionProps> = ({
   onTestScenario,
   onUseTestGreeting,
   onDiscardTestGreeting,
+  testDisabled = false,
 }) => {
   const { theme } = useAppTheme();
   const { t } = useTranslation('characters');
@@ -70,16 +77,18 @@ export const GreetingEditorSection: React.FC<GreetingEditorSectionProps> = ({
           style={styles.actionBarButton}
           testID="preview-opening-button"
         />
-        <ThemedButton
-          variant="primary"
-          label={
-            testState === 'generating' ? t('testScenarioGenerating') : t('testScenario')
-          }
-          onPress={onTestScenario}
-          disabled={testState === 'generating'}
-          style={styles.actionBarButton}
-          testID="test-scenario-button"
-        />
+        {!testDisabled && (
+          <ThemedButton
+            variant="primary"
+            label={
+              testState === 'generating' ? t('testScenarioGenerating') : t('testScenario')
+            }
+            onPress={onTestScenario}
+            disabled={testState === 'generating'}
+            style={styles.actionBarButton}
+            testID="test-scenario-button"
+          />
+        )}
       </View>
 
       {testState === 'ready' && testGreeting ? (

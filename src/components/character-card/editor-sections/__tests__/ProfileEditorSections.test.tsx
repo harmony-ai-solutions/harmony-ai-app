@@ -280,6 +280,29 @@ describe('Editor sections (Phase 8) — props-in / onChange-out wiring', () => {
     expect(getByText('Generated Alex!')).toBeTruthy();
   });
 
+  it('GreetingEditorSection testDisabled hides [Test scenario generation] (personaMode)', async () => {
+    const { getByTestId, queryByTestId } = await render(
+      <GreetingEditorSection
+        firstMes="Hi {{user}}!"
+        onChangeFirstMes={jest.fn()}
+        charName="Nix"
+        userName="Alex"
+        testState="idle"
+        testGreeting=""
+        onTestScenario={jest.fn()}
+        onUseTestGreeting={jest.fn()}
+        onDiscardTestGreeting={jest.fn()}
+        testDisabled
+      />,
+    );
+
+    // Decision 13: personas never generate greetings as partners — the TEST
+    // affordance is gone while [Preview opening] stays.
+    expect(queryByTestId('test-scenario-button')).toBeNull();
+    expect(getByTestId('preview-opening-button')).toBeTruthy();
+    expect(getByTestId('greeting-editor').props.value).toBe('Hi {{user}}!');
+  });
+
   it('AlternateGreetingsSection forwards the manager props (add/edit/move/promote)', async () => {
     const onAdd = jest.fn();
     const onEdit = jest.fn();

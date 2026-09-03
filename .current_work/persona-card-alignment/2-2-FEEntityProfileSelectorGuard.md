@@ -19,7 +19,7 @@ Commit: `feat(frontend): AI entity profile selector excludes persona-owned cards
 
 ## Checklist
 
-- [ ] Shared ownership helper
-- [ ] Selector exclusion + stale hint
-- [ ] Other-picker audit documented
-- [ ] Build green, committed
+- [x] Shared ownership helper
+- [x] Selector exclusion + stale hint
+- [x] Other-picker audit documented
+- [x] Build green, committed

@@ -3,5 +3,10 @@
   "builtInDesc": "Your default persona — the identity you chat as when no persona is selected.",
   "createPersonaFromCard": "Create persona from this card",
   "deleteProtected": "The built-in 'You' persona can't be deleted. It's the default identity you chat as.",
-  "deleteActiveProtected": "This persona is currently active. Switch to another persona before deleting it."
+  "deleteActiveProtected": "This persona is currently active. Switch to another persona before deleting it.",
+  "personaNameReserved": "The name 'user' is reserved. Choose a different persona name.",
+  "personaPreSeedLocked": "The built-in identity can't be edited until its card is synced.",
+  "personaPreSeedHint": "The built-in 'You' identity is created by the engine. Its card will unlock here once synced.",
+  "personaLockedNameHint": "The built-in identity's name can't be changed.",
+  "personaCreateFromCardFailed": "Failed to create a persona from this card."
 }

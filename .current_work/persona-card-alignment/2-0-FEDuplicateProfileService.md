@@ -18,5 +18,5 @@ Thin client for the 1-3 endpoint, following the existing service conventions.
 
 ## Checklist
 
-- [ ] Wrapper + conventions match
-- [ ] Build green, committed
+- [x] Wrapper + conventions match
+- [x] Build green, committed
