@@ -77,12 +77,13 @@ export type RootStackParamList = {
   };
   /**
    * CreateAI — the single create AND edit surface for AI partners.
-   *   - (create) prefillProfileId = link an existing profile; duplicateProfileId = full fork
+   *   - (create) prefillProfileId = LIVE LINK an existing character profile
+   *     (the new AI entity references the SAME shared card — no fork; the old
+   *     duplicateProfileId fork param is retired)
    *   - (edit)   editProfileId = edit an existing AI partner (profile + entity + settings)
    */
   CreateAI: {
     prefillProfileId?: string;
-    duplicateProfileId?: string;
     editProfileId?: string;
   };
   Login: undefined;

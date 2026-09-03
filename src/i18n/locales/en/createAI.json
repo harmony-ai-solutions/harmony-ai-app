@@ -57,6 +57,7 @@
   "moduleImagination": "Imagination",
   "nameRequired": "Name Required",
   "nameRequiredMessage": "Please give your AI a name.",
+  "sharedCardHint": "This AI uses a shared character card. The name below becomes this AI's name — the card itself is not copied or changed.",
   "aliasConflictTitle": "Name already in use",
   "aliasConflictMessage": "Another AI partner already uses this name. Please choose a different name.",
   "createFailed": "Failed to create AI partner: {{message}}",

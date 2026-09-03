@@ -213,12 +213,8 @@ export const CharactersScreen: React.FC = () => {
   );
   // Whether the "new AI partner?" bottom sheet is open (opened via ＋ FAB)
   const [createVisible, setCreateVisible] = useState(false);
-  // Whether the "duplicate an AI partner" card picker is open
+  // Whether the "From an Existing One" card picker is open
   const [pickerVisible, setPickerVisible] = useState(false);
-  // Whether the picker was opened from the FAB "From an Existing One" flow
-  const [pickerMode, setPickerMode] = useState<'duplicate' | 'fromExisting'>(
-    'duplicate',
-  );
 
   // ── Favorites + categories ─────────────────────────────────────────────
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
@@ -644,25 +640,22 @@ export const CharactersScreen: React.FC = () => {
   };
 
   /**
-   * Open the card picker. When opened from a card tap it duplicates; when
-   * opened from the FAB "From an Existing One" flow it links the profile.
+   * "From an Existing One" — open the card picker sheet (live-link mode). The
+   * picked card is SHARED: the new AI entity references the SAME character
+   * profile (engine parity) instead of forking it.
    */
-  const openPicker = (mode: 'duplicate' | 'fromExisting') => {
-    setPickerMode(mode);
-    setPickerVisible(true);
-  };
-
-  /** "From an Existing One" — open the card picker sheet (link mode). */
   const handleFromExisting = () => {
-    openPicker('fromExisting');
+    setPickerVisible(true);
   };
 
   /** A profile was picked in the card picker. */
   const handlePickerSelect = (profile: CharacterProfile) => {
     setPickerVisible(false);
-    // Both intents create a FULL FORK of the chosen character — same info,
-    // avatar and settings — with an auto-numbered name ("Max" → "Max 2").
-    navigation.navigate('CreateAI', { duplicateProfileId: profile.id });
+    // LIVE LINK (engine parity): the new AI entity references the SAME
+    // character profile — no card fork. CreateAIScreen prefills from the
+    // shared card; the picked profile's id rides `prefillProfileId` and the
+    // entity alias comes from the name the user types there.
+    navigation.navigate('CreateAI', { prefillProfileId: profile.id });
   };
 
   /**
@@ -1115,11 +1108,11 @@ export const CharactersScreen: React.FC = () => {
         hasExistingProfiles={profiles.length > 0}
       />
 
-      {/* Card picker — duplicates an AI partner (card tap) or links one
-          ("From an Existing One" FAB flow) */}
+      {/* Card picker — live-links a card to a NEW AI entity ("From an
+          Existing One" flow: the entity references the shared profile) */}
       <AICardPickerModal
         visible={pickerVisible}
-        mode={pickerMode}
+        mode="fromExisting"
         onClose={() => setPickerVisible(false)}
         onSelect={handlePickerSelect}
       />

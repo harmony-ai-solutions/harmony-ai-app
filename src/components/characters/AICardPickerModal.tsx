@@ -1,12 +1,12 @@
 /**
- * AICardPickerModal — "fork an existing AI partner?"
+ * AICardPickerModal — "build a partner on an existing card?"
  *
- * Opens as a smooth obsidian-glass bottom sheet when the user taps an existing
- * AI character card on the Characters screen. Presents every existing character
- * profile as a sleek 3D Vertical/Perspective Cover Flow carousel — a stacked
- * deck where the active center card is highlighted (scale 1.0, full opacity,
- * elevated neon glow) while preceding/following cards are angled, scaled down
- * and recessed along the Z-axis.
+ * Opens as a smooth obsidian-glass bottom sheet from the Characters screen's
+ * "From an Existing One" flow. Presents every existing character profile as a
+ * sleek 3D Vertical/Perspective Cover Flow carousel — a stacked deck where the
+ * active center card is highlighted (scale 1.0, full opacity, elevated neon
+ * glow) while preceding/following cards are angled, scaled down and recessed
+ * along the Z-axis.
  *
  * - Swipe left/right (or drag/scroll) to flip through the deck (native paging,
  *   native-driver animations → 60fps).
@@ -16,9 +16,12 @@
  *   re-renders with just the matching cards.
  *
  * Picking a card fires `onSelect(profile)` — the parent navigates to the
- * Create AI Partner screen with `duplicateProfileId` so the new partner is a
- * full fork (profile fields + avatar + module settings) with an auto-numbered
- * name (02, 03, …).
+ * Create AI Partner screen with `prefillProfileId` so the new AI entity LIVE
+ * LINKS the SAME character profile (engine parity — no card copy). The name
+ * the user types there becomes the new entity's alias; the card is shared.
+ *
+ * The legacy `duplicate` mode (full fork) is retired — the AI-create fork path
+ * no longer exists; `mode` is kept for the shared carousel contract.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';

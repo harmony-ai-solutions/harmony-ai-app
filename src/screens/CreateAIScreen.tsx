@@ -103,7 +103,6 @@ import {
   getAllEntities,
   getEntityByCharacterProfileId,
   getEntityModuleMapping,
-  getNextEntityAliasCopy,
   updateEntityFields,
 } from '../database/repositories/entities';
 import { getUserPersona } from '../database/repositories/userEntities';
@@ -261,29 +260,14 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const [editOriginalName, setEditOriginalName] = useState('');
 
   // ── "From an existing one" — prefillProfileId links an existing profile ──────
+  // LIVE LINK (engine parity): the new AI entity references the SAME character
+  // profile — the card is shared, never forked. The screen prefills the
+  // editable fields from the shared card as a starting preview.
   const prefillProfileId = route.params?.prefillProfileId ?? null;
   const [prefilled, setPrefilled] = useState(false);
-
-  // ── Fork flow — duplicateProfileId forks a profile into a NEW one ────────────
-  // The source profile is fully forked: name gets an auto-numbered suffix
-  // (02, 03, …), all detail fields + voice settings carry over, the primary
-  // avatar image is copied, and any existing entity module mapping is re-used
-  // so the fork is chat-ready with the exact same settings.
-  const duplicateProfileId = route.params?.duplicateProfileId ?? null;
-  const [duplicateProfile, setDuplicateProfile] =
-    useState<CharacterProfile | null>(null);
-  const [duplicateLoaded, setDuplicateLoaded] = useState(false);
-  // Tracks the last auto-assigned fork name so the focus-time name re-derivation
-  // can distinguish "the auto name is still in the field" (safe to advance to
-  // the next free number) from "the user manually edited the field" (leave it).
-  const lastAutoNameRef = useRef<string | null>(null);
-  // Live mirror of `name` so focus callbacks never read a stale closure.
-  const nameRef = useRef(name);
-  useEffect(() => {
-    nameRef.current = name;
-  }, [name]);
-  // Prefills from the forked profile — separate from the module-config
-  // selection below so pickers work after the fork lands.
+  // Copied entity module mapping (link + edit modes): the source entity's
+  // 8 config slots, held separately from the module-config selection below so
+  // the pickers work once the configs load.
   const [prefillModuleIds, setPrefillModuleIds] = useState<{
     backend: string | null;
     cognition: string | null;
@@ -372,159 +356,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [prefillProfileId, prefilled]);
 
-  // ── Duplicate prefill (route param duplicateProfileId) ───────────────────────
-  // Loads the source profile, forks its primary avatar + entity module mapping,
-  // computes an auto-numbered name (02, 03, …) and prefills every editable field
-  // so the user gets a full fork they can tweak, save, or chat with.
-  //
-  // NOTE on screen reuse: CreateAI is a single Stack.Screen that the user can
-  // return to repeatedly ("Max" → "Max 2" → save → "Max" again → "Max 3").
-  // Because stack navigation reuses the mounted component, React state survives
-  // the round-trip and the `duplicateLoaded` latch below would otherwise stay
-  // `true`, so re-entering the duplicate flow would KEEP the stale "Max 2" name
-  // instead of recomputing "Max 3". This was the reported bug: creating a 3rd
-  // fork of the same AI stayed named "Name 2", collided with the existing
-  // "Name 2", and the save spilled an orphaned duplicate profile.
-  //
-  // Two guards fix it:
-  //   1. `duplicateLoaded` is reset whenever the duplication TARGET changes, and
-  //   2. a focus-time re-derivation (below) advances the auto-name even when the
-  //      same target is duplicated twice in a row — after saving "Max 2" and
-  //      returning to duplicate "Max" again, the field still holds "Max 2"
-  //      (from the previous visit); we recompute the next free number and bump
-  //      it to "Max 3" so the user never saves a duplicate name.
-  useEffect(() => {
-    if (!duplicateProfileId) return;
-    setDuplicateLoaded(false);
-  }, [duplicateProfileId]);
-
-  useEffect(() => {
-    if (!duplicateProfileId || duplicateLoaded) return;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const profile = await getCharacterProfile(duplicateProfileId);
-        if (!profile || cancelled) return;
-
-        // Compute the next free fork name — "Aria" → "Aria 02" → "Aria 03"…
-        const nextName = await getNextEntityAliasCopy(profile.name || 'Character');
-        if (cancelled) return;
-        setDuplicateProfile(profile);
-        setName(nextName);
-        lastAutoNameRef.current = nextName;
-        setDescription(profile.description ?? '');
-        setPersonality(profile.personality ?? '');
-        setVoiceCharacteristics(profile.voice_characteristics ?? '');
-        setTypingSpeedWpm(String(profile.typing_speed_wpm ?? 60));
-        setAudioResponseChance(String(profile.audio_response_chance_percent ?? 50));
-        setBasePrompt(profile.base_prompt ?? '');
-        setScenario(profile.scenario ?? '');
-        setExampleDialogues(profile.mes_example ?? '');
-
-        // Copy the source profile's gallery images (the primary avatar is
-        // already copied separately above — skip it to avoid a duplicate).
-        try {
-          const images = await getCharacterImages(profile.id);
-          if (!cancelled) {
-            setGalleryImages(
-              images
-                .filter(img => img.image_data && img.mime_type && !img.is_primary)
-                .map(img => ({
-                  base64: img.image_data,
-                  mimeType: img.mime_type,
-                  description: img.description ?? '',
-                })),
-            );
-          }
-        } catch (galleryErr) {
-          log.warn('Failed to copy gallery images:', galleryErr);
-        }
-
-        // Copy the primary avatar image (base64 + mime) so the fork looks identical.
-        try {
-          const images = await getCharacterImages(profile.id);
-          const primary = images.find(img => img.is_primary === true);
-          if (primary && !cancelled) {
-            setAvatarBase64(primary.image_data || null);
-            setAvatarMimeType(primary.mime_type || 'image/jpeg');
-            setAvatarUri(createDataURL(primary.image_data, primary.mime_type));
-          }
-        } catch (imgErr) {
-          log.warn('Failed to copy primary avatar:', imgErr);
-        }
-
-        // Copy the source entity's module mapping (settings) so the fork is
-        // chat-ready with the exact same AI model / voice / config stack.
-        try {
-          const entity = await getEntityByCharacterProfileId(profile.id);
-          if (entity) {
-            const mapping = await getEntityModuleMapping(entity.id);
-            if (mapping && !cancelled) {
-              setPrefillModuleIds({
-                backend: mapping.backend_config_id ?? null,
-                cognition: mapping.cognition_config_id ?? null,
-                tts: mapping.tts_config_id ?? null,
-                stt: mapping.stt_config_id ?? null,
-                vision: mapping.vision_config_id ?? null,
-                rag: mapping.rag_config_id ?? null,
-                imagination: mapping.imagination_config_id ?? null,
-                movement: mapping.movement_config_id ?? null,
-              });
-            }
-          }
-        } catch (mapErr) {
-          log.warn('Failed to copy module mapping:', mapErr);
-        }
-      } catch (err) {
-        log.error('Failed to duplicate profile:', err);
-      } finally {
-        if (!cancelled) setDuplicateLoaded(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [duplicateProfileId, duplicateLoaded]);
-
-  // ── Focus-time auto-name re-derivation (duplicate flow) ─────────────────────
-  // Guards against the reported bug: duplicating the SAME source AI twice in a
-  // row. Stack navigation reuses this component, so after saving "Max 2" and
-  // re-entering the duplicate flow for "Max", the name field still holds the
-  // previous visit's "Max 2". If the field still contains the auto-assigned
-  // name (not manually edited), recompute the next free fork number and bump it
-  // ("Max 2" → "Max 3") so the user can never save a duplicate name.
-  useFocusEffect(
-    useCallback(() => {
-      if (!duplicateProfileId || !duplicateProfile || !lastAutoNameRef.current) {
-        return;
-      }
-      // Respect manual edits: only advance when the field still shows the name
-      // we auto-assigned (compared via the live ref, avoiding stale closures).
-      const current = nameRef.current?.trim() ?? '';
-      const lastAuto = lastAutoNameRef.current.trim();
-      if (current === '' || current !== lastAuto) {
-        return;
-      }
-      let cancelled = false;
-      (async () => {
-        try {
-          const nextName = await getNextEntityAliasCopy(duplicateProfile.name || 'Character');
-          if (cancelled || nextName === lastAuto) return;
-          lastAutoNameRef.current = nextName;
-          setName(nextName);
-        } catch (err) {
-          log.warn('Failed to re-derive duplicate fork name on focus:', err);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }, [duplicateProfileId, duplicateProfile]),
-  );
-
-  // ── Apply copied module configs (from the duplicated partner) ────────────────
+  // ── Apply copied module configs (from the source partner) ────────────────────
   // Once both the copied mapping is available AND the module-config lists have
   // loaded, pre-select the copied configs so the Advanced pickers reflect the
   // source partner's exact settings (editable afterwards).
@@ -1214,30 +1046,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      // ── Duplicate-flow save-time name guard ─────────────────────────────
-      // The screen-level focus re-derivation normally keeps the auto-name in
-      // sync, but a stale name can still reach the save (e.g. the CreateAI
-      // component was remounted or the user opened the fork flow straight from
-      // a context menu). Rather than fail with the "name already in use" alert
-      // AND leave an orphaned profile, the DUPLICATE flow transparently
-      // advances the auto-name to the next free fork number ("Max 2" → "Max 3")
-      // so the 3rd fork of an AI is always named correctly — the reported bug.
-      // Manual names (the user typed something) are NEVER rewritten; only the
-      // auto-assigned fork name is bumped.
-      let effectiveName = trimmedName;
-      if (
-        duplicateProfile &&
-        lastAutoNameRef.current &&
-        trimmedName === lastAutoNameRef.current.trim()
-      ) {
-        const autoName = await getNextEntityAliasCopy(duplicateProfile.name || 'Character');
-        if (autoName && autoName !== trimmedName) {
-          effectiveName = autoName;
-          lastAutoNameRef.current = autoName;
-          setName(autoName);
-        }
-      }
-      const entityId = effectiveName;
+      // The entity id doubles as the display name (name-like ids).
+      const entityId = trimmedName;
 
       // 1. Either link an existing character profile (from the "From an
       //    Existing One" flow) or create a brand-new one.
@@ -1254,7 +1064,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
         await createCharacterProfile({
           id: profileId,
-          name: effectiveName,
+          name: trimmedName,
           description: description.trim() || '',
           personality: personality.trim() || '',
           voice_characteristics: voiceCharacteristics.trim() || '',
@@ -1262,11 +1072,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           audio_response_chance_percent: Number.isFinite(audioChance)
             ? Math.min(100, Math.max(0, audioChance))
             : 50,
-          // When duplicating, the prompt fields are prefilled from the source
-          // profile — the editable state values carry over faithfully. Vision
-          // config + lifecycle config are carried over only from the source.
-          vision_config_id: duplicateProfile?.vision_config_id ?? null,
-          lifecycle_config: duplicateProfile?.lifecycle_config ?? '{}',
+          vision_config_id: null,
+          lifecycle_config: '{}',
           base_prompt: basePrompt.trim() || '',
           scenario: scenario.trim() || '',
           mes_example: exampleDialogues.trim() || '',
@@ -1325,7 +1132,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       try {
         await createEntity({
           id: entityId,
-          alias: effectiveName,
+          alias: trimmedName,
           character_profile_id: profileId,
           lifecycle_config: '{}',
           rag_reindex_required: 1,
@@ -1340,10 +1147,10 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           // attempt cannot leave an orphaned "Name 2" duplicate in the
           // Characters list — the reported bug showed a "name already in use"
           // alert AND the fork still appearing. The prefill-link flow
-          // (prefillProfileId, no duplicate) reuses an EXISTING profile, so
-          // nothing needs rolling back there — the entity insert simply fails.
-          // For a fresh duplicate the entity insert failed, so the cascade
-          // soft-deletes just the profile (+ any created images/sidecars).
+          // (prefillProfileId) reuses an EXISTING profile, so nothing needs
+          // rolling back there — the entity insert simply fails. For a fresh
+          // create the entity insert failed, so the cascade soft-deletes just
+          // the profile (+ any created images/sidecars).
           if (!prefillProfileId) {
             try {
               await deleteCharacterProfileCascade(profileId);
@@ -1516,8 +1323,6 @@ const focused = focusedField === field;
         title={
           editProfileId
             ? t('editTitle', { name: editOriginalName || name })
-            : duplicateProfile
-            ? t('duplicateTitle', { name: duplicateProfile.name })
             : t('title')
         }
         onBack={() => navigation.goBack()}
@@ -1546,6 +1351,17 @@ const focused = focusedField === field;
           {/* ══════════════════ 1. GENERAL ══════════════════ */}
           <ThemedCard elevated accentStripe style={styles.section}>
             <SectionHeader title={t('sectionGeneral')} />
+
+            {/* Live-link mode: the card is SHARED with the source AI — keep
+                the UX honest about what saving will and won't do. */}
+            {prefillProfileId && (
+              <View style={styles.sharedCardHint} testID="shared-card-hint">
+                <Icon name="link-variant" size={14} color={theme.colors.text.muted} />
+                <ThemedText size={12} variant="muted" style={styles.sharedCardHintText}>
+                  {t('sharedCardHint')}
+                </ThemedText>
+              </View>
+            )}
 
             {/* Avatar */}
             <View style={styles.avatarRow}>
@@ -2178,6 +1994,17 @@ const styles = StyleSheet.create({
   sectionContent: {
     padding: 16,
     gap: 0,
+  },
+  // ── Live-link shared-card hint (muted, subtle) ──
+  sharedCardHint: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+  sharedCardHintText: {
+    flex: 1,
   },
 
   // ── Avatar row ──

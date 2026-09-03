@@ -281,6 +281,71 @@ jest.mock('../../components/characters/CharacterProfileCard', () => {
   };
 });
 
+// "New AI partner?" bottom sheet: expose the two routing intents the screen
+// wires — fresh create + "From an Existing One" (live-link picker).
+jest.mock('../../components/characters/CreatePartnerModal', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return {
+    __esModule: true,
+    CreatePartnerModal: ({ visible, onNewPartner, onFromExisting }: any) =>
+      visible
+        ? React.createElement(
+            View,
+            { testID: 'create-partner-modal' },
+            React.createElement(View, {
+              testID: 'partner-new',
+              onPress: onNewPartner,
+              accessibilityRole: 'button',
+            }),
+            React.createElement(View, {
+              testID: 'partner-from-existing',
+              onPress: onFromExisting,
+              accessibilityRole: 'button',
+            }),
+          )
+        : null,
+  };
+});
+
+// Card picker: loads profiles from the (mocked) repo when visible and exposes
+// one tappable row per profile driving `onSelect` — the routing seam under test.
+jest.mock('../../components/characters/AICardPickerModal', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return {
+    __esModule: true,
+    AICardPickerModal: ({ visible, onSelect }: any) => {
+      const [profiles, setProfiles] = React.useState([]);
+      React.useEffect(() => {
+        if (!visible) return;
+        let cancelled = false;
+        require('../../database/repositories/characters')
+          .getAllCharacterProfiles()
+          .then((rows: any[]) => {
+            if (!cancelled) setProfiles(rows);
+          });
+        return () => {
+          cancelled = true;
+        };
+      }, [visible]);
+      if (!visible) return null;
+      return React.createElement(
+        View,
+        { testID: 'ai-card-picker-modal' },
+        profiles.map((p: any) =>
+          React.createElement(View, {
+            key: p.id,
+            testID: `picker-select-${p.id}`,
+            onPress: () => onSelect(p),
+            accessibilityRole: 'button',
+          }),
+        ),
+      );
+    },
+  };
+});
+
 // Long-press context menu: expose the "Create persona from this card" action
 // (decision 4/7/12 — immediate full-copy → editor).
 jest.mock('../../components/characters/CharacterCardMenuModal', () => {
@@ -552,6 +617,50 @@ describe('CharactersScreen — create persona from card (decision 4/7/12)', () =
     expect(mockNavigate).not.toHaveBeenCalledWith(
       'PersonaEdit',
       expect.objectContaining({ prefill: expect.anything() }),
+    );
+  });
+});
+
+describe('CharactersScreen — new-partner picker routing (live link)', () => {
+  beforeEach(() => {
+    mockNavigate.mockClear();
+  });
+
+  it('routes "From an Existing One" to the LIVE-LINK param (prefillProfileId, no fork)', async () => {
+    const utils = await renderScreen();
+
+    // FAB → "From an Existing One" → card picker opens.
+    await fireEvent.press(utils.getByTestId('add-ai-partner'));
+    await fireEvent.press(utils.getByTestId('partner-from-existing'));
+    expect(utils.getByTestId('ai-card-picker-modal')).toBeTruthy();
+
+    // Pick a card → CreateAI with the LIVE-LINK param (the new AI entity
+    // references the SAME character profile — the fork param is retired).
+    await fireEvent.press(utils.getByTestId('picker-select-p1'));
+    await flush();
+
+    expect(mockNavigate).toHaveBeenCalledWith('CreateAI', {
+      prefillProfileId: 'p1',
+    });
+    expect(mockNavigate).not.toHaveBeenCalledWith(
+      'CreateAI',
+      expect.objectContaining({ duplicateProfileId: expect.anything() }),
+    );
+  });
+
+  it('routes "New partner" to a bare CreateAI (fresh-profile mode unchanged)', async () => {
+    const utils = await renderScreen();
+
+    await fireEvent.press(utils.getByTestId('add-ai-partner'));
+    await fireEvent.press(utils.getByTestId('partner-new'));
+
+    expect(mockNavigate).toHaveBeenCalledWith('CreateAI', {});
+    expect(mockNavigate).not.toHaveBeenCalledWith(
+      'CreateAI',
+      expect.objectContaining({
+        prefillProfileId: expect.anything(),
+        duplicateProfileId: expect.anything(),
+      }),
     );
   });
 });
