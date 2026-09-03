@@ -10,7 +10,7 @@
  */
 
 import {useFreshDatabase} from '../repositoryFixtures';
-import {createUserPersona, createUserPersonaFromCard} from '../../repositories/userEntities';
+import {createUserPersona, createUserPersonaFromCard, deleteUserPersona} from '../../repositories/userEntities';
 import {
   createCharacterProfile,
   getCharacterProfile,
@@ -167,6 +167,57 @@ describe('persona from card (createUserPersonaFromCard)', () => {
     const ids = entities.map(e => e.id);
     expect(ids).toContain('Source Card');
     expect(ids).toContain('Source Card 2');
+  });
+
+  it('from-card onto a soft-deleted (ghost) id succeeds (ghost-id bug)', async () => {
+    await seedSourceCard('src-ghost');
+    // A persona named 'Source Card' exists and is deleted → its entity id
+    // 'Source Card' is a ghost that still reserves the TEXT PRIMARY KEY.
+    await createUserPersona({name: 'Source Card'});
+    await deleteUserPersona('Source Card');
+
+    const persona = await createUserPersonaFromCard('src-ghost');
+    expect(persona.id).toBe('Source Card 2');
+
+    // The copy is a live persona; the ghost is untouched.
+    const live = await getEntity('Source Card 2');
+    expect(live).not.toBeNull();
+    expect(live!.entity_type).toBe('user');
+    const ghost = await getEntity('Source Card', true);
+    expect(ghost!.deleted_at).not.toBeNull();
+  });
+
+  it('compensates an entity-INSERT failure by tombstones + deleting the orphaned copy (from-card residue, ghost-id bug)', async () => {
+    await seedSourceCard('src-comp');
+    // Live entity whose ALIAS (not id) is 'Source Card' → the persona's id
+    // resolves to 'Source Card' (free id) but its alias collides with the live
+    // row's alias → entity INSERT fails AFTER the full card copy (profile +
+    // images) was created. Compensation must tombstone the orphaned copy.
+    await getDb().executeSql(
+      `INSERT INTO entities (id, alias, character_profile_id, lifecycle_config, rag_reindex_required, entity_type, created_at, updated_at)
+       VALUES ('renamed-owner-comp', 'Source Card', NULL, '{}', 1, 'ai', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    );
+
+    await expect(createUserPersonaFromCard('src-comp')).rejects.toThrow();
+
+    // No LIVE orphan profile named 'Source Card' remains (only the source
+    // card itself, which has id 'src-comp', is live).
+    const [liveResult] = await getDb().executeSql(
+      `SELECT COUNT(*) AS count FROM character_profiles WHERE name = 'Source Card' AND deleted_at IS NULL`,
+    );
+    expect(liveResult.rows.item(0).count).toBe(1); // just the source card
+
+    // The orphaned copy's images are tombstoned too (from-card copies images —
+    // they must not linger as live residue).
+    const [ghostImages] = await getDb().executeSql(
+      `SELECT COUNT(*) AS count FROM character_image ci
+       JOIN character_profiles cp ON cp.id = ci.character_profile_id
+       WHERE cp.name = 'Source Card' AND cp.id != 'src-comp' AND ci.deleted_at IS NULL`,
+    );
+    expect(ghostImages.rows.item(0).count).toBe(0);
+
+    // No live entity was created.
+    expect(await getEntity('Source Card')).toBeNull();
   });
 
   it('uses an explicit name option as the copy base name', async () => {

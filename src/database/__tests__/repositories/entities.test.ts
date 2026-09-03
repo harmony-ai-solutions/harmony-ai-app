@@ -15,6 +15,8 @@ import {
   getEntityByCharacterProfileId,
   getNextEntityAliasCopy,
   stripCopySuffix,
+  entityIdExists,
+  resolveNextEntityIdCopy,
   updateEntity,
   updateEntityFields,
   deleteEntity,
@@ -834,6 +836,95 @@ describe('entities repository', () => {
       await createEntity({id: 'aria-04', character_profile_id: null, alias: 'Aria 04', lifecycle_config: '{}', rag_reindex_required: 1});
       // Aria 3 is free, Aria 2 + Aria 4 are taken → next free is 3.
       expect(await getNextEntityAliasCopy('Aria 02')).toBe('Aria 3');
+    });
+  });
+
+  describe('entityIdExists (ghost-aware id probe)', () => {
+    it('returns false when no row exists (live or ghost)', async () => {
+      expect(await entityIdExists('never-seen-id')).toBe(false);
+    });
+
+    it('returns true for a live entity row', async () => {
+      await createEntity({
+        id: 'live-probe',
+        character_profile_id: null,
+        alias: '',
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+      expect(await entityIdExists('live-probe')).toBe(true);
+    });
+
+    it('returns true for a SOFT-DELETED (ghost) row — no deleted_at filter (the PK is reserved)', async () => {
+      await createEntity({
+        id: 'ghost-probe',
+        character_profile_id: null,
+        alias: '',
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+      await deleteEntity('ghost-probe');
+
+      // The live-only getter misses the ghost…
+      expect(await getEntity('ghost-probe')).toBeNull();
+      // …but entityIdExists must still see it: entities.id is a TEXT PRIMARY
+      // KEY spanning soft-deleted rows, so the ghost reserves the id.
+      expect(await entityIdExists('ghost-probe')).toBe(true);
+    });
+  });
+
+  describe('resolveNextEntityIdCopy (ghost-aware id resolution)', () => {
+    const makeEntity = (id: string, alias = '') =>
+      createEntity({
+        id,
+        character_profile_id: null,
+        alias,
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+
+    it('returns the base verbatim when it is free', async () => {
+      expect(await resolveNextEntityIdCopy('Max')).toBe('Max');
+    });
+
+    it('resolves a soft-deleted (ghost) base to "<base> 2"', async () => {
+      await makeEntity('Max', 'Max');
+      await deleteEntity('Max');
+      // getEntity misses the ghost, but the id is still reserved.
+      expect(await getEntity('Max')).toBeNull();
+      expect(await resolveNextEntityIdCopy('Max')).toBe('Max 2');
+    });
+
+    it('resolves past a ghost "Max 2" to "Max 3"', async () => {
+      await makeEntity('Max', 'Max');
+      await deleteEntity('Max');
+      await makeEntity('Max 2', 'Max 2');
+      await deleteEntity('Max 2');
+      expect(await resolveNextEntityIdCopy('Max')).toBe('Max 3');
+    });
+
+    it('strips ONE trailing copy suffix from the input ("Max 2" with Max + Max 2 taken → "Max 3", never "Max 2 2")', async () => {
+      await makeEntity('Max', 'Max');
+      await makeEntity('Max 2', 'Max 2');
+      expect(await resolveNextEntityIdCopy('Max 2')).toBe('Max 3');
+    });
+
+    it('probes by ID not alias — an id equal to a LIVE entity id is resolved even when the alias differs', async () => {
+      // Rename divergence: entity id FROZEN at "Max" while its alias became
+      // "Max 2" (persona/AI rename keeps the id, updates the alias). The id
+      // space is what the PK cares about — alias-based dedupe would have
+      // returned "Max 3" (alias "Max 2" occupies slot 2), the id-based
+      // resolver must return the genuinely free id "Max 2".
+      await makeEntity('Max', 'Max 2');
+      expect(await resolveNextEntityIdCopy('Max')).toBe('Max 2');
+    });
+
+    it('walking skips LIVE and GHOST ids alike and emits the smallest free N ≥ 2', async () => {
+      await makeEntity('Max', 'Max');
+      await makeEntity('Max 2', 'Max 2'); // live
+      await makeEntity('Max 3', 'Max 3');
+      await deleteEntity('Max 3'); // ghost
+      expect(await resolveNextEntityIdCopy('Max')).toBe('Max 4');
     });
   });
 

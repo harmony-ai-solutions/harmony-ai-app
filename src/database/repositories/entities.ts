@@ -358,6 +358,62 @@ export async function getNextEntityAliasCopy(baseName: string): Promise<string> 
   return `${base} ${next}`;
 }
 
+// ============================================================================
+// Ghost-aware id resolution (soft-deleted ids reserve the TEXT PRIMARY KEY)
+// ============================================================================
+
+/**
+ * True when ANY `entities` row carries the id — LIVE or SOFT-DELETED (ghost).
+ *
+ * `entities.id` is a TEXT PRIMARY KEY spanning soft-deleted rows (migration
+ * 000042), so a deleted row still reserves its id: recreating an entity with
+ * that id fails with a PK constraint. This probe mirrors the engine's
+ * `EntityExists` (harmony-link-private/database/repository/entities/) and is
+ * the ONLY existence check that may be used for id-creation decisions —
+ * `getEntity` filters `deleted_at IS NULL` and would miss the ghost.
+ */
+export async function entityIdExists(id: string): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT 1 FROM entities WHERE id = ?',
+    [id],
+  );
+  return results.rows.length > 0;
+}
+
+/**
+ * Resolve a collision-free entity id for a name-like base ("Max", "Max 2").
+ *
+ * Mirrors the engine's `ResolveEntityID` (harmony-link-private/database/
+ * controllers/entity_controller.go) with the RN naming convention (ids here
+ * are name-like; spaces are legal):
+ *
+ *   1. Strip ONE trailing copy suffix (same separator class as
+ *      `getNextEntityAliasCopy`'s slot regex: space/dash/underscore + digits)
+ *      to recover the TRUE base — "Max 2" as input never yields "Max 2 2".
+ *   2. If the base id is free (no live AND no ghost row — probed via
+ *      {@link entityIdExists}), return it VERBATIM.
+ *   3. Otherwise walk the smallest `N ≥ 2` whose id `<base> <N>` is free
+ *      (space separator, unpadded), emitting the same shape
+ *      `getNextEntityAliasCopy` produces.
+ *
+ * The probe is ID-based (live+ghost), never alias-based: alias dedupe can
+ * mint colliding ids, and the alias partial unique index is LIVE-ONLY, so the
+ * id space and alias space may diverge.
+ */
+export async function resolveNextEntityIdCopy(base: string): Promise<string> {
+  // Recover the true base when the source is itself a copy ("Max 2" → "Max").
+  const baseId = stripCopySuffix(base.trim());
+  if (!(await entityIdExists(baseId))) {
+    return baseId;
+  }
+  let n = 2;
+  while (await entityIdExists(`${baseId} ${n}`)) {
+    n += 1;
+  }
+  return `${baseId} ${n}`;
+}
+
 /**
  * Update an existing entity
  * Throws error if entity not found

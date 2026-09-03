@@ -26,7 +26,9 @@ import { createLogger } from '../utils/logger';
 import {
   createEntity,
   createEntityModuleMapping,
+  entityIdExists,
   getEntityByCharacterProfileId,
+  resolveNextEntityIdCopy,
 } from '../database/repositories/entities';
 import {
   deriveParticipantKey,
@@ -87,10 +89,16 @@ export async function openCharacterChat(
   let createdNewEntity = false;
   if (!entity) {
     createdNewEntity = true;
-    const entityId = profile.name.trim();
-    if (!entityId) {
+    const rawId = profile.name.trim();
+    if (!rawId) {
       throw new Error('Cannot open chat for a character without a name');
     }
+    // Ghost-aware id: probe once — the raw name is used verbatim when free; a
+    // live-or-ghost collision (soft-deleted rows still reserve the entities
+    // TEXT PRIMARY KEY) resolves to a copy id instead of throwing on the PK.
+    const entityId = (await entityIdExists(rawId))
+      ? await resolveNextEntityIdCopy(rawId)
+      : rawId;
     entity = await createEntity({
       id: entityId,
       alias: profile.name.trim(),

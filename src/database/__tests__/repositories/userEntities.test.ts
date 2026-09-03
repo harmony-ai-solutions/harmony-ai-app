@@ -77,6 +77,61 @@ describe('user entities repository', () => {
       expect(second.id).toBe('Aria 2');
     });
 
+    it('recreate-after-delete succeeds: a soft-deleted (ghost) id is resolved, leaving no residue (ghost-id bug)', async () => {
+      const first = await createUserPersona({name: 'Max'});
+      expect(first.id).toBe('Max');
+      await deleteUserPersona('Max');
+
+      // Old code path: getEntity('Max') misses the ghost → id = 'Max' → the
+      // entity INSERT hits the TEXT PRIMARY KEY → generic failure + an orphaned
+      // profile (phantom card). New path must resolve the ghost to "Max 2".
+      const recreated = await createUserPersona({name: 'Max'});
+      expect(recreated.id).toBe('Max 2');
+
+      // The ghost still reserves the PK; the new persona is a live row.
+      const ghost = await getEntity('Max', true);
+      expect(ghost).not.toBeNull();
+      expect(ghost!.deleted_at).not.toBeNull();
+      const live = await getEntity('Max 2');
+      expect(live).not.toBeNull();
+      expect(live!.entity_type).toBe('user');
+      expect(live!.alias).toBe('Max 2');
+
+      // Exactly ONE live persona named "Max"/"Max 2" — no phantom card.
+      // (Convention: the profile name stays the raw name; the deduped id lives
+      // on the entity alias.)
+      const liveProfiles = await getCharacterProfile(live!.character_profile_id!);
+      expect(liveProfiles?.name).toBe('Max');
+    });
+
+    it('compensates an entity-INSERT failure by soft-deleting the orphaned profile (no residue)', async () => {
+      // Alias/rename divergence: a live entity whose id is NOT "Max" but whose
+      // alias IS "Max". The id "Max" is free, so the persona's id resolves to
+      // "Max" verbatim — but the alias "Max" collides with the live row's
+      // alias (idx_entities_alias_unique) → the entity INSERT fails AFTER the
+      // profile was created. Compensation must tombstone the orphan profile.
+      await getDb().executeSql(
+        `INSERT INTO entities (id, alias, character_profile_id, lifecycle_config, rag_reindex_required, entity_type, created_at, updated_at)
+         VALUES ('renamed-owner', 'Max', NULL, '{}', 1, 'ai', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      );
+
+      await expect(createUserPersona({name: 'Max'})).rejects.toThrow();
+
+      // No LIVE orphan profile named "Max" remains; the failed attempt's
+      // profile row is tombstoned (not left as a phantom card).
+      const [liveResult] = await getDb().executeSql(
+        `SELECT COUNT(*) AS count FROM character_profiles WHERE name = 'Max' AND deleted_at IS NULL`,
+      );
+      expect(liveResult.rows.item(0).count).toBe(0);
+      const [ghostResult] = await getDb().executeSql(
+        `SELECT COUNT(*) AS count FROM character_profiles WHERE name = 'Max' AND deleted_at IS NOT NULL`,
+      );
+      expect(ghostResult.rows.item(0).count).toBe(1);
+
+      // No live entity was created either.
+      expect(await getEntity('Max')).toBeNull();
+    });
+
     it('accepts the full V3 + Soulbits field set and persists it on the profile (3-2-A)', async () => {
       // character_profiles.vision_config_id has an FK to vision_configs — seed
       // a config row so the non-null vision_config_id round-trips.

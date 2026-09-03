@@ -21,7 +21,7 @@ import { generateId } from '../../utils/uuid';
 import {
   getEntity,
   createEntity,
-  getNextEntityAliasCopy,
+  resolveNextEntityIdCopy,
   deleteEntity,
   isProfilePersonaOwned,
   ERR_PROFILE_OWNED_BY_PERSONA,
@@ -35,6 +35,7 @@ import {
   getPrimaryImage,
   getCharacterProfile,
   deleteCharacterProfile,
+  deleteCharacterProfileCascade,
   imageToDataURL,
 } from './characters';
 import type { CharacterProfile } from '../models';
@@ -276,10 +277,31 @@ export interface UpdateUserPersonaInput extends UserPersonaProfileFields {
 }
 
 /**
+ * Best-effort tombstone of an orphaned persona profile (engine FE
+ * compensation pattern, mirrored from the engine's create-failure handling).
+ *
+ * Runs when a persona's entity INSERT fails AFTER the profile (and any
+ * from-card copied images) were created: the residue is soft-deleted so no
+ * phantom card lingers in the Characters library. Best-effort — a failure
+ * here never masks the original error (the caller rethrows it).
+ *
+ * Mirrors the persona delete cascade order: images first, then the profile.
+ * The entity row itself never exists at this point (its INSERT failed), so
+ * there is nothing to soft-delete on the entity side.
+ */
+async function compensateOrphanedPersona(profileId: string): Promise<void> {
+  const images = await getCharacterImages(profileId);
+  for (const image of images) {
+    await deleteCharacterImage(image.id);
+  }
+  await deleteCharacterProfileCascade(profileId);
+}
+
+/**
  * Create a persona: a character_profiles row (minimal defaults, overlaid with
  * any full V3 + Soulbits fields the caller provides) + primary avatar image row
- * (if any) + a `user` entity (id = name, unique-checked via
- * getNextEntityAliasCopy; alias = name, entity id FROZEN after create).
+ * (if any) + a `user` entity (id = name, ghost-aware unique-checked via
+ * resolveNextEntityIdCopy; alias = name, entity id FROZEN after create).
  *
  * The caller (screen) is responsible for the fire-and-forget `syncAndWait`
  * (PersonaEdit pattern) — this repo stays layering-clean.
@@ -290,12 +312,14 @@ export async function createUserPersona(input: CreateUserPersonaInput): Promise<
   const personality = input.personality?.trim() ?? '';
   const profileId = generateId();
 
-  // Unique-check the entity id (name convention): if the name is taken, use a
-  // copy-suffixed id (same convention as AI entities). The alias MUST be unique
-  // too (idx_entities_alias_unique is a partial UNIQUE index) — so when the id
-  // is copy-suffixed, the alias matches the id, not the raw (duplicate) name.
-  const existing = await getEntity(name);
-  const entityId = existing ? await getNextEntityAliasCopy(name) : name;
+  // Ghost-aware unique-check of the entity id (name convention): soft-deleted
+  // rows still reserve the TEXT PRIMARY KEY, so a deleted persona with the
+  // same name must resolve to a copy-suffixed id — `getEntity` alone would
+  // miss the ghost and the INSERT would hit the PK (orphaning the profile).
+  // The alias MUST be unique too (idx_entities_alias_unique is a partial
+  // UNIQUE index) — so when the id is copy-suffixed, the alias matches the
+  // id, not the raw (duplicate) name.
+  const entityId = await resolveNextEntityIdCopy(name);
 
   await createCharacterProfile({
     id: profileId,
@@ -306,16 +330,24 @@ export async function createUserPersona(input: CreateUserPersonaInput): Promise<
     ...pickProfileFields(input),
   });
 
-  await createEntity(
-    {
-      id: entityId,
-      character_profile_id: profileId,
-      alias: entityId,
-      lifecycle_config: '{}',
-      rag_reindex_required: 1,
-    },
-    { entity_type: 'user' },
-  );
+  try {
+    await createEntity(
+      {
+        id: entityId,
+        character_profile_id: profileId,
+        alias: entityId,
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      },
+      { entity_type: 'user' },
+    );
+  } catch (err) {
+    // Compensation (engine FE pattern): the profile was created before the
+    // entity INSERT failed (e.g. an alias/PK collision) — tombstone the
+    // orphan so no phantom card lingers, then rethrow.
+    await compensateOrphanedPersona(profileId).catch(() => {});
+    throw err;
+  }
 
   if (input.avatar) {
     await createCharacterImage({
@@ -430,8 +462,9 @@ export async function updateUserPersona(
  *   - ALL Character Card V3 spec + Soulbits fields copied verbatim, including
  *     `card_provenance` AS-IS (decision 6).
  *   - Fresh ids everywhere (profile + entity + images) — never reuses a row.
- *   - `name` deduped via the entity copy-suffix convention
- *     (`getNextEntityAliasCopy`, "Max" → "Max 2").
+ *   - `name` deduped via the ghost-aware entity id resolution
+ *     (`resolveNextEntityIdCopy`, "Max" → "Max 2"; soft-deleted ids reserve
+ *     the TEXT PRIMARY KEY).
  *   - `is_favorite` reset to 0 (a persona copy is never auto-favorited).
  *   - `lifecycle_config` reset to `{}` (a persona has no AI lifecycle).
  *   - ALL `character_image` rows copied with the primary flag preserved
@@ -464,8 +497,11 @@ export async function createUserPersonaFromCard(
   }
 
   const baseName = (options.name ?? source.name).trim();
-  const existing = await getEntity(baseName);
-  const entityId = existing ? await getNextEntityAliasCopy(baseName) : baseName;
+  // Ghost-aware id resolution (name convention): a soft-deleted entity with
+  // the same id still reserves the TEXT PRIMARY KEY — resolve it instead of
+  // letting the INSERT collide (which previously orphaned a FULL card copy,
+  // images included).
+  const entityId = await resolveNextEntityIdCopy(baseName);
   const personaName = entityId; // id = name convention for personas
 
   const profileId = generateId();
@@ -519,16 +555,24 @@ export async function createUserPersonaFromCard(
     });
   }
 
-  await createEntity(
-    {
-      id: entityId,
-      character_profile_id: profileId,
-      alias: entityId,
-      lifecycle_config: '{}',
-      rag_reindex_required: 1,
-    },
-    { entity_type: 'user' },
-  );
+  try {
+    await createEntity(
+      {
+        id: entityId,
+        character_profile_id: profileId,
+        alias: entityId,
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      },
+      { entity_type: 'user' },
+    );
+  } catch (err) {
+    // Compensation (engine FE pattern): the entity INSERT failed after the
+    // FULL card copy (profile + ALL images) was created — tombstone the
+    // orphaned copy so no phantom card with images lingers, then rethrow.
+    await compensateOrphanedPersona(profileId).catch(() => {});
+    throw err;
+  }
 
   const primary = await getPrimaryImage(profileId);
   return {
