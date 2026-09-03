@@ -29,6 +29,7 @@ import {
   getEntityModuleMapping,
   updateEntityModuleMapping,
   deleteEntityModuleMapping,
+  duplicateAIPartner,
 } from '../../repositories/entities';
 import {insertMemory} from '../../repositories/memories';
 import {upsertEmotionState} from '../../repositories/emotion_state';
@@ -925,6 +926,177 @@ describe('entities repository', () => {
       await makeEntity('Max 3', 'Max 3');
       await deleteEntity('Max 3'); // ghost
       expect(await resolveNextEntityIdCopy('Max')).toBe('Max 4');
+    });
+  });
+
+  describe('duplicateAIPartner (engine duplicate parity — atomic AI partner copy)', () => {
+    const makeProfile = (id: string) =>
+      createCharacterProfile({
+        id,
+        name: 'Prof ' + id,
+        description: '',
+        personality: '',
+        voice_characteristics: '',
+        base_prompt: '',
+        scenario: '',
+        typing_speed_wpm: 60,
+        audio_response_chance_percent: 50,
+        vision_config_id: null,
+        lifecycle_config: '{}',
+      });
+
+    /** Seed one config row per module table so every mapping slot is a valid FK. */
+    const seedAllConfigs = async () => {
+      await getDb().executeSql(
+        `INSERT INTO backend_configs (id, name, provider, provider_config_id) VALUES ('cfg-backend', 'Backend', 'openai', 'prov-1')`,
+      );
+      await getDb().executeSql(
+        `INSERT INTO cognition_configs (id, name, provider, provider_config_id) VALUES ('cfg-cognition', 'Cognition', 'openai', 'prov-1')`,
+      );
+      await getDb().executeSql(
+        `INSERT INTO imagination_configs (id, name, provider, provider_config_id) VALUES ('cfg-imagination', 'Imagination', 'openai', 'prov-1')`,
+      );
+      await getDb().executeSql(
+        `INSERT INTO movement_configs (id, name, provider, provider_config_id) VALUES ('cfg-movement', 'Movement', 'openai', 'prov-1')`,
+      );
+      await getDb().executeSql(
+        `INSERT INTO rag_configs (id, name, provider, provider_config_id) VALUES ('cfg-rag', 'RAG', 'openai', 'prov-1')`,
+      );
+      await getDb().executeSql(
+        `INSERT INTO stt_configs (id, name, transcription_provider, transcription_provider_config_id, vad_provider, vad_provider_config_id)
+         VALUES ('cfg-stt', 'STT', 'openai', 'prov-1', 'openai', 'prov-1')`,
+      );
+      await getDb().executeSql(
+        `INSERT INTO tts_configs (id, name, provider, provider_config_id) VALUES ('cfg-tts', 'TTS', 'openai', 'prov-1')`,
+      );
+      await getDb().executeSql(
+        `INSERT INTO vision_configs (id, name, provider, provider_config_id) VALUES ('cfg-vision', 'Vision', 'openai', 'prov-1')`,
+      );
+    };
+
+    const seedSourceEntity = async (id: string, profileId: string | null, alias = '') =>
+      createEntity(
+        {id, character_profile_id: profileId, alias, lifecycle_config: '{}', rag_reindex_required: 1},
+        {entity_type: 'ai'},
+      );
+
+    it('copies the AI partner: live profile link, flags reset, lifecycle + all 8 mapping slots verbatim', async () => {
+      await makeProfile('dup-profile');
+      await seedAllConfigs();
+      await seedSourceEntity('Aria', 'dup-profile', 'Aria');
+      await createEntityModuleMapping({
+        entity_id: 'Aria',
+        backend_config_id: 'cfg-backend',
+        cognition_config_id: 'cfg-cognition',
+        imagination_config_id: 'cfg-imagination',
+        movement_config_id: 'cfg-movement',
+        rag_config_id: 'cfg-rag',
+        stt_config_id: 'cfg-stt',
+        tts_config_id: 'cfg-tts',
+        vision_config_id: 'cfg-vision',
+        deleted_at: null,
+      });
+      // Give the source non-default lifecycle + flags to prove reset/copy.
+      await getDb().executeSql(
+        `UPDATE entities SET lifecycle_config = '{"state":"archived","level":2}', is_muted = 1, is_disabled = 1 WHERE id = 'Aria'`,
+      );
+
+      const dup = await duplicateAIPartner('Aria');
+
+      expect(dup.id).toBe('Aria 2');
+      expect(dup.alias).toBe('Aria 2');
+      expect(dup.character_profile_id).toBe('dup-profile'); // LIVE link — no card copy
+      expect(dup.entity_type).toBe('ai');
+      expect(dup.is_muted).toBe(0); // reset
+      expect(dup.is_disabled).toBe(0); // reset
+      expect(dup.lifecycle_config).toBe('{"state":"archived","level":2}'); // verbatim
+      expect(dup.rag_reindex_required).toBe(1);
+
+      // The mapping is a NEW row (not the source's) with all 8 slots verbatim.
+      const mapping = await getEntityModuleMapping('Aria 2');
+      expect(mapping).not.toBeNull();
+      expect(mapping!.entity_id).toBe('Aria 2');
+      expect(mapping!.backend_config_id).toBe('cfg-backend');
+      expect(mapping!.cognition_config_id).toBe('cfg-cognition');
+      expect(mapping!.imagination_config_id).toBe('cfg-imagination');
+      expect(mapping!.movement_config_id).toBe('cfg-movement');
+      expect(mapping!.rag_config_id).toBe('cfg-rag');
+      expect(mapping!.stt_config_id).toBe('cfg-stt');
+      expect(mapping!.tts_config_id).toBe('cfg-tts');
+      expect(mapping!.vision_config_id).toBe('cfg-vision');
+
+      // The source entity + mapping are untouched (still live, still linked).
+      const source = await getEntity('Aria');
+      expect(source?.is_muted).toBe(1);
+      expect(source?.is_disabled).toBe(1);
+      expect((await getEntityModuleMapping('Aria'))!.entity_id).toBe('Aria');
+    });
+
+    it('continues the id series across live + ghost ids; alias stays live-only (divergence pinned)', async () => {
+      await makeProfile('dup-series-profile');
+      await seedSourceEntity('Aria', 'dup-series-profile', 'Aria');
+
+      const dup1 = await duplicateAIPartner('Aria');
+      expect(dup1.id).toBe('Aria 2');
+      const dup2 = await duplicateAIPartner('Aria');
+      expect(dup2.id).toBe('Aria 3');
+
+      // A ghost "Aria 4" (soft-deleted) still reserves the id → next id is 5.
+      await seedSourceEntity('Aria 4', 'dup-series-profile', 'Aria 4');
+      await deleteEntity('Aria 4');
+
+      const dup3 = await duplicateAIPartner('Aria');
+      // id: ghost-aware → skips the ghost, lands on 5.
+      expect(dup3.id).toBe('Aria 5');
+      // alias: LIVE-only dedupe (getNextEntityAliasCopy) → the ghost "Aria 4"
+      // does not occupy a slot, so the alias lands on the free 4. The id space
+      // and alias space may diverge — this is the engine-parity behavior.
+      expect(dup3.alias).toBe('Aria 4');
+      expect(await entityIdExists('Aria 5')).toBe(true);
+    });
+
+    it('rejects a user persona source with a clear error', async () => {
+      await makeProfile('dup-persona-profile');
+      await createEntity(
+        {id: 'You-Persona', character_profile_id: 'dup-persona-profile', alias: 'You Persona', lifecycle_config: '{}', rag_reindex_required: 1},
+        {entity_type: 'user'},
+      );
+      await expect(duplicateAIPartner('You-Persona')).rejects.toThrow(/user persona/i);
+      // No duplicate row was created.
+      expect(await getEntity('You-Persona 2')).toBeNull();
+    });
+
+    it('throws a not-found error for a missing source', async () => {
+      await expect(duplicateAIPartner('missing-source')).rejects.toThrow(/not found/i);
+    });
+
+    it('creates an all-NULL mapping when the source has none (engine CreateEntity convention)', async () => {
+      await makeProfile('dup-nomap-profile');
+      await seedSourceEntity('NoMap', 'dup-nomap-profile', 'NoMap');
+      // No entity_module_mappings row for the source.
+
+      const dup = await duplicateAIPartner('NoMap');
+      expect(dup.id).toBe('NoMap 2');
+      const mapping = await getEntityModuleMapping('NoMap 2');
+      expect(mapping).not.toBeNull();
+      expect(mapping!.backend_config_id).toBeNull();
+      expect(mapping!.cognition_config_id).toBeNull();
+      expect(mapping!.imagination_config_id).toBeNull();
+      expect(mapping!.movement_config_id).toBeNull();
+      expect(mapping!.rag_config_id).toBeNull();
+      expect(mapping!.stt_config_id).toBeNull();
+      expect(mapping!.tts_config_id).toBeNull();
+      expect(mapping!.vision_config_id).toBeNull();
+    });
+
+    it('uses the source alias (falling back to its id) as the duplicate alias base', async () => {
+      await makeProfile('dup-alias-profile');
+      // alias diverged from id (rename): id frozen at "Old", alias "New Name".
+      await seedSourceEntity('Old', 'dup-alias-profile', 'New Name');
+
+      const dup = await duplicateAIPartner('Old');
+      expect(dup.id).toBe('Old 2'); // id resolves from the id space
+      expect(dup.alias).toBe('New Name 2'); // alias dedupes from the alias space
     });
   });
 

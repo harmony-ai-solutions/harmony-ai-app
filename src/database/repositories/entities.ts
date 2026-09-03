@@ -415,6 +415,80 @@ export async function resolveNextEntityIdCopy(base: string): Promise<string> {
 }
 
 /**
+ * Duplicate an AI partner entity (engine duplicate parity,
+ * harmony-link-private/database/controllers/entity_controller.go).
+ *
+ * Atomic copy of an existing AI entity:
+ *   - Source must be a LIVE `entity_type = 'ai'` entity; a `user` persona is
+ *     rejected with a clear error, and a missing/soft-deleted source throws a
+ *     not-found error.
+ *   - The duplicate keeps the SAME `character_profile_id` (a LIVE link — NO
+ *     character-card copy) and copies `lifecycle_config` + `rag_reindex_required`
+ *     verbatim; `is_muted` / `is_disabled` are reset to false.
+ *   - ALL 8 module-mapping slots are copied verbatim into a fresh mapping row
+ *     (an all-NULL mapping is created when the source has none — mirrors the
+ *     engine `CreateEntity` always-create-mapping convention).
+ *   - `id` = {@link resolveNextEntityIdCopy} of the source id (ghost-aware:
+ *     soft-deleted ids still reserve the TEXT PRIMARY KEY); `alias` =
+ *     `getNextEntityAliasCopy` of the source alias (live-only dedupe). The id
+ *     and alias spaces may therefore diverge — by design (engine parity).
+ *
+ * @param entityId the LIVE source entity id to duplicate
+ * @returns the newly created Entity: `{ id, alias, character_profile_id,
+ *   lifecycle_config, rag_reindex_required, entity_type: 'ai', is_muted: 0,
+ *   is_disabled: 0, created_at, updated_at, deleted_at: null }` — consumers
+ *   should read `id` / `alias` off the result to drive navigation + display.
+ * @throws not-found error when the source is missing or soft-deleted; a
+ *   `user persona` error when the source is a persona.
+ */
+export async function duplicateAIPartner(entityId: string): Promise<Entity> {
+  const source = await getEntity(entityId);
+  if (!source) {
+    throw new Error(`Entity not found: ${entityId}`);
+  }
+  if (source.entity_type === 'user') {
+    throw new Error(
+      `Cannot duplicate user persona '${entityId}' — only AI entities are duplicateable`,
+    );
+  }
+
+  // Ghost-aware id (soft-deleted ids reserve the PK) + live-only alias dedupe.
+  const newId = await resolveNextEntityIdCopy(source.id);
+  const newAlias = await getNextEntityAliasCopy(source.alias || source.id);
+
+  // Same character profile (LIVE link — the duplicate shares the source card),
+  // lifecycle verbatim, flags reset to false.
+  const created = await createEntity(
+    {
+      id: newId,
+      alias: newAlias,
+      character_profile_id: source.character_profile_id,
+      lifecycle_config: source.lifecycle_config ?? '{}',
+      rag_reindex_required: source.rag_reindex_required ?? 1,
+    },
+    { entity_type: 'ai', is_muted: 0, is_disabled: 0 },
+  );
+
+  // Copy the source mapping verbatim into a fresh row; when the source has
+  // none, create the all-NULL mapping the engine's CreateEntity always makes.
+  const sourceMapping = await getEntityModuleMapping(entityId);
+  await createEntityModuleMapping({
+    entity_id: newId,
+    backend_config_id: sourceMapping?.backend_config_id ?? null,
+    cognition_config_id: sourceMapping?.cognition_config_id ?? null,
+    imagination_config_id: sourceMapping?.imagination_config_id ?? null,
+    movement_config_id: sourceMapping?.movement_config_id ?? null,
+    rag_config_id: sourceMapping?.rag_config_id ?? null,
+    stt_config_id: sourceMapping?.stt_config_id ?? null,
+    tts_config_id: sourceMapping?.tts_config_id ?? null,
+    vision_config_id: sourceMapping?.vision_config_id ?? null,
+    deleted_at: null,
+  });
+
+  return created;
+}
+
+/**
  * Update an existing entity
  * Throws error if entity not found
  */
