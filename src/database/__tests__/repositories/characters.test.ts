@@ -113,9 +113,11 @@ describe('characters repository', () => {
     });
 
     // Read-side completeness pin (persona cards 3-3): the Characters list must
-    // never surface a persona-owned card — even when a soft-deleted user entity
-    // still references it (the NOT EXISTS subquery ignores deleted_at).
-    it('excludes persona-owned profiles (user entity linkage) from the list', async () => {
+    // never surface a persona-owned card. A LIVE persona (user entity) owner
+    // hides the card; a SOFT-DELETED (tombstoned) owner does NOT — the owner
+    // EXISTS subquery filters `deleted_at IS NULL` (Batch D.1 live-owner
+    // consistency, matching isProfilePersonaOwned).
+    it('excludes LIVE persona-owned profiles (user entity linkage) from the list', async () => {
       await createMinimalProfile('profile-persona-hidden');
       await createEntity(
         {
@@ -127,13 +129,31 @@ describe('characters repository', () => {
         },
         {entity_type: 'user'},
       );
-      await deleteEntity('profile-persona-owner'); // soft-deleted owner still hides it
 
       const visible = await getAllCharacterProfiles();
       expect(visible.some(p => p.id === 'profile-persona-hidden')).toBe(false);
       // A plain AI profile still surfaces alongside.
       await createMinimalProfile('profile-ai-visible');
       expect((await getAllCharacterProfiles()).some(p => p.id === 'profile-ai-visible')).toBe(true);
+    });
+
+    it('a tombstoned persona owner no longer hides the profile (Batch D.1 — deleted_at IS NULL in the owner subquery)', async () => {
+      await createMinimalProfile('profile-owner-tombstoned');
+      await createEntity(
+        {
+          id: 'profile-tombstone-owner',
+          character_profile_id: 'profile-owner-tombstoned',
+          alias: 'profile-tombstone-owner',
+          lifecycle_config: '{}',
+          rag_reindex_required: 1,
+        },
+        {entity_type: 'user'},
+      );
+      await deleteEntity('profile-tombstone-owner'); // soft-deleted owner
+
+      // The freed card surfaces as an AI character again.
+      const visible = await getAllCharacterProfiles();
+      expect(visible.some(p => p.id === 'profile-owner-tombstoned')).toBe(true);
     });
   });
 
@@ -158,6 +178,26 @@ describe('characters repository', () => {
       );
       // The persona-owned card must never surface through the AI-profile read.
       expect(await getAICharacterProfile('persona-guard-1')).toBeNull();
+    });
+
+    it('returns the profile when its persona owner is tombstoned (Batch D.1 — live-owner consistency)', async () => {
+      await createMinimalProfile('persona-guard-tombstoned');
+      await createEntity(
+        {
+          id: 'persona-guard-tombstone-entity',
+          alias: 'persona-guard-tombstone-entity',
+          character_profile_id: 'persona-guard-tombstoned',
+          lifecycle_config: '{}',
+          rag_reindex_required: 1,
+        },
+        {entity_type: 'user'},
+      );
+      await deleteEntity('persona-guard-tombstone-entity');
+
+      // The freed card is readable as an AI profile again.
+      expect((await getAICharacterProfile('persona-guard-tombstoned'))?.id).toBe(
+        'persona-guard-tombstoned',
+      );
     });
 
     it('returns null for a missing profile and for a soft-deleted profile', async () => {

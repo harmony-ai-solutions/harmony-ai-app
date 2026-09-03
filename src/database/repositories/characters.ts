@@ -248,7 +248,8 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
         FROM character_profiles
         WHERE NOT EXISTS (SELECT 1 FROM entities e
                           WHERE e.character_profile_id = character_profiles.id
-                            AND e.entity_type = 'user')
+                            AND e.entity_type = 'user'
+                            AND e.deleted_at IS NULL)
         ORDER BY name`
     : `SELECT id, name, description, personality,
               voice_characteristics, base_prompt, scenario,
@@ -263,7 +264,8 @@ export async function getAllCharacterProfiles(includeDeleted = false): Promise<C
         WHERE deleted_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM entities e
                           WHERE e.character_profile_id = character_profiles.id
-                            AND e.entity_type = 'user')
+                            AND e.entity_type = 'user'
+                            AND e.deleted_at IS NULL)
         ORDER BY name`;
 
   const [results] = await db.executeSql(query);
@@ -333,7 +335,8 @@ export async function getUserCharacterProfiles(
  * AIProfile routing) could render a persona's card as an AI partner. This
  * variant applies the same persona-owned exclusion as
  * `getAllCharacterProfiles` (§9-A3) to the single-row read — a profile linked
- * to any `entity_type = 'user'` entity returns null.
+ * to any LIVE `entity_type = 'user'` entity returns null (a soft-deleted /
+ * tombstoned owner frees the card, Batch D.1).
  *
  * Consumers that already obtain ids from filtered sources (entity-driven
  * lookups such as ChatDetailScreen / DisabledAIsScreen / ArchivedChatsScreen)
@@ -346,7 +349,7 @@ export async function getAICharacterProfile(id: string): Promise<CharacterProfil
   const db = getDatabase();
   const [results] = await db.executeSql(
     `SELECT 1 FROM entities e
-     WHERE e.character_profile_id = ? AND e.entity_type = 'user'`,
+     WHERE e.character_profile_id = ? AND e.entity_type = 'user' AND e.deleted_at IS NULL`,
     [id],
   );
   if (results.rows.length > 0) return null;
