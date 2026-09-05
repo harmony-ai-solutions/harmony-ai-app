@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Fixed
 - **Chat list live updates**: new messages appear in the list immediately with correct ordering, conversations paginate cleanly (no more duplicate entries), and unread counts are correct. Muted conversations no longer show unread badges, blocked users' content is filtered out, and deleting a conversation cleans up its settings too.
 - **Chatting with a freshly created partner is reliable** — if the session is interrupted during initialization, the app now recovers automatically instead of showing "Session initialization failed".
+- **Opening a chat with an AI that has no opening greeting no longer gets stuck on a loading screen** — the empty conversation appears right away with the option to generate a greeting.
+- **Opening lines are swappable again** — when a chat opens with the AI's authored greeting, you can cycle through the alternate greetings (and generate another) instead of seeing a plain message with no options.
 - **Voice recordings are kept** when the 120-second auto-stop kicks in — the recording is finished and attached instead of being discarded.
 - The connection indicator now clearly shows **connecting / connected / offline** states.
 - The first message in a conversation now gets a day divider like the rest of the timeline.

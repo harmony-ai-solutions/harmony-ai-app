@@ -104,6 +104,8 @@ describe('EntitySessionService listener idempotency', () => {
 
     expect(handled1).not.toHaveBeenCalled(); // stale instance must not react
     expect(handled2).toHaveBeenCalledTimes(1);
-    expect(handled2).toHaveBeenCalledWith('entity-1', { event_type: 'SOME_EVENT' });
+    // Third arg is the delivering socket's connectionId (participant-set
+    // disambiguation) — undefined when the emitter provides none.
+    expect(handled2).toHaveBeenCalledWith('entity-1', { event_type: 'SOME_EVENT' }, undefined);
   });
 });

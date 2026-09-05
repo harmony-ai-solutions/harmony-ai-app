@@ -45,7 +45,10 @@ interface ConnectionManagerEvents {
   'connected:entity': (entityId: string) => void;
   'disconnected:entity': (entityId: string) => void;
   'error:entity': (entityId: string, error: any) => void;
-  'event:entity': (entityId: string, data: any) => void;
+  // connectionId (participant-set-scoped socket identity) lets consumers
+  // disambiguate concurrent sessions sharing an entity — optional for
+  // backward compatibility with older listeners.
+  'event:entity': (entityId: string, data: any, connectionId?: string) => void;
 }
 
 export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
@@ -259,11 +262,15 @@ export class ConnectionManager extends EventEmitter<ConnectionManagerEvents> {
         heartbeatStarted = true;
       }
       
-      // Route to appropriate handler
+      // Route to appropriate handler. Entity events carry the connectionId so
+      // consumers can disambiguate CONCURRENT sessions that share an entity
+      // (every chat contains the own entity, e.g. 'user'): connection ids are
+      // participant-set-scoped (`entity-<id>-<participantKey>`), making the
+      // socket identity an exact session discriminator.
       if (info.type === 'sync') {
         this.emit('event:sync', data);
       } else if (info.type === 'entity' && info.entityId) {
-        this.emit('event:entity', info.entityId, data);
+        this.emit('event:entity', info.entityId, data, connectionId);
       }
     });
 

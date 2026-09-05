@@ -122,6 +122,22 @@ export function shouldShowEmptyChatHint(
 }
 
 /**
+ * Empty-chat splash reveal gate (display mirror of the §1-10 engine contract):
+ * reveal the chat as soon as the message query settled AND the engine reported
+ * `has_first_mes === false` with zero messages — no greeting message will ever
+ * arrive for that conversation, so waiting for content would strand it on the
+ * splash forever. The splash must hold while the signal is unknown (null) or a
+ * greeting is pending (true).
+ */
+export function shouldRevealEmptyChat(
+  loading: boolean,
+  hasFirstMes: boolean | null,
+  messageCount: number,
+): boolean {
+  return !loading && hasFirstMes === false && messageCount === 0;
+}
+
+/**
  * Replace-vs-restart gate (§2-4): GENERATE_GREETING is valid only while the
  * greeting is the only message (the engine enforces this too and returns ERROR
  * otherwise — the client then falls back to START_NEW_SCENARIO). `true` also
@@ -133,6 +149,22 @@ export function shouldUseGenerateGreeting(
   return (
     messages.length === 0 ||
     (messages.length === 1 && messages[0].message_type === 'greeting')
+  );
+}
+
+/**
+ * Authored greeting swipes (§1-10): the delivered first_mes followed by the
+ * partner profile's `alternate_greetings` (JSON text column). Malformed or
+ * empty entries degrade silently; a missing profile leaves just the delivered
+ * greeting. Each swipe is macro-resolved for display inside GreetingBubble.
+ */
+export function buildGreetingSwipes(
+  greetingContent: string,
+  profile: { alternate_greetings?: string | null } | null,
+): string[] {
+  const alternates = parseAlternateGreetings(profile?.alternate_greetings);
+  return [greetingContent, ...alternates].filter(
+    g => g && g.trim().length > 0,
   );
 }
 
@@ -1777,15 +1809,34 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // keep snapping to the bottom (absorbing async image decode / late batches),
   // then reveal the screen. Re-runs whenever the message list grows during
   // init so a late-arriving message still re-anchors the viewport to the bottom.
+  //
+  // Known-empty chats reveal WITHOUT content: once the message query has
+  // settled AND the engine reported has_first_mes=false, no greeting message
+  // will EVER arrive for this conversation (§1-10 engine contract) — waiting
+  // for content here stranded those chats on the splash forever. The revealed
+  // empty chat shows the generate-greeting hint via the ListEmptyComponent;
+  // a message arriving later still pins to the bottom via onContentSizeChange
+  // (messagesCountAtReveal stays 0).
   useEffect(() => {
     const hasRealContent =
       messages.length > 0;
+    const isKnownEmpty = shouldRevealEmptyChat(
+      loading,
+      hasFirstMes,
+      messages.length,
+    );
     if (
       !isReadyToShowRef.current &&
       !isInitialScrollDone.current &&
-      initialScrollTarget === 'bottom' &&
-      hasRealContent
+      ((initialScrollTarget === 'bottom' && hasRealContent) || isKnownEmpty)
     ) {
+      if (isKnownEmpty) {
+        // Nothing to scroll or pin — reveal immediately.
+        isInitialScrollDone.current = true;
+        isReadyToShowRef.current = true;
+        setIsReadyToShow(true);
+        return;
+      }
       const scroll = () => flatListRef.current?.scrollToEnd({ animated: false });
       // First snap immediately, then keep re-snapping on a few frames so rows
       // get a chance to render (images decode async → content grows).
@@ -1809,7 +1860,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }, 60);
       }
     }
-  }, [messages, messagesWithDivider, initialScrollTarget]);
+  }, [messages, messagesWithDivider, initialScrollTarget, loading, hasFirstMes]);
 
   const persistMarkAsRead = useCallback(() => {
     // Derived unread (A5/A2): mark partner-sent messages in THIS conversation
@@ -2029,15 +2080,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [messages, ownEntityId]);
 
-  // Authored swipes: [delivered first_mes, ...alternate_greetings (JSON)].
-  // Each swipe is macro-resolved for display inside GreetingBubble.
-  const greetingSwipes = useMemo(() => {
-    if (!greetingMessage) return [];
-    const alternates = parseAlternateGreetings(partnerProfile?.alternate_greetings);
-    return [greetingMessage.content, ...alternates].filter(
-      g => g && g.trim().length > 0,
-    );
-  }, [greetingMessage, partnerProfile]);
+  // Authored swipes: [delivered first_mes, ...alternate_greetings (JSON)]
+  // (pure gate in buildGreetingSwipes — unit-testable without the RN harness).
+  const greetingSwipes = useMemo(
+    () =>
+      greetingMessage
+        ? buildGreetingSwipes(greetingMessage.content, partnerProfile)
+        : [],
+    [greetingMessage, partnerProfile],
+  );
 
   // {{char}} → profile nickname || name; {{user}} → own entity alias.
   const charName = partnerProfile?.nickname || partnerProfile?.name || partnerName;
@@ -2200,7 +2251,11 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
   return (
     <ThemedView style={styles.container}>
       {!isReadyToShow && (
-        <ThemedView style={[styles.loadingOverlay, styles.centered]} pointerEvents="none">
+        <ThemedView
+          style={[styles.loadingOverlay, styles.centered]}
+          pointerEvents="none"
+          testID="chat-detail-splash"
+        >
           <ActivityIndicator size="large" color={theme?.colors.accent.primary} />
         </ThemedView>
       )}

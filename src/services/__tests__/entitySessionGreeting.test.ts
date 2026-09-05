@@ -162,21 +162,25 @@ describe('EntitySessionService — has_first_mes surfacing (§1-10)', () => {
     expect(session.hasFirstMes).toBe(false);
   });
 
-  it('does NOT fabricate a greeting — session.hasFirstMes stays undefined when the payload omits it', async () => {
+  it('maps an ABSENT has_first_mes to false — the engine omits the field when no greeting will be delivered (omitempty)', async () => {
     const svc = EntitySessionService.getInstance();
     const session = makeSession();
     (svc as any).sessions.set(session.interactionId, session);
 
     await (svc as any).handleInitEntityResponse(
       'char-entity',
-      initEntitySuccess({ session_id: 's-char' }),
+      initEntitySuccess({ session_id: 's-char' }), // no has_first_mes key
       null,
       session,
       session.interactionId,
     );
 
-    expect(session.hasFirstMes).toBeUndefined();
-    // No greeting message was created by the handler.
+    // Wire contract (engine TestInitEntityResponse_HasFirstMesJSONShape):
+    // absent ≡ false — the engine serializes the field with omitempty. The
+    // previous "stays undefined" behavior left no-first_mes cards on the
+    // ChatDetail splash forever (no message can ever arrive for them).
+    expect(session.hasFirstMes).toBe(false);
+    // Still no greeting fabrication — no message row was created.
     const { createConversationMessage } = require('../../database/repositories/conversation_messages');
     expect(createConversationMessage).not.toHaveBeenCalled();
   });
@@ -195,5 +199,72 @@ describe('EntitySessionService — has_first_mes surfacing (§1-10)', () => {
     );
 
     expect(session.hasFirstMes).toBeUndefined();
+  });
+});
+
+describe('EntitySessionService — live greeting delivery keeps message_type (§1-10)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockInitiateSync.mockClear();
+    mockInitiateSync.mockResolvedValue(undefined);
+    resetSingleton();
+  });
+
+  it('persists a greeting-flagged ENTITY_UTTERANCE with message_type=greeting — the swiper gate depends on it', async () => {
+    const svc = EntitySessionService.getInstance();
+    const session = makeSession();
+    (svc as any).sessions.set(session.interactionId, session);
+
+    // Engine DeliverGreeting emits the authored first_mes as a plain
+    // ENTITY_UTTERANCE flagged with message_type="greeting" on the wire.
+    await (svc as any).handleIncomingUtterance(
+      session,
+      session.interactionId,
+      {
+        entity_id: 'char-entity',
+        message_id: 'msg-engine-greeting',
+        type: 'verbal',
+        message_type: 'greeting',
+        content: 'Hi {{user}}!',
+      },
+      'evt-greeting-live',
+    );
+
+    const {
+      createConversationMessage,
+    } = require('../../database/repositories/conversation_messages');
+    expect(createConversationMessage).toHaveBeenCalledTimes(1);
+    expect(createConversationMessage.mock.calls[0][0]).toMatchObject({
+      message_type: 'greeting',
+      content: 'Hi {{user}}!',
+      sender_entity_id: 'char-entity',
+    });
+  });
+
+  it('persists a plain ENTITY_UTTERANCE as message_type=text (no greeting flag)', async () => {
+    const svc = EntitySessionService.getInstance();
+    const session = makeSession();
+    (svc as any).sessions.set(session.interactionId, session);
+
+    await (svc as any).handleIncomingUtterance(
+      session,
+      session.interactionId,
+      {
+        entity_id: 'char-entity',
+        message_id: 'msg-engine-text',
+        type: 'verbal',
+        content: 'regular reply',
+      },
+      'evt-text-live',
+    );
+
+    const {
+      createConversationMessage,
+    } = require('../../database/repositories/conversation_messages');
+    expect(createConversationMessage).toHaveBeenCalledTimes(1);
+    expect(createConversationMessage.mock.calls[0][0]).toMatchObject({
+      message_type: 'text',
+      content: 'regular reply',
+    });
   });
 });

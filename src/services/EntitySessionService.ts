@@ -72,8 +72,10 @@ export interface InteractionSession {
    * authored `first_mes` (read from the INIT_ENTITY SUCCESS payload). The
    * greeting itself is NOT fabricated here — it arrives as a normal
    * `message_type="greeting"` ConversationMessage via the message-load/sync
-   * path. `undefined` until an INIT_ENTITY SUCCESS carrying `has_first_mes`
-   * has been processed.
+   * path. `undefined` until the first INIT_ENTITY SUCCESS has been processed;
+   * on SUCCESS the value is ALWAYS boolean — the engine serializes the field
+   * with omitempty, so a payload WITHOUT `has_first_mes` means false (no
+   * authored greeting will be delivered for this chat).
    */
   hasFirstMes?: boolean;
   /**
@@ -289,8 +291,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
     cm.entitySessionListenersInstalled = true;
 
-    cm.on('event:entity', (entityId: string, event: any) => {
-      cm.entitySessionEventTarget?.handleEntityEvent(entityId, event);
+    cm.on('event:entity', (entityId: string, event: any, connectionId?: string) => {
+      cm.entitySessionEventTarget?.handleEntityEvent(entityId, event, connectionId);
     });
     cm.on('disconnected:entity', (entityId: string) => {
       cm.entitySessionEventTarget?.handleEntityDisconnected(entityId);
@@ -481,6 +483,30 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     // Check if sync connection is active
     if (!this.connectionManager.isConnected('sync')) {
       throw new Error('Sync connection required for entity sessions');
+    }
+
+    // Session dedup (recreation/effect-reentry guard): if a live session for
+    // the SAME own entity + participant set already exists, reuse it instead
+    // of stacking a parallel one. Re-entry happens when the chat screen's
+    // init effect re-fires (route/participant/connection deps change — e.g.
+    // an entity deleted + recreated while the screen is open) while the
+    // previous session is still alive. Parallel sessions for one chat fought
+    // over the same participant-set-scoped sockets ("already exists,
+    // disconnecting first"), split INIT responses across two session
+    // objects, and starved the all-active gate → 15s timeout → retry storm.
+    // (The context retry path is unaffected: retryInitialization stops the
+    // matching session BEFORE re-calling here, so nothing is found to reuse.)
+    const requestedParticipantKey = [...participantIds].sort().join('+');
+    for (const [, existing] of this.sessions.entries()) {
+      if (
+        existing.ownEntityId === ownEntityId &&
+        [...existing.participantIds].sort().join('+') === requestedParticipantKey
+      ) {
+        log.info(
+          `Reusing existing interaction session for [${participantIds.join(', ')}] (${existing.interactionId}) instead of starting a parallel one`,
+        );
+        return existing;
+      }
     }
 
     // Generate a temp UUIDv7 for optimistic navigation
@@ -1374,7 +1400,11 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   // handleEntityEvent — process incoming WebSocket events
   // ---------------------------------------------------------------------------
 
-  private async handleEntityEvent(entityId: string, event: any): Promise<void> {
+  private async handleEntityEvent(
+    entityId: string,
+    event: any,
+    connectionId?: string
+  ): Promise<void> {
     log.debug(`handleEntityEvent called for entity ${entityId}, event type: ${event.event_type}, status: ${event.status}`);
 
     // First, try to find in pending sessions (for sessions still initializing)
@@ -1382,17 +1412,50 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     let interactionSession: InteractionSession | null = null;
     let interactionId: string | null = null;
 
-    // Find the InteractionSession that contains this entity
-    if (!targetSession) {
+    // Connection-exact routing (recreation-hijack fix): when the transport
+    // tells us WHICH socket delivered the event, resolve the
+    // InteractionSession by that exact connection id. Connection ids embed
+    // the participant-set key (`entity-<id>-<participantKey>`), so this
+    // disambiguates concurrent sessions sharing an entity (every chat
+    // contains the own entity, e.g. 'user'). The legacy first-match scan
+    // let a STALE session for a deleted partner hijack the new chat's
+    // INIT_ENTITY response — the canonical-id swap landed on the wrong
+    // session while the live greeting was persisted under the new
+    // session's abandoned temp id (observed on device: entity recreated
+    // from the chat screen → chat stuck on the preparing bubble with the
+    // greeting invisible and connectivity never turning active).
+    if (connectionId) {
       for (const [iid, session] of this.sessions.entries()) {
-        if (session.connections.has(entityId)) {
+        const conn = session.connections.get(entityId);
+        if (conn && conn.connectionId === connectionId) {
           interactionSession = session;
           interactionId = iid;
           break;
         }
       }
+      // pendingSessions is keyed by bare entityId — with concurrent
+      // sessions the entry may belong to a DIFFERENT chat; only trust it
+      // when its connection id matches the delivering socket.
+      if (targetSession && targetSession.connectionId !== connectionId) {
+        let pendingMatch: EntitySession | undefined;
+        for (const ps of this.pendingSessions.values()) {
+          if (ps.connectionId === connectionId) {
+            pendingMatch = ps;
+            break;
+          }
+        }
+        targetSession = pendingMatch;
+      }
+      if (!interactionSession) {
+        // The exact session is gone (torn down between emit and delivery) —
+        // the event is stale. Routing it to an unrelated session that
+        // happens to contain this entity would reintroduce the hijack.
+        log.debug(`Event ${event.event_type} for ${entityId} arrived on unknown connection ${connectionId}, dropping`);
+        return;
+      }
     } else {
-      // Also find if this entity belongs to an InteractionSession
+      // Legacy fallback (no connection id from the transport): first
+      // session whose connections contain the entity.
       for (const [iid, session] of this.sessions.entries()) {
         if (session.connections.has(entityId)) {
           interactionSession = session;
@@ -1542,12 +1605,17 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         // message_type="greeting" message via the message-load/sync path.
         // Read BEFORE the all-active check so the value is on the session by
         // the time session:started emits (which carries the session object).
-        if (typeof event.payload?.has_first_mes === 'boolean') {
-          interactionSession.hasFirstMes = event.payload.has_first_mes;
-          log.info(
-            `Entity ${entityId} reports has_first_mes=${event.payload.has_first_mes} (interaction ${interactionId})`,
-          );
-        }
+        //
+        // The engine serializes the field with omitempty (pinned by its
+        // TestInitEntityResponse_HasFirstMesJSONShape): a SUCCESS payload
+        // WITHOUT `has_first_mes` means FALSE. Mapping absence to false is
+        // what lets the empty-chat UI reveal for cards with no authored
+        // first_mes — treating absence as "unknown" left those chats on the
+        // splash forever (no message can ever arrive for them).
+        interactionSession.hasFirstMes = event.payload?.has_first_mes === true;
+        log.info(
+          `Entity ${entityId} reports has_first_mes=${interactionSession.hasFirstMes} (interaction ${interactionId})`,
+        );
 
         const connection = interactionSession.connections.get(entityId);
         if (connection) {
@@ -1961,9 +2029,16 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       return;
     }
 
-    // Determine message type
-    let messageType: 'text' | 'audio' | 'combined' | 'image' = 'text';
-    if (utterance.image_data) {
+    // Determine message type. The engine flags the authored first_mes
+    // (DeliverGreeting) with `message_type: "greeting"` on the wire — persist
+    // it verbatim so the chat renders the greeting through the
+    // AlternateGreetingSwiper (alternate-greeting cycling + regenerate slot)
+    // instead of a plain bubble. Media fields decide the remaining types.
+    let messageType: 'text' | 'audio' | 'combined' | 'image' | 'greeting' =
+      'text';
+    if (utterance.message_type === 'greeting') {
+      messageType = 'greeting';
+    } else if (utterance.image_data) {
       messageType = 'image';
     } else if (utterance.audio && utterance.content) {
       messageType = 'combined';
