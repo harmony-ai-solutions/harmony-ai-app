@@ -1,0 +1,103 @@
+# 3-2 — App: Wipe & Rebuild Bootstrap (+ Placeholder Migration 000045)
+
+> **Rewritten per ruling D11** (plan review 2, user-ruled 2026-09-06): the app no longer performs an id
+> migration or a timestamp repair. Convergence is **engine-authoritative** — the app wipes local data once
+> and re-syncs from the migrated engine. This replaces the previous content of this phase (app id-pattern
+> migration + timestamp repair pass + `repair_completed` marker), which is **fully superseded**.
+
+## Objective
+
+One-time, guided local reset: on first launch after this update the app wipes its database and the
+id-keyed AsyncStorage preferences (D19), then performs a **full pull** from the already-migrated engine.
+Only the engine ever computes migrated ids; the app receives them verbatim.
+
+## Binding Rules
+
+- **Ordering (D11):** the engine deploy (3-1 migration 000045 + 3-3 gate v2) lands **before** this app
+  release. A wiped app pointing at an un-migrated engine is covered by 3-3's app-side
+  `serverUpdateRequired` — the wipe destroys nothing that isn't on the engine except the accepted loss
+  below, and data re-pulls once the engine is updated.
+- **Placeholder migration 000045:** `src/database/migrations/` gains a **comment-only no-op** to keep
+  cross-repo numbering parity (both repos at 000044 → both at 000045). Runner-compatible: comments are
+  stripped → zero executable statements → version still recorded (`migrations.ts:432-445`). Description
+  text (binding): *"Placeholder — engine counterpart 000045 performs the entity id-pattern migration;
+  app converges via full re-sync (no local data migration required)."*
+- **Accepted loss (user-ruled):** app-local rows created while offline and never pushed. Auto-sync
+  triggers bound the window: on connect, on explicit actions (create/edit/delete/save/duplicate —
+  `CreateAIScreen.tsx:1054,1225`, `CharactersScreen.tsx:716`, `PersonaEditScreen.tsx:814`,
+  `userEntities.ts:600`, `EntitySessionService.ts:1744,2085`), on session start, and manual
+  (`SyncSettingsScreen.tsx:217,256`). Run a manual sync before updating if the window matters.
+
+## Implementation Steps
+
+1. **Wipe trigger (D61 — review 5; supersedes D38's `initiateSync` placement):** one-time persisted flag,
+     checked as the first step of **`DatabaseContext.initializeDb`** (`DatabaseContext.tsx:41-66`) — the
+     pre-render boot window already gated by `isLoading`, rendering `DatabaseLoadingScreen` (which already
+     imports and calls `wipeDatabaseCompletely`, `DatabaseLoadingScreen.tsx:20/:38`). React mounts screens
+     child-first, BEFORE the on-connect sync effect (`SyncConnectionContext.tsx:295`) — an
+     `initiateSync`-anchored wipe ran under already-rendered, querying screens; boot is strictly before
+     every sync trigger, preserving D38's "before any sync starts" rationale with none of the race.
+     Sequence: read flag → wipe (**`wipeDatabaseCompletely`** — NOT test-only `clearDatabaseData`,
+     `connection.ts:209`; `clearDatabaseData` also drops `schema_migrations` and re-runs all migrations
+     on the empty DB, `connection.ts:228-231, 254`) + **D19 prefs sweep** → clear flag →
+     `initializeDatabase()`. The review-4 addenda shrink at boot: the lazy `syncDb` handle
+     (`connection.ts:406-433`) is not yet opened and no SyncService in-memory state exists yet (keep the
+     wipe-path resets as belt-and-braces); the Keychain concern is moot — SQLCipher is not linked and
+     `getOrCreateEncryptionKey` never stores a key (`connection.ts:60-67`), so the reset is a no-op.
+     Dev-context: auto-wipe with the visible notice; a confirm prompt is fine too.
+     **D58 (as amended by D61):** the "**Rebuilding from Soulbits Engine…**" label (proper i18n keys, en
+     only per app convention; label: "Soulbits Engine") rides the existing loading screen during the wipe
+     and **clears when the wipe completes** — not when the first pull finalizes (empty-DB rendering
+     during the subsequent on-connect pull is safe: `sync:data-applied` refreshes the lists).
+     No screen renders against a half-wiped database.
+2. **Preference reset (D19):** clear `chat_global_impersonated_entity`, `@harmony_chat_reply_mode_*`,
+   and legacy `chat_entity_pref_*` keys in the same flow (sweep pattern precedent:
+   `ChatPreferencesService.ts:100-113`). Preferences reset once — no remap machinery.
+3. **Pull-not-push verification (rewritten per review-3 finding — the real mechanism is the watermark,
+   not the initial-upload flag):** the guarantee is the **cleared-watermark → `force_full_sync`
+   escalation** (`SyncService.ts:505-517`): `storedLastSync === 0` escalates to
+   `effectiveForceFullSync`, and the engine re-sends everything only on that flag. The
+   `@harmony_sync_initial_upload_done:{source}` flag (`ConnectionStateManager.ts:470-508`) is **not
+   cleared** by either wipe helper and **never gates pulls** — it only shapes upload `since`-values,
+   which `forceFullSync` zeroes anyway; an empty DB uploads zero SYNC_DATA events regardless (no
+   engine-destruction hazard exists). Tests assert: **first post-wipe `initiateSync` sends
+   `force_full_sync: true`** (mock `getLastSyncTimestamp`); the surviving flag's inconsistency is
+   harmless and noted.
+4. **`user` persona merge (premise corrected in review 3 — there is NO local seeder):** production code
+   never creates the `user` entity row (only `createUserPersona`/`createUserPersonaFromCard` from UI
+   flows; `userEntities.test.ts:203` notes "raw id until the Phase-5 seeder lands" — it never landed).
+   The engine's `user` row arrives via pull and simply INSERTs into the empty DB. Test: "engine `user`
+   row inserts cleanly on first sync" — no LWW merge/flip-flop test is possible or needed.
+5. **Version advertisement:** after the first successful full sync, the app advertises sync schema
+   version 2 (3-3). Until then the engine-side gate (min 2) already refuses the pre-rebuild state.
+6. **Placeholder migration** as specced above; no functional content.
+7. **D21-7 rides this release (D32):** the `normalizeTimestampForSync`/`toUnixTimestamp` UTC fix ships
+   here — landing it earlier would cause one-time LWW churn on legacy format-A rows; post-wipe all
+   local rows are engine-origin (format B/C) and the churn window vanishes.
+
+## Files to Create/Modify
+
+- `src/database/migrations/000045_AppNoOp.sql` (name TBD by convention) + `src/database/migrations.ts`
+  array entry
+- Wipe bootstrap (SyncService bootstrap or a small module colocated with sync state)
+- `src/services/ChatPreferencesService.ts` (key sweep)
+
+## Tests (app, migrations + integration projects)
+
+- Wipe runs exactly once (persisted flag, checked inside `DatabaseContext.initializeDb`) — BEFORE any
+  screen renders (no query hits a half-wiped DB); DB empty; prefs + watermarks cleared.
+- **Wipe shows the labeled rebuild gate (D58/D61 — "Rebuilding from Soulbits Engine…", i18n) and clears
+  it when the wipe completes; the first on-connect pull then repopulates (empty-DB render safe); `syncDb`
+  not yet open at boot (review-4 addenda retained as belt-and-braces).**
+- **First post-wipe sync sends `force_full_sync: true`** (watermark-escalation mechanism, D38 framing).
+- Engine `user` row inserts cleanly into the empty DB on first sync (no local seeder exists).
+- 000045 placeholder records its version and executes nothing.
+- Preference sweep clears all three key families (D19).
+
+## Checklist
+
+- [ ] One-time wipe + prefs sweep + watermark clearing
+- [ ] Pull-not-push verified (initial-upload flag interplay)
+- [ ] `user` merge verified on first sync
+- [ ] Placeholder 000045 with the binding description text
+- [ ] v2 advertised post-rebuild (3-3); phase doc updated

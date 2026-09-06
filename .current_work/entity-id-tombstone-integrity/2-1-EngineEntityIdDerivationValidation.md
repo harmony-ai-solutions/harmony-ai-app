@@ -1,0 +1,102 @@
+# 2-1 — Engine: Entity ID Derivation & Derived-Only Creation
+
+## Objective
+
+Implement decision **D2** engine-side: timestamped default id derivation at every creation seam, and — per
+review-3 rulings **D22/D23** — **derived-only creation**: ids are minted by construction and locked from
+birth. There is no explicit-id mode, no charset validation surface at runtime (D20 moot), and no rename
+(D22). Resolves ledger **N3** (charset, by construction) and **N4** (by removal — see 2-1b).
+
+## ID Schema (binding, matches summary.md D2/D3; creation is derived-only per D23)
+
+```
+id        := base "-" timestamp
+base      := slug(displayName)           // runs of [^A-Za-z0-9] → single "-", trim edges, cap 48 chars
+                                             empty → "entity"
+timestamp := YYYYMMDDHHMMSS in UTC       // second precision
+exempt    : built-in ids — "user" (D10), "claire"/"default-user-profile" seeds (D31)
+```
+
+Example: card "Isabella" created 2026-09-05 12:35:14 UTC → `Isabella-20260905123514`.
+Derived-id collisions within the same second fall through to the existing ghost-aware
+`dedupe_id_if_taken` in-transaction next-free resolution (`base-N` series — keep exactly as-is).
+The charset regex survives **only** inside 3-1's migration as the "already-conforming" detector.
+
+## Implementation Steps
+
+1. **Shared derivation helper** in the engine (e.g. `database/controllers/entity_controller.go` next to
+   `ResolveEntityID`): `DeriveEntityID(name string, t time.Time) string` per the schema above (UTC
+   formatting). Unit-test the slug rules: `"Isabella 2" → "Isabella-2"`, `"  Max  2 " → "Max-2"`,
+   `"«Zoë»!!" → "Zo"…"` (non-ASCII strips to `-` boundaries), empty → `entity`. (6-1 §1 vectors pin this
+   function — they are 2-1-only post-D40.)
+2. **Management API `POST /api/entities`** (`management/routes_entities.go`) — **derived-only wire contract
+   (D15 as amended by D23)**:
+   - **D66 (review 5 — final shape):** `{ name, character_profile_id?, entity_type?, dedupe_id_if_taken: true }` —
+      the ONLY mode: `name` required (400 otherwise; human name, may contain spaces — never
+      charset-validated), id derived via `DeriveEntityID(name, now)` before in-transaction next-free
+      resolution; 201 echoes the resolved id. `entity_type` stays optional exactly as today
+      (`routes_entities.go:184`) — persona creates depend on it (`entityService.js:94` sends
+      `entity_type: 'user'`; dropping it would collapse the ai/user split). Today's route takes `id`
+      (**required**, `:182`) + optional `alias` (`:185`): requests carrying `id` **or `alias`** now →
+      `400 'id and alias are server-assigned at creation'` (alias editable afterwards via `updateEntity`).
+      *(Implementation: route through the existing `CreateEntityWithAliasResolved` spine,
+      `entity_controller.go:105-118`; note `DuplicateEntity` does NOT share it — it calls `ResolveEntityID`
+      + `CreateEntity` directly (`:280`), which is where the D52 swap lands — review-5.)*
+   - `duplicate` (`POST /entities/:id/duplicate`): derived id via **`DeriveEntityID(source display name,
+     now)`** — display name = `alias` if set, else linked profile name, else id (**D63, review 5:
+     deliberately decoupled from 3-1's migration source `alias → old id → profile` — runtime duplicates
+     live in the post-migration world where ids are timestamps; migrations deal with legacy ids-as-names**),
+     with `dedupe_id_if_taken` backstop. **D52 (review 4 — behavior change):** this REPLACES
+     the copy-series `ResolveEntityID(src.ID)` mechanic from ed517ea (`Max-2` → now `Max-<ts>`); the old
+     "duplicate derivation intact" checklist line is void. Alias stays copy-suffixed via `ResolveAliasCopy`
+     (existing `DuplicateEntity` path — the D52/D56 tie-in).
+   - **Rename route deleted** (D22 — owned by 2-1b).
+3. **Alias population (D15 + D30):** `alias` defaults to `name` on derived create. If the alias collides
+   with a **live** entity's alias (`enforceAliasUniqueness`, definition `routes_entities.go:82-93`,
+   create-path call `:233-242`; partial unique
+   index — tombstoned aliases never block, verified), **auto-suffix via existing `ResolveAliasCopy`**
+   (`entity_controller.go:209-244`): live twin `Isabella` → alias `Isabella 2`. Create never 400s on a
+   name collision. (Alias uniqueness otherwise stays live-aware/partial-index as today.)
+4. **Seeds (D31):** `claire` (`config/db/init.go:132`) and `default-user-profile` (`:289`) keep their raw
+   ids — documented exempt built-ins like `user`; no per-install derivation churn. The seed path needs no
+   new machinery.
+5. **`EntityConfig` payload note**: keep the phase-2 contract (profile embedded as `character_profile`; 201
+   echoes the **resolved** id) — the FE depends on the echo (record decision 1).
+
+## Review-3 Amendments
+
+- Explicit-create mode and rename validation are **deleted** (D22/D23); the charset/reserved 400s on
+  create/rename no longer exist at runtime. Reserved ids remain relevant only as: `user` exempt (D10),
+  `deleted` protected for the `GET /api/entities/deleted` route (5-1), and app-side **name** checks (D33).
+- Test-suite precision: "33 tests" = `routes_entities_test.go` specifically; the management package has
+  39 (extend the entity file).
+
+## Files to Modify
+
+- `database/controllers/entity_controller.go` (`DeriveEntityID`; derived create/duplicate paths; alias
+  auto-suffix via `ResolveAliasCopy`)
+- `management/routes_entities.go` (derived-only contract, 400-on-`id`, alias default + suffix)
+- Seed path `config/db/init.go` — documentation comment only (D31)
+
+## Tests (extend `routes_entities_test.go`'s 33; management package totals 39)
+
+- Derivation unit tests (slug rules, UTC, cap — the 6-1 §1 vector list).
+- Create `{ name, dedupe_id_if_taken: true }` → id matches `Name-YYYYMMDDHHMMSS` (clock seam injected);
+  `name` missing → 400; **request carrying `id` or `alias` → 400 'server-assigned'** (D23/D66).
+- `alias` defaulted to `name`; live same-name twin → alias `Isabella 2` (D30); tombstoned twin → no suffix.
+- Same-second id collision → `Name-YYYYMMDDHHMMSS-2` (next-free series; ghost-aware).
+- **Duplicate derives `Name-YYYYMMDDHHMMSS` from the source display name (D52 — copy-series replaced);
+  alias copy-suffixed (`ResolveAliasCopy`).**
+- Rename endpoint absent (covered in 2-1b).
+
+## Codebase Mapping Consulted
+
+`harmony-link-private/.planning/codebase/`, senju record decisions 1–3 + ledger N3/N4, plan reviews 1–3.
+
+## Checklist
+
+- [ ] `DeriveEntityID` + unit tests (6-1 §1 vectors)
+- [ ] Derived-only create contract (400 on `id`; `name` required; alias default + auto-suffix D30)
+- [ ] Duplicate derivation switched to `DeriveEntityID` (D52 — copy-series replaced); rename route deleted (2-1b)
+- [ ] Seed exemptions documented (D31)
+- [ ] Tests green; phase doc updated
