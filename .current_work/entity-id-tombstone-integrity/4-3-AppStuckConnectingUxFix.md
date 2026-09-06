@@ -13,7 +13,8 @@ a never-revealing splash. (Hotfix-grade; independent of the ID-schema phases.)
 - `ChatDetailScreen.tsx:2196-2200`: `connectionState = isConnected ? (isSessionActive ? 'connected' : 'connecting') : 'offline'`
   → permanent `connecting` (amber pulsing dot, `chatDetail.json:95`).
 - Splash: `isReadyToShow` requires `hasRealContent || isKnownEmpty`; `hasFirstMes` only set from INIT_ENTITY
-  SUCCESS payload (`has_first_mes`) → stays `null` → splash persists (`ChatDetailScreen.tsx:134-137, 2253-2261`).
+  SUCCESS payload (`has_first_mes`) → stays `null` → splash persists (`ChatDetailScreen.tsx:134-137` = the
+  `shouldRevealEmptyChat` pure helper, state `:370`, render gate `:2253-2261` — review-7 ref precision).
 - Recovery loop today: `handleInitEntityResponse` ERROR branch (`EntitySessionService.ts:1756-1807`),
   `recoverInitEntity` re-sync + resend (max 2), then give-up; context retry scheduler
   (`scheduleRetry`, `isRetryableError` — `EntitySessionContext.tsx:250-357`).

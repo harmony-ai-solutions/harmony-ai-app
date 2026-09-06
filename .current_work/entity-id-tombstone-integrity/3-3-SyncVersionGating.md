@@ -55,6 +55,13 @@ duplicate entities (old-id row + new-id row on either side). Implements **D6**.
    - On `HANDSHAKE_ACCEPT` (`SyncService.ts:425-467`), compare engine's advertised version; if engine < app's,
      abort sync with a user-facing state `serverUpdateRequired` ("Harmony Link update required — please update
      Harmony Link before syncing").
+   - **Reject-reason mapping (review 7 — belt-and-braces; the accept-compare above is the operative
+     v1→v2 path and is verified to cover cloud mode too, since the app handshakes there as well):**
+     the existing `SYNC_REJECT` handler (`handleSyncReject`, `SyncService.ts:721-741`) special-cases
+     `reason === 'unsupported_schema_version'` → enters the same sticky `serverUpdateRequired` state
+     (suppression + slow re-probe) instead of the generic rejection notification. Forward-compat: a
+     future v3 engine rejecting an already-shipped v2 app degrades to the actionable state, not a
+     generic error.
    - **Review-3 plumbing note:** `connectionStatus` is *derived* by `computeConnectionStatus(...)`
       (`connectionStatusHelper.ts:39-120`, mode-branched cloud/selfhosted) — a new union member requires a
       **new input parameter** wired through `SyncConnectionContext.tsx:1024-1027`, inserted **before the
@@ -65,8 +72,12 @@ duplicate entities (old-id row + new-id row on either side). Implements **D6**.
       **D57 (review 4) — the gate must NOT create a reconnect loop:** `SyncConnectionContext.tsx:310-312`
       auto-schedules reconnect on any disconnect and `:295` re-fires sync on connect, so a WS-teardown
       implementation would cycle connect → handshake → abort → reconnect forever. Instead,
-      `serverUpdateRequired` is a **sticky** state that (a) suppresses reconnect scheduling and on-connect
-      `initiateSync`, and (b) starts a **slow background re-probe** (~10 min, constant) that re-handshakes
+      `serverUpdateRequired` is a **sticky** state that (a) suppresses reconnect scheduling and —
+      **review 7 generalization: ONE choke point** — short-circuits `initiateSync()` at its top while
+      sticky, covering ALL sync triggers (on-connect, token refresh `soulbitsTokenSync.ts:85`, session
+      start `EntitySessionService.ts:1744`, screen and manual pulls; manual pulls land on
+      SyncSettingsScreen's `serverUpdateRequired` status card rather than a generic error), and (b)
+      starts a **slow background re-probe** (~10 min, constant) that re-handshakes
       — the app auto-recovers once the engine is updated (D11's "data re-pulls once the engine is
       updated"). The sticky state clears on an accepted version-≥-2 handshake.
    - `ConnectionStatusBadge` consumes raw booleans — needs the new derived prop (review-2 note stands).
@@ -91,13 +102,17 @@ duplicate entities (old-id row + new-id row on either side). Implements **D6**.
 - Absent field treated as version 1 (both sides).
 - D11 order simulation: engine-first rollout — old app rejected cleanly, wiped app rebuilds then advertises 2;
   app-before-engine mistake → `serverUpdateRequired`, recoverable by updating the engine (re-pull).
-- **D57: while sticky, auto-reconnect and on-connect sync are suppressed and no handshake loop occurs;
+- **D57: while sticky, auto-reconnect is suppressed and `initiateSync` short-circuits for EVERY trigger
+  (on-connect, token refresh, session start, manual) — no handshake loop and no error-notification spam;
   the slow re-probe recovers automatically after a (simulated) engine update.**
+- **Review 7: `SYNC_REJECT` with `reason: unsupported_schema_version` → sticky `serverUpdateRequired`
+  (not the generic rejection notification).**
 
 ## Checklist
 
 - [ ] Constants defined both repos (engine min 2 at the single deploy; app 2 post-rebuild)
 - [ ] Engine reject path + payload (extends existing `SYNC_REJECT`)
 - [ ] App gate + user-facing state (net-new union member + badge state)
+- [ ] Reject-reason mapping + `initiateSync` choke-point short-circuit (review 7)
 - [ ] Optional-field backward semantics covered by tests
 - [ ] Both suites green; phase doc updated

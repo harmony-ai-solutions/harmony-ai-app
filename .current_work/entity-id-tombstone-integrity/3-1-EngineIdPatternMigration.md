@@ -36,7 +36,8 @@ display_name: alias → old id → linked character_profiles.name (**D63 — dec
               duplicate source alias → profile → id; legacy ids WERE the display name**)
 conforming?  Go check: charset ^[A-Za-z0-9][A-Za-z0-9._-]*$ AND ends -\d{14} OR -\d{14}-\d+
               (dedupe-suffixed timestamped ids count as conforming/taken — review-5 fixture)
-parse3:      the shared 3-format Go parser (deliverable owned by 5-1; 6-1 §2 vectors)
+parse3:      the shared 3-format Go parser (deliverable owned HERE since review 6 — its only remaining
+              consumer post-D75; 6-1 §2 vectors)
 tie-break:   (created_at, old_id) — plain Go string comparison IS byte/codepoint order (the BINARY
               pin); never localeCompare
 ```
@@ -53,13 +54,25 @@ tie-break:   (created_at, old_id) — plain Go string comparison IS byte/codepoi
    **and their ids count as TAKEN**: the tie-break must also avoid collisions with untouched
    already-conforming ids (review-2 finding, fixture required — now including a pre-existing
    `Name-<ts>-2` row, review-5).
-- The built-in `user` entity is exempt (id stays `user`).
+- The built-in `user` entity is exempt (id stays `user`). **`claire` is NOT exempt (review 7,
+  user-ruled — D31 amended to seed-time-only): existing installs' seed row migrates like any other
+  non-conforming id (`claire-<created_at>` per the Core Rule); fresh installs keep seeding raw
+  `claire` (2-1 step 4) — the install-local inconsistency is accepted, and her
+  `WorkingDir/<claireId>/` module folders orphan once (the D22 re-embed class).**
 - Deterministic tie-break: if two rows derive the same new id (same name + same created_at second), order
   candidates by (`created_at`, old_id) and append `-2`, `-3` … in that order. **Sorting must happen in SQL
   (`ORDER BY … COLLATE BINARY`) or an explicit codepoint comparator — never JS `localeCompare`/default sort**
   (UTF-16 unit order ≠ UTF-8 byte order for supplementary characters; review-2 pin).
 - Display-name source: `alias` if set, else old id, else linked `character_profiles.name`. Record the chosen
   source per row in the migration log output for auditability.
+- **Alias-backfill collisions: skip-and-log (review 7, user-ruled).** Backfilling
+  `alias = old display name` can collide on the live-only partial unique index
+  `idx_entities_alias_unique` (`000018:5`, recreated `000042:31`) — against an existing explicit
+  alias or another backfilled value (edge case; existing non-empty aliases can never collide with
+  each other — the index enforced uniqueness at write time, so only backfilled values need the
+  guard). On collision: **LEAVE the alias empty and log the row** (surfaced with the orphan-referent
+  list in step 5 — accept + log; the display-name loss for that row is an accepted edge case). Never
+  let a collision fail the hook — a failed `GoUp` rolls back and boot-loops the migration.
 - **D12 (moot per D22) / ~~D40~~ (moot per D62):** the migration is plain Go — it reuses `DeriveEntityID`
    (id transform) and `controllers.DeriveParticipantKey` **verbatim** for the participant-key recompute
    (no SQL re-expression, no fixture-only equivalence — the runtime function IS the migration code).
@@ -131,8 +144,9 @@ is NOT in SQLite (external registry — `dropEntityVectorCollections` operates o
      `CURRENT_TIMESTAMP` (format A); `interactions`/`memories`/`conversation_messages`/`emotion_state`/
      `lifecycle_state`/`entity_emoji_actions`/`chat_conversation_settings` store Go-driver strings
       (`2006-01-02 15:04:05.999999999±07:00`) — mostly UTC but some written in **local time** (e.g.
-      `emotion/ekman8.go:120` — path corrected review 5). The derivation parses via the **shared Go
-      3-format parser** (5-1 deliverable; 6-1 §2 vectors) — no SQL parsing remains under D62.
+       `emotion/ekman8.go:120` — path corrected review 5). The derivation parses via the **shared Go
+       3-format parser** (3-1-owned deliverable since review 6 — the 5-1 owner is deleted with Phase 5;
+       6-1 §2 vectors) — no SQL parsing remains under D62.
 4. `updated_at` bump: set `updated_at` (engine write convention) on every rewritten row so the changes
    propagate to devices via normal sync (they arrive as updates/inserts of the new ids; old ids vanish
    locally on devices after they run 3-2 — version gating in 3-3 prevents mixed-state sync).
@@ -140,9 +154,11 @@ is NOT in SQLite (external registry — `dropEntityVectorCollections` operates o
    SQL-expressible without `regexp()`, review-5): 0 rows violating the charset regex
    (**no length component — D20**; minted ids may reach ~67); 0 reserved ids (`user` exempt);
    `participant_key` consistency (every key == `DeriveParticipantKey` recomputation); FK check
-   clean; entity count unchanged (live + tombstoned); **orphan-referent check (review-5): list
-   `interactions.participant_ids` entries and `conversation_messages.sender_entity_id` values not
-   present in `entities` post-rewrite — accept + log (legacy orphans), but surface them.**
+    clean; entity count unchanged (live + tombstoned); **orphan-referent check (review-5): list
+    `interactions.participant_ids` entries and `conversation_messages.sender_entity_id` values not
+    present in `entities` post-rewrite — accept + log (legacy orphans), but surface them**;
+    **alias-collision skip list (review 7): the rows whose backfill was skipped — accept + log,
+    surfaced alongside the orphan list.**
 6. Keep migration idempotent/re-runnable (mapping table makes it cheap).
 7. **Historical rename tombstones**: pre-D8 renames left create-copy-tombstone shapes (old-id tombstone +
    copied mappings). The migration renames tombstoned rows like any other (per the core rule from their own
@@ -152,7 +168,7 @@ is NOT in SQLite (external registry — `dropEntityVectorCollections` operates o
 
 - `database/migrations/000045_entity_id_timestamp_pattern.up.sql` / `.down.sql` (comment-only stub +
   no-op down) **+ the `GoUp` hook body + `migrations.go` `GoUp` support (D62)**
-- The shared 3-format parser deliverable (5-1) is a dependency
+- The shared 3-format parser deliverable (owned by THIS phase since review 6 — leaf package, 6-1 §2 vectors)
 - No registration change needed (`//go:embed migrations/*.sql` auto-discovers).
 
 ## Tests (engine — engine-only determinism post-D11)
@@ -169,7 +185,10 @@ is NOT in SQLite (external registry — `dropEntityVectorCollections` operates o
   a legacy-000024 participant_key row (recomputed to canonical form — D60; **asserted equal to
   `DeriveParticipantKey` output**), **format-B `entities` rows**
   (D21-6), all three timestamp formats, **and a non-ASCII display-name row (`«Zoë»!!` → base `Zo`) —
-  now simply a `DeriveEntityID` vector (D62)**.
+  now simply a `DeriveEntityID` vector (D62)**, **and an alias-collision pair (live explicit alias
+  `X` + live old-id `X` with empty alias → id migrated, backfill SKIPPED, alias stays empty, row
+  surfaced — review 7)**, **and a `claire` seed row (migrated, NOT exempt — review 7; only `user`
+  is)**.
 - Post-migration invariants: no charset violations, participant_key recomputed (or preserved per decision),
   FK check clean, tombstones preserved with new ids.
 - Determinism: run twice → identical result (idempotence; no cross-repo fixture post-D11).

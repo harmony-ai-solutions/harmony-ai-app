@@ -37,8 +37,8 @@ the server-derived create contract for everything, move persona names to alias. 
 
 > **Review-2 rulings in force here: D14** (persona edits never rename the id), **D15** (create wire
 > contract), **D21** items 9–13. **Review-3 rulings in force: D22** (rename deleted), **D23**
-> (derived-only creation; 400 on `id`), **D30** (alias auto-suffix engine-side), **D37** (restore
-> feedback — 5-2).
+> (derived-only creation; 400 on `id`), **D30** (alias auto-suffix engine-side). **Review 6: D37 (restore
+> feedback — 5-2) is deleted with Phase 5 (D75) — no restore UI or feedback exists.**
 
 1. **Delete ALL client-side id machinery:** `deriveEntityId` util deleted (reserved-name/empty throws
     move to engine-400 surfacing; ~~`deriveEntityAlias` stays~~ — **deleted per D59, review 4**: the

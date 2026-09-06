@@ -49,7 +49,8 @@ insert was invisible in logs; session `sync_44be981ca4cfc0dc_1788599686` is stuc
    requested `entity_id`, handler id and session params in the log line (`handler_websocket` component). No
    protocol change.
 4. **Optional (small)**: emit a distinct error code (`entity_exists_deleted`) if the INIT_ENTITY id exists but
-   is tombstoned — helps the app give an actionable message (pairs with 5-1 restore).
+    is tombstoned — helps the app give an actionable message (diagnostic only post-review-6: no restore
+    exists (D75); the message should guide the user to recreate instead).
 
 ## Files to Modify
 

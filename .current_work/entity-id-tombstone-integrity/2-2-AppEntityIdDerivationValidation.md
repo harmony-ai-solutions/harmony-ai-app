@@ -92,6 +92,15 @@ Creation seams that mint ids today:
    same-name-card latent collision (it sets `alias = profile.name` undeduped today,
    `CharacterChatService.ts:104`). Engine sync-apply does NOT mutate incoming aliases (verbatim-apply
    preserved — server-side D30 covers management creates only).
+   **Edit-path parity (review 7):** D56 covers creates only — `updateUserPersona`
+   (`userEntities.ts:388-454`) sets `alias = displayName` with no dedupe/pre-check, so an edit renaming
+   onto a taken alias surfaces as a raw SQLite UNIQUE error. Mirror the engine's update semantics
+   (create auto-suffixes, update rejects): (1) `PersonaEditScreen` validation gains a
+   case-insensitive alias-equality pre-check (live rows, excluding the edited entity) → friendly inline
+   error — mirror of 2-3's edit predicate and the engine's update-400 (`enforceAliasUniqueness` on
+   update, `routes_entities.go:315-331`); (2) `updateUserPersona` catches the residual
+   unique-constraint race → typed friendly error instead of raw SQLite (belt-and-braces, same as the
+   engine's `isEntityUniqueConstraintConflict` mapping).
 5. **`user` persona** stays `user` (exempt); typing an id `user` at creation is still rejected (existing rule).
 6. **participant_key compatibility**: `deriveParticipantKey` consumes entity ids — new ids contain `-` and the
    key format `{ids joined by "+"}` is unaffected; add a unit test asserting keys like
@@ -120,6 +129,8 @@ Creation seams that mint ids today:
 - **Persona duplicate display name → alias `Max 2` via `getNextEntityAliasCopy` (D56); from-card persona
   `profile.name === baseName` (never the derived id — review-4 fix); same-name cards in
   `openCharacterChat` alias-deduped (D56).**
+- **Persona EDIT onto a taken alias → friendly inline error (case-insensitive, self-excluded); residual
+  race → typed error, never raw SQLite (review 7).**
 - participant_key derivation with timestamped ids.
 
 ## Codebase Mapping Consulted
@@ -134,6 +145,7 @@ introduced the ghost-aware create compensation this builds on).
       helper (D68)**; backstop **replaced** with `nextFreeDerivedId` (no space ids)
 - [ ] Reserved-name checks (`user`, `deleted`) at all three name seams (D33 — no explicit-id UX exists)
 - [ ] Persona alias/id split (create only; edits stable) + alias dedupe `getNextEntityAliasCopy` (D56) +
-      `createUserPersonaFromCard` names the profile `baseName`, never the derived id (review-4)
+      `createUserPersonaFromCard` names the profile `baseName`, never the derived id (review-4) +
+      edit-path alias-collision friendly error (review 7)
 - [ ] ChatDetail partner header alias fallback added — `charName` AND `headerName` (D21-8)
 - [ ] `tsc` + jest suites green; phase doc updated

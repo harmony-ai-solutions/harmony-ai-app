@@ -2,8 +2,9 @@
 
 ## Objective
 
-Remove user-reachable hard deletes from the app so every deletion is a tombstone (D1), aligning with engine
-1-2.
+Remove user-reachable hard deletes from the app so every deletion is a tombstone (D1 as amended by
+D69–D78: tombstone-then-GC — the tombstone is what propagates the delete; the local GC (4-1) purges it
+afterward), aligning with engine 1-2's repaired GC.
 
 ## Context (from investigation, 2026-09-05)
 
@@ -48,6 +49,13 @@ Hard-delete sites (app):
    (permanent-branch asserts), and `conversationDeleteCascade.test.ts:84-105` (pins the settings
    hard-delete observable — rewrite together with D18's filters and ship the filters WITH or BEFORE the
    DELETE→soft switch, or the suite is red mid-window).
+6. **Delete-cascade completion — D26 app parity (review 7; previously hung off the deleted 5-3, now
+   re-homed here per summary D41's "retained via D26/D17/4-4"):** the soft-delete cascade in
+   `deleteEntity` (`entities.ts:705-730`, one shared `now` at `:720-728`) grows from 6 to **8
+   children** — add `chat_conversation_settings` (keyed `entity_id`) and `lifecycle_state` tombstone
+   UPDATEs inside the same one-`now` block, each with `AND deleted_at IS NULL`. Without this, settings
+   rows for deleted entities never tombstone → they ghost-render in ChatList/ArchivedChats (D18's
+   filters only hide tombstoned rows) and the local GC (4-1) can never purge them.
 
 ## Files to Modify
 
@@ -59,6 +67,8 @@ Hard-delete sites (app):
 ## Tests
 
 - Every delete seam produces `deleted_at` set, rows physically present.
+- Entity delete → 8 children tombstoned under the one shared `now` (incl. settings +
+  `lifecycle_state` — D26 parity, step 6).
 - Softened settings delete: row filtered from all five read paths; re-open on same participant_key
   resurrects fresh (D18).
 - No `DELETE FROM` on never-erase tables in any unit/integration path (add a DB-spy assertion where cheap).
@@ -70,11 +80,15 @@ Hard-delete sites (app):
       `000041_consolidate_senju_features.ts:159`)
 - [ ] Compensating deletes verified soft (CreateAIScreen rollback AND
       `compensateOrphanedPersona` `userEntities.ts:292-298` — both already soft; enumerate both in the audit)
+- [ ] Delete cascade grown to 8 children in the one-`now` block (D26 app parity — step 6, review 7)
 - [ ] Tests updated; suites green; phase doc updated
 
 ### Review-3 notes
 
 - Consider a shared `NOT_DELETED = 'deleted_at IS NULL'` const for the five D18 predicates (precedent:
   `emoji_actions.ts:27`) to prevent five-site drift.
-- 4-1 cross-reference: once the finalize purge is gone (4-1) these settings tombstones accumulate — the
-  five filters are what keep them invisible; ship D18 before or with 4-1's removal if sequencing allows.
+- 4-1 cross-reference (review-6 update): 4-1 now KEEPS the finalize purge — settings tombstones purge
+  locally at the next finalize. The five `deleted_at IS NULL` filters still matter for the
+  tombstoned-but-not-yet-purged window (they must not ghost-render in ArchivedChats / leak stale
+  pins/reply-modes between the delete and the next finalize); ship them WITH or BEFORE the DELETE→soft
+  switch regardless.

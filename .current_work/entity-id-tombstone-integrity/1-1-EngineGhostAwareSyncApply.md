@@ -4,7 +4,9 @@
 
 Eliminate the silent `UNIQUE constraint failed: entities.id` failure when the app pushes an entity whose id is
 held by an engine-side soft-deleted (tombstoned) row. Implements decision **D4** (ghost-aware resurrect/replace
-on sync apply), decision **D9** (resurrect ≡ restore, shared child-resurrection helper), and the
+on sync apply) — **review-6 amendment (D75/D69–D78): the resurrect branch is row-level; D9's shared
+child-resurrection helper is deleted with Phase 5** (a lagging sender pushes entity AND child rows as
+individual records; each child resurrects through its own ghost-aware apply, D39) — and the
 verbatim-timestamp apply (originally D7's prerequisite; post-D11 a correctness fix — the engine must stop
 re-stamping incoming timestamps). Resolves senju phase-2 ledger **N1**.
 
@@ -99,9 +101,9 @@ Verified facts (plan review):
    |---|---|---|
    | none | live or deleted | `CreateEntity` (insert; timestamps verbatim) |
    | live | newer live | `UpdateEntity` (unchanged behavior; timestamps verbatim) |
-   | **tombstone** | **newer live** | **REPLACE/RESURRECT via the shared `RestoreEntity` helper (D9)**: capture the tombstone's `deleted_at` **before** overwriting, write the entity row (`deleted_at = NULL`, incoming columns incl. verbatim timestamps, **`updated_at = max(incoming, engine-now UTC)` — D29**: the engine tombstone's `updated_at` is pre-delete while the app's is delete-time, so anything weaker can be dropped by the app's LWW gate at `SyncService.ts:1069`; clock-skew-safe by construction), run the shared zombie teardown (D24), then equality-resurrect the cascade children per **D17/D25** (parsed-instant equality, second-truncated, against the pre-overwrite `deleted_at`). |
+   | **tombstone** | **newer live** | **ROW-LEVEL RESURRECT (review 6 — D9's shared helper deleted with Phase 5/D75):** overwrite the entity row (`deleted_at = NULL`, incoming columns incl. verbatim timestamps, **`updated_at = max(incoming, engine-now UTC)` — D29**: the engine tombstone's `updated_at` is pre-delete while the app's is delete-time, so anything weaker can be dropped by the app's LWW gate at `SyncService.ts:1069`; clock-skew-safe by construction), run the shared zombie teardown (D24), refresh the entity cache. **No child-family matcher**: a lagging sender pushes the entity AND its child rows as individual records in the same session — each child resurrects through its own ghost-aware apply (step 4) under the same LWW rule; family completeness comes from the record stream, not from a matcher. |
    | tombstone | older/equal live | drop (tombstone wins, LWW unchanged — note the gate becomes inclusive `>=` per D29, matching the app) |
-   | any | deleted (tombstone op) | existing soft-delete path **+ D24 additions**: stamps go through the unified captured-now helper (D25 — today each repo re-stamps its own now/CURRENT_TIMESTAMP: `entities.go:206`, `interactions.go:242-245`, `messages.go:166`, `memory.go:144`, `emoji_action.go:72`, **plus the profile/image sync deletes — review-4 D25 completion: `DeleteCharacterProfileForSync` + its image cascade (`character_profiles.go:258, 265`) and `DeleteCharacterImage` (`images.go:157`); without them, sync-arrived profile/image tombstones carry divergent stamps and the D17 restore matcher misses them**), and the apply runs the **shared zombie teardown + evicts active sessions** on the id (deletion must converge; nothing may stay attached to a tombstoned id — sessions/runners/emotion-engines). **D54 (review 4): delete ops stay unconditional — no LWW guard** (a stale delete tombstones anyway; a newer live row resurrects per this table; the momentary teardown of a live runner by a stale delete is accepted — pinned by test). |
+   | any | deleted (tombstone op) | existing soft-delete path **+ D24 additions**: stamps go through the unified captured-now helper (D25 — today each repo re-stamps its own now/CURRENT_TIMESTAMP: `entities.go:206`, `interactions.go:242-245`, `messages.go:166`, `memory.go:144`, `emoji_action.go:72`, **plus the profile/image sync deletes — review-4 D25 completion: `DeleteCharacterProfileForSync` + its image cascade (`character_profiles.go:258, 265`) and `DeleteCharacterImage` (`images.go:157`)**), and the apply runs the **shared zombie teardown + evicts active sessions** on the id (deletion must converge; nothing may stay attached to a tombstoned id — sessions/runners/emotion-engines). **Review 6: D17/D25 stamping survives as delete-path hygiene** — one captured `now`, `AND deleted_at IS NULL` guards, no re-stamp of already-tombstoned children (consistent family stamps are what let the repaired GC (1-2) purge whole families predictably; the restore matcher they originally served is deleted with Phase 5). **D54 (review 4): delete ops stay unconditional — no LWW guard** (a stale delete tombstones anyway; a newer live row resurrects per this table; the momentary teardown of a live runner by a stale delete is accepted — pinned by test). |
 
    - **D29 scope (review 4):** the inclusive `>=` applies to the row-vs-tombstone/entity gates ONLY — the
      `conversation_messages` field-scoped merge gate (`synchronization.go:1478-1484`) stays **strict
@@ -185,7 +187,8 @@ completeness.)
 
 - `eventserver/synchronization.go` (entities apply case + sibling cases via the `applySyncedRow` helper +
   timestamp fidelity + payload keys + sync-delete teardown/eviction D24)
-- `database/repository/entities/entities.go` (`GetEntityIncludingDeleted`; resurrect helper shared with 5-1)
+- `database/repository/entities/entities.go` (`GetEntityIncludingDeleted`; row-level resurrect per step 3 —
+  the shared-with-5-1 helper is deleted with Phase 5, review 6)
 - `database/repository/{characters,interaction,conversation}` + `character_image` for sibling-table parity
   (`…IncludingDeleted` fetches as strategy fields — see step 4)
 - `database/models/{interaction,memory,emoji_action}.go` (the three `deleted_at` omitempty tag fixes)
@@ -193,8 +196,9 @@ completeness.)
 
 ## Tests (engine, `go test ./...`)
 
-- Insert-over-tombstone (incoming live newer) → row replaced, `deleted_at = NULL`, **cascade children
-  resurrected**, cache refreshed.
+- Insert-over-tombstone (incoming live newer) → row replaced, `deleted_at = NULL`, cache refreshed; a
+  **family-of-rows** push (entity + children as individual records, the lagging-sender shape) resurrects the
+  family via each table's own ghost-aware apply.
 - Insert-over-tombstone (incoming older) → tombstone preserved, no error.
 - Insert with fresh id → plain insert (regression).
 - Resurrect followed by `INIT_ENTITY` for that entity id → session created (was `entity_not_defined`); greeting
@@ -227,7 +231,7 @@ completeness.)
 
 - [ ] `GetEntityIncludingDeleted` added
 - [ ] Verbatim `created_at`/`updated_at` on apply (all re-stamping tables incl. character_profiles + character_image)
-- [ ] Sync-apply entities case reworked; resurrect shares the 5-1 helper (D9); `updated_at = max(incoming, engine-now)` (D29)
+- [ ] Sync-apply entities case reworked; resurrect is **row-level** (D9 helper deleted with Phase 5 — review 6); `updated_at = max(incoming, engine-now)` (D29)
 - [ ] Sibling tables ghost-aware via generic `applySyncedRow` helper (D39); sync-delete runs teardown + eviction (D24); delete stamps unified (D25)
 - [ ] Outbound payloads always carry `deleted_at` key
 - [ ] Tests green (`go build`, `go vet`, `go test ./...` — management suite currently 33 tests, extend it)

@@ -25,7 +25,8 @@ exists. "Rename" from now on means an **alias edit** (`updateEntity`), everywher
   of the guard). The delete 409 blocks on `Active || (Suspended && within TTL)` sessions (phone sessions
   suspend — stay in `entitySessions`, resumable for a 5-min TTL, `session.go:639-667` — and still hold
   the id; `GetActiveSessions` includes them).
-- **D24 — shared zombie teardown (helper owned here, used by 1-1/5-1):** stop runners + emotion engines +
+- **D24 — shared zombie teardown (helper owned here, used by 1-1 — review 6: the 5-1 restore caller is
+   deleted with Phase 5):** stop runners + emotion engines +
    clear `sharedCognition` for the id. **`StopBeatRunner` (`lifecycle/service.go:223`) and
    `RemoveEmotionEngine` (`:85`) already exist with zero production callers — call them; do NOT add new
    APIs**. `sharedCognition`
@@ -36,8 +37,8 @@ exists. "Rename" from now on means an **alias edit** (`updateEntity`), everywher
    `sharedCognition` is private to `eventserver.EntitySessionManager`. Shape: a method on
    `HarmonyLinkEventServer` composing `lifecycleService.StopBeatRunner` + `RemoveEmotionEngine` + a new
    exported `RemoveSharedCognition(entityID)` on the session manager; management delete reaches it via
-   the eventserver handle. Wire into:
-   management delete (here), sync-apply delete (1-1), restore (5-1).
+    the eventserver handle. Wire into:
+    management delete (here), sync-apply delete (1-1).
 
 ## Implementation Steps
 
@@ -59,9 +60,22 @@ exists. "Rename" from now on means an **alias edit** (`updateEntity`), everywher
    up to 30s — the TTL check is mandatory, not defensive.
 3. **Disconnect release (D27):** one line in the non-phone branch of `handler_websocket.go:80-82`.
 4. **Shared zombie teardown helper** (D24): `StopBeatRunner` + `RemoveEmotionEngine` + `sharedCognition`
-   clear; call from management delete, and expose for 1-1's sync-apply delete and 5-1's restore.
+   clear; call from management delete, and expose for 1-1's sync-apply delete.
 5. **Vector note (D22):** no `Relocate` API — renames no longer exist, and 3-1's one-time re-embed is
    accepted (summary Risks).
+6. **Delete-cascade completion — D26 + D17 engine side (review 7; the work 5-1's deletion orphaned —
+   1-2 step 11 and summary D41 already point here):** `DeleteEntity` (`entities.go:160-222`) grows
+   from 6 to **8 children** — add `chat_conversation_settings` (keyed `entity_id`, never
+   `participant_key` — one entity spans many conversations) and `lifecycle_state` — and ALL stamps
+   unify under **one captured UTC second-truncated `now`** ("9 stamps, one captured `now`": entity row
+   + 8 children), replacing today's per-statement `CURRENT_TIMESTAMP` (`entities.go:162-206` stamps
+   each table independently). Every cascade UPDATE gains `AND deleted_at IS NULL` (never re-stamp an
+   already-tombstoned child); partner-side mirror `interactions` rows stay excluded. The persona-delete
+   route's profile delete routes through the same captured `now` (D17). Share the captured-now helper
+   seam with D25's sync-delete unification (1-1) — one helper, not two. Purpose (review 6): complete
+   tombstoning is what lets the repaired GC (1-2) purge whole families — `chat_conversation_settings`
+   rows that never tombstone can never be purged and ghost-render app-side (D18's filters only hide
+   tombstoned rows).
 
 ## Files to Modify
 
@@ -70,6 +84,8 @@ exists. "Rename" from now on means an **alias edit** (`updateEntity`), everywher
 - `eventserver/` (teardown helper — D24 home per review 5; `handler_websocket.go` disconnect release;
   `session.go` status predicate + `RemoveSharedCognition`),
   `lifecycle/service.go` (call existing stop/remove — no new APIs)
+- `database/repository/entities/entities.go` (DeleteEntity → 8-child cascade + one captured `now` —
+  D26/D17, step 6)
 
 ## Tests (extend the management suite; `routes_entities_test.go` currently 33, package 39)
 
@@ -78,11 +94,15 @@ exists. "Rename" from now on means an **alias edit** (`updateEntity`), everywher
 - Delete with `Active` session → 409; with only expired-`Suspended` → proceeds.
 - Non-phone WS disconnect → session removed from `entitySessions` (leak regression lock).
 - Delete → runner/emotion-engine/cognition state stopped (teardown exercised via the shared helper).
+- Delete → entity + all 8 children tombstoned with ONE identical second-truncated stamp (settings +
+  `lifecycle_state` included — D26/D17); an already-tombstoned child keeps its original stamp.
 
 ## Checklist
 
 - [ ] Rename endpoint + controller path + FE wiring deleted (FE side in 2-3)
 - [ ] Delete 409 guard (Active || Suspended-within-TTL)
 - [ ] Non-phone disconnect releases the session (D27 leak fix)
-- [ ] Shared zombie teardown helper wired into delete / sync-delete (1-1) / restore (5-1)
+- [ ] Shared zombie teardown helper wired into delete / sync-delete (1-1)
+- [ ] Delete cascade grown to 8 children + one-captured-`now` stamping incl. persona-route profile
+      delete (D26/D17 — step 6, review 7)
 - [ ] Tests green; phase doc updated with deviations

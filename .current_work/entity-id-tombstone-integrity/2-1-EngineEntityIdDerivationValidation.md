@@ -53,13 +53,17 @@ The charset regex survives **only** inside 3-1's migration as the "already-confo
    - **Rename route deleted** (D22 — owned by 2-1b).
 3. **Alias population (D15 + D30):** `alias` defaults to `name` on derived create. If the alias collides
    with a **live** entity's alias (`enforceAliasUniqueness`, definition `routes_entities.go:82-93`,
-   create-path call `:233-242`; partial unique
-   index — tombstoned aliases never block, verified), **auto-suffix via existing `ResolveAliasCopy`**
+   create-path call `:233-242`), **auto-suffix via existing `ResolveAliasCopy`**
    (`entity_controller.go:209-244`): live twin `Isabella` → alias `Isabella 2`. Create never 400s on a
-   name collision. (Alias uniqueness otherwise stays live-aware/partial-index as today.)
-4. **Seeds (D31):** `claire` (`config/db/init.go:132`) and `default-user-profile` (`:289`) keep their raw
-   ids — documented exempt built-ins like `user`; no per-install derivation churn. The seed path needs no
-   new machinery.
+   name collision. **(Review-7 precision: uniqueness is enforced by BOTH the query guard AND the DB
+   partial unique index `idx_entities_alias_unique` (`000018:5`, recreated `000042:31`) — tombstoned
+   aliases never block (partial index); the guard also runs on UPDATE (`:315-331`) and residual
+   constraint races map to 400 via `isEntityUniqueConstraintConflict`.)**
+4. **Seeds (D31, seed-time scope pinned review 7):** `claire` (`config/db/init.go:132`) and
+   `default-user-profile` (`:289`) keep their raw ids **at seed time** — documented exempt built-ins
+   like `user`; no per-install derivation churn. The seed path needs no new machinery. **(Existing
+   installs' `claire` is migrated by 3-1's 000045 like any non-conforming id — review 7 user ruling;
+   only `user` is migration-exempt. `default-user-profile` is a profile id — unaffected.)**
 5. **`EntityConfig` payload note**: keep the phase-2 contract (profile embedded as `character_profile`; 201
    echoes the **resolved** id) — the FE depends on the echo (record decision 1).
 
@@ -67,7 +71,8 @@ The charset regex survives **only** inside 3-1's migration as the "already-confo
 
 - Explicit-create mode and rename validation are **deleted** (D22/D23); the charset/reserved 400s on
   create/rename no longer exist at runtime. Reserved ids remain relevant only as: `user` exempt (D10),
-  `deleted` protected for the `GET /api/entities/deleted` route (5-1), and app-side **name** checks (D33).
+  `deleted` reserved as belt-and-braces (the 5-1 deleted-list route is deleted with Phase 5 — review 6 —
+  but the reservation stays cheap future-proofing), and app-side **name** checks (D33).
 - Test-suite precision: "33 tests" = `routes_entities_test.go` specifically; the management package has
   39 (extend the entity file).
 

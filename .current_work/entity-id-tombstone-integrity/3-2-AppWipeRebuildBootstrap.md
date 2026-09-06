@@ -19,9 +19,18 @@ Only the engine ever computes migrated ids; the app receives them verbatim.
   below, and data re-pulls once the engine is updated.
 - **Placeholder migration 000045:** `src/database/migrations/` gains a **comment-only no-op** to keep
   cross-repo numbering parity (both repos at 000044 → both at 000045). Runner-compatible: comments are
-  stripped → zero executable statements → version still recorded (`migrations.ts:432-445`). Description
+  stripped → zero executable statements → version still recorded (`migrations.ts:432-445`).
+  **Format (review 7 correction): app migrations are TS modules exporting SQL template strings — 44
+  precedents, registered via `migrations.ts:11-55` imports into the `MIGRATIONS` array (`:67-288`); a
+  `.sql` file would never be discovered. The placeholder is
+  `000045_engine_id_pattern_placeholder.ts` exporting a comment-only SQL string + its `migrations.ts`
+  import/array entry.** Description
   text (binding): *"Placeholder — engine counterpart 000045 performs the entity id-pattern migration;
-  app converges via full re-sync (no local data migration required)."*
+  app converges via full re-sync (no local data migration required)."* (4-1 later ships the same-pattern
+  placeholder 000046 for 1-2's `sync_gc_state`.)
+- **Reused by 4-5 (review 6, D76):** the one-time wipe flag + D61 boot-window machinery built here is the
+  reaction path for the engine's purge-floor rebuild signal — build the flag flow **generic**
+  (set → boot-window wipe + prefs sweep → clear), not single-purpose, so 4-5 only sets the flag.
 - **Accepted loss (user-ruled):** app-local rows created while offline and never pushed. Auto-sync
   triggers bound the window: on connect, on explicit actions (create/edit/delete/save/duplicate —
   `CreateAIScreen.tsx:1054,1225`, `CharactersScreen.tsx:716`, `PersonaEditScreen.tsx:814`,
@@ -77,8 +86,8 @@ Only the engine ever computes migrated ids; the app receives them verbatim.
 
 ## Files to Create/Modify
 
-- `src/database/migrations/000045_AppNoOp.sql` (name TBD by convention) + `src/database/migrations.ts`
-  array entry
+- `src/database/migrations/000045_engine_id_pattern_placeholder.ts` (comment-only SQL template string —
+  review 7 format fix) + `src/database/migrations.ts` import + array entry
 - Wipe bootstrap (SyncService bootstrap or a small module colocated with sync state)
 - `src/services/ChatPreferencesService.ts` (key sweep)
 
