@@ -87,8 +87,93 @@ a never-revealing splash. (Hotfix-grade; independent of the ID-schema phases.)
 
 ## Checklist
 
-- [ ] `failed` session status + propagation
-- [ ] Error banner + retry/back actions
-- [ ] Splash reveals on error; connection dot 'error'
-- [ ] Timer/retry scheduler fix
-- [ ] i18n (en only); tests green; phase doc updated
+- [x] `failed` session status + propagation
+- [x] Error banner + retry/back actions
+- [x] Splash reveals on error; connection dot 'error'
+- [x] Timer/retry scheduler fix
+- [x] i18n (en only); tests green; phase doc updated
+
+## Implementation Notes (deviations)
+
+Implemented 2026-09-06 on `senju-design-updates-rebase`. All four steps shipped;
+typecheck clean; targeted suites 21/21 (107 tests); full `npm.cmd test` green
+(unit 132 suites / 1158 tests, integration 12 suites / 53 passed + 1 skipped —
+the previously-known `compat/nodeSide.test.ts` failures were fixed separately by
+a parallel agent and pass 23/23 at verification time).
+
+**closeAllSessions decision (was "evaluate, make a conservative call"):**
+`closeAllSessions` (app-background `EntitySessionService.ts`; sync-loss
+`EntitySessionContext.tsx`) keeps its **deliberate FULL teardown — flagged
+(`failed`) entries are NOT retained** through background/sync-loss. Reasoning:
+(1) these triggers are deliberate battery/consistency teardowns, not failures —
+the sockets die with the teardown, so a retained "failed" marker adds no
+recovery value; (2) on foreground/reconnect the open chat's init effect re-runs
+(`isConnected` dep) and starts a fresh session, and the next `session:started`
+purges same-participant-set flagged entries anyway; (3) full teardown is the
+only GC point for flagged entries of chats that are NOT on screen — the bounded
+retention cleaners (navigation-back, next session:started) only run for open
+chats, so retaining here would leak one entry per failed background chat.
+Documented at both call sites. Verified: `isSessionActive` returns false for a
+retained failed session (explicit `!session.failed` guard added in the context
+too); Retry replaces the entry (service `startInteractionSession` now purges
+flagged same-set sessions instead of the dedup-reuse path resurrecting them).
+
+**Deviations / judgment calls (all within the doc's spirit):**
+
+1. **Own-entity WS disconnect (D65) flags + emits `session:error('Connection
+   lost')`** instead of silently retaining without a marker: an unflagged
+   retained entry would still strand the screen on the amber dot (no timer is
+   pending after init completes), so the flag + emission is what makes the D65
+   retention actually recoverable via the banner's Retry.
+2. **The generic `session:error` toast for a matched failure was replaced by
+   the inline error card** (doc: "reuse the existing session:error listener …
+   rather than new machinery") — keeping both would double-surface the same
+   failure. The `entity_disabled` toast+navigate branch is preserved unchanged;
+   the now-orphaned `chatSessionError` i18n key was deleted (en is the only
+   locale).
+3. **Screen-side matching (review-4 wiring fix, screen half):** the terminal
+   failure never performs the temp→canonical interaction-id swap (that only
+   happens on INIT SUCCESS), so the id emitted by the service/context is
+   usually an id the screen never saw. ChatDetail's `session:error` listener
+   therefore matches by interactionId **OR by participant set** (resolving the
+   session via `getInteractionSession`), in addition to the context's
+   interactionId-keyed emission + flag.
+4. **`entity_exists_deleted` (D35) classified as TERMINAL** (grouped with
+   `entity_disabled`: immediate fail, no recovery, no sync-now hint) — deletion
+   is final (D75), so "it may need to sync" would be dishonest. Recognized via
+   the structured `error_code`; old engines fall back to string equality.
+5. **When `error_code` is present it also becomes the surfaced error string**
+   (replacing the free-text `error`), so the UI's ingestion-hint classification
+   never does free-text matching; exhausted context retries preserve the
+   underlying cause (`failed.error`) as the emitted message so the hint
+   survives to the screen.
+6. **`entity_disabled` added to the context's `isRetryableError` permanent
+   list** — otherwise the timer fix would re-INIT a disabled partner three
+   times per open (it cannot succeed until the user re-enables). The disabled
+   UX itself is unchanged.
+7. **New context API `clearFailedSession(ownEntityId, participantIds)`** (used
+   by ChatDetail on unmount) implements the "clear the flagged entry on
+   navigation-back" ruling — the flagged entry is keyed by a service-temp id
+   the screen's plain stop-by-id never matches.
+8. **Retry's reply-mode read is best-effort** (falls back to 'realistic' on
+   error) — a failed preference read must not block recovering an already-dead
+   session; mirrors the service's `getSyncedReplyMode` fallback.
+9. **`syncAndWait` is called with today's signature**; the call site carries a
+   4-2 tie-in comment marking where `{ critical: true }` lands (D13/D34). No
+   critical mode implemented here, per instructions.
+10. **Late-SUCCESS edge:** an INIT_ENTITY SUCCESS arriving for a flagged
+    session clears the `failed` marker (recovery re-send racing the fail path)
+    so a stale terminal marker can't outlive a live engine session.
+11. **Test-harness note:** the full-screen ChatDetail harness shape (shared by
+    `chatDetailEmptyReveal`/`chatDetailScenarioGenerate`) requires
+    `isSessionActive => true` in the context mock and per-test act-flushed
+    unmounts; `chatDetailSessionError.test.tsx` documents this. Header-dot
+    rendering is not observable in that harness shape (ScreenHeader mock drops
+    `titleRight`), so the 4-state mapping is unit-tested directly
+    (`chatDetailConnectionState.test.ts`) and the card/banner surfaces are
+    integration-tested.
+12. **Parallel-writer incident:** mid-implementation, two of the
+    `EntitySessionContext.tsx` edits were reverted by a concurrent write from
+    outside this phase (verified: mixed old/new content in the working tree).
+    They were re-applied and the final state was re-verified by the targeted
+    and full test runs above. No other territory files were affected.

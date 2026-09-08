@@ -76,17 +76,12 @@ export async function isKajiwotoProviderConfigInUse(id: string): Promise<boolean
   return isProviderConfigInUse('kajiwoto', id);
 }
 
-export async function deleteKajiwotoProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteKajiwotoProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  if (!permanent && await isKajiwotoProviderConfigInUse(id)) throw new Error(`Kajiwoto provider config ${id} is in use and cannot be soft deleted`);
+  if (await isKajiwotoProviderConfigInUse(id)) throw new Error(`Kajiwoto provider config ${id} is in use and cannot be soft deleted`);
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_kajiwoto WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) throw new Error(`Kajiwoto provider config not found: ${id}`);
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql('UPDATE provider_config_kajiwoto SET deleted_at = ? WHERE id = ?', [now, id]);
-      if (result.rowsAffected === 0) throw new Error(`Kajiwoto provider config not found: ${id}`);
-    }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql('UPDATE provider_config_kajiwoto SET deleted_at = ? WHERE id = ?', [now, id]);
+    if (result.rowsAffected === 0) throw new Error(`Kajiwoto provider config not found: ${id}`);
   });
 }

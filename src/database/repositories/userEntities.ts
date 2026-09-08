@@ -21,7 +21,7 @@ import { generateId } from '../../utils/uuid';
 import {
   getEntity,
   createEntity,
-  resolveNextEntityIdCopy,
+  mintPersonaIdentity,
   deleteEntity,
   isProfilePersonaOwned,
   ERR_PROFILE_OWNED_BY_PERSONA,
@@ -277,6 +277,25 @@ export interface UpdateUserPersonaInput extends UserPersonaProfileFields {
 }
 
 /**
+ * Typed error for a persona EDIT whose alias collides with another LIVE
+ * persona's alias (review 7 / D86 residual race).
+ *
+ * Creates auto-suffix (D56) and never hit this; edits REJECT on a taken
+ * alias (mirror of the engine's update-400 `enforceAliasUniqueness`). The
+ * screen's case-insensitive pre-check (later UI phase) catches the common
+ * case; this maps the residual unique-constraint race so callers never see a
+ * raw SQLite error.
+ */
+export class PersonaAliasConflictError extends Error {
+  constructor(name: string) {
+    super(
+      `A persona named "${name}" already exists — choose a different name`,
+    );
+    this.name = 'PersonaAliasConflictError';
+  }
+}
+
+/**
  * Best-effort tombstone of an orphaned persona profile (engine FE
  * compensation pattern, mirrored from the engine's create-failure handling).
  *
@@ -300,8 +319,9 @@ async function compensateOrphanedPersona(profileId: string): Promise<void> {
 /**
  * Create a persona: a character_profiles row (minimal defaults, overlaid with
  * any full V3 + Soulbits fields the caller provides) + primary avatar image row
- * (if any) + a `user` entity (id = name, ghost-aware unique-checked via
- * resolveNextEntityIdCopy; alias = name, entity id FROZEN after create).
+ * (if any) + a `user` entity (id = DERIVED via {@link mintPersonaIdentity} —
+ * `Isabella-20260905123514`, never the raw name; alias = deduped display name
+ * "Isabella" / "Isabella 2"; entity id FROZEN after create).
  *
  * The caller (screen) is responsible for the fire-and-forget `syncAndWait`
  * (PersonaEdit pattern) — this repo stays layering-clean.
@@ -312,14 +332,11 @@ export async function createUserPersona(input: CreateUserPersonaInput): Promise<
   const personality = input.personality?.trim() ?? '';
   const profileId = generateId();
 
-  // Ghost-aware unique-check of the entity id (name convention): soft-deleted
-  // rows still reserve the TEXT PRIMARY KEY, so a deleted persona with the
-  // same name must resolve to a copy-suffixed id — `getEntity` alone would
-  // miss the ghost and the INSERT would hit the PK (orphaning the profile).
-  // The alias MUST be unique too (idx_entities_alias_unique is a partial
-  // UNIQUE index) — so when the id is copy-suffixed, the alias matches the
-  // id, not the raw (duplicate) name.
-  const entityId = await resolveNextEntityIdCopy(name);
+  // One mint seam (D68): derived id (D2 — spaces never survive) + reserved-name
+  // throw (D33) + ghost-aware same-second backstop. The alias is the deduped
+  // display name (D3/D56 — "Max" twin → alias "Max 2", live-only partial
+  // unique index), never the id.
+  const { id: entityId, alias } = await mintPersonaIdentity(name);
 
   await createCharacterProfile({
     id: profileId,
@@ -335,7 +352,7 @@ export async function createUserPersona(input: CreateUserPersonaInput): Promise<
       {
         id: entityId,
         character_profile_id: profileId,
-        alias: entityId,
+        alias,
         lifecycle_config: '{}',
         rag_reindex_required: 1,
       },
@@ -343,7 +360,7 @@ export async function createUserPersona(input: CreateUserPersonaInput): Promise<
     );
   } catch (err) {
     // Compensation (engine FE pattern): the profile was created before the
-    // entity INSERT failed (e.g. an alias/PK collision) — tombstone the
+    // entity INSERT failed (e.g. a residual alias/PK race) — tombstone the
     // orphan so no phantom card lingers, then rethrow.
     await compensateOrphanedPersona(profileId).catch(() => {});
     throw err;
@@ -409,10 +426,25 @@ export async function updateUserPersona(
   });
 
   // Keep entity alias in sync with the renamed profile; id frozen.
-  await getDatabase().executeSql(
-    'UPDATE entities SET alias = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL',
-    [input.name.trim(), new Date().toISOString(), id],
-  );
+  // Residual-race guard (D86/review 7): creates auto-suffix (D56), but an
+  // EDIT onto a taken alias hits the live-only partial unique index
+  // idx_entities_alias_unique. The screen's case-insensitive pre-check (later
+  // UI phase) catches the common case; this maps the residual constraint race
+  // to a typed friendly error — never a raw SQLite message.
+  try {
+    await getDatabase().executeSql(
+      'UPDATE entities SET alias = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL',
+      [input.name.trim(), new Date().toISOString(), id],
+    );
+  } catch (err: any) {
+    if (
+      String(err?.message ?? '').includes('UNIQUE') &&
+      String(err?.message ?? '').toLowerCase().includes('alias')
+    ) {
+      throw new PersonaAliasConflictError(input.name.trim());
+    }
+    throw err;
+  }
 
   // Avatar reconcile (diff-based). If a primary exists and differs, soft-delete
   // it and create a fresh primary; if none exists, just create.
@@ -462,15 +494,17 @@ export async function updateUserPersona(
  *   - ALL Character Card V3 spec + Soulbits fields copied verbatim, including
  *     `card_provenance` AS-IS (decision 6).
  *   - Fresh ids everywhere (profile + entity + images) — never reuses a row.
- *   - `name` deduped via the ghost-aware entity id resolution
- *     (`resolveNextEntityIdCopy`, "Max" → "Max 2"; soft-deleted ids reserve
- *     the TEXT PRIMARY KEY).
+ *   - `name` = baseName; id DERIVED via the one mint seam
+ *     (`mintPersonaIdentity` — D2/D68: `Source-Card-<ts>`, ghost-aware
+ *     same-second backstop). The PROFILE keeps the human name (review-4); the
+ *     DEDUPED display name lives on the entity alias (D56: "Source Card" twin
+ *     → alias "Source Card 2").
  *   - `is_favorite` reset to 0 (a persona copy is never auto-favorited).
  *   - `lifecycle_config` reset to `{}` (a persona has no AI lifecycle).
  *   - ALL `character_image` rows copied with the primary flag preserved
  *     (decision 9).
- *   - A `user` entity is created linking the fresh profile (id = name,
- *     alias = id, frozen after create).
+ *   - A `user` entity is created linking the fresh profile (id = derived,
+ *     alias = deduped display name, frozen after create).
  *
  * @param sourceProfileId the character card profile to copy
  * @param options.name optional copy base name (defaults to the source name)
@@ -497,12 +531,13 @@ export async function createUserPersonaFromCard(
   }
 
   const baseName = (options.name ?? source.name).trim();
-  // Ghost-aware id resolution (name convention): a soft-deleted entity with
-  // the same id still reserves the TEXT PRIMARY KEY — resolve it instead of
-  // letting the INSERT collide (which previously orphaned a FULL card copy,
-  // images included).
-  const entityId = await resolveNextEntityIdCopy(baseName);
-  const personaName = entityId; // id = name convention for personas
+  // One mint seam (D68): derived id (D2) + reserved throw (D33) + ghost-aware
+  // same-second backstop; alias = deduped display name (D56). Review-4 fix:
+  // the PROFILE keeps the HUMAN name (baseName) — never the derived id, which
+  // would otherwise render as "Isabella-20260905123514" (getUserEntities
+  // renders profile_name || alias || id).
+  const { id: entityId, alias } = await mintPersonaIdentity(baseName);
+  const personaName = baseName; // profile name = human name, never the id
 
   const profileId = generateId();
 
@@ -560,7 +595,7 @@ export async function createUserPersonaFromCard(
       {
         id: entityId,
         character_profile_id: profileId,
-        alias: entityId,
+        alias,
         lifecycle_config: '{}',
         rag_reindex_required: 1,
       },

@@ -56,10 +56,57 @@ describe('canUseChatForMode', () => {
 });
 
 describe('computeConnectionStatus', () => {
+  // ── 3-3/D57: sticky server-update-required gate (applies to BOTH modes) ─
+
+  describe('serverUpdateRequired gate: cloud mode', () => {
+    const result = computeConnectionStatus('cloud', 'ready', false, true, false, true);
+
+    it('returns textKey serverUpdateRequired', () => {
+      expect(result.textKey).toBe('serverUpdateRequired');
+    });
+    it('returns error variant', () => {
+      expect(result.variant).toBe('error');
+    });
+    it('keeps the mode (cloud)', () => {
+      expect(result.mode).toBe('cloud');
+    });
+  });
+
+  describe('serverUpdateRequired gate: selfhosted mode (paired + connected)', () => {
+    const result = computeConnectionStatus('selfhosted', 'idle', true, true, false, true);
+
+    it('returns textKey serverUpdateRequired even when paired + connected', () => {
+      expect(result.textKey).toBe('serverUpdateRequired');
+    });
+    it('keeps the mode (selfhosted)', () => {
+      expect(result.mode).toBe('selfhosted');
+    });
+  });
+
+  describe('serverUpdateRequired gate: selfhosted mode (not paired)', () => {
+    const result = computeConnectionStatus('selfhosted', 'idle', false, false, false, true);
+
+    it('overrides notPaired', () => {
+      expect(result.textKey).toBe('serverUpdateRequired');
+    });
+  });
+
+  describe('serverUpdateRequired gate is OFF: existing statuses unchanged', () => {
+    it('cloud ready + connected still yields connected', () => {
+      expect(computeConnectionStatus('cloud', 'ready', false, true, false, false).textKey).toBe('connected');
+    });
+    it('selfhosted paired + disconnected still yields disconnected', () => {
+      expect(computeConnectionStatus('selfhosted', 'idle', true, false, false, false).textKey).toBe('disconnected');
+    });
+    it('selfhosted not-paired still yields notPaired', () => {
+      expect(computeConnectionStatus('selfhosted', 'idle', false, false, false, false).textKey).toBe('notPaired');
+    });
+  });
+
   // ── Cloud mode ───────────────────────────────────────────────────────────
 
   describe('cloud: ready + connected', () => {
-    const result = computeConnectionStatus('cloud', 'ready', false, true, false);
+    const result = computeConnectionStatus('cloud', 'ready', false, true, false, false);
 
     it('returns textKey connected', () => {
       expect(result.textKey).toBe('connected');
@@ -73,7 +120,7 @@ describe('computeConnectionStatus', () => {
   });
 
   describe('cloud: ready + not connected', () => {
-    const result = computeConnectionStatus('cloud', 'ready', false, false, false);
+    const result = computeConnectionStatus('cloud', 'ready', false, false, false, false);
 
     it('returns textKey connecting', () => {
       expect(result.textKey).toBe('connecting');
@@ -84,7 +131,7 @@ describe('computeConnectionStatus', () => {
   });
 
   describe('cloud: provisioning', () => {
-    const result = computeConnectionStatus('cloud', 'provisioning', false, false, false);
+    const result = computeConnectionStatus('cloud', 'provisioning', false, false, false, false);
 
     it('returns textKey preparing', () => {
       expect(result.textKey).toBe('preparing');
@@ -95,7 +142,7 @@ describe('computeConnectionStatus', () => {
   });
 
   describe('cloud: requesting', () => {
-    const result = computeConnectionStatus('cloud', 'requesting', false, false, false);
+    const result = computeConnectionStatus('cloud', 'requesting', false, false, false, false);
 
     it('returns textKey preparing', () => {
       expect(result.textKey).toBe('preparing');
@@ -103,7 +150,7 @@ describe('computeConnectionStatus', () => {
   });
 
   describe('cloud: failed', () => {
-    const result = computeConnectionStatus('cloud', 'failed', false, false, false);
+    const result = computeConnectionStatus('cloud', 'failed', false, false, false, false);
 
     it('returns textKey offline', () => {
       expect(result.textKey).toBe('offline');
@@ -114,7 +161,7 @@ describe('computeConnectionStatus', () => {
   });
 
   describe('cloud: idle', () => {
-    const result = computeConnectionStatus('cloud', 'idle', false, false, false);
+    const result = computeConnectionStatus('cloud', 'idle', false, false, false, false);
 
     it('returns textKey offline', () => {
       expect(result.textKey).toBe('offline');
@@ -127,7 +174,7 @@ describe('computeConnectionStatus', () => {
   // ── Self-hosted mode ─────────────────────────────────────────────────────
 
   describe('self-hosted: not paired', () => {
-    const result = computeConnectionStatus('selfhosted', 'idle', false, false, false);
+    const result = computeConnectionStatus('selfhosted', 'idle', false, false, false, false);
 
     it('returns textKey notPaired', () => {
       expect(result.textKey).toBe('notPaired');
@@ -141,7 +188,7 @@ describe('computeConnectionStatus', () => {
   });
 
   describe('self-hosted: paired + connected', () => {
-    const result = computeConnectionStatus('selfhosted', 'idle', true, true, false);
+    const result = computeConnectionStatus('selfhosted', 'idle', true, true, false, false);
 
     it('returns textKey connected', () => {
       expect(result.textKey).toBe('connected');
@@ -152,7 +199,7 @@ describe('computeConnectionStatus', () => {
   });
 
   describe('self-hosted: paired + reconnecting', () => {
-    const result = computeConnectionStatus('selfhosted', 'idle', true, false, true);
+    const result = computeConnectionStatus('selfhosted', 'idle', true, false, true, false);
 
     it('returns textKey reconnecting', () => {
       expect(result.textKey).toBe('reconnecting');
@@ -163,7 +210,7 @@ describe('computeConnectionStatus', () => {
   });
 
   describe('self-hosted: paired + disconnected (not reconnecting)', () => {
-    const result = computeConnectionStatus('selfhosted', 'idle', true, false, false);
+    const result = computeConnectionStatus('selfhosted', 'idle', true, false, false, false);
 
     it('returns textKey disconnected', () => {
       expect(result.textKey).toBe('disconnected');
@@ -175,7 +222,7 @@ describe('computeConnectionStatus', () => {
 
   describe('self-hosted: paired + connected carries cloud status ignored', () => {
     // Even if cloudStatus were 'failed', self-hosted mode should ignore it.
-    const result = computeConnectionStatus('selfhosted', 'failed', true, true, false);
+    const result = computeConnectionStatus('selfhosted', 'failed', true, true, false, false);
 
     it('returns textKey connected', () => {
       expect(result.textKey).toBe('connected');

@@ -48,7 +48,7 @@ import { ScenarioGeneratorSheet, ScenarioGuidedInputs } from '../components/chat
 import { DayDivider } from '../components/chat/DayDivider';
 import EntityEmojiActionService from '../services/EntityEmojiActionService';
 import { useEntitySession } from '../contexts/EntitySessionContext';
-import EntitySessionService, { InteractionSession } from '../services/EntitySessionService'; // Still needed for event listeners
+import EntitySessionService, { InteractionSession, isIngestionSessionError } from '../services/EntitySessionService'; // Still needed for event listeners
 import { SyncService } from '../services/SyncService';
 import {
   getConversationMessagesByParticipantKey,
@@ -191,6 +191,32 @@ export function shouldInitializeEntitySession(params: {
   return true;
 }
 
+/** 4-3 (D36): the header connection-dot states — the original three plus the
+ *  net-new terminal `'error'` state (red dot; a session:init failure must not
+ *  masquerade as "connecting" forever). */
+export type ChatConnectionState = 'connected' | 'connecting' | 'offline' | 'error';
+
+/**
+ * 4-3 (D36): the 4-state connection mapping, shared by the header dot render,
+ * the pulse effect and the input-bar gating so all three can never disagree.
+ * Extracted as a pure helper so the union-member mapping is unit-testable in
+ * one place (exhaustive per review-3: the dot render's final `else` must not
+ * swallow the error state).
+ *
+ * Precedence: offline (no sync transport — most accurate description, and the
+ * banner surfaces the failure independently) > error (terminal session
+ * failure) > connected > connecting.
+ */
+export function resolveChatConnectionState(params: {
+  isConnected: boolean;
+  isSessionActive: boolean;
+  sessionFailed: boolean;
+}): ChatConnectionState {
+  if (!params.isConnected) return 'offline';
+  if (params.sessionFailed) return 'error';
+  return params.isSessionActive ? 'connected' : 'connecting';
+}
+
 /**
  * Persona-switch decision (review): the persona switcher must navigate to the
  * persona's OWN thread — the data model is thread-per-persona (`participant_key`
@@ -289,8 +315,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { showAlert } = useAppAlert();
   const { showToast } = useToast();
   const { isConnected } = useSyncConnection();
-  const { isSessionActive, startInteractionSession, stopInteractionSession } =
-    useEntitySession();
+  const {
+    isSessionActive,
+    startInteractionSession,
+    stopInteractionSession,
+    clearFailedSession,
+  } = useEntitySession();
 
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -348,6 +378,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // The init effect gates on this so it never sends INIT while the flag is
   // still loading (see shouldInitializeEntitySession — Q8).
   const [disabledLoaded, setDisabledLoaded] = useState(false);
+
+  // 4-3 (D36): terminal session-failure state. Set by the session:error
+  // listener (matched by interactionId OR participant set — a terminal failure
+  // never performs the temp→canonical id swap, so the emitted id is usually a
+  // service-temp id this screen never saw). Drives the inline error card
+  // (Retry / Back / Sync now), the red header dot, and the splash reveal.
+  // Cleared on session:started for this chat (success) and on Retry.
+  const [sessionFailed, setSessionFailed] = useState<{
+    error: string;
+    ingestionHint: boolean;
+  } | null>(null);
 
   // Track the canonical interactionId — starts as temp UUIDv7 from route params,
   // updated to the server-assigned canonical ID when INIT_ENTITY response arrives.
@@ -498,6 +539,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         const allEntities = await getAllEntities();
         const entity = allEntities.find(e => e.id === partnerEntityId);
+        // D21-8: the entity alias is the final display-name fallback — the
+        // persona naming convention carries the human name in `alias` (D56),
+        // so a profile-less partner must never surface the bare id or the
+        // 'Chat' placeholder when an alias exists.
+        const partnerAlias = entity?.alias ?? null;
         if (entity?.character_profile_id) {
           // HARD GATE — marketplace preview lock (viewable free, chat locked
           // until acquired; own library never locked): if the partner is a
@@ -532,14 +578,31 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             // {{char}} macro resolution (nickname || name) for the greeting.
             setPartnerProfile(profile);
             if (!routeEntityName) {
-              setPartnerName(profile.name);
-              setHeaderName(profile.name);
+              // D21-8: the header/label chain gains the alias fallback —
+              // nickname || profile name || alias (previously neither the
+              // nickname nor the alias ever reached headerName).
+              const resolvedName =
+                profile.nickname?.trim() ||
+                profile.name ||
+                partnerAlias ||
+                partnerEntityId;
+              setPartnerName(resolvedName);
+              setHeaderName(resolvedName);
             }
+          } else if (!routeEntityName && partnerAlias) {
+            // D21-8: linked profile missing — the alias still carries a name.
+            setPartnerName(partnerAlias);
+            setHeaderName(partnerAlias);
           }
           const image = await getPrimaryImage(entity.character_profile_id);
           if (image) {
             setPartnerAvatar(imageToDataURL(image));
           }
+        } else if (!routeEntityName && partnerAlias) {
+          // D21-8: profile-less partner (e.g. a persona entity) — the alias
+          // carries the visible name for BOTH headerName and charName.
+          setPartnerName(partnerAlias);
+          setHeaderName(partnerAlias);
         }
 
         // Own entity's display name — {{user}} macro substitution in greetings.
@@ -675,6 +738,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           if (session.hasFirstMes !== undefined) {
             setHasFirstMes(session.hasFirstMes);
           }
+          // 4-3 (D36): the session started — clear any terminal-failure state
+          // (a retry succeeded; the error card must make way for the chat).
+          setSessionFailed(null);
         }
       }
     };
@@ -690,6 +756,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => {
       log.info(`Screen unmounting – stopping session for ${currentInteractionIdRef.current}`);
       stopInteractionSession(currentInteractionIdRef.current);
+      // 4-3 bounded retention (review 4): also clear any FLAGGED (failed)
+      // session entry for this participant set. Its key is a service-temp
+      // interactionId the ref above never saw (the temp→canonical swap only
+      // happens on INIT SUCCESS), so the plain stop-by-id never matched it.
+      clearFailedSession(ownEntityId, participantIds);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeInteractionId]);
@@ -886,25 +957,49 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // Listen for session errors
   useEffect(() => {
+    const sortedScreenParticipants = [...participantIds].sort().join('+');
     const handleSessionError = (errorInteractionId: string, error: string) => {
-      if (errorInteractionId === currentInteractionIdRef.current) {
-        log.error(`Session error for ${currentInteractionIdRef.current}:`, error);
+      // 4-3 (D36): match this screen's chat by interactionId OR by participant
+      // set. A terminal failure never performs the temp→canonical id swap
+      // (that only happens on INIT SUCCESS), so the id the service/context
+      // emits is usually a service-temp id this screen never saw — the
+      // participant-set match is what makes the terminal error actually
+      // surface (screen side of the review-4 wiring fix).
+      const errorSession =
+        EntitySessionService.getInteractionSession(errorInteractionId);
+      const matchesThisScreen =
+        errorInteractionId === currentInteractionIdRef.current ||
+        (!!errorSession &&
+          errorSession.ownEntityId === ownEntityId &&
+          [...errorSession.participantIds].sort().join('+') ===
+            sortedScreenParticipants);
 
-        // Q8/A3 — a DISABLED AI partner is a terminal state. The engine refuses
-        // INIT_ENTITY with `entity_disabled`; the app surfaces the honest
-        // disabled-partner toast and jumps to the AI profile (which shows the
-        // disabled state + the enable action). Distinct from the generic error
-        // path.
-        if (error === 'entity_disabled') {
-          showToast(t('entityDisabledBody', { name: headerName }));
-          if (partnerProfileId) {
-            navigation.navigate('AIProfile', { profileId: partnerProfileId });
-          }
-          return;
-        }
-
-        showToast(t('chatSessionError', { error }));
+      if (!matchesThisScreen) {
+        return;
       }
+
+      log.error(`Session error for ${currentInteractionIdRef.current}:`, error);
+
+      // Q8/A3 — a DISABLED AI partner is a terminal state. The engine refuses
+      // INIT_ENTITY with `entity_disabled`; the app surfaces the honest
+      // disabled-partner toast and jumps to the AI profile (which shows the
+      // disabled state + the enable action). Distinct from the generic error
+      // path.
+      if (error === 'entity_disabled') {
+        showToast(t('entityDisabledBody', { name: headerName }));
+        if (partnerProfileId) {
+          navigation.navigate('AIProfile', { profileId: partnerProfileId });
+        }
+        return;
+      }
+
+      // 4-3 (D36): terminal failure → the inline error card (Retry / Back /
+      // and — for the D35 ingestion class — Sync now). The card replaces the
+      // legacy free-text toast as the actionable surface for this chat.
+      setSessionFailed({
+        error,
+        ingestionHint: isIngestionSessionError(error),
+      });
     };
 
     EntitySessionService.on('session:error', handleSessionError);
@@ -912,7 +1007,50 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => {
       EntitySessionService.off('session:error', handleSessionError);
     };
-  }, [routeInteractionId, partnerProfileId, headerName, navigation, showToast, t]);
+  }, [routeInteractionId, partnerProfileId, headerName, navigation, showToast, t, ownEntityId, participantIds]);
+
+  // 4-3 (D36): Retry after a terminal session failure — clears the failure
+  // state and re-invokes startInteractionSession (the service purges the
+  // flagged entry for this participant set and mints a fresh session; the
+  // context re-arms its initialization timer/retry budget).
+  const handleSessionRetry = useCallback(async () => {
+    log.info(`Retrying session for ${currentInteractionIdRef.current} after terminal failure`);
+    hapticLightPress();
+    setSessionFailed(null);
+    try {
+      // Reply mode read fresh from the SYNCED settings column (same as the
+      // init effect) — but BEST-EFFORT here: a failed preference read must
+      // never block the retry (the session is already down; fall back to the
+      // default pacing), matching the service's getSyncedReplyMode fallback.
+      let mode = 'realistic';
+      try {
+        const savedMode = participantKey ? await getReplyMode(participantKey) : null;
+        if (savedMode) {
+          mode = savedMode;
+        }
+      } catch (modeError) {
+        log.warn('Failed to read reply mode for session retry, using default:', modeError);
+      }
+      await startInteractionSession(ownEntityId, participantIds, mode);
+    } catch (error: any) {
+      log.error('Session retry failed:', error);
+      showToast(`${t('common:error')}: ${error?.message || 'Unknown error'}`);
+    }
+  }, [participantKey, ownEntityId, participantIds, startInteractionSession, showToast, t]);
+
+  // 4-3 (D35): ingestion-class failures ("the AI couldn't be found on Harmony
+  // Link") — run a blocking re-sync so the engine ingests the entity, then
+  // retry the session. 4-2 (D13/D34): the wait is CRITICAL so a failed sync
+  // surfaces as a rejection (logged here) instead of resolving best-effort.
+  const handleSyncAndRetry = useCallback(async () => {
+    hapticLightPress();
+    try {
+      await SyncService.getInstance().syncAndWait({ critical: true });
+    } catch (error) {
+      log.warn('Sync-and-retry sync failed (critical):', error);
+    }
+    await handleSessionRetry();
+  }, [handleSessionRetry]);
 
   // Seed emoji action defaults when session becomes active
   useEffect(() => {
@@ -1810,13 +1948,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // then reveal the screen. Re-runs whenever the message list grows during
   // init so a late-arriving message still re-anchors the viewport to the bottom.
   //
-  // Known-empty chats reveal WITHOUT content: once the message query has
-  // settled AND the engine reported has_first_mes=false, no greeting message
-  // will EVER arrive for this conversation (§1-10 engine contract) — waiting
-  // for content here stranded those chats on the splash forever. The revealed
-  // empty chat shows the generate-greeting hint via the ListEmptyComponent;
-  // a message arriving later still pins to the bottom via onContentSizeChange
-  // (messagesCountAtReveal stays 0).
+  //   Known-empty chats reveal WITHOUT content: once the message query has
+  //   settled AND the engine reported has_first_mes=false, no greeting message
+  //   will EVER arrive for this conversation (§1-10 engine contract) — waiting
+  //   for content here stranded those chats on the splash forever. The revealed
+  //   empty chat shows the generate-greeting hint via the ListEmptyComponent;
+  //   a message arriving later still pins to the bottom via onContentSizeChange
+  //   (messagesCountAtReveal stays 0).
+  //
+  //   4-3 (D36): a terminally FAILED session also reveals immediately — a
+  //   failed init never delivers content, so holding the splash would dead-end
+  //   behind the error card. No settle window: reveal at once.
   useEffect(() => {
     const hasRealContent =
       messages.length > 0;
@@ -1828,9 +1970,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     if (
       !isReadyToShowRef.current &&
       !isInitialScrollDone.current &&
-      ((initialScrollTarget === 'bottom' && hasRealContent) || isKnownEmpty)
+      ((initialScrollTarget === 'bottom' && hasRealContent) ||
+        isKnownEmpty ||
+        sessionFailed !== null)
     ) {
-      if (isKnownEmpty) {
+      if (isKnownEmpty || sessionFailed !== null) {
         // Nothing to scroll or pin — reveal immediately.
         isInitialScrollDone.current = true;
         isReadyToShowRef.current = true;
@@ -1860,7 +2004,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }, 60);
       }
     }
-  }, [messages, messagesWithDivider, initialScrollTarget, loading, hasFirstMes]);
+  }, [messages, messagesWithDivider, initialScrollTarget, loading, hasFirstMes, sessionFailed]);
 
   const persistMarkAsRead = useCallback(() => {
     // Derived unread (A5/A2): mark partner-sent messages in THIS conversation
@@ -2004,10 +2148,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
         setHasFirstMes(true);
 
+        // 4-2 (D34): critical — a failed sync rejects instead of resolving
+        // best-effort (logged here; the restart keeps the honest failure path).
         await SyncService.getInstance()
-          .syncAndWait()
+          .syncAndWait({ critical: true })
           .catch(err => {
-            log.warn('Scenario restart sync failed (best-effort):', err);
+            log.warn('Scenario restart sync failed (critical):', err);
           });
 
         if (participantKey) {
@@ -2090,7 +2236,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     [greetingMessage, partnerProfile],
   );
 
-  // {{char}} → profile nickname || name; {{user}} → own entity alias.
+  // {{char}} → profile nickname || profile name || entity alias (D21-8: the
+  // alias fallback rides partnerName, set by the header resolution);
+  // {{user}} → own entity alias.
   const charName = partnerProfile?.nickname || partnerProfile?.name || partnerName;
 
   const renderMessage = useCallback(
@@ -2188,16 +2336,18 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
     ],
   );
 
-  // Connection indicator (D1-7): three states, restored from her cd821db
-  // collapse (which reduced it to a single online/offline boolean dot).
-  //   connected  — sync WS up AND the entity session is fully active (purple)
+  // Connection indicator (D1-7, extended by 4-3/D36): four states.
+  //   connected  — sync WS up AND the entity session is fully active (green)
   //   connecting — sync WS up, session still initializing (amber, pulsing)
+  //   error      — the session terminally FAILED (red; no more infinite amber)
   //   offline    — sync WS down / disconnected (grey)
-  const connectionState: 'connected' | 'connecting' | 'offline' = isConnected
-    ? isSessionActive(currentInteractionIdRef.current)
-      ? 'connected'
-      : 'connecting'
-    : 'offline';
+  // The mapping lives in the pure resolveChatConnectionState helper (shared by
+  // the dot render, the pulse effect and the input-bar gating).
+  const connectionState: ChatConnectionState = resolveChatConnectionState({
+    isConnected,
+    isSessionActive: isSessionActive(currentInteractionIdRef.current),
+    sessionFailed: sessionFailed !== null,
+  });
 
   // Pulsing affordance for the "connecting" state.
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -2287,6 +2437,18 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
             >
               <View style={[styles.statusDot, styles.statusDotConnecting]} />
             </Animated.View>
+          ) : connectionState === 'error' ? (
+            // 4-3 (D36): terminal failure — explicit red state. Must stay a
+            // dedicated branch BEFORE the final else (which is the grey
+            // offline dot and must not swallow unknown/error states).
+            <View
+              style={styles.statusDotWrap}
+              accessibilityRole="image"
+              accessibilityLabel={t('statusError')}
+              testID="chat-detail-status-error"
+            >
+              <View style={[styles.statusDot, styles.statusDotError]} />
+            </View>
           ) : (
             <View
               style={styles.statusDotWrap}
@@ -2728,6 +2890,69 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
             {t('disabledBanner')}
           </ThemedText>
         </View>
+      ) : sessionFailed ? (
+        // 4-3 (D36): terminal session-failure card. Reuses the disabledBanner
+        // visual (same container tokens, composer slot) with column layout for
+        // the hint + action rows. The composer is unreachable while the
+        // session is failed (nothing can be sent), so it is replaced here —
+        // same trade the disabled banner already makes.
+        <View
+          style={[styles.disabledBanner, styles.sessionErrorBanner, { paddingBottom: safeBottom + 14 }]}
+          testID="session-error-card"
+        >
+          <View style={styles.sessionErrorRow}>
+            <Icon name="alert-circle-outline" size={18} color={theme?.colors.status.error} />
+            <ThemedText variant="muted" size={13} style={styles.disabledBannerText}>
+              {t('sessionErrorBanner', { name: headerName })}
+            </ThemedText>
+          </View>
+          {sessionFailed.ingestionHint ? (
+            <View style={styles.sessionErrorRow}>
+              <Icon name="sync-alert" size={18} color={theme?.colors.status.warning} />
+              <ThemedText variant="muted" size={13} style={styles.disabledBannerText}>
+                {t('sessionErrorSyncHint')}
+              </ThemedText>
+              <TouchableOpacity
+                onPress={handleSyncAndRetry}
+                style={styles.sessionErrorActionButton}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={t('sessionErrorSyncNow')}
+                testID="session-error-sync"
+              >
+                <ThemedText size={13} weight="bold" style={styles.sessionErrorAction}>
+                  {t('sessionErrorSyncNow')}
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          <View style={styles.sessionErrorRow}>
+            <TouchableOpacity
+              onPress={handleSessionRetry}
+              style={styles.sessionErrorActionButton}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('retry')}
+              testID="session-error-retry"
+            >
+              <ThemedText size={13} weight="bold" style={styles.sessionErrorAction}>
+                {t('retry')}
+              </ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={styles.sessionErrorActionButton}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('back')}
+              testID="session-error-back"
+            >
+              <ThemedText size={13} weight="bold" style={styles.sessionErrorAction}>
+                {t('back')}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+        </View>
       ) : (
         <ChatInputBar
           onSendText={handleSendTextMessage}
@@ -2853,6 +3078,10 @@ const styles = StyleSheet.create({
   statusDotConnecting: {
     backgroundColor: '#f59e0b',
   },
+  // Red "terminal session failure" dot (4-3 / D36 fourth state).
+  statusDotError: {
+    backgroundColor: '#ef4444',
+  },
   statusDotOffline: {
     opacity: 0.85,
   },
@@ -2938,5 +3167,27 @@ const styles = StyleSheet.create({
   },
   disabledBannerText: {
     flex: 1,
+  },
+  // 4-3 (D36): terminal session-failure card — applied ON TOP of
+  // disabledBanner (same container tokens); only switches the row layout to a
+  // column stack so the hint + action rows fit the composer slot.
+  sessionErrorBanner: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 10,
+  },
+  sessionErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sessionErrorActionButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(220, 38, 38, 0.18)',
+  },
+  sessionErrorAction: {
+    color: '#ef4444',
   },
 });

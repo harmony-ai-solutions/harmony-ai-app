@@ -171,11 +171,26 @@ jest.mock('../../database/repositories/userEntities', () => ({
   getUserPersona: jest.fn(),
   deleteUserPersona: jest.fn(),
   resolvePersonaId: jest.fn(),
+  // Typed error class mirrored from the real repo module — the screen's
+  // `instanceof` guard must see the SAME class this file throws.
+  PersonaAliasConflictError: class PersonaAliasConflictError extends Error {
+    constructor(name: string) {
+      super(`A persona named "${name}" already exists — choose a different name`);
+      this.name = 'PersonaAliasConflictError';
+    }
+  },
 }));
 
 jest.mock('../../database/repositories/entities', () => ({
   getEntity: jest.fn(),
   getAllEntities: jest.fn().mockResolvedValue([]),
+  // Typed error class mirrored from the real repo module (D33 instanceof).
+  ReservedEntityNameError: class ReservedEntityNameError extends Error {
+    constructor(name: string) {
+      super(`"${name}" is a reserved name — rename the card and retry`);
+      this.name = 'ReservedEntityNameError';
+    }
+  },
 }));
 
 jest.mock('../../database/repositories/characters', () => ({
@@ -187,10 +202,14 @@ jest.mock('../../database/repositories/characters', () => ({
   getAllCharacterProfiles: jest.fn().mockResolvedValue([]),
 }));
 
-jest.mock('../../services/SyncService', () => ({
-  __esModule: true,
-  default: { syncAndWait: jest.fn().mockResolvedValue(undefined) },
-}));
+jest.mock('../../services/SyncService', () => {
+  const instance = { syncAndWait: jest.fn().mockResolvedValue(undefined) };
+  return {
+    __esModule: true,
+    default: instance,
+    __mockSyncServiceInstance: instance,
+  };
+});
 
 jest.mock('../../services/ChatPreferencesService', () => ({
   __esModule: true,
@@ -291,7 +310,7 @@ import {
   getUserPersona,
   resolvePersonaId,
 } from '../../database/repositories/userEntities';
-import { getEntity } from '../../database/repositories/entities';
+import { getEntity, getAllEntities } from '../../database/repositories/entities';
 import ChatPreferencesService from '../../services/ChatPreferencesService';
 import RNFS from 'react-native-fs';
 
@@ -389,7 +408,7 @@ describe('PersonaEditScreen — create mode (full editor)', () => {
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('blocks a persona named "user" (trim + case-insensitive — decision 14)', async () => {
+  it('blocks a persona named "user" (trim + case-insensitive — decision 14/D33) with the INLINE error', async () => {
     const utils = await render(<PersonaEditScreen />);
     await flush();
 
@@ -399,7 +418,48 @@ describe('PersonaEditScreen — create mode (full editor)', () => {
 
     expect(mockCreate).not.toHaveBeenCalled();
     expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockShowAlert).toHaveBeenCalledWith('personaNameReserved');
+    // D33: inline field error under the name field — never an alert.
+    expect(utils.getByTestId('persona-name-error')).toBeTruthy();
+    expect(utils.getByText('personaNameReserved')).toBeTruthy();
+    expect(mockShowAlert).not.toHaveBeenCalled();
+  });
+
+  it('blocks "deleted" the same way (D33 — case-insensitive)', async () => {
+    const utils = await render(<PersonaEditScreen />);
+    await flush();
+
+    await fireEvent.changeText(utils.getByTestId('persona-name-input'), 'Deleted');
+    await fireEvent.press(utils.getByTestId('save-persona-button'));
+    await flush();
+
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(utils.getByTestId('persona-name-error')).toBeTruthy();
+    expect(utils.getByText('personaNameReserved')).toBeTruthy();
+    expect(mockShowAlert).not.toHaveBeenCalled();
+  });
+
+  it('4-2/D34: a CRITICAL sync failure after create shows the failure alert and does not goBack', async () => {
+    // The pre-chat entity push must be critical (D34) — a failed push surfaces
+    // the failure alert instead of the success alert; the user stays on the
+    // screen so a retry re-runs the save (fresh derived id for creates).
+    const { __mockSyncServiceInstance } = require('../../services/SyncService');
+    (__mockSyncServiceInstance.syncAndWait as jest.Mock).mockRejectedValueOnce(new Error('push failed'));
+
+    const utils = await render(<PersonaEditScreen />);
+    await flush();
+
+    await fireEvent.changeText(utils.getByTestId('persona-name-input'), 'Mara');
+    await fireEvent.changeText(utils.getByTestId('persona-description-input'), 'A mystic healer');
+    await fireEvent.changeText(utils.getByTestId('persona-personality-input'), 'Calm, wise');
+    await fireEvent.press(utils.getByTestId('save-persona-button'));
+    await flush();
+
+    expect(__mockSyncServiceInstance.syncAndWait).toHaveBeenCalledWith({ timeoutMs: 45_000, critical: true });
+    expect(mockShowAlert).toHaveBeenCalledWith('common:error', 'personaSaveSyncFailed');
+    // No success alert, no navigation away — a retry can re-run the save.
+    expect(mockShowAlert).not.toHaveBeenCalledWith('personaSaved');
+    expect(mockNavigation.goBack).not.toHaveBeenCalled();
   });
 });
 
@@ -501,6 +561,85 @@ describe('PersonaEditScreen — edit mode (full editor)', () => {
       'common:error',
       'personaAliasConflict',
     );
+  });
+});
+
+describe('PersonaEditScreen — persona edit alias-collision UX (D86 / review 7)', () => {
+  beforeEach(() => {
+    mockRouteParams = { entityId: 'Mystic Mara' };
+    mockGet.mockResolvedValue({
+      id: 'Mystic Mara',
+      name: 'Mystic Mara',
+      description: 'A mystic healer',
+      personality: 'Calm, wise',
+      avatarUri: null,
+    });
+    mockGetEntity.mockResolvedValue({
+      id: 'Mystic Mara',
+      alias: 'Mystic Mara',
+      character_profile_id: 'profile-1',
+      entity_type: 'user',
+    });
+    const { getCharacterProfile } = require('../../database/repositories/characters');
+    (getCharacterProfile as jest.Mock).mockResolvedValue(profile('profile-1', 'Mystic Mara'));
+  });
+
+  it('pre-check: renaming onto ANOTHER live persona\'s alias (case-insensitive) shows the inline error and never calls updateUserPersona', async () => {
+    (getAllEntities as jest.Mock).mockResolvedValue([
+      { id: 'Shadow Self', alias: 'shadow self' },
+      { id: 'Mystic Mara', alias: 'Mystic Mara' }, // the edited entity — must be excluded
+    ]);
+
+    const utils = await render(<PersonaEditScreen />);
+    await flush();
+
+    await fireEvent.changeText(utils.getByTestId('persona-name-input'), 'SHADOW SELF');
+    await fireEvent.press(utils.getByTestId('save-persona-button'));
+    await flush();
+
+    // Edits REJECT on a taken alias (mirror of the engine update-400) —
+    // no save call, friendly INLINE error, never an alert.
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(utils.getByTestId('persona-name-error')).toBeTruthy();
+    expect(utils.getByText('personaAliasConflict')).toBeTruthy();
+    expect(mockShowAlert).not.toHaveBeenCalled();
+  });
+
+  it('pre-check self-exclusion: a case-insensitive match on the EDITED entity itself does not block the save', async () => {
+    (getAllEntities as jest.Mock).mockResolvedValue([
+      { id: 'Mystic Mara', alias: 'renamed' }, // same id as the edit target
+      { id: 'Someone Else', alias: 'unrelated' },
+    ]);
+
+    const utils = await render(<PersonaEditScreen />);
+    await flush();
+
+    await fireEvent.changeText(utils.getByTestId('persona-name-input'), 'Renamed');
+    await fireEvent.press(utils.getByTestId('save-persona-button'));
+    await flush();
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(utils.queryByTestId('persona-name-error')).toBeNull();
+  });
+
+  it('typed PersonaAliasConflictError from updateUserPersona (residual race) surfaces the same friendly inline error — never raw SQLite', async () => {
+    // Pre-check passes (collision created between probe and save).
+    (getAllEntities as jest.Mock).mockResolvedValue([]);
+    const { PersonaAliasConflictError } = require('../../database/repositories/userEntities');
+    mockUpdate.mockRejectedValue(new PersonaAliasConflictError('Raced'));
+
+    const utils = await render(<PersonaEditScreen />);
+    await flush();
+
+    await fireEvent.changeText(utils.getByTestId('persona-name-input'), 'Raced');
+    await fireEvent.press(utils.getByTestId('save-persona-button'));
+    await flush();
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(utils.getByTestId('persona-name-error')).toBeTruthy();
+    expect(utils.getByText('personaAliasConflict')).toBeTruthy();
+    // The typed mapping must not fall through to any alert branch.
+    expect(mockShowAlert).not.toHaveBeenCalled();
   });
 });
 

@@ -279,28 +279,20 @@ export async function isSoulbitsCloudProviderConfigInUse(id: string): Promise<bo
   return isProviderConfigInUse('soulbitscloud', id);
 }
 
-export async function deleteSoulbitsCloudProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteSoulbitsCloudProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-
-  if (!permanent && await isSoulbitsCloudProviderConfigInUse(id)) {
+  if (await isSoulbitsCloudProviderConfigInUse(id)) {
     throw new Error(`SoulbitsCloud provider config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_soulbitscloud WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`SoulbitsCloud provider config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE provider_config_soulbitscloud SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`SoulbitsCloud provider config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE provider_config_soulbitscloud SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`SoulbitsCloud provider config not found: ${id}`);
     }
   });
 }

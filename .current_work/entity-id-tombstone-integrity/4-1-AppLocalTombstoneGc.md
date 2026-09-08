@@ -76,7 +76,24 @@ review 6 (D69–D78).
 
 ## Checklist
 
-- [ ] Table list aligned to 35 + dependency order parity with engine (D72/D73)
-- [ ] Orphan-memory sweep call retained (D77); `applySyncRecord` dead code deleted
-- [ ] Placeholder 000046 shipped (D11 parity pattern)
-- [ ] Inbound-resurrect + list-parity tests green; personaCascade suite stays green as the GC regression lock; phase doc updated
+- [x] Table list aligned to 35 + dependency order parity with engine (D72/D73)
+- [x] Orphan-memory sweep call retained (D77); `applySyncRecord` dead code deleted
+- [ ] Placeholder 000046 shipped (D11 parity pattern) — **NOT SHIPPED: skipped per orchestrator — ships together with 3-2's 000045 in a later wave (shipping 000046 now would create a numbering gap; app migration 000045 does not exist yet).**
+- [x] Inbound-resurrect + list-parity tests green; personaCascade suite stays green as the GC regression lock; phase doc updated
+
+## Implementation Notes (deviations)
+
+**Deviation (orchestrator-ruled, supersedes doc step 2):** the placeholder migration `000046` was **NOT created**. App migration 000045 (3-2's placeholder) does not exist yet (migrations end at 000044), so shipping 000046 now would leave a numbering gap. The placeholder ships together with 3-2's 000045 in a later wave. No `000046_sync_gc_state_placeholder.ts` file, no `migrations.ts` entry.
+
+**Implemented as scoped:**
+1. `src/services/SyncService.ts` — new exported `GC_TABLES` const (35 tables, engine child-first dependency order per D71(a)/1-2 step 1: entity children → `entities` → `character_profiles` → `character_image` → provider configs → module configs). The RESTRICT-reasoning comment moved verbatim onto the const. `cleanupSoftDeletedRecords` now iterates `GC_TABLES`; per-table try/catch log-and-continue unchanged; call site `handleSyncFinalize` untouched (single caller verified).
+2. `src/database/sync.ts` — `applySyncRecord` deleted (test-only dead code; single caller was `syncApplyNewTables.test.ts`). Unused `DatabaseTransaction` import removed. `cleanupOrphanedMemories` and `cleanupOrphanEntityModuleMappings` untouched (D77).
+3. `src/database/__tests__/repositories/syncApplyNewTables.test.ts` — rewritten (not deleted): the two `applySyncRecord` tests dropped with the dead code; the `getChangedRecords` pinned/archived-as-JSON-numbers shape contract test for `chat_conversation_settings` retained (it exercises production code, not the dead function).
+4. `src/services/__tests__/syncGcTablesParity.test.ts` — NEW app-local list-parity unit test: `GC_TABLES` member-set == `SYNC_TABLES` (35), contains `emotion_state` + `lifecycle_state`, and exact child-first order pin. Cross-repo parity with engine `registeredSyncTables` is 6-1's lock (not attempted).
+5. `__tests__/integration/sync.inboundResurrect.integration.test.ts` — NEW integration test: local tombstone INSIDE the pre-GC window (future `deleted_at`, so the finalize-GC predicate keeps it) + inbound live row (`deleted_at: null`, newer `updated_at`) → `applyBufferedSyncData` resurrects the row; a second un-resurrected tombstone in the same sync proves the GC retention. Uses the personaCascade harness (mock-server protocol round).
+6. `sync.personaCascade.integration.test.ts` — UNTOUCHED and GREEN (the GC regression lock).
+
+**Observations (not caused by this phase):**
+- `SYNC_TABLES` (SyncService.ts:81-122) already contains `emotion_state` + `lifecycle_state` (35 entries) — the "if it's 33 not 35" contradiction did NOT occur; the GC list was the 33-table side that needed the D72 alignment.
+- Test-data pitfall found while writing the resurrect test: repo mappers (`getEntity`) return `Date` objects, which better-sqlite3 cannot bind — engine wire payloads always carry ISO strings (D29), so the incoming record must use `.toISOString()`. Not an app bug.
+- Full-suite failures observed but NOT caused by this phase: (a) `src/database/__tests__/compat/nodeSide.test.ts` — 3 known pre-existing failures; (b) `src/services/__tests__/entitySessionInitRecovery.test.ts` — 4 failures from the PARALLEL UX agent's uncommitted `EntitySessionService.ts`/`EntitySessionContext.tsx` edits (their territory; that test imports only `EntitySessionService`).

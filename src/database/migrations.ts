@@ -53,6 +53,8 @@ import { migration041 } from './migrations/000041_consolidate_senju_features';
 import { migration042 } from './migrations/000042_entity_type_and_flags';
 import { migration043 } from './migrations/000043_drop_dead_sync_infra';
 import { migration044 } from './migrations/000044_favorite_column';
+import { migration045 } from './migrations/000045_engine_id_pattern_placeholder';
+import { migration046 } from './migrations/000046_sync_gc_state_placeholder';
 
 // Migration definition
 export interface Migration {
@@ -280,11 +282,21 @@ export const MIGRATIONS: Migration[] = [
      description: 'drop dead sync-infra tables (sync_devices/sync_history; §9-A14 pair — engine 000043 = synced_tables registry)',
      sql: migration043,
    },
-   {
-     version: 44,
-     description: 'is_favorite column on character_profiles replaces the favorites sidecar table (user ruling 2026-09-01, LWW coupling accepted; paired engine 000044)',
-     sql: migration044,
-   },
+{
+      version: 44,
+      description: 'is_favorite column on character_profiles replaces the favorites sidecar table (user ruling 2026-09-01, LWW coupling accepted; paired engine 000044)',
+      sql: migration044,
+    },
+    {
+      version: 45,
+      description: 'Placeholder — engine counterpart 000045 performs the entity id-pattern migration; app converges via full re-sync (no local data migration required).',
+      sql: migration045,
+    },
+    {
+      version: 46,
+      description: 'Placeholder — engine counterpart 000046 adds engine-local `sync_gc_state` (tombstone-GC purge floor); the app needs no schema change.',
+      sql: migration046,
+    },
   ];
 
 /**

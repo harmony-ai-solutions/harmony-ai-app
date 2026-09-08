@@ -116,3 +116,56 @@ describe('deriveParticipantKey — world scope (O3)', () => {
     expect(deriveParticipantKey([], 'anyone', 'world')).toBe('');
   });
 });
+
+describe('deriveParticipantKey — 6-1 §3 vectors with TIMESTAMPED entity ids (D2 compatibility)', () => {
+  // Post-D2 ids carry "-" (base-YYYYMMDDHHMMSS) and dedupe suffixes
+  // ("-2"); the "+"-joined key format is unaffected — the sorted pair/set
+  // must round-trip timestamped ids exactly like the engine.
+  it('private: sorted pair with timestamped ids', () => {
+    expect(
+      deriveParticipantKey(
+        ['Isabella-20260905123514', 'user'],
+        'user',
+        'private',
+      ),
+    ).toBe('Isabella-20260905123514+user');
+  });
+
+  it('private: order-flipped input still sorts (deterministic key)', () => {
+    expect(
+      deriveParticipantKey(
+        ['user', 'Isabella-20260905123514'],
+        'user',
+        'private',
+      ),
+    ).toBe('Isabella-20260905123514+user');
+    // Same key from the OTHER side's perspective (own = Isabella).
+    expect(
+      deriveParticipantKey(
+        ['Isabella-20260905123514', 'user'],
+        'Isabella-20260905123514',
+        'private',
+      ),
+    ).toBe('Isabella-20260905123514+user');
+  });
+
+  it('group: sorted full set with dedupe-suffixed timestamped ids', () => {
+    expect(
+      deriveParticipantKey(
+        ['B-20260905123514-2', 'A-20260905123514', 'C-20260905123514'],
+        'A-20260905123514',
+        'group',
+      ),
+    ).toBe('A-20260905123514+B-20260905123514-2+C-20260905123514');
+  });
+
+  it('world: a single timestamped id yields an empty key', () => {
+    expect(
+      deriveParticipantKey(
+        ['Isabella-20260905123514'],
+        'Isabella-20260905123514',
+        'world',
+      ),
+    ).toBe('');
+  });
+});

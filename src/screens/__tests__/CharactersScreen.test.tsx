@@ -154,6 +154,20 @@ jest.mock('../../database/repositories/entities', () => ({
   createEntity: jest.fn(),
   createEntityModuleMapping: jest.fn(),
   getEntityByCharacterProfileId: jest.fn().mockResolvedValue(null),
+  // Typed error class mirrored from the real repo module (D33 instanceof).
+  ReservedEntityNameError: class ReservedEntityNameError extends Error {
+    constructor(name: string) {
+      super(`"${name}" is a reserved name — rename the card and retry`);
+      this.name = 'ReservedEntityNameError';
+    }
+  },
+}));
+
+// Chat-open service: mocked so tests can drive its failure surface (the
+// reserved-name card flow asserts the dedicated D33 alert).
+jest.mock('../../services/CharacterChatService', () => ({
+  __esModule: true,
+  openCharacterChat: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../../database/repositories/interactions', () => ({
@@ -249,13 +263,14 @@ jest.mock('../../components/character-card/TagChips', () => {
 
 // CharacterProfileCard mock: a card shell + a tappable creator attribution
 // (drives the screen's creator filter — the wiring under test) + a long-press
-// target (drives the context menu).
+// target (drives the context menu) + a chat button (drives handleChatPress —
+// the reserved-name card-flow test).
 jest.mock('../../components/characters/CharacterProfileCard', () => {
   const React = require('react');
   const { View, Text } = require('react-native');
   return {
     __esModule: true,
-    CharacterProfileCard: ({ profile, onCreatorPress, onLongPress }: any) =>
+    CharacterProfileCard: ({ profile, onCreatorPress, onLongPress, onChatPress }: any) =>
       React.createElement(
         View,
         { testID: `card-${profile.id}` },
@@ -276,6 +291,14 @@ jest.mock('../../components/characters/CharacterProfileCard', () => {
             accessibilityRole: 'button',
           },
           React.createElement(Text, null, `by ${profile.creator}`),
+        ),
+        React.createElement(
+          View,
+          {
+            testID: `chat-${profile.id}`,
+            onPress: () => onChatPress?.(),
+            accessibilityRole: 'button',
+          },
         ),
       ),
   };
@@ -662,6 +685,26 @@ describe('CharactersScreen — new-partner picker routing (live link)', () => {
         duplicateProfileId: expect.anything(),
       }),
     );
+  });
+});
+
+describe('CharactersScreen — reserved-name card flow (D33 / review-5 UX pin)', () => {
+  it('a card whose name is reserved shows the dedicated alert — never the generic chatOpenFailed', async () => {
+    const { openCharacterChat } = require('../../services/CharacterChatService');
+    const { ReservedEntityNameError } = require('../../database/repositories/entities');
+    (openCharacterChat as jest.Mock).mockRejectedValue(
+      new ReservedEntityNameError('user'),
+    );
+
+    const utils = await renderScreen();
+
+    await fireEvent.press(utils.getByTestId('chat-p1'));
+    await flush();
+
+    expect(openCharacterChat).toHaveBeenCalledTimes(1);
+    expect(mockShowAlert).toHaveBeenCalledTimes(1);
+    expect(mockShowAlert).toHaveBeenCalledWith('common:error', 'chatOpenReservedName');
+    expect(mockShowAlert).not.toHaveBeenCalledWith('common:error', 'chatOpenFailed');
   });
 });
 

@@ -9,6 +9,7 @@ import {
   updateUserPersona,
   deleteUserPersona,
   resolvePersonaId,
+  PersonaAliasConflictError,
 } from '../../repositories/userEntities';
 import {getEntity, getAllEntities, createEntity} from '../../repositories/entities';
 import {
@@ -34,15 +35,25 @@ describe('user entities repository', () => {
   const {getDb} = useFreshDatabase();
 
   describe('createUserPersona', () => {
-    it('creates a persona with a profile, a user entity (id = name), and returns a Persona', async () => {
+    // Pinned to the 6-1 fixed instant so derived ids are fully deterministic.
+    const TS = '20260905123514';
+
+    beforeEach(() => {
+      jest.useFakeTimers({now: new Date('2026-09-05T12:35:14Z')});
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('creates a persona with a profile, a user entity (id = DERIVED, alias = display name), and returns a Persona', async () => {
       const persona = await createUserPersona({
         name: '  Mystic Mara  ',
         description: 'A mystic healer',
         personality: 'Calm, wise',
       });
 
-      expect(persona.id).toBe('Mystic Mara'); // trimmed + id = name
-      expect(persona.name).toBe('Mystic Mara');
+      expect(persona.id).toBe(`Mystic-Mara-${TS}`); // D2 derived, never the raw name
+      expect(persona.name).toBe('Mystic Mara'); // profile keeps the human name
       expect(persona.description).toBe('A mystic healer');
       expect(persona.personality).toBe('Calm, wise');
       expect(persona.avatarUri).toBeNull();
@@ -50,7 +61,7 @@ describe('user entities repository', () => {
       const entity = await getEntity(persona.id);
       expect(entity).not.toBeNull();
       expect(entity!.entity_type).toBe('user');
-      expect(entity!.alias).toBe('Mystic Mara');
+      expect(entity!.alias).toBe('Mystic Mara'); // D3/D56: alias carries the name
       expect(entity!.character_profile_id).not.toBeNull();
 
       const profile = await getCharacterProfile(entity!.character_profile_id!);
@@ -71,65 +82,63 @@ describe('user entities repository', () => {
       expect(image!.is_primary).toBe(true);
     });
 
-    it('unique-checks the entity id via the copy-suffix convention when the name is taken', async () => {
+    it('derives a -N-suffixed id and DEDUPED alias when the display name is taken (D56)', async () => {
       await createUserPersona({name: 'Aria'});
       const second = await createUserPersona({name: 'Aria'});
-      expect(second.id).toBe('Aria 2');
+      // Same pinned second → id "-2" on the FULL derived id; alias "Aria 2".
+      expect(second.id).toBe(`Aria-${TS}-2`);
+      expect(second.name).toBe('Aria');
+      const entity = await getEntity(second.id);
+      expect(entity!.alias).toBe('Aria 2');
     });
 
     it('recreate-after-delete succeeds: a soft-deleted (ghost) id is resolved, leaving no residue (ghost-id bug)', async () => {
       const first = await createUserPersona({name: 'Max'});
-      expect(first.id).toBe('Max');
-      await deleteUserPersona('Max');
+      expect(first.id).toBe(`Max-${TS}`);
+      await deleteUserPersona(first.id);
 
       // Old code path: getEntity('Max') misses the ghost → id = 'Max' → the
       // entity INSERT hits the TEXT PRIMARY KEY → generic failure + an orphaned
-      // profile (phantom card). New path must resolve the ghost to "Max 2".
+      // profile (phantom card). New path must resolve the ghost via the
+      // ghost-aware backstop.
       const recreated = await createUserPersona({name: 'Max'});
-      expect(recreated.id).toBe('Max 2');
+      expect(recreated.id).toBe(`Max-${TS}-2`);
 
-      // The ghost still reserves the PK; the new persona is a live row.
-      const ghost = await getEntity('Max', true);
+      // The ghost still reserves the PK; the new persona is a live row. The
+      // ALIAS is live-only deduped (D56): the ghost's alias does not block,
+      // so the recreated persona's alias is the plain display name again.
+      const ghost = await getEntity(`Max-${TS}`, true);
       expect(ghost).not.toBeNull();
       expect(ghost!.deleted_at).not.toBeNull();
-      const live = await getEntity('Max 2');
+      const live = await getEntity(recreated.id);
       expect(live).not.toBeNull();
       expect(live!.entity_type).toBe('user');
-      expect(live!.alias).toBe('Max 2');
+      expect(live!.alias).toBe('Max');
 
-      // Exactly ONE live persona named "Max"/"Max 2" — no phantom card.
-      // (Convention: the profile name stays the raw name; the deduped id lives
-      // on the entity alias.)
+      // Exactly ONE live persona named "Max" — no phantom card.
       const liveProfiles = await getCharacterProfile(live!.character_profile_id!);
       expect(liveProfiles?.name).toBe('Max');
     });
 
-    it('compensates an entity-INSERT failure by soft-deleting the orphaned profile (no residue)', async () => {
-      // Alias/rename divergence: a live entity whose id is NOT "Max" but whose
-      // alias IS "Max". The id "Max" is free, so the persona's id resolves to
-      // "Max" verbatim — but the alias "Max" collides with the live row's
-      // alias (idx_entities_alias_unique) → the entity INSERT fails AFTER the
-      // profile was created. Compensation must tombstone the orphan profile.
+    it('dedupes the alias onto a LIVE alias-twin instead of throwing (D56 — the old compensation trigger is gone)', async () => {
+      // A live AI entity whose ALIAS (not id) is 'Max'. The persona's derived
+      // id is free, but the alias 'Max' is taken — D56 dedupes to 'Max 2'
+      // instead of throwing on idx_entities_alias_unique.
       await getDb().executeSql(
         `INSERT INTO entities (id, alias, character_profile_id, lifecycle_config, rag_reindex_required, entity_type, created_at, updated_at)
          VALUES ('renamed-owner', 'Max', NULL, '{}', 1, 'ai', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       );
 
-      await expect(createUserPersona({name: 'Max'})).rejects.toThrow();
-
-      // No LIVE orphan profile named "Max" remains; the failed attempt's
-      // profile row is tombstoned (not left as a phantom card).
+      const persona = await createUserPersona({name: 'Max'});
+      expect(persona.id).toBe(`Max-${TS}`);
+      const entity = await getEntity(persona.id);
+      expect(entity!.alias).toBe('Max 2');
+      // No live OR orphaned ghost profile was created for the failed attempt —
+      // the create SUCCEEDED (dedupe, not collision).
       const [liveResult] = await getDb().executeSql(
         `SELECT COUNT(*) AS count FROM character_profiles WHERE name = 'Max' AND deleted_at IS NULL`,
       );
-      expect(liveResult.rows.item(0).count).toBe(0);
-      const [ghostResult] = await getDb().executeSql(
-        `SELECT COUNT(*) AS count FROM character_profiles WHERE name = 'Max' AND deleted_at IS NOT NULL`,
-      );
-      expect(ghostResult.rows.item(0).count).toBe(1);
-
-      // No live entity was created either.
-      expect(await getEntity('Max')).toBeNull();
+      expect(liveResult.rows.item(0).count).toBe(1); // the persona's profile
     });
 
     it('accepts the full V3 + Soulbits field set and persists it on the profile (3-2-A)', async () => {
@@ -279,6 +288,26 @@ describe('user entities repository', () => {
       expect(profile!.card_provenance).toBe('{"source": "updated"}');
       expect(profile!.voice_characteristics).toBe('deep');
       expect(profile!.typing_speed_wpm).toBe(60);
+    });
+
+    it('throws a TYPED friendly error when the edit renames onto a LIVE alias (residual race — never raw SQLite, D86)', async () => {
+      const twin = await createUserPersona({name: 'Twin One'});
+      const other = await createUserPersona({name: 'Other'});
+
+      // Renaming "Other" onto the live alias "Twin One" hits
+      // idx_entities_alias_unique → mapped to a typed friendly error.
+      await expect(
+        updateUserPersona(other.id, {name: 'Twin One'}),
+      ).rejects.toBeInstanceOf(PersonaAliasConflictError);
+
+      // The error carries a friendly message, never a raw SQLite constraint
+      // string.
+      await expect(
+        updateUserPersona(other.id, {name: 'Twin One'}),
+      ).rejects.toThrow(/already exists/i);
+
+      // The twin is untouched.
+      expect((await getEntity(twin.id))!.alias).toBe('Twin One');
     });
   });
 

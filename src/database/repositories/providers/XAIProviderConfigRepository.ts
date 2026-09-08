@@ -140,17 +140,12 @@ export async function isXAIProviderConfigInUse(id: string): Promise<boolean> {
   return isProviderConfigInUse('xai', id);
 }
 
-export async function deleteXAIProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteXAIProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  if (!permanent && await isXAIProviderConfigInUse(id)) throw new Error(`XAI provider config ${id} is in use and cannot be soft deleted`);
+  if (await isXAIProviderConfigInUse(id)) throw new Error(`XAI provider config ${id} is in use and cannot be soft deleted`);
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_xai WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) throw new Error(`XAI provider config not found: ${id}`);
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql('UPDATE provider_config_xai SET deleted_at = ? WHERE id = ?', [now, id]);
-      if (result.rowsAffected === 0) throw new Error(`XAI provider config not found: ${id}`);
-    }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql('UPDATE provider_config_xai SET deleted_at = ? WHERE id = ?', [now, id]);
+    if (result.rowsAffected === 0) throw new Error(`XAI provider config not found: ${id}`);
   });
 }

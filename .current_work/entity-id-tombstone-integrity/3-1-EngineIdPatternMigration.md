@@ -207,12 +207,84 @@ timestamped ids; N1 fix handles the rest).
 
 ## Checklist
 
-- [ ] Ripple matrix verified against live schema (all FK/column references enumerated — incl.
+- [x] Ripple matrix verified against live schema (all FK/column references enumerated — incl.
       `conversation_messages.entity_id`, `chat_conversation_settings.{participant_key, entity_id}`)
-- [ ] Migration written as the D62 Go hook (deterministic mapping, runner-compliant, integrity checks)
-- [ ] Runner `GoUp` support + runner-level tests (hook-in-tx, error-retry, mixed ordering)
-- [ ] Participant-key recompute expression cross-checked with `DeriveParticipantKey` (+ legacy-000024 decision)
-- [ ] Timestamp parser handles all 3 formats, incl. the post-verbatim-apply format-A/B mix in `entities`
-- [ ] Tie-break avoids collisions with already-conforming ids; BINARY sort pinned (D21-6)
-- [ ] D11 ordering respected (engine deploy lands before the app update)
-- [ ] Fixture-based migration tests green; idempotence verified; phase doc updated
+- [x] Migration written as the D62 Go hook (deterministic mapping, runner-compliant, integrity checks)
+- [x] Runner `GoUp` support + runner-level tests (hook-in-tx, error-retry, mixed ordering)
+- [x] Participant-key recompute expression cross-checked with `DeriveParticipantKey` (+ legacy-000024 decision)
+- [x] Timestamp parser handles all 3 formats, incl. the post-verbatim-apply format-A/B mix in `entities`
+- [x] Tie-break avoids collisions with already-conforming ids; BINARY sort pinned (D21-6)
+- [x] D11 ordering respected (engine deploy lands before the app update — rollout note, no code)
+- [x] Fixture-based migration tests green; idempotence verified; phase doc updated
+
+## Implementation Notes (deviations)
+
+Implemented + verified on `feat/engine-track-phase2` (working tree, uncommitted). `go build ./...`,
+`go vet ./...`, `go test ./... -count=1 -timeout 90s` all green (30/30 packages).
+
+**Files created/changed** (engine repo): `database/migrations.go` (GoUp field + dispatch + registry),
+`database/migration_entity_id_timestamp.go` (the 000045 GoUp hook, detector, ripple, verification),
+`database/migrations/000045_entity_id_timestamp_pattern.{up,down}.sql` (comment-only stub + no-op down),
+`database/controllers/entity_id_migration_hooks.go` (init wiring), `utils/timestampparse/parse.go`
+(shared 3-format parser), plus tests: `database/migrations_goup_test.go` (runner-level),
+`database/migration_entity_id_timestamp_test.go` (6-1 §4 fixture, `database_test` package),
+`utils/timestampparse/parse_test.go` (6-1 §2 vectors). No `eventserver/` files touched.
+
+1. **Verbatim-reuse seam is value-level, not an import** (REAL constraint found at implementation time).
+   Package `database` cannot import `database/controllers`: the controllers' INTERNAL tests
+   (`package controllers`) import `database`, so a `database -> controllers` production edge cycles
+   those test binaries (verified: `go vet` fails with "import cycle not allowed in test"). The D62
+   requirement is satisfied at the value level instead — `database.SetEntityIDPatternHooks(...)` is
+   called from `database/controllers` `init()` with the ACTUAL runtime `DeriveEntityID` /
+   `DeriveParticipantKey` function values; the migration calls those same values. The fixture test
+   builds its expected map with the same functions and additionally calls the setter explicitly.
+   Failure mode when the hooks are missing AND data needs migrating is a LOUD error (never a silent
+   no-op); empty DBs never touch the hooks (guarded), so every existing test binary is unaffected.
+   Production wiring is guaranteed: the `cmd` binary imports `database/controllers` transitively.
+
+2. **The 6-1 §4 fixture test lives in the external package `database_test`** (deviating from the
+   phase doc's "materialized in the engine repo" — no package mandated). An internal `package
+   database` test importing `controllers` would cycle for the same reason as note 1. The external
+   package re-runs the migration by dropping version 45 and reopening the file-backed DB
+   (`InitDatabase` — the real "next startup" path).
+
+3. **No temp `id_map` table** (the D40-era "SQLite mechanics" step was superseded by D62). The
+   mapping is an in-memory Go map computed from the same loaded rows; idempotence comes from
+   recompute-on-rerun (second run sees every id conforming → zero renames → identical result, pinned
+   by the fixture's run-twice snapshot).
+
+4. **FK check inside the hook is warning-only** (never fails the hook). The runner's own
+   `foreign_key_check` is warning-only (migrations.go:246-285); failing the hook on any FK violation
+   would boot-loop a DB with pre-existing violations. Violations are logged + surfaced; the fixture
+   asserts a clean `foreign_key_check` on the well-formed case.
+
+5. **Unparseable `created_at` rows: skip + surface** (accepted exception, not in the doc's fixture
+   list). A corrupt created_at cannot be derived from; the row keeps its legacy id, is logged, and is
+   excluded from the charset hard-fail (surfaced with the orphan list). Never fails the hook (D80's
+   boot-loop rule). `COALESCE(CAST(created_at AS TEXT),'')` guards a NULL created_at.
+
+6. **`chat_conversation_settings.participant_key` rewrite = component mapping + canonical sorted
+   re-join** (equal to `DeriveParticipantKey`'s output for every well-formed 2+ component key). A
+   legacy UNSORTED key is canonicalized (a superset of pure mapping — converges settings keys to the
+   runtime formula; idempotent since the second run sees the canonical key). Degenerate
+   single-component keys are left untouched (a PK must never be blanked). Accepted edge: a legacy id
+   containing `+` would split ambiguously (legacy ids are names, never observed; the runtime formula
+   itself would be ambiguous for such ids).
+
+7. **Fixture extras beyond 6-1 §4's list**: the `Max`/`MaxTwin` pair exercises BOTH the
+   pre-existing `Name-<ts>-2` taken-shape AND a second alias-collision skip (MaxTwin's explicit alias
+   `Max` blocks Max's backfill), and `X`/`Xcard` is the doc's dedicated alias-collision pair. The
+   `Isabella` + `Isabella-ghost` tombstones double as the same-second duplicate pair (profile-name
+   fallback → same base → deterministic `-2` by old_id). The `user`-side mirror, a world row with a
+   single participant (single-id legacy key → NULL), and an orphan-bearing private row round out the
+   matrix.
+
+8. **Numbering**: 000045 applies before the parallel 000046 (`loadMigrations` sort verified by a
+   runner test); the 000045 stub records its version and the no-op down keeps rollback bookkeeping.
+
+9. **`claire` is NOT exempt** (D81) — the fixture seeds a raw `claire` row and asserts it migrates to
+   `claire-<ts>`; only `user` is exempt.
+
+10. **Vector folders** (D22) are not relocated — documented in the migration comment + hook docblock:
+    all seven `WorkingDir/<entityId>/{backend,cognition,movement,rag,stt,tts,vision}` orphan once,
+    modules self-heal via `os.MkdirAll`, only rag re-embeds on first use.

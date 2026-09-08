@@ -20,7 +20,7 @@ import { ThemedButton } from '../themed/ThemedButton';
 import { wipeDatabaseCompletely } from '../../database';
 
 export function DatabaseLoadingScreen() {
-  const { isLoading, error, retryInitialization } = useDatabase();
+  const { isLoading, isRebuilding, error, retryInitialization } = useDatabase();
   const { theme } = useAppTheme();
   const { t } = useTranslation('database');
   const { showAlert } = useAppAlert();
@@ -160,7 +160,7 @@ export function DatabaseLoadingScreen() {
           hierarchy="header"
           style={styles.headline}
         >
-          {t('initializing')}
+          {isRebuilding ? t('rebuilding') : t('initializing')}
         </ThemedText>
 
         <ThemedText
@@ -169,7 +169,7 @@ export function DatabaseLoadingScreen() {
           hierarchy="subtext"
           style={styles.description}
         >
-          {t('settingUp')}
+          {isRebuilding ? t('rebuildingDescription') : t('settingUp')}
         </ThemedText>
 
         {/* Decorative bottom accent bar */}

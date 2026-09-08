@@ -24,6 +24,16 @@ import type {CharacterProfile} from '../../models';
 describe('persona from card (createUserPersonaFromCard)', () => {
   const {getDb} = useFreshDatabase();
 
+  // Pinned to the 6-1 fixed instant so derived ids are fully deterministic.
+  const TS = '20260905123514';
+
+  beforeEach(() => {
+    jest.useFakeTimers({now: new Date('2026-09-05T12:35:14Z')});
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   /** Full-featured source card: every V3 + Soulbits field + 2 images. */
   async function seedSourceCard(id: string): Promise<CharacterProfile> {
     await createCharacterProfile({
@@ -85,8 +95,9 @@ describe('persona from card (createUserPersonaFromCard)', () => {
     await seedSourceCard('src-1');
     const persona = await createUserPersonaFromCard('src-1');
 
-    // Fresh user entity, id = deduped name.
-    expect(persona.id).toBe('Source Card');
+    // Fresh user entity, id = DERIVED (D2), alias = deduped display name.
+    expect(persona.id).toBe(`Source-Card-${TS}`);
+    expect(persona.name).toBe('Source Card'); // review-4: profile keeps the human name
     const entity = await getEntity(persona.id);
     expect(entity).not.toBeNull();
     expect(entity!.entity_type).toBe('user');
@@ -155,69 +166,64 @@ describe('persona from card (createUserPersonaFromCard)', () => {
     expect(persona.avatarUri).toBe('data:image/png;base64,cHJpbWFyeQ==');
   });
 
-  it('dedupes the persona name via getNextEntityAliasCopy when the name is taken', async () => {
+  it('derives a -N-suffixed id and DEDUPED alias when the display name is taken (D56); profile keeps the human name (review-4)', async () => {
     await seedSourceCard('src-3');
     await createUserPersona({name: 'Source Card'});
 
     const persona = await createUserPersonaFromCard('src-3');
-    expect(persona.id).toBe('Source Card 2');
+    expect(persona.id).toBe(`Source-Card-${TS}-2`);
 
-    // Only one entity named 'Source Card' + one copy.
+    // review-4: the PROFILE is named after the base name, never the derived id.
+    const entity = await getEntity(persona.id);
+    const profile = await getCharacterProfile(entity!.character_profile_id!);
+    expect(profile!.name).toBe('Source Card');
+    expect(entity!.alias).toBe('Source Card 2');
+
+    // Only one entity with the base id + one copy.
     const entities = await getAllEntities();
     const ids = entities.map(e => e.id);
-    expect(ids).toContain('Source Card');
-    expect(ids).toContain('Source Card 2');
+    expect(ids).toContain(`Source-Card-${TS}`);
+    expect(ids).toContain(`Source-Card-${TS}-2`);
   });
 
   it('from-card onto a soft-deleted (ghost) id succeeds (ghost-id bug)', async () => {
     await seedSourceCard('src-ghost');
-    // A persona named 'Source Card' exists and is deleted → its entity id
-    // 'Source Card' is a ghost that still reserves the TEXT PRIMARY KEY.
-    await createUserPersona({name: 'Source Card'});
-    await deleteUserPersona('Source Card');
+    // A persona named 'Source Card' exists and is deleted → its entity id is a
+    // ghost that still reserves the TEXT PRIMARY KEY.
+    const first = await createUserPersona({name: 'Source Card'});
+    await deleteUserPersona(first.id);
 
     const persona = await createUserPersonaFromCard('src-ghost');
-    expect(persona.id).toBe('Source Card 2');
+    // Same pinned second → the derived id collides with the ghost → -2.
+    expect(persona.id).toBe(`Source-Card-${TS}-2`);
 
     // The copy is a live persona; the ghost is untouched.
-    const live = await getEntity('Source Card 2');
+    const live = await getEntity(`Source-Card-${TS}-2`);
     expect(live).not.toBeNull();
     expect(live!.entity_type).toBe('user');
-    const ghost = await getEntity('Source Card', true);
+    const ghost = await getEntity(`Source-Card-${TS}`, true);
     expect(ghost!.deleted_at).not.toBeNull();
   });
 
-  it('compensates an entity-INSERT failure by tombstones + deleting the orphaned copy (from-card residue, ghost-id bug)', async () => {
+  it('dedupes the alias onto a LIVE alias-twin instead of throwing (D56 — creates never 400 on a name collision)', async () => {
     await seedSourceCard('src-comp');
-    // Live entity whose ALIAS (not id) is 'Source Card' → the persona's id
-    // resolves to 'Source Card' (free id) but its alias collides with the live
-    // row's alias → entity INSERT fails AFTER the full card copy (profile +
-    // images) was created. Compensation must tombstone the orphaned copy.
+    // Live entity whose ALIAS (not id) is 'Source Card' → the persona's
+    // derived id is free, but the alias 'Source Card' is taken — D56 dedupes
+    // the alias to 'Source Card 2' instead of throwing on
+    // idx_entities_alias_unique.
     await getDb().executeSql(
       `INSERT INTO entities (id, alias, character_profile_id, lifecycle_config, rag_reindex_required, entity_type, created_at, updated_at)
        VALUES ('renamed-owner-comp', 'Source Card', NULL, '{}', 1, 'ai', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     );
 
-    await expect(createUserPersonaFromCard('src-comp')).rejects.toThrow();
-
-    // No LIVE orphan profile named 'Source Card' remains (only the source
-    // card itself, which has id 'src-comp', is live).
-    const [liveResult] = await getDb().executeSql(
-      `SELECT COUNT(*) AS count FROM character_profiles WHERE name = 'Source Card' AND deleted_at IS NULL`,
-    );
-    expect(liveResult.rows.item(0).count).toBe(1); // just the source card
-
-    // The orphaned copy's images are tombstoned too (from-card copies images —
-    // they must not linger as live residue).
-    const [ghostImages] = await getDb().executeSql(
-      `SELECT COUNT(*) AS count FROM character_image ci
-       JOIN character_profiles cp ON cp.id = ci.character_profile_id
-       WHERE cp.name = 'Source Card' AND cp.id != 'src-comp' AND ci.deleted_at IS NULL`,
-    );
-    expect(ghostImages.rows.item(0).count).toBe(0);
-
-    // No live entity was created.
-    expect(await getEntity('Source Card')).toBeNull();
+    const persona = await createUserPersonaFromCard('src-comp');
+    expect(persona.id).toBe(`Source-Card-${TS}`);
+    const entity = await getEntity(persona.id);
+    expect(entity!.alias).toBe('Source Card 2');
+    // The full card copy completed (profile + images) under the deduped alias.
+    const copy = await getCharacterProfile(entity!.character_profile_id!);
+    expect(copy!.name).toBe('Source Card');
+    expect(copy!.scenario).toBe('In a library.');
   });
 
   it('uses an explicit name option as the copy base name', async () => {
@@ -225,10 +231,12 @@ describe('persona from card (createUserPersonaFromCard)', () => {
     await createUserPersona({name: 'Custom'});
 
     const persona = await createUserPersonaFromCard('src-4', {name: 'Custom'});
-    expect(persona.id).toBe('Custom 2');
+    expect(persona.id).toBe(`Custom-${TS}-2`);
     const entity = await getEntity(persona.id);
     const copy = await getCharacterProfile(entity!.character_profile_id!);
-    expect(copy!.name).toBe('Custom 2');
+    // review-4: the PROFILE keeps the explicit base name, never the derived id.
+    expect(copy!.name).toBe('Custom');
+    expect(entity!.alias).toBe('Custom 2');
     // Full fields still copied under the renamed identity.
     expect(copy!.scenario).toBe('In a library.');
   });
@@ -300,7 +308,7 @@ describe('persona from card (createUserPersonaFromCard)', () => {
     await deleteEntity('src-freed-owner');
 
     const persona = await createUserPersonaFromCard('src-freed-card');
-    expect(persona.id).toBe('Source Card');
+    expect(persona.id).toBe(`Source-Card-${TS}`);
   });
 
   it('copies a card with NO images into a persona with a null avatar', async () => {

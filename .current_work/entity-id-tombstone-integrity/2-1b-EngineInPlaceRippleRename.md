@@ -99,10 +99,76 @@ exists. "Rename" from now on means an **alias edit** (`updateEntity`), everywher
 
 ## Checklist
 
-- [ ] Rename endpoint + controller path + FE wiring deleted (FE side in 2-3)
-- [ ] Delete 409 guard (Active || Suspended-within-TTL)
-- [ ] Non-phone disconnect releases the session (D27 leak fix)
-- [ ] Shared zombie teardown helper wired into delete / sync-delete (1-1)
-- [ ] Delete cascade grown to 8 children + one-captured-`now` stamping incl. persona-route profile
+- [x] Rename endpoint + controller path + FE wiring deleted (FE side in 2-3)
+- [x] Delete 409 guard (Active || Suspended-within-TTL)
+- [x] Non-phone disconnect releases the session (D27 leak fix)
+- [x] Shared zombie teardown helper wired into delete / sync-delete (1-1)
+- [x] Delete cascade grown to 8 children + one-captured-`now` stamping incl. persona-route profile
       delete (D26/D17 — step 6, review 7)
-- [ ] Tests green; phase doc updated with deviations
+- [x] Tests green; phase doc updated with deviations
+
+## Implementation Notes (deviations)
+
+1. **Captured-now helper placement (step 6 / D25 seam):** `DeleteStampNow() time.Time`
+   lives in `database/repository/entities/delete_stamps.go` — the `entities` repository
+   package. That is the import-safe common denominator for both consumers named in the doc:
+   `entities.go` is in the package, and `eventserver/synchronization.go` already imports
+   `database/repository/entities` (no import cycle either direction). 1-1's per-table
+   delete-op unification (D25) can import the same package from the interaction/memory/
+   conversation repos without cycles (those repos import only `database/models` today, and
+   `entities` imports only `database/models`). Not placed in `database/models` because that
+   is the data-shape package (no logic precedent), and not a new top-level util package
+   because the doc explicitly allowed "a repo-level or shared util".
+   `DeleteEntity` returns the captured stamp (`(time.Time, error)`) so the persona route can
+   thread the SAME now into the profile delete (D17) — this keeps "one helper, not two".
+
+2. **Signature changes required by the D17 shared-now threading:**
+   - `entities.DeleteEntity` / `controllers.DeleteEntity` now return `(time.Time, error)`.
+     All callers adapted (hldb facade discards the stamp; sync-apply `synchronization.go:1409`
+     adapted with a comment that 1-1 wires the shared teardown + D25 stamps through it — the
+     doc's "do not modify synchronization.go's delete branches yourself" was respected: this
+     is a compile-required mechanical adaptation only, no semantic change to the branch).
+   - `characters` repo gained `DeleteCharacterProfileAt(tx, id, now)`; the internal
+     `deleteCharacterProfile` takes `now`; the standalone public wrappers pass
+     `time.Now().UTC().Truncate(time.Second)` inline (they are standalone profile deletes,
+     NOT part of the shared entity-family cascade — the D17 shared-now requirement is
+     satisfied by the persona route receiving the stamp from `DeleteEntity`). The characters
+     repo deliberately does NOT import `entities` for the helper (avoids a peer-repo
+     dependency); the shared-now threading is value-based.
+   - `controllers.DeleteCharacterProfileAt` added as a thin wrapper for the route.
+
+3. **409-guard predicate home (step 2):** `HasBlockingSessions(entityID)` is a method on
+   `EntitySessionManager` (eventserver/session.go), implemented over `GetEntitySessions`
+   with the TTL expression verbatim from `FindResumableSession`
+   (`time.Since(s.SuspendedAt) < SessionSuspendTTL`) per the review-4 note. The management
+   handler checks it nil-safely (handlers wired without a session manager — the existing
+   unit-test pattern `handleDeleteEntity(c, nil)` — skip the guard).
+
+4. **Teardown helper (step 4 / D24):** `RemoveEntityRuntimeState(entityID)` is a method on
+   `HarmonyLinkEventServer` (eventserver/server.go) composing the EXISTING
+   `lifecycleService.StopBeatRunner` + `RemoveEmotionEngine` and the new exported
+   `EntitySessionManager.RemoveSharedCognition`. No new lifecycle APIs. The 409 guard means
+   management delete only reaches teardown when no blocking session exists; 1-1's sync-apply
+   call site is unchanged (seam only — the doc's "do not modify synchronization.go's delete
+   branches yourself" honored).
+
+5. **Test placement:** the doc's "extend the management suite" header is honored where the
+   eventserver handle is reachable, but two test groups necessarily live in the eventserver
+   package (private-field access): the disconnect-release leak lock (step 3) and the
+   teardown-helper test (step 4). The 409/one-now/persona-shared-now tests are management
+   HTTP tests; `setupManagementEventServer` builds a real `HarmonyLinkEventServer` via
+   `eventserver.Init` (the only exported constructor) with a temp DataDir — RSA keygen adds
+   ~0.5–1.3s per guard test, acceptable. The 8-child/one-now + already-tombstoned-child
+   behavior is additionally locked at the repo level
+   (`TestDeleteEntity_ReturnsCapturedNowAndStampsFamily`).
+
+6. **Test collateral deleted:** `routes_entities_test.go` rename route registration +
+   `TestHandleRenameEntity_UserRejected`, `entity_controller_test.go`
+   `TestRenameEntity_PreservesEntityType` — replaced by `TestRenameEndpointGone` (404 lock).
+
+7. **`DuplicateEntity` untouched** as instructed — the duplicate derivation path
+   (`ResolveEntityID` + `ResolveAliasCopy`) is unchanged.
+
+8. **No contradictions found** — all doc file:line claims matched codebase reality (minor
+   line drift only, e.g. `session.go:689` TTL expression is at 688-689; `GetActiveSessions`
+   at 339-356; `StopBeatRunner` at 223; `RemoveEmotionEngine` at 85).

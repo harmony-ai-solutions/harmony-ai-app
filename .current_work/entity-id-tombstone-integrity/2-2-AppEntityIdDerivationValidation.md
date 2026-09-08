@@ -140,12 +140,124 @@ introduced the ghost-aware create compensation this builds on).
 
 ## Checklist
 
-- [ ] Shared `deriveEntityId` + regression vectors (per-repo, post-D11)
-- [ ] All derived seams switched (5 call sites incl. `duplicateAIPartner`) **via the one `mintEntityId`
-      helper (D68)**; backstop **replaced** with `nextFreeDerivedId` (no space ids)
-- [ ] Reserved-name checks (`user`, `deleted`) at all three name seams (D33 — no explicit-id UX exists)
-- [ ] Persona alias/id split (create only; edits stable) + alias dedupe `getNextEntityAliasCopy` (D56) +
+- [x] Shared `deriveEntityId` + regression vectors (per-repo, post-D11) — `src/utils/entityIdUtils.ts` +
+      `src/utils/__tests__/entityIdUtils.test.ts` (all 6-1 §1 vectors + timezone rule)
+- [x] All derived seams switched (5 call sites incl. `duplicateAIPartner`) **via the one `mintEntityId`
+      helper (D68)**; backstop **replaced** with `nextFreeDerivedId` (no space ids) — `resolveNextEntityIdCopy`
+      removed; `stripCopySuffix` kept (alias copies + `getSiblingCharacterProfiles`)
+- [x] Reserved-name checks (`user`, `deleted`) at all three name seams (D33 — no explicit-id UX exists) —
+      typed `ReservedEntityNameError` thrown from the mint seam (all five callers); the screen-side dedicated
+      message-key mapping is owned by the follow-up UI phase
+- [x] Persona alias/id split (create only; edits stable) + alias dedupe `getNextEntityAliasCopy` (D56) +
       `createUserPersonaFromCard` names the profile `baseName`, never the derived id (review-4) +
-      edit-path alias-collision friendly error (review 7)
-- [ ] ChatDetail partner header alias fallback added — `charName` AND `headerName` (D21-8)
-- [ ] `tsc` + jest suites green; phase doc updated
+      edit-path alias-collision friendly error (review 7) — typed `PersonaAliasConflictError` in
+      `updateUserPersona` (residual race); the PersonaEditScreen case-insensitive pre-check is a UI-phase item
+- [x] ChatDetail partner header alias fallback added — `charName` AND `headerName` (D21-8) — **owned by the
+      follow-up UI phase (screens are out of scope for 2-2 CORE)** — **DONE in the UI phase** (see
+      "Implementation Notes (deviations) → UI phase"): `resolveHeaderName` resolves
+      `nickname || profile name || alias` for private chats; profile-less partners surface the alias in
+      both `headerName` and the `charName` chain; 4-3 suites stay green
+- [x] `tsc` + jest suites green; phase doc updated — `npx tsc --noEmit` clean; `npm test` 133/133 unit suites
+      (1184 tests) + 12/12 integration suites green (only the known pre-existing parallel-load flakes
+      `nodeDatabase.smoke` / `compat/nodeSide` ever fail intermittently, and pass in isolation)
+
+## Implementation Notes (deviations)
+
+1. **Slug rule — D2 prose vs 6-1 §1 vectors (resolved contradiction).** The prose rule "every run of chars
+   outside `[A-Za-z0-9]` → single `-`" contradicts the binding vector `a.b_c-d → a.b_c-d-…` ("valid charset
+   passthrough") and the `--__-- → entity-…` vector (which forces `_` to be trimmed at the edges, not
+   preserved). Implemented the vector-satisfying rule: characters inside the VALID ID CHARSET
+   `[A-Za-z0-9._-]` pass through verbatim; every run of `[^A-Za-z0-9._-]` collapses to a single `-`;
+   leading/trailing non-alphanumerics are trimmed; cap 48; empty → `entity`. All seven §1 vectors pass.
+   The engine's 2-1 `DeriveEntityID` (not yet implemented in `harmony-link-private` at write time) must
+   adopt the same rule to stay vector-consistent.
+2. **D56 create-alias semantics — `getNextEntityAliasCopy` alone would mint "Name 2" for a brand-new
+   name.** That helper treats the base as slot 1 (duplicate semantics: the source always exists). Creates
+   need the engine D30 create default: alias = name VERBATIM when free, auto-suffix only on a LIVE twin.
+   Added `entityAliasExists` (live-only, case-insensitive) + `resolveCreateAlias`; used by
+   `mintPersonaIdentity` and `openCharacterChat`. `duplicateAIPartner` keeps `getNextEntityAliasCopy`
+   (its base always exists).
+3. **`duplicateAIPartner` display-name source — D63's `alias → linked profile name → id` middle step
+   skipped.** entities.ts cannot import characters.ts (circular import — characters.ts already imports
+   from entities.ts), and the app always populates `alias` at every create seam, so `alias || id` is the
+   operative base. The duplicate id now derives from the display name (`New-Name-<ts>`), the D52
+   timestamped-derivation switch; the copy-suffix alias convention is unchanged (D56).
+4. **Create-side compensation tests rewritten.** The old alias-collision compensation trigger (alias was
+   the id → two same-name personas collided on `idx_entities_alias_unique`) can no longer fire because
+   D56 dedupes the alias BEFORE the INSERT. The `compensateOrphanedPersona` code stays as belt-and-braces
+   for genuine residual races (PK/alias), but the tests now pin the dedupe behavior (creates never 400 on a
+   name collision).
+5. **CreateAIScreen alias stays undeduped.** Only the id call was switched to `mintEntityId` (the task's
+   minimal call-site swap rule). `alias: trimmedName` is unchanged — a duplicate AI-partner name still
+   surfaces the screen's existing alias-conflict alert + profile rollback. D56 alias dedupe for the
+   CreateAIScreen partner seam is a UI-phase decision.
+6. **PersonaEditScreen / ChatDetailScreen items deferred.** `isReservedPersonaName` (`deleted` addition),
+   the alias-equality pre-check, the reserved-name dedicated message keys, and the ChatDetail partner
+   header alias fallback (`charName` + `headerName`, D21-8) are UI-phase items per the task's screen
+   scope; the service/repo layer behind each is in place (typed `ReservedEntityNameError`,
+   `PersonaAliasConflictError`, `mintEntityId`).
+
+## Implementation Notes (deviations) — UI phase (phase 2-2 screens, 2026-09-07)
+
+Wired the screen/UI half of D33/D21-8/D86 on top of the in-tree service layer. All verification green:
+`npx tsc --noEmit` clean; unit 141/141 suites (1235 tests), integration 13/13 suites (55 passed,
+1 skipped) — including the 4-3 ChatDetail/session suites (`chatDetail*` 8 suites, `EntitySession*`
+14 suites).
+
+### What shipped
+
+1. **Reserved-name friendly errors (D33) — form seams.**
+   - `CreateAIScreen`: module-level `isReservedPartnerName` (trim + case-insensitive `user`/`deleted`,
+     same predicate the mint seam enforces); LIVE inline error under the partner-name field
+     (testID `create-ai-name-error`, key `createAI:nameReserved`) in CREATE mode; submit blocked before
+     `setIsSaving`; belt-and-braces `catch (ReservedEntityNameError)` around `mintEntityId` maps to the
+     same inline error (never the generic `createFailed` alert).
+   - `PersonaEditScreen`: `isReservedPersonaName` extended to `deleted`, trim + case-insensitive; inline
+     error under the persona-name field (testID `persona-name-error`, key `profile:personaNameReserved`)
+     renders live; `handleSave` blocks silently (the inline error is the message); belt-and-braces
+     `instanceof ReservedEntityNameError` catch (the persona CREATE seam mints via `mintPersonaIdentity`).
+2. **Card-flow seam (D33 review-5 UX pin).** All three `openCharacterChat` callers catch the typed error
+   and surface the DEDICATED message ("This character's name is reserved — rename the card and retry"),
+   never the bare generic failure: `CharactersScreen.handleChatPress` (alert, `characters:chatOpenReservedName`),
+   `AIProfileScreen.handleChat` (toast, `profile:aiChatReservedName`), `ChatListScreen.handleNewChat`
+   (alert, `characters:chatOpenReservedName`).
+3. **Persona edit alias-collision UX (D86).** `handleSave` (edit mode) pre-checks case-insensitive
+   alias-equality over LIVE rows (`getAllEntities()`, live-only) excluding the edited entity id → friendly
+   inline error (`profile:personaAliasConflict`), `updateUserPersona` never called; probe failure is
+   best-effort (logs + falls through to the typed save guard). `catch (PersonaAliasConflictError)` maps
+   the residual unique-index race to the SAME inline error — never raw SQLite text. The legacy
+   raw-UNIQUE→alert branch remains only as the last-resort mapping for non-typed errors.
+4. **ChatDetail partner header alias fallback (D21-8).** `resolveHeaderName` (private-chat branch)
+   resolves `nickname || profile name || alias` into BOTH `headerName` and `partnerName`; a profile-less
+   partner (or a profile-less-linkage entity) with an alias now shows the alias instead of the `'Chat'`
+   placeholder / bare id. The `charName` chain (`nickname || name || partnerName`) picks the alias up
+   transitively via `partnerName`. Group chats and the `routeEntityName` fast path unchanged. 4-3's
+   failed-session/error-banner machinery untouched; all its tests green.
+
+### Deviations / notes
+
+1. **"Reuse the screen's existing inline-error pattern" — none existed (drift, adapted).** Both editor
+   screens surfaced validation via `showAlert` only; the app's established inline-error idiom lives in
+   the auth screens (error-colored `ThemedText` under the field). Introduced exactly that minimal pattern
+   (no new visual system) in both screens; the previous reserved-name ALERT in PersonaEditScreen was
+   replaced by the inline error per D33's "friendly inline error" wording.
+2. **`profile:personaNameReserved` is a NEW key in `profile.json`.** The old `t('personaNameReserved')`
+   lookup resolved only against the screen's namespace list (`profile`/`characters`/`createAI`), where
+   the key did not exist (it exists only in `persona.json`, which is NOT in that list) — so the old alert
+   rendered the raw key in production (latent pre-existing bug, now fixed by the profile-ns key). The
+   `persona.json` key was left untouched (nothing deleted). Copy covers both reserved names.
+3. **CreateAIScreen reserved-name block is CREATE-mode only** (matches D33's seam definition: edit mode
+   renames the alias via `updateEntityFields`; no name→id mint exists there — the alias-conflict alert
+   still guards edit renames). The live inline error is gated the same way.
+4. **headerName for profile-bearing partners now includes `nickname`** (`nickname || name || alias`) —
+   per the D21-8 review-3 extension wording ("extend the fallback chain into the `headerName`
+   derivation"); previously headerName read only `profile.name`. Profile-less partner WITHOUT an alias
+   keeps the `'Chat'` placeholder (no regression; the ruling only adds the alias fallback).
+5. **Tests.** New: `CreateAIScreen.test.tsx` (4 — inline error + blocked submit for `deleted`/`USER`,
+   typed-error path, happy-path control), `chatDetailHeaderAlias.test.tsx` (4 — alias in headerName AND
+   charName; no-alias placeholder regression; profile-name-beats-alias; nickname-wins chain order),
+   `CharactersScreen.test.tsx` +1 (typed error → dedicated alert, never `chatOpenFailed`),
+   `PersonaEditScreen.test.tsx` +5 net (`deleted` case, D86 pre-check / self-exclusion / typed residual
+   race, and the two reserved-name tests rewritten from alert-assertions to inline-error assertions).
+   New i18n keys (en only): `createAI:nameReserved`, `characters:chatOpenReservedName`,
+   `profile:aiChatReservedName`, `profile:personaNameReserved`.

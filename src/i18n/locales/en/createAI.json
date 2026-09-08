@@ -57,6 +57,7 @@
   "moduleImagination": "Imagination",
   "nameRequired": "Name Required",
   "nameRequiredMessage": "Please give your AI a name.",
+  "nameReserved": "This name is reserved. Please choose a different name.",
   "sharedCardHint": "This AI uses a shared character card. The name below becomes this AI's name — the card itself is not copied or changed.",
   "personaOwnedHint": "This character card belongs to one of your personas, so it can't be used by an AI partner. This state can appear from data synced before that rule existed.",
   "aliasConflictTitle": "Name already in use",

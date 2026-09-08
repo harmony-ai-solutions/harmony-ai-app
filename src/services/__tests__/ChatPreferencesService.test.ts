@@ -146,3 +146,46 @@ describe('ChatPreferencesService legacy-entity-pref sweep (Q14)', () => {
     await expect(ChatPreferencesService.sweepLegacyEntityPrefs()).resolves.toBeUndefined();
   });
 });
+
+describe('ChatPreferencesService wipe-rebuild sweep (D19, phase 3-2)', () => {
+  it('clears all three id-keyed preference families in one sweep', async () => {
+    const keys = [
+      'chat_global_impersonated_entity',
+      '@harmony_chat_reply_mode_max+user',
+      '@harmony_chat_reply_mode_claire+user',
+      'chat_entity_pref_char1',
+      'chat_entity_pref_char2',
+      'unrelated_key',
+      '@harmony_some_other_thing',
+    ];
+    const getAllKeys = jest.spyOn(AsyncStorage, 'getAllKeys').mockResolvedValue(keys);
+    const multiRemove = jest.spyOn(AsyncStorage, 'multiRemove').mockResolvedValue(undefined);
+
+    await ChatPreferencesService.sweepWipePreferences();
+
+    expect(getAllKeys).toHaveBeenCalled();
+    // Global key + every reply-mode key + every legacy key — unrelated keys
+    // (including other @harmony_ keys) survive.
+    expect(multiRemove).toHaveBeenCalledWith([
+      'chat_global_impersonated_entity',
+      '@harmony_chat_reply_mode_max+user',
+      '@harmony_chat_reply_mode_claire+user',
+      'chat_entity_pref_char1',
+      'chat_entity_pref_char2',
+    ]);
+  });
+
+  it('does nothing when no id-keyed preferences exist', async () => {
+    jest.spyOn(AsyncStorage, 'getAllKeys').mockResolvedValue(['unrelated_key']);
+    const multiRemove = jest.spyOn(AsyncStorage, 'multiRemove').mockResolvedValue(undefined);
+
+    await ChatPreferencesService.sweepWipePreferences();
+
+    expect(multiRemove).not.toHaveBeenCalled();
+  });
+
+  it('does not throw when storage read fails (best-effort sweep)', async () => {
+    jest.spyOn(AsyncStorage, 'getAllKeys').mockRejectedValueOnce(new Error('boom'));
+    await expect(ChatPreferencesService.sweepWipePreferences()).resolves.toBeUndefined();
+  });
+});

@@ -75,13 +75,13 @@ Hard-delete sites (app):
 
 ## Checklist
 
-- [ ] `permanent` branches removed/neutralized (incl. module/provider config repos in the audit)
-- [ ] Settings-row delete fully softened (5 read filters + upsert resurrect — D18; column exists at
+- [x] `permanent` branches removed/neutralized (incl. module/provider config repos in the audit)
+- [x] Settings-row delete fully softened (5 read filters + upsert resurrect — D18; column exists at
       `000041_consolidate_senju_features.ts:159`)
-- [ ] Compensating deletes verified soft (CreateAIScreen rollback AND
+- [x] Compensating deletes verified soft (CreateAIScreen rollback AND
       `compensateOrphanedPersona` `userEntities.ts:292-298` — both already soft; enumerate both in the audit)
-- [ ] Delete cascade grown to 8 children in the one-`now` block (D26 app parity — step 6, review 7)
-- [ ] Tests updated; suites green; phase doc updated
+- [x] Delete cascade grown to 8 children in the one-`now` block (D26 app parity — step 6, review 7)
+- [x] Tests updated; suites green; phase doc updated
 
 ### Review-3 notes
 
@@ -92,3 +92,64 @@ Hard-delete sites (app):
   tombstoned-but-not-yet-purged window (they must not ghost-render in ArchivedChats / leak stale
   pins/reply-modes between the delete and the next finalize); ship them WITH or BEFORE the DELETE→soft
   switch regardless.
+
+## Implementation Notes (deviations)
+
+Implemented 2026-09-06 by the 4-4 executor (all steps 1–6). See the phase completion report for the full
+audit enumeration; deviations and drift from this doc are recorded here.
+
+1. **`permanent` handling = ignore + warn-once (shared helper).** New file
+   `src/database/repositories/permanentDeleteGuard.ts` exports `warnOncePermanent(fnName)`; every
+   gated delete function keeps its `(id, permanent = false)` signature, logs a one-time warning when the
+   flag is truthy, and ALWAYS runs the soft path. The warning is suppressed under Jest
+   (`process.env.JEST_WORKER_ID !== undefined`, same detector as `createWebSocket.ts:46`) so the 23
+   test call-sites that deliberately pass `permanent=true` don't spam the async logger after test
+   completion.
+2. **In-use guards became unconditional.** Every config/profile delete that had
+   `if (!permanent && await isXInUse(id)) throw` now always throws on an in-use row. Production never
+   passed `permanent=true`, so no production flow changes; the only behavioral difference is that a
+   hypothetical future `permanent=true` caller can no longer bypass the guard. Test impact: the
+   `cross-repo.test.ts:145` FK-RESTRICT test now rejects with the friendly "in use" error instead of a
+   SQLite constraint error (`.rejects.toThrow()` — passes either way).
+3. **D26 `AND deleted_at IS NULL` guard applied to the TWO NEW cascade statements only.** The doc's
+   step 6 wording ("each with `AND deleted_at IS NULL`") was read as scoping the guard to the added
+   `chat_conversation_settings` + `lifecycle_state` UPDATEs; the pre-existing six children keep their
+   unguarded predicates exactly as before (no re-design). Note for D17 auditors: the app's six legacy
+   child UPDATEs still re-stamp an already-tombstoned child; aligning them with D17's no-re-stamp rule
+   was out of scope for this phase.
+4. **`character_image` is NOT tombstoned by a plain profile soft delete.** Two tests
+   (`characters.test.ts:482`, `cross-repo.test.ts:70`) originally asserted the image was physically
+   gone after `deleteCharacterProfile(profileId, true)` (the old hard delete fired the
+   `character_image` ON DELETE CASCADE FK). With the hard path removed, the profile row stays, the FK
+   never fires, and the image row stays live (`deleted_at` NULL) — only `deleteCharacterProfileCascade`
+   tombstones images. Both tests now assert profile tombstoned + image untouched (correct soft-path
+   semantics).
+5. **`entitySessionInitRecovery.test.ts` (4) + `chatDetailEmptyReveal`/`chatDetailScenarioGenerate`
+   (9) fail during this phase's full-suite run — all are parallel-agent in-flight work, NOT this
+   phase.** `EntitySessionService.ts` (184 lines) and `ChatDetailScreen.tsx` (113 lines) carry
+   uncommitted edits from the parallel 4-3/4-4-parallel agent (D36 session retention + `clearFailedSession`
+   wiring); their test suites still assert the pre-D36 behavior. `nodeSide.test.ts` is the known
+   pre-existing failure (flaky — it passed in the `npm test` run, failed in the raw unit run).
+6. **Incident during the run: I briefly `git stash push`ed the parallel agent's `EntitySessionService.ts`
+   + `EntitySessionContext.tsx` changes to test a hypothesis and restored them.** The stash pop was
+   aborted by a concurrent re-save of `EntitySessionContext.tsx` by the other agent; `EntitySessionService.ts`
+   was restored from `stash@{0}` via `git restore --source`. Current working tree holds BOTH agents'
+   full changes (verified by diff stat). A redundant WIP `stash@{0}` remains as a safety net — the
+   coordinator may drop it after confirming the working-tree copies are the latest.
+7. **Settings read-path blast radius (D18):** `getReplyMode` is on the chat-list render path
+   (`RenderItem → GetReplyMode`); a tombstoned row now returns the default `realistic` instead of the
+   stale pin/reply-mode — the intended D18 behavior (no ghost pins/badges between delete and 4-1 GC).
+8. **TypeScript is clean** (`npx tsc --noEmit`), all 7 edited test suites + `chatConversationSettings` /
+   `ChatPreferencesService` / `syncApplyNewTables` pass (192 tests), integration 12/12 (1 skipped).
+
+9. **User-ruled follow-up (2026-09-06): the `permanent` parameter is fully removed.** After 4-4 shipped,
+   the user ruled the dead flag "purposeless lines". The `permanent` parameter was dropped from all 28
+   repository-layer delete signatures (entities ×2, characters ×2, modules ×8, providers ×16);
+   `src/database/repositories/permanentDeleteGuard.ts` and every `warnOncePermanent` import/usage were
+   deleted; and all 44 test call sites across the entities / characters / cross-repo / modules / providers
+   suites had the flag argument removed (tests keep asserting tombstone semantics unchanged — no assertion
+   edits). Production call sites never passed the flag (verified by grep — zero). `deleteConversationByParticipantKey`
+   in `conversation_messages.ts` carried no `permanent` parameter in 4-4, so it needed no change. Post-change:
+   `npx tsc --noEmit` clean; touched suites 147/147; full `npm test` green except the known pre-existing
+   `compat/nodeSide.test.ts` (3 failures) — `nodeDatabase.smoke.test.ts` flaked once under full parallel
+   load but passes standalone and on re-run (untouched file + untouchable-by-this-change deps).

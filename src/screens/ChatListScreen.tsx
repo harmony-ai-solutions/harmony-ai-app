@@ -26,6 +26,7 @@ import {
   setEntityMuted,
   setEntityDisabled,
   getDisabledEntityIds,
+  ReservedEntityNameError,
 } from '../database/repositories/entities';
 import { resolvePersonaId } from '../database/repositories/userEntities';
 import {
@@ -717,6 +718,12 @@ export const ChatListScreen: React.FC = () => {
       log.error('Failed to open chat from picker:', err);
       // Same failure the Characters / AI Profile screens alert on — the picker
       // gives no other feedback, so surface it instead of dying silently.
+      // D33 (review-5 UX pin): a reserved card name (`user` / `deleted`)
+      // instead gets the dedicated guidance, never this generic failure.
+      if (err instanceof ReservedEntityNameError) {
+        showAlert(t('common:error'), t('characters:chatOpenReservedName'));
+        return;
+      }
       showAlert(t('common:error'), t('characters:chatOpenFailed'));
     }
   };

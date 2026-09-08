@@ -229,10 +229,48 @@ completeness.)
 
 ## Checklist
 
-- [ ] `GetEntityIncludingDeleted` added
-- [ ] Verbatim `created_at`/`updated_at` on apply (all re-stamping tables incl. character_profiles + character_image)
-- [ ] Sync-apply entities case reworked; resurrect is **row-level** (D9 helper deleted with Phase 5 — review 6); `updated_at = max(incoming, engine-now)` (D29)
-- [ ] Sibling tables ghost-aware via generic `applySyncedRow` helper (D39); sync-delete runs teardown + eviction (D24); delete stamps unified (D25)
-- [ ] Outbound payloads always carry `deleted_at` key
-- [ ] Tests green (`go build`, `go vet`, `go test ./...` — management suite currently 33 tests, extend it)
-- [ ] Phase doc updated with deviations
+- [x] `GetEntityIncludingDeleted` added (entities, character_profiles, character_image, entity_module_mappings, interactions, conversation_messages; all normalize "missing" to `(nil, nil)`)
+- [x] Verbatim `created_at`/`updated_at` on apply (all re-stamping tables incl. character_profiles + character_image) — **zero-check fallback** (write non-zero model timestamps, else default), NOT unconditional; management `UpdateEntity`/`UpdateImageMetadata` stamp `now` themselves
+- [x] Sync-apply entities case reworked; resurrect is **row-level** (D9 helper deleted with Phase 5 — review 6); `updated_at = max(incoming, engine-now)` (D29)
+- [x] Sibling tables ghost-aware via generic `applySyncedRow` strategy registry (D39); sync-delete runs teardown + eviction (D24); delete stamps unified (D25); row-table delete ops unconditional (D54); config deletes keep the LWW guard (D64 — documented split)
+- [x] Outbound payloads always carry `deleted_at` key (InteractionSync, MemorySync, EntityEmojiActionSync — H6)
+- [x] Tests green (`go build`, `go vet`, `go test ./...` — **769/769 pass**; 12 new ghost-aware sync-apply suite tests + 4 config-table tests + H6 outbound + zero-fallback + resurrect→INIT_ENTITY)
+- [x] Phase doc updated with deviations
+
+## Implementation Notes (deviations)
+
+> Resumed by a second agent on 2026-09-07 after the predecessor was cancelled when a test run hung. This section records what was found in the working tree (predecessor's work) vs. what this agent fixed/added. The record reflects both.
+
+### Root cause of the predecessor's test hang (FIXED — this agent)
+
+`TestNewDeviceWithExistingContent` (a character_profiles **insert** for a new profile) panicked with a nil-pointer dereference inside `applySyncedRow` → `deletedAtOf(existing)` (character_profiles strategy). The strategy `fetch` returns `(nil, nil)` for a missing row, but Go interface conversion wraps the repo's nil `*T` into a **typed nil** (`any` holding `(*models.CharacterProfile)(nil)`): `existing == nil` was `false`, the create branch was skipped, and the LWW columns were read off the nil pointer → panic. The panic then unwound through `WithTransaction`'s deferred `conn.Close()`, which deadlocked on the connection mutex (goroutine blocked 7+ minutes) → the `go test -timeout 8m` hang that killed the predecessor.
+
+**Fix:** `normalizeMissing(existing any)` in `eventserver/synchronization.go` collapses any typed-nil pointer back to untyped nil immediately after the strategy fetch (one centralized point covers all seven tables; `memories` already returns explicit untyped nil). This is exactly the review-4 "not-found normalization" pin — the predecessor's repo-level `(nil, nil)` convention was defeated by Go's typed-nil interface semantics. The `conversation_messages`/`chat_conversation_settings` bespoke paths were NOT affected (they compare concrete pointer types, where `== nil` works).
+
+### Predecessor work kept (audited correct)
+
+- `GetEntityIncludingDeleted` + per-table `…IncludingDeleted` fetches, `Resurrect*` repo helpers (row-level, D29 `max(incoming, engine-now)` via `resurrectUpdatedAt`), zero-check fallbacks in every re-stamping repo, `syncProviderRecord` D21-1/D28/D64 branches, `UpdateRecordMapIncludingDeleted` (third-branch primitive), H6 tag fixes, D24 helpers (`RemoveEntityRuntimeState`, `EvictEntitySessions`), D25 `DeleteStampNow` routing, `DeleteEmojiAction` `deleted_at IS NULL` guard, management `UpdateEntity`/`UpdateImageMetadata` `now` stamps. **No corrections needed to the strategy registry's LWW-with-resurrect semantics.**
+
+### `DeleteStampNow` final location
+
+Canonical home is **`utils/delete_stamps.go`** (NOT `database/repository/entities/delete_stamps.go` as the phase handoff note reported). This is the right call: the consumer set spans `entities`, `characters`, `interaction`, `conversation`, `memory` repos and `eventserver` — a helper in the entities package would create an import cycle for the characters repo (whose test binary already imports entities). The 2-1b test `TestDeleteStampNow_CapturedUTCSecondTruncated` lives in `database/repository/entities/entities_test.go` and passes there. All consumers + tests are consistent at the `utils` location.
+
+### Fixes this agent made (beyond the hang)
+
+1. **Unknown-table loud rejection (review-5 pin) was implemented wrong.** The predecessor left the post-switch `return nil` in place; replacing it with an unconditional error broke every successful apply (Go switch cases fall through to the bottom return on success). Fixed: each of the seven registry cases now `return nil` after a successful `applySyncedRow`; the bottom error is only reachable for genuinely unknown tables (`sync apply: unknown table %q`) — covered by `TestSyncApply_UnknownTableRejectedLoudly`.
+2. **Stale pre-H6 test contradicted the ruling.** `TestMemorySyncModelDeletedAtRoundTrip` (committed, pre-existing) asserted `deleted_at` is **omitted** when nil — the exact behavior H6 forbids. Updated to assert `deleted_at` is present as JSON `null` on live rows (and added `TestH6DeletedAtKeyAlwaysEmitted` covering all three fixed tables). This was a REAL contradiction between a pre-existing test and a user ruling; the ruling wins.
+3. **Pre-existing flaky test de-flaked.** `TestHandleInitEntity_Resume_PendingEventsDelivered` failed intermittently under full-package load: `deliverPendingEvents` sleeps 500 ms by design before writing, and the test's `require.Eventually` window was 2 s. Widened to 5 s (test-only change; passed 3× and failed 2× under identical eventserver code, proving flake, not regression).
+
+### Tests added by this agent (the phase doc's test list was NOT yet implemented — `synchronization_test.go` was untouched)
+
+- 12 sync-suite tests (`TestSyncApply_*`): insert-over-tombstone newer → resurrect + cache refresh; older → tombstone preserved; fresh id → plain insert; family-of-rows push resurrects (entity+profile+mapping+interaction+message); sync-apply delete tears down runner/session/cognition + evicts sessions (D24); delete-over-tombstoned row no-ops (review-5); stale delete-over-newer-live tombstones unconditionally (D54); mappings delete falls through live with bumped `updated_at` (D21-5); messages resurrect fires RAG capture; resurrect then INIT_ENTITY resolves + greeting NOT re-delivered over prior live history (D9 live-only); unknown table rejected loudly; verbatim timestamps across all six tables.
+- 4 config tests (`TestSyncProviderRecord_*`): payload `deleted_at` applied verbatim (D28); resurrect over tombstone; delete over already-tombstoned config row (D28 third branch); resurrect gate uses `max(updated_at, deleted_at)`.
+- `TestManagementUpdateEntityStampsNow` (zero-fallback pin), `TestH6DeletedAtKeyAlwaysEmitted` (outbound `deleted_at: null`).
+
+### Deviations / notes
+
+- **Config resurrect gate wording:** the doc's "a between-timestamps resurrect lands" was read as the *drop* case being pinned (incoming between pre-delete `updated_at` and `deleted_at` is dropped by the `max()` gate) plus the ≥-deleted_at case landing — matching the D28/D29 semantics as implemented. Both branches are asserted in `TestSyncProviderRecord_ResurrectGateUsesMax`.
+- **D24 emotion-engine assertion:** post-sync-delete, `EnsureEmotionEngine` correctly returns nil (the entity-cache refresh has dropped the tombstoned entity from `config.ApplicationConfig.Entities`, so the Q8/Q9 gate refuses) — the engine removal itself is covered by the existing `TestRemoveEntityRuntimeState_TearsDownZombieState`. The sync-apply test asserts the runner/cognition/session teardown signals instead.
+- **`character_image` NOT NULL `image_data`:** the verbatim-timestamps test supplies bytes; an app-synced live image with no bytes fails the NOT NULL constraint (pre-existing schema; unchanged).
+- **Rename deletion (2-1b, D22):** `gitnexus_detect_changes` reports CRITICAL risk with `HandleRenameEntity`/`RenameEntity` processes affected — expected (rename is deleted per D22/D23; the plan's blast radius). Not a regression.
+- Phase 1-2 owns `handleSyncFinalize` / `maintenance.go` — untouched (the sync-finalize cleanup code at `synchronization.go:2204-2249` was not modified by this phase).

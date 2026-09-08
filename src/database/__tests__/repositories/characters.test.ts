@@ -478,12 +478,17 @@ describe('characters repository', () => {
         updated_at: now,
       });
 
-      // Permanent delete (hard delete) should cascade to images
-      await deleteCharacterProfile(profileId, true);
+      // `permanent = true` is ignored (D1/D69–D78): the profile is tombstoned, not
+      // physically deleted. The profile row stays present, so the
+      // character_image ON DELETE CASCADE FK never fires — the image is
+      // untouched (only deleteCharacterProfileCascade tombstones images).
+      await deleteCharacterProfile(profileId);
       const profile = await getCharacterProfile(profileId, true);
-      expect(profile).toBeNull();
+      expect(profile).not.toBeNull();
+      expect(profile!.deleted_at).not.toBeNull();
       const image = await getCharacterImage(imageId, true);
-      expect(image).toBeNull();
+      expect(image).not.toBeNull();
+      expect(image!.deleted_at).toBeNull();
     });
 
     it('deleteCharacterProfileCascade soft-deletes the profile and its linked entities', async () => {

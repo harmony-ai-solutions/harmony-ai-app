@@ -449,10 +449,13 @@ export async function deleteConversationMessage(id: string): Promise<void> {
  * matches the deleteEntity cascade convention (never touch conversations
  * rooted at another entity).
  *
- * F3 cascade: also DELETEs the `chat_conversation_settings` row for the key so
- * no stale pinned/muted/archived/disabled/unread state resurrects when the
- * conversation is re-created (the settings table has no FK to interactions, so
- * this is an explicit repo-level cascade).
+ * F3 cascade (D18): also TOMBSTONES the `chat_conversation_settings` row for
+ * the key so no stale pinned/muted/archived/disabled/unread state resurrects
+ * when the conversation is re-created (the settings table has no FK to
+ * interactions, so this is an explicit repo-level cascade). Full soft delete —
+ * the row stays physically present; every settings read predicates
+ * `deleted_at IS NULL` and `upsertSettings` resurrects (deleted_at = NULL) on
+ * re-open, per D18.
  */
 export async function deleteConversationByParticipantKey(
   entityId: string,
@@ -484,12 +487,13 @@ export async function deleteConversationByParticipantKey(
     );
   }
 
-  // F3: drop the client-only settings row (pinned / archived / muted /
-  // disabled / unread_count) so deleted conversations never resurrect stale
-  // badge or preference state.
+  // F3/D18: tombstone the client-side settings row (pinned / archived /
+  // reply_mode) so deleted conversations never resurrect stale badge or
+  // preference state — and so re-opening the same participant_key resurrects
+  // fresh via upsertSettings' ON CONFLICT deleted_at = NULL.
   await db.executeSql(
-    'DELETE FROM chat_conversation_settings WHERE participant_key = ?',
-    [participantKey],
+    'UPDATE chat_conversation_settings SET deleted_at = ?, updated_at = ? WHERE participant_key = ?',
+    [now, now, participantKey],
   );
 }
 

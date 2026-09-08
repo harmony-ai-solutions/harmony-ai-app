@@ -116,6 +116,7 @@ jest.mock('../../contexts/EntitySessionContext', () => ({
     isSessionActive: () => true,
     startInteractionSession: jest.fn().mockResolvedValue(undefined),
     stopInteractionSession: jest.fn(),
+    clearFailedSession: jest.fn().mockResolvedValue(undefined),
   }),
 }));
 

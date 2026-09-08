@@ -16,7 +16,10 @@ import {
   getNextEntityAliasCopy,
   stripCopySuffix,
   entityIdExists,
-  resolveNextEntityIdCopy,
+  nextFreeDerivedId,
+  mintEntityId,
+  mintPersonaIdentity,
+  ReservedEntityNameError,
   updateEntity,
   updateEntityFields,
   deleteEntity,
@@ -36,6 +39,7 @@ import {upsertEmotionState} from '../../repositories/emotion_state';
 import {createEmojiAction} from '../../repositories/emoji_actions';
 import {createInteraction} from '../../repositories/interactions';
 import {createConversationMessage} from '../../repositories/conversation_messages';
+import {setConversationPinned} from '../../repositories/chatConversationSettings';
 import {createCharacterProfile} from '../../repositories/characters';
 import type {
   EntityModuleMapping,
@@ -513,6 +517,14 @@ describe('entities repository', () => {
       });
       await createInteraction(makeInteraction(interactionId, entityId, [entityId, 'user']));
       await createConversationMessage(makeMessage(`msg-${entityId}`, entityId, entityId, interactionId));
+      // D26: the two cascade children added in 4-4 — a settings row keyed by
+      // the entity (entity_id = POV) and a lifecycle_state row.
+      await setConversationPinned(`user+${entityId}`, entityId, true);
+      await getDb().executeSql(
+        `INSERT INTO lifecycle_state (entity_id, exhaustion, sleeping, inner_monologue, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [entityId, 0, 0, '[]', nowIso(), nowIso()],
+      );
     }
 
     /** Raw deleted_at value for a row identified by table + id column + id. */
@@ -550,6 +562,10 @@ describe('entities repository', () => {
       expect(await deletedAtOf('entity_emoji_actions', 'id', `emoji-${entityId}`)).not.toBeNull();
       expect(await deletedAtOf('interactions', 'id', `int-${entityId}`)).not.toBeNull();
       expect(await deletedAtOf('conversation_messages', 'id', `msg-${entityId}`)).not.toBeNull();
+      // D26: settings + lifecycle_state join the cascade.
+      expect(await deletedAtOf('entity_module_mappings', 'entity_id', entityId)).not.toBeNull();
+      expect(await deletedAtOf('chat_conversation_settings', 'participant_key', `user+${entityId}`)).not.toBeNull();
+      expect(await deletedAtOf('lifecycle_state', 'entity_id', entityId)).not.toBeNull();
     });
 
     it('does NOT cascade to interactions/messages rooted at OTHER entities (business rule)', async () => {
@@ -589,22 +605,45 @@ describe('entities repository', () => {
       expect(await deletedAtOf('memories', 'id', `mem-${entityA}`)).not.toBeNull();
     });
 
-    it('permanent delete removes the entity and all child rows from the DB', async () => {
+    it('tombstones the entity and ALL EIGHT child rows under one shared now — permanent flag ignored (D26/D17)', async () => {
       const entityId = 'entity-cascade-permanent';
       await seedEntityWithChildren(entityId, `int-${entityId}`);
 
-      await deleteEntity(entityId, true);
+      // `permanent = true` is a legacy compatibility shim (D1/D69–D78): the
+      // soft path runs regardless — rows stay physically present, tombstoned.
+      await deleteEntity(entityId);
 
-      // Entity + mapping gone
-      expect(await getEntity(entityId, true)).toBeNull();
-      expect(await getEntityModuleMapping(entityId, true)).toBeNull();
+      // Entity + mapping STILL present (tombstoned, not hard-deleted).
+      const entity = await getEntity(entityId, true);
+      expect(entity).not.toBeNull();
+      expect(entity!.deleted_at).not.toBeNull();
+      const mapping = await getEntityModuleMapping(entityId, true);
+      expect(mapping).not.toBeNull();
+      expect(mapping!.deleted_at).not.toBeNull();
 
-      // Child rows gone (query returns no rows)
-      expect(await deletedAtOf('memories', 'id', `mem-${entityId}`)).toBeUndefined();
-      expect(await deletedAtOf('emotion_state', 'entity_id', entityId)).toBeUndefined();
-      expect(await deletedAtOf('entity_emoji_actions', 'id', `emoji-${entityId}`)).toBeUndefined();
-      expect(await deletedAtOf('interactions', 'id', `int-${entityId}`)).toBeUndefined();
-      expect(await deletedAtOf('conversation_messages', 'id', `msg-${entityId}`)).toBeUndefined();
+      // ALL EIGHT child rows tombstoned (rows physically present).
+      expect(await deletedAtOf('entity_module_mappings', 'entity_id', entityId)).not.toBeNull();
+      expect(await deletedAtOf('memories', 'id', `mem-${entityId}`)).not.toBeNull();
+      expect(await deletedAtOf('emotion_state', 'entity_id', entityId)).not.toBeNull();
+      expect(await deletedAtOf('entity_emoji_actions', 'id', `emoji-${entityId}`)).not.toBeNull();
+      expect(await deletedAtOf('interactions', 'id', `int-${entityId}`)).not.toBeNull();
+      expect(await deletedAtOf('conversation_messages', 'id', `msg-${entityId}`)).not.toBeNull();
+      expect(await deletedAtOf('chat_conversation_settings', 'participant_key', `user+${entityId}`)).not.toBeNull();
+      expect(await deletedAtOf('lifecycle_state', 'entity_id', entityId)).not.toBeNull();
+
+      // One shared `now` across the whole 9-stamp cascade (D17 stamping).
+      const stamps = [
+        await deletedAtOf('entities', 'id', entityId),
+        await deletedAtOf('entity_module_mappings', 'entity_id', entityId),
+        await deletedAtOf('memories', 'id', `mem-${entityId}`),
+        await deletedAtOf('emotion_state', 'entity_id', entityId),
+        await deletedAtOf('entity_emoji_actions', 'id', `emoji-${entityId}`),
+        await deletedAtOf('interactions', 'id', `int-${entityId}`),
+        await deletedAtOf('conversation_messages', 'id', `msg-${entityId}`),
+        await deletedAtOf('chat_conversation_settings', 'participant_key', `user+${entityId}`),
+        await deletedAtOf('lifecycle_state', 'entity_id', entityId),
+      ].map(String);
+      expect(new Set(stamps).size).toBe(1);
     });
   });
 
@@ -755,12 +794,15 @@ describe('entities repository', () => {
         vision_config_id: null,
         deleted_at: null,
       });
-      // Permanent delete should cascade to entity_module_mappings
-      await deleteEntity(entityId, true);
+      // Permanent delete should cascade to entity_module_mappings — the flag is
+      // ignored (D1/D69–D78): both rows stay present as tombstones.
+      await deleteEntity(entityId);
       const entity = await getEntity(entityId, true);
-      expect(entity).toBeNull();
+      expect(entity).not.toBeNull();
+      expect(entity!.deleted_at).not.toBeNull();
       const mapping = await getEntityModuleMapping(entityId, true);
-      expect(mapping).toBeNull();
+      expect(mapping).not.toBeNull();
+      expect(mapping!.deleted_at).not.toBeNull();
     });
   });
 
@@ -874,7 +916,18 @@ describe('entities repository', () => {
     });
   });
 
-  describe('resolveNextEntityIdCopy (ghost-aware id resolution)', () => {
+  describe('nextFreeDerivedId (ghost-aware -N backstop on the FULL derived id)', () => {
+    // Pinned to the 6-1 fixed instant so the -N series is fully deterministic.
+    const FIXED_INSTANT = new Date('2026-09-05T12:35:14Z');
+    const derivedId = 'Isabella-20260905123514';
+
+    beforeEach(() => {
+      jest.useFakeTimers({now: FIXED_INSTANT});
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     const makeEntity = (id: string, alias = '') =>
       createEntity({
         id,
@@ -884,63 +937,154 @@ describe('entities repository', () => {
         rag_reindex_required: 1,
       });
 
-    it('returns the base verbatim when it is free', async () => {
-      expect(await resolveNextEntityIdCopy('Max')).toBe('Max');
+    it('returns the FULL derived id verbatim when free (never stripped)', async () => {
+      expect(await nextFreeDerivedId(derivedId)).toBe(derivedId);
     });
 
-    it('returns a FREE suffixed requested id verbatim (engine ResolveEntityID ordering — strip only when taken)', async () => {
-      // "Max 2" is deliberately requested and free: it must NOT be collapsed
-      // to the stripped base "Max" (which also happens to be free here).
-      expect(await resolveNextEntityIdCopy('Max 2')).toBe('Max 2');
+    it('appends "-2" to the FULL derived id when taken — never space-joined, never timestamp-stripped (D3)', async () => {
+      await makeEntity(derivedId, 'Isabella');
+      expect(await nextFreeDerivedId(derivedId)).toBe(`${derivedId}-2`);
     });
 
-    it('keeps a free requested id even when its stripped base is taken', async () => {
-      await makeEntity('Max', 'Max');
-      expect(await resolveNextEntityIdCopy('Max 2')).toBe('Max 2');
+    it('walks the -N series past LIVE and GHOST ids alike', async () => {
+      await makeEntity(derivedId, 'Isabella');
+      await makeEntity(`${derivedId}-2`, 'Isabella 2'); // live
+      await makeEntity(`${derivedId}-3`, 'Isabella 3');
+      await deleteEntity(`${derivedId}-3`); // ghost still reserves the PK
+      expect(await nextFreeDerivedId(derivedId)).toBe(`${derivedId}-4`);
     });
 
-    it('resolves a soft-deleted (ghost) base to "<base> 2"', async () => {
-      await makeEntity('Max', 'Max');
-      await deleteEntity('Max');
-      // getEntity misses the ghost, but the id is still reserved.
-      expect(await getEntity('Max')).toBeNull();
-      expect(await resolveNextEntityIdCopy('Max')).toBe('Max 2');
+    it('a soft-deleted (ghost) derived id still reserves the PK (ghost-aware)', async () => {
+      await makeEntity(derivedId, 'Isabella');
+      await deleteEntity(derivedId);
+      // getEntity misses the ghost…
+      expect(await getEntity(derivedId)).toBeNull();
+      // …but the id is still reserved → -2.
+      expect(await nextFreeDerivedId(derivedId)).toBe(`${derivedId}-2`);
+    });
+  });
+
+  describe('mintEntityId (D68 — the ONE mint seam)', () => {
+    const FIXED_INSTANT = new Date('2026-09-05T12:35:14Z');
+
+    beforeEach(() => {
+      jest.useFakeTimers({now: FIXED_INSTANT});
+    });
+    afterEach(() => {
+      jest.useRealTimers();
     });
 
-    it('resolves past a ghost "Max 2" to "Max 3"', async () => {
-      await makeEntity('Max', 'Max');
-      await deleteEntity('Max');
-      await makeEntity('Max 2', 'Max 2');
-      await deleteEntity('Max 2');
-      expect(await resolveNextEntityIdCopy('Max')).toBe('Max 3');
+    const makeEntity = (id: string, alias = '') =>
+      createEntity({
+        id,
+        character_profile_id: null,
+        alias,
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+
+    it('derives the D2 timestamped id from the name (spaces never survive — D3)', async () => {
+      expect(await mintEntityId('Isabella 2')).toBe('Isabella-2-20260905123514');
+      expect(await mintEntityId('  Max  2 ')).toBe('Max-2-20260905123514');
     });
 
-    it('strips ONE trailing copy suffix from the input ("Max 2" with Max + Max 2 taken → "Max 3", never "Max 2 2")', async () => {
-      await makeEntity('Max', 'Max');
-      await makeEntity('Max 2', 'Max 2');
-      expect(await resolveNextEntityIdCopy('Max 2')).toBe('Max 3');
+    it('falls back to the "entity" base for a name with no sluggable chars', async () => {
+      expect(await mintEntityId('--__--')).toBe('entity-20260905123514');
     });
 
-    it('probes by ID not alias — an id equal to a LIVE entity id is resolved even when the alias differs', async () => {
-      // Rename divergence: entity id FROZEN at "Max" while its alias became
-      // "Max 2" (persona/AI rename keeps the id, updates the alias). The id
-      // space is what the PK cares about — alias-based dedupe would have
-      // returned "Max 3" (alias "Max 2" occupies slot 2), the id-based
-      // resolver must return the genuinely free id "Max 2".
-      await makeEntity('Max', 'Max 2');
-      expect(await resolveNextEntityIdCopy('Max')).toBe('Max 2');
+    it('throws a TYPED ReservedEntityNameError for "user" / "deleted" (D33, case-insensitive)', async () => {
+      await expect(mintEntityId('user')).rejects.toBeInstanceOf(
+        ReservedEntityNameError,
+      );
+      await expect(mintEntityId('deleted')).rejects.toBeInstanceOf(
+        ReservedEntityNameError,
+      );
+      await expect(mintEntityId('  User  ')).rejects.toBeInstanceOf(
+        ReservedEntityNameError,
+      );
+      await expect(mintEntityId('DELETED')).rejects.toBeInstanceOf(
+        ReservedEntityNameError,
+      );
     });
 
-    it('walking skips LIVE and GHOST ids alike and emits the smallest free N ≥ 2', async () => {
-      await makeEntity('Max', 'Max');
-      await makeEntity('Max 2', 'Max 2'); // live
-      await makeEntity('Max 3', 'Max 3');
-      await deleteEntity('Max 3'); // ghost
-      expect(await resolveNextEntityIdCopy('Max')).toBe('Max 4');
+    it('is ghost-aware: a same-second recreate lands on "-2" of the FULL derived id', async () => {
+      await makeEntity('Isabella-20260905123514', 'Isabella');
+      // Same pinned instant → same derived id → ghost-aware backstop.
+      expect(await mintEntityId('Isabella')).toBe(
+        'Isabella-20260905123514-2',
+      );
+    });
+  });
+
+  describe('mintPersonaIdentity (D56 — derived id + deduped display-name alias)', () => {
+    const FIXED_INSTANT = new Date('2026-09-05T12:35:14Z');
+
+    beforeEach(() => {
+      jest.useFakeTimers({now: FIXED_INSTANT});
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    const makeEntity = (id: string, alias = '') =>
+      createEntity({
+        id,
+        character_profile_id: null,
+        alias,
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+
+    it('returns { id, alias } — id derived, alias = the display name (spaces allowed)', async () => {
+      expect(await mintPersonaIdentity('Max')).toEqual({
+        id: 'Max-20260905123514',
+        alias: 'Max',
+      });
+    });
+
+    it('dedupes the alias against a LIVE twin ("Max" twin → alias "Max 2", id "-2") — D56/D30 mirror', async () => {
+      const first = await mintPersonaIdentity('Max');
+      await makeEntity(first.id, first.alias); // live twin
+
+      const second = await mintPersonaIdentity('Max');
+      expect(second.id).toBe('Max-20260905123514-2');
+      expect(second.alias).toBe('Max 2');
+    });
+
+    it('ignores SOFT-DELETED twins (alias partial unique index is live-only)', async () => {
+      const first = await mintPersonaIdentity('Max');
+      await makeEntity(first.id, first.alias);
+      await deleteEntity(first.id); // ghost: id reserved, alias freed
+
+      const second = await mintPersonaIdentity('Max');
+      // Id space is ghost-aware → -2; alias space is live-only → plain "Max".
+      expect(second.id).toBe('Max-20260905123514-2');
+      expect(second.alias).toBe('Max');
+    });
+
+    it('throws the typed reserved-name error through the persona mint', async () => {
+      await expect(mintPersonaIdentity('user')).rejects.toBeInstanceOf(
+        ReservedEntityNameError,
+      );
+      await expect(mintPersonaIdentity('deleted')).rejects.toBeInstanceOf(
+        ReservedEntityNameError,
+      );
     });
   });
 
   describe('duplicateAIPartner (engine duplicate parity — atomic AI partner copy)', () => {
+    // Pinned to the 6-1 fixed instant: duplicates derive a FRESH timestamped
+    // id (D52) — the whole -N series is deterministic under the pinned clock.
+    const FIXED_INSTANT = new Date('2026-09-05T12:35:14Z');
+    const TS = '20260905123514';
+
+    beforeEach(() => {
+      jest.useFakeTimers({now: FIXED_INSTANT});
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     const makeProfile = (id: string) =>
       createCharacterProfile({
         id,
@@ -991,7 +1135,7 @@ describe('entities repository', () => {
         {entity_type: 'ai'},
       );
 
-    it('copies the AI partner: live profile link, flags reset, lifecycle + all 8 mapping slots verbatim', async () => {
+    it('copies the AI partner: derived id (D52), copy-suffix alias (D56), live profile link, flags reset, lifecycle + all 8 mapping slots verbatim', async () => {
       await makeProfile('dup-profile');
       await seedAllConfigs();
       await seedSourceEntity('Aria', 'dup-profile', 'Aria');
@@ -1014,8 +1158,9 @@ describe('entities repository', () => {
 
       const dup = await duplicateAIPartner('Aria');
 
-      expect(dup.id).toBe('Aria 2');
-      expect(dup.alias).toBe('Aria 2');
+      // D52: id = DeriveEntityID(display name "Aria", now) — timestamped, no space.
+      expect(dup.id).toBe(`Aria-${TS}`);
+      expect(dup.alias).toBe('Aria 2'); // D56: alias stays copy-suffixed
       expect(dup.character_profile_id).toBe('dup-profile'); // LIVE link — no card copy
       expect(dup.entity_type).toBe('ai');
       expect(dup.is_muted).toBe(0); // reset
@@ -1024,9 +1169,9 @@ describe('entities repository', () => {
       expect(dup.rag_reindex_required).toBe(1);
 
       // The mapping is a NEW row (not the source's) with all 8 slots verbatim.
-      const mapping = await getEntityModuleMapping('Aria 2');
+      const mapping = await getEntityModuleMapping(`Aria-${TS}`);
       expect(mapping).not.toBeNull();
-      expect(mapping!.entity_id).toBe('Aria 2');
+      expect(mapping!.entity_id).toBe(`Aria-${TS}`);
       expect(mapping!.backend_config_id).toBe('cfg-backend');
       expect(mapping!.cognition_config_id).toBe('cfg-cognition');
       expect(mapping!.imagination_config_id).toBe('cfg-imagination');
@@ -1043,27 +1188,29 @@ describe('entities repository', () => {
       expect((await getEntityModuleMapping('Aria'))!.entity_id).toBe('Aria');
     });
 
-    it('continues the id series across live + ghost ids; alias stays live-only (divergence pinned)', async () => {
+    it('repeated duplicates derive the -N series on the FULL derived id; alias stays live-only (divergence pinned)', async () => {
       await makeProfile('dup-series-profile');
       await seedSourceEntity('Aria', 'dup-series-profile', 'Aria');
 
       const dup1 = await duplicateAIPartner('Aria');
-      expect(dup1.id).toBe('Aria 2');
+      expect(dup1.id).toBe(`Aria-${TS}`);
+      expect(dup1.alias).toBe('Aria 2');
       const dup2 = await duplicateAIPartner('Aria');
-      expect(dup2.id).toBe('Aria 3');
+      expect(dup2.id).toBe(`Aria-${TS}-2`);
+      expect(dup2.alias).toBe('Aria 3');
 
-      // A ghost "Aria 4" (soft-deleted) still reserves the id → next id is 5.
-      await seedSourceEntity('Aria 4', 'dup-series-profile', 'Aria 4');
-      await deleteEntity('Aria 4');
+      // A ghost at the -4 id slot (soft-deleted) still reserves the PK → the
+      // id series lands on the LOWEST free slot (-3). The alias series is
+      // LIVE-only, so the ghost's alias "Aria 4" does NOT occupy slot 4 →
+      // alias "Aria 4". Id and alias spaces diverge — engine parity.
+      const ghostId = `Aria-${TS}-4`;
+      await seedSourceEntity(ghostId, 'dup-series-profile', 'Aria 4');
+      await deleteEntity(ghostId);
 
       const dup3 = await duplicateAIPartner('Aria');
-      // id: ghost-aware → skips the ghost, lands on 5.
-      expect(dup3.id).toBe('Aria 5');
-      // alias: LIVE-only dedupe (getNextEntityAliasCopy) → the ghost "Aria 4"
-      // does not occupy a slot, so the alias lands on the free 4. The id space
-      // and alias space may diverge — this is the engine-parity behavior.
+      expect(dup3.id).toBe(`Aria-${TS}-3`);
       expect(dup3.alias).toBe('Aria 4');
-      expect(await entityIdExists('Aria 5')).toBe(true);
+      expect(await entityIdExists(`Aria-${TS}-3`)).toBe(true);
     });
 
     it('rejects a user persona source with a clear error', async () => {
@@ -1073,8 +1220,9 @@ describe('entities repository', () => {
         {entity_type: 'user'},
       );
       await expect(duplicateAIPartner('You-Persona')).rejects.toThrow(/user persona/i);
-      // No duplicate row was created.
-      expect(await getEntity('You-Persona 2')).toBeNull();
+      // No duplicate row was created (only the source user entity exists).
+      const entities = await getAllEntities();
+      expect(entities.filter(e => e.entity_type === 'user').length).toBe(1);
     });
 
     it('throws a not-found error for a missing source', async () => {
@@ -1087,8 +1235,8 @@ describe('entities repository', () => {
       // No entity_module_mappings row for the source.
 
       const dup = await duplicateAIPartner('NoMap');
-      expect(dup.id).toBe('NoMap 2');
-      const mapping = await getEntityModuleMapping('NoMap 2');
+      expect(dup.id).toBe(`NoMap-${TS}`);
+      const mapping = await getEntityModuleMapping(`NoMap-${TS}`);
       expect(mapping).not.toBeNull();
       expect(mapping!.backend_config_id).toBeNull();
       expect(mapping!.cognition_config_id).toBeNull();
@@ -1100,13 +1248,15 @@ describe('entities repository', () => {
       expect(mapping!.vision_config_id).toBeNull();
     });
 
-    it('uses the source alias (falling back to its id) as the duplicate alias base', async () => {
+    it('derives the id from the source display name (alias first — D63), alias copy-suffixed', async () => {
       await makeProfile('dup-alias-profile');
       // alias diverged from id (rename): id frozen at "Old", alias "New Name".
       await seedSourceEntity('Old', 'dup-alias-profile', 'New Name');
 
       const dup = await duplicateAIPartner('Old');
-      expect(dup.id).toBe('Old 2'); // id resolves from the id space
+      // D52/D63: id derives from the DISPLAY NAME ("New Name"), never the
+      // source id "Old" and never a copy-series on it.
+      expect(dup.id).toBe(`New-Name-${TS}`);
       expect(dup.alias).toBe('New Name 2'); // alias dedupes from the alias space
     });
   });

@@ -87,12 +87,13 @@ import {
   deleteCharacterImage,
   getAllCharacterProfiles,
 } from '../database/repositories/characters';
-import { getEntity } from '../database/repositories/entities';
+import { getAllEntities, getEntity, ReservedEntityNameError } from '../database/repositories/entities';
 import {
   createUserPersona,
   getUserPersona,
   updateUserPersona,
   deleteUserPersona,
+  PersonaAliasConflictError,
   resolvePersonaId,
 } from '../database/repositories/userEntities';
 import type { UserPersonaAvatar, UserPersonaProfileFields } from '../database/repositories/userEntities';
@@ -128,12 +129,14 @@ const PERSONA_EDITOR_SECTIONS: PersonaEditorSection[] = [
 ];
 
 /**
- * Reserved-name validation (decision 14): `user` is the built-in identity — a
- * persona named `user` must never be created (trim + case-insensitive; the
- * engine PK collision stays as the backstop).
+ * Reserved-name validation (decision 14 + D33): `user` is the built-in
+ * identity and `deleted` is system-reserved — a persona must never be created
+ * or renamed to one (trim + case-insensitive; the mint seam's typed
+ * `ReservedEntityNameError` stays as the backstop).
  */
 function isReservedPersonaName(raw: string): boolean {
-  return raw.trim().toLowerCase() === 'user';
+  const lower = raw.trim().toLowerCase();
+  return lower === 'user' || lower === 'deleted';
 }
 
 /** Filesystem-safe export base name (CreateAI parity). */
@@ -210,6 +213,25 @@ export const PersonaEditScreen: React.FC = () => {
 
   // ── UI state ────────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false);
+  // D86: set by the alias-collision pre-check or the typed
+  // `PersonaAliasConflictError` save guard; cleared on the next name edit.
+  const [aliasConflictFlag, setAliasConflictFlag] = useState(false);
+
+  // ── Name-field inline errors ──────────────────────────────────────────────
+  // D33: reserved names (`user` / `deleted`) flag LIVE as they are typed —
+  // submit is additionally blocked in `handleSave`.
+  const reservedNameError = isReservedPersonaName(name)
+    ? t('personaNameReserved')
+    : null;
+  // D86: alias conflict (pre-check + typed residual race) — friendly inline
+  // error mirroring the engine's update-400 semantics, never raw SQLite text.
+  const aliasConflictError = aliasConflictFlag ? t('personaAliasConflict') : null;
+  const nameFieldError = reservedNameError ?? aliasConflictError;
+
+  const handleNameChange = (v: string) => {
+    setName(v);
+    if (aliasConflictFlag) setAliasConflictFlag(false);
+  };
   const [loaded, setLoaded] = useState(false);
   const [hasLinkedProfile, setHasLinkedProfile] = useState(false);
   const [showDetails, setShowDetails] = useState(true);
@@ -667,9 +689,10 @@ export const PersonaEditScreen: React.FC = () => {
       showAlert(t('personaNameRequired'));
       return;
     }
-    // Decision 14: reserved-name validation (trim + case-insensitive).
+    // Decision 14 / D33: reserved-name validation (trim + case-insensitive).
+    // The inline field error renders live under the name field; just block
+    // the submit here.
     if (isReservedPersonaName(name)) {
-      showAlert(t('personaNameReserved'));
       return;
     }
     if (isPreSeed) {
@@ -687,6 +710,28 @@ export const PersonaEditScreen: React.FC = () => {
     if (isNaN(audioChance) || audioChance < 0 || audioChance > 100) {
       showAlert(t('common:validation'), t('characters:validationAudioChance'));
       return;
+    }
+
+    // D86 (review 7): case-insensitive alias-equality pre-check over LIVE
+    // rows, excluding the edited entity — the edit-path mirror of the engine's
+    // update-400 semantics (creates auto-suffix per D56, edits reject).
+    // Best-effort probe: if it fails, the typed save guard below still maps
+    // the residual constraint race.
+    if (isEdit) {
+      try {
+        const liveEntities = await getAllEntities();
+        const aliasTaken = liveEntities.some(
+          e =>
+            e.id !== personaId &&
+            (e.alias ?? '').trim().toLowerCase() === trimmedName.toLowerCase(),
+        );
+        if (aliasTaken) {
+          setAliasConflictFlag(true);
+          return;
+        }
+      } catch (preCheckErr) {
+        log.warn('Persona alias pre-check failed; falling back to the save guard:', preCheckErr);
+      }
     }
 
     setIsSaving(true);
@@ -808,18 +853,39 @@ export const PersonaEditScreen: React.FC = () => {
         }
       }
 
-      // ── Push the backing entity to the engine (best-effort) so chat
-      //    INIT_ENTITY succeeds when chatting as this persona. ──
+      // ── Push the backing entity to the engine (CRITICAL — 4-2/D34) so chat
+      //    INIT_ENTITY succeeds when chatting as this persona. A failed push
+      //    surfaces the failure alert instead of the success alert; the persona
+      //    is saved locally either way and a retry re-runs the save. ──
       try {
-        await syncService.syncAndWait({ timeoutMs: 45_000 });
+        await syncService.syncAndWait({ timeoutMs: 45_000, critical: true });
       } catch (syncErr) {
-        log.warn('Auto-sync after persona save failed (non-critical):', syncErr);
+        log.error('Auto-sync after persona save failed (critical):', syncErr);
+        const syncCode = (syncErr as { code?: string })?.code;
+        showAlert(
+          t('common:error'),
+          syncCode === 'sync_conflict' ? t('personaSaveSyncConflict') : t('personaSaveSyncFailed'),
+        );
+        return;
       }
 
       showAlert(t('personaSaved'), undefined, [{ text: t('common:ok') }]);
       navigation.goBack();
     } catch (err) {
       log.error('Failed to save persona:', err);
+      // D33 belt-and-braces: the persona create seam mints via mintEntityId,
+      // which throws the typed reserved-name error — the live inline error
+      // above already covers it; never the generic alert.
+      if (err instanceof ReservedEntityNameError) {
+        return;
+      }
+      // D86: typed residual-race mapping (updateUserPersona's unique-index
+      // catch) — the same friendly inline error as the pre-check, never raw
+      // SQLite text and never the generic alert.
+      if (err instanceof PersonaAliasConflictError) {
+        setAliasConflictFlag(true);
+        return;
+      }
       // Alias-unique failures (rename or create) are user-presentable: another
       // live entity already owns that name. SQLite surfaces them as UNIQUE
       // violations on idx_entities_alias_unique. Everything else — persona
@@ -1088,12 +1154,22 @@ export const PersonaEditScreen: React.FC = () => {
                 'personaName',
                 'personaNamePlaceholder',
                 name,
-                setName,
+                handleNameChange,
                 false,
                 nameEditable,
                 'words',
                 'persona-name-input',
               )}
+              {/* D33/D86: reserved-name + alias-conflict inline errors */}
+              {nameFieldError ? (
+                <ThemedText
+                  size={12}
+                  style={{ color: theme.colors.status.error, marginLeft: 2, marginTop: -2 }}
+                  testID="persona-name-error"
+                >
+                  {nameFieldError}
+                </ThemedText>
+              ) : null}
               {isBuiltIn ? (
                 <ThemedText size={11} variant="muted" style={styles.fieldHint} testID="persona-builtin-lock-hint">
                   {t('personaLockedNameHint')}

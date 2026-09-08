@@ -1,12 +1,15 @@
 /**
  * Conversation Delete Cascade Tests
  *
- * Locks the F3 behavior of `deleteConversationByParticipantKey`: deleting a
- * conversation must ALSO delete its `chat_conversation_settings` row so no
- * stale pinned / archived state resurrects when the conversation is later
- * re-created. The settings table has no FK to interactions, so this is an
- * explicit repo-level cascade. (Mute/disable/unread no longer live on the
- * settings table — they are entity flags / derived, respectively.)
+ * Locks the F3/D18 behavior of `deleteConversationByParticipantKey`: deleting a
+ * conversation must TOMBSTONE its `chat_conversation_settings` row (never hard-
+ * delete) so no stale pinned / archived state resurrects when the conversation
+ * is later re-created, while the row itself stays physically present for the
+ * local GC (4-1) to purge. Every settings read predicates `deleted_at IS NULL`
+ * and re-opening the same participant_key resurrects fresh (D18). The settings
+ * table has no FK to interactions, so this is an explicit repo-level cascade.
+ * (Mute/disable/unread no longer live on the settings table — they are entity
+ * flags / derived, respectively.)
  */
 
 import {useFreshDatabase} from '../repositoryFixtures';
@@ -20,6 +23,10 @@ import {
 } from '../../repositories/conversation_messages';
 import {
   getChatConversationSettings,
+  getChatConversationSettingsBatch,
+  conversationSettingsExistForEntity,
+  listConversationsByFlag,
+  getReplyMode,
   setConversationPinned,
 } from '../../repositories/chatConversationSettings';
 import {Interaction} from '../../models';
@@ -50,7 +57,17 @@ describe('deleteConversationByParticipantKey cascade', () => {
     };
   }
 
-  it('deletes the chat_conversation_settings row along with messages + interaction', async () => {
+  /** Raw deleted_at for a settings row (physical presence check). */
+  async function settingsDeletedAt(participantKey: string): Promise<string | null> {
+    const [result] = await getDb().executeSql(
+      'SELECT deleted_at FROM chat_conversation_settings WHERE participant_key = ?',
+      [participantKey],
+    );
+    if (result.rows.length === 0) return undefined as unknown as null;
+    return result.rows.item(0).deleted_at;
+  }
+
+  it('tombstones the chat_conversation_settings row (D18) along with messages + interaction', async () => {
     // interactions.entity_id FK-constrains entities(id) — seed the POV entity.
     await createEntity(
       {id: 'user', alias: 'user', character_profile_id: null, lifecycle_config: '{}', rag_reindex_required: 1},
@@ -87,12 +104,34 @@ describe('deleteConversationByParticipantKey cascade', () => {
     await setConversationPinned(participantKey, 'e1', true);
     expect((await getChatConversationSettings(participantKey)).pinned).toBe(true);
 
+    // D18: the settings delete must be a soft UPDATE, never a hard DELETE.
+    const executeSqlSpy = jest.spyOn(getDb(), 'executeSql');
     await deleteConversationByParticipantKey('user', participantKey);
+    const deleteStatements = executeSqlSpy.mock.calls
+      .map(call => String(call[0]).trim().toUpperCase())
+      .filter(sql => sql.startsWith('DELETE FROM'));
+    expect(deleteStatements).toEqual([]);
 
-    // Settings row gone → default all-off; derived unread also gone (message
-    // soft-deleted).
-    const settings = await getChatConversationSettings(participantKey);
-    expect(settings.pinned).toBe(false);
+    // Settings row STAYS physically present but is tombstoned (D18) — the
+    // local GC (4-1) purges it later; it must never be hard-deleted here.
+    expect(await settingsDeletedAt(participantKey)).not.toBeNull();
+
+    // D18: the tombstoned row is filtered from ALL five read paths.
+    expect((await getChatConversationSettings(participantKey)).pinned).toBe(false);
+    expect((await getChatConversationSettingsBatch([participantKey])).has(participantKey)).toBe(false);
+    expect(await conversationSettingsExistForEntity('e1')).toBe(false);
+    expect(await listConversationsByFlag('pinned')).toHaveLength(0);
+    expect(await listConversationsByFlag('archived')).toHaveLength(0);
+    expect(await getReplyMode(participantKey)).toBe('realistic');
+
+    // D18: re-opening the same participant_key resurrects fresh — the upsert
+    // clears deleted_at and the row is readable again (and purgable re-stamp
+    // guards apply on a later delete).
+    await setConversationPinned(participantKey, 'user', true);
+    expect((await getChatConversationSettings(participantKey)).pinned).toBe(true);
+    expect(await settingsDeletedAt(participantKey)).toBeNull();
+
+    // Derived unread also gone (message soft-deleted).
     const unread = await getUnreadCountByParticipantKeys([participantKey], 'user');
     expect(unread.get(participantKey) ?? 0).toBe(0);
 
@@ -117,8 +156,11 @@ describe('deleteConversationByParticipantKey cascade', () => {
 
     await deleteConversationByParticipantKey('user', 'user+e2');
 
-    // The untouched conversation keeps its settings row.
+    // The untouched conversation keeps its live settings row.
     expect((await getChatConversationSettings('user+e1')).pinned).toBe(true);
+    expect(await settingsDeletedAt('user+e1')).toBeNull();
+    // The deleted conversation's row is tombstoned and filtered.
+    expect(await settingsDeletedAt('user+e2')).not.toBeNull();
     expect((await getChatConversationSettings('user+e2')).pinned).toBe(false);
   });
 

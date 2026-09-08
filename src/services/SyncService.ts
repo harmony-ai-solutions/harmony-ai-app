@@ -10,6 +10,8 @@ import type { ConnectionManager } from './connection/ConnectionManager';
 import { getDatabase, getSyncDatabase } from '../database/connection';
 import { createLogger } from '../utils/logger';
 import EntityEmojiActionService from './EntityEmojiActionService';
+import { setWipeRebuildFlag, hasRebuildCompletedInProcess } from './WipeRebuildFlag';
+import { restartApp } from './AppRestart';
 import {
   CONFIG_ID_REFERENCES,
   generateRenamedName,
@@ -54,6 +56,20 @@ interface SyncServiceEvents {
    * Payload is a plain `{ tables: string[] }`.
    */
   'sync:data-applied': (payload: { tables: string[] }) => void;
+  /**
+   * Emitted when the sticky `serverUpdateRequired` gate (3-3 / D57/D83) enters
+   * (`true`) or clears (`false`). While true, the connection context suppresses
+   * auto-reconnect scheduling and the on-connect sync trigger; the only
+   * recovery is an accepted handshake advertising version ≥ SYNC_SCHEMA_VERSION.
+   */
+  'sync:server-update-required': (serverUpdateRequired: boolean) => void;
+  /**
+   * Emitted by the slow re-probe when it fires while the gate is sticky and the
+   * sync WS is down (e.g. the engine restarted to apply the update). The
+   * connection context dials the WS exactly ONCE (no reconnect loop) — the
+   * on-connect handler then re-handshakes to re-evaluate the engine version.
+   */
+  'sync:server-update-probe-reconnect': () => void;
 }
 
 export interface SyncSession {
@@ -66,6 +82,34 @@ export interface SyncSession {
   recordsReceived: number;
   error?: string;
   forceFullSync?: boolean;
+}
+
+/**
+ * Typed sync-apply conflict (4-2 / D13, modeled on the `MarketplaceError`
+ * precedent — `src/services/stub/StubServiceError.ts`).
+ *
+ * Raised when a SYNC_DATA_CONFIRM error payload carries the structured
+ * `error_code` field (engine-side 1-3): `sync_conflict` for the
+ * constraint-class (e.g. a UNIQUE PK collision on push) and `apply_failed`
+ * for other apply-time failures. Old engines (no `error_code`) fall back to a
+ * plain `Error` — `code` is then absent and callers show the generic retry
+ * copy.
+ */
+export class SyncConflictError extends Error {
+  /** The sync table whose push/apply failed (e.g. `entities`). */
+  readonly table: string;
+  /** The offending record's primary key value (e.g. the derived entity id). */
+  readonly entityId: string;
+  /** The engine's structured `error_code` (`sync_conflict` | `apply_failed`). */
+  readonly code: string;
+
+  constructor(table: string, entityId: string, code: string, message: string) {
+    super(message);
+    this.name = 'SyncConflictError';
+    this.table = table;
+    this.entityId = entityId;
+    this.code = code;
+  }
 }
 
 /**
@@ -122,6 +166,68 @@ export const SYNC_TABLES: string[] = [
 ];
 
 /**
+ * Finalize-GC table list (4-1 / D72/D73): the SAME 35-table member set as
+ * `SYNC_TABLES`, but in the ENGINE's child-first FK-safe dependency order
+ * (D71(a), engine 1-2 step 1) — entity children first, then `entities`, then
+ * `character_profiles`, then `character_image`, then provider configs, then
+ * module configs. Both sides delete in the same dependency order so a persona
+ * family is physically purged in ONE finalize cycle.
+ *
+ * The 35-member parity with `SYNC_TABLES` is pinned by
+ * `src/services/__tests__/syncGcTablesParity.test.ts`; cross-repo parity with
+ * the engine's `registeredSyncTables` is locked by phase 6-1.
+ */
+export const GC_TABLES: string[] = [
+  // Entity children first: every child of `entities` must be purged before its
+  // parent row, otherwise the child FK blocks the `entities` DELETE (the
+  // engine's original purge-abort bug, repaired by D71(a)).
+  'entity_module_mappings',
+  'interactions',
+  'conversation_messages',
+  'memories',
+  'emotion_state',
+  'lifecycle_state',
+  'entity_emoji_actions',
+  'chat_conversation_settings',
+  // `entities` is purged BEFORE `character_profiles`: the profile→entity
+  // FK (entities.character_profile_id → character_profiles.id, migration
+  // 000002) is ON DELETE RESTRICT, so a soft-deleted persona/entity row
+  // blocks its profile's DELETE. Purging entities first lets a persona
+  // cascade (entity + profile + images) be physically removed in ONE cycle
+  // (persona cards 3-4). character_image rides an ON DELETE CASCADE, so its
+  // own purge row is order-independent.
+  'entities',
+  'character_profiles',
+  'character_image',
+  // Provider configs (no FK dependencies)
+  'provider_config_openai',
+  'provider_config_ollama',
+  'provider_config_openaicompatible',
+  'provider_config_openrouter',
+  'provider_config_harmonyspeech',
+  'provider_config_elevenlabs',
+  'provider_config_kindroid',
+  'provider_config_kajiwoto',
+  'provider_config_characterai',
+  'provider_config_localai',
+  'provider_config_mistral',
+  'provider_config_comfyui',
+  'provider_config_xai',
+  'provider_config_google',
+  'provider_config_anthropic',
+  'provider_config_soulbitscloud',
+  // Module configs (reference provider configs)
+  'backend_configs',
+  'cognition_configs',
+  'movement_configs',
+  'rag_configs',
+  'stt_configs',
+  'tts_configs',
+  'vision_configs',
+  'imagination_configs',
+];
+
+/**
  * Per-table sort rank for buffered-apply FK-safe ordering (see
  * applyBufferedSyncData). DERIVED from SYNC_TABLES (rank = array index + 1) so
  * the two lists are a single source of truth and can never drift (review fix).
@@ -131,6 +237,30 @@ export const SYNC_TABLES: string[] = [
 export const TABLE_ORDER: Record<string, number> = Object.fromEntries(
   SYNC_TABLES.map((table, i) => [table, i + 1]),
 );
+
+/**
+ * Sync-schema version (3-3 / D6): bumped by the id-pattern migration. Version
+ * 1 is implicitly pre-plan (the field is absent). The engine advertises its
+ * version in HANDSHAKE_ACCEPT and keys its own gate on the version the app
+ * sends in HANDSHAKE_REQUEST / SYNC_REQUEST; the app compares the engine's
+ * advertised version on HANDSHAKE_ACCEPT (and maps
+ * `reason: "unsupported_schema_version"` SYNC_REJECTs) to the sticky
+ * `serverUpdateRequired` gate.
+ *
+ * D11 reading (implementation note): the app ALWAYS sends its version (2) in
+ * both payloads — it cannot know whether its own post-wipe rebuild completed
+ * from inside the sync layer, and the engine-side gate covers the pre-rebuild
+ * window by the absent-field rule. See the phase doc for the sequencing.
+ */
+export const SYNC_SCHEMA_VERSION = 2;
+
+/**
+ * Slow background re-probe interval (3-3 / D57): while the
+ * `serverUpdateRequired` gate is sticky, the app re-handshakes every ~10
+ * minutes so it auto-recovers (and re-pulls) once the engine is updated.
+ * Named constant per the phase doc.
+ */
+export const SERVER_UPDATE_REPROBE_INTERVAL_MS = 10 * 60 * 1000;
 
 /**
  * Resolve the sync watermark for a single table given the per-table
@@ -164,9 +294,27 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   // callers attach to the same in-flight wait instead of starting another one.
   private currentSyncWait: Promise<void> | null = null;
 
+  // 4-2 / D34: whether ANY attached syncAndWait caller requested `critical`
+  // mode. When true, the SHARED wait rejects on sync failure instead of
+  // resolving best-effort — so a critical caller attaching to a
+  // background-initiated best-effort sync still receives the rejection (the
+  // incident's exact timing: on-connect background sync + user taps a chat).
+  private currentSyncWaitCritical = false;
+
+  // 4-2: the last sync failure as an Error object (kept so the typed
+  // SyncConflictError survives the `sync:error` event's string payload and
+  // reaches the wait's rejection). Set where a failure is produced, consumed
+  // by runSyncAndWait's error handler, and reset when a new wait starts.
+  private lastSyncError: Error | null = null;
+
   private syncPhase: 'IDLE' | 'SERVER_SENDING' | 'CLIENT_SENDING' | 'FINALIZING' = 'IDLE';
   private pendingSyncConfirmation: {
     eventId: string;
+    // 4-2: the record being pushed — carried so a confirm error can build the
+    // typed SyncConflictError with the offending table + entity id (the engine
+    // confirm error payload only echoes event_id/status).
+    table: string;
+    entityId: string;
     resolve: (value: any) => void;
     reject: (reason: any) => void;
   } | null = null;
@@ -231,6 +379,24 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   // aborts/rejects — it must never leak into the next sync.
   private nameClashApplyToAllResolution: NameClashResolution | null = null;
 
+  // ── 3-3 / D57/D83: sticky "server update required" gate ─────────────────
+  // Set when the engine advertises a sync-schema version below
+  // SYNC_SCHEMA_VERSION (handleHandshakeAccept) or rejects with
+  // reason 'unsupported_schema_version' (handleSyncReject). While set:
+  //   - initiateSync() short-circuits at its TOP — one choke point covering
+  //     EVERY sync trigger (on-connect, token refresh, session start, screen
+  //     and manual pulls, syncAndWait).
+  //   - the connection context suppresses auto-reconnect scheduling (D57: a
+  //     WS-teardown implementation would loop connect → handshake → abort →
+  //     reconnect forever; the gate is sticky instead).
+  //   - a slow background re-probe (~10 min) re-handshakes, so the app
+  //     auto-recovers once the engine is updated (D11).
+  // The ONLY way out is an accepted handshake advertising version ≥
+  // SYNC_SCHEMA_VERSION, which clears the gate and re-kicks a sync
+  // ("data re-pulls once the engine is updated").
+  private serverUpdateRequired = false;
+  private serverUpdateProbeTimer: ReturnType<typeof setTimeout> | null = null;
+
   private constructor() {
     super();
     this.connectionManager = connectionManagerInstance;
@@ -242,6 +408,93 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       SyncService.instance = new SyncService();
     }
     return SyncService.instance;
+  }
+
+  // ── 3-3 / D57/D83: sticky-gate API ─────────────────────────────────────
+
+  /** Whether the engine currently cannot safely sync (schema version too old). */
+  getServerUpdateRequired(): boolean {
+    return this.serverUpdateRequired;
+  }
+
+  /**
+   * Enter the sticky gate. Idempotent — the probe timer is (re)armed once, on
+   * the false→true transition. Emits 'sync:server-update-required' so the
+   * connection context can suppress reconnect scheduling + the on-connect sync.
+   */
+  private enterServerUpdateRequired(): void {
+    if (this.serverUpdateRequired) {
+      return;
+    }
+    log.warn(
+      'Entering serverUpdateRequired: engine sync-schema version is below the app\'s — syncing is suppressed until the engine is updated',
+    );
+    this.serverUpdateRequired = true;
+    this.emit('sync:server-update-required', true);
+    this.scheduleServerUpdateProbe();
+  }
+
+  /**
+   * Clear the sticky gate (an accepted handshake advertised version ≥
+   * SYNC_SCHEMA_VERSION). Cancels the re-probe timer and emits the change so
+   * the connection context restores normal reconnect/sync behaviour.
+   */
+  private clearServerUpdateRequired(): void {
+    if (!this.serverUpdateRequired) {
+      return;
+    }
+    log.info('Clearing serverUpdateRequired: engine sync-schema version is now accepted');
+    this.serverUpdateRequired = false;
+    if (this.serverUpdateProbeTimer !== null) {
+      clearTimeout(this.serverUpdateProbeTimer);
+      this.serverUpdateProbeTimer = null;
+    }
+    this.emit('sync:server-update-required', false);
+  }
+
+  /**
+   * Arm (or re-arm) the slow background re-probe. Fires ~10 min after the gate
+   * was entered; if the gate is still sticky it re-handshakes (connection up)
+   * or asks the connection context for a ONE-shot re-dial (connection down).
+   */
+  private scheduleServerUpdateProbe(): void {
+    if (this.serverUpdateProbeTimer !== null) {
+      clearTimeout(this.serverUpdateProbeTimer);
+    }
+    this.serverUpdateProbeTimer = setTimeout(() => {
+      this.serverUpdateProbeTimer = null;
+      void this.runServerUpdateProbe();
+    }, SERVER_UPDATE_REPROBE_INTERVAL_MS);
+  }
+
+  private async runServerUpdateProbe(): Promise<void> {
+    if (!this.serverUpdateRequired) {
+      return;
+    }
+    if (this.connectionManager.isConnected('sync')) {
+      // WS is up: re-handshake over the live connection. The engine replies
+      // with HANDSHAKE_ACCEPT carrying its (possibly updated) version, which
+      // handleHandshakeAccept evaluates — clearing the gate if now ≥ 2.
+      log.info('Server-update re-probe: connection available — re-handshaking');
+      try {
+        await this.requestHandshake();
+      } catch (err) {
+        log.warn('Server-update re-probe: handshake failed:', err);
+      }
+    } else {
+      // WS is down (e.g. the engine restarted to apply the update). Ask the
+      // connection context for ONE re-dial — no reconnect-loop — its
+      // on-connect handler re-handshakes while the gate is sticky.
+      log.info('Server-update re-probe: connection down — requesting one-shot re-dial');
+      this.emit('sync:server-update-probe-reconnect');
+    }
+    // Still sticky after the attempt → keep probing on the same ~10 min
+    // cadence until the engine is updated and the gate clears (true
+    // auto-recovery, D11). A gate clear cancels the timer via
+    // clearServerUpdateRequired.
+    if (this.serverUpdateRequired) {
+      this.scheduleServerUpdateProbe();
+    }
   }
 
   /**
@@ -376,7 +629,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         device_id: deviceId,
         device_name: deviceName,
         device_type: 'phone',
-        device_platform: Platform.OS
+        device_platform: Platform.OS,
+        // 3-3 / D6: advertise the app's sync-schema version. Optional field —
+        // a pre-plan engine ignores unknown fields (absent = version 1).
+        sync_schema_version: SYNC_SCHEMA_VERSION
       }
     };
 
@@ -464,6 +720,30 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     }
 
     this.emit('handshake:accepted', payload);
+
+    // ── 3-3 / D6: version gate (operative v1→v2 path, app side). Absence of
+    // the field = engine version 1 (pre-plan). An engine below the app's
+    // version cannot safely sync (it would LWW-merge pre-migration id rows
+    // with the app's post-wipe rows into duplicates) — enter the sticky
+    // serverUpdateRequired gate instead of proceeding. A version ≥ the app's
+    // clears the gate (and, on the true→false transition, re-kicks a sync so
+    // data re-pulls once the engine is updated — D11).
+    const engineVersion =
+      typeof payload?.sync_schema_version === 'number' ? payload.sync_schema_version : 1;
+    if (engineVersion < SYNC_SCHEMA_VERSION) {
+      log.warn(
+        `Engine sync-schema version ${engineVersion} < app ${SYNC_SCHEMA_VERSION} — entering serverUpdateRequired`,
+      );
+      this.enterServerUpdateRequired();
+    } else if (this.serverUpdateRequired) {
+      log.info(
+        `Engine sync-schema version ${engineVersion} ≥ ${SYNC_SCHEMA_VERSION} — clearing serverUpdateRequired`,
+      );
+      this.clearServerUpdateRequired();
+      this.initiateSync().catch((err: any) => {
+        log.warn('Post-recovery sync after engine update failed:', err);
+      });
+    }
   };
 
   private handleHandshakeReject(payload: any): void {
@@ -480,6 +760,17 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   }
 
   async initiateSync(forceFullSync: boolean = false): Promise<void> {
+    // ── 3-3 / D57 (review-7 generalization): ONE choke point at the TOP.
+    // While `serverUpdateRequired` is sticky, NO sync may start — covering
+    // every trigger class (on-connect, token refresh, session start, screen
+    // and manual pulls, syncAndWait) without per-trigger wiring. The gate
+    // clears only on an accepted handshake advertising version ≥
+    // SYNC_SCHEMA_VERSION, which then re-kicks a sync for the data re-pull.
+    if (this.serverUpdateRequired) {
+      log.warn('Sync suppressed: server update required (engine sync-schema version too old)');
+      return;
+    }
+
     // Guard: Skip if a sync is already in flight — either actively in progress
     // (SYNC_ACCEPT received) OR still awaiting acceptance (SYNC_REQUEST sent,
     // status 'pending'). Without the 'pending' check, two concurrent callers
@@ -513,6 +804,16 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     // A client with no stored watermark has nothing locally, so requesting a
     // full pull is correct and lossless: escalate to force_full_sync so the
     // engine overrides its own watermark and resends all records.
+    //
+    // NOTE (phase 3-2 / D11 wipe): this cleared-watermark → force_full_sync
+    // escalation is the guarantee behind the one-time wipe + rebuild — the
+    // boot wipe clears the persisted watermark (wipeDatabaseCompletely →
+    // clearAllLastSyncTimestamps), so the FIRST post-wipe initiateSync lands
+    // here with storedLastSync === 0 and requests a full pull. The
+    // `@harmony_sync_initial_upload_done:{source}` flag is NOT cleared by
+    // either wipe helper; that inconsistency is harmless — the flag never
+    // gates pulls (it only shapes upload `since`-values, which forceFullSync
+    // zeroes anyway), and an empty DB uploads zero SYNC_DATA events regardless.
     const effectiveForceFullSync = forceFullSync || storedLastSync === 0;
     const lastSync = effectiveForceFullSync ? 0 : storedLastSync;
 
@@ -551,7 +852,12 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
         device_platform: Platform.OS,
         current_utc_timestamp: this.currentSession.startTime,
         last_sync_timestamp: lastSync,
-        force_full_sync: effectiveForceFullSync
+        force_full_sync: effectiveForceFullSync,
+        // 3-3 / D6: advertise the app's sync-schema version. Optional field —
+        // a pre-plan engine ignores unknown fields (absent = version 1). The
+        // engine's own gate keys on this for the handshake-less cloud path
+        // (review-5).
+        sync_schema_version: SYNC_SCHEMA_VERSION
       }
     };
 
@@ -563,6 +869,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
       // Clear session since sync failed to initiate
       this.currentSession = null;
+
+      // 4-2: preserve the real error so a `critical` syncAndWait waiter rejects
+      // with it (the sync:error emit below carries only a string payload).
+      this.lastSyncError = sendError instanceof Error ? sendError : new Error(String(sendError));
 
       // Emit error event so UI can show appropriate message
       this.emit('sync:error', 'Failed to initiate sync - connection may be lost');
@@ -593,64 +903,102 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
    *
    * Behaviour:
    *   - Resolves on 'sync:completed'.
-   *   - Resolves best-effort (with a warning) on 'sync:error'/'sync:rejected'/
-   *     'sync:aborted' or after `timeoutMs`, so callers are never blocked
-   *     forever (e.g. a pending size-estimate confirmation the user hasn't
-   *     acted on). The caller proceeds; the chat's own session logic surfaces
-   *     any remaining problem.
+   *   - Best-effort (default): resolves (with a warning) on 'sync:error' /
+   *     'sync:rejected' / 'sync:aborted' or after `timeoutMs`, so background
+   *     callers are never blocked forever (e.g. a pending size-estimate
+   *     confirmation the user hasn't acted on).
+   *   - `critical: true` (4-2 / D34): REJECTS instead of resolving on
+   *     'sync:error' / 'sync:rejected' / 'sync:aborted' and when the internal
+   *     `initiateSync` throws — pre-chat pushes must not proceed into a doomed
+   *     session. Timeout still resolves best-effort (a hung sync may still
+   *     complete later; D55's predicate re-check covers the chat-open path).
+   *   - The shared wait is gated: when ANY attached caller is critical, the
+   *     whole wait rejects on failure — a critical caller attaching to a
+   *     background-initiated best-effort sync still receives the rejection.
    *   - Concurrent callers share a single wait.
    */
-  async syncAndWait(options?: { timeoutMs?: number }): Promise<void> {
+  async syncAndWait(options?: { timeoutMs?: number; critical?: boolean }): Promise<void> {
+    const critical = options?.critical ?? false;
+
     // If a sync is already running (started via initiateSync or another waiter),
-    // attach to the shared wait promise.
+    // attach to the shared wait promise. A critical attach upgrades the shared
+    // wait to reject-on-error (D34) — this composition (on-connect background
+    // sync + user taps a chat) is the incident's exact timing.
     if (this.currentSyncWait) {
+      if (critical) {
+        this.currentSyncWaitCritical = true;
+      }
       return this.currentSyncWait;
     }
 
     const timeoutMs = options?.timeoutMs ?? 45_000;
+    this.currentSyncWaitCritical = critical;
     this.currentSyncWait = this.runSyncAndWait(timeoutMs);
     try {
       await this.currentSyncWait;
     } finally {
       this.currentSyncWait = null;
+      this.currentSyncWaitCritical = false;
     }
   }
 
   private runSyncAndWait(timeoutMs: number): Promise<void> {
-    return new Promise<void>((resolve) => {
+    // 4-2: reset the per-wait typed-error slot so a stale error from a previous
+    // round never leaks into this wait's rejection.
+    this.lastSyncError = null;
+
+    return new Promise<void>((resolve, reject) => {
       let settled = false;
       let timer: ReturnType<typeof setTimeout>;
 
       const cleanup = () => {
         this.off('sync:completed', onDone);
-        this.off('sync:error', onDone);
-        this.off('sync:rejected', onDone);
-        this.off('sync:aborted', onDone);
+        this.off('sync:error', onError);
+        this.off('sync:rejected', onRejected);
+        this.off('sync:aborted', onAborted);
       };
 
-      const onDone = () => {
+      const settle = (error?: Error) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         cleanup();
-        resolve();
+        if (error && this.currentSyncWaitCritical) {
+          reject(error);
+        } else if (error) {
+          log.warn('syncAndWait: sync failed (best-effort, non-critical):', error.message);
+          resolve();
+        } else {
+          resolve();
+        }
       };
+
+      const onDone = () => settle();
+      // 4-2: prefer the typed error (SyncConflictError) captured by the
+      // failure producer; fall back to the string payload when no typed error
+      // was recorded (old-engine / apply-failure paths).
+      const onError = (message: string) => settle(this.lastSyncError ?? new Error(message));
+      const onRejected = () => settle(new Error('Sync rejected'));
+      const onAborted = () => settle(new Error('Sync aborted'));
 
       timer = setTimeout(() => {
         log.warn(`syncAndWait timed out after ${timeoutMs}ms — proceeding (best-effort)`);
-        onDone();
+        settle();
       }, timeoutMs);
 
       this.on('sync:completed', onDone);
-      this.on('sync:error', onDone);
-      this.on('sync:rejected', onDone);
-      this.on('sync:aborted', onDone);
+      this.on('sync:error', onError);
+      this.on('sync:rejected', onRejected);
+      this.on('sync:aborted', onAborted);
 
       // Kick off a sync if one isn't already running. initiateSync self-guards
       // (no-op when one is in progress or the connection is unavailable), so we
       // safely attach to an in-flight sync when present.
+      // 4-2 / D34: a rejecting initiateSync throw must surface in critical mode
+      // (previously swallowed as best-effort).
       this.initiateSync().catch(err => {
-        log.warn('syncAndWait: initiateSync failed (best-effort):', err);
+        log.warn('syncAndWait: initiateSync failed:', err);
+        settle(err instanceof Error ? err : new Error(String(err)));
       });
     });
   }
@@ -721,6 +1069,29 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   private handleSyncReject(payload: any): void {
     log.warn('Sync rejected:', payload);
 
+    // ── 4-5 / D76/D82: `rebuild_required` is the stale-watermark rebuild
+    // signal — the engine's purge floor (max_purged_deleted_at) passed this
+    // device's sync watermark. The reaction (abort in-flight sync → persist
+    // the one-time wipe flag → RESTART the process) is async (flag
+    // persistence), so it runs fire-and-forget and RETURNS before the generic
+    // rejection path — no 'sync:rejected' toast (the "Rebuilding from
+    // Soulbits Engine…" label is the only UX; the process is dying anyway).
+    const isRebuildRequired = payload?.reason === 'rebuild_required';
+    if (isRebuildRequired) {
+      void this.handleRebuildRequired(payload);
+      return;
+    }
+
+    // ── 3-3 / D83: reject-reason mapping. `unsupported_schema_version` (a
+    // future engine rejecting this app build, or the belt-and-braces v1→v2
+    // path) enters the SAME sticky serverUpdateRequired gate instead of the
+    // generic rejection notification — no error-toast spam (D57), and the
+    // slow re-probe keeps trying until the versions align.
+    const isVersionGate = payload?.reason === 'unsupported_schema_version';
+    if (isVersionGate) {
+      this.enterServerUpdateRequired();
+    }
+
     if (this.currentSession) {
       this.currentSession.status = 'failed';
       this.currentSession = null;
@@ -737,7 +1108,132 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     }
     this.nameClashApplyToAllResolution = null;
 
+    if (isVersionGate) {
+      // Sticky-gate path: do NOT emit 'sync:rejected' — the UI surfaces the
+      // serverUpdateRequired status instead of a generic rejection toast.
+      return;
+    }
     this.emit('sync:rejected', payload);
+  }
+
+  /**
+   * ── 4-5 / D76/D82: stale-watermark rebuild reaction.
+   *
+   * The engine answered SYNC_REQUEST with `reason: "rebuild_required"` because
+   * this ESTABLISHED device's sync watermark is below the engine's purge floor
+   * (`max_purged_deleted_at`) — the engine holds stale live rows it can no
+   * longer correct (the tombstones were GC'd; a later edit would re-push them
+   * as fresh inserts — silent resurrect via 1-1's plain-insert path). The app
+   * reacts by REUSING the D61 one-time boot wipe (3-2's persisted flag,
+   * set-only — no new wipe code) + full re-pull:
+   *
+   *   1. abort the in-flight sync attempt — send NOTHING further (the engine
+   *      does NOT tear down the WS on this signal — 1-2 pin; the process
+   *      restart below closes it by construction),
+   *   2. persist the one-time wipe flag (setWipeRebuildFlag) — CRASH-SAFETY
+   *      (D82): the flag MUST be on disk before the restart is invoked, so a
+   *      failed restart still wipes on the next natural launch,
+   *   3. restart the app process (react-native-restart) — the D61 boot-window
+   *      wipe then runs naturally (flag check inside
+   *      `DatabaseContext.initializeDb` → wipe + D19 prefs sweep → clear flag
+   *      → init DB → on-connect `initiateSync` full pull; the "Rebuilding from
+   *      Soulbits Engine…" label rides the loading screen for the duration).
+   *
+   * The restart tears down everything a mid-session re-init would have to
+   * manage (open WS, DB handles, in-memory sync state, mounted querying
+   * screens) — the exact race class D61 was ruled to kill (D82, review 7).
+   * No reconnect-suppression machinery is needed: the process dies before any
+   * reconnect could fire.
+   *
+   * Accepted loss (same class as D11): local-only rows created since the
+   * device's last successful sync. A flagged device is by definition behind
+   * the engine; the loss window is its offline delta only. Logged for
+   * diagnostics; the rebuild label is the only UX.
+   *
+   * One-shot / loop guard (D82): after the wipe, the first full pull advances
+   * the watermark past the floor, so the engine does not re-flag. If the
+   * signal arrives AGAIN after a rebuild completed in THIS process lifetime
+   * (the boot wipe already ran and cleared the flag), something is genuinely
+   * wrong (the rebuild failed to advance the watermark) — log + surface a
+   * diagnostic error instead of restarting again (never a restart loop). The
+   * D76 invariant makes this unreachable; the guard is defensive.
+   */
+  private async handleRebuildRequired(payload: any): Promise<void> {
+    log.warn(
+      'Sync rejected: rebuild_required — device watermark below the engine purge floor; one-time wipe + full re-pull required (4-5 / D76/D82)',
+      payload,
+    );
+
+    // ── Precedence vs. 3-3 (D82, verified explicitly): the version gate wins.
+    // While `serverUpdateRequired` is sticky, initiateSync() short-circuits at
+    // its top — no SYNC_REQUEST goes out, so the engine cannot answer with
+    // rebuild_required in response. Belt-and-braces for an out-of-band signal
+    // (a reject racing the gate entry): ignore it — a wipe cannot help a
+    // version-mismatched engine, and the rebuild must wait for the accepted
+    // handshake (D11: "data re-pulls once the engine is updated").
+    if (this.serverUpdateRequired) {
+      log.warn(
+        'rebuild_required received while serverUpdateRequired is sticky — ignoring (version gate wins; the rebuild fires after the engine is updated and the handshake is accepted)',
+      );
+      return;
+    }
+
+    // 1. Abort the in-flight sync attempt: reset the session state machine so
+    //    the `initiateSync` guard is released. NOTHING further is sent — the
+    //    WS stays up (the engine keeps it; 1-2 pin) and dies with the process
+    //    restart below. No client-side WS teardown here.
+    if (this.currentSession) {
+      this.currentSession.status = 'failed';
+      this.currentSession = null;
+    }
+    this.syncPhase = 'IDLE';
+    this.incomingDataBuffer = [];
+    this.serverRecordIds.clear();
+    if (this.pendingNameClash) {
+      const pending = this.pendingNameClash;
+      this.pendingNameClash = null;
+      pending.reject(new Error('Sync aborted: rebuild required'));
+    }
+    this.nameClashApplyToAllResolution = null;
+
+    // ── Loop guard (D82): a rebuild already completed in THIS process
+    // lifetime (the boot window wiped + cleared the flag) → a re-signal means
+    // the rebuild failed to advance the watermark. NEVER restart again — log +
+    // surface a diagnostic error instead. Unreachable under the D76 invariant.
+    if (hasRebuildCompletedInProcess()) {
+      const message =
+        'rebuild_required received after a completed rebuild — the rebuild did not advance the watermark; not restarting (loop guard)';
+      log.error(message, payload);
+      this.emit('sync:error', message);
+      return;
+    }
+
+    // 2. Persist the wipe flag BEFORE the restart (crash-safety, D82). If the
+    //    persist itself fails, do NOT restart — a restart without the flag
+    //    cannot wipe; the next sync round re-attempts the persist (and the
+    //    engine will re-flag, since the watermark is still below the floor).
+    try {
+      await setWipeRebuildFlag();
+    } catch (err) {
+      log.error(
+        'Failed to persist the wipe-rebuild flag — not restarting (a restart without the persisted flag cannot wipe; the next sync round will retry):',
+        err,
+      );
+      return;
+    }
+
+    // 3. Restart the app process. The flag is already persisted, so a failure
+    //    here (e.g. native module unavailable) still wipes on the next natural
+    //    launch.
+    log.warn('Wipe-rebuild flag persisted — restarting the app to run the boot-window wipe (D82)');
+    try {
+      restartApp();
+    } catch (err) {
+      log.error(
+        'App restart failed — the wipe-rebuild flag is persisted; the wipe will run on the next natural launch:',
+        err,
+      );
+    }
   }
 
   private async handleSyncAccept(payload: any): Promise<void> {
@@ -1256,6 +1752,10 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
 
     } catch (error) {
       log.error('Error sending local changes:', error);
+      // 4-2: preserve the typed error (SyncConflictError) so a `critical`
+      // syncAndWait waiter rejects with it — the sync:error event itself only
+      // carries the string message.
+      this.lastSyncError = error instanceof Error ? error : new Error(String(error));
       this.emit('sync:error', error instanceof Error ? error.message : String(error));
     }
   }
@@ -1272,8 +1772,20 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     const eventId = `data_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     return new Promise((resolve, reject) => {
-      // Store confirmation callback
-      this.pendingSyncConfirmation = { eventId, resolve, reject };
+      // Resolve the PK via the centralized registry (4-1) — tables with a
+      // non-`id` PK (entity_module_mappings, emotion_state, lifecycle_state,
+      // chat_conversation_settings) key correctly.
+      const pkField = getPkField(table);
+      const pkValue = record[pkField];
+      // 4-2: carry table + entity id so a confirm error can build the typed
+      // SyncConflictError (the engine's error payload only echoes event_id).
+      this.pendingSyncConfirmation = {
+        eventId,
+        table,
+        entityId: pkValue != null ? String(pkValue) : 'unknown',
+        resolve,
+        reject,
+      };
 
       // Send the data
       const event = {
@@ -1295,10 +1807,6 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
       const mbSize = byteSize / (1024 * 1024);
       log.debug(`📊 SYNC_DATA payload size: ${table} ${operation} - ${mbSize.toFixed(2)} MB (${byteSize} bytes)`);
 
-      // Resolve the PK via the centralized registry (4-1) — tables with a
-      // non-`id` PK (entity_module_mappings, emotion_state, lifecycle_state,
-      // chat_conversation_settings) key correctly.
-      const pkField = getPkField(table);
       log.info(`Sending sync data for ${table}:${record[pkField] || 'undefined'}, eventId: ${eventId}`);
       this.connectionManager.sendEvent('sync', event).catch(reject);
 
@@ -1397,21 +1905,35 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     log.debug(`Received confirmation for ${payload.event_id}: ${payload.status}`);
 
     // Check if we're waiting for this confirmation
-    if (this.pendingSyncConfirmation?.eventId === payload.event_id) {
+    if (this.pendingSyncConfirmation && this.pendingSyncConfirmation.eventId === payload.event_id) {
+      const pending = this.pendingSyncConfirmation;
       if (payload.status === 'SUCCESS') {
         // Increment records sent counter and emit progress when confirmed
         if (this.currentSession) {
           this.currentSession.recordsSent++;
           this.emit('sync:progress', this.currentSession);
         }
-        this.pendingSyncConfirmation?.resolve(true);
+        pending.resolve(true);
       } else {
-        this.pendingSyncConfirmation?.reject(
-          new Error(payload.error_message || 'Sync failed')
-        );
+        // 4-2: classify the confirm error via the structured `error_code`
+        // (engine-side 1-3): present → SyncConflictError with the offending
+        // table + entity id; absent (old engines) → plain Error.
+        pending.reject(this.classifyConfirmError(payload, pending));
       }
       this.pendingSyncConfirmation = null;
     }
+  }
+
+  private classifyConfirmError(
+    payload: any,
+    pending: { table: string; entityId: string },
+  ): Error {
+    const code = payload?.error_code;
+    const message = payload?.error_message || 'Sync failed';
+    if (code) {
+      return new SyncConflictError(pending.table, pending.entityId, code, message);
+    }
+    return new Error(message);
   }
 
   private async handleSyncComplete(event: any): Promise<void> {
@@ -1551,48 +2073,9 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   private async cleanupSoftDeletedRecords(
     olderThanTimestamp: number,
   ): Promise<void> {
-    const tables = [
-      // `entities` is purged BEFORE `character_profiles`: the profile→entity
-      // FK (entities.character_profile_id → character_profiles.id, migration
-      // 000002) is ON DELETE RESTRICT, so a soft-deleted persona/entity row
-      // blocks its profile's DELETE. Purging entities first lets a persona
-      // cascade (entity + profile + images) be physically removed in ONE cycle
-      // (persona cards 3-4). character_image rides an ON DELETE CASCADE, so its
-      // own purge row is order-independent.
-      'entities',
-      'character_profiles',
-      'character_image',
-      'entity_module_mappings',
-      'interactions',
-      'conversation_messages',
-      'memories',
-      'entity_emoji_actions',
-      'provider_config_openai',
-      'provider_config_ollama',
-      'provider_config_openaicompatible',
-      'provider_config_openrouter',
-      'provider_config_harmonyspeech',
-      'provider_config_elevenlabs',
-      'provider_config_kindroid',
-      'provider_config_kajiwoto',
-      'provider_config_characterai',
-      'provider_config_localai',
-      'provider_config_mistral',
-      'provider_config_comfyui',
-      'provider_config_xai',
-      'provider_config_google',
-      'provider_config_anthropic',
-      'provider_config_soulbitscloud',
-      'backend_configs',
-      'cognition_configs',
-      'movement_configs',
-      'rag_configs',
-      'stt_configs',
-      'tts_configs',
-      'vision_configs',
-      'imagination_configs',
-      'chat_conversation_settings', // 4-1: soft-delete cleanup
-    ];
+    // 4-1 (D72/D73): the full 35-table allowlist in engine child-first order —
+    // see the GC_TABLES const for the order rationale + parity pin.
+    const tables = GC_TABLES;
 
     const db = getDatabase();
     for (const table of tables) {
@@ -1611,7 +2094,13 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
     log.info('Soft-deleted records cleanup completed');
   }
 
-  private async getLastSyncTimestamp(): Promise<number> {
+  /**
+   * Last successful full-sync watermark for the current source (seconds since
+   * epoch, 0 when never synced). 4-2 / D55: the chat-open critical-wait
+   * predicate (`entity.updated_at > watermark`) uses this to decide whether a
+   * locally-changed entity still needs pushing before INIT_ENTITY.
+   */
+  async getLastSyncTimestamp(): Promise<number> {
     const source = await ConnectionStateManager.getCurrentSource();
     return ConnectionStateManager.getLastSync(source);
   }

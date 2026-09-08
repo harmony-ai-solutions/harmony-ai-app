@@ -17,7 +17,7 @@ describe('cross-repository behavior', () => {
   const {getDb} = useFreshDatabase();
 
   describe('FK CASCADE', () => {
-    it('deleting an entity cascades to dependent entity_module_mappings', async () => {
+    it('deleting an entity tombstones dependent entity_module_mappings', async () => {
       const entityId = 'cascade-entity-1';
       await createEntity({id: entityId, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
 
@@ -28,18 +28,19 @@ describe('cross-repository behavior', () => {
         [entityId],
       );
 
-      // Permanent delete entity — should CASCADE to entity_module_mappings
-      await deleteEntity(entityId, true);
+      // Delete entity (permanent flag ignored — D1/D69–D78) — the mapping is
+      // tombstoned, not CASCADE-deleted.
+      await deleteEntity(entityId);
 
-      // Verify mapping is gone
+      // Verify mapping is still physically present with deleted_at set
       const [result] = await db.executeSql(
-        'SELECT COUNT(*) as count FROM entity_module_mappings WHERE entity_id = ?',
+        'SELECT COUNT(*) as count FROM entity_module_mappings WHERE entity_id = ? AND deleted_at IS NOT NULL',
         [entityId],
       );
-      expect(result.rows.item(0).count).toBe(0);
+      expect(result.rows.item(0).count).toBe(1);
     });
 
-    it('deleting a character profile cascades to character_image', async () => {
+    it('soft-deleting a character profile tombstones the profile and leaves character_image untouched', async () => {
       const profileId = 'cascade-profile-1';
 
       // Create profile with minimal fields
@@ -57,7 +58,7 @@ describe('cross-repository behavior', () => {
         lifecycle_config: '{}',
       });
 
-      // Insert a character image directly (to test CASCADE)
+      // Insert a character image directly
       const db = getDb();
       const imageId = 'cascade-image-1';
       await db.executeSql(
@@ -66,15 +67,21 @@ describe('cross-repository behavior', () => {
         [imageId, profileId, 'testdata', 'image/png', 'Test', 0, 0, '', ''],
       );
 
-      // Permanent delete profile — should CASCADE to character_image
-      await deleteCharacterProfile(profileId, true);
+      // Delete profile (permanent flag ignored — D1/D69–D78). The soft path
+      // tombstones the profile row; the profile row stays physically present,
+      // so the character_image ON DELETE CASCADE FK never fires — the image is
+      // untouched (only deleteCharacterProfileCascade tombstones images).
+      await deleteCharacterProfile(profileId);
 
-      // Verify image is gone
+      const profile = await getCharacterProfile(profileId, true);
+      expect(profile).not.toBeNull();
+      expect(profile!.deleted_at).not.toBeNull();
       const image = await getCharacterImage(imageId, true);
-      expect(image).toBeNull();
+      expect(image).not.toBeNull();
+      expect(image!.deleted_at).toBeNull();
     });
 
-    it('deleting an entity cascades to memories', async () => {
+    it('deleting an entity tombstones its memories', async () => {
       const entityId = 'cascade-mem-entity-1';
       await createEntity({id: entityId, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
 
@@ -85,14 +92,15 @@ describe('cross-repository behavior', () => {
         ['mem-cascade-1', entityId, 1, 'Cascade test memory', 0],
       );
 
-      // Permanent delete entity — should CASCADE to memories
-      await deleteEntity(entityId, true);
+      // Delete entity (permanent flag ignored — D1/D69–D78) — memories are
+      // tombstoned by the cascade, not FK-deleted.
+      await deleteEntity(entityId);
 
       const [result] = await db.executeSql(
-        'SELECT COUNT(*) as count FROM memories WHERE entity_id = ?',
+        'SELECT COUNT(*) as count FROM memories WHERE entity_id = ? AND deleted_at IS NOT NULL',
         [entityId],
       );
-      expect(result.rows.item(0).count).toBe(0);
+      expect(result.rows.item(0).count).toBe(1);
     });
   });
 
@@ -142,7 +150,7 @@ describe('cross-repository behavior', () => {
       await createEntity({id: 'restrict-entity-2', character_profile_id: profileId, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
 
       // Hard-delete should also fail due to FK RESTRICT
-      await expect(deleteCharacterProfile(profileId, true)).rejects.toThrow();
+      await expect(deleteCharacterProfile(profileId)).rejects.toThrow();
     });
 
     it('can soft-delete a profile not in use', async () => {
@@ -186,8 +194,8 @@ describe('cross-repository behavior', () => {
     });
   });
 
-  describe('cascade delete entity also removes memories', () => {
-    it('FK CASCADE from entities to memories on permanent delete', async () => {
+  describe('cascade delete entity also tombstones memories', () => {
+    it('entity delete tombstones its memories (soft cascade, not FK CASCADE)', async () => {
       const entityId = 'cascade-mem-only';
       await createEntity({id: entityId, character_profile_id: null, alias: '', lifecycle_config: '{}', rag_reindex_required: 1});
 
@@ -206,15 +214,15 @@ describe('cross-repository behavior', () => {
       );
       expect(before.rows.item(0).count).toBe(1);
 
-      // Delete entity permanently
-      await deleteEntity(entityId, true);
+      // Delete entity (permanent flag ignored — D1/D69–D78)
+      await deleteEntity(entityId);
 
-      // Verify memory is gone via CASCADE
+      // Verify memory is tombstoned, not gone via CASCADE
       const [after] = await db.executeSql(
-        'SELECT COUNT(*) as count FROM memories WHERE entity_id = ?',
+        'SELECT COUNT(*) as count FROM memories WHERE entity_id = ? AND deleted_at IS NOT NULL',
         [entityId],
       );
-      expect(after.rows.item(0).count).toBe(0);
+      expect(after.rows.item(0).count).toBe(1);
     });
   });
 });

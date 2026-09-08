@@ -44,6 +44,17 @@ import { createLogger } from '../utils/logger';
 
 const log = createLogger('[CreateAIScreen]');
 
+/**
+ * Reserved-name guard (D33): `user` and `deleted` are system-reserved names —
+ * an AI partner must never be created from one. Trim + case-insensitive; the
+ * same predicate the `mintEntityId` seam enforces (the typed
+ * `ReservedEntityNameError` catch in `createPartner` is the backstop).
+ */
+function isReservedPartnerName(raw: string): boolean {
+  const lower = raw.trim().toLowerCase();
+  return lower === 'user' || lower === 'deleted';
+}
+
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
@@ -103,7 +114,8 @@ import {
   getEntityByCharacterProfileId,
   getEntityModuleMapping,
   isProfilePersonaOwned,
-  resolveNextEntityIdCopy,
+  mintEntityId,
+  ReservedEntityNameError,
   updateEntityFields,
 } from '../database/repositories/entities';
 import { getUserPersona } from '../database/repositories/userEntities';
@@ -214,6 +226,10 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false);
+  // D33: set when a save attempt is rejected for a reserved name (the typed
+  // `ReservedEntityNameError` backstop in `createPartner`); cleared on the
+  // next name edit. The live inline error below covers the common case.
+  const [reservedNameBlocked, setReservedNameBlocked] = useState(false);
 
   // ── V3/RP editor state (edit mode only; `{...current}` spread preserves
   //    unknown columns on save, so absent columns are never wiped) ────────────
@@ -264,6 +280,21 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // create on-device — it can only appear from data synced before the guards
   // existed — so it only earns a muted hint, not a lock.
   const [editPersonaOwned, setEditPersonaOwned] = useState(false);
+
+  // ── D33: reserved-name inline error on the partner-name field ────────────────
+  // Live in CREATE mode only (the name→id mint seam lives there; edit mode
+  // renames the alias, no id is derived), so the field flags `user`/`deleted`
+  // as soon as they are typed; submit is additionally blocked in
+  // `createPartner`.
+  const reservedNameError =
+    !editProfileId && (reservedNameBlocked || isReservedPartnerName(name))
+      ? t('nameReserved')
+      : null;
+
+  const handleNameChange = (v: string) => {
+    setName(v);
+    if (reservedNameBlocked) setReservedNameBlocked(false);
+  };
 
   // ── "From an existing one" — prefillProfileId links an existing profile ──────
   // LIVE LINK (engine parity): the new AI entity references the SAME character
@@ -922,6 +953,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       return;
     }
 
+    // D33: reserved names (`user` / `deleted`) never reach the mint seam —
+    // block the submit; the inline field error is already visible.
+    if (!editProfileId && isReservedPartnerName(trimmedName)) {
+      setReservedNameBlocked(true);
+      return;
+    }
+
     setIsSaving(true);
     try {
       // ── EDIT MODE: update the existing AI partner in place ─────────────
@@ -1059,11 +1097,24 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      // The entity id doubles as the display name (name-like ids). Resolve it
-      // ghost-aware (engine ResolveEntityID parity — resolveNextEntityIdCopy):
-      // the requested name is kept verbatim when free, and a soft-deleted id
-      // still reserves the TEXT PRIMARY KEY, so taken names walk "<base> <N>".
-      const entityId = await resolveNextEntityIdCopy(trimmedName);
+      // One mint seam (D68): derive the D2 timestamped id from the name
+      // (spaces never survive — D3), throw a TYPED reserved-name error for
+      // `user`/`deleted` (D33 — surfaced by the inline field error), and
+      // ghost-probe the same-second backstop.
+      let entityId: string;
+      try {
+        entityId = await mintEntityId(trimmedName);
+      } catch (mintErr) {
+        if (mintErr instanceof ReservedEntityNameError) {
+          // D33 belt-and-braces: the pre-check above catches the common case;
+          // this typed catch keeps the rejection on the inline field error
+          // (never the generic createFailed alert) even if the predicates
+          // ever drift.
+          setReservedNameBlocked(true);
+          return;
+        }
+        throw mintErr;
+      }
 
       // 1. Either link an existing character profile (from the "From an
       //    Existing One" flow) or create a brand-new one.
@@ -1156,7 +1207,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       } catch (err: any) {
         // Alias-unique violation ONLY (idx_entities_alias_unique is a live-only
         // partial index): another AI partner already uses this name. Ghost-id
-        // collisions already auto-resolved above via resolveNextEntityIdCopy,
+        // collisions already auto-resolved above via mintEntityId,
         // so any remaining UNIQUE failure on the id itself (or any non-unique
         // error) must NOT be mislabeled — it falls through to the generic
         // createFailed alert below.
@@ -1459,11 +1510,27 @@ const focused = focusedField === field;
                 'nameLabel',
                 'namePlaceholder',
                 name,
-                setName,
+                handleNameChange,
                 'name',
                 false,
                 'account-edit',
               )}
+
+              {/* D33: reserved-name inline error (create mode — `user`/`deleted`) */}
+              {reservedNameError ? (
+                <ThemedText
+                  size={12}
+                  style={{
+                    color: theme.colors.status.error,
+                    marginLeft: 4,
+                    marginTop: -10,
+                    marginBottom: 12,
+                  }}
+                  testID="create-ai-name-error"
+                >
+                  {reservedNameError}
+                </ThemedText>
+              ) : null}
 
               {/* Description */}
               {renderField(

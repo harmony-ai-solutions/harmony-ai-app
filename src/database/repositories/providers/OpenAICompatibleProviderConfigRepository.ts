@@ -227,28 +227,20 @@ export async function isOpenAICompatibleProviderConfigInUse(id: string): Promise
   return isProviderConfigInUse('openaicompatible', id);
 }
 
-export async function deleteOpenAICompatibleProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteOpenAICompatibleProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isOpenAICompatibleProviderConfigInUse(id)) {
+  if (await isOpenAICompatibleProviderConfigInUse(id)) {
     throw new Error(`OpenAICompatible provider config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_openaicompatible WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`OpenAICompatible provider config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE provider_config_openaicompatible SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`OpenAICompatible provider config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE provider_config_openaicompatible SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`OpenAICompatible provider config not found: ${id}`);
     }
   });
 }

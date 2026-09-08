@@ -85,9 +85,59 @@ conflicts are near-impossible after Phases 1–2, and a retry re-derives a fresh
 
 ## Checklist
 
-- [ ] Typed sync errors (structured `error_code`; string-only fallback)
-- [ ] `critical` syncAndWait mode (opt-in; initiateSync-throw covered) + failure alert
-- [ ] **D55: critical-wait-on-dirty-watermark at chat open (wizard/duplicate paths covered; full-round
+- [x] Typed sync errors (structured `error_code`; string-only fallback)
+- [x] `critical` syncAndWait mode (opt-in; initiateSync-throw covered) + failure alert
+- [x] **D55: critical-wait-on-dirty-watermark at chat open (wizard/duplicate paths covered; full-round
       completion before INIT_ENTITY)**
-- [ ] No auto id-rewrite/ripple machinery (dropped per D13)
-- [ ] Tests green; phase doc updated
+- [x] No auto id-rewrite/ripple machinery (dropped per D13)
+- [x] Tests green; phase doc updated
+
+## Implementation Notes (deviations)
+
+All deviations are minor, doc-literal drift adaptations — no design changes.
+
+1. **`SyncConflictError` classification (doc-literal).** Any confirm payload carrying `error_code` →
+   `SyncConflictError` (`sync_conflict` AND `apply_failed`); absent `error_code` (old engine) → plain
+   `Error`. The ALERT copy then distinguishes on `code === 'sync_conflict'` (conflict copy) vs everything
+   else (generic retry copy) — the doc's "surface distinctly where the alert copy allows it". `table` /
+   `entityId` are carried from the pending SYNC_DATA (the engine's confirm error payload only echoes
+   `event_id`/`status`), via an extended `pendingSyncConfirmation` (`{ eventId, table, entityId, resolve,
+   reject }`).
+2. **Critical mode rejects on the whole failure class, not only `sync:error`.** Per D34's wording
+   ("REJECTS on `sync:error`") the primary trigger is `sync:error`; I also reject on `sync:rejected` and
+   `sync:aborted` in critical mode — all three mean "this round did not complete" and the pre-chat push
+   must not proceed. Timeout still resolves best-effort in BOTH modes (a hung sync may complete later;
+   D55's predicate re-check covers the chat-open path). `recoverInitEntity` and every other
+   non-critical caller pass no flag → unchanged best-effort.
+3. **Shared-wait composition also rejects for the initiating background caller.** Because the wait is a
+   single shared promise, a critical attach that upgrades it to reject-on-error means the background
+   caller's own `await` also rejects. All real `syncAndWait` callers already `.catch` (CharacterChat,
+   PersonaEdit, ChatDetail restart) or are fire-and-forget with a `.catch` on the caller
+   (`recoverInitEntity`, EntitySessionService:1930). No caller regressed.
+4. **`initiateSync`-throw path carries the real send error.** The throw path now also records
+   `lastSyncError = sendError` so the critical rejection surfaces the actual error message; the
+   `sync:error` event payload stays a STRING (unchanged for the SyncConnectionContext /
+   SyncSettingsScreen listeners — neither file was touched).
+5. **Chat-open failure UX lives in `CharacterChatService`** (not the screens): it shows `Alert.alert`
+   with the i18n'd copy and returns WITHOUT navigating. The entry-point screens (CharactersScreen,
+   AIProfileScreen, ChatListScreen) are outside this phase's territory and keep their generic
+   `chatOpenFailed` catch for non-4-2 errors (ReservedEntityNameError etc.). No double alert: the
+   service shows the 4-2 alert and resolves, so the screens' catch never fires for this path.
+6. **CreateAIScreen unchanged (per the doc's evaluation).** Its post-create sync is fire-and-forget
+   `initiateSync` by design; the D55 chat-open predicate is the protection for wizard-created entities.
+   No CreateAIScreen edit was needed.
+7. **Persona save (PersonaEditScreen) failure keeps the user ON the screen** (no `goBack`, no
+   `personaSaved` success alert) so a retry re-runs the save — the "actionable" reading of the doc's
+   failure alert for a non-chat surface.
+8. **ChatDetailScreen edits are exactly the two flips** (`{ critical: true }` on the banner
+   "Sync now" tie-in call site + the scenario-restart call site) plus their stale comments/log text;
+   the existing `.catch(…log…)` swallows remain (the flips make failures observable in logs + feed the
+   shared-wait gating; the deeper retry UX is 4-3/out of scope).
+9. **D55 predicate is second-granularity** (`entity.updated_at` ms vs watermark seconds*1000) exactly as
+   documented — the same-second `.000`-ms razor edge over-triggers safely in the other direction (the
+   watermark floor-second makes a same-second entity "dirty" except at the exact `.000` boundary).
+10. **Tests.** New `syncAndWaitCritical.test.ts` (7 tests); CharacterChatService D55 suite extended
+    (11 tests total, incl. Review-5 bounded-rounds + conflict/transient alert paths + clean-skip);
+    PersonaEditScreen gained the critical-failure alert test (16 total). The CharacterChatService test
+    SyncService mock now also exposes `getLastSyncTimestamp` (stateful watermark) — the D55 predicate
+    needs it.

@@ -43,6 +43,69 @@ const INIT_ENTITY_INGESTION_ERROR = 'entity_not_defined';
  */
 const INIT_ENTITY_DISABLED_ERROR = 'entity_disabled';
 
+/**
+ * 4-3 (D35) — structured INIT_ENTITY ERROR `error_code` classification
+ * (the field itself is added engine-side in phase 1-3; until that ships, old
+ * engines send only the free-text `error` and we fall back to string equality
+ * with the constants above).
+ *
+ * Ingestion class: the engine doesn't have the entity (yet) — recoverable by
+ * re-syncing + re-sending INIT_ENTITY.
+ *
+ * Terminal class: `entity_disabled` (Q8, above) and `entity_exists_deleted` —
+ * the engine holds a tombstone for the id. Deletion is final (no restore
+ * exists), so re-syncing CANNOT resolve it; it must NOT enter the recovery
+ * loop. It is grouped with the disabled class (immediate fail, generic error
+ * surface) rather than getting the "may need to sync" hint, which would be
+ * dishonest for a deleted entity.
+ */
+const INIT_ENTITY_INGESTION_ERROR_CODES: readonly string[] = ['entity_not_defined'];
+const INIT_ENTITY_DISABLED_ERROR_CODES: readonly string[] = ['entity_disabled', 'entity_exists_deleted'];
+
+/** Classification result for an INIT_ENTITY ERROR payload (4-3 / D35). */
+export interface InitEntityErrorClassification {
+  /** Ingestion-rejection class — recoverable via re-sync + re-send. */
+  isIngestionError: boolean;
+  /** Terminal class (disabled / deleted) — no recovery retries. */
+  isDisabledError: boolean;
+}
+
+/**
+ * Classify an INIT_ENTITY ERROR. D35: the structured `error_code` field is the
+ * canonical classifier WHEN PRESENT (brittle free-text matching is the
+ * fallback for old engines). Pure + exported for unit testing.
+ */
+export function classifyInitEntityError(
+  payload: any,
+  errorMessage: string,
+): InitEntityErrorClassification {
+  const errorCode =
+    typeof payload?.error_code === 'string' && payload.error_code.length > 0
+      ? payload.error_code
+      : null;
+  if (errorCode) {
+    return {
+      isIngestionError: INIT_ENTITY_INGESTION_ERROR_CODES.includes(errorCode),
+      isDisabledError: INIT_ENTITY_DISABLED_ERROR_CODES.includes(errorCode),
+    };
+  }
+  return {
+    isIngestionError: errorMessage === INIT_ENTITY_INGESTION_ERROR,
+    isDisabledError: errorMessage === INIT_ENTITY_DISABLED_ERROR,
+  };
+}
+
+/**
+ * 4-3 (D35): true when a surfaced `session:error` string denotes the
+ * engine ingestion-rejection class ("the AI couldn't be found on Harmony
+ * Link"). Consumers (ChatDetailScreen) use this to offer the sync-now hint.
+ * The service surfaces the structured code as the error string when available
+ * (see handleInitEntityResponse), so no free-text matching happens downstream.
+ */
+export function isIngestionSessionError(error: string): boolean {
+  return error === INIT_ENTITY_INGESTION_ERROR;
+}
+
 // ============================================================================
 // InteractionSession — replaces DualEntitySession
 // ============================================================================
@@ -93,6 +156,20 @@ export interface InteractionSession {
    * initialization failure.
    */
   initRetryCount: number;
+  /**
+   * 4-3 (D36) — terminal failure marker. A failed session is RETAINED in
+   * `sessions` (flagged, not deleted) so the context retry/timer machinery
+   * and the UI can observe the terminal state; Retry replaces the entry
+   * (startInteractionSession purges flagged entries for the same participant
+   * set). `failed` is one source of truth shared by the service map and the
+   * context's activeSessions (same object / clone with the marker set).
+   */
+  failed?: {
+    /** Surfaced error (engine error string/code, transport or timeout message). */
+    error: string;
+    /** Epoch ms when the failure was flagged (diagnostics). */
+    at: number;
+  };
 }
 
 /**
@@ -440,12 +517,15 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       connection.status = 'disconnected';
 
       if (entityId === session.ownEntityId) {
-        // OWN entity connection dropped — this is fatal for the interaction
-        log.info(`Own entity connection lost for interaction ${interactionId} — terminating session`);
+        // OWN entity connection dropped. 4-3 (D65): this used to DELETE the
+        // session with no marker and no session:error — ChatDetail does not
+        // listen to session:stopped, so the screen stuck at the amber
+        // "connecting" dot forever. Instead: flag + RETAIN the entry so the
+        // context retry/timer machinery sees it, and surface session:error
+        // (ChatDetail listens) so the error banner + retry affordance appear.
+        log.info(`Own entity connection lost for interaction ${interactionId} — flagging session as failed (retryable)`);
         this.cleanupTranscriptionsForInteraction(interactionId);
-        this.cancelReconnectsForInteraction(interactionId);
-        this.sessions.delete(interactionId);
-        this.emit('session:stopped', interactionId);
+        this.failInteractionSession(interactionId, session, 'Connection lost');
       } else {
         // PARTNER entity connection dropped — interaction continues
         log.info(`Partner ${entityId} disconnected from interaction ${interactionId} — scheduling reconnect`);
@@ -502,10 +582,33 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         existing.ownEntityId === ownEntityId &&
         [...existing.participantIds].sort().join('+') === requestedParticipantKey
       ) {
-        log.info(
-          `Reusing existing interaction session for [${participantIds.join(', ')}] (${existing.interactionId}) instead of starting a parallel one`,
-        );
-        return existing;
+        // 4-3 (D36): a retained FAILED session must NOT be reused — it is
+        // terminal. Fall through to the purge below + fresh session creation.
+        if (!existing.failed) {
+          log.info(
+            `Reusing existing interaction session for [${participantIds.join(', ')}] (${existing.interactionId}) instead of starting a parallel one`,
+          );
+          return existing;
+        }
+      }
+    }
+
+    // 4-3 (D36): Retry REPLACES the entry. Purge flagged sessions for the same
+    // participant set before creating the fresh one — both entries would share
+    // participant-key-derived connection ids, and connection-exact event
+    // routing could then land INIT responses on the stale failed session.
+    // No session:stopped emission: the terminal failure was already surfaced
+    // via session:error; the context drops the matching flagged entry on the
+    // next session:started for the set (bounded retention).
+    for (const [key, existing] of this.sessions.entries()) {
+      if (
+        existing.failed &&
+        existing.ownEntityId === ownEntityId &&
+        [...existing.participantIds].sort().join('+') === requestedParticipantKey
+      ) {
+        log.info(`Purging failed interaction session ${key} for [${participantIds.join(', ')}] (retry replaces the entry)`);
+        this.cancelReconnectsForInteraction(key);
+        this.sessions.delete(key);
       }
     }
 
@@ -975,6 +1078,17 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
   }
 
+  /**
+   * Deliberate FULL teardown of every session (app background, sync loss).
+   *
+   * 4-3 (D36) evaluation — flagged (failed) sessions are NOT retained here,
+   * on purpose: these triggers are deliberate battery/consistency teardowns,
+   * not failures; on foreground/reconnect the screen re-inits (the init
+   * effect re-runs on the sync connection), and full teardown is the
+   * garbage-collection point for flagged entries of chats that are NOT on
+   * screen (the bounded-retention cleaners — navigation-back and the next
+   * session:started for the set — only run for open chats).
+   */
   async closeAllSessions(): Promise<void> {
     const interactionIds = Array.from(this.sessions.keys());
     await Promise.all(interactionIds.map(id => this.stopInteractionSession(id)));
@@ -1598,6 +1712,14 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
       // Update the connection status in the InteractionSession
       if (interactionSession) {
+        // 4-3 (D36): a late SUCCESS after a transient flag (e.g. a recovery
+        // re-send racing the fail path) means the engine accepted the session
+        // — the terminal marker must not outlive it.
+        if (interactionSession.failed) {
+          log.info(`INIT_ENTITY SUCCESS for previously flagged session (interaction ${interactionId}) — clearing failed marker`);
+          interactionSession.failed = undefined;
+        }
+
         // Render-only greeting support (§1-10): surface `has_first_mes` from
         // the INIT_ENTITY SUCCESS payload so ChatDetailScreen can branch
         // synchronously (GreetingBubble vs EmptyChatCTA). The greeting itself
@@ -1764,7 +1886,18 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
       // If we have an interaction session, handle error
       if (interactionSession && interactionId) {
-        const errorMessage = event.payload?.error || 'Session initialization failed';
+        const rawMessage = event.payload?.error || 'Session initialization failed';
+        // 4-3 (D35): the structured `error_code` (engine phase 1-3) is the
+        // canonical classifier — free-text `error` is brittle against engine
+        // copy changes. When the code is present it ALSO becomes the surfaced
+        // error string, so downstream consumers (ChatDetail banner hint)
+        // classify without free-text matching. Old engines (no field) fall
+        // back to string equality with today's constants.
+        const errorCode =
+          typeof event.payload?.error_code === 'string' && event.payload.error_code.length > 0
+            ? event.payload.error_code
+            : null;
+        const errorMessage = errorCode ?? rawMessage;
 
         // Track E — INIT_ENTITY ingestion-error recovery. CreateAIScreen syncs
         // new entities fire-and-forget; when the chat is opened before the
@@ -1774,8 +1907,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         // WITHOUT syncing, failing identically every time), re-sync + re-send
         // INIT_ENTITY, bounded by MAX_INIT_ENTITY_RETRIES. Only after exhausting
         // the retries (or for non-ingestion errors) does the session fail.
-        const isIngestionError = errorMessage === INIT_ENTITY_INGESTION_ERROR;
-        const isDisabledError = errorMessage === INIT_ENTITY_DISABLED_ERROR;
+        // D35: classification prefers the structured `error_code` (when
+        // present) over string equality — see classifyInitEntityError.
+        const { isIngestionError, isDisabledError } = classifyInitEntityError(event.payload, rawMessage);
         const retryCount = interactionSession.initRetryCount ?? 0;
         if (isDisabledError) {
           // Terminal (A3/Q8): a disabled AI entity is off — re-syncing will NOT
@@ -1808,22 +1942,36 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
 
   /**
-   * Emit session:error and tear down an interaction session. Shared by the
-   * INIT_ENTITY ERROR branch, the recovery-failure path, and the transport
-   * error path. Mirrors the historical teardown: cancel reconnect timers,
-   * drop the session, disconnect all entity sockets, clear pending sessions.
+   * Emit session:error and FLAG a terminal failure on the interaction session.
+   * Shared by the INIT_ENTITY ERROR branch, the recovery-failure path, the
+   * transport error path and the own-entity disconnect path.
+   *
+   * 4-3 (D36): this used to DELETE the session — the deletion site that left
+   * ChatDetail stuck on the amber "Connecting…" dot forever (the context init
+   * timer found no session and silently stopped retrying). Instead the session
+   * is now flagged (`failed` marker) and RETAINED so the context retry/timer
+   * machinery and the UI observe the terminal state; `isSessionActive` stays
+   * false for a flagged session and Retry replaces the entry
+   * (startInteractionSession purges flagged same-participant-set entries).
+   * Sockets are still torn down — retention is a marker, not a live session.
    */
   private failInteractionSession(
     interactionId: string,
     interactionSession: InteractionSession,
     errorMessage: string
   ): void {
+    // Flag BEFORE the emission so listeners observe a consistent object.
+    interactionSession.failed = { error: errorMessage, at: Date.now() };
     this.emit('session:error', interactionId, errorMessage);
     this.cancelReconnectsForInteraction(interactionId);
-    this.sessions.delete(interactionId);
 
-    // Disconnect all connections for this interaction
+    // Disconnect all connections for this interaction. The statuses are also
+    // reset so a retained flagged session can never pass an all-active check
+    // (belt-and-braces: the context's isSessionActive already gates on the
+    // failed marker, and stale 'active' statuses would otherwise let
+    // forwardTextMessage reuse a dead session).
     for (const [, conn] of interactionSession.connections) {
+      conn.status = 'disconnected';
       if (this.connectionManager.isConnected(conn.connectionId)) {
         this.connectionManager.disconnectConnection(conn.connectionId);
       }

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### Data & Sync
+
+#### Fixed
+- **Fixed AIs getting stuck on "Connecting…" after you deleted and recreated them** — the recreated AI now connects and its greeting arrives normally.
+- **Deleted data is now cleaned up consistently across your devices.** Deletion is final: once a deleted AI's data has been removed everywhere, it stays removed — there is no undo (recreating an AI always starts fresh). The recurring engine-side "clean up soft-deleted records" maintenance error behind inconsistent cleanup is resolved.
+- **Entity IDs are always generated automatically.** You give your AI a name; its ID is permanent internal plumbing you never see or set (and it can never collide with a deleted AI's old ID).
+
+#### Changed
+- **This update re-syncs all of your data from Harmony Link once after updating** (a one-time local reset — expect a brief "Rebuilding from Soulbits Engine…" screen at first launch). If you were offline and have changes that never synced, sync them before updating; anything Harmony Link never received is not part of the rebuild.
+- The app now requires a matching Harmony Link version to sync — if Harmony Link needs updating first, the app tells you clearly and resumes syncing automatically once it's updated.
+
 ### Voice & Speech
 
 #### Added

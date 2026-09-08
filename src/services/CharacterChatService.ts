@@ -23,12 +23,14 @@
  */
 
 import { createLogger } from '../utils/logger';
+import { Alert } from 'react-native';
+import i18n from 'i18next';
 import {
   createEntity,
   createEntityModuleMapping,
-  entityIdExists,
   getEntityByCharacterProfileId,
-  resolveNextEntityIdCopy,
+  mintEntityId,
+  resolveCreateAlias,
 } from '../database/repositories/entities';
 import {
   deriveParticipantKey,
@@ -39,7 +41,7 @@ import ChatPreferencesService from './ChatPreferencesService';
 import { resolvePersonaId } from '../database/repositories/userEntities';
 import syncService from './SyncService';
 import { isChatLocked } from './marketplace/MarketplaceService';
-import type { CharacterProfile } from '../database/models';
+import type { CharacterProfile, Entity } from '../database/models';
 
 const log = createLogger('[CharacterChatService]');
 
@@ -51,6 +53,79 @@ export interface CharacterChatNavigation {
     entityId: string;
     entityName?: string;
   }) => void;
+}
+
+// ── 4-2 / D55: critical-wait-before-INIT_ENTITY ────────────────────────────
+
+/**
+ * Dirty-watermark predicate (D55): the entity has unsynced local changes when
+ * its `updated_at` is newer than the last successful full-sync watermark
+ * (per-source `getLastSyncTimestamp`; both inputs exist — no new persisted
+ * state). Clean entities (pulled, or already synced) skip the wait — zero
+ * added latency. The watermark stores the session's START time, so the
+ * predicate over-triggers safely (Review-5): a just-created entity is always
+ * dirtier than a watermark written before it existed.
+ */
+async function isEntityDirty(entity: Entity): Promise<boolean> {
+  const lastSync = await syncService.getLastSyncTimestamp();
+  const updatedMs =
+    entity.updated_at instanceof Date
+      ? entity.updated_at.getTime()
+      : new Date(String(entity.updated_at)).getTime();
+  return updatedMs > lastSync * 1000;
+}
+
+/**
+ * Run a CRITICAL syncAndWait until the entity is provably ingested by the
+ * engine, bounded to ≤2 rounds (Review-5 pin).
+ *
+ * The wait can resolve on the WRONG round: `runSyncAndWait` attaches to any
+ * in-flight session and `initiateSync` no-ops under its guard, so a round
+ * whose upload capture already ran completes "successfully" WITHOUT the
+ * just-created entity — the incident's timing, narrower. Re-evaluate the
+ * dirty predicate after each resolve; when still dirty, run ONE more fresh
+ * round (post-resolve `currentSession` is null, so round 2 is guaranteed
+ * fresh). Still dirty after the bound → the failure-alert path (false).
+ *
+ * @returns true when the entity is clean (no wait needed / fully synced),
+ *          false after a final failure (the caller must NOT navigate).
+ */
+async function ensureEntitySyncedBeforeInit(entity: Entity): Promise<boolean> {
+  for (let round = 0; round < 2; round++) {
+    try {
+      await syncService.syncAndWait({ timeoutMs: 15_000, critical: true });
+    } catch (err) {
+      log.warn(`Pre-chat critical sync failed (round ${round + 1}):`, err);
+      showChatSetupFailureAlert(err);
+      return false;
+    }
+    if (!(await isEntityDirty(entity))) {
+      return true;
+    }
+    log.warn(
+      `Pre-chat critical sync round ${round + 1} resolved but the entity is still dirty — ` +
+        `re-running a fresh round (bounded)`,
+    );
+  }
+  log.error('Pre-chat critical sync: entity still unsynced after the bounded 2 rounds');
+  showChatSetupFailureAlert(new Error('Entity still unsynced after critical sync'));
+  return false;
+}
+
+/**
+ * Actionable failure alert (4-2): the conflict copy for a genuine
+ * `sync_conflict`, the generic retry copy for transient errors / old engines.
+ * The caller does NOT navigate — a retry re-runs the creation flow, which
+ * re-derives a fresh timestamped id at a new second (D13: no auto-recovery
+ * machinery; genuine conflicts are near-impossible post Phases 1–2).
+ */
+function showChatSetupFailureAlert(err: unknown): void {
+  const code = (err as { code?: string })?.code;
+  const message =
+    code === 'sync_conflict'
+      ? i18n.t('characters:chatOpenSyncConflict')
+      : i18n.t('characters:chatOpenSyncFailed');
+  Alert.alert(i18n.t('common:error'), message);
 }
 
 /**
@@ -86,22 +161,23 @@ export async function openCharacterChat(
 
   // 2. Reuse an entity linked to this profile, or create one
   let entity = await getEntityByCharacterProfileId(profile.id);
-  let createdNewEntity = false;
   if (!entity) {
-    createdNewEntity = true;
     const rawId = profile.name.trim();
     if (!rawId) {
       throw new Error('Cannot open chat for a character without a name');
     }
-    // Ghost-aware id: probe once — the raw name is used verbatim when free; a
-    // live-or-ghost collision (soft-deleted rows still reserve the entities
-    // TEXT PRIMARY KEY) resolves to a copy id instead of throwing on the PK.
-    const entityId = (await entityIdExists(rawId))
-      ? await resolveNextEntityIdCopy(rawId)
-      : rawId;
+    // One mint seam (D68): derive the D2 timestamped id from the card name
+    // (spaces never survive — D3), throw a TYPED reserved-name error for
+    // `user`/`deleted` (D33 — the caller's generic alert surfaces its
+    // friendly message), and ghost-probe the same-second backstop. The card
+    // alias is DEDUPED (D56): a same-name live card gets "Isabella 2" instead
+    // of throwing on idx_entities_alias_unique; a unique card name stays
+    // verbatim.
+    const entityId = await mintEntityId(rawId);
+    const alias = await resolveCreateAlias(rawId);
     entity = await createEntity({
       id: entityId,
-      alias: profile.name.trim(),
+      alias,
       character_profile_id: profile.id,
       lifecycle_config: '{}',
       rag_reindex_required: 1,
@@ -130,15 +206,20 @@ export async function openCharacterChat(
     return;
   }
 
-  // 3. Push a NEWLY created entity to the engine BEFORE navigating.
-  //    ChatDetail sends INIT_ENTITY on mount; if the engine has not yet
-  //    ingested the entity it rejects with entity_not_defined and the chat
-  //    is stuck on "Connecting..." (same constraint documented in
-  //    CreateAIScreen). Existing entities are already known — no wait.
-  if (createdNewEntity) {
-    await syncService.syncAndWait({ timeoutMs: 15_000 }).catch(syncErr => {
-      log.warn('Auto-sync before chat failed (non-critical):', syncErr);
-    });
+  // 3. 4-2 / D55: sync fully executed before INIT_ENTITY, ALWAYS. ChatDetail
+  //    sends INIT_ENTITY on mount; if the engine has not yet ingested the
+  //    entity it rejects with entity_not_defined and the chat is stuck on
+  //    "Connecting..." (the incident). The dirty-watermark predicate covers
+  //    EVERY creation path — created-now, wizard-created-then-opened-later
+  //    (CreateAIScreen's fire-and-forget create + goBack), and duplicates —
+  //    while clean entities (pulled / already synced) skip the wait with zero
+  //    added latency. On final failure the service shows the actionable alert
+  //    and does NOT navigate into a doomed chat.
+  if (await isEntityDirty(entity)) {
+    const synced = await ensureEntitySyncedBeforeInit(entity);
+    if (!synced) {
+      return;
+    }
   }
 
   // 4. Derive chat params and navigate

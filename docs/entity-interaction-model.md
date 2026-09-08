@@ -202,3 +202,57 @@ When **no** identity has been chosen yet, the literal string `'user'` is used as
 | The "Chatting as" / impersonated identity | [`src/screens/ChatListScreen.tsx`](src/screens/ChatListScreen.tsx:343) |
 | Interaction session lifecycle (`ownEntityId`) | [`src/contexts/EntitySessionContext.tsx`](src/contexts/EntitySessionContext.tsx:149) |
 | Interaction / message SQL queries | [`src/database/repositories/interactions.ts`](src/database/repositories/interactions.ts:1), [`src/database/repositories/conversation_messages.ts`](src/database/repositories/conversation_messages.ts:1) |
+| How entity IDs are minted / how deletion cascades | [`src/utils/entityIdUtils.ts`](src/utils/entityIdUtils.ts:1), [`src/database/repositories/entities.ts`](src/database/repositories/entities.ts:1) |
+
+---
+
+## 8. Entity lifecycle: IDs, deletion, and rebuilds
+
+> Added 2026-09-07 (entity-id/tombstone-integrity work). Plain-English summary; the binding rulings live in
+> [`.current_work/entity-id-tombstone-integrity/summary.md`](../.current_work/entity-id-tombstone-integrity/summary.md)
+> and the engine-side companion doc is [`../harmony-link-private/docs/Entity-Lifecycle.md`](../harmony-link-private/docs/Entity-Lifecycle.md).
+
+### 8.1 IDs are minted, never chosen — and never change
+
+- You give your AI a **name**; its **ID** is internal plumbing generated from that name plus the creation
+  second (UTC): `Isabella` → `Isabella-20260905123514`. Same name recreated later gets a different
+  timestamp — IDs are unique *by construction*, which is what makes reuse impossible.
+- IDs are **immutable for life**. There is no rename — anywhere, in any app or UI. "Renaming" an AI or a
+  persona only edits its display name (`alias` and/or the profile name); the ID underneath never changes.
+- All creation goes through **one minting seam** (`mintEntityId`), which also enforces the reserved names
+  (`user`, `deleted`) and falls back to a `-2`/`-3` suffix if the same name is minted twice in the same
+  second. If two devices each create "the same" AI offline, they independently mint different IDs.
+
+### 8.2 Deletion: tombstone → garbage collection (and it's final)
+
+```mermaid
+flowchart LR
+    L["🟢 Live entity"] -- "user deletes" --> T["🪦 Tombstone<br/>(soft delete — propagates<br/>to every device via sync)"]
+    T -- "all devices have received it" --> G["🗑️ Garbage-collected<br/>(purged at the next sync-finalize;<br/>the whole family: chats, memories,<br/>settings, images…)"]
+    G -. "recreate? mint a NEW timestamped id<br/>(fresh start — no history comes back)" .-> L2["🟢 New entity"]
+```
+
+- Deleting an entity is a **tombstone** (soft delete), not an immediate erase. The tombstone is a
+  propagation record: it tells every paired device "this family is gone".
+- Once propagation is complete, each side **garbage-collects** the tombstoned family (entity + its 8 child
+  kinds — chats, messages, memories, emotion/lifecycle state, emoji actions, conversation settings, module
+  bindings — all stamped with one shared delete-time so families purge cleanly).
+- **There is no restore, no undo, no "deleted items" list.** Deletion is final once propagated and
+  collected; the only way back is recreating the AI, which starts fresh (new ID, new greeting, no memory of
+  the deleted family). Deleted conversation settings are likewise soft-deleted and filtered everywhere.
+- Accepted exception: when the engine *consolidates* a memory (merging several into a better one), the
+  source memories are hard-deleted engine-side and app devices keep their copies — a known, documented
+  divergence, not a deletion feature.
+
+### 8.3 One-time rebuilds (why the app may wipe and re-sync)
+
+- **After updating past the ID-schema change (2026-09), the app rebuilds its local database once from
+  Harmony Link.** You'll briefly see "Rebuilding from Soulbits Engine…" at startup. Anything that was never
+  synced to Harmony Link (created while offline and never synced) is not part of the rebuild — sync before
+  updating if that matters to you. Chat preferences tied to old IDs reset once as part of this.
+- **Stale-device rebuild:** garbage collection frees space, so an old tombstone eventually stops existing
+  even as a "you deleted this" record. A device returning after that point can't be brought up to date
+  incrementally — Harmony Link tells it to rebuild, the app restarts itself and re-pulls everything.
+- **Version gate:** if the app is newer than the paired Harmony Link (or vice versa) in a way that would
+  corrupt sync, the app shows a clear "Harmony Link update required" state instead of failing confusingly —
+  and recovers automatically once the other side is updated.

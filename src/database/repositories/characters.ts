@@ -440,28 +440,21 @@ export async function isCharacterProfileInUse(id: string): Promise<boolean> {
  * Soft delete character profile
  * Throws error if profile not found
  */
-export async function deleteCharacterProfile(id: string, permanent = false): Promise<void> {
+export async function deleteCharacterProfile(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isCharacterProfileInUse(id)) {
+
+  if (await isCharacterProfileInUse(id)) {
     throw new Error(`Character profile ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM character_profiles WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`Character profile not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE character_profiles SET deleted_at = ?, updated_at = ? WHERE id = ?',
-        [now, now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`Character profile not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE character_profiles SET deleted_at = ?, updated_at = ? WHERE id = ?',
+      [now, now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`Character profile not found: ${id}`);
     }
   });
 }
@@ -676,24 +669,17 @@ export async function updateCharacterImage(
  * Soft delete character image
  * Throws error if image not found
  */
-export async function deleteCharacterImage(id: string, permanent = false): Promise<void> {
+export async function deleteCharacterImage(id: string): Promise<void> {
   const db = getDatabase();
-  
+
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM character_image WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`Character image not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE character_image SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`Character image not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE character_image SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`Character image not found: ${id}`);
     }
   });
 }

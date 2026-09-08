@@ -77,17 +77,12 @@ export async function isHarmonySpeechProviderConfigInUse(id: string): Promise<bo
   return isProviderConfigInUse('harmonyspeech', id);
 }
 
-export async function deleteHarmonySpeechProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteHarmonySpeechProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  if (!permanent && await isHarmonySpeechProviderConfigInUse(id)) throw new Error(`HarmonySpeech provider config ${id} is in use and cannot be soft deleted`);
+  if (await isHarmonySpeechProviderConfigInUse(id)) throw new Error(`HarmonySpeech provider config ${id} is in use and cannot be soft deleted`);
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_harmonyspeech WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) throw new Error(`HarmonySpeech provider config not found: ${id}`);
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql('UPDATE provider_config_harmonyspeech SET deleted_at = ? WHERE id = ?', [now, id]);
-      if (result.rowsAffected === 0) throw new Error(`HarmonySpeech provider config not found: ${id}`);
-    }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql('UPDATE provider_config_harmonyspeech SET deleted_at = ? WHERE id = ?', [now, id]);
+    if (result.rowsAffected === 0) throw new Error(`HarmonySpeech provider config not found: ${id}`);
   });
 }

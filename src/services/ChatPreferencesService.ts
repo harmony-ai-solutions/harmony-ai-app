@@ -112,10 +112,44 @@ async function sweepLegacyEntityPrefs(): Promise<void> {
   }
 }
 
+/**
+ * One-time sweep of ALL id-keyed entity preferences (D19, phase 3-2 wipe).
+ *
+ * Runs in the boot-window wipe (D61) — a one-time reset that clears every
+ * preference family whose keys are entity-id-keyed and would otherwise dangle
+ * after the database wipe + full re-sync:
+ *   - `chat_global_impersonated_entity` (single global key)
+ *   - `@harmony_chat_reply_mode_*` (per participant key)
+ *   - legacy `chat_entity_pref_*` (per-chat persona prefs, dead since Q14)
+ *
+ * Unlike `sweepLegacyEntityPrefs`, this clears the GLOBAL key and the
+ * reply-mode family too — the wipe invalidates every id-based key at once
+ * (ids are stable for life post-migration, so this staleness class is
+ * one-time; no remap machinery — D19). Best-effort — never throws.
+ */
+async function sweepWipePreferences(): Promise<void> {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const wipeKeys = (keys ?? []).filter(
+      key =>
+        key === GLOBAL_ENTITY_KEY ||
+        key.startsWith(REPLY_MODE_PREFIX) ||
+        key.startsWith(LEGACY_ENTITY_PREF_PREFIX),
+    );
+    if (wipeKeys.length > 0) {
+      await AsyncStorage.multiRemove(wipeKeys);
+      log.info(`Swept ${wipeKeys.length} wipe-rebuild preference key(s) (D19)`);
+    }
+  } catch (error) {
+    log.error('Failed to sweep wipe-rebuild preferences:', error);
+  }
+}
+
 export default {
   getGlobalImpersonatedEntity,
   setGlobalImpersonatedEntity,
   getReplyMode,
   setReplyMode,
   sweepLegacyEntityPrefs,
+  sweepWipePreferences,
 };

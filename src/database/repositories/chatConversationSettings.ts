@@ -84,7 +84,7 @@ export async function getChatConversationSettings(
 ): Promise<ChatConversationSettings> {
   const db = getDatabase();
   const [results] = await db.executeSql(
-    'SELECT * FROM chat_conversation_settings WHERE participant_key = ?',
+    `SELECT * FROM chat_conversation_settings WHERE participant_key = ? AND deleted_at IS NULL`,
     [participantKey],
   );
   if (results.rows.length === 0) {
@@ -117,7 +117,7 @@ export async function getChatConversationSettingsBatch(
     const placeholders = chunk.map(() => '?').join(', ');
     const [results] = await db.executeSql(
       `SELECT * FROM chat_conversation_settings
-       WHERE participant_key IN (${placeholders})`,
+       WHERE participant_key IN (${placeholders}) AND deleted_at IS NULL`,
       chunk,
     );
     for (let j = 0; j < results.rows.length; j++) {
@@ -151,7 +151,8 @@ async function upsertSettings(
        pinned = excluded.pinned,
        archived = excluded.archived,
        reply_mode = excluded.reply_mode,
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at,
+       deleted_at = NULL`,
     [
       participantKey,
       entityId ?? null,
@@ -195,7 +196,7 @@ export async function conversationSettingsExistForEntity(
 ): Promise<boolean> {
   const db = getDatabase();
   const [results] = await db.executeSql(
-    'SELECT 1 FROM chat_conversation_settings WHERE entity_id = ? LIMIT 1',
+    `SELECT 1 FROM chat_conversation_settings WHERE entity_id = ? AND deleted_at IS NULL LIMIT 1`,
     [entityId],
   );
   return results.rows.length > 0;
@@ -210,7 +211,7 @@ export async function listConversationsByFlag(
 ): Promise<ChatConversationSettings[]> {
   const db = getDatabase();
   const [results] = await db.executeSql(
-    `SELECT * FROM chat_conversation_settings WHERE ${flag} = 1
+    `SELECT * FROM chat_conversation_settings WHERE ${flag} = 1 AND deleted_at IS NULL
      ORDER BY updated_at DESC`,
   );
   const list: ChatConversationSettings[] = [];
@@ -263,7 +264,7 @@ export async function getReplyMode(
 ): Promise<'realistic' | 'instant'> {
   const db = getDatabase();
   const [results] = await db.executeSql(
-    'SELECT reply_mode FROM chat_conversation_settings WHERE participant_key = ?',
+    `SELECT reply_mode FROM chat_conversation_settings WHERE participant_key = ? AND deleted_at IS NULL`,
     [participantKey],
   );
   if (results.rows.length > 0) {

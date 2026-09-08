@@ -49,7 +49,7 @@ export const SyncSettingsScreen: React.FC = () => {
 
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
-  const { isConnected, isPaired, isReconnecting, reconnectAttempt, nextReconnectIn, showToast, canUseChat, connectionStatus } =
+  const { isConnected, isPaired, isReconnecting, reconnectAttempt, nextReconnectIn, showToast, canUseChat, connectionStatus, serverUpdateRequired } =
     useSyncConnection();
 
   // ── Existing state (preserved from original) ────────────────────────────────
@@ -416,7 +416,9 @@ export const SyncSettingsScreen: React.FC = () => {
             {getConnectionStatusText()}
           </ThemedText>
           <ThemedText variant="secondary" size={13} style={styles.heroSubtext}>
-            {connectionStatus.mode === 'cloud'
+            {connectionStatus.textKey === 'serverUpdateRequired'
+              ? t('heroSubtextServerUpdateRequired')
+              : connectionStatus.mode === 'cloud'
               ? connectionStatus.textKey === 'connected'
                 ? t('heroSubtextCloudConnected')
                 : connectionStatus.textKey === 'preparing'
@@ -533,7 +535,7 @@ export const SyncSettingsScreen: React.FC = () => {
           label={isSyncing ? 'Syncing...' : 'Sync Now'}
           icon={isSyncing ? 'sync' : 'cloud-sync-outline'}
           onPress={handleSyncNow}
-          disabled={isSyncing || !isConnected}
+          disabled={isSyncing || !isConnected || serverUpdateRequired}
           variant="primary"
           style={styles.actionButton}
           testID="sync-now-button"
@@ -544,7 +546,7 @@ export const SyncSettingsScreen: React.FC = () => {
           label={t('forceFullResync')}
           icon="database-sync-outline"
           onPress={handleForceFullSync}
-          disabled={isSyncing || !isConnected}
+          disabled={isSyncing || !isConnected || serverUpdateRequired}
           variant="outline"
           style={styles.actionButton}
           testID="force-resync-button"
@@ -587,6 +589,22 @@ export const SyncSettingsScreen: React.FC = () => {
         )}
 
         {/* ── Warning / Info messages ───────────────────────────────────── */}
+
+        {/* 3-3/D57: sticky Harmony Link version gate. Shown first — while
+            sticky it overrides every other status (checked before the mode
+            branch in computeConnectionStatus). Explains the fix + that the
+            app reconnects automatically once the engine is updated (the
+            ~10-min background re-probe). */}
+        {serverUpdateRequired && (
+          <ThemedCard style={styles.warningCard} testID="server-update-required-card">
+            <View style={styles.warningRow}>
+              <Icon name="alert-circle-outline" size={18} color={accentPrimary} />
+              <ThemedText variant="secondary" size={13} style={styles.warningText}>
+                {t('serverUpdateRequiredWarning')}
+              </ThemedText>
+            </View>
+          </ThemedCard>
+        )}
 
         {connectionStatus.mode === 'cloud' && !canUseChat && (
           <ThemedCard style={styles.warningCard}>

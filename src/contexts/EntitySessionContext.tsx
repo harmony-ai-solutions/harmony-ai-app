@@ -25,6 +25,13 @@ interface EntitySessionContextType {
   startInteractionSession: (ownEntityId: string, participantIds: string[], replyMode?: string) => Promise<void>;
   stopInteractionSession: (interactionId: string) => Promise<void>;
   getInteractionSession: (interactionId: string) => InteractionSession | null;
+  /**
+   * 4-3 (bounded retention): stop + clear flagged (failed) session entries for
+   * a participant set. Called on navigation-back — failed entries are keyed by
+   * the service's temp interactionId, which a plain stop-by-id call never
+   * matches (the temp→canonical swap only happens on INIT SUCCESS).
+   */
+  clearFailedSession: (ownEntityId: string, participantIds: string[]) => Promise<void>;
 
   // Message sending
   sendMessage: (interactionId: string, message: string) => Promise<void>;
@@ -62,6 +69,13 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
   const canStartSession = isSyncConnected;
 
   // Monitor sync connection and clean up sessions when it drops.
+  // 4-3 (D36) evaluation: sync loss keeps the deliberate FULL teardown (no
+  // retention of flagged/failed entries). Sync is a hard prerequisite for
+  // entity sessions (start requires it), so nothing can proceed while down;
+  // on reconnect the open chat's init effect re-runs and starts a fresh
+  // session (the next session:started also purges same-set flagged entries).
+  // Full teardown is additionally the GC point for flagged entries of chats
+  // that are NOT on screen. See EntitySessionService.closeAllSessions.
   useEffect(() => {
     if (!isSyncConnected) {
       log.warn('Sync connection lost, clearing all entity sessions');
@@ -94,10 +108,23 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
 
       setActiveSessions(prev => {
         const newMap = new Map(prev);
+        const sortedParticipants = [...session.participantIds].sort().join('+');
         // Remove stale entries with temp UUIDv7 keys pointing to the same session
         // (the InteractionService re-keys from temp UUIDv7 to canonical ID)
         for (const [key, existing] of newMap.entries()) {
           if (existing === session && key !== interactionId) {
+            newMap.delete(key);
+            continue;
+          }
+          // 4-3 bounded retention (review 4): a flagged (failed) entry for the
+          // same participant set is superseded by the fresh session — drop it
+          // so failed entries don't accumulate one per failed chat.
+          if (
+            existing.failed &&
+            existing !== session &&
+            existing.ownEntityId === session.ownEntityId &&
+            [...existing.participantIds].sort().join('+') === sortedParticipants
+          ) {
             newMap.delete(key);
           }
         }
@@ -117,9 +144,22 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
 
     const handleSessionError = (interactionId: string, error: string) => {
       log.error('Session error for interaction:', interactionId, error);
+      // 4-3 (D36): KEEP the entry — flag it as terminally failed instead of
+      // deleting (the old deletion here was the second silent-drop site). The
+      // service flags the shared session object too; the shallow clone below
+      // guarantees the state change propagates to consumers. A missing entry
+      // (e.g. the legacy participant-keyed exhaustion emission for a start
+      // that never registered) has nothing to flag.
       setActiveSessions(prev => {
+        const existing = prev.get(interactionId);
+        if (!existing || existing.failed) {
+          return prev;
+        }
         const newMap = new Map(prev);
-        newMap.delete(interactionId);
+        newMap.set(interactionId, {
+          ...existing,
+          failed: { error, at: Date.now() },
+        });
         return newMap;
       });
     };
@@ -215,7 +255,33 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
         }
 
         if (!foundSession || !foundKey) {
-          log.warn(`Initialization timeout: session for participants [${participantIds.join(', ')}] no longer exists`);
+          // 4-3 timer fix: the session disappeared (e.g. the service flagged a
+          // failure and a stale entry was cleaned, or teardown raced the
+          // timer). This used to log and silently stop — the exact dead-end
+          // behind the eternal "Connecting…" dot. Schedule one context retry
+          // (existing 3-attempt budget) instead.
+          log.warn(`Initialization timeout: session for participants [${participantIds.join(', ')}] no longer exists — scheduling context retry`);
+          scheduleRetry(
+            participantKey,
+            ownEntityId,
+            participantIds,
+            new Error('Session initialization timeout'),
+          );
+          return currentSessions;
+        }
+
+        // 4-3 timer fix (D36): a FLAGGED session is a terminal failure the
+        // service already surfaced — but it may be transient (the incident
+        // class: the engine hadn't ingested a freshly created entity). Give it
+        // the same bounded context-retry budget instead of stopping silently.
+        if (foundSession.failed) {
+          log.warn(`Initialization timeout: session for [${participantIds.join(', ')}] already failed (${foundSession.failed.error}) — scheduling context retry`);
+          scheduleRetry(
+            participantKey,
+            ownEntityId,
+            participantIds,
+            new Error(`Session initialization failed: ${foundSession.failed.error}`),
+          );
           return currentSessions;
         }
 
@@ -268,9 +334,46 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     if (currentRetry.attempts >= DEFAULT_RETRY_POLICY.maxAttempts) {
       log.error(`Max retry attempts (${DEFAULT_RETRY_POLICY.maxAttempts}) exceeded for ${key}`);
 
-      // Emit permanent failure - use a generic key
-      entitySessionService.emit('session:error' as any, key,
-        `Failed to initialize session after ${currentRetry.attempts} attempts`);
+      // 4-3 review-4 wiring fix: find the tracked session entry for this
+      // participant set and (a) flag it terminally failed, (b) emit
+      // session:error with its REAL interactionId. The legacy code emitted
+      // with the retry-map key (the participant key), which ChatDetail's
+      // interactionId-matching listener never matched — the terminal error
+      // never surfaced and no failed marker was ever set.
+      const sortedParticipants = [...participantIds].sort().join('+');
+      let matchedId: string | null = null;
+      let matchedSession: InteractionSession | null = null;
+      for (const [id, s] of activeSessionsRef.current.entries()) {
+        if (
+          s.ownEntityId === ownEntityId &&
+          [...s.participantIds].sort().join('+') === sortedParticipants
+        ) {
+          matchedId = id;
+          matchedSession = s;
+          break;
+        }
+      }
+
+      if (matchedId && matchedSession) {
+        // Preserve the underlying cause when the service already flagged a
+        // failure (e.g. 'entity_not_defined') — the screen uses it for the
+        // D35 sync-now hint; otherwise use the generic exhaustion message.
+        const message =
+          matchedSession.failed?.error ??
+          `Failed to initialize session after ${currentRetry.attempts} attempts`;
+        matchedSession.failed = { error: message, at: Date.now() };
+        entitySessionService.emit('session:error' as any, matchedId, message);
+      } else {
+        // No tracked session (start kept throwing before registration) — keep
+        // the legacy participant-key emission so an observer still sees the
+        // terminal failure. ChatDetail cannot match this key; the init-failure
+        // toast from its start catch path remains the surface there.
+        entitySessionService.emit(
+          'session:error' as any,
+          key,
+          `Failed to initialize session after ${currentRetry.attempts} attempts`,
+        );
+      }
 
       retryStateRef.current.delete(key);
       return;
@@ -343,6 +446,14 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
       return false;
     }
 
+    // 4-3: a DISABLED partner is terminal — the engine will reject every
+    // re-INIT with entity_disabled until the user re-enables (Q8/A3). The
+    // flag arrives wrapped in the timer-fix error message too
+    // ("Session initialization failed: entity_disabled").
+    if (message.includes('entity_disabled')) {
+      return false;
+    }
+
     // Retry on network errors, timeouts, connection failures
     if (message.includes('timeout') ||
         message.includes('Connection') ||
@@ -395,12 +506,29 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
 
   const isSessionActive = (interactionId: string): boolean => {
     const session = activeSessionsRef.current.get(interactionId);
-    if (!session) return false;
+    // 4-3 (D36): a flagged (failed) session is never active — retained entries
+    // must not pass the gate anywhere (verified safe-to-retain precondition).
+    if (!session || session.failed) return false;
 
     // ALL connections must be 'active' (not just 'connecting')
     return Array.from(session.connections.values()).every(
       conn => conn.status === 'active'
     );
+  };
+
+  const clearFailedSession = async (ownEntityId: string, participantIds: string[]): Promise<void> => {
+    // 4-3 bounded retention (review 4): drop flagged (failed) entries for this
+    // participant set. Called on navigation-back (ChatDetail unmount) — failed
+    // entries are keyed by the service's temp interactionId, which the
+    // screen's plain stop-by-id never matches, so they would otherwise
+    // accumulate one per failed chat.
+    const targetKey = [...participantIds].sort().join('+');
+    for (const [id, session] of activeSessionsRef.current.entries()) {
+      if (!session.failed) continue;
+      if (session.ownEntityId !== ownEntityId) continue;
+      if ([...session.participantIds].sort().join('+') !== targetKey) continue;
+      await stopInteractionSession(id);
+    }
   };
 
   const getInteractionSession = (interactionId: string): InteractionSession | null => {
@@ -416,6 +544,7 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     startInteractionSession,
     stopInteractionSession,
     getInteractionSession,
+    clearFailedSession,
     sendMessage,
     canStartSession,
     // eslint-disable-next-line react-hooks/exhaustive-deps

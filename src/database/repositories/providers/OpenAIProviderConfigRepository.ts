@@ -276,28 +276,20 @@ export async function isOpenAIProviderConfigInUse(id: string): Promise<boolean> 
   return isProviderConfigInUse('openai', id);
 }
 
-export async function deleteOpenAIProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteOpenAIProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isOpenAIProviderConfigInUse(id)) {
+  if (await isOpenAIProviderConfigInUse(id)) {
     throw new Error(`OpenAI provider config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_openai WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`OpenAI provider config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE provider_config_openai SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`OpenAI provider config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE provider_config_openai SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`OpenAI provider config not found: ${id}`);
     }
   });
 }

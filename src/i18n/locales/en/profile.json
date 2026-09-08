@@ -55,6 +55,7 @@
   "aiDuplicate": "Duplicate",
   "aiDuplicateDone": "Created a copy — {{name}}",
   "aiDuplicateFailed": "Failed to duplicate AI: {{message}}",
+  "aiChatReservedName": "This character's name is reserved — rename the card and retry.",
 
   "sections": "Sections",
   "tabPosts": "Posts",
@@ -95,6 +96,7 @@
   "personaPictureChange": "Change Picture",
   "personaPictureRemove": "Remove Picture",
   "personaNameRequired": "Persona name is required",
+  "personaNameReserved": "This name is reserved. Please choose a different persona name.",
   "personaSaved": "Persona saved",
   "personaDeleted": "Persona deleted",
   "personaDeleteConfirm": "Delete this persona?",
@@ -103,6 +105,8 @@
   "personaDeleteFailed": "Failed to delete persona",
   "personaSaveFailed": "Failed to save persona",
   "personaAliasConflict": "A persona with this name already exists. Choose another name.",
+  "personaSaveSyncConflict": "Couldn't save the Persona (sync conflict). Please try again.",
+  "personaSaveSyncFailed": "Couldn't set up the Persona. Please try again.",
 
   "signInTitle": "Sign in to see your profile",
   "signInHint": "Sign in to view and manage your profile, characters and personas.",

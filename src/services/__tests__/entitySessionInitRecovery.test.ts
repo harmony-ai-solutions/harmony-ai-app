@@ -208,7 +208,7 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     expect(initEvents.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('surfaces session:error and tears down after the retry cap when the engine keeps rejecting', async () => {
+  it('surfaces session:error and FLAGS (retains) the session after the retry cap when the engine keeps rejecting', async () => {
     const svc = EntitySessionService.getInstance();
     const session = makeSession();
     (svc as any).sessions.set(session.interactionId, session);
@@ -230,12 +230,15 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     );
 
     expect(errors).toEqual(['entity_not_defined']);
-    expect((svc as any).sessions.has(session.interactionId)).toBe(false);
+    // 4-3 (D36): the session is flagged + RETAINED, not deleted — the context
+    // retry/timer machinery must be able to observe the terminal state.
+    expect((svc as any).sessions.has(session.interactionId)).toBe(true);
+    expect(session.failed).toMatchObject({ error: 'entity_not_defined' });
     expect(mockSyncAndWait).not.toHaveBeenCalled();
     expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
   });
 
-  it('does NOT trigger recovery for non-ingestion INIT_ENTITY errors (falls through to normal failure)', async () => {
+  it('does NOT trigger recovery for non-ingestion INIT_ENTITY errors (flags + retains)', async () => {
     const svc = EntitySessionService.getInstance();
     const session = makeSession();
     (svc as any).sessions.set(session.interactionId, session);
@@ -252,7 +255,8 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     );
 
     expect(errors).toEqual(['session limit reached']);
-    expect((svc as any).sessions.has(session.interactionId)).toBe(false);
+    expect((svc as any).sessions.has(session.interactionId)).toBe(true);
+    expect(session.failed).toMatchObject({ error: 'session limit reached' });
     expect(mockSyncAndWait).not.toHaveBeenCalled();
     expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
   });
@@ -276,7 +280,8 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     // A disabled partner is a terminal state — NO recovery re-sync / re-send,
     // NO retries. The session fails immediately with the honest error.
     expect(errors).toEqual(['entity_disabled']);
-    expect((svc as any).sessions.has(session.interactionId)).toBe(false);
+    expect((svc as any).sessions.has(session.interactionId)).toBe(true);
+    expect(session.failed).toMatchObject({ error: 'entity_disabled' });
     expect(mockSyncAndWait).not.toHaveBeenCalled();
     expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
     expect(
@@ -284,6 +289,84 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
         (c: any[]) => c[1]?.event_type === 'INIT_ENTITY',
       ),
     ).toHaveLength(0);
+  });
+
+  it('classifies via the structured error_code WHEN PRESENT, even when the free text changed (D35)', async () => {
+    const svc = EntitySessionService.getInstance();
+    const session = makeSession();
+    (svc as any).sessions.set(session.interactionId, session);
+
+    const errors: string[] = [];
+    svc.on('session:error', (_id: string, err: string) => errors.push(err));
+
+    // Old-style string equality would MISS this — the engine rewrote its copy.
+    // The structured code keeps the ingestion classification stable, and the
+    // CODE becomes the surfaced error string.
+    const event = {
+      event_type: 'INIT_ENTITY',
+      status: 'ERROR',
+      payload: { error: 'Engine has no idea what that is', error_code: 'entity_not_defined' },
+    };
+
+    await (svc as any).handleInitEntityResponse('claire', event, null, session, session.interactionId);
+
+    // The recovery loop ran (ingestion class)...
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(mockSyncAndWait).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveLength(0);
+
+    // ...and the surfaced error (on exhaustion) is the structured CODE.
+    session.initRetryCount = 2;
+    await (svc as any).handleInitEntityResponse('claire', event, null, session, session.interactionId);
+    expect(errors).toEqual(['entity_not_defined']);
+    expect(session.failed).toMatchObject({ error: 'entity_not_defined' });
+  });
+
+  it('treats entity_exists_deleted as TERMINAL (no recovery, no sync hint class) via error_code (D35)', async () => {
+    const svc = EntitySessionService.getInstance();
+    const session = makeSession();
+    (svc as any).sessions.set(session.interactionId, session);
+
+    const errors: string[] = [];
+    svc.on('session:error', (_id: string, err: string) => errors.push(err));
+
+    await (svc as any).handleInitEntityResponse(
+      'claire',
+      {
+        event_type: 'INIT_ENTITY',
+        status: 'ERROR',
+        payload: { error: 'entity exists but is deleted', error_code: 'entity_exists_deleted' },
+      },
+      null,
+      session,
+      session.interactionId,
+    );
+
+    // Deletion is final — re-syncing cannot resolve it, so no recovery.
+    expect(errors).toEqual(['entity_exists_deleted']);
+    expect(session.failed).toMatchObject({ error: 'entity_exists_deleted' });
+    expect(mockSyncAndWait).not.toHaveBeenCalled();
+  });
+
+  it('falls back to string-equality classification when no error_code is present (old engines)', async () => {
+    const svc = EntitySessionService.getInstance();
+    const session = makeSession();
+    (svc as any).sessions.set(session.interactionId, session);
+
+    const errors: string[] = [];
+    svc.on('session:error', (_id: string, err: string) => errors.push(err));
+
+    await (svc as any).handleInitEntityResponse(
+      'claire',
+      initEntityError('entity_not_defined'),
+      null,
+      session,
+      session.interactionId,
+    );
+
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(mockSyncAndWait).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveLength(0);
   });
 
   it('does not tear down when the transport error storm delivers an INIT_ENTITY app-level error', async () => {
@@ -308,12 +391,14 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     expect((svc as any).sessions.has(session.interactionId)).toBe(true);
     expect(errors).toHaveLength(0);
 
-    // A genuine transport error (no attached event) is still fatal.
+    // A genuine transport error (no attached event) is still fatal — but 4-3
+    // (D36) fatality now FLAGS + retains instead of deleting.
     await (svc as any).handleEntityConnectionError(
       'claire',
       { message: 'Connection reset by peer', code: 'ECONNRESET' },
     );
     expect(errors.length).toBeGreaterThan(0);
-    expect((svc as any).sessions.has(session.interactionId)).toBe(false);
+    expect((svc as any).sessions.has(session.interactionId)).toBe(true);
+    expect(session.failed).toMatchObject({ error: 'Connection reset by peer' });
   });
 });

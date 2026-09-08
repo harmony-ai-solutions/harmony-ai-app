@@ -12,6 +12,7 @@ import { LandingCard } from '../components/landing/LandingCard';
 import { ConnectionStatusBadge } from '../components/settings/ConnectionStatusBadge';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
+import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import { getAppVersion } from '../utils/version';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -21,6 +22,7 @@ export const LandingScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('landing');
+  const { serverUpdateRequired } = useSyncConnection();
   const [refreshing, setRefreshing] = useState(false);
 
   if (!theme) return null;
@@ -35,7 +37,7 @@ export const LandingScreen: React.FC = () => {
       {/* Header */}
       <ScreenHeader
         title={t('title')}
-        right={<ConnectionStatusBadge />}
+        right={<ConnectionStatusBadge serverUpdateRequired={serverUpdateRequired} />}
       />
 
       <ScrollView

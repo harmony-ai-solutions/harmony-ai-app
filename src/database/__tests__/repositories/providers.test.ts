@@ -141,9 +141,11 @@ describe('providers repository', () => {
       expect(retrieved).not.toBeNull();
       expect(retrieved!.name).toBe('Test OpenAI');
 
-      await deleteOpenAIProviderConfig(id, true);
+      await deleteOpenAIProviderConfig(id);
       const afterDelete = await getOpenAIProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -180,9 +182,11 @@ describe('providers repository', () => {
       const retrieved = await getOpenRouterProviderConfig(id);
       expect(retrieved).not.toBeNull();
 
-      await deleteOpenRouterProviderConfig(id, true);
+      await deleteOpenRouterProviderConfig(id);
       const afterDelete = await getOpenRouterProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -215,9 +219,11 @@ describe('providers repository', () => {
       const retrieved = await getOpenAICompatibleProviderConfig(id);
       expect(retrieved).not.toBeNull();
 
-      await deleteOpenAICompatibleProviderConfig(id, true);
+      await deleteOpenAICompatibleProviderConfig(id);
       const afterDelete = await getOpenAICompatibleProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -238,9 +244,11 @@ describe('providers repository', () => {
       const retrieved = await getHarmonySpeechProviderConfig(id);
       expect(retrieved).not.toBeNull();
 
-      await deleteHarmonySpeechProviderConfig(id, true);
+      await deleteHarmonySpeechProviderConfig(id);
       const afterDelete = await getHarmonySpeechProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -261,9 +269,11 @@ describe('providers repository', () => {
       const retrieved = await getElevenLabsProviderConfig(id);
       expect(retrieved).not.toBeNull();
 
-      await deleteElevenLabsProviderConfig(id, true);
+      await deleteElevenLabsProviderConfig(id);
       const afterDelete = await getElevenLabsProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -279,9 +289,11 @@ describe('providers repository', () => {
       const retrieved = await getKindroidProviderConfig(id);
       expect(retrieved).not.toBeNull();
 
-      await deleteKindroidProviderConfig(id, true);
+      await deleteKindroidProviderConfig(id);
       const afterDelete = await getKindroidProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -298,9 +310,11 @@ describe('providers repository', () => {
       const retrieved = await getKajiwotoProviderConfig(id);
       expect(retrieved).not.toBeNull();
 
-      await deleteKajiwotoProviderConfig(id, true);
+      await deleteKajiwotoProviderConfig(id);
       const afterDelete = await getKajiwotoProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -316,9 +330,11 @@ describe('providers repository', () => {
       const retrieved = await getCharacterAIProviderConfig(id);
       expect(retrieved).not.toBeNull();
 
-      await deleteCharacterAIProviderConfig(id, true);
+      await deleteCharacterAIProviderConfig(id);
       const afterDelete = await getCharacterAIProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -333,9 +349,11 @@ describe('providers repository', () => {
       const retrieved = await getLocalAIProviderConfig(id);
       expect(retrieved).not.toBeNull();
 
-      await deleteLocalAIProviderConfig(id, true);
+      await deleteLocalAIProviderConfig(id);
       const afterDelete = await getLocalAIProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -350,9 +368,11 @@ describe('providers repository', () => {
       const retrieved = await getMistralProviderConfig(id);
       expect(retrieved).not.toBeNull();
 
-      await deleteMistralProviderConfig(id, true);
+      await deleteMistralProviderConfig(id);
       const afterDelete = await getMistralProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -368,9 +388,11 @@ describe('providers repository', () => {
       const retrieved = await getOllamaProviderConfig(id);
       expect(retrieved).not.toBeNull();
 
-      await deleteOllamaProviderConfig(id, true);
+      await deleteOllamaProviderConfig(id);
       const afterDelete = await getOllamaProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -392,9 +414,11 @@ describe('providers repository', () => {
       expect(retrieved).not.toBeNull();
       expect(retrieved!.base_url).toBe('http://localhost:8188');
 
-      await deleteComfyUIProviderConfig(id, true);
+      await deleteComfyUIProviderConfig(id);
       const afterDelete = await getComfyUIProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -426,9 +450,11 @@ describe('providers repository', () => {
       expect(retrieved).not.toBeNull();
       expect(retrieved!.name).toBe('Test XAI');
 
-      await deleteXAIProviderConfig(id, true);
+      await deleteXAIProviderConfig(id);
       const afterDelete = await getXAIProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -456,9 +482,11 @@ describe('providers repository', () => {
       expect(retrieved).not.toBeNull();
       expect(retrieved!.name).toBe('Test Google');
 
-      await deleteGoogleProviderConfig(id, true);
+      await deleteGoogleProviderConfig(id);
       const afterDelete = await getGoogleProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -482,9 +510,11 @@ describe('providers repository', () => {
       expect(retrieved).not.toBeNull();
       expect(retrieved!.name).toBe('Test Anthropic');
 
-      await deleteAnthropicProviderConfig(id, true);
+      await deleteAnthropicProviderConfig(id);
       const afterDelete = await getAnthropicProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
   });
 
@@ -519,9 +549,11 @@ describe('providers repository', () => {
       expect(retrieved).not.toBeNull();
       expect(retrieved!.name).toBe('Test Soulbits');
 
-      await deleteSoulbitsCloudProviderConfig(id, true);
+      await deleteSoulbitsCloudProviderConfig(id);
       const afterDelete = await getSoulbitsCloudProviderConfig(id, true);
-      expect(afterDelete).toBeNull();
+      // permanent flag ignored (D1/D69–D78): the row is tombstoned, not gone.
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
     });
 
     it('updateAllSoulbitsCloudApiKeys refreshes every non-deleted row', async () => {
@@ -553,7 +585,7 @@ describe('providers repository', () => {
       const active1 = await make('Active 1', 'token-old-1');
       const active2 = await make('Active 2', 'token-old-2');
       const softDeleted = await make('Soft-Deleted', 'token-old-3');
-      await deleteSoulbitsCloudProviderConfig(softDeleted, false); // soft delete
+      await deleteSoulbitsCloudProviderConfig(softDeleted); // soft delete
 
       await updateAllSoulbitsCloudApiKeys('paseto-v4.local.refreshed');
 

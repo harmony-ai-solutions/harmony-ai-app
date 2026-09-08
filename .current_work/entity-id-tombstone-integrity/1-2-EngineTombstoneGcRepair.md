@@ -136,9 +136,23 @@ phase now re-aligns the code with tombstone-as-protocol + GC), plan reviews 2026
 
 ## Checklist
 
-- [ ] FK-safe order + per-table log-and-continue (D71)
-- [ ] Allowlist unified to 35 (D72) + parity fixture
-- [ ] Purge floor persisted + SYNC_REQUEST rebuild check (D76; signal shape agreed with 3-3)
-- [ ] Migration 000046 + app placeholder shipped (D11 parity pattern)
-- [ ] `DeleteOrphanedMemories` call site KEPT (D77); dead-code sweep done (D21-3); `DeleteMemory` exception documented (D67)
-- [ ] Recurring FK error gone in a fresh sync cycle (manual log check); tests green; phase doc updated
+- [x] FK-safe order + per-table log-and-continue (D71)
+- [x] Allowlist unified to 35 (D72) + parity fixture
+- [x] Purge floor persisted + SYNC_REQUEST rebuild check (D76; signal shape = typed `SYNC_REJECT` `reason=rebuild_required` on the existing `SyncRejectPayload`)
+- [x] Migration 000046 shipped engine-side (gap investigation: runner tolerates gaps — verdict below). App placeholder 000046 deferred to 4-1 (correct owner per D11/D85 parity pattern — engine phase ships engine-side only)
+- [x] `DeleteOrphanedMemories` call site KEPT (D77); dead-code sweep done (D21-3); `DeleteMemory` exception documented (D67 comment extended)
+- [x] Recurring FK error gone in a fresh sync cycle (regression-lock tests); tests green; phase doc updated
+
+## Implementation Notes (deviations)
+
+- **Migration-gap verdict (000045 missing, 000046 lands): GAPS ARE TOLERATED — no contradiction.** `database/migrations.go` `loadMigrations()` parses each file's version into a map, sorts by version, and applies any version absent from `schema_migrations` — there is NO gap check and no "expected next version" assertion. Verified live: a throwaway in-memory-DB test ran the full migration chain 44 → 46 (skipping the nonexistent 45) with 000046 recorded and `sync_gc_state` created (test file deleted after verification). 000045 (id-pattern, phase 3-1) and 000046 (sync_gc_state) keep their binding cross-repo numbering; no renumbering, no fake 000045 stub.
+- **Rebuild-signal shape:** typed `SYNC_REJECT` with `reason: "rebuild_required"` + human-readable `message` on the existing `SyncRejectPayload` (size-estimate reject precedent), emitted after the device lookup + approval gate inside `handleSyncRequest`. New named constant `SyncRejectReasonRebuildRequired = "rebuild_required"` in `eventserver/synchronization.go`. WS NOT torn down (`handleSyncRequest` returns `nil, nil`; no sync session created; test asserts zero active syncs). Phase 3-3's `unsupported_schema_version` will follow the same shape.
+- **Doc-vs-code drift (adapted, non-blocking):**
+  - `emoji_action.go:76-80` in the doc matches `DeleteEmojiAction`'s range, not `SoftDeleteEmojiActionsByEntity` (actual: 82-87). The symbol was unambiguous — deleted the named function (and the now-unused `context` import).
+  - `memory.go:103-111` in the doc vs actual `UpdateMemoryEndDate` at 116-126. Symbol unambiguous — deleted it plus its test `TestUpdateMemoryEndDate` (`memory_test.go:32-81`, not named in the doc but required to keep the package compiling).
+  - `conversation_messages.entity_id ON DELETE CASCADE` (doc) — the CURRENT engine DDL (000041 rebuild) declares NO FK on `conversation_messages.entity_id` at all. Harmless either way: children-first order satisfies both CASCADE and NO ACTION, exactly as the doc's reasoning states. No code change.
+  - Doc's family count implied "whole family" without a number; the image row is cascade-purged with its profile (ON DELETE CASCADE), so the explicit-DELETE count is 10, not 11 — asserted with a comment.
+- **Floor accounting:** `CleanupSoftDeletedRecords` now returns `(totalDeleted, maxPurgedDeletedAt, aggErr)`. Per-table max is SELECTed BEFORE the DELETE (only rows matching the purge predicate count); a failed table contributes nothing; the caller (`handleSyncFinalize`) persists via `AdvanceMaxPurgedDeletedAt` (MAX-upsert) only when `deleted > 0`. Partial-failure survival verified by the poison tests.
+- **`WithTransaction` nesting hazard:** the suite-level `seedTombstonedFamily` helper commits its own transaction (`SetMaxOpenConns(1)` — nested `WithTransaction` on the same handle would deadlock). The poison test seeds in a separate committed tx before applying the poison UPDATE.
+- **GitNexus risk note:** `gitnexus_detect_changes` reports CRITICAL aggregate risk — driven by the accumulated uncommitted multi-phase working tree (2-1b + 1-1 + this phase), not by this phase in isolation. This phase's specific blast radius is the sync handshake/finalize flows (HandleEvent → SyncRejectPayload / handleSyncFinalize), fully covered by green tests.
+- **Test count:** baseline 769 → removed `TestDeleteEmotionState` + `TestUpdateMemoryEndDate` (−2), added 5 repo-level + 4 eventserver-suite tests (+9) = **776 executed tests green** (`go build ./...`, `go vet ./...`, `go test ./... -count=1 -timeout 120s` all clean).

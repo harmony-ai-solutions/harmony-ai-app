@@ -153,13 +153,73 @@ service layer via management API), senju record decision 2 (explicit-id vs deriv
 
 ## Checklist
 
-- [ ] Client-side id generation + validation + rename machinery deleted (`deriveEntityId`,
+- [x] Client-side id generation + validation + rename machinery deleted (`deriveEntityId`,
       `validateEntityId`, `generateUniqueEntityId`, **`deriveEntityAlias` (D59)**, rename dialog +
       `entityService.renameEntity`);
       server-echoed ids everywhere (incl. `entityStore.createEntity` fix)
-- [ ] D15/D23 wire contract: `name` field on all creates; `id`-carrying requests impossible client-side
-- [ ] Add-dialog name-only (auto-derived); persona create → single atomic derived call; edit = alias only (D14);
+- [x] D15/D23 wire contract: `name` field on all creates; `id`-carrying requests impossible client-side
+- [x] Add-dialog name-only (auto-derived); persona create → single atomic derived call; edit = alias only (D14);
       uniqueness = alias-equality; reserved names `user`/`deleted` (D33)
-- [ ] Store selects echoed id + passes name/dedupe options
-- [ ] i18n: dead keys deleted (incl. review-3 additions); tutorial copy name-only; entity-list `min-w-0`
-- [ ] `node --test` validation locks + `npm run build` green; phase doc updated
+- [x] Store selects echoed id + passes name/dedupe options
+- [x] i18n: dead keys deleted (incl. review-3 additions); tutorial copy name-only; entity-list `min-w-0`
+- [x] `node --test` validation locks + `npm run build` green; phase doc updated
+
+## Implementation Notes (deviations)
+
+Implemented 2026-09-07 on `feat/engine-track-phase2` (local-only nested repo). No contradictions with the
+plan found — all six steps shipped as ruled; notes below are drift adaptations and implementation pins.
+
+**Files changed/deleted**
+
+- `src/utils/entityIdUtils.js` — **deleted entirely** (D23/D59: `deriveEntityId` + `deriveEntityAlias`).
+- `src/utils/personaNameUtils.js` (**new**) — pure `validatePersonaName(name, { entities, excludeId }) →
+  errorKey | null` (D21-9 shape); returns `'nameRequired' | 'nameReservedUser' | 'nameExists'`; non-empty +
+  reserved (`user`/`deleted`, case-insensitive) + case-insensitive alias-equality on live rows, no charset
+  check. `src/utils/personaNameUtils.test.js` (**new**) — 8 `node --test` locks (precedent style).
+- `src/services/management/entityService.js` — `createEntity`/`createPersonaEntity` re-signed to
+  `(name, characterProfileId, { dedupeIdIfTaken })` sending the D66 contract (`name` +
+  `character_profile_id` + optional `entity_type: 'user'` on the persona variant + `dedupe_id_if_taken`);
+  `id`/`alias` never sent; **`renameEntity` deleted** (D22).
+- `src/store/entityStore.js` — `createEntity` passes `name` + `dedupeIdIfTaken` through and selects the
+  **server-echoed** `newEntity.id` (was the requested id at old line 29).
+- `src/components/EntitySettingsView.jsx` — name-only add dialog (`generateUniqueEntityId` default-name
+  crutch + `validateEntityId` + `handleRename` + `renameEntity` import deleted); action grid re-laid to
+  3 buttons (Add `col-span-2` on row 1, Copy + Delete on row 2 — no empty cell); entity-list row flex chain
+  gains `min-w-0 flex-1` + per-span `min-w-0` + `title` tooltips.
+- `src/components/personas/PersonasView.jsx` — local `validatePersonaName` replaced by thin i18n wrapper
+  over the util; CREATE = profile POST → ONE derived entity create + **orphan-profile compensation**
+  (best-effort `deleteCharacterProfile`, mirror of CharacterProfilesView, newly added); EDIT = the
+  `name !== editingPersona.id` trigger and the whole rename block deleted — validation + alias
+  (`updateEntity`) fire only when the display name changed, profile update unchanged.
+- `src/components/characters/CharacterProfilesView.jsx` — both card-create paths post the raw profile/copy
+  name (no derivation, no alias computation); echoed ids already used (kept).
+- `src/components/tutorial/tutorialSteps.jsx` — `entity-create` step name-only; zero `ID`/`username`
+  mentions remain in the file (grep-verified).
+- i18n `en/` only: deletions + rewrites per step 5 (list in report).
+
+**Drift adaptations (line numbers only — key names/symbols binding and matched)**
+
+- PersonasView edit-rename block actual span 309-323 (plan 309-318); trigger at 291-292 ✓. Uniqueness
+  predicate was at 218 ✓. EntitySettingsView action grid at 567-575 (plan ~568-574).
+
+**Implementation pins**
+
+- `personas.json nameInvalid` kept byte-identical per review-5, but NOTE: after the charset-regex removal
+  no code path emits it anymore (the util only returns the three keys above). Ruled to stay → stays.
+- Edit-path "display name changed" gate uses `profile?.name || alias || id` (the same derivation persona
+  cards/search use), so a rename via alias still validates + syncs even when the profile name is unchanged.
+- `character_profile_id: null` continues to be sent when no profile is linked (today's wire shape; the
+  contract's `?` is satisfied by null).
+- Reserved/empty names now surface as engine 400s on ALL create paths (plan step 1: throws move to
+  engine-400 surfacing); the add dialog silently ignores empty input (old behavior preserved).
+- The D22 tombstone comment in `entityService.js` deliberately avoids the literal `renameEntity`/`/rename`
+  tokens so the zero-rename grep proof stays clean. Unrelated `/voices/:name/rename` (configService) and
+  `/integrations/.../rename` (integrationsService) endpoints are out of scope and untouched.
+- `gitnexus_detect_changes` (repo `harmony-link-ui`) cross-check flags risk "critical" — expected: it maps
+  the pre-change index, and every flagged flow is one this phase deletes by design (HandleRename,
+  deriveEntityAlias/validateEntityId steps, legacy create shape). No changed symbol falls outside the
+  intended blast radius.
+
+**Verification evidence:** `npm.cmd run build` exit 0 (✓ built in 18.65s); `node --test
+src/utils/personaNameUtils.test.js src/store/dynamicBackgroundStore.test.js` → 15/15 pass, exit 0; static
+traces in the phase report (zero-rename grep clean).

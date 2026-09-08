@@ -61,6 +61,7 @@ import {
   getEntityByCharacterProfileId,
   setEntityDisabled,
   setEntityMuted,
+  ReservedEntityNameError,
 } from '../database/repositories/entities';
 import { createUserPersonaFromCard } from '../database/repositories/userEntities';
 import * as SocialService from '../services/social/SocialService';
@@ -418,6 +419,12 @@ export const AIProfileScreen: React.FC = () => {
       });
     } catch (err) {
       log.error('Failed to open chat:', err);
+      // D33 (review-5 UX pin): reserved card name (`user` / `deleted`) —
+      // dedicated toast, never the bare generic failure.
+      if (err instanceof ReservedEntityNameError) {
+        showToast(t('aiChatReservedName'));
+        return;
+      }
       showToast(t('common:error'));
     } finally {
       setChatting(false);

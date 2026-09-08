@@ -57,6 +57,17 @@ what kinds of tests exist, and how to add new ones.
 | Failures | `sync.failures.test.ts` | 3 (1 skipped) | Error handling scenarios |
 | Concurrent | `sync.concurrent.test.ts` | 2 | Concurrent sync sessions |
 
+> **Note (2026-09-07):** the counts and suite tables above are the original test-framework-overhaul baseline
+> and are no longer exhaustive — the suite has since grown to **146 unit suites / ~1300 tests + 13
+> integration suites**, and migrations now run to **000046**. Waves since the overhaul added suites for, a.o.:
+> sync version gating & rebuild (`syncVersionGating`, `syncRebuildRequired`, `wipeRebuild*`,
+> `DatabaseContext.wipe`), critical sync waits (`syncAndWaitCritical`, D55 cases in `CharacterChatService`),
+> tombstone-GC table parity (`syncGcTablesParity`), entity-ID minting (`entityIdUtils`), UTC timestamp
+> parsing (`timestampUtc`), participant-key vectors (`interactionsParticipantKey`), failed-session/chat
+> connection UX (`chatDetailConnectionState`, `chatDetailSessionError`, `EntitySession*`), and migration
+> placeholders/roll-forward coverage. For the current per-feature coverage map see
+> [`.current_work/entity-id-tombstone-integrity/6-1-CrossRepoVerification.md`](../.current_work/entity-id-tombstone-integrity/6-1-CrossRepoVerification.md).
+
 ## Running Tests Locally
 
 ### All Tests

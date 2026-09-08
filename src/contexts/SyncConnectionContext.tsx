@@ -73,6 +73,10 @@ interface SyncConnectionContextType {
   /** Human-readable connection status derived from current mode + state.
    *  Includes textKey for i18n, colour, semantic variant, and mode. */
   connectionStatus: ConnectionStatusInfo;
+  /** Sticky gate (3-3/D57): the engine advertises a sync-schema version below
+   *  the app's — syncs are suppressed (initiateSync choke point + suppressed
+   *  auto-reconnect) until the engine is updated and re-handshakes. */
+  serverUpdateRequired: boolean;
 }
 
 const SyncConnectionContext = createContext<SyncConnectionContextType | undefined>(undefined);
@@ -99,6 +103,11 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   // ── Phase 10: cloud status + source tracking ───────────────────────────
   const [cloudStatus, setCloudStatus] = useState<CloudSessionStatus>(cloudSessionService.getStatus());
   const [currentSource, setCurrentSource] = useState<SyncSource>('selfhosted');
+
+  // ── 3-3 / D57: sticky server-update-required gate ──────────────────────
+  // Mirrored from SyncService (single source of truth); drives the derived
+  // connectionStatus member AND the reconnect/on-connect suppression below.
+  const [serverUpdateRequired, setServerUpdateRequired] = useState(false);
 
   // Themed alert dialog (AppAlertProvider is mounted ABOVE this provider in
   // App.tsx). Captured in a ref because handleSyncEstimate is registered in a
@@ -137,6 +146,9 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   // expected TLS/cert churn of the pairing flow. Cleared once the transport
   // settles successfully.
   const isCertFlowActiveRef    = useRef(false);
+  // 3-3 / D57: sticky-gate mirror read by closures (event listeners registered
+  // with [] deps must never read stale React state).
+  const serverUpdateRequiredRef = useRef(false);
 
   // Keep refs in sync with state so both UI renders (state) and closures (refs) are accurate.
   const setIsConnectingSync = (value: boolean) => {
@@ -155,6 +167,10 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     isConnectedRef.current = value;
     setIsConnected(value);
   };
+  const setServerUpdateRequiredSync = (value: boolean) => {
+    serverUpdateRequiredRef.current = value;
+    setServerUpdateRequired(value);
+  };
 
   const RECONNECT_INTERVALS = [1000, 2000, 4000, 8000, 16000, 30000];
 
@@ -170,6 +186,15 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   // Reconnect scheduling (uses refs – never stale)
   // ---------------------------------------------------------------------------
   const scheduleReconnect = () => {
+    // ── 3-3 / D57: while the server-update-required gate is sticky, do NOT
+    // auto-reconnect — the loop connect → handshake → abort → reconnect is
+    // exactly what D57 forbids (the gate must never tear down the WS as its
+    // mechanism). Recovery is the slow re-probe (SyncService), which re-dials
+    // ONCE and re-handshakes; manual reconnect() still works.
+    if (serverUpdateRequiredRef.current) {
+      log.info('Server update required — suppressing auto-reconnect scheduling (D57)');
+      return;
+    }
     if (reconnectTimeoutRef.current !== null) {
       log.info('Reconnect already scheduled');
       return;
@@ -291,6 +316,18 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
         return;
       }
 
+      // ── 3-3 / D57: while the server-update-required gate is sticky, do NOT
+      // auto-sync on connect. Instead re-handshake: the engine's
+      // HANDSHAKE_ACCEPT carries its sync-schema version, which is how the
+      // gate re-evaluates (and clears) itself after the engine is updated.
+      if (serverUpdateRequiredRef.current) {
+        log.info('Connected while server update required — re-handshaking to re-evaluate engine version');
+        SyncServiceClass.getInstance().requestHandshake().catch((err: any) => {
+          log.warn('Re-handshake on connect failed (non-critical):', err);
+        });
+        return;
+      }
+
       // Trigger background sync to pick up any messages generated while disconnected
       SyncServiceClass.getInstance().initiateSync().catch((err: any) => {
         log.warn('Auto-sync on connect failed (non-critical):', err);
@@ -393,15 +430,19 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     if (readOnly) {
       const onConnected = () => setIsConnectedSync(true);
       const onDisconnected = () => setIsConnectedSync(false);
+      const onServerUpdateRequired = (value: boolean) => setServerUpdateRequiredSync(value);
       connectionManager.on('connected:sync', onConnected);
       connectionManager.on('disconnected:sync', onDisconnected);
+      SyncService.on('sync:server-update-required', onServerUpdateRequired);
       ConnectionStateManager.on('state:changed', handleStateChange);
       const summary = ConnectionStateManager.getConnectionSummary();
       setIsPairedSync(summary.isPaired || false);
       setIsConnectedSync(summary.isConnected || false);
+      setServerUpdateRequiredSync(SyncService.getServerUpdateRequired());
       return () => {
         connectionManager.off('connected:sync', onConnected);
         connectionManager.off('disconnected:sync', onDisconnected);
+        SyncService.off('sync:server-update-required', onServerUpdateRequired);
         ConnectionStateManager.off('state:changed', handleStateChange);
       };
     }
@@ -422,6 +463,32 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       log.warn('Sync rejected:', payload);
       const message = payload?.message || payload?.reason || '';
       showToast(i18n.t('syncConnection:syncRejected', { message }));
+    };
+
+    // ── 3-3 / D57: sticky server-update-required gate ─────────────────────
+    // Entered by SyncService on an old-engine handshake accept or an
+    // `unsupported_schema_version` SYNC_REJECT. While sticky, auto-reconnect
+    // and the on-connect sync are suppressed (above); when it CLEARS (engine
+    // updated + accepted handshake), reset reconnect state so the resumed
+    // sync path starts clean (any stale reconnect timer is cancelled).
+    const handleServerUpdateRequiredChange = (value: boolean) => {
+      setServerUpdateRequiredSync(value);
+      if (!value) {
+        cancelReconnect();
+        setIsReconnectingSync(false);
+        setNextReconnectIn(0);
+      }
+    };
+
+    // One-shot re-dial requested by the slow re-probe when the WS is down
+    // (the engine likely restarted to apply the update). Dial exactly ONCE —
+    // no reconnect scheduling while sticky (the on-connect handler re-
+    // handshakes, which is how the gate re-evaluates the engine version).
+    const handleServerUpdateProbeReconnect = () => {
+      log.info('Server-update re-probe: dialing sync connection once');
+      connect().catch((err: any) => {
+        log.warn('Server-update re-probe: re-dial failed:', err);
+      });
     };
 
     // The engine sends a SYNC_DATA_SIZE_ESTIMATE before pushing data and
@@ -556,6 +623,8 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     SyncService.on('sync:rejected',                   handleSyncRejected);
     SyncService.on('sync:estimate',                   handleSyncEstimate);
     SyncService.on('sync:nameclash',                  handleSyncNameClash);
+    SyncService.on('sync:server-update-required',     handleServerUpdateRequiredChange);
+    SyncService.on('sync:server-update-probe-reconnect', handleServerUpdateProbeReconnect);
 
     if (!hasInitialized.current) {
       hasInitialized.current = true;
@@ -573,6 +642,8 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       SyncService.off('sync:rejected',                   handleSyncRejected);
       SyncService.off('sync:estimate',                   handleSyncEstimate);
       SyncService.off('sync:nameclash',                  handleSyncNameClash);
+      SyncService.off('sync:server-update-required',     handleServerUpdateRequiredChange);
+      SyncService.off('sync:server-update-probe-reconnect', handleServerUpdateProbeReconnect);
     };
   }, []);
 
@@ -1022,8 +1093,15 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     [currentSource, cloudStatus, isPaired],
   );
   const connectionStatus = useMemo(
-    () => computeConnectionStatus(currentSource, cloudStatus, isPaired, isConnected, isReconnecting),
-    [currentSource, cloudStatus, isPaired, isConnected, isReconnecting],
+    () => computeConnectionStatus(
+      currentSource,
+      cloudStatus,
+      isPaired,
+      isConnected,
+      isReconnecting,
+      serverUpdateRequired,
+    ),
+    [currentSource, cloudStatus, isPaired, isConnected, isReconnecting, serverUpdateRequired],
   );
 
   // Memoize the context value over the exposed state + derived values. The
@@ -1044,10 +1122,12 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     showToast,
     canUseChat,
     connectionStatus,
+    serverUpdateRequired,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
     isPaired, isConnected, isConnecting, isReconnecting,
     reconnectAttempts, nextReconnectIn, canUseChat, connectionStatus,
+    serverUpdateRequired,
   ]);
 
   return (

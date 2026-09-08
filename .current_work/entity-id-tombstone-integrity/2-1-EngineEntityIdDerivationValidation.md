@@ -100,8 +100,54 @@ The charset regex survives **only** inside 3-1's migration as the "already-confo
 
 ## Checklist
 
-- [ ] `DeriveEntityID` + unit tests (6-1 §1 vectors)
-- [ ] Derived-only create contract (400 on `id`; `name` required; alias default + auto-suffix D30)
-- [ ] Duplicate derivation switched to `DeriveEntityID` (D52 — copy-series replaced); rename route deleted (2-1b)
-- [ ] Seed exemptions documented (D31)
-- [ ] Tests green; phase doc updated
+- [x] `DeriveEntityID` + unit tests (6-1 §1 vectors — all 7 pinned; UTC/clock-seam rule; slug edge cases)
+- [x] Derived-only create contract (400 on `id`/`alias`; `name` required; reserved `user`/`deleted` → 400; alias default + auto-suffix D30)
+- [x] Duplicate derivation switched to `DeriveEntityID` (D52 — copy-series replaced; D63 display-name chain); rename route deleted (2-1b, verified absent)
+- [x] Seed exemptions documented (D31, seed-time scope)
+- [x] Tests green; phase doc updated
+
+## Implementation Notes (deviations)
+
+All deviations below are "adapt + note" class — every sub-item was implemented; none required a stop.
+
+1. **Slug-rule pin (orchestrator-ruled, adopted):** `DeriveEntityID` preserves `[A-Za-z0-9._-]`
+   verbatim, collapses runs of everything else to a single `-`, trims non-alphanumeric edges, caps
+   the base at 48 chars, and falls back to `entity` — matching the app-side reference
+    (`entityIdUtils.ts`) and the 6-1 §1 vectors. **CORRECTION (orchestrator, verified by execution):**
+    the initial claim that the app's code fails `(a) "  Max  2 "` and `(b) "--__--"` was a MISREAD of
+    the app implementation — `slugifyEntityName` collapses runs (`[^A-Za-z0-9._-]+` → `-`, the `+`
+    collapses `Max··2` to `Max-2`, never `Max--2`) and its `EDGE_NON_ALNUM` trim (`^[^A-Za-z0-9]+|…`)
+    consumes `--__--` entirely → `entity` fallback. Executed vectors (tsx): `Max-2` ✓, `entity` ✓,
+    `Isabella-2` ✓, `Zo` ✓, `a.b_c-d` ✓ — **both implementations pass the identical 6-1 §1 vectors;
+    no 2-2 fix needed; cross-repo parity confirmed.**
+2. **`stripIDCopySuffix` learned the timestamp shape:** the phase doc's "keep the ghost-aware
+   `dedupe_id_if_taken` mechanism exactly as-is" cannot be satisfied literally together with the 6-1
+   §1 backstop vector ("never stripping the timestamp suffix": taken `Isabella-20260905123514` →
+   `Isabella-20260905123514-2`, never `Isabella-2`). The as-is resolver strips ANY trailing digit
+   run, so it would strip the timestamp. The in-tx existence probe + series walk + ghost-awareness
+   are kept as-is; only the suffix classifier now treats a trailing 14-digit run (YYYYMMDDHHMMSS) as
+   part of the derived base and never strips it. `Name-<ts>-2` taken → `Name-<ts>-3` works.
+3. **Clock seam:** added exported `controllers.Now` (var, `time.Now` default) as the derivation
+   clock; `handleCreateEntity` and `DuplicateEntity` route through it; tests pin it to
+   `2026-09-05T12:35:14Z` via a `fixedDeriveNow` helper (t.Cleanup restore). `DeriveEntityID`
+   always formats `t.UTC()` — the +02:00 timezone vector is covered at the function level.
+4. **`dedupe_id_if_taken` stays opt-in** (absent/false → loud 400 on a same-second derived-id
+   collision; true → in-tx next-free resolution). D66's "the ONLY mode" is read as the FE always
+   sending `true`; the flag semantics are preserved per the phase doc's "keep exactly as-is".
+5. **201 echo:** `alias` now echoes the RESOLVED alias (defaulted to name / auto-suffixed);
+   `entity_type` echoes the raw request value as before; the slim create echo keeps
+   `character_profile_id` (the "profile embedded as `character_profile`" note refers to the
+   `EntityConfig` payload of GET/list, not the create 201).
+6. **Obsolete/rewritten tests:** 6 pre-D23 create tests and 5 duplicate tests were rewritten to the
+   derived-only contract (the old explicit-`id` bodies now hit the 400 'server-assigned' guard); one
+   obsolete test (`TestHandleCreateEntity_WithoutAliasUnchanged` — "no alias → null alias" is void
+   post-D23) was removed. 5 new contract tests added (name required; id/alias server-assigned;
+   reserved names incl. 6-1 `user`; tombstoned-twin alias never blocks; duplicate derives from
+   linked profile name). `routes_entities_test.go`: 39 → **43**; management package: **49**;
+   controllers package: **42** (4 new derivation tests).
+7. **Seed docs (D31):** `config/db/init.go` gained documentation comments pinning `claire` and
+   `default-user-profile` as seed-time-exempt built-ins (seed-time-only for `claire`; 000045
+   migrates existing installs; only `user` is migration-exempt; the profile id is unaffected). No
+   behavior change — the seed path keeps raw ids.
+8. **New 400 messages:** `"name is required"` and `"name is reserved"` were chosen (not pinned by
+   the plan); `"id and alias are server-assigned at creation"` is used verbatim from D23/D66.

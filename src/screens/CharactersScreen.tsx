@@ -76,6 +76,7 @@ import {
   createEntity,
   createEntityModuleMapping,
   getEntityByCharacterProfileId,
+  ReservedEntityNameError,
 } from '../database/repositories/entities';
 import {
   deriveParticipantKey,
@@ -491,6 +492,13 @@ export const CharactersScreen: React.FC = () => {
       );
     } catch (err) {
       log.error('Failed to open chat:', err);
+      // D33 (review-5 UX pin): a card whose NAME is reserved (`user` /
+      // `deleted`) can never mint an entity id — dedicated guidance, never
+      // the bare generic failure.
+      if (err instanceof ReservedEntityNameError) {
+        showAlert(t('common:error'), t('chatOpenReservedName'));
+        return;
+      }
       showAlert(t('common:error'), t('chatOpenFailed'));
     }
   };

@@ -15,6 +15,7 @@
   "reconnecting": "Reconnecting…",
   "disconnected": "Disconnected",
   "notPaired": "Not paired",
+  "serverUpdateRequired": "Backend Engine update required",
   "upToDate": "✓ Up to date",
   "offline": "⚠ Offline",
   "configureConnection": "Configure connection",

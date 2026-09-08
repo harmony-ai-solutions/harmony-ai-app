@@ -11,6 +11,8 @@ import {
   runStatementsInTransaction,
 } from '../transaction';
 import { Entity, EntityModuleMapping } from '../models';
+import { deriveEntityId } from '../../utils/entityIdUtils';
+
 
 // ============================================================================
 // Profile-assignment guards (persona cards 3-3 / engine 1-1 parity)
@@ -382,40 +384,126 @@ export async function entityIdExists(id: string): Promise<boolean> {
 }
 
 /**
- * Resolve a collision-free entity id for a name-like base ("Max", "Max 2").
+ * True when ANY LIVE `entities` row carries the alias — case-insensitive.
  *
- * Mirrors the engine's `ResolveEntityID` ordering (harmony-link-private/
- * database/controllers/entity_controller.go) with the RN naming convention
- * (ids here are name-like; spaces are legal):
- *
- *   1. If the REQUESTED id (trimmed) is free — no live AND no ghost row,
- *      probed via {@link entityIdExists} — return it VERBATIM. A deliberately
- *      suffixed name ("Max 2" typed while free) is never collapsed to "Max".
- *   2. Taken → strip ONE trailing copy suffix (same separator class as
- *      `getNextEntityAliasCopy`'s slot regex: space/dash/underscore + digits)
- *      to recover the TRUE base — "Max 2" as input never yields "Max 2 2".
- *   3. Walk the smallest `N ≥ 2` whose id `<base> <N>` is free (space
- *      separator, unpadded), emitting the same shape
- *      `getNextEntityAliasCopy` produces.
- *
- * The probe is ID-based (live+ghost), never alias-based: alias dedupe can
- * mint colliding ids, and the alias partial unique index is LIVE-ONLY, so the
- * id space and alias space may diverge.
+ * The alias partial unique index `idx_entities_alias_unique` spans live rows
+ * only, so this is the LIVE-ONLY mirror of the engine's alias-uniqueness
+ * predicate (D30/D56). Used by create seams to decide whether the display
+ * name may be used verbatim as the alias or must auto-suffix.
  */
-export async function resolveNextEntityIdCopy(base: string): Promise<string> {
-  // Requested id free (live + ghost) → verbatim. The suffix is stripped ONLY
-  // when the requested id is taken (engine ResolveEntityID ordering).
-  const requested = base.trim();
-  if (!(await entityIdExists(requested))) {
-    return requested;
+export async function entityAliasExists(alias: string): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT 1 FROM entities WHERE deleted_at IS NULL AND lower(alias) = lower(?)',
+    [alias.trim()],
+  );
+  return results.rows.length > 0;
+}
+
+/**
+ * D56 alias resolution for CREATES: the display name is used VERBATIM when no
+ * LIVE row already carries it; a live twin (case-insensitive) auto-suffixes
+ * via {@link getNextEntityAliasCopy} — live twin "Isabella" → alias
+ * "Isabella 2". Mirrors the engine's derived-create alias default (D30):
+ * "alias defaults to name; auto-suffix only on a live collision."
+ *
+ * NOTE: this is deliberately NOT `getNextEntityAliasCopy` alone — that helper
+ * treats the base as slot 1 (duplicate semantics: the source always exists)
+ * and would mint "Isabella 2" for a brand-new name.
+ */
+export async function resolveCreateAlias(displayName: string): Promise<string> {
+  const name = displayName.trim();
+  if (await entityAliasExists(name)) {
+    return getNextEntityAliasCopy(name);
   }
-  // Recover the true base when the source is itself a copy ("Max 2" → "Max").
-  const baseId = stripCopySuffix(requested);
+  return name;
+}
+
+/**
+ * Typed error for reserved display names (`user` / `deleted`, D33).
+ *
+ * Minting an entity id from a reserved name throws this so screens can
+ * surface a friendly, dedicated message instead of a bare generic failure
+ * (review-5 UX pin — the UI mapping ships in the later screen phase).
+ */
+export class ReservedEntityNameError extends Error {
+  constructor(name: string) {
+    super(`"${name}" is a reserved name — rename the card and retry`);
+    this.name = 'ReservedEntityNameError';
+  }
+}
+
+/**
+ * Ghost-aware next-free id for a FULL DERIVED id (D2/D68 backstop).
+ *
+ * The derived id is already timestamped (`Isabella-20260905123514`), so a
+ * same-second collision appends "-N" to the WHOLE derived id — never to a
+ * stripped base and never space-joined (D3): `…-20260905123514` →
+ * `…-20260905123514-2` → `…-3`. Probes live AND soft-deleted (ghost) rows via
+ * {@link entityIdExists} — a tombstone reserves the TEXT PRIMARY KEY.
+ *
+ *   nextFreeDerivedId("Isabella-20260905123514")        → same id when free
+ *   nextFreeDerivedId("Isabella-20260905123514") (taken) → "…-20260905123514-2"
+ */
+export async function nextFreeDerivedId(fullDerivedId: string): Promise<string> {
+  if (!(await entityIdExists(fullDerivedId))) {
+    return fullDerivedId;
+  }
   let n = 2;
-  while (await entityIdExists(`${baseId} ${n}`)) {
+  while (await entityIdExists(`${fullDerivedId}-${n}`)) {
     n += 1;
   }
-  return `${baseId} ${n}`;
+  return `${fullDerivedId}-${n}`;
+}
+
+/**
+ * THE one mint seam for entity ids (D68 — all five creation paths route
+ * here; seam drift is the N3 incident class, so future seams get correctness
+ * by construction).
+ *
+ * Compose:
+ *   1. `deriveEntityId(name)` — D2 schema (slug + UTC timestamp; see
+ *      `src/utils/entityIdUtils.ts`). Spaces never survive into an id (D3).
+ *   2. Reserved-name throw (`user` / `deleted`, case-insensitive — D33):
+ *      a TYPED {@link ReservedEntityNameError} for friendly UI surfacing.
+ *   3. Ghost-aware {@link nextFreeDerivedId} backstop for same-second
+ *      collisions (`-N` appended to the FULL derived id).
+ *
+ * @param name the display name to derive from (trimmed internally)
+ * @throws {@link ReservedEntityNameError} for reserved names
+ */
+export async function mintEntityId(name: string): Promise<string> {
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+  if (lower === 'user' || lower === 'deleted') {
+    throw new ReservedEntityNameError(trimmed);
+  }
+  const derived = deriveEntityId(trimmed);
+  return nextFreeDerivedId(derived);
+}
+
+/**
+ * Persona-identity mint: derived id + DEDUPED display-name alias (D56).
+ *
+ * `alias` = the display name VERBATIM when no live twin exists, else
+ * `getNextEntityAliasCopy(displayName)` — live twin "Max" → alias "Max 2"
+ * (live-only mirror of the engine's D30 derived-create alias default; the
+ * alias partial unique index `idx_entities_alias_unique` is live-only, so
+ * tombstoned aliases never block). Persona creates + the open-chat card alias
+ * route here so `alias` carries the human name (spaces allowed) while `id` is
+ * derived (D3/D56).
+ *
+ * @returns `{ id, alias }` — id = minted derived id, alias = deduped display name
+ */
+export async function mintPersonaIdentity(
+  displayName: string,
+): Promise<{ id: string; alias: string }> {
+  const name = displayName.trim();
+  const id = await mintEntityId(name);
+  // D56: alias = the display name VERBATIM when free; live twin → "Name 2"
+  // (engine D30 mirror — creates never 400 on a name collision).
+  const alias = await resolveCreateAlias(name);
+  return { id, alias };
 }
 
 /**
@@ -432,10 +520,13 @@ export async function resolveNextEntityIdCopy(base: string): Promise<string> {
  *   - ALL 8 module-mapping slots are copied verbatim into a fresh mapping row
  *     (an all-NULL mapping is created when the source has none — mirrors the
  *     engine `CreateEntity` always-create-mapping convention).
- *   - `id` = {@link resolveNextEntityIdCopy} of the source id (ghost-aware:
- *     soft-deleted ids still reserve the TEXT PRIMARY KEY); `alias` =
- *     `getNextEntityAliasCopy` of the source alias (live-only dedupe). The id
- *     and alias spaces may therefore diverge — by design (engine parity).
+ *   - `id` = {@link mintEntityId} of the source display name (D52: duplicates
+ *     derive a FRESH timestamped id from the display name — `alias` when set,
+ *     else the id — never a copy-series on the source id, which is itself a
+ *     timestamp post-migration); `alias` = `getNextEntityAliasCopy` of the
+ *     source alias (live-only dedupe — the already-complying copy-suffix
+ *     convention, D56). The id and alias spaces may therefore diverge — by
+ *     design (engine parity).
  *
  * @param entityId the LIVE source entity id to duplicate
  * @returns the newly created Entity: `{ id, alias, character_profile_id,
@@ -456,9 +547,13 @@ export async function duplicateAIPartner(entityId: string): Promise<Entity> {
     );
   }
 
-  // Ghost-aware id (soft-deleted ids reserve the PK) + live-only alias dedupe.
-  const newId = await resolveNextEntityIdCopy(source.id);
-  const newAlias = await getNextEntityAliasCopy(source.alias || source.id);
+  // D52/D68: derive a fresh timestamped id from the source display name
+  // (alias → id; D63's linked-profile-name step is skipped — the app always
+  // populates alias on create, and entities.ts must not import characters.ts
+  // — circular). Alias keeps the copy-suffix convention (live-only, D56).
+  const displayName = source.alias || source.id;
+  const newId = await mintEntityId(displayName);
+  const newAlias = await getNextEntityAliasCopy(displayName);
 
   // Same character profile (LIVE link — the duplicate shares the source card),
   // lifecycle verbatim, flags reset to false.
@@ -665,41 +760,13 @@ export async function getDisabledEntityIds(): Promise<string[]> {
  * Soft delete entity by ID
  * Throws error if entity not found
  */
-export async function deleteEntity(
-  id: string,
-  permanent = false,
-): Promise<void> {
+export async function deleteEntity(id: string): Promise<void> {
   const db = getDatabase();
 
   // First check if entity exists
   const existing = await getEntity(id, true);
   if (!existing) {
     throw new Error(`Entity not found: ${id}`);
-  }
-
-  if (permanent) {
-    // Hard delete.
-    //
-    // ⚠️ CRITICAL: this is a MULTI-statement transaction. Do NOT convert it to
-    // withTransaction + sequential `await tx.executeSql()` calls. react-native-
-    // sqlite-storage transactions follow run-to-completion semantics: the tx is
-    // finalized immediately after the callback's synchronous portion returns, so
-    // a second `await tx.executeSql()` throws
-    //   "InvalidStateError: DOM Exception 11: This transaction is already finalized."
-    // (see src/database/README.md — "Multiple sequential statements | ❌ NO").
-    // Use nested callbacks in a single transaction instead.
-    //
-    // Delete order matters: children first, entity last. interactions and
-    // conversation_messages have NO ON DELETE CASCADE (interactions has no FK;
-    // conversation_messages FK is plain REFERENCES), and entity_emoji_actions
-    // FK has no ON DELETE CASCADE either. emotion_state / memories /
-    // entity_module_mappings cascade via their ON DELETE CASCADE FKs.
-    return runStatementsInTransaction(db, [
-      { sql: 'DELETE FROM entity_emoji_actions WHERE entity_id = ?', params: [id] },
-      { sql: 'DELETE FROM interactions WHERE entity_id = ?', params: [id] },
-      { sql: 'DELETE FROM conversation_messages WHERE entity_id = ?', params: [id] },
-      { sql: 'DELETE FROM entities WHERE id = ?', params: [id] },
-    ]);
   }
 
   // Soft delete — cascade to child rows rooted at this entity ONLY.
@@ -717,6 +784,13 @@ export async function deleteEntity(
   // NEVER match by participant_ids, participant_key, sender_entity_id, or via
   // interaction joins. Conversations rooted at another entity that merely
   // mention the deleted entity must remain untouched.
+  //
+  // D26 parity (D17 stamping): the cascade tombstones ALL EIGHT child tables in
+  // one shared `now` — entity_module_mappings, memories, emotion_state,
+  // entity_emoji_actions, interactions, conversation_messages,
+  // chat_conversation_settings (keyed entity_id) and lifecycle_state. The
+  // settings + lifecycle_state updates carry `AND deleted_at IS NULL` so an
+  // already-tombstoned child is never re-stamped (delaying the 4-1 GC).
   const now = new Date().toISOString();
   return runStatementsInTransaction(db, [
     { sql: 'UPDATE entities SET deleted_at = ?, updated_at = ? WHERE id = ?', params: [now, now, id] },
@@ -726,6 +800,8 @@ export async function deleteEntity(
     { sql: 'UPDATE entity_emoji_actions SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
     { sql: 'UPDATE interactions SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
     { sql: 'UPDATE conversation_messages SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE chat_conversation_settings SET deleted_at = ?, updated_at = ? WHERE entity_id = ? AND deleted_at IS NULL', params: [now, now, id] },
+    { sql: 'UPDATE lifecycle_state SET deleted_at = ?, updated_at = ? WHERE entity_id = ? AND deleted_at IS NULL', params: [now, now, id] },
   ]);
 }
 
@@ -937,24 +1013,14 @@ export async function createOrUpdateEntityModuleMapping(
  * Note: This is normally handled by CASCADE delete when entity is deleted,
  * but with soft delete we should manually mark it if needed.
  */
-export async function deleteEntityModuleMapping(
-  entityId: string,
-  permanent = false,
-): Promise<void> {
+export async function deleteEntityModuleMapping(entityId: string): Promise<void> {
   const db = getDatabase();
 
   return withTransaction(db, async tx => {
-    if (permanent) {
-      await tx.executeSql(
-        'DELETE FROM entity_module_mappings WHERE entity_id = ?',
-        [entityId],
-      );
-    } else {
-      const now = new Date().toISOString();
-      await tx.executeSql(
-        'UPDATE entity_module_mappings SET deleted_at = ? WHERE entity_id = ?',
-        [now, entityId],
-      );
-    }
+    const now = new Date().toISOString();
+    await tx.executeSql(
+      'UPDATE entity_module_mappings SET deleted_at = ? WHERE entity_id = ?',
+      [now, entityId],
+    );
   });
 }

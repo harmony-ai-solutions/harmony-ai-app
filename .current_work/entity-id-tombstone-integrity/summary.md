@@ -243,28 +243,34 @@ never pushed), nested `frontend/` repo on the same branch name, app on `senju-de
 
 Track the completion of each phase as implementation progresses:
 
-- [ ] **Phase 1: Engine Integrity (sync apply & tombstone GC)**
-  - [ ] Ghost-Aware Sync Apply — N1 Fix ([1-1-EngineGhostAwareSyncApply.md](1-1-EngineGhostAwareSyncApply.md))
-  - [ ] Tombstone GC repair — FK-safe order, 35-table allowlist, purge floor + rebuild signal ([1-2-EngineTombstoneGcRepair.md](1-2-EngineTombstoneGcRepair.md)) — D69/D71/D72/D76
-  - [ ] Sync Observability & Session Hygiene ([1-3-EngineSyncObservability.md](1-3-EngineSyncObservability.md))
-- [ ] **Phase 2: ID Schema — Derivation & Derived-Only Creation**
-  - [ ] Engine: ID derivation + derived-only create contract ([2-1-EngineEntityIdDerivationValidation.md](2-1-EngineEntityIdDerivationValidation.md))
-  - [ ] Engine: remove legacy rename + delete-side guards — D22/D27 ([2-1b-EngineInPlaceRippleRename.md](2-1b-EngineInPlaceRippleRename.md))
-  - [ ] App: ID derivation + charset validation ([2-2-AppEntityIdDerivationValidation.md](2-2-AppEntityIdDerivationValidation.md))
-  - [ ] Engine FE: validation UX + alias-based persona naming ([2-3-EngineFeIdValidationAndAliasNaming.md](2-3-EngineFeIdValidationAndAliasNaming.md))
-- [ ] **Phase 3: Engine Migration, App Wipe/Rebuild & Version Gating (D11)**
-  - [ ] Engine migration: legacy ids → timestamped pattern ([3-1-EngineIdPatternMigration.md](3-1-EngineIdPatternMigration.md))
-  - [ ] App: wipe & rebuild bootstrap + placeholder 000045 ([3-2-AppWipeRebuildBootstrap.md](3-2-AppWipeRebuildBootstrap.md))
-  - [ ] Sync schema version gating ([3-3-SyncVersionGating.md](3-3-SyncVersionGating.md))
-- [ ] **Phase 4: App Integrity & UX**
-  - [ ] Keep local tombstone GC + align allowlist + placeholder 000046 ([4-1-AppLocalTombstoneGc.md](4-1-AppLocalTombstoneGc.md)) — D72/D73
-  - [ ] Surface sync insert failures + conflict recovery ([4-2-AppSyncFailureSurfacing.md](4-2-AppSyncFailureSurfacing.md))
-  - [ ] Fix stuck "Connecting…" / splash dead-end ([4-3-AppStuckConnectingUxFix.md](4-3-AppStuckConnectingUxFix.md))
-  - [ ] Gate hard-delete paths ([4-4-AppHardDeleteGating.md](4-4-AppHardDeleteGating.md))
-  - [ ] Stale-watermark rebuild — purge-floor reaction ([4-5-AppStaleWatermarkRebuild.md](4-5-AppStaleWatermarkRebuild.md)) — D76
-- [ ] **Phase 6: Verification & Documentation**
-  - [ ] Cross-repo verification & incident repro test ([6-1-CrossRepoVerification.md](6-1-CrossRepoVerification.md))
-  - [ ] Docs, memory banks, changelogs, ledger updates ([6-2-DocsMemoryBanksChangelogs.md](6-2-DocsMemoryBanksChangelogs.md))
+> **IMPLEMENTATION COMPLETE — 2026-09-07** (orchestrator note). All phases executed via distributed subagents;
+> per-phase details + deviations live in each phase doc's "Implementation Notes". Verification evidence in
+> [6-1's Verification Report](6-1-CrossRepoVerification.md); cross-repo record:
+> [`../senju-rebase-integration/17-EntityIdTombstoneIntegrity-Record.md`](../senju-rebase-integration/17-EntityIdTombstoneIntegrity-Record.md).
+> D11 release-window sequencing remains a **manual at-release** gate (engine deploy before app release).
+
+- [x] **Phase 1: Engine Integrity (sync apply & tombstone GC)**
+  - [x] Ghost-Aware Sync Apply — N1 Fix ([1-1-EngineGhostAwareSyncApply.md](1-1-EngineGhostAwareSyncApply.md))
+  - [x] Tombstone GC repair — FK-safe order, 35-table allowlist, purge floor + rebuild signal ([1-2-EngineTombstoneGcRepair.md](1-2-EngineTombstoneGcRepair.md)) — D69/D71/D72/D76
+  - [x] Sync Observability & Session Hygiene ([1-3-EngineSyncObservability.md](1-3-EngineSyncObservability.md))
+- [x] **Phase 2: ID Schema — Derivation & Derived-Only Creation**
+  - [x] Engine: ID derivation + derived-only create contract ([2-1-EngineEntityIdDerivationValidation.md](2-1-EngineEntityIdDerivationValidation.md))
+  - [x] Engine: remove legacy rename + delete-side guards — D22/D27 ([2-1b-EngineInPlaceRippleRename.md](2-1b-EngineInPlaceRippleRename.md))
+  - [x] App: ID derivation + charset validation ([2-2-AppEntityIdDerivationValidation.md](2-2-AppEntityIdDerivationValidation.md))
+  - [x] Engine FE: validation UX + alias-based persona naming ([2-3-EngineFeIdValidationAndAliasNaming.md](2-3-EngineFeIdValidationAndAliasNaming.md))
+- [x] **Phase 3: Engine Migration, App Wipe/Rebuild & Version Gating (D11)**
+  - [x] Engine migration: legacy ids → timestamped pattern ([3-1-EngineIdPatternMigration.md](3-1-EngineIdPatternMigration.md))
+  - [x] App: wipe & rebuild bootstrap + placeholder 000045 ([3-2-AppWipeRebuildBootstrap.md](3-2-AppWipeRebuildBootstrap.md))
+  - [x] Sync schema version gating ([3-3-SyncVersionGating.md](3-3-SyncVersionGating.md))
+- [x] **Phase 4: App Integrity & UX**
+  - [x] Keep local tombstone GC + align allowlist + placeholder 000046 ([4-1-AppLocalTombstoneGc.md](4-1-AppLocalTombstoneGc.md)) — D72/D73
+  - [x] Surface sync insert failures + conflict recovery ([4-2-AppSyncFailureSurfacing.md](4-2-AppSyncFailureSurfacing.md))
+  - [x] Fix stuck "Connecting…" / splash dead-end ([4-3-AppStuckConnectingUxFix.md](4-3-AppStuckConnectingUxFix.md))
+  - [x] Gate hard-delete paths ([4-4-AppHardDeleteGating.md](4-4-AppHardDeleteGating.md))
+  - [x] Stale-watermark rebuild — purge-floor reaction ([4-5-AppStaleWatermarkRebuild.md](4-5-AppStaleWatermarkRebuild.md)) — D76
+- [x] **Phase 6: Verification & Documentation**
+  - [x] Cross-repo verification & incident repro test ([6-1-CrossRepoVerification.md](6-1-CrossRepoVerification.md))
+  - [x] Docs, memory banks, changelogs, ledger updates ([6-2-DocsMemoryBanksChangelogs.md](6-2-DocsMemoryBanksChangelogs.md))
 
 ## Risks & Notes for Executors
 

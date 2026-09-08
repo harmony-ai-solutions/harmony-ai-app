@@ -112,11 +112,12 @@ describe('modules repository', () => {
         deleted_at: null,
       });
 
-      await deleteBackendConfig(backendId, true);
+      await deleteBackendConfig(backendId);
       const afterDelete = await getBackendConfig(backendId, true);
-      expect(afterDelete).toBeNull();
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
 
-      await deleteOpenAIProviderConfig(providerId, true);
+      await deleteOpenAIProviderConfig(providerId);
     });
   });
 
@@ -161,11 +162,12 @@ describe('modules repository', () => {
       const retrieved = await getMovementConfig(movId);
       expect(retrieved).not.toBeNull();
 
-      await deleteMovementConfig(movId, true);
+      await deleteMovementConfig(movId);
       const afterDelete = await getMovementConfig(movId, true);
-      expect(afterDelete).toBeNull();
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
 
-      await deleteOpenRouterProviderConfig(providerId, true);
+      await deleteOpenRouterProviderConfig(providerId);
     });
   });
 
@@ -238,12 +240,13 @@ describe('modules repository', () => {
       const retrieved = await getSTTConfig(sttId);
       expect(retrieved).not.toBeNull();
 
-      await deleteSTTConfig(sttId, true);
+      await deleteSTTConfig(sttId);
       const afterDelete = await getSTTConfig(sttId, true);
-      expect(afterDelete).toBeNull();
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
 
-      await deleteOpenAIProviderConfig(txProviderId, true);
-      await deleteOpenAIProviderConfig(vadProviderId, true);
+      await deleteOpenAIProviderConfig(txProviderId);
+      await deleteOpenAIProviderConfig(vadProviderId);
     });
   });
 
@@ -287,11 +290,12 @@ describe('modules repository', () => {
       const retrieved = await getCognitionConfig(cogId);
       expect(retrieved).not.toBeNull();
 
-      await deleteCognitionConfig(cogId, true);
+      await deleteCognitionConfig(cogId);
       const afterDelete = await getCognitionConfig(cogId, true);
-      expect(afterDelete).toBeNull();
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
 
-      await deleteOpenAIProviderConfig(providerId, true);
+      await deleteOpenAIProviderConfig(providerId);
     });
   });
 
@@ -314,11 +318,12 @@ describe('modules repository', () => {
       const retrieved = await getRAGConfig(ragId);
       expect(retrieved).not.toBeNull();
 
-      await deleteRAGConfig(ragId, true);
+      await deleteRAGConfig(ragId);
       const afterDelete = await getRAGConfig(ragId, true);
-      expect(afterDelete).toBeNull();
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
 
-      await deleteOllamaProviderConfig(providerId, true);
+      await deleteOllamaProviderConfig(providerId);
     });
   });
 
@@ -363,11 +368,12 @@ describe('modules repository', () => {
       const retrieved = await getTTSConfig(ttsId);
       expect(retrieved).not.toBeNull();
 
-      await deleteTTSConfig(ttsId, true);
+      await deleteTTSConfig(ttsId);
       const afterDelete = await getTTSConfig(ttsId, true);
-      expect(afterDelete).toBeNull();
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
 
-      await deleteOpenAIProviderConfig(providerId, true);
+      await deleteOpenAIProviderConfig(providerId);
     });
   });
 
@@ -428,11 +434,12 @@ describe('modules repository', () => {
       expect(retrieved2!.resolution_width).toBe(1280);
       expect(retrieved2!.resolution_height).toBe(720);
 
-      await deleteVisionConfig(visId, true);
+      await deleteVisionConfig(visId);
       const afterDelete = await getVisionConfig(visId, true);
-      expect(afterDelete).toBeNull();
+      expect(afterDelete).not.toBeNull();
+      expect(afterDelete!.deleted_at).not.toBeNull();
 
-      await deleteOpenAIProviderConfig(providerId, true);
+      await deleteOpenAIProviderConfig(providerId);
     });
   });
 
@@ -499,8 +506,8 @@ describe('modules repository', () => {
       const records = await getChangedRecords('backend_configs', pastUnix);
       expect(records.some(r => r.id === backendId)).toBe(true);
 
-      await deleteBackendConfig(backendId, true);
-      await deleteOpenAIProviderConfig(providerId, true);
+      await deleteBackendConfig(backendId);
+      await deleteOpenAIProviderConfig(providerId);
     });
 
     it('updateCognitionConfig bumps updated_at so the change is picked up by sync', async () => {
@@ -538,8 +545,8 @@ describe('modules repository', () => {
       const records = await getChangedRecords('cognition_configs', pastUnix);
       expect(records.some(r => r.id === cogId)).toBe(true);
 
-      await deleteCognitionConfig(cogId, true);
-      await deleteOpenAIProviderConfig(providerId, true);
+      await deleteCognitionConfig(cogId);
+      await deleteOpenAIProviderConfig(providerId);
     });
   });
 });

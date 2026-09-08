@@ -105,8 +105,19 @@ Only the engine ever computes migrated ids; the app receives them verbatim.
 
 ## Checklist
 
-- [ ] One-time wipe + prefs sweep + watermark clearing
-- [ ] Pull-not-push verified (initial-upload flag interplay)
-- [ ] `user` merge verified on first sync
-- [ ] Placeholder 000045 with the binding description text
-- [ ] v2 advertised post-rebuild (3-3); phase doc updated
+- [x] One-time wipe + prefs sweep + watermark clearing
+- [x] Pull-not-push verified (initial-upload flag interplay)
+- [x] `user` merge verified on first sync
+- [x] Placeholder 000045 with the binding description text
+- [ ] v2 advertised post-rebuild (3-3); phase doc updated — **NOT SHIPPED HERE by design (task item 8 / D61 sequencing): phase 3-3 owns the v2 constant + plumbing. Nothing half-wired was left in this phase's territory.**
+
+## Implementation Notes (deviations)
+
+- **000046 placeholder shipped here on 4-1's behalf** (orchestrator instruction, task item 6): `src/database/migrations/000046_sync_gc_state_placeholder.ts` is a comment-only no-op with the binding 000046 description text; it belongs to phase 4-1's checklist (D73) but was created + registered in `migrations.ts` in this phase to keep both repos at 000046 parity in one pass.
+- **SyncService.ts change is comment-only.** The cleared-watermark → `force_full_sync` escalation already existed (`initiateSync`, `storedLastSync === 0`); the only edit was a NOTE documenting the D11 wipe guarantee and the harmless post-wipe inconsistency of the surviving `@harmony_sync_initial_upload_done:{source}` flag. No logic change, GC function, or syncAndWait semantics touched.
+- **`connection.ts` needed no fix** (read-only per territory). `wipeDatabaseCompletely` already closes the main connection, clears the per-source watermarks, deletes the DB file, and re-initializes; the Keychain reset is a no-op (SQLCipher not linked). `closeSyncDatabase()` is called from the wipe bootstrap (`WipeRebuildFlag`) rather than patched into the helper.
+- **Rebuild-gate label timing:** the "Rebuilding from Soulbits Engine…" label is driven by `DatabaseContext.isRebuilding`, fed by `runWipeRebuildIfPending`'s `onStateChange` callback — ON when the wipe starts, OFF when the wipe completes (D61; the wipe helper's internal re-init finishes before the flag clears, so no screen renders against a half-wiped DB). Empty-DB rendering during the subsequent on-connect pull is safe (`sync:data-applied` refreshes the lists) — asserted in `DatabaseContext.wipe.test.tsx` (gate ON while `wipeDatabaseCompletely` is held open; `initializeDatabase` not yet called).
+- **Timestamp warn scope (6-1 §2 rule 2):** the "treating as UTC (legacy local-time writer?)" warning fires only for space-format strings WITH a fractional component and NO offset suffix (the `emotion/ekman8.go:120` Go-driver shape). Seconds-only space-format (SQLite `CURRENT_TIMESTAMP`, format A) is UTC by definition and parses silently — warning on every format-A row would be log noise. All six 6-1 §2 vectors pass (`20260905091244`).
+- **Flag module placement:** `src/services/WipeRebuildFlag.ts` (colocated with sync state) exposing `getWipeRebuildFlag` / `setWipeRebuildFlag` (phase 4-5's set-only hook) / `clearWipeRebuildFlag` / `runWipeRebuildIfPending(onStateChange?)`. No single-purpose hardcoding.
+- **Test-suite state:** full `npm test` shows only (a) the documented pre-existing `compat/nodeSide.test.ts` contamination flake (≤3, passes in isolation, documented in `docs/TESTING.md`) and (b) intermittent failures in `PersonaEditScreen.test.tsx` etc. — files under active parallel edit. All phase-3-2 suites pass in isolation; one full unit run was 139/139 suites / 1222 tests green.
+- **Snapshot re-baseline:** adding migrations 45/46 moved the roll-forward "final version" boundary from v44 to v46; the `migrations.rollforward.test.ts.snap` v44 entry was removed and v45/v46 entries added (identical schema — no-op migrations).

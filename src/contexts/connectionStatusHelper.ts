@@ -14,7 +14,8 @@ export type ConnectionStatusLabel =
   | 'offline'
   | 'reconnecting'
   | 'disconnected'
-  | 'notPaired';
+  | 'notPaired'
+  | 'serverUpdateRequired';
 
 export interface ConnectionStatusInfo {
   /** i18n-friendly label key for the current connection state. */
@@ -35,6 +36,9 @@ export interface ConnectionStatusInfo {
  * @param isPaired    Self-hosted pairing state
  * @param isConnected  Whether the sync WebSocket is currently open
  * @param isReconnecting Whether a reconnect is scheduled/in-flight
+ * @param serverUpdateRequired Sticky 3-3/D57 gate: engine sync-schema version
+ *                             too old to sync. Checked BEFORE the mode branch —
+ *                             it overrides BOTH cloud and self-hosted statuses.
  */
 export function computeConnectionStatus(
   mode: SyncSource,
@@ -42,7 +46,20 @@ export function computeConnectionStatus(
   isPaired: boolean,
   isConnected: boolean,
   isReconnecting: boolean,
+  serverUpdateRequired: boolean,
 ): ConnectionStatusInfo {
+  // ── 3-3 / D57: sticky server-update-required gate. Checked before the
+  // mode branch so it applies to both cloud and selfhosted modes — while the
+  // engine is too old to sync safely, that is the only status that matters.
+  if (serverUpdateRequired) {
+    return {
+      textKey: 'serverUpdateRequired',
+      color: '#f44336',
+      variant: 'error',
+      mode,
+    };
+  }
+
   if (mode === 'cloud') {
     switch (cloudStatus) {
       case 'ready':

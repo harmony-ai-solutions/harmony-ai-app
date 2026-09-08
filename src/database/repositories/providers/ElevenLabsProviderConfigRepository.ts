@@ -77,17 +77,12 @@ export async function isElevenLabsProviderConfigInUse(id: string): Promise<boole
   return isProviderConfigInUse('elevenlabs', id);
 }
 
-export async function deleteElevenLabsProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteElevenLabsProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  if (!permanent && await isElevenLabsProviderConfigInUse(id)) throw new Error(`ElevenLabs provider config ${id} is in use and cannot be soft deleted`);
+  if (await isElevenLabsProviderConfigInUse(id)) throw new Error(`ElevenLabs provider config ${id} is in use and cannot be soft deleted`);
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_elevenlabs WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) throw new Error(`ElevenLabs provider config not found: ${id}`);
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql('UPDATE provider_config_elevenlabs SET deleted_at = ? WHERE id = ?', [now, id]);
-      if (result.rowsAffected === 0) throw new Error(`ElevenLabs provider config not found: ${id}`);
-    }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql('UPDATE provider_config_elevenlabs SET deleted_at = ? WHERE id = ?', [now, id]);
+    if (result.rowsAffected === 0) throw new Error(`ElevenLabs provider config not found: ${id}`);
   });
 }
