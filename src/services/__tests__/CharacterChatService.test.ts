@@ -284,3 +284,195 @@ describe('CharacterChatService — on-the-fly entity creation', () => {
     expect(navigation.navigateToChat).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Chat-picker entity rows (rulings 1b/3): openCharacterChat with
+ * `targetEntityId` must open the chat with THAT EXACT live AI entity — no
+ * minting, no newest-entity reuse — and a DISABLED target still opens the
+ * chat (ChatDetail shows the disabled state; the user unblocks in chat
+ * settings). The card path (no options) keeps its reuse-or-mint behavior and
+ * its disabled gate unchanged.
+ */
+describe('CharacterChatService — picker entity rows (targetEntityId)', () => {
+  const {getDb} = useFreshDatabase();
+
+  let alertSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    mockWatermark = 0;
+    jest.useFakeTimers({now: new Date('2026-09-05T12:35:14Z')});
+    alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const syncMock = require('../SyncService').default;
+    (syncMock.syncAndWait as jest.Mock).mockReset();
+    (syncMock.syncAndWait as jest.Mock).mockImplementation(() => {
+      mockWatermark = Math.floor(Date.now() / 1000) + 100;
+      return Promise.resolve();
+    });
+    (syncMock.getLastSyncTimestamp as jest.Mock).mockReset();
+    (syncMock.getLastSyncTimestamp as jest.Mock).mockImplementation(() => Promise.resolve(mockWatermark));
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    alertSpy.mockRestore();
+  });
+
+  const makeProfile = async (id: string, name: string) =>
+    createCharacterProfile({
+      id,
+      name,
+      description: '',
+      personality: '',
+      voice_characteristics: '',
+      base_prompt: '',
+      scenario: '',
+      typing_speed_wpm: 60,
+      audio_response_chance_percent: 50,
+      vision_config_id: null,
+      lifecycle_config: '{}',
+    });
+
+  const makeEntity = (
+    id: string,
+    profileId: string | null,
+    opts: {entity_type?: string; is_disabled?: number; alias?: string} = {},
+  ) =>
+    createEntity(
+      {
+        id,
+        alias: opts.alias ?? id,
+        character_profile_id: profileId,
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      },
+      {
+        entity_type: opts.entity_type ?? 'ai',
+        is_disabled: opts.is_disabled ?? 0,
+      },
+    );
+
+  const liveEntityCountForProfile = async (profileId: string): Promise<number> => {
+    const [results] = await getDb().executeSql(
+      'SELECT COUNT(*) AS count FROM entities WHERE character_profile_id = ? AND deleted_at IS NULL',
+      [profileId],
+    );
+    return results.rows.item(0).count;
+  };
+
+  it('navigates with the TARGET entity id and mints nothing', async () => {
+    await makeProfile('p1', 'Aria');
+    await makeEntity('e1', 'p1');
+    await makeEntity('e2', 'p1', {alias: 'Aria Two'});
+    const navigation = {navigateToChat: jest.fn()};
+
+    await openCharacterChat((await getCharacterProfile('p1'))!, navigation, {
+      targetEntityId: 'e2',
+    });
+
+    expect(navigation.navigateToChat).toHaveBeenCalledTimes(1);
+    const params = navigation.navigateToChat.mock.calls[0][0];
+    expect(params.participantIds).toContain('e2');
+    // NO minting — the card still carries exactly its two pre-existing entities.
+    expect(await liveEntityCountForProfile('p1')).toBe(2);
+  });
+
+  it('two entities on one card → targeting the OLDER one opens THAT one', async () => {
+    await makeProfile('p1', 'Aria');
+    await makeEntity('e-older', 'p1', {alias: 'Aria Prime'});
+    await makeEntity('e-newer', 'p1');
+    const navigation = {navigateToChat: jest.fn()};
+
+    // The old reuse path (getEntityByCharacterProfileId, ORDER BY created_at
+    // DESC) would silently route to e-newer — the bug. Targeting must win.
+    await openCharacterChat((await getCharacterProfile('p1'))!, navigation, {
+      targetEntityId: 'e-older',
+    });
+
+    const params = navigation.navigateToChat.mock.calls[0][0];
+    expect(params.participantIds).toContain('e-older');
+    expect(params.participantIds).not.toContain('e-newer');
+  });
+
+  it('a DISABLED target NAVIGATES — no early return (ruling 3)', async () => {
+    await makeProfile('p1', 'Aria');
+    await makeEntity('e1', 'p1', {is_disabled: 1});
+    const navigation = {navigateToChat: jest.fn()};
+
+    await openCharacterChat((await getCharacterProfile('p1'))!, navigation, {
+      targetEntityId: 'e1',
+    });
+
+    expect(navigation.navigateToChat).toHaveBeenCalledTimes(1);
+    expect(navigation.navigateToChat.mock.calls[0][0].participantIds).toContain('e1');
+  });
+
+  it('the entity branch uses `entity.alias || profile.name` as entityName', async () => {
+    await makeProfile('p1', 'Profile Name');
+    await makeEntity('e1', 'p1', {alias: 'Alias Name'});
+    await makeEntity('e2', 'p1', {alias: ''});
+    const navigation = {navigateToChat: jest.fn()};
+
+    await openCharacterChat((await getCharacterProfile('p1'))!, navigation, {
+      targetEntityId: 'e1',
+    });
+    expect(navigation.navigateToChat.mock.calls[0][0].entityName).toBe('Alias Name');
+
+    // Empty alias falls back to the profile name.
+    await openCharacterChat((await getCharacterProfile('p1'))!, navigation, {
+      targetEntityId: 'e2',
+    });
+    expect(navigation.navigateToChat.mock.calls[1][0].entityName).toBe('Profile Name');
+  });
+
+  it('throws for a MISSING target entity and does not navigate', async () => {
+    await makeProfile('p1', 'Aria');
+    await makeEntity('e1', 'p1');
+    const navigation = {navigateToChat: jest.fn()};
+
+    await expect(
+      openCharacterChat((await getCharacterProfile('p1'))!, navigation, {
+        targetEntityId: 'ghost',
+      }),
+    ).rejects.toThrow(/not found/);
+    expect(navigation.navigateToChat).not.toHaveBeenCalled();
+  });
+
+  it('throws for a USER-type target entity and does not navigate', async () => {
+    await makeProfile('p1', 'Aria');
+    await makeEntity('persona-b', null, {entity_type: 'user'});
+    const navigation = {navigateToChat: jest.fn()};
+
+    await expect(
+      openCharacterChat((await getCharacterProfile('p1'))!, navigation, {
+        targetEntityId: 'persona-b',
+      }),
+    ).rejects.toThrow(/not an AI entity/);
+    expect(navigation.navigateToChat).not.toHaveBeenCalled();
+  });
+
+  it('throws when the target entity links a DIFFERENT profile and does not navigate', async () => {
+    await makeProfile('p1', 'Aria');
+    await makeProfile('p2', 'Bela');
+    await makeEntity('e1', 'p2');
+    const navigation = {navigateToChat: jest.fn()};
+
+    await expect(
+      openCharacterChat((await getCharacterProfile('p1'))!, navigation, {
+        targetEntityId: 'e1',
+      }),
+    ).rejects.toThrow(/not linked/);
+    expect(navigation.navigateToChat).not.toHaveBeenCalled();
+  });
+
+  it('card path UNCHANGED: a disabled card entity is still blocked (gate intact)', async () => {
+    await makeProfile('p-card', 'Card Char');
+    await makeEntity('e-card', 'p-card', {is_disabled: 1});
+    const navigation = {navigateToChat: jest.fn()};
+
+    // No options — the card path keeps its Q8/A3 early return.
+    await openCharacterChat((await getCharacterProfile('p-card'))!, navigation);
+
+    expect(navigation.navigateToChat).not.toHaveBeenCalled();
+    // And no on-the-fly mint happened either (the reuse path found e-card).
+    expect(await liveEntityCountForProfile('p-card')).toBe(1);
+  });
+});

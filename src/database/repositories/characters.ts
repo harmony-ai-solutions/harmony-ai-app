@@ -8,7 +8,7 @@
 
 import {getDatabase} from '../connection';
 import {withTransaction} from '../transaction';
-import {CharacterProfile, CharacterImage, CharacterImageInfo} from '../models';
+import {CharacterProfile, CharacterImage, CharacterImageInfo, Entity} from '../models';
 import {uint8ArrayToBase64, createDataURL} from '../base64';
 import {loadTextColumn} from '../sync';
 import {generateId} from '../../utils/uuid';
@@ -1016,4 +1016,304 @@ export async function getCharacterStats(
   }
 
   return { likes, chats };
+}
+
+// ============================================================================
+// Chat picker rows ("Start a new chat" — ChatPartnerPickerModal)
+// ============================================================================
+//
+// Rulings (product owner, locked — Variant B):
+//  1a. CARD rows: live profiles (`character_profiles.deleted_at IS NULL`) that
+//      NO live entity references (neither `entity_type='ai'` nor `'user'`).
+//      Tapping one mints a fresh entity via the existing create path.
+//  1b. ENTITY rows: every live AI entity (`entity_type='ai'`,
+//      `deleted_at IS NULL`) with a LIVE linked card
+//      (`character_profile_id IS NOT NULL`, card live) that has had NO
+//      interaction with the CURRENTLY impersonated persona. ONE ROW PER
+//      ENTITY — multiple unused entities sharing one card each get a row
+//      (the old one-row-per-card picker made duplicates unreachable).
+//  2.  "Has had an actual interaction" is PERSONA-SCOPED: it counts ONLY the
+//      persona's own POV interaction rows (`interactions.entity_id = <the
+//      impersonated persona id>`, `presence_type='phone'`,
+//      `deleted_at IS NULL`, and the entity id appears in the row's
+//      `participant_ids` JSON array). Engine-mirrored rows
+//      (`entity_id = <character entity>`) are IGNORED. Soft-deleted POV
+//      interactions do NOT count — deleting a conversation re-offers the
+//      entity in the picker as a fresh chat. Any scope (private/group)
+//      counts; no status filter.
+//  3.  Disabled + muted entities ARE visible (no is_disabled/is_muted filter
+//      here; picking a disabled entity opens the chat and ChatDetail shows
+//      the disabled state).
+//  4.  One mixed alphabetical list (cards + entity rows interleaved), sorted
+//      by the resolved display label case-insensitively (COLLATE NOCASE
+//      semantics).
+//
+// Marketplace preview locks are NOT special-cased — the central hard gate in
+// `openCharacterChat` (MarketplaceService.isChatLocked) covers every entry
+// point, including this picker.
+
+/**
+ * One selectable row of the "Start a new chat" picker.
+ *
+ * - `card`   → tapping creates a new entity from the profile (existing path).
+ * - `entity` → tapping opens the chat with THAT exact entity (`targetEntityId`
+ *   in `openCharacterChat`) — no minting, no newest-entity reuse.
+ */
+export type ChatPickerRow =
+  | { kind: 'card'; profile: CharacterProfile }
+  | { kind: 'entity'; entity: Entity; profile: CharacterProfile };
+
+/**
+ * Resolved display label of a picker row — the shared sort/search/render
+ * label used by the modal AND the tests (one implementation, no drift).
+ *
+ *   card rows   → `profile.nickname || profile.name`
+ *   entity rows → `entity.alias || profile.nickname || profile.name`
+ */
+export function resolveChatPickerRowLabel(row: ChatPickerRow): string {
+  const nickname = row.profile.nickname ?? '';
+  if (row.kind === 'card') {
+    return nickname || row.profile.name;
+  }
+  return row.entity.alias || nickname || row.profile.name;
+}
+
+/** Profile column list for the picker queries (p-aliased; mirrors getAllCharacterProfiles' SELECT). */
+const CHAT_PICKER_PROFILE_COLUMNS = `p.id, p.name, p.description, p.personality,
+  p.voice_characteristics, p.base_prompt, p.scenario,
+  p.typing_speed_wpm, p.audio_response_chance_percent, p.vision_config_id,
+  p.lifecycle_config, p.first_mes, p.mes_example, p.alternate_greetings,
+  p.post_history_instructions, p.creator_notes, p.creator, p.character_version,
+  p.nickname, p.tags, p.group_only_greetings, p.extensions, p.assets,
+  p.card_provenance, p.character_book, p.is_favorite,
+  p.created_at, p.updated_at, p.deleted_at`;
+
+/** Entity columns e-aliased so the entity⧉profile join never collides on names. */
+const CHAT_PICKER_ENTITY_COLUMNS = `e.id AS entity_id, e.alias AS entity_alias,
+  e.character_profile_id AS entity_profile_id,
+  e.lifecycle_config AS entity_lifecycle_config,
+  e.rag_reindex_required AS entity_rag_reindex_required,
+  e.entity_type AS entity_type, e.is_muted AS entity_is_muted,
+  e.is_disabled AS entity_is_disabled, e.created_at AS entity_created_at,
+  e.updated_at AS entity_updated_at, e.deleted_at AS entity_deleted_at`;
+
+/** Row → CharacterProfile mapper for the picker queries (same mapping as getAllCharacterProfiles). */
+function mapPickerProfileRow(row: Record<string, any>): CharacterProfile {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    personality: row.personality,
+    voice_characteristics: row.voice_characteristics,
+    base_prompt: row.base_prompt,
+    scenario: row.scenario,
+    typing_speed_wpm: row.typing_speed_wpm,
+    audio_response_chance_percent: row.audio_response_chance_percent,
+    vision_config_id: row.vision_config_id ?? null,
+    lifecycle_config: row.lifecycle_config ?? null,
+    first_mes: row.first_mes ?? '',
+    mes_example: row.mes_example ?? '',
+    alternate_greetings: row.alternate_greetings ?? '',
+    post_history_instructions: row.post_history_instructions ?? '',
+    creator_notes: row.creator_notes ?? '',
+    creator: row.creator ?? '',
+    character_version: row.character_version ?? '',
+    nickname: row.nickname ?? '',
+    tags: row.tags ?? '',
+    group_only_greetings: row.group_only_greetings ?? '',
+    extensions: row.extensions ?? '',
+    assets: row.assets ?? '',
+    card_provenance: row.card_provenance ?? '',
+    character_book: row.character_book ?? '',
+    is_favorite: row.is_favorite ?? 0,
+    created_at: new Date(row.created_at),
+    updated_at: new Date(row.updated_at),
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+  };
+}
+
+/** An entity row joined with its (live) linked card. */
+interface PickerEntityJoin {
+  entity: Entity;
+  profile: CharacterProfile;
+}
+
+/** JOIN row → {entity, profile} mapper (reads the e-aliased entity columns). */
+function mapPickerEntityRow(row: Record<string, any>): PickerEntityJoin {
+  return {
+    entity: {
+      id: row.entity_id,
+      alias: row.entity_alias,
+      character_profile_id: row.entity_profile_id,
+      lifecycle_config: row.entity_lifecycle_config ?? null,
+      rag_reindex_required: row.entity_rag_reindex_required ?? 1,
+      entity_type: row.entity_type ?? 'ai',
+      is_muted: row.entity_is_muted ?? 0,
+      is_disabled: row.entity_is_disabled ?? 0,
+      created_at: new Date(row.entity_created_at),
+      updated_at: new Date(row.entity_updated_at),
+      deleted_at: row.entity_deleted_at ? new Date(row.entity_deleted_at) : null,
+    },
+    profile: mapPickerProfileRow(row),
+  };
+}
+
+/**
+ * Entity ids hidden by the persona's POV phone interactions (JS fallback
+ * path). Mirrors getCharacterStats' defensive pattern: malformed
+ * `participant_ids` JSON is skipped (hides nothing) instead of crashing.
+ */
+function collectHiddenEntityIds(rows: Array<{ participant_ids: string | null }>): Set<string> {
+  const hidden = new Set<string>();
+  for (const row of rows) {
+    try {
+      const parsed: unknown = JSON.parse(row.participant_ids ?? '');
+      if (Array.isArray(parsed)) {
+        for (const id of parsed) {
+          if (typeof id === 'string') hidden.add(id);
+        }
+      }
+    } catch {
+      // Malformed participant_ids — this row hides nothing.
+    }
+  }
+  return hidden;
+}
+
+/**
+ * JSON1-unavailable / malformed-JSON fallback for the entity rows: load ALL
+ * candidate entities (live AI + live card) and filter with the persona's POV
+ * phone interactions parsed client-side. Read-only — two plain queries, no
+ * transaction (the react-native-sqlite-storage multi-statement trap does not
+ * apply, but we keep the statements independent anyway).
+ */
+async function loadUnusedAiEntitiesWithJsFilter(
+  impersonatedPersonaId: string,
+): Promise<PickerEntityJoin[]> {
+  const db = getDatabase();
+  const [entityResults] = await db.executeSql(
+    `SELECT ${CHAT_PICKER_ENTITY_COLUMNS}, ${CHAT_PICKER_PROFILE_COLUMNS}
+     FROM entities e
+     JOIN character_profiles p ON p.id = e.character_profile_id AND p.deleted_at IS NULL
+     WHERE e.deleted_at IS NULL
+       AND e.entity_type = 'ai'
+       AND e.character_profile_id IS NOT NULL`,
+  );
+  const [povResults] = await db.executeSql(
+    `SELECT participant_ids FROM interactions
+     WHERE entity_id = ? AND presence_type = 'phone' AND deleted_at IS NULL`,
+    [impersonatedPersonaId],
+  );
+  const povRows: Array<{ participant_ids: string | null }> = [];
+  for (let i = 0; i < povResults.rows.length; i++) {
+    povRows.push({ participant_ids: povResults.rows.item(i).participant_ids });
+  }
+  const hidden = collectHiddenEntityIds(povRows);
+
+  const joined: PickerEntityJoin[] = [];
+  for (let i = 0; i < entityResults.rows.length; i++) {
+    const mapped = mapPickerEntityRow(entityResults.rows.item(i));
+    if (!hidden.has(mapped.entity.id)) {
+      joined.push(mapped);
+    }
+  }
+  return joined;
+}
+
+/**
+ * The "Start a new chat" picker rows for ONE impersonated persona.
+ *
+ * Returns the MERGED, case-insensitively label-sorted union of:
+ *  - card rows (ruling 1a): live profiles no live entity references, and
+ *  - entity rows (ruling 1b): every live AI entity with a live linked card
+ *    the persona has had no POV phone interaction with — one row per entity.
+ *
+ * All predicates respect soft delete (`deleted_at IS NULL`). Disabled/muted
+ * entities are NOT filtered (ruling 3); marketplace locks are handled
+ * centrally by `openCharacterChat`, not here.
+ */
+export async function getChatPickerRows(
+  impersonatedPersonaId: string,
+): Promise<ChatPickerRow[]> {
+  const db = getDatabase();
+
+  // ── Card rows (ruling 1a) ──
+  const [cardResults] = await db.executeSql(
+    `SELECT ${CHAT_PICKER_PROFILE_COLUMNS}
+     FROM character_profiles p
+     WHERE p.deleted_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM entities e
+                       WHERE e.character_profile_id = p.id
+                         AND e.deleted_at IS NULL)`,
+  );
+  const rows: ChatPickerRow[] = [];
+  for (let i = 0; i < cardResults.rows.length; i++) {
+    rows.push({ kind: 'card', profile: mapPickerProfileRow(cardResults.rows.item(i)) });
+  }
+
+  // ── Entity rows (ruling 1b) — JSON1 main path + defensive JS fallback ──
+  // The NOT EXISTS subquery mirrors getCharacterStats' exact json_each
+  // membership test ("Max" must never match "Max 2"). A single malformed
+  // `participant_ids` row makes json_each throw mid-scan (failing the WHOLE
+  // query), so the catch falls back to the client-side filter — same
+  // defensive pattern as getCharacterStats / getDistinctTags.
+  let joined: PickerEntityJoin[];
+  try {
+    const [entityResults] = await db.executeSql(
+      `SELECT ${CHAT_PICKER_ENTITY_COLUMNS}, ${CHAT_PICKER_PROFILE_COLUMNS}
+       FROM entities e
+       JOIN character_profiles p ON p.id = e.character_profile_id AND p.deleted_at IS NULL
+       WHERE e.deleted_at IS NULL
+         AND e.entity_type = 'ai'
+         AND e.character_profile_id IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM interactions i
+           WHERE i.entity_id = ?
+             AND i.presence_type = 'phone'
+             AND i.deleted_at IS NULL
+             AND EXISTS (SELECT 1 FROM json_each(i.participant_ids) je
+                         WHERE je.value = e.id)
+         )`,
+      [impersonatedPersonaId],
+    );
+    joined = [];
+    for (let i = 0; i < entityResults.rows.length; i++) {
+      joined.push(mapPickerEntityRow(entityResults.rows.item(i)));
+    }
+  } catch {
+    joined = await loadUnusedAiEntitiesWithJsFilter(impersonatedPersonaId);
+  }
+  for (const j of joined) {
+    rows.push({ kind: 'entity', entity: j.entity, profile: j.profile });
+  }
+
+  // ── Ruling 4: one mixed list, resolved label, case-insensitive ──
+  // Lowercased plain `<`/`>` comparison = COLLATE NOCASE semantics for ASCII
+  // (deterministic — no locale dependence).
+  return rows.sort((a, b) => {
+    const la = resolveChatPickerRowLabel(a).toLowerCase();
+    const lb = resolveChatPickerRowLabel(b).toLowerCase();
+    return la < lb ? -1 : la > lb ? 1 : 0;
+  });
+}
+
+/**
+ * True when the character library has at least one PICKER-ELIGIBLE card — a
+ * live profile not owned by a live user entity (the §9-A3 AI-partner
+ * predicate, LIMIT 1). ChatPartnerPickerModal uses this ONLY to pick the
+ * empty state: no rows + no library → "create a character first";
+ * no rows + library → "every character already has a chat".
+ */
+export async function hasChatPickerLibrary(): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    `SELECT 1 FROM character_profiles p
+     WHERE p.deleted_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM entities e
+                       WHERE e.character_profile_id = p.id
+                         AND e.entity_type = 'user'
+                         AND e.deleted_at IS NULL)
+     LIMIT 1`,
+  );
+  return results.rows.length > 0;
 }

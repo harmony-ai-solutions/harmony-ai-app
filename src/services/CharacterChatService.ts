@@ -28,6 +28,7 @@ import i18n from 'i18next';
 import {
   createEntity,
   createEntityModuleMapping,
+  getEntity,
   getEntityByCharacterProfileId,
   mintEntityId,
   resolveCreateAlias,
@@ -53,6 +54,26 @@ export interface CharacterChatNavigation {
     entityId: string;
     entityName?: string;
   }) => void;
+}
+
+/**
+ * Optional behavior switches for {@link openCharacterChat}.
+ *
+ * `targetEntityId` — open the chat with THIS exact live AI entity instead of
+ * reusing-or-minting one for the card. Used by the "Start a new chat"
+ * picker's ENTITY rows (ruling 1b: multiple live entities can share one
+ * card; each unused entity is individually chattable — the old
+ * newest-entity reuse made duplicates unreachable). Validation is strict:
+ * the target must exist (live), be `entity_type='ai'`, and be linked to the
+ * SAME character profile — anything else throws so the caller surfaces its
+ * generic failure toast. NO minting happens on this branch (the D68 mint
+ * seam, D33 typed reserved-name error and D56 alias dedupe stay exclusively
+ * on the card create branch), and a DISABLED target still opens the chat
+ * (ruling 3 — ChatDetail shows the disabled state; the user unblocks in chat
+ * settings).
+ */
+export interface OpenCharacterChatOptions {
+  targetEntityId?: string;
 }
 
 // ── 4-2 / D55: critical-wait-before-INIT_ENTITY ────────────────────────────
@@ -144,6 +165,7 @@ function showChatSetupFailureAlert(err: unknown): void {
 export async function openCharacterChat(
   profile: CharacterProfile,
   navigation: CharacterChatNavigation,
+  options?: OpenCharacterChatOptions,
 ): Promise<void> {
   // 0. HARD GATE — marketplace preview lock (viewable free, chat locked until
   //    acquired; own library never locked). Silently ignore the request so
@@ -159,49 +181,82 @@ export async function openCharacterChat(
   const storedId = await ChatPreferencesService.getGlobalImpersonatedEntity();
   const impersonatedEntityId = await resolvePersonaId(storedId);
 
-  // 2. Reuse an entity linked to this profile, or create one
-  let entity = await getEntityByCharacterProfileId(profile.id);
-  if (!entity) {
-    const rawId = profile.name.trim();
-    if (!rawId) {
-      throw new Error('Cannot open chat for a character without a name');
+  // 2. Resolve the chat partner entity — two branches:
+  //    a) targetEntityId (picker entity rows, ruling 1b): load the EXACT
+  //       entity. Strict validation (live + AI + linked to THIS profile),
+  //       NO minting, NO newest-entity reuse — two entities on one card are
+  //       individually addressable. Errors throw so the caller surfaces its
+  //       generic toast.
+  //    b) card path (unchanged): reuse the newest live entity for the card or
+  //       create one on the fly through the one mint seam (D68) with the
+  //       typed reserved-name error (D33) and alias dedupe (D56).
+  let entity: Entity;
+  if (options?.targetEntityId) {
+    const target = await getEntity(options.targetEntityId);
+    if (!target) {
+      throw new Error(`Target entity not found: ${options.targetEntityId}`);
     }
-    // One mint seam (D68): derive the D2 timestamped id from the card name
-    // (spaces never survive — D3), throw a TYPED reserved-name error for
-    // `user`/`deleted` (D33 — the caller's generic alert surfaces its
-    // friendly message), and ghost-probe the same-second backstop. The card
-    // alias is DEDUPED (D56): a same-name live card gets "Isabella 2" instead
-    // of throwing on idx_entities_alias_unique; a unique card name stays
-    // verbatim.
-    const entityId = await mintEntityId(rawId);
-    const alias = await resolveCreateAlias(rawId);
-    entity = await createEntity({
-      id: entityId,
-      alias,
-      character_profile_id: profile.id,
-      lifecycle_config: '{}',
-      rag_reindex_required: 1,
-    });
-    await createEntityModuleMapping({
-      entity_id: entityId,
-      backend_config_id: null,
-      cognition_config_id: null,
-      tts_config_id: null,
-      stt_config_id: null,
-      vision_config_id: null,
-      rag_config_id: null,
-      imagination_config_id: null,
-      movement_config_id: null,
-      deleted_at: null,
-    });
+    if (target.entity_type !== 'ai') {
+      throw new Error(`Target entity ${target.id} is not an AI entity`);
+    }
+    if (target.character_profile_id !== profile.id) {
+      throw new Error(
+        `Target entity ${target.id} is not linked to profile ${profile.id}`,
+      );
+    }
+    entity = target;
+  } else {
+    let candidate = await getEntityByCharacterProfileId(profile.id);
+    if (!candidate) {
+      const rawId = profile.name.trim();
+      if (!rawId) {
+        throw new Error('Cannot open chat for a character without a name');
+      }
+      // One mint seam (D68): derive the D2 timestamped id from the card name
+      // (spaces never survive — D3), throw a TYPED reserved-name error for
+      // `user`/`deleted` (D33 — the caller's generic alert surfaces its
+      // friendly message), and ghost-probe the same-second backstop. The card
+      // alias is DEDUPED (D56): a same-name live card gets "Isabella 2" instead
+      // of throwing on idx_entities_alias_unique; a unique card name stays
+      // verbatim.
+      const entityId = await mintEntityId(rawId);
+      const alias = await resolveCreateAlias(rawId);
+      candidate = await createEntity({
+        id: entityId,
+        alias,
+        character_profile_id: profile.id,
+        lifecycle_config: '{}',
+        rag_reindex_required: 1,
+      });
+      await createEntityModuleMapping({
+        entity_id: entityId,
+        backend_config_id: null,
+        cognition_config_id: null,
+        tts_config_id: null,
+        stt_config_id: null,
+        vision_config_id: null,
+        rag_config_id: null,
+        imagination_config_id: null,
+        movement_config_id: null,
+        deleted_at: null,
+      });
+    }
+    entity = candidate;
   }
 
   // 2b. Client-side defense-in-depth (Q8/A3): a DISABLED AI entity is off —
-  // never drop the user into a chat that the engine will reject with
-  // `entity_disabled`. Refuse to navigate (the caller stays on the profile
-  // screen, which offers the enable action). ChatDetailScreen's
-  // session:error 'entity_disabled' branch covers the engine-Init path too.
-  if (entity.entity_type === 'ai' && entity.is_disabled === 1) {
+  //     never drop the user into a chat that the engine will reject with
+  //     `entity_disabled`. CARD PATH ONLY: when the caller targets a SPECIFIC
+  //     entity (picker entity rows, ruling 3) the chat must OPEN even for a
+  //     disabled target — ChatDetailScreen's session:error 'entity_disabled'
+  //     branch shows the disabled state and chat settings offers the enable
+  //     action (the CharactersScreen / AIProfileScreen card entries keep the
+  //     strict refusal UX).
+  if (
+    !options?.targetEntityId &&
+    entity.entity_type === 'ai' &&
+    entity.is_disabled === 1
+  ) {
     log.warn(`Cannot open chat for disabled AI entity ${entity.id} — blocked client-side (Q8).`);
     return;
   }
@@ -222,7 +277,12 @@ export async function openCharacterChat(
     }
   }
 
-  // 4. Derive chat params and navigate
+  // 4. Derive chat params and navigate. Display name per branch: the card
+  //    path keeps the profile name (unchanged); the entity branch prefers the
+  //    entity's alias (picker entity rows show the alias, e.g. "Isabella 2").
+  const entityName = options?.targetEntityId
+    ? entity.alias || profile.name
+    : profile.name;
   const participantIds = [impersonatedEntityId ?? 'user', entity.id];
   const scope = deriveScopeFromParticipants(participantIds);
   const participantKey = deriveParticipantKey(
@@ -236,7 +296,7 @@ export async function openCharacterChat(
     participantKey,
     participantIds,
     entityId: impersonatedEntityId ?? 'user',
-    entityName: profile.name,
+    entityName,
   });
 }
 

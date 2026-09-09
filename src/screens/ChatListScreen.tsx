@@ -40,6 +40,7 @@ import {
   getPrimaryImage,
   getCharacterProfile,
   imageToDataURL,
+  ChatPickerRow,
 } from '../database/repositories/characters';
 
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
@@ -54,7 +55,6 @@ import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
 import { ChatPartnerPickerModal } from '../components/chat/ChatPartnerPickerModal';
 import { openCharacterChat } from '../services/CharacterChatService';
-import { CharacterProfile } from '../database/models';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { createLogger } from '../utils/logger';
 import {
@@ -709,11 +709,19 @@ export const ChatListScreen: React.FC = () => {
   // openCharacterChat covers them instead: it silently returns (log.warn) and
   // no chat opens. That matches the old "locked characters simply don't open
   // a chat" picker UX without per-row async lock checks.
-  const handleNewChat = async (profile: CharacterProfile) => {
+  //
+  // Picker rows (rulings 1a/1b): a CARD row opens via the existing reuse-or-
+  // mint path; an ENTITY row targets THAT exact live entity (ruling 3: even a
+  // disabled target opens — ChatDetail shows the disabled state).
+  const handleNewChat = async (row: ChatPickerRow) => {
     try {
-      await openCharacterChat(profile, {
-        navigateToChat: params => navigation.navigate('ChatDetail', params),
-      });
+      await openCharacterChat(
+        row.profile,
+        {
+          navigateToChat: params => navigation.navigate('ChatDetail', params),
+        },
+        row.kind === 'entity' ? { targetEntityId: row.entity.id } : undefined,
+      );
     } catch (err) {
       log.error('Failed to open chat from picker:', err);
       // Same failure the Characters / AI Profile screens alert on — the picker
@@ -1142,10 +1150,11 @@ export const ChatListScreen: React.FC = () => {
         testID="new-chat-fab"
       />
 
-      {/* "Start a new chat" picker — lists AI characters with a chat icon */}
+      {/* "Start a new chat" picker — cards + unused entities, persona-scoped */}
       <ChatPartnerPickerModal
         visible={pickerVisible}
         onClose={() => setPickerVisible(false)}
+        impersonatedPersonaId={impersonatedEntityId}
         onChat={handleNewChat}
       />
 

@@ -2,16 +2,31 @@
  * ChatPartnerPickerModal — "start a new chat with one of your AI characters"
  *
  * Opens as a full-screen picker when the user taps the ＋ FAB on the Chat list
- * screen. Lists every AI character profile as a row (avatar + name + description
- * preview) with a chat icon button at the end. A search bar filters the list by
- * name.
+ * screen. Lists one MIXED alphabetical row set (avatar + resolved label +
+ * description preview, chat icon button at the end):
+ *
+ *  - CARD rows — live profiles no live entity references yet. Tapping creates
+ *    a new entity from the card via the existing create path.
+ *  - ENTITY rows — every live AI entity with a linked card that has had NO
+ *    interaction with the CURRENTLY impersonated persona (ruling 1b/2,
+ *    Variant B). ONE ROW PER ENTITY: two unused entities sharing a card
+ *    produce two rows — the old one-row-per-card list made duplicates
+ *    unreachable and silently routed new chats to the newest entity.
+ *
+ * Rows come from `getChatPickerRows(impersonatedPersonaId)` (persona-scoped,
+ * soft-delete aware, disabled/muted entities stay visible per ruling 3).
+ * Labels resolve through the shared `resolveChatPickerRowLabel` helper
+ * (card → nickname||name, entity → alias||nickname||name) so the sort, the
+ * search filter and the render never drift apart. Marketplace-locked entries
+ * are NOT filtered here — the central hard gate in openCharacterChat covers
+ * them (it silently ignores the request).
  *
  * Full-screen (not a bottom sheet) so the keyboard never hides the search bar
  * or the results — the whole screen is the picker and results scroll freely.
  *
- * Tapping a row or its chat button fires `onChat(profile)` — the parent
- * (ChatListScreen) routes through openCharacterChat so the chat is created on
- * the fly if the character has no entity yet.
+ * Tapping a row or its chat button fires `onChat(row)` — the parent
+ * (ChatListScreen) routes through openCharacterChat, passing
+ * `targetEntityId` for entity rows so the chat opens with THAT entity.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -34,9 +49,14 @@ import { ThemedText } from '../themed/ThemedText';
 import { ThemedEmptyState } from '../themed/ThemedEmptyState';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
-import { getAllCharacterProfiles, getCharacterImages } from '../../database/repositories/characters';
+import {
+  getChatPickerRows,
+  getCharacterImages,
+  hasChatPickerLibrary,
+  resolveChatPickerRowLabel,
+  ChatPickerRow,
+} from '../../database/repositories/characters';
 import { createDataURL } from '../../database/base64';
-import type { CharacterProfile } from '../../database/models';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
 import { createLogger } from '../../utils/logger';
 
@@ -45,20 +65,33 @@ const log = createLogger('[ChatPartnerPickerModal]');
 interface ChatPartnerPickerModalProps {
   visible: boolean;
   onClose: () => void;
-  /** Fired when the user picks a character to chat with */
-  onChat: (profile: CharacterProfile) => void;
+  /**
+   * The currently impersonated persona entity id — scopes the picker's
+   * "already chatted" filter (ruling 2, Variant B): an entity that has only
+   * interacted with a DIFFERENT persona is still offered as a fresh chat.
+   */
+  impersonatedPersonaId: string;
+  /** Fired when the user picks a row (card or entity) to chat with */
+  onChat: (row: ChatPickerRow) => void;
+}
+
+/** Stable list key + testID suffix: `card:<profileId>` / `entity:<entityId>`. */
+function chatPickerRowKey(row: ChatPickerRow): string {
+  return row.kind === 'card' ? `card:${row.profile.id}` : `entity:${row.entity.id}`;
 }
 
 export const ChatPartnerPickerModal: React.FC<ChatPartnerPickerModalProps> = ({
   visible,
   onClose,
+  impersonatedPersonaId,
   onChat,
 }) => {
   const { theme } = useAppTheme();
   const { top: safeTop, bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('chatList');
 
-  const [profiles, setProfiles] = useState<CharacterProfile[]>([]);
+  const [rows, setRows] = useState<ChatPickerRow[]>([]);
+  const [libraryHasContent, setLibraryHasContent] = useState(false);
   const [avatars, setAvatars] = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -81,7 +114,8 @@ export const ChatPartnerPickerModal: React.FC<ChatPartnerPickerModalProps> = ({
     return () => subs.forEach(s => s.remove());
   }, []);
 
-  // Load profiles + primary avatars each time the picker opens
+  // Load picker rows + primary avatars each time the picker opens — or the
+  // impersonated persona changes (the row set is persona-scoped, ruling 2).
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -90,28 +124,36 @@ export const ChatPartnerPickerModal: React.FC<ChatPartnerPickerModalProps> = ({
 
     (async () => {
       try {
-        const data = await getAllCharacterProfiles();
+        const data = await getChatPickerRows(impersonatedPersonaId);
         if (cancelled) return;
-        setProfiles(data);
+        setRows(data);
 
+        // Entity rows carry their linked profile, so several rows may share
+        // one profile id — load each avatar ONCE, keyed by profile id.
+        const profileIds = [...new Set(data.map(row => row.profile.id))];
         const avatarMap: Record<string, string | null> = {};
         await Promise.all(
-          data.map(async profile => {
+          profileIds.map(async profileId => {
             try {
-              const imgs = await getCharacterImages(profile.id);
+              const imgs = await getCharacterImages(profileId);
               const primary = imgs.find(img => img.is_primary === true);
-              avatarMap[profile.id] = primary
+              avatarMap[profileId] = primary
                 ? createDataURL(primary.image_data, primary.mime_type)
                 : null;
             } catch {
-              avatarMap[profile.id] = null;
+              avatarMap[profileId] = null;
             }
           }),
         );
+        // Distinguishes the two empty states (ruling 4 / pickerEmpty vs
+        // pickerAllChatted) — a cheap LIMIT 1 probe, only meaningful when
+        // there are no rows.
+        const hasLibrary = await hasChatPickerLibrary();
         if (cancelled) return;
+        setLibraryHasContent(hasLibrary);
         setAvatars(avatarMap);
       } catch (err) {
-        log.error('Failed to load profiles for chat picker:', err);
+        log.error('Failed to load rows for chat picker:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -120,7 +162,7 @@ export const ChatPartnerPickerModal: React.FC<ChatPartnerPickerModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [visible]);
+  }, [visible, impersonatedPersonaId]);
 
   if (!theme) return null;
 
@@ -128,16 +170,19 @@ export const ChatPartnerPickerModal: React.FC<ChatPartnerPickerModalProps> = ({
   const accentSecondary =
     theme.colors.accent.secondary ?? theme.colors.accent.primaryHover ?? accent;
 
-  // Prefix match on the character name ONLY — typing "Ma" finds "Max" but
-  // not "Samara".
-  const filteredProfiles = profiles.filter(p =>
-    p.name.toLowerCase().startsWith(query.trim().toLowerCase()),
+  // Prefix match on the RESOLVED label (shared helper) — typing "Ma" finds
+  // the entity aliased "Max" even though its card is named "Maximilian", but
+  // not "Samara" (ruling 4).
+  const filteredRows = rows.filter(row =>
+    resolveChatPickerRowLabel(row)
+      .toLowerCase()
+      .startsWith(query.trim().toLowerCase()),
   );
 
-  const handleChat = (profile: CharacterProfile) => {
+  const handleChat = (row: ChatPickerRow) => {
     hapticLightPress();
     onClose();
-    onChat(profile);
+    onChat(row);
   };
 
   return (
@@ -223,73 +268,85 @@ export const ChatPartnerPickerModal: React.FC<ChatPartnerPickerModalProps> = ({
               <View style={styles.loadingWrap}>
                 <ActivityIndicator size="large" color={accent} />
               </View>
-            ) : filteredProfiles.length === 0 ? (
+            ) : filteredRows.length === 0 ? (
               <ThemedEmptyState
                 compact
                 icon={query ? 'file-search-outline' : 'chat-outline'}
                 title={
-                  query ? t('pickerNoResults') : t('pickerEmpty')
+                  query
+                    ? t('pickerNoResults')
+                    : libraryHasContent
+                      ? t('pickerAllChatted')
+                      : t('pickerEmpty')
                 }
                 subtitle={
-                  query ? t('pickerNoResultsHint') : t('pickerEmptyHint')
+                  query
+                    ? t('pickerNoResultsHint')
+                    : libraryHasContent
+                      ? t('pickerAllChattedHint')
+                      : t('pickerEmptyHint')
                 }
                 style={styles.empty}
               />
             ) : (
               <FlatList
-                data={filteredProfiles}
-                keyExtractor={item => item.id}
+                data={filteredRows}
+                keyExtractor={chatPickerRowKey}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={[
                   styles.listContent,
                   { paddingBottom: safeBottom + 16 },
                 ]}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    onPress={() => handleChat(item)}
-                    activeOpacity={0.7}
-                    style={styles.row}
-                    testID={`chat-picker-${item.id}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Chat with ${item.name}`}
-                  >
-                    <ProfileAvatar
-                      name={item.name}
-                      uri={avatars[item.id] ?? null}
-                      size={44}
-                      showRing={false}
-                    />
-                    <View style={styles.rowText}>
-                      <ThemedText size={15} weight="bold" numberOfLines={1}>
-                        {item.name}
-                      </ThemedText>
-                      {item.description ? (
-                        <ThemedText
-                          variant="muted"
-                          size={12}
-                          numberOfLines={1}
-                          style={styles.rowDesc}
-                        >
-                          {item.description}
-                        </ThemedText>
-                      ) : null}
-                    </View>
+                renderItem={({ item }) => {
+                  const label = resolveChatPickerRowLabel(item);
+                  const rowKey = chatPickerRowKey(item);
+                  return (
                     <TouchableOpacity
                       onPress={() => handleChat(item)}
-                      hitSlop={8}
-                      style={[
-                        styles.chatIcon,
-                        { backgroundColor: hexToRgba(accent, 0.18) },
-                      ]}
-                      testID={`chat-picker-chat-${item.id}`}
+                      activeOpacity={0.7}
+                      style={styles.row}
+                      testID={`chat-picker-${rowKey}`}
                       accessibilityRole="button"
-                      accessibilityLabel={`Start chat with ${item.name}`}
+                      accessibilityLabel={`Chat with ${label}`}
                     >
-                      <Icon name="chat" size={18} color={accent} />
+                      <ProfileAvatar
+                        name={label}
+                        uri={avatars[item.profile.id] ?? null}
+                        size={44}
+                        showRing={false}
+                      />
+                      <View style={styles.rowText}>
+                        <ThemedText size={15} weight="bold" numberOfLines={1}>
+                          {label}
+                        </ThemedText>
+                        {item.profile.description ? (
+                          <ThemedText
+                            variant="muted"
+                            size={12}
+                            numberOfLines={1}
+                            style={styles.rowDesc}
+                          >
+                            {item.profile.description}
+                          </ThemedText>
+                        ) : null}
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => handleChat(item)}
+                        hitSlop={8}
+                        style={[
+                          styles.chatIcon,
+                          { backgroundColor: hexToRgba(accent, 0.18) },
+                        ]}
+                        testID={`chat-picker-chat-${rowKey}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Start chat with ${label}`}
+                      >
+                        <Icon name="chat" size={18} color={accent} />
+                      </TouchableOpacity>
                     </TouchableOpacity>
-                  </TouchableOpacity>
-                )}
+                  );
+                }}
               />
             )}
           </View>
