@@ -65,7 +65,7 @@ export async function updateMistralProviderConfig(config: MistralProviderConfig)
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_mistral SET name = ?, api_key = ? WHERE id = ?',
+      'UPDATE provider_config_mistral SET name = ?, api_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.api_key, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`Mistral provider config not found: ${config.id}`);
@@ -76,17 +76,12 @@ export async function isMistralProviderConfigInUse(id: string): Promise<boolean>
   return isProviderConfigInUse('mistral', id);
 }
 
-export async function deleteMistralProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteMistralProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  if (!permanent && await isMistralProviderConfigInUse(id)) throw new Error(`Mistral provider config ${id} is in use and cannot be soft deleted`);
+  if (await isMistralProviderConfigInUse(id)) throw new Error(`Mistral provider config ${id} is in use and cannot be soft deleted`);
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_mistral WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) throw new Error(`Mistral provider config not found: ${id}`);
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql('UPDATE provider_config_mistral SET deleted_at = ? WHERE id = ?', [now, id]);
-      if (result.rowsAffected === 0) throw new Error(`Mistral provider config not found: ${id}`);
-    }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql('UPDATE provider_config_mistral SET deleted_at = ? WHERE id = ?', [now, id]);
+    if (result.rowsAffected === 0) throw new Error(`Mistral provider config not found: ${id}`);
   });
 }

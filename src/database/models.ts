@@ -13,18 +13,39 @@ import type { EmotionEffect, MetabolismVector } from '../types/emoji';
 export interface CharacterProfile {
   id: string;
   name: string;
-  description: string | null;
-  personality: string | null;
-  appearance: string | null;
-  backstory: string | null;
-  voice_characteristics: string | null;
-  base_prompt: string | null;
-  scenario: string | null;
-  example_dialogues: string | null;
+  description: string;
+  personality: string;
+  voice_characteristics: string;
+  base_prompt: string;
+  scenario: string;
   typing_speed_wpm: number;
   audio_response_chance_percent: number;
   vision_config_id: string | null;
-  lifecycle_config: string | null; // Opaque JSON blob
+  lifecycle_config: string; // Opaque JSON blob
+  // Character Card V3 standard fields (migration 000037). Columns are NOT NULL
+  // DEFAULT '' (absent = empty string, never null). Optional (`?`) only because
+  // some in-memory construction sites predate these fields; persisted rows and
+  // engine-synced rows always carry them.
+  first_mes?: string;
+  mes_example?: string;
+  alternate_greetings?: string; // JSON []
+  post_history_instructions?: string;
+  creator_notes?: string;
+  creator?: string;
+  character_version?: string;
+  nickname?: string;
+  tags?: string; // JSON []
+  group_only_greetings?: string; // JSON []
+  extensions?: string; // JSON {}
+  assets?: string; // JSON []
+  card_provenance?: string; // JSON {}
+  character_book?: string; // JSON {}
+  // Favorite flag (migration 000044): replaced the favorites sidecar table.
+  // 0/1 number (same convention as Entity's is_muted/is_disabled) — NO
+  // boolean normalization, it rides the profile sync row as a JSON number.
+  // Optional (`?`) because some in-memory construction sites predate the column;
+  // persisted / synced rows always carry it.
+  is_favorite?: number;
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -36,6 +57,14 @@ export interface Entity {
   character_profile_id: string | null;
   lifecycle_config: string | null; // Opaque JSON blob
   rag_reindex_required: number; // 0 or 1 flag for RAG vector store re-index
+  // Entity typing / flags (migration 000042). `entity_type` = 'ai' | 'user'
+  // (Q9); `is_muted` / `is_disabled` are 0/1 flags (Q8). Optional (`?`) only
+  // because some in-memory construction sites predate these columns — the same
+  // convention as CharacterProfile's V3 fields; persisted / synced rows always
+  // carry them.
+  entity_type?: string;
+  is_muted?: number;
+  is_disabled?: number;
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
@@ -148,6 +177,7 @@ export interface HarmonySpeechProviderConfig {
   id: string;
   name: string;
   endpoint: string;
+  api_key: string;
   model: string | null;
   voice_config_file: string | null;
   format: string | null;
@@ -396,7 +426,7 @@ export interface ImaginationConfig {
 // ============================================================================
 
 export interface CharacterImage {
-  id: number;
+  id: string;
   character_profile_id: string;
   image_data: string; // Base64 encoded image
   mime_type: string;
@@ -407,40 +437,6 @@ export interface CharacterImage {
   vl_model: string;
   created_at: Date;
   updated_at: Date;
-  deleted_at: Date | null;
-}
-
-// ============================================================================
-// Sync & Chat Models
-// ============================================================================
-
-export interface SyncDevice {
-  device_id: string;
-  device_name: string;
-  device_type: string;
-  device_platform: string | null;
-  is_approved: number;
-  approval_requested_at: Date | null;
-  approved_by_user_at: Date | null;
-  last_sync_timestamp: number;
-  last_sync_initiated_by: string;
-  jwt_token: string | null;
-  jwt_expires_at: number | null;
-  created_at: Date;
-  updated_at: Date;
-  deleted_at: Date | null;
-}
-
-export interface SyncHistory {
-  id: number;
-  device_id: string;
-  sync_started_at: Date;
-  sync_completed_at: Date | null;
-  records_sent: number;
-  records_received: number;
-  sync_status: string;
-  error_message: string | null;
-  created_at: Date;
   deleted_at: Date | null;
 }
 
@@ -471,7 +467,7 @@ export interface ConversationMessage {
   interaction_id: string | null;
   content: string;
   audio_duration: number | null;
-  message_type: 'text' | 'audio' | 'combined' | 'image';
+  message_type: 'text' | 'audio' | 'combined' | 'image' | 'greeting';
 
   // Audio storage (base64 encoded)
   audio_data?: string | null;
@@ -491,13 +487,22 @@ export interface ConversationMessage {
   is_edited: boolean;              // true if message was edited via recon
   edit_of_message_id?: string | null; // references original message for edits
 
+  // Message actions (Migration 46)
+  reactions_json?: string | null;   // JSON array of emoji reaction strings, e.g. '["❤️","👍"]'
+  reply_to_message_id?: string | null; // references the message this one replies to (dormant — UI gated off)
+  is_pinned?: boolean;              // true if the message is pinned
+
+  // Read flag (Migration 41 / A2): 0/1, born 0, written ONLY by the app read
+  // action. "The counterpart has read it" per-record.
+  is_read?: boolean;
+
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
 }
 
 export interface CharacterImageInfo {
-  id: number;
+  id: string;
   character_profile_id: string;
   mime_type: string;
   description: string;
@@ -582,6 +587,20 @@ export interface EmotionState {
 
   created_at: Date;
   updated_at: Date;
+  deleted_at: Date | null;
+}
+
+export interface LifecycleState {
+  entity_id: string;
+  exhaustion: number;
+  sleeping: boolean;
+  sleep_start_time: number | null; // unix seconds
+  last_beat_at: number | null; // unix seconds
+  last_outreach_at: number | null; // unix seconds (N1-A: outreach cooldown)
+  inner_monologue: string; // JSON array of last-N entries
+  created_at: Date;
+  updated_at: Date;
+  deleted_at: Date | null;
 }
 
 export interface Memory {

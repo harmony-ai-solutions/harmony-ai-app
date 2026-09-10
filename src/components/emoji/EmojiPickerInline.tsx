@@ -15,9 +15,11 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import { useEmoji, RecentEmoji } from '../../contexts/EmojiContext';
+import { useEmojiPreferences, useEmojiRecents, RecentEmoji } from '../../contexts/EmojiContext';
+import EmojiService from '../../services/EmojiService';
 import { EmojiEntry, EmojiCategory } from '../../types/emoji';
 import { EmojiAction } from '../../database/models';
+import { hapticLightPress } from '../../utils/haptics';
 import { EntityEmojiActionService } from '../../services/EntityEmojiActionService';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
@@ -30,10 +32,8 @@ const COMPACT_EMOJI_SIZE = 28;
 interface EmojiPickerInlineProps {
   /** Called when the user selects an emoji */
   onEmojiSelected: (emoji: EmojiEntry) => void;
-  /** Entity ID for action lookup + advanced editor nav */
+  /** Entity ID for action lookup */
   entityId?: string | null;
-  /** Navigate to the action editor screen */
-  onOpenActionEditor?: () => void;
   /** Optional theme override; uses useAppTheme() if omitted */
   theme?: any;
   /** Override the container style (e.g. remove maxHeight for use in modals) */
@@ -43,13 +43,14 @@ interface EmojiPickerInlineProps {
 export const EmojiPickerInline: React.FC<EmojiPickerInlineProps> = memo(({
   onEmojiSelected,
   entityId,
-  onOpenActionEditor,
   theme: themeProp,
   containerStyle,
 }) => {
   const { theme: contextTheme } = useAppTheme();
   const theme = themeProp ?? contextTheme;
-  const { emojiService, addRecentEmoji, recentEmojis, loading } = useEmoji();
+  const { loading } = useEmojiPreferences();
+  const { addRecentEmoji, recentEmojis } = useEmojiRecents();
+  const emojiService = EmojiService;
   const [activeCategory, setActiveCategory] = useState<string>('people');
   const [categories, setCategories] = useState<EmojiCategory[]>([]);
 
@@ -97,7 +98,7 @@ export const EmojiPickerInline: React.FC<EmojiPickerInlineProps> = memo(({
       result.push(...categories);
     }
     return result;
-  }, [categories, recentEmojis, isSearching, emojiService, loading]);
+  }, [categories, recentEmojis, isSearching, emojiService]);
 
   // Handle search
   const handleSearch = useCallback(async (query: string) => {
@@ -170,6 +171,7 @@ export const EmojiPickerInline: React.FC<EmojiPickerInlineProps> = memo(({
         <View style={styles.toolbarActions}>
           <TouchableOpacity
             onPress={() => {
+              hapticLightPress();
               if (showSearch) { setShowSearch(false); handleSearch(''); }
               else { setShowSearch(true); }
             }}
@@ -177,11 +179,6 @@ export const EmojiPickerInline: React.FC<EmojiPickerInlineProps> = memo(({
           >
             <Icon name={showSearch ? 'close' : 'magnify'} size={20} color={theme.colors.text.secondary} />
           </TouchableOpacity>
-          {onOpenActionEditor && (
-            <TouchableOpacity onPress={onOpenActionEditor} style={styles.toolBtn}>
-              <Icon name="tune-variant" size={18} color={theme.colors.accent.primary} />
-            </TouchableOpacity>
-          )}
         </View>
       </View>
 

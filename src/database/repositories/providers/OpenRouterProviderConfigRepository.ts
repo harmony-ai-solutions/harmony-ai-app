@@ -227,7 +227,8 @@ export async function updateOpenRouterProviderConfig(config: OpenRouterProviderC
        SET name = ?, api_key = ?, model = ?, max_tokens = ?, temperature = ?, top_p = ?, n = ?, stop_tokens = ?,
            frequency_penalty = ?, presence_penalty = ?, max_completion_tokens = ?, seed = ?, response_format = ?,
            top_k = ?, top_a = ?, min_p = ?, repetition_penalty = ?, sampling_preset_name = ?, extra_params = ?,
-           voice = ?, speed = ?, format = ?, image_aspect_ratio = ?, image_size = ?
+           voice = ?, speed = ?, format = ?, image_aspect_ratio = ?, image_size = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name, config.api_key, config.model, config.max_tokens, config.temperature, config.top_p, config.n, config.stop_tokens,
@@ -251,28 +252,20 @@ export async function isOpenRouterProviderConfigInUse(id: string): Promise<boole
   return isProviderConfigInUse('openrouter', id);
 }
 
-export async function deleteOpenRouterProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteOpenRouterProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isOpenRouterProviderConfigInUse(id)) {
+  if (await isOpenRouterProviderConfigInUse(id)) {
     throw new Error(`OpenRouter provider config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_openrouter WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`OpenRouter provider config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE provider_config_openrouter SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`OpenRouter provider config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE provider_config_openrouter SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`OpenRouter provider config not found: ${id}`);
     }
   });
 }

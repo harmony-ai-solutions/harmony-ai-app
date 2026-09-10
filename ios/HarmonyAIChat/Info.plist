@@ -38,6 +38,8 @@
 	<string></string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app needs microphone access to record voice messages</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID is used to unlock the app</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>
@@ -52,5 +54,20 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>ai.soulbits.chat</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.128352209891-07iqnfd4udu6p7vt86dvh4go65htkv43</string>
+				<string>com.googleusercontent.apps.128352209891-3lm1pgood2a4h97kpasjmjlaer0oighu</string>
+				<string>soulbits</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

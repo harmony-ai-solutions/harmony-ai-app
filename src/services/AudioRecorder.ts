@@ -1,4 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
+import { Buffer } from 'buffer';
 import { createLogger } from '../utils/logger';
 import { checkAndRequestPermission, PERMISSIONS } from '../utils/permissions';
 
@@ -164,6 +165,38 @@ export class AudioRecorder {
       log.error('stopRecording failed:', error);
       throw error;
     }
+  }
+
+  /**
+   * Subscribe to the recorder's LIVE raw PCM chunks (react-native-audio-record
+   * `data` event → base64 → Uint8Array). On BOTH platforms the native `data`
+   * payload is raw 16-bit little-endian PCM WITHOUT a WAV header (Android
+   * `RNAudioRecordModule` emits `Buffer.encodeToString(buffer)` from
+   * `AudioRecord.read`; iOS `RNAudioRecord.m` emits `inBuffer->mAudioData` from
+   * the audio-queue callback) — exactly the engine's `AudioChunk.audio_bytes`.
+   *
+   * Returns an unsubscribe function. NOTE: the native module keeps a SINGLE
+   * `data` listener (it removes prior listeners before adding), so only one live
+   * subscription is active at a time — acceptable for the streaming test panel.
+   */
+  subscribeLivePcm(onChunk: (pcm: Uint8Array) => void): () => void {
+    // The library's type declares `on(...): void`, but at runtime the native
+    // event subscription is an EmitterSubscription exposing `.remove()`. Cast
+    // through unknown to capture the unsubscribe handle safely.
+    const subscription = AudioRecord.on('data', (base64Data: string) => {
+      try {
+        const bytes = Buffer.from(base64Data, 'base64');
+        onChunk(new Uint8Array(bytes));
+      } catch (decodeError) {
+        log.error('Failed to decode live PCM chunk:', decodeError);
+      }
+    }) as unknown as { remove?: () => void };
+
+    return () => {
+      if (subscription && typeof subscription.remove === 'function') {
+        subscription.remove();
+      }
+    };
   }
 
   /**

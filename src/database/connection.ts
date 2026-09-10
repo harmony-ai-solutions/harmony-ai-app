@@ -8,12 +8,14 @@
  * - Connection pooling and lifecycle management
  */
 
-import SQLite, {SQLiteDatabase} from 'react-native-sqlite-storage';
+import SQLite from 'react-native-sqlite-storage';
 import RNFS from 'react-native-fs';
 import * as Keychain from 'react-native-keychain';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {runMigrations} from './migrations';
 import {createLogger} from '../utils/logger';
+import {ConnectionStateManager} from '../services/ConnectionStateManager';
+import type {Database, DatabaseResultSet} from './types';
+import {ReactNativeDatabase} from './reactNativeDatabase';
 
 const log = createLogger('[Database]');
 
@@ -27,13 +29,13 @@ const ENCRYPTION_KEY_SERVICE = 'com.harmonyai.database';
 const ENCRYPTION_KEY_USERNAME = 'db_encryption_key';
 
 // Global database instance
-let db: SQLiteDatabase | null = null;
+let db: Database | null = null;
 
 // Secondary database connection used exclusively by the sync pipeline.
 // WAL mode (enabled in configureDatabase) allows concurrent reads on the
 // main connection while this one runs heavy write transactions — so
 // ChatDetailScreen message queries are never blocked by a sync.
-let syncDb: SQLiteDatabase | null = null;
+let syncDb: Database | null = null;
 
 /**
  * Generate a cryptographically secure random encryption key
@@ -53,74 +55,66 @@ function generateEncryptionKey(): string {
 }
 
 /**
- * Retrieve or generate database encryption key
- * Keys are securely stored in the device keychain
+ * Retrieve or generate database encryption key.
+ *
+ * SQLCipher is not linked, so the key is unused for DB encryption.
+ * Keychain calls are skipped here to avoid native module contention
+ * with BiometricLockService at startup. The `import * as Keychain`
+ * above ensures the native module is bundled for fingerprint use.
  */
-async function getOrCreateEncryptionKey(): Promise<string> {
-  try {
-    // Try to retrieve existing key
-    const credentials = await Keychain.getGenericPassword({
-      service: ENCRYPTION_KEY_SERVICE,
-    });
-    
-    if (credentials && credentials.password) {
-      log.info('Retrieved existing encryption key');
-      return credentials.password;
-    }
-    
-    // Generate new key if none exists
-    const newKey = generateEncryptionKey();
-    
-    // Store securely in keychain
-    await Keychain.setGenericPassword(
-      ENCRYPTION_KEY_USERNAME,
-      newKey,
-      {
-        service: ENCRYPTION_KEY_SERVICE,
-        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
-      }
-    );
-    
-    log.info('Generated and stored new encryption key');
-    return newKey;
-  } catch (error) {
-    log.error('Failed to manage encryption key:', error);
-    throw new Error('Failed to initialize database encryption');
-  }
+function getOrCreateEncryptionKey(): string {
+  return generateEncryptionKey();
 }
 
 /**
- * Open database connection with encryption
+ * Open database connection
  */
-async function openDatabase(encryptionKey: string): Promise<SQLiteDatabase> {
+async function openDatabase(encryptionKey: string): Promise<Database> {
   const dbPath = `${RNFS.DocumentDirectoryPath}/${DATABASE_NAME}`;
   
-  log.info(`Opening encrypted database at: ${dbPath}`);
+  log.info(`Opening database at: ${dbPath}`);
   
   try {
-    // Open database with encryption
+    // Open database — SQLCipher not linked, key param omitted
     // SQLite location: default (documents directory)
-    const database = await SQLite.openDatabase({
+    const rawDb = await SQLite.openDatabase({
       name: DATABASE_NAME,
       location: 'default',
-      key: encryptionKey, // Enable SQLCipher encryption
     });
+    
+    // Wrap in ReactNativeDatabase adapter to satisfy Database interface
+    const database = new ReactNativeDatabase(rawDb);
     
     // Configure database settings
     await configureDatabase(database);
     
-    log.info('Successfully opened encrypted database');
+    log.info('Successfully opened database');
     return database;
   } catch (error) {
     log.error('Failed to open database:', error);
-    throw error;
+    // If the old encrypted DB file is causing corruption, delete and retry
+    try {
+      log.info('Deleting old DB file and retrying...');
+      await SQLite.deleteDatabase(DATABASE_NAME);
+      const rawDb = await SQLite.openDatabase({
+        name: DATABASE_NAME,
+        location: 'default',
+      });
+      const database = new ReactNativeDatabase(rawDb);
+      await configureDatabase(database);
+      log.info('Successfully opened database after deleting old file');
+      return database;
+    } catch (retryError) {
+      log.error('Failed to open database after retry:', retryError);
+      throw retryError;
+    }
   }
 }
 
 /**
  * Configure database settings for optimal performance and data integrity
  */
-async function configureDatabase(database: SQLiteDatabase): Promise<void> {
+async function configureDatabase(database: Database): Promise<void> {
   try {
     // Enable foreign key constraints (CRITICAL for CASCADE deletes)
     await database.executeSql('PRAGMA foreign_keys = ON;');
@@ -158,9 +152,9 @@ export async function initializeDatabase(
     }
 
     // Get or create encryption key
-    const encryptionKey = await getOrCreateEncryptionKey();
+    const encryptionKey = getOrCreateEncryptionKey();
 
-    // Open database with encryption
+    // Open database
     db = await openDatabase(encryptionKey);
 
     // Run pending migrations
@@ -180,7 +174,7 @@ export async function initializeDatabase(
  * Get the current database connection
  * Throws error if database is not initialized
  */
-export function getDatabase(): SQLiteDatabase {
+export function getDatabase(): Database {
   if (!db) {
     throw new Error('Database not initialized. Call initializeDatabase() first.');
   }
@@ -239,6 +233,19 @@ export async function clearDatabaseData(
     // Re-enable foreign keys
     await database.executeSql('PRAGMA foreign_keys = ON;');
 
+    // Clear the sync watermark(s) from AsyncStorage so the next sync requests
+    // a FULL data pull instead of an incremental one against a stale
+    // last_sync_timestamp (which would leave the app believing it was already
+    // in sync and transfer nothing).
+    try {
+      await ConnectionStateManager.getInstance().clearAllLastSyncTimestamps();
+      if (!silent) {
+        log.info('Cleared last sync timestamps from AsyncStorage');
+      }
+    } catch (error) {
+      log.warn('Failed to clear last sync timestamps:', error);
+    }
+
     if (!silent) {
       log.info('Schema dropped. Re-applying migrations...');
     }
@@ -295,15 +302,18 @@ export async function wipeDatabaseCompletely(
       log.warn('Failed to clear encryption key (may not exist):', error);
     }
 
-    // Step 2b: Clear sync timestamp from AsyncStorage to allow full sync after wipe
-    // This ensures the app requests all data from Harmony Link instead of just changes since last sync
+    // Step 2b: Clear sync timestamp(s) from AsyncStorage to allow full sync after wipe
+    // This ensures the app requests ALL data from Harmony Link instead of just
+    // changes since last sync. Clears the per-source keys (selfhosted/cloud)
+    // that getLastSync()/setLastSync() use. Per-source sync behavior itself is
+    // unaffected — only the persisted watermark is removed.
     try {
-      await AsyncStorage.removeItem('last_sync_timestamp');
+      await ConnectionStateManager.getInstance().clearAllLastSyncTimestamps();
       if (!silent) {
-        log.info('Cleared last_sync_timestamp from AsyncStorage');
+        log.info('Cleared last sync timestamps from AsyncStorage');
       }
     } catch (error) {
-      log.warn('Failed to clear last_sync_timestamp:', error);
+      log.warn('Failed to clear last sync timestamps:', error);
     }
 
     // Step 3: Force a small delay to ensure SQLite releases all file handles
@@ -368,7 +378,7 @@ export async function wipeDatabaseCompletely(
 export async function executeRawQuery(
   sql: string,
   params?: any[]
-): Promise<any> {
+): Promise<DatabaseResultSet> {
   const database = getDatabase();
   const [results] = await database.executeSql(sql, params);
   return results;
@@ -393,7 +403,7 @@ export async function executeRawQuery(
  * No migrations are run on this connection; they are guaranteed to have been
  * applied already by the primary connection during `initializeDatabase()`.
  */
-export async function getSyncDatabase(): Promise<SQLiteDatabase> {
+export async function getSyncDatabase(): Promise<Database> {
   if (syncDb) {
     return syncDb;
   }
@@ -406,12 +416,14 @@ export async function getSyncDatabase(): Promise<SQLiteDatabase> {
 
   log.info('Opening secondary database connection for sync…');
 
-  const encryptionKey = await getOrCreateEncryptionKey();
-  syncDb = await SQLite.openDatabase({
+  const encryptionKey = getOrCreateEncryptionKey();
+  const rawSyncDb = await SQLite.openDatabase({
     name: DATABASE_NAME,
     location: 'default',
-    key: encryptionKey,
   });
+
+  // Wrap in ReactNativeDatabase adapter to satisfy Database interface
+  syncDb = new ReactNativeDatabase(rawSyncDb);
 
   // Apply the same PRAGMA settings (foreign keys, WAL, synchronous)
   await configureDatabase(syncDb);

@@ -114,6 +114,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'endpoint', label: 'Endpoint URL', type: 'text', required: true, placeholder: 'http://localhost:5000' },
+      { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'Optional for self-hosted HSE' },
       { key: 'model', label: 'Model', type: 'text' },
       { key: 'voice_config_file', label: 'Voice Config File', type: 'text' },
       { key: 'format', label: 'Format', type: 'text', placeholder: 'wav' },
@@ -252,7 +253,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: 'https://api.soulbits.app' },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
-      { key: 'model', label: 'Model', type: 'text', placeholder: 'soulchat-v1' },
+      { key: 'model', label: 'Model', type: 'text', placeholder: 'qwen-35-9b' },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Harmony Link server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
       { key: 'max_completion_tokens', label: 'Max Completion Tokens', type: 'number', disabledValue: 0 },

@@ -1,0 +1,294 @@
+/**
+ * Node-side Database implementation for Jest tests.
+ *
+ * Wraps better-sqlite3 to satisfy the Database interface defined in
+ * src/database/types.ts. Test-only — never imported by production code
+ * (enforced by Jest's moduleNameMapper in setup).
+ *
+ * @see docs/TESTING.md#architecture-decisions for why better-sqlite3 was chosen
+ *      over node:sqlite and why the Database abstraction exists.
+ */
+
+import Database from 'better-sqlite3';
+import type {
+  Database as IDatabase,
+  DatabaseResultSet,
+  DatabaseTransaction,
+} from '../types';
+
+export interface NodeDatabaseOptions {
+  /** ':memory:' for ephemeral fast tests, or a file path for persistence. */
+  path: string;
+  /** Skip PRAGMA setup if true (used by the snapshot test which wants vanilla schema). */
+  skipPragmas?: boolean;
+  /**
+   * If true, bind all numbers as doubles to mimic react-native-sqlite-storage's
+   * known limitation (issue #4141). Set this for tests that need to reproduce
+   * RN-specific number-binding behavior.
+   */
+  mimicRnNumberBinding?: boolean;
+}
+
+export class NodeDatabase implements IDatabase {
+  private db: Database.Database;
+  private transactionDepth = 0;
+  private opts: NodeDatabaseOptions;
+
+  constructor(opts: NodeDatabaseOptions) {
+    this.opts = opts;
+    this.db = new Database(opts.path);
+    if (!opts.skipPragmas) {
+      // Match production PRAGMAs where they are meaningful (see connection.ts
+      // configureDatabase). foreign_keys + synchronous apply to both in-memory
+      // and file-backed databases.
+      this.db.pragma('foreign_keys = ON');
+      this.db.pragma('synchronous = NORMAL');
+      // WAL only for file-backed databases. SQLite cannot use WAL with an
+      // in-memory database (it silently keeps the MEMORY journal), but asking
+      // better-sqlite3 to switch an in-memory DB into WAL mode is a known
+      // source of cross-connection state corruption under serial (single-worker)
+      // Jest execution — it manifests as flaky "constraint violation did not
+      // throw" failures when several DB test files share one worker
+      // (e.g. under --detectOpenHandles). Skipping WAL for :memory: is safe and
+      // matches SQLite's own behaviour for in-memory databases.
+      if (opts.path !== ':memory:') {
+        this.db.pragma('journal_mode = WAL');
+      }
+    }
+  }
+
+  async executeSql(sql: string, params: any[] = []): Promise<[DatabaseResultSet]> {
+    const trimmed = sql.trim().replace(/;$/, '');
+    const leading = trimmed.slice(0, 6).toUpperCase();
+
+    // Normalize params for better-sqlite3 compatibility
+    let boundParams = params.map(p => {
+      // better-sqlite3 cannot bind booleans directly — convert to 0/1
+      if (typeof p === 'boolean') return p ? 1 : 0;
+      return p;
+    });
+    if (this.opts.mimicRnNumberBinding) {
+      boundParams = boundParams.map(p =>
+        typeof p === 'number' ? Number.parseFloat(p.toString()) : p,
+      );
+    }
+
+    // Handle PRAGMA statements using better-sqlite3's native pragma() helper,
+    // which correctly handles both getters (returns rows) and setters (no rows).
+    // Using stmt.all() on a PRAGMA setter throws "This statement does not return
+    // data. Use run() instead".
+    if (leading === 'PRAGMA') {
+      // Strip 'PRAGMA' prefix for the native helper
+      const pragmaCmd = trimmed.replace(/^PRAGMA\s+/i, '');
+      const rows = this.db.pragma(pragmaCmd, { simple: false }) as Record<string, any>[];
+      return [
+        {
+          rows: {
+            length: rows.length,
+            item: (i: number) => rows[i],
+          },
+          rowsAffected: 0,
+        },
+      ];
+    }
+
+    if (leading === 'SELECT' || leading === 'WITH') {
+      const stmt = this.db.prepare(trimmed);
+      const rows = stmt.all(...boundParams) as Record<string, any>[];
+      return [
+        {
+          rows: {
+            length: rows.length,
+            item: (i: number) => rows[i],
+          },
+          rowsAffected: 0,
+        },
+      ];
+    }
+
+    // INSERT/UPDATE/DELETE/CREATE/DROP/etc.
+    const stmt = this.db.prepare(trimmed);
+    const info = stmt.run(...boundParams);
+    return [
+      {
+        rows: {
+          length: 0,
+          item: () => {
+            throw new Error('No rows for a non-SELECT statement');
+          },
+        },
+        rowsAffected: info.changes,
+        insertId:
+          info.lastInsertRowid !== null &&
+          info.lastInsertRowid !== undefined
+            ? Number(info.lastInsertRowid)
+            : undefined,
+      },
+    ];
+  }
+
+  // --- transaction overloads ---
+
+  transaction<T>(fn: (tx: DatabaseTransaction) => Promise<T>): Promise<T>;
+  transaction(
+    fn: (tx: DatabaseTransaction) => void,
+    errorCallback?: (error: Error) => void,
+    successCallback?: () => void,
+  ): void;
+  transaction<T>(
+    fn: (tx: DatabaseTransaction) => Promise<T> | void,
+    errorCallback?: (error: Error) => void,
+    successCallback?: () => void,
+  ): Promise<T> | void {
+    // For NodeDatabase, only the promise form is supported in tests.
+    // The callback form is a no-op pass-through for type compatibility.
+    if (errorCallback !== undefined || successCallback !== undefined) {
+      // Callback form: emulate a real RN SQLite transaction. All tx.executeSql
+      // calls execute SYNCHRONOUSLY inside fn (better-sqlite3 is synchronous —
+      // executeSql's async body has no awaits before the statement), so the
+      // writes are durable before COMMIT and the success callback sees the
+      // committed data. defer_foreign_keys mirrors SyncService's real
+      // transaction so cross-table FK reparenting (e.g. config id adoption)
+      // can complete before the commit-time check. Nesting uses SAVEPOINTs,
+      // matching the promise form below.
+      const depth = this.transactionDepth++;
+      const savepointName = `sp_${depth}`;
+      if (depth === 0) {
+        this.db.exec('BEGIN');
+        this.db.pragma('defer_foreign_keys = ON');
+      } else {
+        this.db.exec(`SAVEPOINT ${savepointName}`);
+      }
+
+      let txError: Error | null = null;
+      try {
+        (fn as (tx: DatabaseTransaction) => void)(this.makeTx());
+      } catch (err) {
+        txError = err as Error;
+      }
+
+      if (txError) {
+        if (depth === 0) {
+          this.db.exec('ROLLBACK');
+        } else {
+          this.db.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+          this.db.exec(`RELEASE SAVEPOINT ${savepointName}`);
+        }
+        this.transactionDepth--;
+        if (errorCallback) errorCallback(txError);
+      } else {
+        try {
+          if (depth === 0) {
+            this.db.exec('COMMIT');
+          } else {
+            this.db.exec(`RELEASE SAVEPOINT ${savepointName}`);
+          }
+          this.transactionDepth--;
+          if (successCallback) successCallback();
+        } catch (commitErr) {
+          // Deferred FK (or any) failure surfaced at COMMIT.
+          try {
+            this.db.exec('ROLLBACK');
+          } catch {
+            // Best-effort rollback.
+          }
+          this.transactionDepth--;
+          if (errorCallback) errorCallback(commitErr as Error);
+        }
+      }
+      return;
+    }
+
+    return this.transactionImpl(fn as (tx: DatabaseTransaction) => Promise<T>);
+  }
+
+  private async transactionImpl<T>(
+    fn: (tx: DatabaseTransaction) => Promise<T>,
+  ): Promise<T> {
+    const depth = this.transactionDepth++;
+    const savepointName = `sp_${depth}`;
+    const tx = this.makeTx();
+
+    if (depth === 0) {
+      this.db.exec('BEGIN');
+    } else {
+      this.db.exec(`SAVEPOINT ${savepointName}`);
+    }
+
+    try {
+      const result = await fn(tx);
+      if (depth === 0) {
+        this.db.exec('COMMIT');
+      } else {
+        this.db.exec(`RELEASE SAVEPOINT ${savepointName}`);
+      }
+      this.transactionDepth--;
+      return result;
+    } catch (err) {
+      if (depth === 0) {
+        this.db.exec('ROLLBACK');
+      } else {
+        this.db.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+        this.db.exec(`RELEASE SAVEPOINT ${savepointName}`);
+      }
+      this.transactionDepth--;
+      throw err;
+    }
+  }
+
+  private makeTx(): DatabaseTransaction {
+    // Use a function that accepts all overload forms and delegates to executeSql
+    const executeSqlFn = (
+      sql: string,
+      params?: any[],
+      successCallback?: any,
+      errorCallback?: any,
+    ): any => {
+      const promise = this.executeSql(sql, params);
+      if (successCallback !== undefined || errorCallback !== undefined) {
+        // Callback form: invoke callbacks based on Promise resolution
+        promise.then(
+          (result) => {
+            if (successCallback) successCallback(null, result[0]);
+          },
+          (error) => {
+            if (errorCallback) errorCallback(null, error);
+          },
+        );
+        return; // void return for callback overload
+      }
+      return promise;
+    };
+    return {executeSql: executeSqlFn as DatabaseTransaction['executeSql']};
+  }
+
+  close(): Promise<void> {
+    try {
+      this.db.close();
+    } catch (err) {
+      // Idempotent close — match RN's behavior of not throwing on double-close.
+      if (
+        (err as Error).message !==
+        'Cannot close a database while it is opening or closing.'
+      ) {
+        throw err;
+      }
+    }
+    return Promise.resolve();
+  }
+
+  /** Exposed for tests that want to drop all tables (parallels clearDatabaseData). */
+  async dropAllTables(): Promise<void> {
+    this.db.pragma('foreign_keys = OFF');
+    const tables = this.db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+      )
+      .all() as Array<{ name: string }>;
+    for (const { name } of tables) {
+      // name comes from sqlite_master, not user input — safe to interpolate.
+      this.db.exec(`DROP TABLE IF EXISTS ${name};`);
+    }
+    this.db.pragma('foreign_keys = ON');
+  }
+}

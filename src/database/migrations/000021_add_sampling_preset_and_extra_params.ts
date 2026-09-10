@@ -20,7 +20,8 @@ ALTER TABLE provider_config_openrouter ADD COLUMN sampling_preset_name TEXT NOT 
 ALTER TABLE provider_config_openrouter ADD COLUMN extra_params TEXT NOT NULL DEFAULT '{}';
 
 -- Drop deprecated chat_template_kwargs column (replaced by extra_params)
-ALTER TABLE provider_config_openai DROP COLUMN chat_template_kwargs;
-ALTER TABLE provider_config_openaicompatible DROP COLUMN chat_template_kwargs;
-ALTER TABLE provider_config_openrouter DROP COLUMN chat_template_kwargs;
+-- FIXME: Properly handle drop columns here in a later migration, since SQLite does NOT support this pattern
+-- ALTER TABLE provider_config_openai DROP COLUMN chat_template_kwargs;
+-- ALTER TABLE provider_config_openaicompatible DROP COLUMN chat_template_kwargs;
+-- ALTER TABLE provider_config_openrouter DROP COLUMN chat_template_kwargs;
 `;

@@ -1,0 +1,35 @@
+# e2e/Dockerfile.maestro
+# ─────────────────────────────────────────────────────────────────────────────
+# Maestro test runner image
+#
+# Base: Ubuntu 22.04 with JDK 17 (for Android SDK tooling), ADB, curl, and
+# the Maestro CLI. This image is built fresh per-run (or cached locally) and
+# used as the maestro-runner service in docker-compose.yml.
+#
+# The image is intentionally minimal — flows and the APK are mounted as
+# volumes at runtime, not baked into the image.
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system prerequisites
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openjdk-17-jdk \
+    android-tools-adb \
+    curl \
+    ca-certificates \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Maestro CLI via the official install script
+# This installs to /root/.maestro/bin/
+RUN curl -fsSL "https://get.maestro.mobile.dev" | bash
+ENV PATH="$PATH:/root/.maestro/bin"
+
+WORKDIR /app
+
+# Default command (overridden by docker-compose command block)
+CMD ["maestro", "--help"]

@@ -3,11 +3,12 @@
  */
 import React, { memo, useState } from 'react';
 import { TouchableOpacity, StyleSheet, View, Modal, Text } from 'react-native';
-import { useEmoji } from '../../contexts/EmojiContext';
+import { useEmojiPreferences } from '../../contexts/EmojiContext';
 import { EmojiEntry } from '../../types/emoji';
 import { EmojiAction } from '../../database/models';
 import { Theme } from '../../theme/types';
 import EmojiText from './EmojiText';
+import { hapticLightPress } from '../../utils/haptics';
 
 // ActionPreviewPopup sub-component
 interface ActionPreviewPopupProps {
@@ -94,7 +95,7 @@ interface EmojiItemProps {
 }
 
 export const EmojiItem: React.FC<EmojiItemProps> = memo(({ emoji, size, onPress, onLongPress, action, theme }) => {
-  const { skinTone } = useEmoji();
+  const { skinTone } = useEmojiPreferences();
   const [popupVisible, setPopupVisible] = useState(false);
 
   const hasAction = action !== null && action !== undefined;
@@ -136,7 +137,10 @@ export const EmojiItem: React.FC<EmojiItemProps> = memo(({ emoji, size, onPress,
     <>
       <TouchableOpacity
         style={[styles.container, { width: size, height: size }]}
-        onPress={handlePress}
+        onPress={() => {
+          hapticLightPress();
+          handlePress();
+        }}
         onLongPress={handleLongPress}
         activeOpacity={0.7}
         delayLongPress={300}

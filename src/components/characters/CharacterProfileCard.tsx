@@ -9,7 +9,11 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
+import { SoulIcon } from '../market/SoulIcon';
+import { hexToRgba } from '../../utils/colorUtils';
+import { hapticLightPress } from '../../utils/haptics';
 import { CharacterProfile } from '../../database/models';
 
 interface CharacterProfileCardProps {
@@ -18,23 +22,66 @@ interface CharacterProfileCardProps {
   imageCount?: number;     // total images this profile has
   onPress: () => void;
   onLongPress: () => void;
+  onChatPress: () => void;
+  /**
+   * Tap handler for the creator attribution line (4-3). When set, the compact
+   * "by {creator}" row becomes tappable and drives the management-screen
+   * creator filter. Optional — cards render the row read-only without it.
+   */
+  onCreatorPress?: (creator: string) => void;
+  /** True when this profile is in the user's favorites */
+  isFavorite?: boolean;
+  /** Toggle favorite state for this profile */
+  onFavoriteToggle?: () => void;
+  /**
+   * When set (> 0), this character is listed on the Marketplace with this
+   * SOUL price — renders a price pill over the portrait so Discover shows
+   * the paid state (chat requires a purchase).
+   */
+  priceSouls?: number;
 }
 
+/**
+ * Obsidian Glass Character Card.
+ *
+ * Anatomy (outside → in):
+ *   1. Ambient neon glow shadow — accent-colored radiant halo that floats
+ *      the card above the aurora background.
+ *   2. 1dp hairline gradient border — polished silver top-left catching
+ *      the light, fading into muted accent purple at bottom-right.
+ *   3. Deep Obsidian Glass body — rich translucent fill at theme-governed
+ *      opacity, dark enough for crisp text while the aurora bleeds through.
+ *   4. Image area — 3:4 portrait clipped to the card's top rounded corners,
+ *      with a dark fade overlay blending into the glass text area below.
+ *   5. Specular sweep — diagonal white light refraction across the text
+ *      area for a premium glass-surface feel.
+ *   6. Prismatic accent tint — accent primary at ~5 % opacity from top-left.
+ *   7. Left accent stripe — 3px vertical gradient (primary → secondary)
+ *      running the full card height.
+ *   8. Spring-scale press animation — 0.95 shrink with gentle bounce-back.
+ */
 export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
   profile,
   imageUri,
   imageCount = 0,
   onPress,
   onLongPress,
+  onChatPress,
+  onCreatorPress,
+  isFavorite = false,
+  onFavoriteToggle,
+  priceSouls,
 }) => {
   const { theme } = useAppTheme();
+  const { t } = useTranslation('characters');
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
-      toValue: 0.96,
+      toValue: 0.95,
       useNativeDriver: true,
-      speed: 20,
+      speed: 24,
+      bounciness: 4,
     }).start();
   };
 
@@ -42,122 +89,254 @@ export const CharacterProfileCard: React.FC<CharacterProfileCardProps> = ({
     Animated.spring(scaleAnim, {
       toValue: 1,
       useNativeDriver: true,
-      speed: 20,
+      speed: 24,
+      bounciness: 4,
     }).start();
   };
 
   if (!theme) return null;
 
+  const glass = theme.colors.glass;
+  const accent = theme.colors.accent;
+  const bgHex = theme.colors.background.elevated;
+  const glassFill = hexToRgba(bgHex, glass.cardOpacity);
+  const textFill = hexToRgba(theme.colors.background.surface, glass.cardOpacity + 0.08);
+  const accentSecondary = accent.secondary ?? accent.primaryHover;
+
   return (
     <Animated.View
-      style={[styles.wrapper, { transform: [{ scale: scaleAnim }] }]}
+      style={[
+        styles.wrapper,
+        { transform: [{ scale: scaleAnim }] },
+        {
+          // ── Ambient neon glow shadow ──
+          shadowColor: accent.primary,
+          shadowOffset: { width: 0, height: 6 },
+          shadowOpacity: glass.glowOpacity,
+          shadowRadius: glass.glowRadius,
+          elevation: 8,
+        },
+      ]}
     >
       <TouchableOpacity
-        style={[
-          styles.card,
-          { borderColor: theme.colors.border.default + '66' },
-        ]}
         onPress={onPress}
         onLongPress={onLongPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         activeOpacity={1}
         delayLongPress={400}
+        testID="character-profile-card"
+        accessibilityLabel={`Character profile: ${profile.name}`}
       >
-        {/* Gradient card background */}
+        {/* ── 1dp hairline gradient border ── */}
         <LinearGradient
-          colors={[
-            theme.colors.background.elevated,
-            theme.colors.background.surface,
-          ]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-        />
-
-        {/* Image area — 3:4 aspect ratio */}
-        <View
-          style={[
-            styles.imageContainer,
-            { backgroundColor: theme.colors.background.base },
-          ]}
+          colors={[glass.borderGradientStart, glass.borderGradientEnd]}
+          start={{ x: 0.15, y: 0 }}
+          end={{ x: 0.85, y: 1 }}
+          style={styles.border}
         >
-          {imageUri ? (
-            <Image
-              source={{ uri: imageUri }}
-              style={styles.image}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.placeholder}>
-              <Icon
-                name="account"
-                size={48}
-                color={theme.colors.text.disabled ?? theme.colors.text.muted}
-              />
-            </View>
-          )}
-
-          {/* Image count badge */}
-          {imageCount > 1 && (
+          {/* ── Deep Obsidian Glass body ── */}
+          <View style={[styles.body, { backgroundColor: glassFill }]}>
+            {/* ── Image area (3:4 portrait) ── */}
             <View
               style={[
-                styles.imageBadge,
-                { backgroundColor: 'rgba(0,0,0,0.58)' },
+                styles.imageContainer,
+                { backgroundColor: theme.colors.background.base },
               ]}
             >
-              <Icon name="image-multiple-outline" size={10} color="#fff" />
-              <ThemedText
-                size={10}
-                weight="medium"
-                style={styles.imageBadgeText}
+              {imageUri ? (
+                <Image
+                  source={{ uri: imageUri }}
+                  style={styles.image}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.placeholder}>
+                  <Icon
+                    name="account"
+                    size={44}
+                    color={theme.colors.text.disabled ?? theme.colors.text.muted}
+                  />
+                </View>
+              )}
+
+              {/* Image count badge — glass pill */}
+              {imageCount > 1 && (
+                <View style={styles.imageBadge}>
+                  <Icon name="image-multiple-outline" size={10} color="#fff" />
+                  <ThemedText
+                    size={10}
+                    weight="medium"
+                    style={styles.imageBadgeText}
+                  >
+                    {imageCount}
+                  </ThemedText>
+                </View>
+              )}
+
+              {/* Marketplace price pill — shown when the character is listed
+                  for sale. The chat button on this card (and the AI profile)
+                  runs the purchase gate. */}
+              {priceSouls != null && priceSouls > 0 && (
+                <View style={styles.priceBadge}>
+                  <SoulIcon size={12} />
+                  <ThemedText
+                    size={11}
+                    weight="bold"
+                    style={styles.priceBadgeText}
+                  >
+                    {Number.isInteger(priceSouls)
+                      ? String(priceSouls)
+                      : priceSouls.toFixed(2)}
+                  </ThemedText>
+                </View>
+              )}
+
+              {/* Chat button — floating glass pill over the image. Nested
+                  TouchableOpacity captures the touch so tapping it does NOT
+                  trigger the parent card's onPress/onLongPress. */}
+              <TouchableOpacity
+                onPress={() => {
+                  hapticLightPress();
+                  onChatPress();
+                }}
+                onPressIn={e => e.stopPropagation()}
+                onPressOut={e => e.stopPropagation()}
+                activeOpacity={0.82}
+                style={styles.chatButton}
+                testID="character-chat-button"
+                accessibilityRole="button"
+                accessibilityLabel={`Chat with ${profile.name}`}
               >
-                {imageCount}
-              </ThemedText>
+                <LinearGradient
+                  colors={[accent.primary, accentSecondary]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.chatButtonFill}
+                >
+                  <Icon name="chat-processing-outline" size={16} color="#fff" />
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Favorite button — floating heart over the image, shown when
+                  onFavoriteToggle is provided. Captures the touch so it does
+                  NOT trigger the parent card's onPress/onLongPress. */}
+              {onFavoriteToggle && (
+                <TouchableOpacity
+                  onPress={() => {
+                    hapticLightPress();
+                    onFavoriteToggle();
+                  }}
+                  onPressIn={e => e.stopPropagation()}
+                  onPressOut={e => e.stopPropagation()}
+                  activeOpacity={0.82}
+                  style={styles.favButton}
+                  testID="character-favorite-button"
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isFavorite
+                      ? `Remove ${profile.name} from favorites`
+                      : `Add ${profile.name} to favorites`
+                  }
+                >
+                  <Icon
+                    name={isFavorite ? 'heart' : 'heart-outline'}
+                    size={22}
+                    color={isFavorite ? accent.primary : '#fff'}
+                    style={styles.favIcon}
+                  />
+                </TouchableOpacity>
+              )}
+
+              {/* Dark fade overlay — blends image into glass text area */}
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.50)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={styles.imageOverlay}
+                pointerEvents="none"
+              />
             </View>
-          )}
 
-          {/* Gradient overlay at bottom of image */}
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.35)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={styles.imageOverlay}
-            pointerEvents="none"
-          />
-        </View>
+            {/* ── Text area (surface-tinted glass) ── */}
+            <View style={[styles.textContainer, { backgroundColor: textFill }]}>
+              {/* Specular sweep — diagonal light refraction */}
+              <LinearGradient
+                colors={['rgba(255,255,255,0.10)', 'transparent']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0.7, y: 1 }}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
 
-        {/* Text area */}
-        <View style={styles.textContainer}>
-          <ThemedText
-            weight="bold"
-            size={14}
-            numberOfLines={1}
-            style={[styles.name, { color: theme.colors.accent.primary }]}
-          >
-            {profile.name}
-          </ThemedText>
-          <ThemedText
-            variant="muted"
-            size={12}
-            numberOfLines={2}
-            style={styles.description}
-          >
-            {profile.description || 'No description provided.'}
-          </ThemedText>
-        </View>
+              {/* Prismatic accent tint — subtle color bleed from top-left */}
+              <LinearGradient
+                colors={[accent.primary + '0D', 'transparent']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
 
-        {/* Left accent stripe */}
-        {/* <LinearGradient
-          colors={[
-            theme.colors.accent.primary,
-            theme.colors.accent.secondary ?? theme.colors.accent.primaryHover,
-          ]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={styles.accentStripe}
-          pointerEvents="none"
-        /> */}
+              <ThemedText
+                weight="bold"
+                size={13}
+                numberOfLines={1}
+                style={[styles.name, { color: accent.primary }]}
+              >
+                {profile.name}
+              </ThemedText>
+              <ThemedText
+                variant="muted"
+                size={11}
+                numberOfLines={2}
+                style={styles.description}
+              >
+                {profile.description || 'No description provided.'}
+              </ThemedText>
+
+              {/* Compact creator attribution (4-3) — tappable to filter.
+                  The full CreatorAttributionBadge is editor-width; the grid
+                  card gets a compact, actionable row instead. */}
+              {profile.creator ? (
+                <TouchableOpacity
+                  onPress={() => onCreatorPress?.(profile.creator as string)}
+                  disabled={!onCreatorPress}
+                  style={styles.creatorRow}
+                  testID={`creator-attribution-${profile.id}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('byCreator', { creator: profile.creator })}
+                >
+                  <Icon
+                    name="account-outline"
+                    size={12}
+                    color={accent.primary}
+                  />
+                  <ThemedText
+                    variant="muted"
+                    size={10}
+                    numberOfLines={1}
+                    style={styles.creatorText}
+                  >
+                    {t('byCreator', { creator: profile.creator })}
+                    {profile.character_version
+                      ? ` · v${profile.character_version}`
+                      : ''}
+                  </ThemedText>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            {/* ── Left accent stripe ── */}
+            <LinearGradient
+              colors={[accent.primary, accentSecondary]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.accentStripe}
+              pointerEvents="none"
+            />
+          </View>
+        </LinearGradient>
       </TouchableOpacity>
     </Animated.View>
   );
@@ -168,14 +347,23 @@ const styles = StyleSheet.create({
     flex: 1, // fills one column in FlatList numColumns={2}
     maxWidth: '50%',
   },
-  card: {
-    borderRadius: 12,
-    borderWidth: 1,
+  // ── 1dp hairline gradient border (outer shell) ──
+  border: {
+    borderRadius: 16,
+    padding: StyleSheet.hairlineWidth,
+  },
+  // ── Glass body (inner content area) ──
+  body: {
+    borderRadius: 15,
     overflow: 'hidden',
   },
+  // ── Image area ──
   imageContainer: {
     aspectRatio: 3 / 4,
     width: '100%',
+    borderTopLeftRadius: 15,
+    borderTopRightRadius: 15,
+    overflow: 'hidden',
   },
   image: {
     width: '100%',
@@ -186,43 +374,121 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  // ── Bottom fade overlay on image ──
   imageOverlay: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    height: 40,
+    height: 48,
   },
+  // ── Image count badge ──
   imageBadge: {
     position: 'absolute',
-    bottom: 6,
-    right: 6,
+    bottom: 8,
+    right: 8,
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: 10,
-    paddingHorizontal: 6,
+    paddingHorizontal: 7,
     paddingVertical: 3,
     gap: 3,
   },
   imageBadgeText: {
     color: '#fff',
   },
+  // ── Marketplace price pill ──
+  priceBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 59, 167, 0.78)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    gap: 3,
+  },
+  priceBadgeText: {
+    color: '#ffffff',
+  },
+  // ── Chat button (floating over the image) ──
+  chatButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    // Dark glass shell + subtle glow so it reads on any image
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.15)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 4,
+    overflow: 'hidden',
+  },
+  chatButtonFill: {
+    flex: 1,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // ── Favorite button (floating heart over the image, bottom-left) ──
+  // Clean icon only — no circle backdrop. A soft shadow keeps the heart
+  // readable over any portrait.
+  favButton: {
+    position: 'absolute',
+    bottom: 6,
+    left: 8,
+    padding: 4,
+  },
+  favIcon: {
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 1.5 },
+    textShadowRadius: 3,
+  },
+  // ── Text area ──
   textContainer: {
-    padding: 10,
-    gap: 4,
+    padding: 12,
+    gap: 3,
   },
   name: {
-    letterSpacing: 0.1,
+    letterSpacing: 0.2,
   },
   description: {
-    lineHeight: 16,
-    minHeight: 32, // reserve space for 2 lines even when empty
+    lineHeight: 15,
+    minHeight: 30, // reserve space for 2 lines
   },
-  // accentStripe: {
-  //   position: 'absolute',
-  //   top: 0,
-  //   left: 0,
-  //   bottom: 0,
-  //   width: 3,
-  // },
+  // ── Compact creator attribution row (4-3) ──
+  creatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  creatorText: {
+    flexShrink: 1,
+  },
+  // ── Left accent stripe ──
+  accentStripe: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: 3,
+    borderTopLeftRadius: 15,
+    borderBottomLeftRadius: 15,
+  },
 });

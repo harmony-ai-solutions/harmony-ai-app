@@ -128,7 +128,7 @@ export async function updateBackendConfig(config: BackendConfig): Promise<void> 
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE backend_configs
-       SET name = ?, provider = ?, provider_config_id = ?
+       SET name = ?, provider = ?, provider_config_id = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [config.name, config.provider, config.provider_config_id, config.id]
     );
@@ -151,28 +151,21 @@ export async function isBackendConfigInUse(id: string): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteBackendConfig(id: string, permanent = false): Promise<void> {
+export async function deleteBackendConfig(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isBackendConfigInUse(id)) {
+
+  if (await isBackendConfigInUse(id)) {
     throw new Error(`Backend config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM backend_configs WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`Backend config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE backend_configs SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`Backend config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE backend_configs SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`Backend config not found: ${id}`);
     }
   });
 }
@@ -303,7 +296,7 @@ export async function updateCognitionConfig(config: CognitionConfig): Promise<vo
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE cognition_configs
-       SET name = ?, provider = ?, provider_config_id = ?, max_cognition_events = ?, generate_expressions = ?
+       SET name = ?, provider = ?, provider_config_id = ?, max_cognition_events = ?, generate_expressions = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,
@@ -333,28 +326,21 @@ export async function isCognitionConfigInUse(id: string): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteCognitionConfig(id: string, permanent = false): Promise<void> {
+export async function deleteCognitionConfig(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isCognitionConfigInUse(id)) {
+
+  if (await isCognitionConfigInUse(id)) {
     throw new Error(`Cognition config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM cognition_configs WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`Cognition config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE cognition_configs SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`Cognition config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE cognition_configs SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`Cognition config not found: ${id}`);
     }
   });
 }
@@ -485,7 +471,7 @@ export async function updateMovementConfig(config: MovementConfig): Promise<void
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE movement_configs
-       SET name = ?, provider = ?, provider_config_id = ?, startup_sync_timeout = ?, execution_threshold = ?
+       SET name = ?, provider = ?, provider_config_id = ?, startup_sync_timeout = ?, execution_threshold = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,
@@ -515,28 +501,21 @@ export async function isMovementConfigInUse(id: string): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteMovementConfig(id: string, permanent = false): Promise<void> {
+export async function deleteMovementConfig(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isMovementConfigInUse(id)) {
+
+  if (await isMovementConfigInUse(id)) {
     throw new Error(`Movement config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM movement_configs WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`Movement config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE movement_configs SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`Movement config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE movement_configs SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`Movement config not found: ${id}`);
     }
   });
 }
@@ -663,7 +642,7 @@ export async function updateRAGConfig(config: RAGConfig): Promise<void> {
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE rag_configs
-       SET name = ?, provider = ?, provider_config_id = ?, embedding_concurrency = ?
+       SET name = ?, provider = ?, provider_config_id = ?, embedding_concurrency = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,
@@ -692,28 +671,21 @@ export async function isRAGConfigInUse(id: string): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteRAGConfig(id: string, permanent = false): Promise<void> {
+export async function deleteRAGConfig(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isRAGConfigInUse(id)) {
+
+  if (await isRAGConfigInUse(id)) {
     throw new Error(`RAG config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM rag_configs WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`RAG config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE rag_configs SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`RAG config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE rag_configs SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`RAG config not found: ${id}`);
     }
   });
 }
@@ -873,7 +845,7 @@ export async function updateSTTConfig(config: STTConfig): Promise<void> {
       `UPDATE stt_configs
        SET name = ?, main_stream_time_millis = ?, transition_stream_time_millis = ?, max_buffer_count = ?,
            transcription_provider = ?, transcription_provider_config_id = ?,
-           vad_provider = ?, vad_provider_config_id = ?
+           vad_provider = ?, vad_provider_config_id = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,
@@ -906,28 +878,21 @@ export async function isSTTConfigInUse(id: string): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteSTTConfig(id: string, permanent = false): Promise<void> {
+export async function deleteSTTConfig(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isSTTConfigInUse(id)) {
+
+  if (await isSTTConfigInUse(id)) {
     throw new Error(`STT config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM stt_configs WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`STT config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE stt_configs SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`STT config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE stt_configs SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`STT config not found: ${id}`);
     }
   });
 }
@@ -1062,7 +1027,7 @@ export async function updateTTSConfig(config: TTSConfig): Promise<void> {
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE tts_configs
-       SET name = ?, provider = ?, provider_config_id = ?, output_type = ?, words_to_replace = ?, vocalize_nonverbal = ?
+       SET name = ?, provider = ?, provider_config_id = ?, output_type = ?, words_to_replace = ?, vocalize_nonverbal = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name,
@@ -1093,28 +1058,21 @@ export async function isTTSConfigInUse(id: string): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteTTSConfig(id: string, permanent = false): Promise<void> {
+export async function deleteTTSConfig(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isTTSConfigInUse(id)) {
+
+  if (await isTTSConfigInUse(id)) {
     throw new Error(`TTS config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM tts_configs WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`TTS config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE tts_configs SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`TTS config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE tts_configs SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`TTS config not found: ${id}`);
     }
   });
 }
@@ -1239,7 +1197,7 @@ export async function updateVisionConfig(config: VisionConfig): Promise<void> {
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE vision_configs
-       SET name = ?, provider = ?, provider_config_id = ?, resolution_width = ?, resolution_height = ?
+       SET name = ?, provider = ?, provider_config_id = ?, resolution_width = ?, resolution_height = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [config.name, config.provider, config.provider_config_id, config.resolution_width, config.resolution_height, config.id]
     );
@@ -1262,28 +1220,21 @@ export async function isVisionConfigInUse(id: string): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteVisionConfig(id: string, permanent = false): Promise<void> {
+export async function deleteVisionConfig(id: string): Promise<void> {
   const db = getDatabase();
-  
-  if (!permanent && await isVisionConfigInUse(id)) {
+
+  if (await isVisionConfigInUse(id)) {
     throw new Error(`Vision config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM vision_configs WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`Vision config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE vision_configs SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`Vision config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE vision_configs SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`Vision config not found: ${id}`);
     }
   });
 }
@@ -1400,7 +1351,7 @@ export async function updateImaginationConfig(config: ImaginationConfig): Promis
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
       `UPDATE imagination_configs
-       SET name = ?, provider = ?, provider_config_id = ?
+       SET name = ?, provider = ?, provider_config_id = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [config.name, config.provider, config.provider_config_id, config.id]
     );
@@ -1423,28 +1374,21 @@ export async function isImaginationConfigInUse(id: string): Promise<boolean> {
   return results.rows.item(0).count > 0;
 }
 
-export async function deleteImaginationConfig(id: string, permanent = false): Promise<void> {
+export async function deleteImaginationConfig(id: string): Promise<void> {
   const db = getDatabase();
 
-  if (!permanent && await isImaginationConfigInUse(id)) {
+  if (await isImaginationConfigInUse(id)) {
     throw new Error(`Imagination config ${id} is in use and cannot be soft deleted`);
   }
 
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM imagination_configs WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) {
-        throw new Error(`Imagination config not found: ${id}`);
-      }
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql(
-        'UPDATE imagination_configs SET deleted_at = ? WHERE id = ?',
-        [now, id]
-      );
-      if (result.rowsAffected === 0) {
-        throw new Error(`Imagination config not found: ${id}`);
-      }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql(
+      'UPDATE imagination_configs SET deleted_at = ? WHERE id = ?',
+      [now, id]
+    );
+    if (result.rowsAffected === 0) {
+      throw new Error(`Imagination config not found: ${id}`);
     }
   });
 }

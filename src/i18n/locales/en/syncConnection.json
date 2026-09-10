@@ -1,0 +1,18 @@
+{
+  "connectedToast": "Connected to Harmony Link",
+  "connectionError": "Connection error: {{message}}",
+  "syncComplete": "Sync complete! Sent: {{sent}}, Received: {{received}}",
+  "syncFailed": "Sync failed: {{error}}",
+  "syncRejected": "Sync rejected: {{message}}",
+  "failedToConnect": "Failed to connect to Harmony Link",
+  "handshakeTimeout": "Handshake connection timeout",
+  "alertTitle": "Harmony Link",
+  "sizeEstimateConfirm": "Sync {{records}} records ({{mb}} MB) from Harmony Link?",
+  "sizeEstimateConfirmImages": "Sync {{records}} records ({{mb}} MB, including {{images}} images) from Harmony Link?",
+  "nameClashTitle": "Sync Name Conflict",
+  "nameClashMessage": "A name conflict was found for \"{{name}}\" ({{table}}). This happens when this device and Harmony Link each have an entry with the same name. Choose how to resolve it:",
+  "nameClashOverwrite": "Overwrite",
+  "nameClashKeep": "Keep",
+  "nameClashRename": "Rename",
+  "nameClashApplyToAll": "Apply to all"
+}

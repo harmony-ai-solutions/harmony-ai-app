@@ -10,4 +10,3 @@ export { EmojiPickerInline } from './EmojiPickerInline';
 export { EmojiSearchBar } from './EmojiSearchBar';
 export { SkinToneSelector } from './SkinToneSelector';
 export { EmojiAwareText } from './EmojiAwareText';
-export { EmojiAutocomplete } from './EmojiAutocomplete';

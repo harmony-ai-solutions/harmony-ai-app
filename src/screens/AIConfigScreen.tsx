@@ -1,34 +1,39 @@
-import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { Appbar } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
+import React, { useState, useCallback } from 'react';
+import { StyleSheet, View, ScrollView, RefreshControl } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
-import { SettingsMenu } from '../components/navigation/SettingsMenu';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 
 export const AIConfigScreen: React.FC<any> = ({ navigation }) => {
     const { theme } = useAppTheme();
     const { t } = useTranslation('config');
-    const [menuVisible, setMenuVisible] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
 
     if (!theme) return null;
 
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        setTimeout(() => setRefreshing(false), 800);
+    }, []);
+
     return (
         <ThemedView style={styles.container}>
-            <ThemedAppbar style={styles.header}>
-                <Appbar.Content
-                    title={t('aiConfig')}
-                    titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-                />
-                <Appbar.Action
-                    icon={() => <Icon name="menu" size={24} color={theme.colors.text.primary} />}
-                    onPress={() => setMenuVisible(true)}
-                />
-            </ThemedAppbar>
+            <ScreenHeader title={t('aiConfig')} />
 
+            <ScrollView
+                contentContainerStyle={styles.scrollContent}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        colors={[theme!.colors.accent.primary]}
+                        tintColor={theme!.colors.accent.primary}
+                        progressBackgroundColor={theme!.colors.background.surface}
+                    />
+                }
+            >
             <View style={styles.content}>
                 <ThemedText weight="bold" size={24}>
                     {t('aiConfig')}
@@ -37,12 +42,8 @@ export const AIConfigScreen: React.FC<any> = ({ navigation }) => {
                     {t('common:comingSoon')}
                 </ThemedText>
             </View>
+            </ScrollView>
 
-            <SettingsMenu
-                visible={menuVisible}
-                onClose={() => setMenuVisible(false)}
-                onNavigate={(screen) => navigation.navigate(screen)}
-            />
         </ThemedView>
     );
 };
@@ -51,8 +52,8 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    header: {
-        elevation: 4,
+    scrollContent: {
+        flexGrow: 1,
     },
     content: {
         flex: 1,

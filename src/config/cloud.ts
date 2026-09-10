@@ -17,9 +17,43 @@
  *   expression must be updated to `Config?.IS_BETA === true || Config?.IS_BETA === 'true'`.
  *   For now the `=== true` arm fires on Android (real boolean) and is
  *   a no-op on iOS until 8-1c resolves the type story.
+ *
+ * Local backend override:
+ *   Set USE_LOCAL_BACKEND = true to route all cloud traffic to a local
+ *   soulbits-cloud-backend docker-compose stack for end-to-end debugging.
+ *   See the "Local backend override" section below.
  */
 
 import Config from 'react-native-config';
+import { Platform } from 'react-native';
+
+// ── Local backend override ─────────────────────────────────────────────
+// Flip to true in __DEV__ to route all cloud traffic to a local
+// soulbits-cloud-backend docker-compose stack instead of the beta cloud.
+// Only effective in __DEV__ builds — production always uses cloud hosts.
+//
+// Prerequisites:
+//   cd soulbits-cloud-backend
+//   docker compose --profile services up
+//   docker compose ps   # wait for all services to report "healthy"
+//
+// The Android emulator reaches the host machine's localhost via 10.0.2.2
+// (QEMU loopback alias).  iOS Simulator uses localhost directly.
+//
+// Service ports (matching soulbits-cloud-backend/docker-compose.yml):
+//   auth-service       :8083   /v1/auth/*
+//   session-broker     :8080   /v1/session/*
+//   conduct-proxy      :8085   /ws/sync, /ws/worker  (WebSocket)
+//   inference-gateway  :8082   /v1/inference/*
+const USE_LOCAL_BACKEND = false;
+
+const LOCAL_HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+const LOCAL_PORTS = {
+  auth: 8083,
+  sessionBroker: 8080,
+  conductProxy: 8085,
+  inference: 8082,
+};
 
 // ── Flavour detection ──────────────────────────────────────────────────
 // __DEV__ fallback so local Metro (no native flavour) resolves to beta.*.
@@ -28,18 +62,58 @@ const IS_BETA: boolean = __DEV__
   ? true
   : (Config?.IS_BETA === true || Config?.IS_BETA === 'true');
 
+/**
+ * Active build environment ('dev' | 'prod').
+ *
+ * Injected per-flavour by scripts/oauth-secrets.cjs:
+ *   - iOS/Metro → APP_ENV written into the generated .env
+ *   - Android   → APP_ENV written into gradle-secrets.<flavor>.properties
+ * Falls back to 'dev' (__DEV__) so local Metro resolves to the dev flavour
+ * even when the native build hasn't regenerated config yet.
+ */
+const APP_ENV: string = Config?.APP_ENV || (__DEV__ ? 'dev' : 'prod');
+
+// OAuth identifiers are injected at build time from the gitignored GCP
+// client_secret_*.json files (see scripts/oauth-secrets.cjs) — never
+// hardcoded in this repo.
 const GOOGLE_WEB_CLIENT_ID: string = Config?.GOOGLE_WEB_CLIENT_ID ?? '';
 const APPLE_SERVICES_ID: string = Config?.APPLE_SERVICES_ID ?? '';
 
 const SUFFIX = IS_BETA ? 'beta.' : '';
 
-// ── External hosts ─────────────────────────────────────────────────────
-// Auth / session-broker / subscription share the same host.
-// Inference gateway and conduct proxy WS are separate subdomains.
+// ── Host resolution ────────────────────────────────────────────────────
+// Cloud: a single hostname per subdomain; an API gateway / ALB routes by
+//        path prefix (/v1/auth/* → auth-service, /v1/session/* → broker).
+// Local: no API gateway in docker-compose — each service is on its own
+//        port, so auth and session endpoints need separate base URLs.
+const useLocal = __DEV__ && USE_LOCAL_BACKEND;
+
+const AUTH_HOST = useLocal
+  ? `http://${LOCAL_HOST}:${LOCAL_PORTS.auth}`
+  : `https://${SUFFIX}cloud.soulbits.app`;
+
+const SESSION_HOST = useLocal
+  ? `http://${LOCAL_HOST}:${LOCAL_PORTS.sessionBroker}`
+  : `https://${SUFFIX}cloud.soulbits.app`;
+
+const WS_HOST = useLocal
+  ? `ws://${LOCAL_HOST}:${LOCAL_PORTS.conductProxy}`
+  : `wss://${SUFFIX}connect.soulbits.app`;
+
+const INFERENCE_HOST = useLocal
+  ? `http://${LOCAL_HOST}:${LOCAL_PORTS.inference}`
+  : `https://${SUFFIX}api.soulbits.app`;
+
+// ── External hosts (backward-compatible export) ────────────────────────
+// `session` is the session-broker host — used as the Soulbits client's
+// `cloudURL` base for the `session.*` sub-API (POST /v1/session/connect &
+// /disconnect). In cloud mode it equals `auth` (API gateway routes by path);
+// in local dev the broker runs on its own port (see LOCAL_PORTS).
 export const CLOUD_HOSTS = {
-  auth: `https://${SUFFIX}cloud.soulbits.app`,
-  inference: `https://${SUFFIX}api.soulbits.app`,
-  conductProxyWs: `wss://${SUFFIX}connect.soulbits.app`,
+  auth: AUTH_HOST,
+  session: SESSION_HOST,
+  inference: INFERENCE_HOST,
+  conductProxyWs: WS_HOST,
 };
 
 // ── WebSocket paths on the conduct proxy ───────────────────────────────
@@ -55,19 +129,35 @@ export const OAUTH = {
   appleServicesId: APPLE_SERVICES_ID,
 };
 
+// ── Environment metadata ───────────────────────────────────────────────
+// Consumer-visible label for the active build environment. `env` is the
+// value injected by the OAuth secrets loader (APP_ENV); `label` is the
+// human-facing name (useful for DEV badges / settings screens).
+export const APP_ENVIRONMENT = {
+  env: APP_ENV as 'dev' | 'prod',
+  label: APP_ENV === 'prod' ? 'Production' : 'Development',
+};
+
 // ── Dev-mode convenience alias ─────────────────────────────────────────
 export const IS_DEV = IS_BETA;
 
-// ── Auth endpoint URLs (fully qualified) ───────────────────────────────
+// ── Endpoint URLs ──────────────────────────────────────────────────────
+// Auth routes → auth-service; Session routes → session-broker.
+// In cloud both share the same hostname (API gateway routes by path).
+// In local dev they use separate ports.
+
+// NOTE: Session-broker routes (/v1/session/connect, /disconnect) are no longer
+// listed here — they are reached via the first-party Soulbits API client
+// (createClient({ cloudURL: CLOUD_HOSTS.session })), which builds the URL from
+// its baseUrl. The provisioning poll budget lives in the client's
+// session.connectPoll (see src/services/cloud/CloudSessionService.ts).
 export const AUTH_ENDPOINTS = {
-  login: `${CLOUD_HOSTS.auth}/v1/auth/login`,
-  register: `${CLOUD_HOSTS.auth}/v1/auth/register`,
-  refresh: `${CLOUD_HOSTS.auth}/v1/auth/refresh`,
-  logout: `${CLOUD_HOSTS.auth}/v1/auth/logout`,
-  google: `${CLOUD_HOSTS.auth}/v1/auth/google`,
-  apple: `${CLOUD_HOSTS.auth}/v1/auth/apple`,
-  me: `${CLOUD_HOSTS.auth}/v1/auth/me`,
-  sessionConnect: `${CLOUD_HOSTS.auth}/v1/session/connect`,
-  sessionDisconnect: `${CLOUD_HOSTS.auth}/v1/session/disconnect`,
-  resendVerification: `${CLOUD_HOSTS.auth}/v1/auth/resend-verification`,
+  login: `${AUTH_HOST}/v1/auth/login`,
+  register: `${AUTH_HOST}/v1/auth/register`,
+  refresh: `${AUTH_HOST}/v1/auth/refresh`,
+  logout: `${AUTH_HOST}/v1/auth/logout`,
+  google: `${AUTH_HOST}/v1/auth/google`,
+  apple: `${AUTH_HOST}/v1/auth/apple`,
+  me: `${AUTH_HOST}/v1/auth/me`,
+  resendVerification: `${AUTH_HOST}/v1/auth/resend-verification`,
 };

@@ -1,0 +1,12 @@
+{
+  "purpose": "Script additions for Phase 5 (Schema Parity Gate). Merge these into root package.json after Phase 1-1 (Jest 30 upgrade) completes to avoid merge conflicts.",
+  "context": "See .current_work/test-framework-overhaul/5-1-RNSchemaDumpUtility.md and 5-3-ParityCIGate.md for rationale.",
+  "scripts": {
+    "schema:dump": "ts-node --project scripts/tsconfig.json scripts/dump-schema.ts"
+  },
+  "notes": [
+    "schema:dump: Dumps the full RN database schema (from all migrations) as normalized JSON to stdout or --output file.",
+    "Uses ts-node with a scripts-specific tsconfig that sets moduleResolution to 'node' (the root tsconfig uses 'bundler' which ts-node does not support).",
+    "Requires ts-node devDependency (added in Phase 5-1)."
+  ]
+}

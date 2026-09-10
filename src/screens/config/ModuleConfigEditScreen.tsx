@@ -1,36 +1,50 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   StyleSheet,
   View,
   ScrollView,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   TextInput,
   Platform,
   KeyboardAvoidingView,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
-import { Appbar } from 'react-native-paper';
+import { useTranslation } from 'react-i18next';
 import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[ModuleConfigEditScreen]');
 
-import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+/** Persisted user preference for the Simple vs Advanced view toggle. */
+const MODE_TOGGLE_KEY = 'module_config_show_advanced';
+
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { ThemedCard } from '../../components/themed/ThemedCard';
 import { SectionHeader } from '../../components/themed/SectionHeader';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
+import { hapticLightPress } from '../../utils/haptics';
+import { useAppAlert } from '../../contexts/AppAlertContext';
 import { FormField } from '../../components/config/FormField';
 import { AdvancedSamplingParams } from '../../components/config/AdvancedSamplingParams';
+import { SoulbitsModelSelect } from '../../components/config/SoulbitsModelSelect';
 import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
 import { MODULE_DEFAULTS, PROVIDER_DEFAULTS } from '../../constants/moduleDefaults';
 import { PROVIDER_SCHEMAS } from '../../constants/providerFieldSchemas';
+import { isSimpleFieldKey, isManagedCloudField } from '../../constants/moduleConfigVisibility';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useSyncConnection } from '../../contexts/SyncConnectionContext';
+import { SttTestPanel } from '../../components/config/SttTestPanel';
+import { TtsTestPanel } from '../../components/config/TtsTestPanel';
+import { CLOUD_HOSTS } from '../../config/cloud';
+import { injectSoulbitsToken } from '../../services/cloud/soulbitsTokenSync';
+import AuthService from '../../services/auth/AuthService';
 import {
   createBackendConfig, updateBackendConfig, getBackendConfig, deleteBackendConfig,
   createCognitionConfig, updateCognitionConfig, getCognitionConfig, deleteCognitionConfig,
@@ -94,6 +108,9 @@ type RootStackParamList = {
   ModuleConfigEdit: {
     moduleType: string;
     configId?: string;
+    /** The AI entity this config is wired to (edit-mode CreateAI). Enables
+     *  entity-bound test panels (TTS) — absent in create mode. */
+    entityId?: string;
   };
 };
 
@@ -101,6 +118,28 @@ type ModuleConfigEditRouteProp = RouteProp<RootStackParamList, 'ModuleConfigEdit
 type ModuleConfigEditNavigationProp = NativeStackNavigationProp<RootStackParamList, 'ModuleConfigEdit'>;
 
 const OPENAI_FAMILY = ['openai', 'openaicompatible', 'openrouter', 'google', 'xai', 'anthropic'];
+
+/** Beta-aware inference host, used to prefill the Soulbits Cloud base_url when connected. */
+function soulbitsCloudBaseUrl(cloudConnected: boolean): string | undefined {
+  return cloudConnected ? CLOUD_HOSTS.inference : undefined;
+}
+
+/**
+ * True when the api_key field holds an injected cloud PASETO (v4.local.*) that
+ * must be shown read-only — same prefix heuristic the engine uses to switch
+ * between PASETO mode and plain API-key mode (`strings.HasPrefix(apiKey,
+ * "v4.local.")`). Prevents the user from copying/editing the managed credential.
+ */
+function isManagedSoulbitsApiKey(
+  providerType: string,
+  fieldKey: string,
+  apiKey: string | undefined,
+): boolean {
+  return providerType === 'soulbitscloud'
+    && fieldKey === 'api_key'
+    && typeof apiKey === 'string'
+    && apiKey.startsWith('v4.local.');
+}
 
 const MODULE_REPOSITORIES: Record<string, {
   create: (config: any) => Promise<string>;
@@ -146,9 +185,17 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const route = useRoute<ModuleConfigEditRouteProp>();
   const navigation = useNavigation<ModuleConfigEditNavigationProp>();
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
+  const { t } = useTranslation('moduleConfig');
   const { bottom: safeBottom } = useSafeAreaInsets();
+  const { isConnected, connectionStatus } = useSyncConnection();
+  const cloudConnected = connectionStatus?.mode === 'cloud' && isConnected === true;
+  // Managed Soulbits Cloud mode — endpoint + tokens are auto-synced from the
+  // backend, so the credential/endpoint fields should be hidden regardless of
+  // the momentary WS connection state.
+  const isCloudMode = connectionStatus?.mode === 'cloud';
   
-  const { moduleType, configId } = route.params;
+  const { moduleType, configId, entityId } = route.params;
   const isCreate = !configId;
   const isSTT = moduleType === 'stt';
   
@@ -168,12 +215,45 @@ export const ModuleConfigEditScreen: React.FC = () => {
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  // Simple vs Advanced mode toggle — Simple hides the deep technical fields.
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Restore the persisted Simple/Advanced preference.
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(MODE_TOGGLE_KEY)
+      .then((val) => {
+        if (alive && val === 'true') {
+          setShowAdvanced(true);
+        }
+      })
+      .catch(() => {
+        // Best-effort — default to Simple view.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Persist the preference whenever it changes.
+  useEffect(() => {
+    AsyncStorage.setItem(MODE_TOGGLE_KEY, String(showAdvanced)).catch(() => {
+      // Best-effort — non-critical persistence failure.
+    });
+  }, [showAdvanced]);
 
   useFocusEffect(
     useCallback(() => {
       loadConfig();
     }, [configId, moduleType])
   );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadConfig();
+    setRefreshing(false);
+  }, [configId, moduleType]);
 
   if (!theme) return null;
 
@@ -313,7 +393,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
     }));
   };
 
-  const handleProviderSwitch = (slot: string, providerType: string) => {
+  const handleProviderSwitch = async (slot: string, providerType: string) => {
     if (slot === 'provider') {
       handleModuleFieldChange('provider', providerType);
     } else if (slot === 'transcription') {
@@ -324,6 +404,26 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
     // Reset provider form values to defaults for the new type
     const defaults = PROVIDER_DEFAULTS[providerType] || {};
+
+    // Feature 1: when switching TO Soulbits Cloud while connected, prefill the
+    // beta-aware inference endpoint (overrides the prod default baked into PROVIDER_DEFAULTS).
+    if (providerType === 'soulbitscloud') {
+      const prefillUrl = soulbitsCloudBaseUrl(cloudConnected);
+      if (prefillUrl) {
+        defaults.base_url = prefillUrl;
+      }
+      // Pre-seed the cloud PASETO as api_key (read-only in the form) so new
+      // configs ship with a working credential without manual entry.
+      try {
+        const paseto = await AuthService.getToken();
+        if (paseto) {
+          defaults.api_key = paseto;
+        }
+      } catch {
+        // No cloud token — standalone mode. Leave api_key empty for the user.
+      }
+    }
+
     setProviderForms(prev => ({
       ...prev,
       [slot]: {
@@ -358,14 +458,23 @@ export const ModuleConfigEditScreen: React.FC = () => {
       providerConfig.name = `${formValues.name || 'Config'} - ${providerType}`;
     }
 
+    // Inject the current cloud PASETO as api_key for NEW soulbitscloud configs
+    // (belt-and-braces on top of the form prefill — catches token refreshes that
+    // happened while the form was open). No-op for updates / standalone mode.
+    const seededConfig = await injectSoulbitsToken({
+      providerType,
+      isCreate: !form.providerConfigId,
+      providerConfig,
+    });
+
     try {
       if (form.providerConfigId) {
         // Update existing
-        await pRepo.update({ ...providerConfig, id: form.providerConfigId });
+        await pRepo.update({ ...seededConfig, id: form.providerConfigId });
         return form.providerConfigId;
       } else {
         // Create new
-        const newId = await pRepo.create(providerConfig);
+        const newId = await pRepo.create(seededConfig);
         return newId;
       }
     } catch (error) {
@@ -376,7 +485,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
   const handleSave = async () => {
     if (!formValues.name) {
-      Alert.alert('Error', 'Config name is required');
+      showAlert(t('common:error'), t('configNameRequired'));
       return;
     }
 
@@ -384,7 +493,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
     try {
       const repo = MODULE_REPOSITORIES[moduleType];
       if (!repo) {
-        Alert.alert('Error', 'Unknown module type');
+        showAlert(t('common:error'), t('unknownModuleType'));
         return;
       }
 
@@ -393,11 +502,11 @@ export const ModuleConfigEditScreen: React.FC = () => {
         const txProvider = formValues.transcription_provider;
         const vadProvider = formValues.vad_provider;
         if (!txProvider) {
-          Alert.alert('Error', 'Transcription provider is required');
+          showAlert(t('common:error'), t('transcriptionProviderRequired'));
           return;
         }
         if (!vadProvider) {
-          Alert.alert('Error', 'VAD provider is required');
+          showAlert(t('common:error'), t('vadProviderRequired'));
           return;
         }
 
@@ -426,7 +535,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
         // Standard module
         const providerType = formValues.provider;
         if (!providerType) {
-          Alert.alert('Error', 'Provider is required');
+          showAlert(t('common:error'), t('providerRequired'));
           return;
         }
 
@@ -460,7 +569,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
       navigation.goBack();
     } catch (error) {
       log.error('Failed to save:', error);
-      Alert.alert('Error', 'Failed to save configuration');
+      showAlert(t('common:error'), t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -470,13 +579,13 @@ export const ModuleConfigEditScreen: React.FC = () => {
     const repo = MODULE_REPOSITORIES[moduleType];
     if (!repo || !configId) return;
 
-    Alert.alert(
-      'Delete Configuration',
-      'Are you sure you want to delete this configuration?',
+    showAlert(
+      t('deleteTitle'),
+      t('deleteConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common:cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common:delete'),
           style: 'destructive',
           onPress: async () => {
             await repo.delete(configId);
@@ -584,22 +693,60 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
     const isOpenAIFamily = OPENAI_FAMILY.includes(providerType);
 
-    // Filter out 'name' field — it's auto-generated from module config name
-    const fields = schema.fields.filter(f => f.key !== 'name');
+    // Fields used to look up the module model catalog. The STT VAD slot uses a
+    // dedicated 'vad' mapping (voice-activity models, e.g. silero-vad) instead
+    // of the STT transcription models.
+    const modelModuleType = slot === 'vad' ? 'vad' : moduleType;
+
+    // Filter out 'name' field (auto-generated from module config name) and, in
+    // Simple mode, any field not in the essential set.
+    const fields = schema.fields.filter(f => {
+      if (f.key === 'name') return false;
+      if (showAdvanced) return true;
+      return isSimpleFieldKey(f.key);
+    });
+
+    // Managed Soulbits Cloud provider (cloud mode): the endpoint and the
+    // API key/token are auto-synced from the backend — hide both fields in
+    // Simple AND Advanced mode so the screen never suggests they are
+    // user-configurable. The credential is still injected server-side
+    // (injectSoulbitsToken) and synced via soulbitsTokenSync.
+    const isManagedCloudProvider =
+      providerType === 'soulbitscloud' && isCloudMode;
 
     return (
       <View style={styles.providerFieldsContainer}>
-        {fields.map((field) => (
-          <FormField
-            key={field.key}
-            field={field}
-            value={form.values[field.key]}
-            onChange={(key, value) => handleProviderFieldChange(slot, key, value)}
-          />
-        ))}
+        {fields.map((field) => {
+          // Hide endpoint/credential fields for managed Soulbits Cloud providers.
+          if (isManagedCloudProvider && isManagedCloudField(field.key)) {
+            return null;
+          }
 
-        {/* Advanced Sampling Params for OpenAI family */}
-        {isOpenAIFamily && (
+          if (providerType === 'soulbitscloud' && field.key === 'model') {
+            return (
+              <View key={field.key} style={{ marginBottom: 16 }}>
+                <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
+                <SoulbitsModelSelect
+                  moduleType={modelModuleType}
+                  value={form.values.model ?? ''}
+                  onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
+                />
+              </View>
+            );
+          }
+          return (
+            <FormField
+              key={field.key}
+              field={field}
+              value={form.values[field.key]}
+              onChange={(key, value) => handleProviderFieldChange(slot, key, value)}
+              readOnly={isManagedSoulbitsApiKey(providerType, field.key, form.values.api_key)}
+            />
+          );
+        })}
+
+        {/* Advanced Sampling Params for OpenAI family (Advanced mode only) */}
+        {showAdvanced && isOpenAIFamily && (
           <AdvancedSamplingParams
             extraParamsJson={form.values.extra_params || '{}'}
             onChange={(json) => handleExtraParamsChange(slot, json)}
@@ -648,16 +795,10 @@ export const ModuleConfigEditScreen: React.FC = () => {
   if (loading) {
     return (
       <ThemedView style={styles.container}>
-        <ThemedAppbar style={styles.header}>
-          <Appbar.BackAction
-            color={theme.colors.text.primary}
-            onPress={() => navigation.goBack()}
-          />
-          <Appbar.Content
-            title={`${moduleConfig?.name || moduleType} Config`}
-            titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-          />
-        </ThemedAppbar>
+        <ScreenHeader
+          title={`${moduleConfig?.name || moduleType} Config`}
+          onBack={() => navigation.goBack()}
+        />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={theme.colors.accent.primary} />
         </View>
@@ -689,21 +830,21 @@ export const ModuleConfigEditScreen: React.FC = () => {
             <SectionHeader title="STT Settings" />
             <View style={styles.sectionContent}>
               {renderThemedInput(
-                'Main Stream Time (ms)',
+                t('mainStreamTime'),
                 formValues.main_stream_time_millis,
                 (text) => handleModuleFieldChange('main_stream_time_millis', text ? parseInt(text, 10) : null),
                 '2000',
                 'number-pad',
               )}
               {renderThemedInput(
-                'Transition Stream Time (ms)',
+                t('transitionStreamTime'),
                 formValues.transition_stream_time_millis,
                 (text) => handleModuleFieldChange('transition_stream_time_millis', text ? parseInt(text, 10) : null),
                 '1000',
                 'number-pad',
               )}
               {renderThemedInput(
-                'Max Buffer Count',
+                t('maxBufferCount'),
                 formValues.max_buffer_count,
                 (text) => handleModuleFieldChange('max_buffer_count', text ? parseInt(text, 10) : null),
                 '5',
@@ -711,6 +852,18 @@ export const ModuleConfigEditScreen: React.FC = () => {
               )}
             </View>
           </ThemedCard>
+
+          {/* ── STT/VAD recorder test block (2-2) — eventserver debug session. The
+              engine runs the entity's SYNCED STT config (draft configs can't be
+              tested over the eventserver transport) — see SttTestPanel doc. ── */}
+          {formValues.transcription_provider && (
+            <ThemedCard elevated accentStripe style={styles.section}>
+              <SectionHeader title={t('testConfiguration')} />
+              <View style={styles.sectionContent}>
+                <SttTestPanel enabled={!!formValues.transcription_provider} entityId={entityId} />
+              </View>
+            </ThemedCard>
+          )}
         </>
       );
     }
@@ -763,6 +916,19 @@ export const ModuleConfigEditScreen: React.FC = () => {
           'Provider Settings',
           formValues.provider,
         )}
+
+        {/* ── TTS playback test block (2-3) — eventserver debug session. The
+            editor threads the optional `entityId` route param (edit-mode
+            CreateAI) into the panel: with an entity the test is ENABLED, in
+            create mode (no entity) it shows the disabled hint; see TtsTestPanel doc. ── */}
+        {moduleType === 'tts' && formValues.provider && (
+          <ThemedCard elevated accentStripe style={styles.section}>
+            <SectionHeader title={t('testConfiguration')} />
+            <View style={styles.sectionContent}>
+              <TtsTestPanel entityId={entityId} />
+            </View>
+          </ThemedCard>
+        )}
       </>
     );
   };
@@ -770,29 +936,30 @@ export const ModuleConfigEditScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={isCreate ? `New ${moduleConfig?.name || moduleType} Config` : `Edit ${moduleConfig?.name || moduleType} Config`}
-          titleStyle={{ color: theme.colors.text.primary, fontWeight: 'bold' }}
-        />
-        {saving ? (
-          <ActivityIndicator
-            size="small"
-            color={theme.colors.accent.primary}
-            style={styles.savingIndicator}
-          />
-        ) : (
-          <Appbar.Action
-            icon="check"
-            color={theme.colors.accent.primary}
-            onPress={handleSave}
-          />
-        )}
-      </ThemedAppbar>
+      <ScreenHeader
+        title={isCreate ? `New ${moduleConfig?.name || moduleType} Config` : `Edit ${moduleConfig?.name || moduleType} Config`}
+        onBack={() => navigation.goBack()}
+        right={
+          saving ? (
+            <ActivityIndicator
+              size="small"
+              color={theme.colors.accent.primary}
+            />
+          ) : (
+            <TouchableOpacity
+              onPress={() => {
+                hapticLightPress();
+                handleSave();
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Save configuration"
+              accessibilityRole="button"
+            >
+              <Icon name="check" size={24} color={theme.colors.accent.primary} />
+            </TouchableOpacity>
+          )
+        }
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
@@ -802,17 +969,101 @@ export const ModuleConfigEditScreen: React.FC = () => {
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 48 + safeBottom }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme!.colors.accent.primary]}
+              tintColor={theme!.colors.accent.primary}
+              progressBackgroundColor={theme!.colors.background.surface}
+            />
+          }
         >
           {/* ── General Section ── */}
           <ThemedCard elevated accentStripe style={styles.section}>
             <SectionHeader title="General" />
             <View style={styles.sectionContent}>
               {renderThemedInput(
-                'Config Name *',
+                t('configName'),
                 formValues.name,
                 (text) => handleModuleFieldChange('name', text),
                 'Enter config name',
               )}
+            </View>
+          </ThemedCard>
+
+          {/* ── Simple / Advanced mode toggle ── */}
+          <ThemedCard elevated style={styles.section}>
+            <View style={styles.modeToggleRow}>
+              <View style={styles.modeToggleCopy}>
+                <ThemedText size={15} weight="medium">
+                  {t('modeLabel')}
+                </ThemedText>
+                <ThemedText size={12} variant="muted" style={styles.modeToggleHint}>
+                  {showAdvanced ? t('modeAdvancedHint') : t('modeSimpleHint')}
+                </ThemedText>
+              </View>
+
+              <View
+                style={[
+                  styles.modeSegmented,
+                  { backgroundColor: theme.colors.background.surface },
+                ]}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.modeSegment,
+                    !showAdvanced && [
+                      styles.modeSegmentActive,
+                      { backgroundColor: theme.colors.accent.primary },
+                    ],
+                  ]}
+                  onPress={() => {
+                    hapticLightPress();
+                    setShowAdvanced(false);
+                  }}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('modeSimple')}
+                  accessibilityState={{ selected: !showAdvanced }}
+                >
+                  <ThemedText
+                    size={13}
+                    weight="medium"
+                    variant={showAdvanced ? 'secondary' : 'primary'}
+                    style={!showAdvanced ? styles.modeSegmentActiveText : undefined}
+                  >
+                    {t('modeSimple')}
+                  </ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modeSegment,
+                    showAdvanced && [
+                      styles.modeSegmentActive,
+                      { backgroundColor: theme.colors.accent.primary },
+                    ],
+                  ]}
+                  onPress={() => {
+                    hapticLightPress();
+                    setShowAdvanced(true);
+                  }}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('modeAdvanced')}
+                  accessibilityState={{ selected: showAdvanced }}
+                >
+                  <ThemedText
+                    size={13}
+                    weight="medium"
+                    variant={showAdvanced ? 'primary' : 'secondary'}
+                    style={showAdvanced ? styles.modeSegmentActiveText : undefined}
+                  >
+                    {t('modeAdvanced')}
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
             </View>
           </ThemedCard>
 
@@ -850,7 +1101,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
                     ]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
-                    style={StyleSheet.absoluteFillObject}
+                    style={StyleSheet.absoluteFill}
                   />
                   <View style={styles.deleteIconBadge}>
                     <Icon
@@ -955,5 +1206,38 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  // ── Simple / Advanced mode toggle ──
+  modeToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: 16,
+  },
+  modeToggleCopy: {
+    flex: 1,
+    marginRight: 8,
+  },
+  modeToggleHint: {
+    marginTop: 2,
+  },
+  modeSegmented: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    padding: 3,
+    gap: 3,
+  },
+  modeSegment: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  modeSegmentActive: {
+    elevation: 1,
+  },
+  modeSegmentActiveText: {
+    color: '#FFFFFF',
   },
 });

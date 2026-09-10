@@ -8,38 +8,48 @@ import React, {
 import {
   StyleSheet,
   FlatList,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
+  RefreshControl,
+  Keyboard,
+  Platform,
   ToastAndroid,
-  Alert,
   NativeScrollEvent,
   NativeSyntheticEvent,
   TouchableOpacity,
   Modal,
   View,
   TouchableWithoutFeedback,
-  Keyboard,
+  Animated,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import LinearGradient from 'react-native-linear-gradient';
-import { Appbar, Avatar } from 'react-native-paper';
-import { ThemedAppbar } from '../components/themed/ThemedAppbar';
+import { Avatar } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScreenHeader } from '../components/themed/ScreenHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
+import { v7 as uuidv7 } from 'uuid';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
+import { useToast } from '../contexts/AppToastContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
-import { ChatBubble } from '../components/chat/ChatBubble';
-import { ChatInput, ChatInputRef } from '../components/chat/ChatInput';
+import { hapticLightPress } from '../utils/haptics';
+import { ChatBubble, isPartnerMessage } from '../components/chat/ChatBubble';
+import { ChatInputBar, PickedImage } from '../components/chat/ChatInputBar';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewMessagesDivider } from '../components/chat/NewMessagesDivider';
-import { EmojiPickerInline } from '../components/emoji/EmojiPickerInline';
+import { AlternateGreetingSwiper, parseAlternateGreetings } from '../components/chat/AlternateGreetingSwiper';
+import { EmptyChatCTA } from '../components/chat/EmptyChatCTA';
+import { GreetingBubble } from '../components/chat/GreetingBubble';
+import { ScenarioGeneratorSheet, ScenarioGuidedInputs } from '../components/chat/ScenarioGeneratorSheet';
+import { DayDivider } from '../components/chat/DayDivider';
 import EntityEmojiActionService from '../services/EntityEmojiActionService';
-import { EmojiEntry } from '../types/emoji';
 import { useEntitySession } from '../contexts/EntitySessionContext';
-import EntitySessionService, { InteractionSession } from '../services/EntitySessionService'; // Still needed for event listeners
+import EntitySessionService, { InteractionSession, isIngestionSessionError } from '../services/EntitySessionService'; // Still needed for event listeners
+import { SyncService } from '../services/SyncService';
 import {
   getConversationMessagesByParticipantKey,
   getRecentConversationMessages,
@@ -52,16 +62,39 @@ import {
   getCharacterProfile,
   imageToDataURL,
 } from '../database/repositories/characters';
-import { getAllEntities } from '../database/repositories/entities';
-import { deleteEntity } from '../database/repositories/entities';
+import {
+  getAllEntities,
+  deleteEntity,
+  getEntity,
+  setEntityDisabled,
+} from '../database/repositories/entities';
+import { getReplyMode } from '../database/repositories/chatConversationSettings';
+import { getUserPersona } from '../database/repositories/userEntities';
+import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import { createLogger } from '../utils/logger';
-import { ConversationMessage } from '../database/models';
+import { ConversationMessage, CharacterProfile } from '../database/models';
 import {
   deriveParticipantKey,
   deriveScopeFromParticipants,
 } from '../database/repositories/interactions';
+import {
+  MessageActionSheet,
+  MessageAction,
+} from '../components/chat/MessageActionSheet';
+import { MESSAGE_REPLY_ENABLED } from '../constants/chatFeatures';
+import {
+  ForwardPickerModal,
+  ForwardTarget,
+} from '../components/chat/ForwardPickerModal';
+import { markConversationMessagesRead } from '../database/repositories/conversation_messages';
+import {
+  showBubble,
+  hasBubblePermission,
+  requestBubblePermission,
+} from '../services/ChatBubbleService';
+import { isChatLocked } from '../services/marketplace/MarketplaceService';
 
 const log = createLogger('[ChatDetailScreen]');
 
@@ -74,10 +107,203 @@ const log = createLogger('[ChatDetailScreen]');
 // For now, this constant controls the fixed window size shown on open and refresh.
 const MESSAGES_PAGE_SIZE = 200;
 
+/**
+ * Empty-chat hint gate (§1-10): show the (P1-disabled) "generate a greeting"
+ * hint only when the engine told us the card has NO first_mes AND the
+ * conversation has zero messages — the display mirror of the engine's
+ * truly-new-chat gate ("no prior interaction with messages"). `null` means the
+ * INIT_ENTITY signal hasn't arrived yet → show nothing (still loading).
+ */
+export function shouldShowEmptyChatHint(
+  hasFirstMes: boolean | null,
+  messageCount: number,
+): boolean {
+  return hasFirstMes === false && messageCount === 0;
+}
+
+/**
+ * Empty-chat splash reveal gate (display mirror of the §1-10 engine contract):
+ * reveal the chat as soon as the message query settled AND the engine reported
+ * `has_first_mes === false` with zero messages — no greeting message will ever
+ * arrive for that conversation, so waiting for content would strand it on the
+ * splash forever. The splash must hold while the signal is unknown (null) or a
+ * greeting is pending (true).
+ */
+export function shouldRevealEmptyChat(
+  loading: boolean,
+  hasFirstMes: boolean | null,
+  messageCount: number,
+): boolean {
+  return !loading && hasFirstMes === false && messageCount === 0;
+}
+
+/**
+ * Replace-vs-restart gate (§2-4): GENERATE_GREETING is valid only while the
+ * greeting is the only message (the engine enforces this too and returns ERROR
+ * otherwise — the client then falls back to START_NEW_SCENARIO). `true` also
+ * covers the truly-empty chat (FIRST custom greeting).
+ */
+export function shouldUseGenerateGreeting(
+  messages: Pick<ConversationMessage, 'message_type'>[],
+): boolean {
+  return (
+    messages.length === 0 ||
+    (messages.length === 1 && messages[0].message_type === 'greeting')
+  );
+}
+
+/**
+ * Authored greeting swipes (§1-10): the delivered first_mes followed by the
+ * partner profile's `alternate_greetings` (JSON text column). Malformed or
+ * empty entries degrade silently; a missing profile leaves just the delivered
+ * greeting. Each swipe is macro-resolved for display inside GreetingBubble.
+ */
+export function buildGreetingSwipes(
+  greetingContent: string,
+  profile: { alternate_greetings?: string | null } | null,
+): string[] {
+  const alternates = parseAlternateGreetings(profile?.alternate_greetings);
+  return [greetingContent, ...alternates].filter(
+    g => g && g.trim().length > 0,
+  );
+}
+
+/**
+ * Session-INIT gate (Q8 / review). The screen must NEVER send INIT for a
+ * disabled partner (the engine would reject with ErrEntityDisabled and the user
+ * would see an error toast) and must never INIT before the partner's disabled
+ * flag has loaded — `disabledLoaded` closes the async `getEntity`-on-mount
+ * race (the init effect can run BEFORE the flag loads and otherwise see the
+ * stale `isDisabled=false` default). `chatLocked` guards the marketplace
+ * preview lock.
+ */
+export function shouldInitializeEntitySession(params: {
+  chatLocked: boolean;
+  isConnected: boolean;
+  participantKey: string | null;
+  disabledLoaded: boolean;
+  isDisabled: boolean;
+}): boolean {
+  if (params.chatLocked) return false;
+  if (!params.isConnected || !params.participantKey) return false;
+  if (!params.disabledLoaded) return false;
+  if (params.isDisabled) return false;
+  return true;
+}
+
+/** 4-3 (D36): the header connection-dot states — the original three plus the
+ *  net-new terminal `'error'` state (red dot; a session:init failure must not
+ *  masquerade as "connecting" forever). */
+export type ChatConnectionState = 'connected' | 'connecting' | 'offline' | 'error';
+
+/**
+ * 4-3 (D36): the 4-state connection mapping, shared by the header dot render,
+ * the pulse effect and the input-bar gating so all three can never disagree.
+ * Extracted as a pure helper so the union-member mapping is unit-testable in
+ * one place (exhaustive per review-3: the dot render's final `else` must not
+ * swallow the error state).
+ *
+ * Precedence: offline (no sync transport — most accurate description, and the
+ * banner surfaces the failure independently) > error (terminal session
+ * failure) > connected > connecting.
+ */
+export function resolveChatConnectionState(params: {
+  isConnected: boolean;
+  isSessionActive: boolean;
+  sessionFailed: boolean;
+}): ChatConnectionState {
+  if (!params.isConnected) return 'offline';
+  if (params.sessionFailed) return 'error';
+  return params.isSessionActive ? 'connected' : 'connecting';
+}
+
+/**
+ * Persona-switch decision (review): the persona switcher must navigate to the
+ * persona's OWN thread — the data model is thread-per-persona (`participant_key`
+ * includes the own identity; the engine's FindResumableSession matches exact
+ * participant sets). This pure helper decides between a no-op and a
+ * replace-target param set for the persona's own thread, so the switch logic is
+ * unit-testable without a screen render harness (RN 0.86 node-env crash).
+ *
+ * - Selecting the currently-active persona → `noop` (the caller just closes the
+ *   modal; this early-return happens BEFORE any state changes).
+ * - A new persona / 'user' ("chat as myself") → `switch` with the replace
+ *   params: the own identity is swapped for the persona, every OTHER participant
+ *   (the partner in a private chat, all other members in a group chat) is kept,
+ *   and the participant_key is re-derived so it becomes a distinct thread.
+ */
+export type PersonaSwitchPlan =
+  | { action: 'noop' }
+  | {
+      action: 'switch';
+      params: {
+        interactionId: string;
+        participantKey: string;
+        participantIds: string[];
+        entityId: string;
+        entityName?: string;
+      };
+    };
+
+export function buildPersonaSwitchPlan(input: {
+  personaId: string;
+  currentOwnEntityId: string;
+  currentParticipantIds: string[];
+  partnerEntityName?: string;
+  newInteractionId: string;
+}): PersonaSwitchPlan {
+  const {
+    personaId,
+    currentOwnEntityId,
+    currentParticipantIds,
+    partnerEntityName,
+    newInteractionId,
+  } = input;
+
+  // Selecting the currently-active persona → no-op (modal already closed).
+  if (personaId === currentOwnEntityId) {
+    return { action: 'noop' };
+  }
+
+  // Replace the own identity, keep every OTHER participant.
+  const others = currentParticipantIds.filter(id => id !== currentOwnEntityId);
+  const newParticipantIds = [personaId, ...others];
+  const scope = deriveScopeFromParticipants(newParticipantIds);
+  const participantKey = deriveParticipantKey(newParticipantIds, personaId, scope);
+
+  return {
+    action: 'switch',
+    params: {
+      interactionId: newInteractionId,
+      participantKey,
+      participantIds: newParticipantIds,
+      entityId: personaId,
+      entityName: partnerEntityName,
+    },
+  };
+}
+
+// After revealing the conversation (list made visible), keep re-pinning to the
+// bottom for this long so async content growth (message images decoding, rows
+// rendering in later batches) doesn't leave the viewport stranded partway up
+// the conversation. The list opens at the latest message and stays there until
+// these late sizes settle.
+const INITIAL_SCROLL_SETTLE_MS = 1200;
+
+/** Returns true when the two timestamps fall on the same local calendar day. */
+function isSameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
 export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { t } = useTranslation('chatDetail');
+  const { bottom: safeBottom } = useSafeAreaInsets();
   const {
     interactionId: routeInteractionId,
     participantKey: routeParticipantKey,
@@ -86,20 +312,49 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     entityName: routeEntityName,
   } = route.params;
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
+  const { showToast } = useToast();
   const { isConnected } = useSyncConnection();
-  const { isSessionActive, startInteractionSession, stopInteractionSession } =
-    useEntitySession();
+  const {
+    isSessionActive,
+    startInteractionSession,
+    stopInteractionSession,
+    clearFailedSession,
+  } = useEntitySession();
 
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [partnerName, setPartnerName] = useState<string>('Chat');
   const [partnerAvatar, setPartnerAvatar] = useState<string | null>(null);
-  const [lastReadTimestamp, setLastReadTimestamp] = useState<number>(0);
+  const [partnerProfileId, setPartnerProfileId] = useState<string | null>(null);
   const [failedTranscriptions, setFailedTranscriptions] = useState<Set<string>>(
     new Set(),
   );
+
+  // Render-only greeting support (§1-10):
+  // - hasFirstMes: surfaced from the INIT_ENTITY SUCCESS payload via the
+  //   InteractionSession (session:started). null until known.
+  // - partnerProfile: the partner character's profile — provides
+  //   alternate_greetings (authored swipes) + nickname for macro resolution.
+  // - ownEntityName: the own entity's alias — {{user}} macro substitution.
+  const [hasFirstMes, setHasFirstMes] = useState<boolean | null>(null);
+  const [partnerProfile, setPartnerProfile] = useState<CharacterProfile | null>(null);
+  const [ownEntityName, setOwnEntityName] = useState<string>('You');
+
+  // Scenario generation (§2-4):
+  // - scenarioSheetOpen: drives the ScenarioGeneratorSheet (paper Modal+Portal).
+  // - greetingPreparing: in-flight generation → GreetingBubble `preparing`
+  //   (GreetingShimmer + TypingIndicator). No streaming — the shimmer is the
+  //   sole latency affordance.
+  // - lastGuidedRef: remembers the last guided inputs so the swiper's
+  //   "Generate another" reuses the same directed style (or random if the last
+  //   generation was "Surprise me").
+  const [scenarioSheetOpen, setScenarioSheetOpen] = useState(false);
+  const [greetingPreparing, setGreetingPreparing] = useState(false);
+  const lastGuidedRef = useRef<ScenarioGuidedInputs | null>(null);
 
   // Resolve participant info for header
   const [participantIds, setParticipantIds] = useState<string[]>(
@@ -109,8 +364,31 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     routeParticipantKey || ''
   );
 
-  const chatInputRef = useRef<ChatInputRef>(null);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [actionSheetMessage, setActionSheetMessage] =
+    useState<ConversationMessage | null>(null);
+  // Reply-to context: the message the user is replying to (consumed on send).
+  // The UI entry points stay gated behind MESSAGE_REPLY_ENABLED (chatFeatures);
+  // the pipeline itself is fully restored so a flag flip activates the feature.
+  const [replyToMessage, setReplyToMessage] =
+    useState<ConversationMessage | null>(null);
+  const [forwardPickerVisible, setForwardPickerVisible] = useState(false);
+  const [forwardMessageText, setForwardMessageText] = useState('');
+  const [isDisabled, setIsDisabled] = useState(false);
+  // True once the partner entity's disabled flag has been read from the DB.
+  // The init effect gates on this so it never sends INIT while the flag is
+  // still loading (see shouldInitializeEntitySession — Q8).
+  const [disabledLoaded, setDisabledLoaded] = useState(false);
+
+  // 4-3 (D36): terminal session-failure state. Set by the session:error
+  // listener (matched by interactionId OR participant set — a terminal failure
+  // never performs the temp→canonical id swap, so the emitted id is usually a
+  // service-temp id this screen never saw). Drives the inline error card
+  // (Retry / Back / Sync now), the red header dot, and the splash reveal.
+  // Cleared on session:started for this chat (success) and on Retry.
+  const [sessionFailed, setSessionFailed] = useState<{
+    error: string;
+    ingestionHint: boolean;
+  } | null>(null);
 
   // Track the canonical interactionId — starts as temp UUIDv7 from route params,
   // updated to the server-assigned canonical ID when INIT_ENTITY response arrives.
@@ -118,23 +396,71 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // in event listeners that need the current ID at callback time.
   const currentInteractionIdRef = useRef(routeInteractionId);
 
+  // HARD GATE — marketplace preview lock (viewable free, chat locked until
+  // acquired; own library never locked): once set, this chat is a locked
+  // marketplace conversation — the session must never start and any open is
+  // reverted. Guards the async race between the header-resolution lock check
+  // and session initialization.
+  const chatLockedRef = useRef(false);
+
   const flatListRef = useRef<FlatList<any>>(null);
-  const sessionDividerTimestamp = useRef<number>(0);
   const isInitialScrollDone = useRef(false);
+  const isArmRevealScheduled = useRef(false);
   const isNearBottom = useRef(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isReadyToShow, setIsReadyToShow] = useState(false);
   const isReadyToShowRef = useRef(false);
   const messagesCountAtReveal = useRef(0);
   const pendingOwnMessageScroll = useRef(false);
+  // While this is non-zero (timestamp of the scheduled settle check), the list
+  // keeps re-pinning to the bottom on every onContentSizeChange. This absorbs
+  // async content growth (images loading, rows rendering in batches) that would
+  // otherwise leave the viewport stranded partway up the conversation, so we
+  // only stop re-pinning once everything has settled.
+  const settleUntilRef = useRef(0);
   const loadedMessagesRef = useRef<ConversationMessage[]>([]);
-  const lastReadTimestampRef = useRef<number>(0);
   const [showDivider, setShowDivider] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
-  const [replyMode, setReplyMode] = useState<string>('realistic');
-  const replyModeRef = useRef<string>('realistic');
+  const [personaSwitcherVisible, setPersonaSwitcherVisible] = useState(false);
   const [isGroupChat, setIsGroupChat] = useState(false);
   const [headerName, setHeaderName] = useState<string>('Chat');
+
+  // ── Keyboard — keep the last messages visible & scrollable above the IME ──
+  // The input bar lifts itself above the keyboard (ChatInputBar translateY),
+  // so the message list must shrink by the same amount. Adding the keyboard
+  // height as bottom padding to the list's content makes the newest messages
+  // scroll into the space above the keyboard instead of being covered.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // True while the soft keyboard is up. Used to re-scroll after the keyboard
+  // padding applies so a just-sent message is never left behind the keyboard.
+  const keyboardVisibleRef = useRef(false);
+  useEffect(() => {
+    const onShow = (e: any) => {
+      const height =
+        e?.endCoordinates?.height ?? (Platform.OS === 'android' ? 300 : 336);
+      keyboardVisibleRef.current = true;
+      setKeyboardHeight(height);
+      // Reveal the latest message above the keyboard.
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      });
+    };
+    const onHide = () => {
+      keyboardVisibleRef.current = false;
+      setKeyboardHeight(0);
+      // Return to the true bottom once the keyboard is gone.
+      flatListRef.current?.scrollToEnd({ animated: true });
+    };
+    const subs = [
+      Keyboard.addListener('keyboardWillShow', onShow),
+      Keyboard.addListener('keyboardDidShow', onShow),
+      Keyboard.addListener('keyboardWillHide', onHide),
+      Keyboard.addListener('keyboardDidHide', onHide),
+    ];
+    return () => {
+      subs.forEach(s => s.remove());
+    };
+  }, []);
 
   // Derive participantKey if not provided (for group chats or new)
   useEffect(() => {
@@ -163,6 +489,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         setPartnerName(routeEntityName);
         // Fall through to avatar loading below
       }
+
+      // Reset partner profile linkage each resolution pass; it is only set
+      // for a private chat with an AI character (not group chats).
+      setPartnerProfileId(null);
 
       if (isGroupChat) {
         // Group chat: show participant names inline per D-11
@@ -209,16 +539,76 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         const allEntities = await getAllEntities();
         const entity = allEntities.find(e => e.id === partnerEntityId);
+        // D21-8: the entity alias is the final display-name fallback — the
+        // persona naming convention carries the human name in `alias` (D56),
+        // so a profile-less partner must never surface the bare id or the
+        // 'Chat' placeholder when an alias exists.
+        const partnerAlias = entity?.alias ?? null;
         if (entity?.character_profile_id) {
+          // HARD GATE — marketplace preview lock (viewable free, chat locked
+          // until acquired; own library never locked): if the partner is a
+          // marketplace-listed AI the local user has not acquired (and does
+          // not own), this chat must never open — navigate back immediately
+          // and stop the session before any message can be sent or received.
+          // Defense in depth: the central openCharacterChat gate normally
+          // prevents reaching this screen, but direct navigation (chat list,
+          // bubbles, deep links) still hits this path.
+          try {
+            if (await isChatLocked(entity.character_profile_id)) {
+              log.warn(
+                `Chat locked for marketplace profile ${entity.character_profile_id} — closing chat.`,
+              );
+              // Never let a session start for this chat, stop any session the
+              // context may have started, then leave.
+              chatLockedRef.current = true;
+              stopInteractionSession(routeInteractionId).catch(() => {});
+              navigation.goBack();
+              return;
+            }
+          } catch (lockErr) {
+            log.warn('Failed to check chat lock, allowing:', lockErr);
+          }
+
+          // Link the header to the partner's AI profile (tap avatar/name →
+          // AIProfile). Skip in group chats — there is no single profile to open.
+          setPartnerProfileId(entity.character_profile_id);
           const profile = await getCharacterProfile(entity.character_profile_id);
-          if (profile && !routeEntityName) {
-            setPartnerName(profile.name);
-            setHeaderName(profile.name);
+          if (profile) {
+            // Partner profile — drives authored alternate-greeting swipes and
+            // {{char}} macro resolution (nickname || name) for the greeting.
+            setPartnerProfile(profile);
+            if (!routeEntityName) {
+              // D21-8: the header/label chain gains the alias fallback —
+              // nickname || profile name || alias (previously neither the
+              // nickname nor the alias ever reached headerName).
+              const resolvedName =
+                profile.nickname?.trim() ||
+                profile.name ||
+                partnerAlias ||
+                partnerEntityId;
+              setPartnerName(resolvedName);
+              setHeaderName(resolvedName);
+            }
+          } else if (!routeEntityName && partnerAlias) {
+            // D21-8: linked profile missing — the alias still carries a name.
+            setPartnerName(partnerAlias);
+            setHeaderName(partnerAlias);
           }
           const image = await getPrimaryImage(entity.character_profile_id);
           if (image) {
             setPartnerAvatar(imageToDataURL(image));
           }
+        } else if (!routeEntityName && partnerAlias) {
+          // D21-8: profile-less partner (e.g. a persona entity) — the alias
+          // carries the visible name for BOTH headerName and charName.
+          setPartnerName(partnerAlias);
+          setHeaderName(partnerAlias);
+        }
+
+        // Own entity's display name — {{user}} macro substitution in greetings.
+        const own = allEntities.find(e => e.id === ownEntityId);
+        if (own?.alias) {
+          setOwnEntityName(own.alias);
         }
       }
     };
@@ -226,80 +616,109 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     resolveHeaderName();
   }, [ownEntityId, participantIds, isGroupChat, routeEntityName]);
 
-  // Load reply mode preference using participantKey (stable across navigation).
-  // routeInteractionId changes every visit (new canonical ID per session), so it
-  // cannot be used as a persistence key — the mode would be "forgotten" each time.
-  useEffect(() => {
-    if (!participantKey) return;
-    const loadReplyMode = async () => {
-      const savedMode = await ChatPreferencesService.getReplyMode(participantKey);
-      const mode = savedMode || 'realistic';
-      setReplyMode(mode);
-      replyModeRef.current = mode;
-    };
-    loadReplyMode();
-  }, [participantKey]);
-
   // Load messages and last-read timestamp
-  useEffect(() => {
-    const loadMessagesAndTimestamp = async () => {
-      try {
-        setLoading(true);
+  const loadMessagesAndTimestamp = useCallback(async () => {
+    try {
+      if (!participantKey) {
+        return;
+      }
 
-        if (!participantKey) {
-          setLoading(false);
-          return;
-        }
+      const existingMessages = await getRecentConversationMessages(
+        ownEntityId,
+        participantKey,
+        MESSAGES_PAGE_SIZE,
+      );
+      setMessages(existingMessages);
+      loadedMessagesRef.current = existingMessages;
 
-        const existingMessages = await getRecentConversationMessages(
-          ownEntityId,
-          participantKey,
-          MESSAGES_PAGE_SIZE,
+      // Detect stuck transcriptions (messages with audio but no text that aren't actively transcribing)
+      const stuckTranscriptions = existingMessages
+        .filter(
+          msg =>
+            msg.audio_data &&
+            msg.audio_data.length > 0 &&
+            (!msg.content || msg.content.trim().length === 0) &&
+            msg.sender_entity_id === ownEntityId,
+        )
+        .map(msg => msg.id);
+
+      if (stuckTranscriptions.length > 0) {
+        log.info(
+          `Found ${stuckTranscriptions.length} stuck transcriptions on load`,
         );
-        setMessages(existingMessages);
-        loadedMessagesRef.current = existingMessages;
+        setFailedTranscriptions(new Set(stuckTranscriptions));
+      }
 
-        // Detect stuck transcriptions (messages with audio but no text that aren't actively transcribing)
-        const stuckTranscriptions = existingMessages
-          .filter(
-            msg =>
-              msg.audio_data &&
-              msg.audio_data.length > 0 &&
-              (!msg.content || msg.content.trim().length === 0) &&
-              msg.sender_entity_id === ownEntityId,
-          )
-          .map(msg => msg.id);
+      // Fallback: if session:started fired before this screen mounted, read
+      // has_first_mes straight from the live session (primary path is the
+      // session:started listener below).
+      const liveSession = EntitySessionService.getInteractionSession(
+        currentInteractionIdRef.current,
+      );
+      if (liveSession?.hasFirstMes !== undefined) {
+        setHasFirstMes(liveSession.hasFirstMes);
+      }
+    } catch (error) {
+      log.error('Failed to load messages:', error);
+    }
+  }, [routeInteractionId, participantKey, ownEntityId]);
 
-        if (stuckTranscriptions.length > 0) {
-          log.info(
-            `Found ${stuckTranscriptions.length} stuck transcriptions on load`,
-          );
-          setFailedTranscriptions(new Set(stuckTranscriptions));
+  // Load disabled state (the partner ENTITY flag, Q8) + register the
+  // conversation as open (so incoming messages don't bump the unread counter
+  // while this chat is on screen).
+  useEffect(() => {
+    let mounted = true;
+    const loadDisabled = async () => {
+      try {
+        if (participantKey) {
+          const partnerEntityId = participantIds.find(id => id !== ownEntityId);
+          if (partnerEntityId) {
+            const partner = await getEntity(partnerEntityId);
+            if (mounted) setIsDisabled(partner?.is_disabled === 1);
+          }
         }
-
-        const timestamp =
-          await ChatPreferencesService.getLastReadTimestamp(routeInteractionId);
-        setLastReadTimestamp(timestamp);
-        lastReadTimestampRef.current = timestamp;
-        sessionDividerTimestamp.current = timestamp;
       } catch (error) {
-        log.error('Failed to load messages:', error);
+        log.error('Failed to load disabled state:', error);
       } finally {
-        setLoading(false);
+        // Always mark the flag as read (even on error) so the init effect is
+        // never blocked waiting on this load — on error we fall back to the
+        // safe default (not disabled) and let the engine guard downstream.
+        if (mounted) setDisabledLoaded(true);
       }
     };
+    loadDisabled();
+    if (participantKey) {
+      EntitySessionService.registerOpenConversation(participantKey);
+    }
+    return () => {
+      mounted = false;
+      if (participantKey) {
+        EntitySessionService.unregisterOpenConversation(participantKey);
+      }
+    };
+  }, [participantKey, participantIds, ownEntityId]);
 
-    loadMessagesAndTimestamp();
-  }, [routeInteractionId, participantKey, ownEntityId]);
+  // Load messages and last-read timestamp on mount
+  useEffect(() => {
+    const init = async () => {
+      setLoading(true);
+      await loadMessagesAndTimestamp();
+      setLoading(false);
+    };
+    init();
+  }, [loadMessagesAndTimestamp]);
+
+  // Pull-to-refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadMessagesAndTimestamp();
+    setRefreshing(false);
+  }, [loadMessagesAndTimestamp]);
 
   // Keep stable refs in sync with state
   useEffect(() => {
     loadedMessagesRef.current = messages;
   }, [messages]);
-
-  useEffect(() => {
-    lastReadTimestampRef.current = lastReadTimestamp;
-  }, [lastReadTimestamp]);
 
   // Track canonical interactionId — temp UUIDv7 is replaced by server's canonical
   // ID when INIT_ENTITY response arrives. This listener updates the ref so all
@@ -309,9 +728,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       if (session.ownEntityId === ownEntityId) {
         const screenParticipants = [...participantIds].sort().join('+');
         const sessionParticipants = [...session.participantIds].sort().join('+');
-        if (screenParticipants === sessionParticipants && interactionId !== currentInteractionIdRef.current) {
-          log.info(`InteractionId updated from ${currentInteractionIdRef.current} to canonical ${interactionId}`);
-          currentInteractionIdRef.current = interactionId;
+        if (screenParticipants === sessionParticipants) {
+          if (interactionId !== currentInteractionIdRef.current) {
+            log.info(`InteractionId updated from ${currentInteractionIdRef.current} to canonical ${interactionId}`);
+            currentInteractionIdRef.current = interactionId;
+          }
+          // Render-only greeting support (§1-10): surface has_first_mes so the
+          // screen can branch synchronously (GreetingBubble vs EmptyChatCTA).
+          if (session.hasFirstMes !== undefined) {
+            setHasFirstMes(session.hasFirstMes);
+          }
+          // 4-3 (D36): the session started — clear any terminal-failure state
+          // (a retry succeeded; the error card must make way for the chat).
+          setSessionFailed(null);
         }
       }
     };
@@ -327,6 +756,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => {
       log.info(`Screen unmounting – stopping session for ${currentInteractionIdRef.current}`);
       stopInteractionSession(currentInteractionIdRef.current);
+      // 4-3 bounded retention (review 4): also clear any FLAGGED (failed)
+      // session entry for this participant set. Its key is a service-temp
+      // interactionId the ref above never saw (the temp→canonical swap only
+      // happens on INIT SUCCESS), so the plain stop-by-id never matched it.
+      clearFailedSession(ownEntityId, participantIds);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeInteractionId]);
@@ -335,19 +769,37 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   useEffect(() => {
     let mounted = true;
 
-    if (!isConnected || !participantKey) {
+    // GATE (shouldInitializeEntitySession, Q8 / review): never send INIT for a
+    // locked marketplace conversation, while disconnected/un-ready, before the
+    // partner's disabled flag has loaded, or for a DISABLED partner — the
+    // engine would reject with ErrEntityDisabled and the user would see an
+    // error toast. Silent skip (debug log, no toast); re-inits when the flag
+    // loads or when the user re-enables from the chat menu (`isDisabled` is a
+    // dep so the toggle immediately restarts the session).
+    if (
+      !shouldInitializeEntitySession({
+        chatLocked: chatLockedRef.current,
+        isConnected,
+        participantKey,
+        disabledLoaded,
+        isDisabled,
+      })
+    ) {
+      if (isDisabled) {
+        log.debug('Skipping session INIT: partner entity is disabled');
+      }
       return;
     }
 
     const initializeSession = async () => {
       try {
         log.info(`Initializing interaction session for ${routeInteractionId}...`);
-        // Read reply mode fresh from storage to avoid race with loadReplyMode
-        // useEffect.  Uses participantKey (stable) — NOT routeInteractionId.
-        const savedMode = await ChatPreferencesService.getReplyMode(participantKey);
+        // Reply mode is read fresh from the SYNCED settings column on every
+        // session init so the mode is not lost between navigations. Uses
+        // participantKey (stable). 4-4: supersedes ChatPreferencesService; the
+        // one-time legacy AsyncStorage migration runs inside getReplyMode.
+        const savedMode = await getReplyMode(participantKey);
         const mode = savedMode || 'realistic';
-        setReplyMode(mode);
-        replyModeRef.current = mode;
         await startInteractionSession(ownEntityId, participantIds, mode);
       } catch (error: any) {
         if (!mounted) return;
@@ -355,18 +807,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         log.error('Failed to initialize entity session:', error);
 
         const errorMessage = error?.message || 'Unknown error';
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(
-            `${t('common:error')}: ${errorMessage}`,
-            ToastAndroid.LONG,
-          );
-        } else {
-          Alert.alert(
-            t('common:error'),
-            `${t('common:error')}: ${errorMessage}`,
-            [{ text: t('common:ok') }],
-          );
-        }
+        showToast(`${t('common:error')}: ${errorMessage}`);
       }
     };
 
@@ -375,7 +816,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => {
       mounted = false;
     };
-  }, [routeInteractionId, ownEntityId, participantIds, isConnected, participantKey]);
+  }, [
+    routeInteractionId,
+    ownEntityId,
+    participantIds,
+    isConnected,
+    participantKey,
+    isDisabled,
+    disabledLoaded,
+  ]);
 
   // Listen for new messages and typing indicator
   useEffect(() => {
@@ -508,16 +957,49 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // Listen for session errors
   useEffect(() => {
+    const sortedScreenParticipants = [...participantIds].sort().join('+');
     const handleSessionError = (errorInteractionId: string, error: string) => {
-      if (errorInteractionId === currentInteractionIdRef.current) {
-        log.error(`Session error for ${currentInteractionIdRef.current}:`, error);
+      // 4-3 (D36): match this screen's chat by interactionId OR by participant
+      // set. A terminal failure never performs the temp→canonical id swap
+      // (that only happens on INIT SUCCESS), so the id the service/context
+      // emits is usually a service-temp id this screen never saw — the
+      // participant-set match is what makes the terminal error actually
+      // surface (screen side of the review-4 wiring fix).
+      const errorSession =
+        EntitySessionService.getInteractionSession(errorInteractionId);
+      const matchesThisScreen =
+        errorInteractionId === currentInteractionIdRef.current ||
+        (!!errorSession &&
+          errorSession.ownEntityId === ownEntityId &&
+          [...errorSession.participantIds].sort().join('+') ===
+            sortedScreenParticipants);
 
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(`Chat session error: ${error}`, ToastAndroid.LONG);
-        } else {
-          Alert.alert(t('common:error'), error, [{ text: t('common:ok') }]);
-        }
+      if (!matchesThisScreen) {
+        return;
       }
+
+      log.error(`Session error for ${currentInteractionIdRef.current}:`, error);
+
+      // Q8/A3 — a DISABLED AI partner is a terminal state. The engine refuses
+      // INIT_ENTITY with `entity_disabled`; the app surfaces the honest
+      // disabled-partner toast and jumps to the AI profile (which shows the
+      // disabled state + the enable action). Distinct from the generic error
+      // path.
+      if (error === 'entity_disabled') {
+        showToast(t('entityDisabledBody', { name: headerName }));
+        if (partnerProfileId) {
+          navigation.navigate('AIProfile', { profileId: partnerProfileId });
+        }
+        return;
+      }
+
+      // 4-3 (D36): terminal failure → the inline error card (Retry / Back /
+      // and — for the D35 ingestion class — Sync now). The card replaces the
+      // legacy free-text toast as the actionable surface for this chat.
+      setSessionFailed({
+        error,
+        ingestionHint: isIngestionSessionError(error),
+      });
     };
 
     EntitySessionService.on('session:error', handleSessionError);
@@ -525,7 +1007,50 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => {
       EntitySessionService.off('session:error', handleSessionError);
     };
-  }, [routeInteractionId]);
+  }, [routeInteractionId, partnerProfileId, headerName, navigation, showToast, t, ownEntityId, participantIds]);
+
+  // 4-3 (D36): Retry after a terminal session failure — clears the failure
+  // state and re-invokes startInteractionSession (the service purges the
+  // flagged entry for this participant set and mints a fresh session; the
+  // context re-arms its initialization timer/retry budget).
+  const handleSessionRetry = useCallback(async () => {
+    log.info(`Retrying session for ${currentInteractionIdRef.current} after terminal failure`);
+    hapticLightPress();
+    setSessionFailed(null);
+    try {
+      // Reply mode read fresh from the SYNCED settings column (same as the
+      // init effect) — but BEST-EFFORT here: a failed preference read must
+      // never block the retry (the session is already down; fall back to the
+      // default pacing), matching the service's getSyncedReplyMode fallback.
+      let mode = 'realistic';
+      try {
+        const savedMode = participantKey ? await getReplyMode(participantKey) : null;
+        if (savedMode) {
+          mode = savedMode;
+        }
+      } catch (modeError) {
+        log.warn('Failed to read reply mode for session retry, using default:', modeError);
+      }
+      await startInteractionSession(ownEntityId, participantIds, mode);
+    } catch (error: any) {
+      log.error('Session retry failed:', error);
+      showToast(`${t('common:error')}: ${error?.message || 'Unknown error'}`);
+    }
+  }, [participantKey, ownEntityId, participantIds, startInteractionSession, showToast, t]);
+
+  // 4-3 (D35): ingestion-class failures ("the AI couldn't be found on Harmony
+  // Link") — run a blocking re-sync so the engine ingests the entity, then
+  // retry the session. 4-2 (D13/D34): the wait is CRITICAL so a failed sync
+  // surfaces as a rejection (logged here) instead of resolving best-effort.
+  const handleSyncAndRetry = useCallback(async () => {
+    hapticLightPress();
+    try {
+      await SyncService.getInstance().syncAndWait({ critical: true });
+    } catch (error) {
+      log.warn('Sync-and-retry sync failed (critical):', error);
+    }
+    await handleSessionRetry();
+  }, [handleSessionRetry]);
 
   // Seed emoji action defaults when session becomes active
   useEffect(() => {
@@ -536,86 +1061,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       });
     }
   }, [routeInteractionId, isSessionActive]);
-
-  const handleSendText = useCallback(
-    async (text: string) => {
-      if (!text.trim() || !isSessionActive(currentInteractionIdRef.current)) {
-        log.warn('Cannot send message: session not active');
-        return;
-      }
-
-      try {
-        // Resolve emoji actions
-        let sendText = text.trim();
-        let additionalEffects = null;
-
-        const resolved = await EntityEmojiActionService.resolveMessageActions(
-          currentInteractionIdRef.current,
-          sendText,
-        );
-
-        if (resolved.hasActions) {
-          sendText = resolved.substitutedText;
-          additionalEffects = resolved.effects;
-          log.info(`Resolved emoji actions: ${resolved.effects.emotionEffects.length} effects`);
-        }
-
-        await EntitySessionService.sendTextMessage(
-          currentInteractionIdRef.current,
-          sendText,
-          additionalEffects,
-        );
-
-        // Optimistically reload from database
-        if (participantKey) {
-          const updatedMessages = await getRecentConversationMessages(
-            ownEntityId,
-            participantKey,
-            MESSAGES_PAGE_SIZE,
-          );
-          pendingOwnMessageScroll.current = true;
-          setMessages(updatedMessages);
-        }
-      } catch (error) {
-        log.error('Failed to send message:', error);
-      }
-    },
-    [routeInteractionId, ownEntityId, participantKey, isSessionActive],
-  );
-
-  const handleEmojiSelected = useCallback((emoji: EmojiEntry) => {
-    chatInputRef.current?.insertEmoji(emoji.native);
-  }, []);
-
-  const handleSendAudio = useCallback(
-    async (audioData: string, duration: number) => {
-      if (!isSessionActive(currentInteractionIdRef.current)) return;
-
-      try {
-        await EntitySessionService.newAudioMessage(
-          currentInteractionIdRef.current,
-          audioData,
-          'audio/wav',
-          duration,
-        );
-
-        log.info('Audio message saved, awaiting transcription...');
-
-        if (participantKey) {
-          const updatedMessages = await getRecentConversationMessages(
-            ownEntityId,
-            participantKey,
-            MESSAGES_PAGE_SIZE,
-          );
-          pendingOwnMessageScroll.current = true;
-          setMessages(updatedMessages);
-        }
-      } catch (error) {
-        log.error('Failed to save audio message:', error);
-      }
-    },
-    [routeInteractionId, ownEntityId, participantKey, isSessionActive],
-  );
 
   const handleConfirmAndSendMessage = useCallback(
     async (messageId: string, finalText: string) => {
@@ -690,29 +1135,125 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       } catch (error: any) {
         log.error('Failed to send message:', error);
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(
-            `Failed to send: ${error.message}`,
-            ToastAndroid.LONG,
-          );
-        } else {
-          Alert.alert(t('common:error'), t('common:error') + `: ${error.message}`);
-        }
+        showToast(t('failedToSend', { message: error.message }));
       }
     },
     [routeInteractionId, ownEntityId, participantKey, isSessionActive],
   );
 
-  const handleSendImage = useCallback(
-    async (imageBase64: string, mimeType: string, caption?: string) => {
-      if (!isSessionActive(currentInteractionIdRef.current)) return;
+  // ---------------------------------------------------------------------------
+  // Message action sheet (long-press a bubble)
+  // ---------------------------------------------------------------------------
 
+  const handleLongPressMessage = useCallback((message: ConversationMessage) => {
+    setActionSheetMessage(message);
+  }, []);
+
+  const closeActionSheet = useCallback(() => {
+    setActionSheetMessage(null);
+  }, []);
+
+  const handleReactToMessage = useCallback(
+    async (messageId: string, emoji: string) => {
       try {
-        await EntitySessionService.sendImageMessage(
-          currentInteractionIdRef.current,
-          imageBase64,
-          mimeType,
-          caption,
+        const msg = await getConversationMessage(messageId);
+        if (!msg) return;
+
+        // Parse existing reactions
+        let reactions: string[] = [];
+        if (msg.reactions_json) {
+          try {
+            const parsed = JSON.parse(msg.reactions_json);
+            if (Array.isArray(parsed)) {
+              reactions = parsed.filter((r): r is string => typeof r === 'string');
+            }
+          } catch {
+            reactions = [];
+          }
+        }
+
+        // Toggle: remove if already present, else add
+        const next = reactions.includes(emoji)
+          ? reactions.filter(r => r !== emoji)
+          : [...reactions, emoji];
+
+        await updateConversationMessage(messageId, {
+          reactions_json: JSON.stringify(next),
+        });
+
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          setMessages(updatedMessages);
+        }
+      } catch (error) {
+        log.error('Failed to toggle reaction:', error);
+      }
+    },
+    [ownEntityId, participantKey],
+  );
+
+  const handleCopyMessage = useCallback(async (message: ConversationMessage) => {
+    if (message.content) {
+      await Clipboard.setString(message.content);
+      showToast(t('toastCopied'));
+    }
+  }, [t]);
+
+  const handleForwardMessage = useCallback((message: ConversationMessage) => {
+    // Open the forward target picker — all characters the user has chatted with.
+    setForwardMessageText(message.content || '');
+    setForwardPickerVisible(true);
+  }, []);
+
+  const handleForwardSelect = useCallback(
+    (target: ForwardTarget) => {
+      setForwardPickerVisible(false);
+      showToast(t('forwarding'));
+
+      // Send the message directly to the target character's session in the
+      // background — no navigation, the user stays on the current chat.
+      EntitySessionService.forwardTextMessage(
+        ownEntityId,
+        target.participantIds,
+        forwardMessageText,
+      )
+        .then(() => {
+          showToast(t('toastForwarded'));
+        })
+        .catch(err => {
+          log.error('Failed to forward message:', err);
+          showToast(t('toastForwardFailed'));
+        });
+    },
+    [ownEntityId, forwardMessageText, t, showToast],
+  );
+
+  const handleTranslateMessage = useCallback(
+    async (message: ConversationMessage) => {
+      // NOTE: There is no translation backend available yet. We show a
+      // friendly confirmation so the action is not a dead button.
+      if (!message.content) return;
+      showAlert(
+        t('translateTitle'),
+        t('translateNotAvailable'),
+        [{ text: t('common:ok') }],
+      );
+    },
+    [showAlert, t],
+  );
+
+  const handleTogglePinMessage = useCallback(
+    async (message: ConversationMessage) => {
+      try {
+        const nextPinned = !message.is_pinned;
+        await updateConversationMessage(message.id, { is_pinned: nextPinned });
+        // Keep the sheet's label in sync with the live message state.
+        setActionSheetMessage(prev =>
+          prev && prev.id === message.id ? { ...prev, is_pinned: nextPinned } : prev,
         );
         if (participantKey) {
           const updatedMessages = await getRecentConversationMessages(
@@ -720,30 +1261,26 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             participantKey,
             MESSAGES_PAGE_SIZE,
           );
-          pendingOwnMessageScroll.current = true;
           setMessages(updatedMessages);
         }
+        showToast(nextPinned ? t('toastPinned') : t('toastUnpinned'));
       } catch (error) {
-        log.error('Failed to send image:', error);
+        log.error('Failed to toggle pin:', error);
       }
     },
-    [routeInteractionId, isSessionActive, ownEntityId, participantKey],
+    [ownEntityId, participantKey],
   );
-
-  const handleTypingStart = useCallback(() => {
-    // Send typing indicator if session active
-  }, [routeInteractionId, isSessionActive]);
 
   // Delete message handler
   const handleDeleteMessage = useCallback(
     async (messageId: string) => {
-      Alert.alert(
-        'Delete Message',
-        'Are you sure you want to delete this message?',
+      showAlert(
+        t('deleteMessageTitle'),
+        t('deleteMessageBody'),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common:cancel'), style: 'cancel' },
           {
-            text: 'Delete',
+            text: t('common:delete'),
             style: 'destructive',
             onPress: async () => {
               try {
@@ -757,9 +1294,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   setMessages(updatedMessages);
                 }
 
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show('Message deleted', ToastAndroid.SHORT);
-                }
+                showToast(t('toastMessageDeleted'));
               } catch (error) {
                 log.error('Failed to delete message:', error);
               }
@@ -774,13 +1309,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Regenerate message handler
   const handleRegenerateMessage = useCallback(
     async (messageId: string) => {
-      Alert.alert(
-        'Regenerate Response',
-        'Delete this response and regenerate a new one?',
+      showAlert(
+        t('regenerateTitle'),
+        t('regenerateBody'),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common:cancel'), style: 'cancel' },
           {
-            text: 'Regenerate',
+            text: t('regenerateButton'),
             onPress: async () => {
               try {
                 await deleteConversationMessage(messageId);
@@ -811,22 +1346,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   setMessages(updatedMessages);
                 }
 
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(
-                    'Regenerating response...',
-                    ToastAndroid.SHORT,
-                  );
-                }
+                showToast(t('toastRegenerating'));
               } catch (error: any) {
                 log.error('Failed to regenerate:', error);
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(
-                    `Failed: ${error.message}`,
-                    ToastAndroid.LONG,
-                  );
-                } else {
-                  Alert.alert('Error', error.message);
-                }
+                showToast(t('toastFailed', { message: error.message }));
               }
             },
           },
@@ -839,13 +1362,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Edit message handler
   const handleEditMessage = useCallback(
     async (messageId: string, newText: string) => {
-      Alert.alert(
-        'Edit and Resend',
-        'Edit and resend this message? This will trigger a new AI response.',
+      showAlert(
+        t('editResendTitle'),
+        t('editResendBody'),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common:cancel'), style: 'cancel' },
           {
-            text: 'Edit & Resend',
+            text: t('edit'),
             onPress: async () => {
               try {
                 // Soft-delete the original so only the replacement appears
@@ -865,22 +1388,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   setMessages(updatedMessages);
                 }
 
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(
-                    'Message updated and sent',
-                    ToastAndroid.SHORT,
-                  );
-                }
+                showToast(t('toastMessageUpdated'));
               } catch (error: any) {
                 log.error('Failed to edit message:', error);
-                if (Platform.OS === 'android') {
-                  ToastAndroid.show(
-                    `Failed: ${error.message}`,
-                    ToastAndroid.LONG,
-                  );
-                } else {
-                  Alert.alert('Error', error.message);
-                }
+                showToast(t('toastFailed', { message: error.message }));
               }
             },
           },
@@ -904,25 +1415,326 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           currentInteractionIdRef.current,
         );
 
-        if (Platform.OS === 'android') {
-          ToastAndroid.show('Retrying transcription...', ToastAndroid.SHORT);
-        }
+        showToast(t('toastRetryingTranscription'));
       } catch (error: any) {
         log.error('Failed to retry transcription:', error);
         setFailedTranscriptions(prev => new Set(prev).add(messageId));
-
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(
-            `Retry failed: ${error.message}`,
-            ToastAndroid.LONG,
-          );
-        } else {
-          Alert.alert('Retry Failed', error.message);
-        }
+        showToast(t('toastRetryFailed', { message: error.message }));
       }
     },
     [routeInteractionId],
   );
+
+  // ---------------------------------------------------------------------------
+  // Message sending — text / audio / images (driven by ChatInputBar)
+  // ---------------------------------------------------------------------------
+
+  const handleSendTextMessage = useCallback(
+    async (text: string) => {
+      if (isDisabled) {
+        log.warn('Cannot send message: AI is disabled');
+        showToast(t('disabledBanner'));
+        return;
+      }
+      if (!isSessionActive(currentInteractionIdRef.current)) {
+        log.warn('Cannot send message: session not active');
+        showToast(t('failedToSend', { message: 'Session not active' }));
+        return;
+      }
+
+      try {
+        // Resolve emoji actions in the text
+        let sendText = text;
+        let additionalEffects = null;
+        const replyId = replyToMessage?.id ?? null;
+
+        const resolved = await EntityEmojiActionService.resolveMessageActions(
+          currentInteractionIdRef.current,
+          sendText,
+        );
+
+        if (resolved.hasActions) {
+          sendText = resolved.substitutedText;
+          additionalEffects = resolved.effects;
+        }
+
+        // Store the reply reference (reply_to_message_id) instead of embedding
+        // a text quote — the UI renders a proper "Replying to" header.
+        await EntitySessionService.sendTextMessage(
+          currentInteractionIdRef.current,
+          sendText,
+          additionalEffects,
+          replyId,
+        );
+
+        // Reply context consumed
+        if (replyToMessage) {
+          setReplyToMessage(null);
+        }
+
+        log.info(`Text message sent for interaction ${routeInteractionId}`);
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          pendingOwnMessageScroll.current = true;
+          setMessages(updatedMessages);
+        }
+      } catch (error: any) {
+        log.error('Failed to send text message:', error);
+        showToast(t('failedToSend', { message: error.message }));
+      }
+    },
+    [
+      routeInteractionId,
+      ownEntityId,
+      participantKey,
+      isSessionActive,
+      showToast,
+      t,
+      replyToMessage,
+    ],
+  );
+
+  const handleSendAudioMessage = useCallback(
+    async (audioData: string, mimeType: string, duration: number) => {
+      if (isDisabled) {
+        log.warn('Cannot send audio: AI is disabled');
+        showToast(t('disabledBanner'));
+        return;
+      }
+      if (!isSessionActive(currentInteractionIdRef.current)) {
+        log.warn('Cannot send audio: session not active');
+        showToast(t('failedToSend', { message: 'Session not active' }));
+        return;
+      }
+
+      try {
+        // newAudioMessage stores the message locally and requests transcription.
+        // Transcription completes server-side and fires 'transcription:completed'.
+        await EntitySessionService.newAudioMessage(
+          currentInteractionIdRef.current,
+          audioData,
+          mimeType,
+          duration,
+        );
+
+        log.info(`Audio message flow started for interaction ${routeInteractionId}`);
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          pendingOwnMessageScroll.current = true;
+          setMessages(updatedMessages);
+        }
+      } catch (error: any) {
+        log.error('Failed to send audio message:', error);
+        showToast(t('audioSendFailed', { message: error.message }));
+      }
+    },
+    [
+      routeInteractionId,
+      ownEntityId,
+      participantKey,
+      isSessionActive,
+      showToast,
+      t,
+    ],
+  );
+
+  const handleSendImages = useCallback(
+    async (images: PickedImage[]) => {
+      if (isDisabled) {
+        log.warn('Cannot send images: AI is disabled');
+        showToast(t('disabledBanner'));
+        return;
+      }
+      if (!isSessionActive(currentInteractionIdRef.current)) {
+        log.warn('Cannot send images: session not active');
+        showToast(t('failedToSend', { message: 'Session not active' }));
+        // Rethrow so the input bar keeps the previews for a retry.
+        throw new Error('Session not active');
+      }
+
+      try {
+        for (const image of images) {
+          await EntitySessionService.sendImageMessage(
+            currentInteractionIdRef.current,
+            image.base64,
+            image.mimeType,
+          );
+        }
+
+        log.info(`Sent ${images.length} image message(s) for interaction ${routeInteractionId}`);
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          pendingOwnMessageScroll.current = true;
+          setMessages(updatedMessages);
+        }
+      } catch (error: any) {
+        log.error('Failed to send image message:', error);
+        showToast(t('imageSendFailed', { message: error.message }));
+        throw error;
+      }
+    },
+    [
+      routeInteractionId,
+      ownEntityId,
+      participantKey,
+      isSessionActive,
+      showToast,
+      t,
+    ],
+  );
+
+  const handleReplyToMessage = useCallback(
+    (message: ConversationMessage) => {
+      setReplyToMessage(message);
+    },
+    [],
+  );
+
+  const handleCancelReply = useCallback(() => {
+    setReplyToMessage(null);
+  }, []);
+
+  // Handle the message action sheet selection
+  const handleMessageAction = useCallback(
+    (action: MessageAction) => {
+      const message = actionSheetMessage;
+      if (!message) return;
+      closeActionSheet();
+
+      switch (action) {
+        case 'reply':
+          handleReplyToMessage(message);
+          break;
+        case 'delete':
+          handleDeleteMessage(message.id);
+          break;
+        case 'copy':
+          handleCopyMessage(message);
+          break;
+        case 'forward':
+          handleForwardMessage(message);
+          break;
+        case 'translate':
+          handleTranslateMessage(message);
+          break;
+        case 'pin':
+          handleTogglePinMessage(message);
+          break;
+      }
+    },
+    [
+      actionSheetMessage,
+      closeActionSheet,
+      handleReplyToMessage,
+      handleDeleteMessage,
+      handleCopyMessage,
+      handleForwardMessage,
+      handleTranslateMessage,
+      handleTogglePinMessage,
+    ],
+  );
+
+  // ── Disable / enable ──
+  const handleDisableToggle = useCallback(() => {
+    setMenuVisible(false);
+    if (!participantKey) return;
+    const otherIds = participantIds.filter(id => id !== ownEntityId);
+    const partnerEntityId = otherIds[0] || '';
+    const partnerName = headerName || t('partnerSettings');
+
+    // Disable is a per-ENTITY flag (Q8) — no single partner (group) → no-op.
+    if (!partnerEntityId) return;
+
+    if (!isDisabled) {
+      showAlert(
+        t('disableTitle', { name: partnerName }),
+        t('disableBody', { name: partnerName }),
+        [
+          { text: t('common:cancel'), style: 'cancel' },
+          {
+            text: t('disableTitle', { name: partnerName }),
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await setEntityDisabled(partnerEntityId, true);
+                setIsDisabled(true);
+                showToast(t('toastDisabled'));
+              } catch (error) {
+                log.error('Failed to disable:', error);
+              }
+            },
+          },
+        ],
+      );
+    } else {
+      // Enable — the send/incoming guards read the entity flag directly
+      // (Q8), no conversation override to seed.
+      setIsDisabled(false);
+      showToast(t('toastEnabled'));
+      setEntityDisabled(partnerEntityId, false).catch(error =>
+        log.error('Failed to enable:', error),
+      );
+    }
+  }, [
+    participantKey,
+    participantIds,
+    ownEntityId,
+    headerName,
+    isDisabled,
+    showAlert,
+    showToast,
+    t,
+  ]);
+
+  // ── Open chat bubble ──
+  const handleOpenBubble = useCallback(async () => {
+    setMenuVisible(false);
+    const conversation = {
+      participantKey,
+      interactionId: currentInteractionIdRef.current,
+      entityId: participantIds.filter(id => id !== ownEntityId)[0] || '',
+      ownEntityId,
+      entityName: headerName,
+      participantIds,
+      avatar: partnerAvatar,
+    };
+
+    // showBubble remembers the conversation and auto-requests the overlay
+    // permission when missing; the bubble auto-shows on return from settings.
+    const shown = await showBubble(conversation);
+    if (shown) {
+      showToast(t('openBubble'));
+      return;
+    }
+
+    // Permission not granted yet — request it; pending conversation auto-shows.
+    const accepted = await requestBubblePermission();
+    if (!accepted) {
+      showToast(t('common:error'));
+    } else {
+      showToast(t('openBubble'));
+    }
+  }, [
+    participantKey,
+    participantIds,
+    ownEntityId,
+    headerName,
+    partnerAvatar,
+    showToast,
+    t,
+  ]);
 
   // Entity context menu
   const handleEntityContextMenu = useCallback(() => {
@@ -934,20 +1746,20 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // For the delete entity flow, we need the partner entity ID from participantIds
     const otherIds = participantIds.filter(id => id !== ownEntityId);
     const partnerEntityId = otherIds[0] || '';
-    Alert.alert(
-      'Delete Entity',
-      `Delete "${headerName}"? Chat history will be preserved but this entity will no longer be accessible.`,
+    showAlert(
+      t('deleteEntityTitle'),
+      t('deleteEntityBody', { name: headerName }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common:cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('common:delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await deleteEntity(partnerEntityId);
-              navigation.navigate('ChatList');
+              navigation.navigate('MainTabs');
             } catch (err: any) {
-              Alert.alert(
+              showAlert(
                 t('common:error'),
                 err?.message ?? t('common:error'),
               );
@@ -958,31 +1770,103 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }, [ownEntityId, participantIds, headerName, navigation]);
 
-  const handleEntitySettings = useCallback(() => {
+  // Open the persona switcher (the "My Personas" role in this chat). Personas
+  // are the ONLY identities the user can chat as; switching the active persona
+  // persists the global preference and shows a confirmation in the chat.
+  const handleOpenPersonaSwitcher = useCallback(() => {
     setMenuVisible(false);
-    // For entity settings, we need the partner entity ID
+    setPersonaSwitcherVisible(true);
+  }, []);
+
+  // Switch the active persona for this chat ('user' = chat as own profile).
+  // Persists the global preference, stops the OLD session, and navigates to the
+  // persona's OWN thread (thread-per-persona — the participant_key includes the
+  // own identity, so each persona/partner pair is its own conversation; the
+  // engine resolves the resumable session on INIT). The old in-chat
+  // "Now chatting as X" divider is gone (review) — confirmation is a toast.
+  const handleSwitchPersona = useCallback(
+    async (personaId: string) => {
+      setPersonaSwitcherVisible(false);
+      try {
+        const plan = buildPersonaSwitchPlan({
+          personaId,
+          currentOwnEntityId: ownEntityId,
+          currentParticipantIds: participantIds,
+          partnerEntityName: partnerName,
+          newInteractionId: uuidv7(),
+        });
+        // Selecting the currently-active persona → no-op (modal already closed).
+        if (plan.action === 'noop') {
+          return;
+        }
+
+        // Resolve the persona display name for the confirmation toast.
+        let personaName = personaId;
+        if (personaId !== 'user') {
+          const persona = await getUserPersona(personaId);
+          personaName = persona?.name ?? personaId;
+        }
+
+        // 1. Persist the global impersonation pref ('user' clears it).
+        await ChatPreferencesService.setGlobalImpersonatedEntity(personaId);
+
+        // 2. Stop the OLD session before navigating to the new thread.
+        stopInteractionSession(currentInteractionIdRef.current).catch(() => {});
+
+        // 3. Navigate to the persona's own thread.
+        navigation.replace('ChatDetail', plan.params);
+
+        // 4. Confirmation toast.
+        showToast(
+          personaId === 'user'
+            ? t('personaChangedUser')
+            : t('personaChanged', { name: personaName }),
+        );
+      } catch (err) {
+        log.error('Failed to switch persona:', err);
+      }
+    },
+    [t, ownEntityId, participantIds, partnerName, navigation, stopInteractionSession],
+  );
+
+  // Open settings for the OTHER participant (partner/character) in this chat.
+  // Resolves the partner entity → its character profile and opens the single
+  // edit surface (Create AI Partner screen in edit mode).
+  const handlePartnerSettings = useCallback(() => {
+    setMenuVisible(false);
     const otherIds = participantIds.filter(id => id !== ownEntityId);
     const partnerEntityId = otherIds[0] || '';
-    navigation.navigate('EntityConfigEdit', { entityId: partnerEntityId });
+    if (!partnerEntityId) return;
+    (async () => {
+      try {
+        const entity = await getEntity(partnerEntityId);
+        if (entity?.character_profile_id) {
+          navigation.navigate('CreateAI', {
+            editProfileId: entity.character_profile_id,
+          });
+        }
+      } catch (err) {
+        log.warn('Failed to resolve partner entity for settings:', err);
+      }
+    })();
   }, [ownEntityId, participantIds, navigation]);
 
-  const handleToggleReplyMode = useCallback(async () => {
-    const newMode = replyMode === 'realistic' ? 'instant' : 'realistic';
-    setReplyMode(newMode);
+  // Open the AI partner's profile page (AIProfile) when the user taps the
+  // header avatar or character name in a private chat with an AI character.
+  const handleOpenPartnerProfile = useCallback(() => {
+    if (!partnerProfileId) return;
+    hapticLightPress();
+    navigation.navigate('AIProfile', { profileId: partnerProfileId });
+  }, [partnerProfileId, navigation]);
 
-    // Persist locally using participantKey (stable across navigations)
-    await ChatPreferencesService.setReplyMode(participantKey, newMode);
-    replyModeRef.current = newMode;
-
-    // Send to Harmony Link if session is active
-    if (isSessionActive(currentInteractionIdRef.current)) {
-      try {
-        await EntitySessionService.setReplyMode(currentInteractionIdRef.current, newMode);
-      } catch (error) {
-        log.error('Failed to send reply mode update:', error);
-      }
+  // Index messages by id so reply headers can look up the quoted message.
+  const messageById = useMemo(() => {
+    const map = new Map<string, ConversationMessage>();
+    for (const m of messages) {
+      map.set(m.id, m);
     }
-  }, [replyMode, participantKey, isSessionActive]);
+    return map;
+  }, [messages]);
 
   // Calculate messages with divider AND compute the initial scroll target
   const { messagesWithDivider, initialScrollTarget } = useMemo(() => {
@@ -990,37 +1874,59 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       return { messagesWithDivider: messages, initialScrollTarget: 'bottom' as const };
     }
 
-    let withDivider: any[] = messages;
+    // Insert a calendar-day divider before the first message of each new day.
+    // This runs on the raw messages so dividers stay stable regardless of the
+    // session/divider insertion below. D1-8: also emit a divider for the FIRST
+    // message (i === 0) so a freshly opened conversation shows its start date
+    // ("Today"/"Yesterday"/date) like mainstream chat apps.
+    let withDivider: any[] = [];
+    for (let i = 0; i < messages.length; i++) {
+      if (
+        i === 0 ||
+        !isSameCalendarDay(messages[i - 1].created_at, messages[i].created_at)
+      ) {
+        withDivider.push({
+          id: `day-divider-${messages[i].id}`,
+          type: 'day',
+          date: messages[i].created_at,
+        });
+      }
+      withDivider.push(messages[i]);
+    }
 
-    if (sessionDividerTimestamp.current !== 0 && showDivider) {
-      const firstNewPartnerIndex = messages.findIndex(
+    if (showDivider) {
+      // "New messages" divider = the FIRST partner-sent UNREAD message at open,
+      // derived from the loaded page's `is_read` flags (3-1 — no AsyncStorage;
+      // the legacy last-read-timestamp divider-key derivation is gone A5/A2).
+      const firstUnreadIndex = messages.findIndex(
         m =>
-          m.created_at.getTime() > sessionDividerTimestamp.current &&
-          m.sender_entity_id !== ownEntityId,
+          m.sender_entity_id !== ownEntityId &&
+          m.is_read === false,
       );
 
-      if (firstNewPartnerIndex > 0) {
-        const newMessageCount = messages.length - firstNewPartnerIndex;
-        const result: any[] = [...messages];
-        result.splice(firstNewPartnerIndex, 0, {
-          id: 'new-messages-divider',
-          type: 'divider',
-          count: newMessageCount,
-        });
-        withDivider = result;
+      if (firstUnreadIndex > 0) {
+        // Map the raw-message index to the corresponding index in the
+        // day-augmented array (each message has one preceding day-divider).
+        const insertionIndex = withDivider.findIndex(
+          (m: any) => m.id === messages[firstUnreadIndex].id,
+        );
+        if (insertionIndex !== -1) {
+          const newMessageCount = messages.length - firstUnreadIndex;
+          withDivider.splice(insertionIndex, 0, {
+            id: 'new-messages-divider',
+            type: 'divider',
+            count: newMessageCount,
+          });
+        }
       }
     }
 
-    const dividerIndex = withDivider.findIndex((m: any) => m.type === 'divider');
-    let target: 'bottom' | number = 'bottom';
-    if (dividerIndex !== -1) {
-      const messagesAfterDivider = withDivider.length - dividerIndex - 1;
-      if (messagesAfterDivider >= 3) {
-        target = dividerIndex;
-      }
-    }
-
-    return { messagesWithDivider: withDivider, initialScrollTarget: target };
+    // ALWAYS open the conversation at the most recent (bottom) message. The
+    // "new messages" divider is still inserted above so it stays visible for
+    // context when the user scrolls up, but the initial viewport must land on
+    // the latest message — starting mid-conversation (on the divider) was the
+    // reported bug, so the scroll target is never a divider index.
+    return { messagesWithDivider: withDivider, initialScrollTarget: 'bottom' as const };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, showDivider, ownEntityId]);
 
@@ -1030,19 +1936,92 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [initialScrollTarget]);
 
-  const persistMarkAsRead = useCallback(() => {
-    const msgs = loadedMessagesRef.current;
-    if (msgs.length === 0) return;
-    const latestTimestamp = msgs[msgs.length - 1]?.created_at.getTime() || 0;
-    if (latestTimestamp > lastReadTimestampRef.current) {
-      lastReadTimestampRef.current = latestTimestamp;
-      setLastReadTimestamp(latestTimestamp);
-      ChatPreferencesService.setLastReadTimestamp(routeInteractionId, latestTimestamp);
+  // Authority for the initial reveal + bottom-pin. This is driven by DATA
+  // (messages / persona-change row) instead of onContentSizeChange, so it is
+  // reliable regardless of when/whether the list reports size changes — the
+  // first onContentSizeChange fires while the list is empty, which would
+  // otherwise arm (and expire) the reveal before a slow, chunked message load
+  // finishes, stranding the viewport on the very first message.
+  //
+  // When real content first arrives: arm a short settle window during which we
+  // keep snapping to the bottom (absorbing async image decode / late batches),
+  // then reveal the screen. Re-runs whenever the message list grows during
+  // init so a late-arriving message still re-anchors the viewport to the bottom.
+  //
+  //   Known-empty chats reveal WITHOUT content: once the message query has
+  //   settled AND the engine reported has_first_mes=false, no greeting message
+  //   will EVER arrive for this conversation (§1-10 engine contract) — waiting
+  //   for content here stranded those chats on the splash forever. The revealed
+  //   empty chat shows the generate-greeting hint via the ListEmptyComponent;
+  //   a message arriving later still pins to the bottom via onContentSizeChange
+  //   (messagesCountAtReveal stays 0).
+  //
+  //   4-3 (D36): a terminally FAILED session also reveals immediately — a
+  //   failed init never delivers content, so holding the splash would dead-end
+  //   behind the error card. No settle window: reveal at once.
+  useEffect(() => {
+    const hasRealContent =
+      messages.length > 0;
+    const isKnownEmpty = shouldRevealEmptyChat(
+      loading,
+      hasFirstMes,
+      messages.length,
+    );
+    if (
+      !isReadyToShowRef.current &&
+      !isInitialScrollDone.current &&
+      ((initialScrollTarget === 'bottom' && hasRealContent) ||
+        isKnownEmpty ||
+        sessionFailed !== null)
+    ) {
+      if (isKnownEmpty || sessionFailed !== null) {
+        // Nothing to scroll or pin — reveal immediately.
+        isInitialScrollDone.current = true;
+        isReadyToShowRef.current = true;
+        setIsReadyToShow(true);
+        return;
+      }
+      const scroll = () => flatListRef.current?.scrollToEnd({ animated: false });
+      // First snap immediately, then keep re-snapping on a few frames so rows
+      // get a chance to render (images decode async → content grows).
+      requestAnimationFrame(scroll);
+
+      if (!isArmRevealScheduled.current) {
+        isArmRevealScheduled.current = true;
+        isInitialScrollDone.current = true;
+        settleUntilRef.current = Date.now() + INITIAL_SCROLL_SETTLE_MS;
+
+        const begin = Date.now();
+        const interval = setInterval(() => {
+          scroll();
+          if (Date.now() - begin >= INITIAL_SCROLL_SETTLE_MS) {
+            clearInterval(interval);
+            settleUntilRef.current = 0;
+            messagesCountAtReveal.current = messagesWithDivider.length;
+            isReadyToShowRef.current = true;
+            setIsReadyToShow(true);
+          }
+        }, 60);
+      }
     }
+  }, [messages, messagesWithDivider, initialScrollTarget, loading, hasFirstMes, sessionFailed]);
+
+  const persistMarkAsRead = useCallback(() => {
+    // Derived unread (A5/A2): mark partner-sent messages in THIS conversation
+    // read, fire-and-forget. Reading the chat clears the derived unread badge.
+    if (participantKey) {
+      markConversationMessagesRead(participantKey, ownEntityId).catch(error =>
+        log.error('Failed to mark conversation read:', error),
+      );
+    }
+    // The legacy last-read-timestamp AsyncStorage key is gone (3-1) — the
+    // divider no longer depends on it; only the derived-first-unread flags
+    // matter. Hide the divider once the reveal settles so it doesn't re-appear
+    // on scroll.
     if (isReadyToShowRef.current) {
       setShowDivider(false);
     }
-  }, [routeInteractionId]);
+  }, [participantKey, ownEntityId]);
 
   const handleScrollEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -1078,154 +2057,459 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     [persistMarkAsRead],
   );
 
+  // ✨ Scenario trigger (§2-4): P1 left the composer ✨ icon + ✨ pill PRESENT
+  // but DISABLED. Opening the sheet is now wired (the sheet's Generate →
+  // onGenerate → runScenarioGeneration dispatches the engine event).
+  const openScenarioSheet = useCallback(() => {
+    setScenarioSheetOpen(true);
+  }, []);
+
+  const closeScenarioSheet = useCallback(() => {
+    setScenarioSheetOpen(false);
+  }, []);
+
+  const showGenerateFailed = useCallback(() => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(t('scenario:generateFailedBackend'), ToastAndroid.LONG);
+    } else {
+      showAlert(t('scenario:title'), t('scenario:generateFailedBackend'), [
+        { text: t('common:ok') },
+      ]);
+    }
+  }, [t, showAlert]);
+
+  /** Dispatch GENERATE_GREETING (replace path) — shared by the sheet's
+   *  replace branch and the swiper's "Generate another" slot. */
+  const performGenerateGreeting = useCallback(
+    async (guided: ScenarioGuidedInputs | null) => {
+      const partnerEntityId = participantIds.find(id => id !== ownEntityId);
+      if (!partnerEntityId) return;
+
+      const mode = guided ? ('directed' as const) : ('random' as const);
+
+      setGreetingPreparing(true);
+      try {
+        await EntitySessionService.generateGreeting({
+          entityId: partnerEntityId,
+          targetEntityId: ownEntityId,
+          interactionId: currentInteractionIdRef.current,
+          mode,
+          ...(guided ? { guided } : {}),
+        });
+
+        // Reload so the (new/updated) greeting message renders — the engine
+        // delivers it via the message/sync path; this is a belt-and-braces
+        // refresh on top of the message:received listener.
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          setMessages(updatedMessages);
+          loadedMessagesRef.current = updatedMessages;
+        }
+      } catch (error) {
+        log.error('Greeting generation failed:', error);
+        // Non-blocking toast/alert — chat stays as-is (no fabrication).
+        showGenerateFailed();
+      } finally {
+        setGreetingPreparing(false);
+      }
+    },
+    [participantIds, ownEntityId, participantKey, showGenerateFailed],
+  );
+
+  /** Restart path — START_NEW_SCENARIO with interaction-id swap + blocking sync. */
+  const performScenarioRestart = useCallback(
+    async (guided: ScenarioGuidedInputs | null) => {
+      const partnerEntityId = participantIds.find(id => id !== ownEntityId);
+      if (!partnerEntityId) return;
+
+      const mode = guided ? ('directed' as const) : ('random' as const);
+
+      setGreetingPreparing(true);
+      try {
+        const result = await EntitySessionService.startNewScenario({
+          entityId: partnerEntityId,
+          targetEntityId: ownEntityId,
+          mode,
+          ...(guided ? { guided } : {}),
+        });
+
+        // Swap the active interactionId to the brand-new interaction, then run
+        // a blocking sync to fetch the new interaction + its first message
+        // before unblocking (the chat re-renders the fresh scenario).
+        if (result.interactionId && result.interactionId !== currentInteractionIdRef.current) {
+          log.info(
+            `Scenario restart: swapping interaction ${currentInteractionIdRef.current} → ${result.interactionId}`,
+          );
+          currentInteractionIdRef.current = result.interactionId;
+        }
+        setHasFirstMes(true);
+
+        // 4-2 (D34): critical — a failed sync rejects instead of resolving
+        // best-effort (logged here; the restart keeps the honest failure path).
+        await SyncService.getInstance()
+          .syncAndWait({ critical: true })
+          .catch(err => {
+            log.warn('Scenario restart sync failed (critical):', err);
+          });
+
+        if (participantKey) {
+          const updatedMessages = await getRecentConversationMessages(
+            ownEntityId,
+            participantKey,
+            MESSAGES_PAGE_SIZE,
+          );
+          setMessages(updatedMessages);
+          loadedMessagesRef.current = updatedMessages;
+        }
+      } catch (error) {
+        log.error('Scenario restart failed:', error);
+        showGenerateFailed();
+      } finally {
+        setGreetingPreparing(false);
+      }
+    },
+    [participantIds, ownEntityId, participantKey, showGenerateFailed],
+  );
+
+  /** Replace-vs-restart dispatch selection (based on message count). */
+  const runScenarioGeneration = useCallback(
+    async (guided: ScenarioGuidedInputs | null) => {
+      if (shouldUseGenerateGreeting(messages)) {
+        await performGenerateGreeting(guided);
+      } else {
+        await performScenarioRestart(guided);
+      }
+    },
+    [messages, performGenerateGreeting, performScenarioRestart],
+  );
+
+  const handleScenarioGenerate = useCallback(
+    async (guided: ScenarioGuidedInputs | null) => {
+      lastGuidedRef.current = guided;
+      setScenarioSheetOpen(false); // Generate collapses the sheet
+      await runScenarioGeneration(guided);
+    },
+    [runScenarioGeneration],
+  );
+
+  /** Regenerate swipe — "Generate another" in the AlternateGreetingSwiper slot. */
+  const handleRegenerateGreeting = useCallback(async () => {
+    if (greetingPreparing) return;
+    await performGenerateGreeting(lastGuidedRef.current);
+  }, [greetingPreparing, performGenerateGreeting]);
+
+  // The regenerate slot is only shown while the greeting is still the only
+  // message (GENERATE_GREETING gate — the engine enforces this too).
+  const canRegenerateGreeting = useMemo(
+    () => shouldUseGenerateGreeting(messages),
+    [messages],
+  );
+
+  // Render-only greeting support (§1-10): the engine delivers the authored
+  // first_mes as a normal message_type="greeting" PARTNER message. For a
+  // truly-new chat it is the FIRST message in the conversation — wrap it in
+  // the authored AlternateGreetingSwiper (first_mes + alternate_greetings from
+  // the profile JSON column). No local first_mes, no optimistic placeholder,
+  // no reconciliation.
+  const { greetingMessage, isGreetingOpening } = useMemo(() => {
+    const idx = messages.findIndex(
+      m => m.message_type === 'greeting' && isPartnerMessage(m, ownEntityId),
+    );
+    const found = idx === -1 ? null : messages[idx];
+    return {
+      greetingMessage: found,
+      isGreetingOpening: found !== null && messages[0]?.id === found.id,
+    };
+  }, [messages, ownEntityId]);
+
+  // Authored swipes: [delivered first_mes, ...alternate_greetings (JSON)]
+  // (pure gate in buildGreetingSwipes — unit-testable without the RN harness).
+  const greetingSwipes = useMemo(
+    () =>
+      greetingMessage
+        ? buildGreetingSwipes(greetingMessage.content, partnerProfile)
+        : [],
+    [greetingMessage, partnerProfile],
+  );
+
+  // {{char}} → profile nickname || profile name || entity alias (D21-8: the
+  // alias fallback rides partnerName, set by the header resolution);
+  // {{user}} → own entity alias.
+  const charName = partnerProfile?.nickname || partnerProfile?.name || partnerName;
+
   const renderMessage = useCallback(
     ({ item }: { item: any }) => {
       if (item.type === 'divider') {
         return <NewMessagesDivider count={item.count} theme={theme!} />;
       }
+      if (item.type === 'day') {
+        return <DayDivider date={item.date} theme={theme!} />;
+      }
 
-      const isOwn = item.sender_entity_id === ownEntityId;
+const isOwn = !isPartnerMessage(item, ownEntityId);
+
+      // Truly-new chat + has_first_mes → the delivered greeting is the opening:
+      // render it wrapped in the authored AlternateGreetingSwiper, with the ✨
+      // Scenario pill beside it for discoverability (enabled in P2 — opens the
+      // generator sheet). The regenerate slot appears after the last authored
+      // greeting while GENERATE_GREETING is valid (greeting = only message).
+      if (
+        !isOwn &&
+        item.message_type === 'greeting' &&
+        item.id === greetingMessage?.id &&
+        isGreetingOpening
+      ) {
+        return (
+          <View style={styles.greetingWrap}>
+            <AlternateGreetingSwiper
+              key={item.id}
+              greetings={greetingSwipes}
+              charName={charName}
+              userName={ownEntityName}
+              theme={theme!}
+              onRegenerateSwipe={
+                canRegenerateGreeting ? handleRegenerateGreeting : undefined
+              }
+            />
+            <View style={styles.scenarioPillRow}>
+              <EmptyChatCTA
+                variant="pill"
+                disabled={false}
+                onPress={openScenarioSheet}
+                theme={theme!}
+              />
+            </View>
+          </View>
+        );
+      }
+
       const isLastMessage =
         messages.length > 0 && item.id === messages[messages.length - 1].id;
       const isTranscriptionFailed = failedTranscriptions.has(item.id);
+      const repliedMessage =
+        item.reply_to_message_id && messageById.has(item.reply_to_message_id)
+          ? messageById.get(item.reply_to_message_id)
+          : null;
 
       return (
         <ChatBubble
           message={item}
           isOwn={isOwn}
-          isLastMessage={isLastMessage}
           isTranscriptionFailed={isTranscriptionFailed}
           partnerAvatar={!isOwn ? partnerAvatar : null}
           partnerName={partnerName}
+          repliedMessage={repliedMessage}
           onImagePress={() => {}}
           onSendMessage={handleConfirmAndSendMessage}
-          onDelete={handleDeleteMessage}
-          onRegenerate={handleRegenerateMessage}
           onEdit={handleEditMessage}
           onRetryTranscription={handleRetryTranscription}
+          onLongPress={handleLongPressMessage}
+          onReact={handleReactToMessage}
           theme={theme!}
         />
       );
     },
     [
       messages,
+      messageById,
       partnerAvatar,
       theme,
       ownEntityId,
       failedTranscriptions,
       handleConfirmAndSendMessage,
-      handleDeleteMessage,
-      handleRegenerateMessage,
       handleEditMessage,
       handleRetryTranscription,
+      greetingMessage,
+      isGreetingOpening,
+      greetingSwipes,
+      charName,
+      ownEntityName,
+      openScenarioSheet,
+      canRegenerateGreeting,
+      handleRegenerateGreeting,
+      handleLongPressMessage,
+      handleReactToMessage,
     ],
   );
 
-  if (loading) {
+  // Connection indicator (D1-7, extended by 4-3/D36): four states.
+  //   connected  — sync WS up AND the entity session is fully active (green)
+  //   connecting — sync WS up, session still initializing (amber, pulsing)
+  //   error      — the session terminally FAILED (red; no more infinite amber)
+  //   offline    — sync WS down / disconnected (grey)
+  // The mapping lives in the pure resolveChatConnectionState helper (shared by
+  // the dot render, the pulse effect and the input-bar gating).
+  const connectionState: ChatConnectionState = resolveChatConnectionState({
+    isConnected,
+    isSessionActive: isSessionActive(currentInteractionIdRef.current),
+    sessionFailed: sessionFailed !== null,
+  });
+
+  // Pulsing affordance for the "connecting" state.
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (connectionState === 'connecting') {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 0.35,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+    pulseAnim.setValue(1);
+  }, [connectionState, pulseAnim]);
+
+  // In-flight generation affordance (§2-4): GreetingBubble `preparing` (shimmer
+  // + TypingIndicator) plus the "Preparing the opening…" caption. No streaming —
+  // this shimmer is the sole latency affordance.
+  const renderGreetingPreparing = useCallback(() => {
     return (
-      <ThemedView style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color={theme?.colors.accent.primary} />
-      </ThemedView>
+      <View style={styles.preparingWrap} testID="scenario-preparing">
+        <GreetingBubble
+          text=""
+          charName={charName}
+          userName={ownEntityName}
+          theme={theme}
+          state="preparing"
+        />
+        <ThemedText
+          variant="muted"
+          size={12}
+          style={styles.preparingText}
+          testID="scenario-preparing-text"
+        >
+          {t('scenario:preparingOpening')}
+        </ThemedText>
+      </View>
     );
-  }
+  }, [charName, ownEntityName, theme, t]);
 
   return (
     <ThemedView style={styles.container}>
       {!isReadyToShow && (
-        <ThemedView style={[styles.loadingOverlay, styles.centered]} pointerEvents="none">
+        <ThemedView
+          style={[styles.loadingOverlay, styles.centered]}
+          pointerEvents="none"
+          testID="chat-detail-splash"
+        >
           <ActivityIndicator size="large" color={theme?.colors.accent.primary} />
         </ThemedView>
       )}
-      <ThemedAppbar>
-        <Appbar.BackAction
-          onPress={() => navigation.goBack()}
-          color={theme?.colors.text.primary}
-        />
-        {partnerAvatar ? (
-          <Avatar.Image
-            size={36}
-            source={{ uri: partnerAvatar }}
-            style={styles.headerAvatar}
-          />
-        ) : (
-          <LinearGradient
-            colors={[
-              (theme?.colors.accent.primary ?? '#7c3aed') + '33',
-              theme?.colors.background.elevated ?? '#1e1e2e',
-            ]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.headerAvatarFallback}
-          >
-            <ThemedText
-              size={14}
-              weight="bold"
-              style={{ color: theme?.colors.accent.primary }}
+      <ScreenHeader
+        title={headerName}
+        onTitlePress={partnerProfileId ? handleOpenPartnerProfile : undefined}
+        titleRight={
+          connectionState === 'connected' ? (
+            <View
+              style={styles.statusDotWrap}
+              accessibilityRole="image"
+              accessibilityLabel={t('statusConnected')}
             >
-              {headerName.substring(0, 2).toUpperCase()}
-            </ThemedText>
-          </LinearGradient>
-        )}
-        <Appbar.Content
-          title={headerName}
-          titleStyle={{ color: theme?.colors.text.primary }}
-        />
-        {isConnected ? (
-          isSessionActive(currentInteractionIdRef.current) ? (
-            <ThemedText
-              variant="success"
-              size={12}
-              style={styles.statusIndicator}
+              <LinearGradient
+                colors={[
+                  (theme?.colors.status.success ?? '#10b981') + 'E6',
+                  (theme?.colors.status.success ?? '#10b981') + '80',
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.statusDot, styles.statusDotOnline]}
+              />
+            </View>
+          ) : connectionState === 'connecting' ? (
+            <Animated.View
+              style={[styles.statusDotWrap, { opacity: pulseAnim }]}
+              accessibilityRole="image"
+              accessibilityLabel={t('statusConnecting')}
             >
-              Connected
-            </ThemedText>
+              <View style={[styles.statusDot, styles.statusDotConnecting]} />
+            </Animated.View>
+          ) : connectionState === 'error' ? (
+            // 4-3 (D36): terminal failure — explicit red state. Must stay a
+            // dedicated branch BEFORE the final else (which is the grey
+            // offline dot and must not swallow unknown/error states).
+            <View
+              style={styles.statusDotWrap}
+              accessibilityRole="image"
+              accessibilityLabel={t('statusError')}
+              testID="chat-detail-status-error"
+            >
+              <View style={[styles.statusDot, styles.statusDotError]} />
+            </View>
           ) : (
-            <ThemedText
-              variant="muted"
-              size={12}
-              style={styles.statusIndicator}
+            <View
+              style={styles.statusDotWrap}
+              accessibilityRole="image"
+              accessibilityLabel={t('statusOffline')}
             >
-              Connecting...
-            </ThemedText>
+              <LinearGradient
+                colors={['#6b7280', '#9ca3af']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.statusDot, styles.statusDotOffline]}
+              />
+            </View>
           )
-        ) : (
-          <ThemedText variant="muted" size={12} style={styles.statusIndicator}>
-            Offline
-          </ThemedText>
-        )}
-        {/* Reply mode toggle */}
-        <TouchableOpacity
-          onPress={handleToggleReplyMode}
-          style={styles.replyModeButton}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          disabled={!isSessionActive(currentInteractionIdRef.current)}
-        >
-          <ThemedText
-            size={11}
-            weight="medium"
-            style={[
-              styles.replyModeText,
-              { color: replyMode === 'instant'
-                ? theme?.colors.accent.primary
-                : theme?.colors.text.muted },
-            ]}
-          >
-            {replyMode === 'instant' ? '⚡ Instant' : '💬 Realistic'}
-          </ThemedText>
-        </TouchableOpacity>
-        {/* Entity context menu */}
-        <TouchableOpacity
-          onPress={handleEntityContextMenu}
-          style={styles.headerMenuButton}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Icon
-            name="dots-vertical"
-            size={24}
-            color={theme?.colors.text.primary}
-          />
-        </TouchableOpacity>
-      </ThemedAppbar>
+        }
+        onBack={() => navigation.goBack()}
+        left={
+          partnerAvatar ? (
+            <Avatar.Image
+              size={36}
+              source={{ uri: partnerAvatar }}
+              style={styles.headerAvatar}
+            />
+          ) : (
+            <LinearGradient
+              colors={[
+                (theme?.colors.accent.primary ?? '#7c3aed') + '33',
+                theme?.colors.background.elevated ?? '#1e1e2e',
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.headerAvatarFallback}
+            >
+              <ThemedText
+                size={14}
+                weight="bold"
+                style={{ color: theme?.colors.accent.primary }}
+              >
+                {headerName.substring(0, 2).toUpperCase()}
+              </ThemedText>
+            </LinearGradient>
+          )
+        }
+        right={
+          <View style={styles.headerControlsRow}>
+            <TouchableOpacity
+              onPress={() => {
+                hapticLightPress();
+                handleEntityContextMenu();
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon
+                name="dots-vertical"
+                size={24}
+                color={theme?.colors.text.primary}
+              />
+            </TouchableOpacity>
+          </View>
+        }
+      />
 
       <Modal
         visible={menuVisible}
@@ -1244,13 +2528,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   ]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 0, y: 1 }}
-                  style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                  style={[StyleSheet.absoluteFill, styles.menuGradientRadius]}
                 />
                 <LinearGradient
                   colors={[theme!.colors.accent.primary + '12', 'transparent']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0.6 }}
-                  style={[StyleSheet.absoluteFillObject, styles.menuGradientRadius]}
+                  style={[StyleSheet.absoluteFill, styles.menuGradientRadius]}
                   pointerEvents="none"
                 />
                 <LinearGradient
@@ -1263,10 +2547,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   end={{ x: 1, y: 0 }}
                   style={styles.menuTopStripe}
                 />
+                {/* ── My Personas (the identity the user is acting as) ── */}
                 <TouchableOpacity
                   style={styles.menuItem}
-                  onPress={handleEntitySettings}
+                  onPress={handleOpenPersonaSwitcher}
                   activeOpacity={0.65}
+                  testID="chat-persona-switcher"
                 >
                   <View
                     style={[
@@ -1274,10 +2560,104 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                       { backgroundColor: theme!.colors.accent.primary + '1A' },
                     ]}
                   >
-                    <Icon name="cog" size={18} color={theme!.colors.accent.primary} />
+                    <Icon name="account-switch-outline" size={18} color={theme!.colors.accent.primary} />
                   </View>
                   <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
-                    Entity Settings
+                    {t('myPersonas')}
+                  </ThemedText>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
+                <ThemedText variant="muted" size={11} style={styles.menuItemCaption}>
+                  {t('myPersonasCaption')}
+                </ThemedText>
+                <View
+                  style={[
+                    styles.menuItemSeparator,
+                    { backgroundColor: theme!.colors.border.default + '44' },
+                  ]}
+                />
+
+                {/* ── Partner / Character (the OTHER participant) ── */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handlePartnerSettings}
+                  activeOpacity={0.65}
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: (theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover) + '1A' },
+                    ]}
+                  >
+                    <Icon
+                      name="cog-outline"
+                      size={18}
+                      color={theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover}
+                    />
+                  </View>
+                  <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
+                    {t('partnerSettings')}
+                  </ThemedText>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
+                <ThemedText variant="muted" size={11} style={styles.menuItemCaption}>
+                  {t('partnerSettingsCaption', { name: headerName })}
+                </ThemedText>
+                <View
+                  style={[
+                    styles.menuItemSeparator,
+                    { backgroundColor: theme!.colors.border.default + '44' },
+                  ]}
+                />
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleOpenBubble}
+                  activeOpacity={0.65}
+                  testID="chat-open-bubble"
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: (theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover) + '1A' },
+                    ]}
+                  >
+                    <Icon
+                      name="chat-processing-outline"
+                      size={18}
+                      color={theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover}
+                    />
+                  </View>
+                  <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
+                    {t('openBubble')}
+                  </ThemedText>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
+                <View
+                  style={[
+                    styles.menuItemSeparator,
+                    { backgroundColor: theme!.colors.border.default + '44' },
+                  ]}
+                />
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleDisableToggle}
+                  activeOpacity={0.65}
+                  testID="chat-disable-toggle"
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: theme!.colors.status.error + '1A' },
+                    ]}
+                  >
+                    <Icon
+                      name={isDisabled ? 'shield-account-outline' : 'shield-off-outline'}
+                      size={18}
+                      color={theme!.colors.status.error}
+                    />
+                  </View>
+                  <ThemedText size={15} weight="medium" style={{ flex: 1, color: theme!.colors.status.error }}>
+                    {isDisabled ? t('enable') : t('disableTitle', { name: headerName })}
                   </ThemedText>
                   <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
@@ -1311,21 +2691,105 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         </TouchableWithoutFeedback>
       </Modal>
 
-      <KeyboardAvoidingView
-        style={[styles.content, !isReadyToShow && styles.hidden]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      {/* Persona switcher — pick the persona to chat as, or create a new one */}
+      <PersonaSwitcherModal
+        visible={personaSwitcherVisible}
+        activePersonaId={ownEntityId === 'user' ? null : ownEntityId}
+        onSelect={handleSwitchPersona}
+        onClose={() => setPersonaSwitcherVisible(false)}
+      />
+
+      {/* Message action sheet — long-press a bubble. Only the last message of
+          the conversation may be deleted, so deletion is hidden otherwise. */}
+      <MessageActionSheet
+        visible={actionSheetMessage !== null}
+        message={actionSheetMessage}
+        isOwn={actionSheetMessage?.sender_entity_id === ownEntityId}
+        partnerName={partnerName}
+        isPinned={actionSheetMessage?.is_pinned ?? false}
+        hideReactions
+        hideForward
+        canDelete={
+          actionSheetMessage !== null &&
+          messages.length > 0 &&
+          messages[messages.length - 1].id === actionSheetMessage.id
+        }
+        onAction={handleMessageAction}
+        onReact={(emoji) => {
+          if (actionSheetMessage) {
+            handleReactToMessage(actionSheetMessage.id, emoji);
+          }
+        }}
+        onClose={closeActionSheet}
+      />
+
+      {/* Forward picker — choose a character to forward the message to */}
+      <ForwardPickerModal
+        visible={forwardPickerVisible}
+        ownEntityId={ownEntityId}
+        messageText={forwardMessageText}
+        onSelect={handleForwardSelect}
+        onClose={() => setForwardPickerVisible(false)}
+      />
+
+      <View
+        style={styles.keyboardAvoid}
+      >
+      <View
+        style={[
+          styles.content,
+          !isReadyToShow && styles.hidden,
+          // The input bar floats above the keyboard via translateY (visual
+          // only). Translate the message list up by the SAME amount so both
+          // move together — the list keeps its full height/scroll range (no
+          // shrinking) and its bottom stays aligned with the input bar top.
+          // Sending a message then scrolls to the list's end, which now sits
+          // above the keyboard, making the new message the visible one.
+          keyboardHeight > 0 && { transform: [{ translateY: -keyboardHeight }] },
+        ]}
       >
         <FlatList
-          ref={flatListRef}
+        style={{ flex: 1 }}
+        ref={flatListRef}
           data={messagesWithDivider}
           renderItem={renderMessage}
           keyExtractor={item => item.id}
-          contentContainerStyle={styles.messageList}
+          contentContainerStyle={[styles.messageList, { flexGrow: 1 }]}
+          ListEmptyComponent={
+            // In-flight first generation → preparing shimmer instead of the hint.
+            greetingPreparing ? (
+              <View style={styles.emptyChat}>{renderGreetingPreparing()}</View>
+            ) : // No first_mes → empty chat + the generate-greeting hint (enabled
+            // in P2 — tapping opens the ScenarioGeneratorSheet). has_first_mes=false
+            // is known only once the session surfaces it; before that we show
+            // nothing (still loading).
+            shouldShowEmptyChatHint(hasFirstMes, messagesWithDivider.length) ? (
+              <View style={styles.emptyChat}>
+                <ThemedText variant="muted" size={13} style={styles.emptyChatHint}>
+                  {t('scenario:noGreetingHint')}
+                </ThemedText>
+                <EmptyChatCTA
+                  variant="pill"
+                  disabled={false}
+                  onPress={openScenarioSheet}
+                  theme={theme!}
+                />
+              </View>
+            ) : null
+          }
           onScroll={handleScroll}
           scrollEventThrottle={100}
           onMomentumScrollEnd={handleScrollEnd}
           onScrollEndDrag={handleScrollEnd}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme!.colors.accent.primary]}
+              tintColor={theme!.colors.accent.primary}
+              progressBackgroundColor={theme!.colors.background.surface}
+            />
+          }
           initialNumToRender={MESSAGES_PAGE_SIZE}
           maxToRenderPerBatch={MESSAGES_PAGE_SIZE}
           windowSize={21}
@@ -1334,55 +2798,66 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           }}
           onContentSizeChange={() => {
             if (!isReadyToShowRef.current) {
+              // Initial load (data-driven effect owns the reveal). While not yet
+              // revealed, keep re-pinning to the bottom on EVERY content-size
+              // change: messages are chronological (oldest→newest) in a
+              // non-inverted list and rows have variable height (images decode
+              // async, later batches render after the first pass), so contentSize
+              // grows several times before it's stable. Re-pinning each change
+              // keeps the viewport anchored at the latest message.
               if (initialScrollTarget === 'bottom') {
                 flatListRef.current?.scrollToEnd({ animated: false });
-              } else if (typeof initialScrollTarget === 'number') {
-                try {
-                  flatListRef.current?.scrollToIndex({
-                    index: initialScrollTarget,
-                    animated: false,
-                    viewPosition: 0,
-                  });
-                } catch {
-                  flatListRef.current?.scrollToEnd({ animated: false });
-                }
-              }
-
-              if (!isInitialScrollDone.current) {
-                isInitialScrollDone.current = true;
-                const revealTarget = initialScrollTarget;
-                setTimeout(() => {
-                  if (revealTarget === 'bottom') {
-                    flatListRef.current?.scrollToEnd({ animated: false });
-                  } else if (typeof revealTarget === 'number') {
-                    try {
-                      flatListRef.current?.scrollToIndex({
-                        index: revealTarget,
-                        animated: false,
-                        viewPosition: 0,
-                      });
-                    } catch {
-                      flatListRef.current?.scrollToEnd({ animated: false });
-                    }
-                  }
-                  messagesCountAtReveal.current = messagesWithDivider.length;
-                  isReadyToShowRef.current = true;
-                  setIsReadyToShow(true);
-                }, 200);
               }
             } else {
-              if (messagesWithDivider.length > messagesCountAtReveal.current) {
+              // Post-reveal. Keep re-pinning to the bottom through the settle
+              // window too — late image decoding / row rendering can still grow
+              // contentSize right after reveal, which would otherwise push the
+              // bottom out from under the viewport and leave it mid-conversation.
+              if (
+                settleUntilRef.current !== 0 &&
+                Date.now() < settleUntilRef.current
+              ) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+                return;
+              }
+              // Settle window done — clear it.
+              if (settleUntilRef.current !== 0) {
+                settleUntilRef.current = 0;
+              }
+
+              if (pendingOwnMessageScroll.current) {
+                // A message was just sent — always reveal it above the keyboard.
+                // (No `length > count` guard here: when the keyboard margin
+                // resizes the content AFTER the send, the count is unchanged
+                // but the viewport needs to re-scroll, and the guard would
+                // swallow that corrective scroll — hiding the sent message.)
+                pendingOwnMessageScroll.current = false;
+                isNearBottom.current = true;
+                flatListRef.current?.scrollToEnd({ animated: true });
+              } else if (
+                messagesWithDivider.length > messagesCountAtReveal.current
+              ) {
                 messagesCountAtReveal.current = messagesWithDivider.length;
-                if (pendingOwnMessageScroll.current || isNearBottom.current) {
-                  pendingOwnMessageScroll.current = false;
+                if (isNearBottom.current) {
                   isNearBottom.current = true;
-                  flatListRef.current?.scrollToEnd({ animated: true });
+                  // Wait for the keyboard margin to apply before scrolling so
+                  // the new message lands above the keyboard, not behind it.
+                  if (keyboardVisibleRef.current) {
+                    requestAnimationFrame(() => {
+                      requestAnimationFrame(() => {
+                        flatListRef.current?.scrollToEnd({ animated: true });
+                      });
+                    });
+                  } else {
+                    flatListRef.current?.scrollToEnd({ animated: true });
+                  }
                 }
               }
             }
           }}
         />
 
+        {greetingPreparing && messages.length > 0 && renderGreetingPreparing()}
         {isTyping && <TypingIndicator theme={theme} mode="text" />}
         {isRecording && <TypingIndicator theme={theme} mode="audio" />}
 
@@ -1392,7 +2867,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               styles.scrollToBottomButton,
               { backgroundColor: theme?.colors.accent.primary },
             ]}
-            onPress={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            onPress={() => {
+              hapticLightPress();
+              flatListRef.current?.scrollToEnd({ animated: true });
+            }}
             activeOpacity={0.8}
           >
             <Icon
@@ -1403,35 +2881,112 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           </TouchableOpacity>
         )}
 
-        <ChatInput
-          ref={chatInputRef}
-          onSendText={handleSendText}
-          onSendAudio={handleSendAudio}
-          onSendImage={handleSendImage}
-          onTypingStart={handleTypingStart}
-          onEmojiToggle={() => {
-            if (!showEmojiPicker) Keyboard.dismiss();
-            setShowEmojiPicker(prev => !prev);
-          }}
-          showEmojiButton={true}
-          disabled={!isSessionActive(currentInteractionIdRef.current)}
-          entityId={currentInteractionIdRef.current}
-          theme={theme!}
+</View>
+
+{isDisabled ? (
+        <View style={[styles.disabledBanner, { paddingBottom: safeBottom + 14 }]}>
+          <Icon name="shield-off-outline" size={18} color={theme?.colors.status.error} />
+          <ThemedText variant="muted" size={13} style={styles.disabledBannerText}>
+            {t('disabledBanner')}
+          </ThemedText>
+        </View>
+      ) : sessionFailed ? (
+        // 4-3 (D36): terminal session-failure card. Reuses the disabledBanner
+        // visual (same container tokens, composer slot) with column layout for
+        // the hint + action rows. The composer is unreachable while the
+        // session is failed (nothing can be sent), so it is replaced here —
+        // same trade the disabled banner already makes.
+        <View
+          style={[styles.disabledBanner, styles.sessionErrorBanner, { paddingBottom: safeBottom + 14 }]}
+          testID="session-error-card"
+        >
+          <View style={styles.sessionErrorRow}>
+            <Icon name="alert-circle-outline" size={18} color={theme?.colors.status.error} />
+            <ThemedText variant="muted" size={13} style={styles.disabledBannerText}>
+              {t('sessionErrorBanner', { name: headerName })}
+            </ThemedText>
+          </View>
+          {sessionFailed.ingestionHint ? (
+            <View style={styles.sessionErrorRow}>
+              <Icon name="sync-alert" size={18} color={theme?.colors.status.warning} />
+              <ThemedText variant="muted" size={13} style={styles.disabledBannerText}>
+                {t('sessionErrorSyncHint')}
+              </ThemedText>
+              <TouchableOpacity
+                onPress={handleSyncAndRetry}
+                style={styles.sessionErrorActionButton}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={t('sessionErrorSyncNow')}
+                testID="session-error-sync"
+              >
+                <ThemedText size={13} weight="bold" style={styles.sessionErrorAction}>
+                  {t('sessionErrorSyncNow')}
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          <View style={styles.sessionErrorRow}>
+            <TouchableOpacity
+              onPress={handleSessionRetry}
+              style={styles.sessionErrorActionButton}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('retry')}
+              testID="session-error-retry"
+            >
+              <ThemedText size={13} weight="bold" style={styles.sessionErrorAction}>
+                {t('retry')}
+              </ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={styles.sessionErrorActionButton}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('back')}
+              testID="session-error-back"
+            >
+              <ThemedText size={13} weight="bold" style={styles.sessionErrorAction}>
+                {t('back')}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <ChatInputBar
+          onSendText={handleSendTextMessage}
+          onSendAudio={handleSendAudioMessage}
+          onSendImages={handleSendImages}
+          disabled={connectionState !== 'connected'}
+          entityId={ownEntityId}
+          showScenarioButton={!hasFirstMes}
+          onScenarioPress={openScenarioSheet}
+          replyTo={
+            MESSAGE_REPLY_ENABLED && replyToMessage
+              ? {
+                  id: replyToMessage.id,
+                  senderName:
+                    replyToMessage.sender_entity_id === ownEntityId
+                      ? ownEntityName
+                      : partnerName,
+                  content: replyToMessage.content || '',
+                }
+              : null
+          }
+          onCancelReply={handleCancelReply}
         />
-        {showEmojiPicker && (
-          <EmojiPickerInline
-            onEmojiSelected={handleEmojiSelected}
-            entityId={currentInteractionIdRef.current}
-            onOpenActionEditor={() => {
-              setShowEmojiPicker(false);
-              navigation.navigate('EmojiActionEditor', {
-                entityId: currentInteractionIdRef.current,
-                entityName: headerName,
-              });
-            }}
-          />
-        )}
-      </KeyboardAvoidingView>
+      )}
+
+      {/* Scenario generator bottom sheet (§2-4) — paper Modal+Portal (§A18).
+          Generate collapses the sheet and dispatches GENERATE_GREETING /
+          START_NEW_SCENARIO (replace vs restart) via handleScenarioGenerate. */}
+      <ScenarioGeneratorSheet
+        open={scenarioSheetOpen}
+        onClose={closeScenarioSheet}
+        onGenerate={handleScenarioGenerate}
+      />
+      </View>
     </ThemedView>
   );
 };
@@ -1439,6 +2994,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  keyboardAvoid: {
+    flex: 1,
+    // Clip the translated-up message list at the header's bottom edge so the
+    // conversation never bleeds over the header when the keyboard is open.
+    overflow: 'hidden',
   },
   centered: {
     justifyContent: 'center',
@@ -1451,11 +3012,39 @@ const styles = StyleSheet.create({
     opacity: 0,
   },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 10,
   },
   messageList: {
     paddingVertical: 8,
+  },
+  greetingWrap: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  preparingWrap: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  preparingText: {
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  scenarioPillRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  emptyChat: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingBottom: 48,
+  },
+  emptyChatHint: {
+    textAlign: 'center',
+    marginBottom: 12,
   },
   headerAvatar: {
     marginRight: 8,
@@ -1468,22 +3057,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 8,
   },
-  statusIndicator: {
-    marginRight: 8,
+  statusDotWrap: {
+    marginLeft: 2,
   },
-  headerMenuButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
-  replyModeButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  // Semantic "connected" dot (review): success green instead of brand violet.
+  statusDotOnline: {
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  replyModeText: {
-    fontSize: 11,
+  // Amber "session initializing" dot (D1-7 third state); the Animated.View
+  // wrapping it pulses opacity while connecting.
+  statusDotConnecting: {
+    backgroundColor: '#f59e0b',
+  },
+  // Red "terminal session failure" dot (4-3 / D36 fourth state).
+  statusDotError: {
+    backgroundColor: '#ef4444',
+  },
+  statusDotOffline: {
+    opacity: 0.85,
+  },
+  headerControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   scrollToBottomButton: {
     position: 'absolute',
@@ -1542,5 +3147,47 @@ const styles = StyleSheet.create({
   menuItemSeparator: {
     height: StyleSheet.hairlineWidth,
     marginLeft: 62,
+  },
+  menuItemCaption: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    paddingTop: 0,
+    marginTop: -4,
+    marginLeft: 46,
+  },
+  disabledBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(220, 38, 38, 0.12)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(220, 38, 38, 0.3)',
+  },
+  disabledBannerText: {
+    flex: 1,
+  },
+  // 4-3 (D36): terminal session-failure card — applied ON TOP of
+  // disabledBanner (same container tokens); only switches the row layout to a
+  // column stack so the hint + action rows fit the composer slot.
+  sessionErrorBanner: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 10,
+  },
+  sessionErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sessionErrorActionButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(220, 38, 38, 0.18)',
+  },
+  sessionErrorAction: {
+    color: '#ef4444',
   },
 });

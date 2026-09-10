@@ -5,16 +5,168 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased - 0.1.0]
+### Data & Sync
+
+#### Fixed
+- **Fixed AIs getting stuck on "Connecting…" after you deleted and recreated them** — the recreated AI now connects and its greeting arrives normally.
+- **Deleted data is now cleaned up consistently across your devices.** Deletion is final: once a deleted AI's data has been removed everywhere, it stays removed — there is no undo (recreating an AI always starts fresh). The recurring engine-side "clean up soft-deleted records" maintenance error behind inconsistent cleanup is resolved.
+- **Entity IDs are always generated automatically.** You give your AI a name; its ID is permanent internal plumbing you never see or set (and it can never collide with a deleted AI's old ID).
+
+#### Changed
+- **This update re-syncs all of your data from Harmony Link once after updating** (a one-time local reset — expect a brief "Rebuilding from Soulbits Engine…" screen at first launch). If you were offline and have changes that never synced, sync them before updating; anything Harmony Link never received is not part of the rebuild.
+- The app now requires a matching Harmony Link version to sync — if Harmony Link needs updating first, the app tells you clearly and resumes syncing automatically once it's updated.
+
+### Voice & Speech
+
+#### Added
+- **Voice input is now a shared setting for all personas** — switch speech-to-text on or off once from Settings (with a pointer from a persona's edit screen), and every persona uses it. Identity and memories stay per-persona; the input pipeline is shared.
+- **Record-and-test your speech-to-text setup** — from the voice settings you can record a capture and have it transcribed through your configured engine to confirm the setup works before you rely on it in chat.
+- **Known limitation:** testing text-to-speech needs a config entry that is bound to an entity, so the TTS test is not available from the settings screen until that wiring lands.
+
+### Chat & Messaging
+
+#### Added
+- **Message reactions, pins and replies now sync across your devices** — a message you react to, pin, or reply to on one device carries over to your other paired devices via synchronization (reactions/pins travel as message state; replies are preserved).
+
+#### Changed
+- **Unread count is now derived from the message layer** instead of a per-conversation counter. A conversation is unread when it has partner-sent messages marked unread, and reading it clears them. This fixes the old bug where messages that arrived via background sync never showed a badge: unread state is now always computed from the actual messages, including ones synced in. "Mark unread" still sets exactly one unread message.
+- **Reply mode is now synced per conversation** (instead of a device-only preference) — your instant/realistic reply mode choice follows you across devices and survives a reinstall.
+- **Mute / Disable is now a global setting on the AI entity**, not a per-conversation flag. Muting an AI silences its notifications everywhere; disabling it fully blocks chatting with it and can be re-enabled from the AI's profile.
+- **Personas are now user identities.** You chat as your persona ("You" by default, editable), can create a persona from scratch or **from an existing character card**, and each persona gets its own conversations. The built-in persona can be edited but not deleted.
+- **Favorites now sync via a profile flag** — favoriting an AI character on one device is reflected on your other paired devices (since favorites ride the character profile through sync).
+
+> **Note for testers / dev builds:** if you ran a pre-Phase-2 build on this branch, wipe the app's local database once. Devices that ran an earlier `000041`/`000042` revision, the old settings shape, or the old personas table need the one-time wipe (the amended migrations never re-run on them). Devices already on the current `000041`–`000043` state do **not** need a wipe — `000044` migrates favorites in place.
+
+### Marketplace, Wallet, Social & Notifications
+#### Added
+- **Community preview data**: the Market, Soul wallet, social feeds and notifications now show **preview content** while the community backend is in development. The Market lists sample characters, the wallet starts with a preview balance, and social/notification feeds display seeded sample content — everything is clearly marked as preview.
+#### Changed
+- **The chat paywall is gone** — every AI character can be chatted with freely from any entry point. No more purchase gates or silent ignores.
+- The **Soul wallet** shows a preview balance, and **buying Souls is coming soon** — attempting an acquire with insufficient balance now explains this honestly instead of failing silently.
+- **Marketplace publishing is preview-only**: character cards can be listed for preview, while text/theme publishing, listing editing, re-listing and library removal show a clear "not available in preview yet" message.
+- **Social interactions are preview interactions** — follows, likes, posts and notifications are backed by sample data until the community backend lands.
+
+### Characters
+#### Added
+- The **Create AI editor** now hosts the full V3/RP editing suite: greetings, alternate greetings, lorebook, tags, lifecycle, attribution and export. Editing an existing character opens the same editor with everything in one place, and image changes keep **stable image ids** (no more churn on save).
+#### Changed
+- **Character categories now sync via tags** — renaming or deleting a category updates the affected characters' tags so the change reaches the engine.
+- Module pickers on Create AI / Edit AI Settings: the **"Disabled" option is back** and nothing is auto-selected anymore. Engine-synced default configs still appear in the picker when the device is connected.
+
+### Profile
+#### Changed
+- **Display name now saves to the cloud** (per account). Username, bio and avatar upload are coming soon — those fields are shown but disabled with a "coming soon" hint.
+
+### Chat & Messaging
+#### Fixed
+- **Chat list live updates**: new messages appear in the list immediately with correct ordering, conversations paginate cleanly (no more duplicate entries), and unread counts are correct. Muted conversations no longer show unread badges, blocked users' content is filtered out, and deleting a conversation cleans up its settings too.
+- **Chatting with a freshly created partner is reliable** — if the session is interrupted during initialization, the app now recovers automatically instead of showing "Session initialization failed".
+- **Opening a chat with an AI that has no opening greeting no longer gets stuck on a loading screen** — the empty conversation appears right away with the option to generate a greeting.
+- **Opening lines are swappable again** — when a chat opens with the AI's authored greeting, you can cycle through the alternate greetings (and generate another) instead of seeing a plain message with no options.
+- **Voice recordings are kept** when the 120-second auto-stop kicks in — the recording is finished and attached instead of being discarded.
+- The connection indicator now clearly shows **connecting / connected / offline** states.
+- The first message in a conversation now gets a day divider like the rest of the timeline.
+
+> **Note for testers / dev builds:** if you ran pre-release builds during development, wipe the app's local database once. Orphaned preview tables are harmless but linger until then.
+
+### Security & Configuration
+#### Added
+- Environment-aware Google OAuth secret wiring: OAuth client IDs are no longer hardcoded in tracked files. A loader (`scripts/oauth-secrets.cjs`) reads the gitignored GCP `client_secret_*.json` per environment (`dev`/`prod`) and generates the derived build config (`.env` + Android `gradle-secrets.<flavor>.properties`). `npm run oauth:dev` / `npm run oauth:prod` expose this; the `android`, `ios`, `start`, and E2E build scripts auto-load. The runtime config now exposes the active environment (`APP_ENV`/`APP_ENVIRONMENT`) for dev/prod awareness.
 
 ### Cloud Integration
 #### Added
+- Device authorization is now one click away: the emailed **Authorize device** button (or opening the link on the phone) authorizes a new device automatically, and the in-app verification screen continues on its own once it is approved. The manual 6-digit code entry remains as fallback.
+- Cloud connection now polls the session broker until the secure session is ready, showing a multi-stage progress indicator (Requesting → Preparing → Establishing → Connected ✓ / failed + retry). Chat list and settings correctly reflect cloud vs self-hosted connection state.
 - Soulbits Cloud login: email/password, Google Sign-In (Android), and Apple Sign-In (iOS).
 - Cloud connection via the Soulbits conduct proxy; switch between self-hosted Harmony Link and Soulbits Cloud.
 - Tier-1 roaming sync: per-source lastSync, standard upsert-by-PK across UUID-keyed config tables, switch-warning UX.
 - Proactive PASETO refresh using `TokenResponse.expires_at`; reactive refresh on WebSocket close (1008/4401).
 - Logout instantly invalidates the PASETO server-side via Valkey cutoff.
 - Build flavours: Android `dev`/`prod` productFlavors; iOS dev/prod via CI build-matrix (react-native-config `.env` + bundle-ID override).
+- Soulbits Cloud module configs now auto-fill the inference endpoint (`base_url`) with the correct beta-aware API URL when the app is connected to the cloud (beta builds use `https://beta.api.soulbits.app`). Previously the field always showed the production URL, even in beta builds.
+- Soulbits Cloud model picker: when configuring a Soulbits Cloud provider, the model field is now a dropdown pre-filtered to the models valid for that module type (text LLM, Whisper for STT, TTS, embeddings, image, etc.). The list is fetched live from the public model catalog, with a cached static fallback when offline, and a free-text override for advanced entry.
+- FormField `select` fields (e.g. OpenAI/xAI `reasoning_effort`, Google/xAI aspect ratios) are now real interactive themed dropdowns instead of read-only disabled text inputs.
+- **Reset Cloud Data** in Settings → Data Synchronization (cloud mode only): a destructive card that permanently deletes your cloud-side engine data via `POST /v1/session/data/delete`. It requires a type-to-confirm step, runs with bounded retries while surfacing the server's typed status (in-progress / snapshot-busy / confirmation-required / purge-in-progress), and suppresses reconnect churn with a toast while the purge is active.
+#### Changed
+- Cloud session provisioning is now fully asynchronous — the session broker returns immediately and the app polls until ready. Removed the client-side connect-timeout hack; WebSocket connectivity is tracked separately from the broker session status. Consecutive WebSocket failures (5) trigger a fresh broker re-provision. Token-expiry pre-check runs before every cloud WebSocket dial to prevent expired-PASETO reconnect loops.
+- Cloud session broker requests (connect/disconnect polling) now go through the first-party Soulbits API client. The client is wired in PASETO-only mode so token refresh on 401 stays with the app's auth layer — keeping one persisted, broadcast credential for both REST and WebSocket paths.
+- The first-party Soulbits API client is now pulled directly from its GitHub repository as a dependency, replacing a local folder link. This makes installs consistent and reproducible across developer machines and CI.
+- Soulbits Cloud is now listed as a provider for every module that supports it — including Speech-to-Text (STT), Voice Activity Detection (VAD), Text-to-Speech (TTS), and RAG — so the provider picker is consistent with the model catalog. The VAD model picker now filters to actual voice-activity models (e.g. silero-vad).
+- Module configuration now has a compact Simple vs Advanced segmented toggle (remembered across sessions). Simple mode shows only the essentials (provider, model, credentials); Advanced mode reveals the full sampling/limit fields. When a managed Soulbits Cloud provider is selected in cloud mode, the endpoint and API key/token fields are hidden entirely because they are auto-synced from the backend.
+- Module config selectors no longer show a trailing "+" button per module. "Create new config…" now lives as the last row inside the module picker sheet, and the pencil edit icon still appears beside the selector when a config is selected.
+
+### Characters
+#### Added
+- Tapping the **creator badge** on an AI character's profile now opens a dedicated profile page (that specific creator), instead of always jumping to your own profile tab. The public profile page shows only public info — name, avatar, bio, stats, and the creator's posts — with a Follow/Following button on other users' profiles so anyone can follow a specific creator (no follow button on your own profile). Private content (AI characters, saved characters, personas, copies) is never shown to others.
+- Tapping an author on a Discover post now opens that author's profile page instead of switching to your own My Profile tab.
+- Import Tavern Card V1/V2/V3 character cards from raw JSON or PNG-embedded (`chara`/`ccv3` `tEXt`/`iTXt` chunks) files. Imported cards are mapped to the existing character profile model (with the PNG used as the primary avatar) and persist locally, syncing through the normal pipeline. Reachable from the Characters screen header.
+- Character cards on the Characters screen now have a chat button that opens a direct chat with that character. If no AI entity exists for the profile yet, one is created and synced automatically before the chat opens.
+- AI Lifecycle editor on the character profile: configure the autonomous-beat defaults (autonomy, beat schedule, sleep & exhaustion, emotion decay, crystallization, memory) that new AI characters inherit from the profile. Each section has a tap-to-expand explanation, and a banner notes these are profile defaults that can be overridden per character.
+- The Characters screen now supports **favorites** and **custom categories** for organizing AI characters. A filter chip row under the search bar offers **All**, **Favorites**, and any user-created categories; a **"Manage categories"** chip opens a sheet to create, rename, or delete categories. **Long-pressing a character card** now opens a quick-action sheet with **Add to category** and **Delete** (delete keeps the confirmation dialog). Each character card also has a heart button to toggle favorites. The organization data lives in client-only tables and is never synced to the engine.
+- The **Create AI Partner** screen is now split into three sections: **General** (name — required, description, avatar), **Details** (personality, appearance, backstory, plus **Voice & Behavior** — voice characteristics, typing speed, audio response chance), and **Advanced** (AI model, voice, and config module pickers). The **Details** and **Advanced** cards are collapsible dropdowns so the essential General section stays front and center. The user can start chatting with just a name — when no module config is selected, Soulbits Cloud default configs (LLM, TTS, STT, vision, RAG, etc.) are created automatically in the background so the partner is chat-ready out of the box. Two action buttons sit side by side at the bottom: **Save** (persists the character without starting a chat) and **Start Chatting** (persists and jumps straight into a conversation).
+- The AI card picker's 3D cover-flow carousel now scales the character cards to the device screen — every card keeps a true portrait shape and fits cleanly inside the picker sheet on any phone size. Switching between cards is smoother (snapping is suspended while a tapped card animates to center, and fewer cards are mounted at once), with a softer, more refined glow around the focused card.
+- **Duplicate an AI partner**: tapping an existing AI character card now opens a sleek 3D Vertical/Perspective **Cover Flow carousel** listing every partner as a stacked, tappable deck — the active center card is highlighted at full scale with an elevated neon glow while preceding/following cards are angled, scaled down and recessed along the Z-axis (glassmorphism dark aesthetic, portrait avatar, name, persona tag, live search, springy sheet entrance). Swipe left/right to flip through the deck, or tap any card to smoothly bring it to the center focus and select it. Picking one opens the **Create AI Partner** screen as a full copy — the name is auto-numbered ("Aria" → "Aria 02", "Aria 03", …), and all details, voice settings, the primary avatar, and the module configuration (AI model, voice, config) carry over. The copy is fully editable and can be saved or started chatting immediately.
+- Tapping a character card no longer opens the profile editor directly — it opens the duplicate picker. **Editing** a profile now lives in the long-press context menu (Edit Profile), which also keeps **Add to category** and **Delete**.
+- **AI character profile page**: tapping an AI character card now opens the character's own profile screen, mirroring the user's My Profile layout — the AI's avatar, name, description, a primary **Chat** button (opens a direct conversation with the character), small rounded **Like** and **Save** buttons, a stats row showing **Likes** and **Chats**, an icon tab bar with **Images** and **Copies**, and a **creator badge** (the avatar + name of the user who created the AI, tappable to open the creator's profile). The **Chats** stat counts distinct users who have chatted with the character (1 per user), not chat sessions or individual messages.
+- The AI profile's **Images** tab now renders every gallery image — including the avatar — as a **post** with **Like** and **Comment** buttons. Any user can like an image or leave a comment; like counts and the comment thread (with author names and avatars) are visible to everyone.
+- On the AI profile, **Edit Profile** and **Edit AI Settings** are now merged into a single **Edit AI Profile and Settings** button (shown above the Chat button) that opens the full AI configuration screen. It appears **only for the creator** of the character — other users never see editing controls for characters they don't own. The creator check now also works for user-created characters in self-hosted mode and legacy characters, and the "Created by …" badge (with the creator's avatar) is always shown for user-created characters. Tapping the creator badge now pushes the My Profile screen on top so going back returns to the AI profile you were on, instead of dropping you to the previous tab.
+- **Save an AI character**: the bookmark button on the AI profile saves the character, and saved characters appear in **My Profile → Saved** as avatar + name tiles that open the AI's profile.
+- The AI profile's **Likes** stat now also includes character profile likes (from the heart button), alongside the existing chat-reaction likes.
+- **From an Existing One** now creates a **full copy** of the chosen character — same info, avatar and settings — with an auto-numbered name ("Max" → "Max 2", "Max 3", …). The "From an Existing One" option is hidden entirely when the user has no existing characters.
+- Saving a character without starting a chat no longer waits for a full engine sync (which could take up to 45s); the save returns immediately and the entity is synced in the background.
+- The **Create AI Partner** screen now has a **Sharing & Visibility** selector in the Details section with three options: **Private AI** (default — only you can see and chat with this AI), **Public AI** (visible and searchable on **Discover** — anyone can view the profile and chat), and **Marketplace** (listed on the **Market** screen — anyone can view the profile, but chatting requires paying you a price in **Souls**). When Marketplace is chosen, a Soul price field appears. The setting is persisted per character and can be changed later when editing a partner.
+- **Marketplace**: the **Market** tab now shows AI characters that creators have listed for sale, in a two-column grid with each character's portrait, name, and Soul price. Tapping a listing opens the character's public AI profile; chatting with a marketplace-listed character requires buying it once with Souls (the creator's earnings are credited to their local Soul wallet). Purchased characters stay permanently chat-enabled. A Soul balance badge in the Market header shows your spendable Souls.
+- **First-signup Soul bonus**: new users who register an account receive **50 free Souls** on their first signup, exactly once — the bonus is granted client-side as soon as the registration is accepted and can never be claimed twice on the same install.
+- **Deleting an AI character now works** — previously the delete button failed because every AI character is linked to a chat entity, and the soft-delete guard refused to delete a profile still in use. Deleting now cascades: it soft-deletes the linked entity (and its chats/memories/settings) first, then the profile. A confirmation toast shows the deleted character's name.
+- Tapping an AI character card on the **Discover** screen now opens the character's **AI profile page** (viewing) instead of the edit screen — editing stays in the long-press menu on the Characters screen.
+#### Changed
+- Character profile editor section order now matches the desktop UI: Images appear right after the identity/persona basics, the AI Lifecycle section sits after the Lorebook, and Attribution is last.
+- The lorebook entry editor no longer shows the Advanced (export-only) fields; name and comment now appear above the content. Existing advanced data is still preserved when saving and exporting.
+- The "Advanced" profile section is now labelled "AI Behaviour".
+- Duplicated AI characters are now called **forks** across the app — the AI profile tab is **Forks** instead of **Copies**, and the duplicate picker/titles use **Fork** / **Forked** wording ("Fork an AI Partner", "Fork of Aria", "Forked as Aria 02"). The underlying behavior and auto-numbered names (Aria → Aria 02 → Aria 03) are unchanged.
+- The Characters screen **＋ button** now opens a "New AI Partner" sheet instead of a speed-dial menu. It asks how you'd like to create the partner — **New AI Partner** (opens the Create AI Partner wizard), **From an Existing One** (opens the card picker to pick an existing character profile, then opens the Create AI Partner wizard with that profile linked), or **Import Character Card** (existing PNG/JSON import).
+- The "No config selected — Soulbits Cloud defaults" hint on the Create AI Partner screen now appears at the **top** of the Advanced section (above the module pickers) instead of at the bottom.
+- The AI module config selectors on the Create AI Partner / Edit AI Settings screen no longer show a **Disabled** option. Every module slot is now pre-selected with the **Soulbits Cloud (default)** config as soon as the screen loads (reusing the existing default configs when present), so each module always shows a real config — the user can still switch any slot to a different config, and unset slots in a duplicated/edited partner are filled with the defaults automatically as well.
+- The "Manage categories" sheet no longer shows a per-category plus button that expanded a character-member list. Assigning characters to categories is now done exclusively from a character card's **Add to category** action.
+- The AI profile **Chats** stat now counts **1 per distinct user** who has chatted with the character, instead of one per chat session. Re-opening a conversation with the same AI no longer inflates the count. A duplicated character (a copy) is fully independent and its chat count starts at 0.
+- The **My AI Characters** screen now has a **sort button** in the header to order characters alphabetically (A–Z), newest first, or oldest first.
+- The **Chats** screen **＋ button** now opens a character picker listing your AI characters (with search + a per-row chat icon) instead of jumping straight to the Create AI Partner wizard.
+- The AI profile now shows a **Follow / Following** button on the creator badge (for creators other than yourself).
+- AI character image posts now show a **date/time** caption under the image.
+- Added a **Notifications** bell to the header of the principal screens (Characters, Chat, Discover, Market, My Profile) with an unread badge. The feed shows follows, AI profile likes, AI image likes/comments, and post likes/comments.
+- **My Profile → Posts** now supports publishing **text and/or image posts** (via a ＋ button) with Like and Comment buttons; posts appear on the Discover screen as a "Recent Posts" section with the author's avatar + name, and tapping the author opens their profile.
+#### Fixed
+- Fixed creating a 3rd (or later) copy of an existing AI partner staying named like the previous copy (e.g. "Max 2") instead of auto-advancing to the next free number ("Max 3"). The 3rd copy is now always named correctly, and a failed duplicate save no longer leaves an orphaned partner in the Characters list.
+
+### Profile
+#### Added
+- Full **My Profile** screen in the profile tab: gradient-ring avatar, display name with the username underneath (small, non-bold), an Edit Profile button, a stats card (Followers · Following · AI Characters), a bio block, and three sections — **AI Characters**, **Posts**, and **Saved**.
+- The **Saved** section of My Profile now lists the AI characters you saved from their AI profile (avatar + name tiles that open the AI's profile).
+- **Edit Profile** screen to set the display name, username, bio and a locally-stored avatar (picked from the photo library). The editable extras persist per cloud account via local storage until the backend exposes a profile-update endpoint.
+- **Personas**: the profile now lists the identities the user chats as (the "Chatting as" concept). Each persona shows its avatar, name and description, can be set as the active chat identity, and opens a dedicated **Persona** editor where the name, description, personality and picture can be managed — or a new persona created. Personas are stored independently of AI characters (a dedicated client-only table) and carry only identity fields — they have no AI models, module configs, or character profiles. AI characters (the entities the user chats with) are never shown as personas and keep their full AI configuration.
+- After a successful sign-in (email/password, Google, or Apple), the app now takes the user straight to their **My Profile** page.
+
+### Navigation
+#### Changed
+- The **Haptic feedback** Settings toggle now actually controls tactile feedback: when turned off, button presses across the app no longer vibrate. The preference is applied at startup and takes effect immediately when toggled.
+- Haptic feedback (a light double-tap pulse) is now triggered on all primary buttons across the app, including the new profile pills (Edit Profile / New Persona), the Characters "New AI Partner" sheet actions, character-card chat and favorite buttons, chat send/mic/stop controls, save buttons on edit screens, and modal action buttons.
+- The Characters tab is now labeled **Characters** on the bottom navigation bar (was "My Characters").
+- The Settings screen is no longer a bottom tab. It is now opened from a "three lines" (☰) menu button in the header of every primary screen, which opens the full Settings screen. The bottom tab bar now contains Chat, Discover, Characters, and Market only.
+- The "Chatting as" persona pill and its adjacent identity-settings (⚙) button were removed from the Chat list header. The underlying persona selection feature and its components are preserved for reuse on another screen; the selected persona still determines which conversations appear in the Chat list.
+- The "My Identity Settings" entry in the chat screen (which opened the AI module editor for the persona) has been replaced with **My Personas** — a switcher that lists the user's personas and lets them pick a different one or create a new one. Switching personas shows an in-chat confirmation row ("Now chatting as …") styled like the chat's divider text. Personas only carry identity fields; AI module configuration remains on the partner character.
+- Removed the dedicated Search tab. The Discover tab now includes a search bar and displays the user's AI characters in a two-column grid, so browsing and searching happen on one screen. Tapping a card opens its profile, and the chat button starts a conversation with that character.
+- Discover now shows **AI characters created by other users** (characters synced down from the engine). The current user's own characters — created through "Create AI", the profile editor, or imported character cards — are hidden from their own Discover grid (tracked via a client-only source tag that never affects engine sync), while remaining fully available on the Characters screen and still syncing up so other users can discover them.
+- All empty states across the app now share the Market screen's premium design — a gradient-ringed icon with a bold title and muted hint, consistently sized and positioned right below the header. This covers the "no conversations", "no characters/profiles", "no search results", "not paired / cloud preparing", "no entities", and emoji search empty states.
+- Removed the dedicated "AI emoji actions" editor screen (and its "advanced emoji actions" button in the chat emoji picker). Emoji actions still resolve automatically when sending messages; only the per-entity editor UI was removed.
+
+### Security & Privacy
+
+#### Added
+- Block unwanted cloud users from their public profile: a **⋯** menu next to the Follow button offers **Block** (with a confirmation). A blocked user's AI characters, marketplace listings, posts and notifications are hidden app-wide until unblocked. Blocked users are listed and removable from **Settings → Account & Security → Blocked Users**.
+- Biometric/PIN app lock: optionally require fingerprint, face, or a 4–6 digit PIN to unlock the app.
+  - Automatically locks when the app moves to the background and prompts to unlock on return.
+  - Biometric unlock with a PIN fallback, or PIN-only when biometrics are unavailable.
+  - A "Test Lock" action in the lock settings lets you preview the unlock experience.
 
 ### Chat & Messaging
 
@@ -83,8 +235,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ChatListScreen adapted to InteractionSession model with JOIN-based interaction queries
 - ChatDetailScreen refactored for InteractionSession lifecycle with reply mode toggle
 - Force full database synchronization option in SyncSettingsScreen
+- Tapping the AI partner's avatar or name in the chat header now opens the character's AI profile page
+- **Long-press conversation actions**: pressing and holding a chat row on the Chat list opens a quick-action sheet with **Pin/Unpin**, **Archive/Unarchive**, **Mute/Unmute**, **Open chat bubble**, **Mark as read / Mark as unread**, **Block/Unblock**, and **Delete**. All actions persist per conversation.
+- **Pinned chats** stay at the top of the Chat list (a pin icon shows next to the time); **muted chats** show a muted icon; **blocked chats** remain visible with a shield icon (blocking only stops messaging — the conversation is not hidden).
+- **Unread badges**: a per-conversation unread counter is incremented when a message arrives while that chat is not open, and cleared when the chat is opened or marked read. "Mark as read / unread" toggles correctly based on the current unread state.
+- **Archived chats** now live in a dedicated **Archived** screen (reached from the archive toggle in the Chat list header), fully separated from the main list. Long-pressing an archived chat offers the same actions, including Unarchive.
+- **Block / Unblock**: blocking an AI stops it from sending AND receiving messages. Unblock is available from the chat header menu, the chat-list long-press menu, and a new **Blocked AIs** screen (Settings → Account) that lists every blocked AI with avatar + name and a one-tap Unblock button. The block state is applied instantly (in-memory override) so unblocking immediately re-enables chatting — no stale "AI blocked" errors on the next send.
+- **Floating chat bubble**: the "Open chat bubble" action launches a draggable floating bubble (display-over-other-apps) showing the AI's avatar. Tapping the bubble brings the app to the foreground and opens that conversation. The overlay permission is requested automatically and the bubble auto-shows once granted — the permission flow never leaves the user stuck on a "permission required" error.
+- **Floating bubble stack (Messenger-style)**: up to **4 chat bubbles** can be open at once — one per conversation. The bubbles are glued together in a single vertical stack that drags as one unit; each bubble shows its own character's avatar and its own unread badge. Tapping a bubble opens that conversation's floating chat window (a different bubble switches the window to its conversation), and hold + drag to the ✕ removes just that bubble. When a 5th conversation is opened, the oldest bubble is replaced automatically. Reopening a conversation now also refreshes its avatar (fixes the stale-avatar bug).
+- Status icons (pin / mute / blocked) are shown next to the time badge on each chat row for consistent alignment, and the unread badge is right-aligned to the same column.
+- When a chat is blocked, the input bar is replaced by a red "You blocked this AI" banner (with safe-area padding) instead of a disabled input.
 
 #### Changed
+- **"Block AI" renamed to "Disable AI"**: the per-AI block action (available from the chat header menu, the chat-list long-press menu, and the archived-chats menu) is now labeled **Disable**, and the **Blocked AIs** settings screen is now **Disabled AIs** (Settings → Account). The behavior is unchanged — a disabled AI can neither send nor receive messages until re-enabled via **Enable**. The disabled state is applied instantly so enabling immediately restores chatting. Existing blocked conversations remain intact.
+- The chat screen's bottom input bar (text field with send, emoji, image, and microphone buttons) has been removed. The chat now displays messages only; the message long-press action sheet no longer includes the "Reply" action.
 - Refactored `DualEntitySession` to `InteractionSession` — session management is now interaction-scoped instead of entity-pair-scoped
   - `InteractionSession` interface: interactionId, interaction, participantIds, ownEntityId, per-connection status tracking
   - Events keyed by `interactionId` instead of `partnerEntityId`: `session:started`, `session:stopped`, `message:received`, etc.
@@ -92,6 +256,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Navigation adapted to use `interactionId` for session lookup
 
 #### Fixed
+- Fixed the floating chat window staying stuck on the loading spinner when opened while the app is in the background (tapping the bubble over another app)
+  - The window is a React surface on the same ReactHost as the main activity; when the app is backgrounded the host is paused and the JS timer pipeline is frozen, so the overlay could never finish loading until the user returned to the app
+  - The overlay now force-resumes the ReactHost for as long as the window is open (so the chat loads normally), and restores the real paused lifecycle state when the window closes
+- Fixed the floating chat bubble incorrectly reporting "Overlay permission is required" after the user enabled "display over other apps"
+  - The permission request now runs a fast grace poll for several seconds after the user returns from the OS settings screen, because many devices apply the overlay toggle asynchronously and a single check could miss a correctly-granted permission
+  - A transient bubble-show failure is no longer conflated with permission denial, so a correctly granted permission no longer surfaces a misleading error
 - Fixed audio messages loading incorrect audio data after reconnection
   - All audio bubbles now load their own audio only when explicitly tapped for playback
   - Eliminates race condition where concurrent mount-time preloads corrupted the shared audio queue
@@ -108,6 +278,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chat list UI fixes for edge cases with interaction-based rendering
 - Message ID handling consistency across send and receive flows
 - Cleanup of deprecated methods from previous session management approach
+- The chat input bar and keyboard no longer overlap the Android system navigation buttons. On devices where the app runs edge-to-edge (React Native New Architecture), the input bar is now pushed above the on-screen keyboard while typing instead of being covered by it.
 
 ### Harmony Link Integration & Device Sync
 
@@ -187,6 +358,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - EntityConfigEditScreen, EntityConfigScreen, LandingScreen, SettingsScreen, ModuleConfigEditScreen
 
 #### Changed
+- All toast notifications now use the app's branded themed toast (obsidian-glass pill) on every platform — the last remaining OS-native Android toast (used for connection/sync status) was replaced, so connection status, sync completion, message confirmations, and errors all share one consistent design
+- Settings menu reorganized into sub-menus to reduce clutter on the main Settings screen
+  - Account & Security and Billing & Purchases grouped under an "Account" sub-menu
+  - Appearance options (theme, language, font size, app icon) grouped under an "Appearance" sub-menu
+  - AI & Conversation options grouped under their own sub-menu
+  - Support & Legal options grouped under a "Help & Support" sub-menu
+  - Frequently used controls (Connection status, Sync status, Notifications toggles) remain directly on the main Settings screen
 - "Reset Security Mode" button moved from SyncSettingsScreen to ConnectionSetupScreen
   - Button now appears alongside other connection management actions (Connect & Pair, Reconnect, Unpair Device)
   - Security mode display row remains in SyncSettingsScreen

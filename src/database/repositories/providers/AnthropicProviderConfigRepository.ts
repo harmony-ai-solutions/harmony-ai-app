@@ -95,7 +95,8 @@ export async function updateAnthropicProviderConfig(config: AnthropicProviderCon
     const [result] = await tx.executeSql(
       `UPDATE provider_config_anthropic
        SET name = ?, api_key = ?, model = ?, max_tokens = ?, temperature = ?, top_p = ?, top_k = ?,
-           stop_sequences = ?, sampling_preset_name = ?, extra_params = ?
+           stop_sequences = ?, sampling_preset_name = ?, extra_params = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name, config.api_key, config.model, config.max_tokens, config.temperature,
@@ -111,17 +112,12 @@ export async function isAnthropicProviderConfigInUse(id: string): Promise<boolea
   return isProviderConfigInUse('anthropic', id);
 }
 
-export async function deleteAnthropicProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteAnthropicProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  if (!permanent && await isAnthropicProviderConfigInUse(id)) throw new Error(`Anthropic provider config ${id} is in use and cannot be soft deleted`);
+  if (await isAnthropicProviderConfigInUse(id)) throw new Error(`Anthropic provider config ${id} is in use and cannot be soft deleted`);
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_anthropic WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) throw new Error(`Anthropic provider config not found: ${id}`);
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql('UPDATE provider_config_anthropic SET deleted_at = ? WHERE id = ?', [now, id]);
-      if (result.rowsAffected === 0) throw new Error(`Anthropic provider config not found: ${id}`);
-    }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql('UPDATE provider_config_anthropic SET deleted_at = ? WHERE id = ?', [now, id]);
+    if (result.rowsAffected === 0) throw new Error(`Anthropic provider config not found: ${id}`);
   });
 }

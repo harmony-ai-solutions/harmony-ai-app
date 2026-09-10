@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS provider_config_soulbitscloud (
   presence_penalty REAL NOT NULL DEFAULT 0,
   n INTEGER NOT NULL DEFAULT 0,
   stop_tokens TEXT NOT NULL DEFAULT '[]',
-  seed INTEGER,
+  seed INTEGER NOT NULL DEFAULT 0,
   response_format TEXT NOT NULL DEFAULT '',
   sampling_preset_name TEXT NOT NULL DEFAULT '',
   extra_params TEXT NOT NULL DEFAULT '{}',

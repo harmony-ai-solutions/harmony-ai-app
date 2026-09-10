@@ -5,7 +5,7 @@
  * Only supports forward migrations - no rollback functionality.
  */
 
-import { SQLiteDatabase } from 'react-native-sqlite-storage';
+import type {Database} from './types';
 import { createLogger } from '../utils/logger';
 
 import { migration001 } from './migrations/000001_initial_schema';
@@ -40,9 +40,24 @@ import { migration029 } from './migrations/000029_rag_reindex_flag';
 import { migration030 } from './migrations/000030_add_provider_expansion';
 import { migration031 } from './migrations/000031_config_uuid_primary_keys';
 import { migration032 } from './migrations/000032_add_soulbitscloud_provider';
+import { migration033 } from './migrations/000033_add_emotion_state_deleted_at';
+import { migration034 } from './migrations/000034_add_unique_name_constraint_vision_imagination';
+import { migration035 } from './migrations/000035_character_image_uuid_primary_key';
+import { migration036 } from './migrations/000036_harmonyspeech_api_key';
+import { migration037 } from './migrations/000037_add_character_card_standard_fields';
+import { migration038 } from './migrations/000038_add_lifecycle_state';
+import { migration039 } from './migrations/000039_device_push_tokens_reserved';
+import { migration040 } from './migrations/000040_lifecycle_state_sync_columns';
+
+import { migration041 } from './migrations/000041_consolidate_senju_features';
+import { migration042 } from './migrations/000042_entity_type_and_flags';
+import { migration043 } from './migrations/000043_drop_dead_sync_infra';
+import { migration044 } from './migrations/000044_favorite_column';
+import { migration045 } from './migrations/000045_engine_id_pattern_placeholder';
+import { migration046 } from './migrations/000046_sync_gc_state_placeholder';
 
 // Migration definition
-interface Migration {
+export interface Migration {
   version: number;
   description: string;
   sql: string;
@@ -51,7 +66,7 @@ interface Migration {
 const log = createLogger('[Migrations]');
 
 // All migrations in order
-const MIGRATIONS: Migration[] = [
+export const MIGRATIONS: Migration[] = [
   {
     version: 1,
     description: 'initial_schema',
@@ -212,13 +227,83 @@ const MIGRATIONS: Migration[] = [
     description: 'add_soulbitscloud_provider',
     sql: migration032,
    },
+   {
+    version: 33,
+    description: 'add_emotion_state_deleted_at',
+    sql: migration033,
+   },
+   {
+    version: 34,
+    description: 'add_unique_name_constraint_vision_imagination',
+    sql: migration034,
+   },
+   {
+    version: 35,
+    description: 'character_image_uuid_primary_key',
+    sql: migration035,
+   },
+   {
+    version: 36,
+    description: 'harmonyspeech_api_key',
+    sql: migration036,
+   },
+   {
+    version: 37,
+    description: 'Add character card standard fields (V3 fidelity, incl. character_book JSON)',
+    sql: migration037,
+   },
+   {
+    version: 38,
+    description: 'add_lifecycle_state',
+    sql: migration038,
+   },
+   {
+    version: 39,
+    description: 'device_push_tokens_reserved (engine-only table; number placeholder)',
+    sql: migration039,
+   },
+   {
+    version: 40,
+    description: 'lifecycle_state sync columns (watermark contract)',
+    sql: migration040,
+   },
+   {
+    version: 41,
+    description: 'consolidate_senju_features (canonical message rebuild, favorites/settings final, §9-A9 reconciliation rebuilds; personas removed)',
+    sql: migration041,
+   },
+   {
+     version: 42,
+     description: 'entity_type + is_muted + is_disabled (entity rebuild; Q9 backfill)',
+     sql: migration042,
+   },
+   {
+     version: 43,
+     description: 'drop dead sync-infra tables (sync_devices/sync_history; §9-A14 pair — engine 000043 = synced_tables registry)',
+     sql: migration043,
+   },
+{
+      version: 44,
+      description: 'is_favorite column on character_profiles replaces the favorites sidecar table (user ruling 2026-09-01, LWW coupling accepted; paired engine 000044)',
+      sql: migration044,
+    },
+    {
+      version: 45,
+      description: 'Placeholder — engine counterpart 000045 performs the entity id-pattern migration; app converges via full re-sync (no local data migration required).',
+      sql: migration045,
+    },
+    {
+      version: 46,
+      description: 'Placeholder — engine counterpart 000046 adds engine-local `sync_gc_state` (tombstone-GC purge floor); the app needs no schema change.',
+      sql: migration046,
+    },
   ];
 
 /**
  * Create the schema_migrations table if it doesn't exist
  */
 async function createMigrationsTable(
-  db: SQLiteDatabase,
+  db: Database,
   silent: boolean = false,
 ): Promise<void> {
   const sql = `
@@ -238,7 +323,7 @@ async function createMigrationsTable(
 /**
  * Get list of applied migration versions
  */
-async function getAppliedMigrations(db: SQLiteDatabase): Promise<Set<number>> {
+async function getAppliedMigrations(db: Database): Promise<Set<number>> {
   const [results] = await db.executeSql(
     'SELECT version FROM schema_migrations',
   );
@@ -252,11 +337,85 @@ async function getAppliedMigrations(db: SQLiteDatabase): Promise<Set<number>> {
   return appliedVersions;
 }
 
+// ---------------------------------------------------------------------------
+// Migration SQL safety guard
+// ---------------------------------------------------------------------------
+// SQLite shipped on many Android devices predates the versions that support
+// `ALTER TABLE ... DROP COLUMN` (SQLite 3.35.0+) and
+// `ALTER TABLE ... RENAME COLUMN` (SQLite 3.25.0+). A migration that uses
+// either will silently fail (or partially fail) on those devices, leaving the
+// schema in an inconsistent state.
+//
+// To remove or rename a column, use the `_new`-table rebuild pattern:
+//   CREATE TABLE <name>_new ( ...columns without the dropped one... );
+//   INSERT INTO <name>_new (...) SELECT ... FROM <name>;
+//   DROP TABLE <name>;
+//   ALTER TABLE <name>_new RENAME TO <name>;
+//
+// `assertMigrationSqlSupported` enforces this at apply time and fails the
+// migration with an actionable error. SQL comments (`--` line comments and
+// C-style block comments) are stripped first, so commented-out documentation
+// lines (e.g. the FIXME notes in migrations 7 and 21) are NOT flagged.
+const FORBIDDEN_SQLITE_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
+  // `\b` word boundaries ensure we match the keyword, not a substring:
+  // `DROP TABLE`, `DROP INDEX` and `ALTER TABLE ... RENAME TO` stay valid.
+  { pattern: /\bDROP\s+COLUMN\b/i, label: 'DROP COLUMN' },
+  { pattern: /\bRENAME\s+COLUMN\b/i, label: 'RENAME COLUMN' },
+];
+
+/**
+ * Strip SQL comments so commented-out statements are ignored by the guard.
+ * Removes C-style block comments (may span multiple lines) and `--` line
+ * comments. Best-effort: assumes `--` does not appear inside a string literal,
+ * which holds for every migration in this repo.
+ */
+function stripSqlComments(sql: string): string {
+  return sql
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((line) => {
+      const commentStart = line.indexOf('--');
+      return commentStart >= 0 ? line.substring(0, commentStart) : line;
+    })
+    .join('\n');
+}
+
+/**
+ * Fail fast if a migration's executable SQL relies on SQLite syntax that is
+ * unsupported on the SQLite versions shipped with older Android devices.
+ *
+ * Throws an Error naming the offending keyword and pointing at the rebuild
+ * pattern. Throwing here (before any statement is executed and before the
+ * migration is recorded as applied) keeps the schema_migrations table honest
+ * and lets the migration be fixed and retried.
+ */
+function assertMigrationSqlSupported(
+  sql: string,
+  version: number,
+  description: string,
+): void {
+  const executableSql = stripSqlComments(sql);
+  for (const { pattern, label } of FORBIDDEN_SQLITE_PATTERNS) {
+    if (pattern.exec(executableSql)) {
+      throw new Error(
+        `Migration ${version} (${description}) uses unsupported SQLite syntax: "${label}". ` +
+          `Older Android devices ship SQLite versions that do not support ` +
+          `ALTER TABLE ... DROP COLUMN (requires SQLite 3.35.0+) or ` +
+          `ALTER TABLE ... RENAME COLUMN (requires SQLite 3.25.0+). ` +
+          `Use the _new-table rebuild pattern instead: CREATE TABLE <name>_new, ` +
+          `INSERT INTO <name>_new (...) SELECT ... FROM <name>, DROP TABLE <name>, ` +
+          `ALTER TABLE <name>_new RENAME TO <name>. ` +
+          `If this statement was documentation only, keep it inside a SQL "--" comment.`,
+      );
+    }
+  }
+}
+
 /**
  * Apply a single migration within a transaction
  */
 async function applyMigration(
-  db: SQLiteDatabase,
+  db: Database,
   migration: Migration,
   silent: boolean = false,
 ): Promise<void> {
@@ -267,16 +426,28 @@ async function applyMigration(
   }
 
   try {
+    // Fail fast if the migration relies on SQLite syntax that is unsupported
+    // on older Android devices (DROP COLUMN / RENAME COLUMN). Throw before
+    // any statement runs so the migration is NOT recorded as applied.
+    assertMigrationSqlSupported(
+      migration.sql,
+      migration.version,
+      migration.description,
+    );
+
     // Execute the migration SQL
     // Note: SQLite doesn't support multiple statements in executeSql,
-    // so we need to split and execute individually
-    const statements = migration.sql
+    // so we need to split and execute individually.
+    // Strip SQL comments first so comment-only lines (e.g. documentation
+    // headers like "-- 2. AUDIO: Replace audio_file with text+mime_type")
+    // don't become standalone statements that confuse the SQLite driver.
+    const statements = stripSqlComments(migration.sql)
       .split(';')
       .map((s: string) => s.trim())
       .filter((s: string) => s.length > 0);
 
     for (const statement of statements) {
-      await db.executeSql(statement);
+        await db.executeSql(statement);
     }
 
     // Record the migration
@@ -299,7 +470,7 @@ async function applyMigration(
  * This is the main entry point called during database initialization
  */
 export async function runMigrations(
-  db: SQLiteDatabase,
+  db: Database,
   silent: boolean = false,
 ): Promise<void> {
   if (!silent) {
@@ -347,9 +518,63 @@ export async function runMigrations(
 }
 
 /**
+ * Run all migrations up to (and including) the specified version.
+ * This is identical to `runMigrations` except it filters pending migrations
+ * to only those with `version <= targetVersion`.
+ *
+ * Useful for testing a specific snapshot of the schema.
+ */
+export async function runMigrationsToVersion(
+  db: Database,
+  targetVersion: number,
+  silent: boolean = false,
+): Promise<void> {
+  if (!silent) {
+    log.info(`Running migrations up to version ${targetVersion}...`);
+  }
+
+  try {
+    // Ensure migrations table exists
+    await createMigrationsTable(db, silent);
+
+    // Get already applied migrations
+    const appliedVersions = await getAppliedMigrations(db);
+
+    // Find pending migrations that are within the target range
+    const pendingMigrations = MIGRATIONS.filter(
+      m => !appliedVersions.has(m.version) && m.version <= targetVersion,
+    );
+
+    if (pendingMigrations.length === 0) {
+      if (!silent) {
+        log.info('Database is up to date');
+      }
+      return;
+    }
+
+    if (!silent) {
+      log.info(
+        `Applying ${pendingMigrations.length} pending migrations (up to v${targetVersion})`,
+      );
+    }
+
+    for (const migration of pendingMigrations) {
+      await applyMigration(db, migration, silent);
+    }
+
+    if (!silent) {
+      log.info('Migrations completed successfully');
+    }
+  } catch (error) {
+    log.error('Migration process failed:', error);
+    throw error;
+  }
+}
+
+/**
  * Get current database schema version
  */
-export async function getCurrentVersion(db: SQLiteDatabase): Promise<number> {
+export async function getCurrentVersion(db: Database): Promise<number> {
   try {
     const [results] = await db.executeSql(
       'SELECT MAX(version) as version FROM schema_migrations',

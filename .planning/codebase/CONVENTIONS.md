@@ -1,192 +1,194 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-05-24
+**Analysis Date:** 2026-08-07
 
 ## Naming Patterns
 
 **Files:**
-- Components: PascalCase (e.g., `ChatBubble.tsx`, `ThemedButton.tsx`, `EmojiAwareText.tsx`)
-- Services: PascalCase with Service suffix (e.g., `SyncService.ts`, `EntitySessionService.ts`, `EntityEmojiActionService.ts`)
-- Services without Service suffix: PascalCase (e.g., `AudioPlayer.ts`, `EmojiService.ts`)
-- Repositories: PascalCase (e.g., `characters.ts`, `entities.ts`, `interactions.ts`, `emoji_actions.ts`)
-- Utilities: camelCase (e.g., `base64.ts`, `connection.ts`, `emojiSprite.ts`)
-- Types: PascalCase (e.g., `types.d.ts`)
-- Tests: `.test.ts` or `.test.tsx` suffix (e.g., `SyncService.test.ts`, `memories.test.ts`)
-- Migrations: Zero-padded numeric prefix (e.g., `000024_create_interactions_table.ts`)
+- Components: PascalCase `.tsx` (e.g., `ChatBubble.tsx`, `ThemedButton.tsx`, `CloudProvisioningCard.tsx`, `StatusPulseDot.tsx`)
+- Screens: PascalCase `.tsx` with `Screen` suffix (e.g., `ChatListScreen.tsx`, `SettingsScreen.tsx`, `EntityConfigEditScreen.tsx`)
+- Services: PascalCase class names with `Service` suffix where stateful (e.g., `SyncService.ts`, `BiometricLockService.ts`, `EntitySessionService.ts`); utility-ish services without suffix (e.g., `AudioPlayer.ts`, `EmojiService.ts`)
+- Repositories: lowercase plural `.ts` files (e.g., `src/database/repositories/characters.ts`, `entities.ts`, `modules.ts`, `providers.ts`, `memories.ts`); `emotion_state.ts` uses snake_case (table-name match)
+- Utilities: camelCase `.ts` (e.g., `src/utils/logger.ts`, `haptics.ts`, `colorUtils.ts`, `uuid.ts`)
+- Contexts: PascalCase `.tsx` with `Context` suffix (e.g., `AuthContext.tsx`, `BiometricLockContext.tsx`, `ThemeContext.tsx`)
+- Migrations: zero-padded numeric prefix `0000NN_description.ts` (e.g., `000034_*.ts`), registered in `src/database/migrations/index.ts`
+- Tests: `.test.ts` / `.test.tsx` suffix, placed in a co-located `__tests__/` directory (e.g., `src/database/__tests__/repositories/characters.test.ts`). Integration tests live in `__tests__/integration/` with `*.integration.test.ts` filename convention (e.g., `sync.conflict.integration.test.ts`)
+- Test helpers: camelCase or PascalCase non-test files inside `__tests__/` and `__test_utils__/` (e.g., `repositoryFixtures.ts`, `testDatabase.ts`, `HarmonyLinkMockServer.ts`)
+- E2E flows: `e2e/.maestro/NN-name.yaml` with zero-padded numeric prefix (e.g., `01-smoke-boot.yaml`, `04-network-reconnect.yaml`)
 
 **Functions:**
-- camelCase (e.g., `createCharacterProfile`, `getDatabase`, `initiateSync`)
-- Async functions: Prefix with action verb (e.g., `createX`, `getX`, `updateX`, `deleteX`, `startX`, `stopX`)
-- Repository functions: Exported directly as named functions from module
+- camelCase (e.g., `createCharacterProfile`, `runMigrations`, `classifyCloudStage`, `calcElapsedSeconds`)
+- Async functions: prefix with action verb (`createX`, `getX`, `updateX`, `deleteX`, `startX`, `stopX`, `initiateX`)
+- Pure helper functions extracted from components are **exported** for testability (e.g., `classifyCloudStage`, `calcElapsedSeconds` in `src/components/cloud/CloudProvisioningCard.tsx`)
+- Hooks: `use` + camelCase (e.g., `useElapsed`, `useAppTheme`, `useSyncConnection`)
+- Repository modules: plain exported named functions, no class wrapper
 
 **Variables:**
-- camelCase (e.g., `currentSession`, `syncPhase`, `interactionId`)
-- Private class properties: Prefix with underscore (e.g., `_instance`, `_connectionManager`)
-- Private class properties also used without underscore in newer code: `this.connectionManager`, `this.sessions` (Map type)
+- camelCase (e.g., `currentSession`, `syncPhase`, `elapsedSeconds`)
+- Module-level constants: SCREAMING_SNAKE_CASE (e.g., `INACTIVE_LOCK_GRACE_MS`, `FLOW_CONCLUDE_CONFIRM_MS`, `APP_TAG`, `PNG_MAGIC_BASE64`)
+- Private class properties: prefix with `private` keyword; underscore prefix (`_instance`, `_connectionManager`, `_serverData`) appears in older service code (`HarmonyLinkMockServer.ts`, `SyncService.ts`), while newer code omits the underscore (`this.connectionManager`, `this.sessions`). Follow the existing style of the file you touch; for new code prefer **no underscore** with `private` modifier
+- Static storage keys: grouped under `private static readonly STORAGE_KEYS = {...}` map (see `src/services/ConnectionStateManager.ts`)
 
 **Types/Interfaces:**
-- PascalCase (e.g., `SyncServiceEvents`, `CharacterProfile`, `ChatBubbleProps`, `InteractionSession`, `EntitySession`)
-- Event interfaces: Suffix with `Events` (e.g., `SyncServiceEvents`, `EntitySessionEvents`, `ConnectionManagerEvents`)
-- Props interfaces: Suffix with `Props` (e.g., `ChatBubbleProps`, `ThemedButtonProps`)
-- Context types: Suffix with `Type` or `ContextType` (e.g., `EntitySessionContextType`)
+- PascalCase (e.g., `CharacterProfile`, `ConnectionState`, `ConversationMessage`, `CloudSessionStatus`)
+- Event-map interfaces: suffix `Events` (e.g., `ConnectionStateEvents`, `SyncServiceEvents`) — used as the generic param of `EventEmitter<...>`
+- Props interfaces: suffix `Props` (e.g., `ChatBubbleProps`, `BiometricLockProviderProps`)
+- Context value types: suffix `ContextType` (e.g., `BiometricLockContextType`)
+- Typed event payloads declared inline in the interface map: `'state:changed': (state: ConnectionState) => void`
 
 ## Code Style
 
 **Formatting:**
 - Tool: Prettier 2.8.8
 - Settings in `.prettierrc.js`:
-  - `arrowParens: 'avoid'` - Omit parens when possible
-  - `singleQuote: true` - Use single quotes
-  - `trailingComma: 'all'` - Trailing commas everywhere
+  - `arrowParens: 'avoid'` — omit parens for single-arg arrows
+  - `singleQuote: true` — single quotes throughout
+  - `trailingComma: 'all'` — trailing commas everywhere
+- Manual formatting convention in tests/source: section separators with `// ── Section name ──...` and `// ====` blocks to group logic
 
 **Linting:**
 - Tool: ESLint 8.19.0
-- Config: `.eslintrc.js` extends `@react-native` preset
+- Config: `.eslintrc.js` — `root: true`, `extends: '@react-native'` (legacy `.eslintrc` format; not flat config)
+- Run: `npm run lint` (eslint ., `scripts.lint` in `package.json`)
 
 **TypeScript:**
-- Strict mode enabled via `@react-native/typescript-config` (v0.83.1)
-- Version: 5.8.3
-- `"types": ["jest"]` in `tsconfig.json` for test type support
+- Version 5.8.3; `tsconfig.json` extends `@react-native/typescript-config` (strict by default)
+- `"types": ["jest"]` enables Jest globals in tests without importing
+- Explicit return types on exported functions and async functions
+- `import type` for type-only imports (e.g., `import type { NodeDatabase } from '../__test_utils__/nodeDatabase'`)
+- Type-only re-exports and discriminated unions used heavily in service/state types
 
 ## Import Organization
 
-**Order:**
-1. Standard library / Node modules (e.g., `import http from 'http'`)
-2. Third-party library imports (e.g., `import EventEmitter from 'eventemitter3'`, `import { Avatar, IconButton } from 'react-native-paper'`)
-3. React imports (`import React from 'react'`)
-4. React Native imports (`import { StyleSheet, View } from 'react-native'`)
-5. Relative imports from same package (`../components/...`, `./services/...`, `../../database/models`)
+**Order (observed in `src/components/chat/ChatBubble.tsx`, `src/services/ConnectionStateManager.ts`):**
+1. React / React Native imports (`import React, { useState } from 'react'`; `import { StyleSheet, View } from 'react-native'`)
+2. Third-party libraries (`react-native-paper`, `react-native-linear-gradient`, `react-i18next`, `eventemitter3`, `react-native-logs`)
+3. Relative app imports — components first, then services, then types/models/utils (relative depth from shallowest to deepest)
 
 **Path Aliases:**
-- Not detected - all imports use relative paths
+- Only one Jest moduleNameMapper alias: `^@test-utils/database$` → `<rootDir>/src/database/__test_utils__/testDatabase` (defined in `jest.config.js`; usable only in tests, not runtime)
+- All runtime imports use relative paths — no `@/` or `~` aliases
 
 **Specific import patterns:**
-- Database repository imports use namespace import: `import * as characters from '../repositories/characters'`
-- Service imports use default export of singleton: `import EntitySessionService from '../../services/EntitySessionService'`
-- Type-only imports for interfaces: `import type { ConnectionManager } from './connection/ConnectionManager'`
+- Repository imports use namespace import: `import * as characters from '../../repositories/characters'`
+- Singleton services imported by name (class): `import { ConnectionStateManager } from '../ConnectionStateManager'` then `ConnectionStateManager.getInstance()`
+- Default-export singleton services: `import EntitySessionService from '../../services/EntitySessionService'`
+- Logger: `import { createLogger } from '../utils/logger'`; local `const log = createLogger('[ComponentName]')`
+- ESM-only packages inside `jest.mock` factories use `require()` (factories are hoisted and cannot reference outer scope) — see `src/components/cloud/__tests__/CloudProvisioningCard.render.test.tsx`
 
 ## Event System
 
-**Library:** `eventemitter3` (v5.0.1) - replaces Node.js EventEmitter
+**Library:** `eventemitter3` (v5.0.1) — replaces Node.js `EventEmitter`
 
 **Pattern:**
 ```typescript
 import EventEmitter from 'eventemitter3';
 
-interface ServiceEvents {
-  'event:name': (param1: string, param2: any) => void;
+interface ConnectionStateEvents {
+  'state:changed': (state: ConnectionState) => void;
+  'error': (error: any) => void;
 }
 
-export class MyService extends EventEmitter<ServiceEvents> {
-  // ...
-  private constructor() {
-    super();
-  }
+export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> {
+  private static instance: ConnectionStateManager;
+  static getInstance(): ConnectionStateManager { ... }
 }
 ```
 
-**Used by:** All major services - `SyncService`, `EntitySessionService`, `ConnectionStateManager`, `ConnectionManager`, `BaseWebSocketConnection`
+**Used by:** `SyncService.ts`, `ConnectionStateManager.ts`, `EntitySessionService.ts`, `ConnectionManager` (`src/services/connection/`), `BaseWebSocketConnection` (`src/services/websocket/`), and the test-side `HarmonyLinkMockServer.ts`
 
-**Event naming convention:** `domain:action` (colon-separated, e.g., `'sync:started'`, `'session:started'`, `'message:received'`)
+**Event naming:** `domain:action` colon-separated (e.g., `'sync:completed'`, `'sync:error'`, `'state:changed'`, `'session:started'`, `'message:received'`)
 
 ## Error Handling
 
 **Patterns:**
-- Use try/catch with async/await for database operations
-- Return `null` for not-found cases (e.g., `getCharacterProfile` returns `Promise<CharacterProfile | null>`)
-- Emit error events for service-level failures (e.g., `this.emit('sync:error', error)`)
-- Log errors with contextual information using logger utility
-- Use `InstanceType<typeof setTimeout>` for timeout return types (e.g., `ReturnType<typeof setTimeout>`)
+- try/catch with async/await for DB and I/O operations; `finally` blocks for cleanup (see `withFreshDatabase` in `src/database/__tests__/repositoryFixtures.ts`)
+- Return `null` for not-found cases: `Promise<CharacterProfile | null>` (repositories), and Promise.resolve(false) style boolean outcomes for guards (e.g., `BiometricLockService.authenticateBiometric` returns `false` rather than rejecting on user cancel)
+- Service-level failures emit error events: `this.emit('sync:error', error)`
+- Timeout safety nets for native prompts that may never settle (see `BiometricLockService.ts` — bounded with `setTimeout`, tested with fake timers)
+- Log errors with namespace logger: `log.error('context', error)`
+- `as any` casts for crossing mock boundaries in tests only (e.g., `(syncService as any).connectionManager = mockCm` in `__tests__/integration/syncService.integration.test.ts`)
 
 ## Logging
 
-**Framework:** `react-native-logs` (v5.5.0)
+**Framework:** `react-native-logs` (v5.5.0) via `src/utils/logger.ts`
 
-**Pattern:** Create logger with context tag
+**Pattern:**
 ```typescript
 import { createLogger } from '../utils/logger';
-const log = createLogger('[ServiceName]');
+const log = createLogger('[BiometricLockContext]');
 ```
 
-**Log levels:** `log.info()`, `log.debug()`, `log.warn()`, `log.error()`
-
-**Configuration** (in `src/utils/logger.ts`):
-- Development (`__DEV__`): All levels enabled (debug, info, warn, error)
-- Production: Only ERROR level
-- Error objects automatically stringified with stack traces
-- Timestamps shown in dev only
+**Configuration** (`src/utils/logger.ts`):
+- Global tag `SOULBITS`; every line formatted `[SOULBITS] | [Namespace] | LEVEL | message` (filter in logcat: `adb logcat | grep "[SOULBITS]"`)
+- Dev (`__DEV__`): all levels (debug, info, warn, error) with timestamps
+- Production: only `error` level, no timestamps
+- Error objects stringified with stack (`m.stack || m.message`)
+- Levels: `log.debug()`, `log.info()`, `log.warn()`, `log.error()`
 
 ## Comments
 
 **When to Comment:**
-- JSDoc for public API functions (exported functions)
-- Inline comments for complex logic or protocol-specific behavior
-- TODO/FIXME comments for technical debt
-- Section comments with visual separators: `// ============================================================================`
-- Design doc references: `// Per D-03/D-32/D-35:` style comments referencing design documents
+- JSDoc/TSDoc block on every exported function, class, and non-trivial hook — states purpose, parameters, and behavioral contract (see `src/contexts/BiometricLockContext.tsx`, `src/utils/logger.ts`)
+- Header comment on every test file explaining what scenario it covers and why (regression context, decision references)
+- Inline `// NOTE:` / `// IMPORTANT:` for gotchas (hoisting limits of `jest.mock`, WAL-on-`:memory:` hazards, RNTL v14 async `render()`)
+- Decision references: `// decision 2/3`, `// Per spec:`, `// Per D-03/D-32/D-35:` — links design decisions to implementation
+- Section separators: `// ── Section name ───...` and `// ====` rule lines in both source and tests
+- TODO/FIXME comments used sparingly for known debt
 
 ## Function Design
 
-**Size:** No strict limit, but prefer focused single-responsibility functions
+**Size:** No strict limit; prefer focused single-responsibility functions. `CloudProvisioningCard.tsx` explicitly extracts pure helpers from the render component
 
 **Parameters:**
-- Use TypeScript interfaces for complex parameter objects
-- Optional parameters with default values
-- Use `Omit` utility type when creating new objects from existing types
+- Object params typed via interfaces; optional props with default values in component signatures (`isLastMessage = false`)
+- Factory-style test helpers take an `overrides: Partial<Record<string, any>> = {}` object spread last (see `sampleCharacter` in `__tests__/integration/helpers/fixtures.ts`)
+- Numeric tolerances/timings as named constants with `_MS` suffix
 
 **Return Values:**
-- Explicit return types in function signatures
-- Return `Promise<T>` for async functions
-- Return `null` for not-found cases
-- Return arrays for collection queries
+- Explicit return types everywhere (e.g., `(status: CloudSessionStatus, isConnected: boolean): RadarState`)
+- `Promise<T>` for async, `null` for not-found, `boolean` for predicate/guard outcomes
+- Collections returned as arrays; counts never implied by `length` alone without assertions
 
-**Private methods:**
-- Prefix private methods with `private` keyword (TypeScript)
-- Helper methods organized under `// ---- Internal helpers ----` section comments
+**Private methods:** `private` keyword; helper groups under `// ---- Internal helpers ----` or `// ── ... ──` section comments
 
 ## Module Design
 
 **Exports:**
-- Named exports for functions and types
-- Singleton pattern for services via `getInstance()` static method
-- Repository functions exported directly as named exports
-- Some services export both the class AND a default singleton instance (e.g., `EntityEmojiActionService`)
+- Named exports for functions, types, and classes; default export for the root logger (`src/utils/logger.ts`)
+- Singleton services: `private static instance` + `static getInstance()` (e.g., `ConnectionStateManager`, `SyncService`, `BiometricLockService`)
+- Some services export both class and a default singleton (e.g., `EntitySessionService`, `EmojiService`, `AudioPlayer`)
+- Repository modules: named function exports only
+- Pure helpers exported from components for unit testing (`classifyCloudStage`, `calcElapsedSeconds`, `useElapsed`)
 
 **Barrel Files:**
-- Use `index.ts` for re-exporting (e.g., `src/database/index.ts`)
-
-**Class-based Services:**
-- Singleton pattern with private constructor
-- Static `getInstance()` method
-- Extend `EventEmitter` from `eventemitter3` for event-driven communication
-
-**Alternative module pattern:**
-- Function-based modules with named exports (e.g., `src/database/repositories/`, `src/utils/`)
-- No class wrapper - exports are standalone async functions
+- `src/database/index.ts` re-exports; `src/database/migrations/index.ts` aggregates migration list (`MIGRATIONS` array with `version`)
+- Contexts export `XProvider` + `useX` hook from the same file
 
 ## Component Patterns
 
 **React Components:**
-- Functional components with TypeScript
-- Use `React.FC<Props>` type for component definition (preferred)
-- Destructure props in function signature
-- Default values for optional props
+- Functional components with TypeScript, typed `React.FC<Props>` (or `React.FC<{...}>` for inline sub-components like `FormattedRPText` in `ChatBubble.tsx`)
+- Props destructured in signature with defaults for optional props
+- Local state via `useState`; effects via `useEffect`; perf via `useCallback`/`useRef`
+- Sub-components kept in the same file when only used there (e.g., `FormattedRPText` in `src/components/chat/ChatBubble.tsx`)
+- `testID` attributes used on interactive elements for RNTL queries (`testID="alert-button-0"` in `AppAlertContext.test.tsx`)
 
 **Theming:**
-- Use `useAppTheme()` hook from `ThemeContext` (e.g., `const { theme } = useAppTheme()`)
-- Components reference `theme` object for colors, spacing, typography
-- Themed wrapper components in `src/components/themed/` (e.g., `ThemedText`, `ThemedButton`, `ThemedCard`, `ThemedView`, `ThemedGradient`)
+- `useAppTheme()` from `src/contexts/ThemeContext.tsx` returns `{ theme }`; colors/spacing/typography read from the `theme` object
+- Themed wrappers in `src/components/themed/`: `ThemedText`, `ThemedButton`, `ThemedCard`, `ThemedView`, `ThemedGradient`, `ThemedAppbar`, `ThemedFab`, `ScreenHeader`, `SectionHeader`
+
+**Context Pattern** (all in `src/contexts/`, e.g., `BiometricLockContext.tsx`):
+- Value type interface suffixed `ContextType`
+- `createContext<ContextType>(defaultValue)` — often a functional default, not `undefined`
+- Provider: `export const XProvider: React.FC<ProviderProps>`
+- Hook: `export const useX = (): ContextType => useContext(XContext)`
+- Newer contexts (e.g., `BiometricLockContext`) prefer a non-throwing default context value over the throw-if-outside-provider pattern; older contexts (`ThemeContext`) may throw — check the file
 
 **Hooks:**
-- Use built-in hooks (`useState`, `useEffect`, `useRef`, `useCallback`)
-- Custom hooks for reusable logic (e.g., contexts in `src/contexts/`)
-
-**Context Pattern:**
-- Create context with `createContext<Type | undefined>(undefined)`
-- Provider component as `export const XProvider: React.FC<Props>`
-- Consumer hook as `export function useX(): XType`
-- Hook throws if used outside provider: `if (!context) throw new Error(...)`
+- Custom hooks exported from component files (e.g., `useElapsed` in `CloudProvisioningCard.tsx`) or context files
+- Hooks that drive timers use `setInterval`/`setTimeout` and must be testable via fake timers
 
 ---
 
-*Convention analysis: 2026-05-24*
+*Convention analysis: 2026-08-07*

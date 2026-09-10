@@ -1,6 +1,6 @@
 import { getDatabase } from './connection';
+import { getPkField } from './pkRegistry';
 import { createLogger } from '../utils/logger';
-import { Transaction } from 'react-native-sqlite-storage';
 
 const log = createLogger('[DatabaseSync]');
 
@@ -20,8 +20,57 @@ const TEXT_SIZE_THRESHOLD = 2_000_000; // 2MB threshold - chunk if larger
 /**
  * Critical: Use CAST(strftime('%s', ...) AS INTEGER) for all timestamp comparisons
  */
+
+/**
+ * Parse a timestamp string into epoch milliseconds using the shared 6-1 §2 UTC
+ * rules (D21-7, shipped with the 3-2 wipe release per D32).
+ *
+ * The #1 divergence hazard: V8 parses a bare space-separated string
+ * (`new Date("2026-09-05 11:12:44")`) as LOCAL time. Every timestamp that
+ * reaches this path must be normalized to a UTC instant BEFORE any LWW
+ * comparison, or the comparison skews by the local offset.
+ *
+ * Rules (identical semantics to the engine migration parser):
+ *  1. Format A (SQLite `CURRENT_TIMESTAMP`, `YYYY-MM-DD HH:MM:SS`) is UTC by
+ *     definition — parse it explicitly as UTC (`+ 'Z'`).
+ *  2. Format B (Go-driver `…HH:MM:SS.nnnnnnnnn±hh:mm`) honors the offset
+ *     suffix; a missing offset (legacy local-time writer, e.g.
+ *     `emotion/ekman8.go:120`) is treated as UTC with a warning — its true
+ *     zone is unrecoverable, and UTC is the deterministic choice both sides
+ *     must make identically.
+ *  3. Format C (ISO-8601 `T`) parses natively.
+ */
+function parseTimestampToUtcMs(timestamp: string): number {
+  // Format C — native parse honors both `Z` and explicit offsets (rule 3).
+  if (timestamp.includes('T')) {
+    return Date.parse(timestamp);
+  }
+
+  // Space-separated formats (SQLite default / Go-driver strings).
+  if (timestamp.includes(' ')) {
+    // Format B with an offset suffix — parse natively after the space→'T'
+    // swap so the offset is honored (rule 2).
+    if (/[+-]\d{2}:\d{2}$/.test(timestamp)) {
+      return Date.parse(timestamp.replace(' ', 'T'));
+    }
+    // No offset suffix. SQLite `CURRENT_TIMESTAMP` (format A) is UTC by
+    // definition (rule 1). A fractional component identifies a legacy
+    // Go-driver string written in local time (rule 2's absence clause).
+    if (/\d{2}:\d{2}:\d{2}\.\d+/.test(timestamp)) {
+      log.warn(
+        `Timestamp "${timestamp}" has no offset suffix — treating as UTC (legacy local-time writer?)`,
+      );
+    }
+    return Date.parse(timestamp.replace(' ', 'T') + 'Z');
+  }
+
+  // Fallback — native parse (e.g. `YYYY-MM-DD` date-only, numeric strings).
+  return Date.parse(timestamp);
+}
+
 export const toUnixTimestamp = (isoDate: string): number => {
-  return Math.floor(new Date(isoDate).getTime() / 1000);
+  const ms = parseTimestampToUtcMs(isoDate);
+  return Number.isNaN(ms) ? NaN : Math.floor(ms / 1000);
 };
 
 /**
@@ -48,11 +97,13 @@ export const normalizeTimestampForSync = (timestamp: any): string => {
   }
   
   // Handle space-separated format (SQLite default): "YYYY-MM-DD HH:MM:SS"
+  // (and Go-driver format-B strings). Parse through the shared UTC-aware
+  // parser — never bare (V8 would read the space format as LOCAL time; 6-1
+  // §2 rule 1, D21-7).
   if (typeof timestamp === 'string' && timestamp.includes(' ')) {
-    const normalized = timestamp.replace(' ', 'T');
-    const date = new Date(normalized);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString();
+    const ms = parseTimestampToUtcMs(timestamp);
+    if (!Number.isNaN(ms)) {
+      return new Date(ms).toISOString();
     }
   }
   
@@ -132,7 +183,7 @@ export async function loadTextColumn(
   columnName: string
 ): Promise<string | null> {
   const db = getDatabase();
-  const pkField = table === 'entity_module_mappings' ? 'entity_id' : 'id';
+  const pkField = getPkField(table);
   
   // Step 1: Check TEXT size using length()
   const [sizeResult] = await db.executeSql(
@@ -190,8 +241,9 @@ function normalizeBooleanFields(table: string, record: any): any {
   // Define tables and their boolean fields
   const booleanFields: Record<string, string[]> = {
     'character_image': ['is_primary'],
-    'conversation_messages': ['is_recon_followup', 'is_edited'],
+    'conversation_messages': ['is_recon_followup', 'is_edited', 'is_pinned', 'is_read'],
     'entity_emoji_actions': ['auto_generated', 'is_default'],
+    'lifecycle_state': ['sleeping'],
   };
 
   const fields = booleanFields[table];
@@ -221,7 +273,7 @@ async function getChangedRecordsWithText(
   const db = getDatabase();
   const textColumns = TEXT_COLUMNS[table] || [];
   const nonTextColumns = await getNonTextColumns(table);
-  const pkField = table === 'entity_module_mappings' ? 'entity_id' : 'id';
+  const pkField = getPkField(table);
   
   // Phase 1: Get IDs and metadata without TEXT columns
   let metadataQuery: string;
@@ -297,7 +349,7 @@ async function getChangedRecordsWithText(
  * Automatically routes TEXT tables to two-phase query
  */
 // Tables that do not have a deleted_at column — deletions cascade from parent entity deletes
-const NO_DELETED_AT_TABLES = ['emotion_state'];
+const NO_DELETED_AT_TABLES: string[] = [];
 
 export const getChangedRecords = async (
   table: string,
@@ -355,84 +407,6 @@ export const getChangedRecords = async (
   
   log.debug(`Found ${records.length} record(s) in ${table}`);
   return records;
-};
-
-/**
- * Get the primary key field name for a table
- */
-const getPrimaryKeyField = (table: string): string => {
-  // entity_module_mappings uses entity_id as primary key
-  if (table === 'entity_module_mappings') {
-    return 'entity_id';
-  }
-  // emotion_state uses entity_id as primary key
-  if (table === 'emotion_state') {
-    return 'entity_id';
-  }
-  // All other tables use id
-  return 'id';
-};
-
-/**
- * Apply sync record using Last-Write-Wins (LWW) conflict resolution
- * 
- * @param table - The table to apply the record to
- * @param operation - The operation type (insert, update, delete)
- * @param record - The record data
- * @param tx - Transaction to execute within (required for atomic sync)
- */
-export const applySyncRecord = async (
-  table: string,
-  operation: 'insert' | 'update' | 'delete',
-  record: any,
-  tx: Transaction
-) => {
-  const pkField = getPrimaryKeyField(table);
-  const pkValue = record[pkField];
-
-  if (operation === 'delete') {
-    // Soft delete
-    await tx.executeSql(
-      `UPDATE ${table} SET deleted_at = ?, updated_at = ? WHERE ${pkField} = ?`,
-      [record.deleted_at, record.updated_at, pkValue]
-    );
-    return;
-  }
-  
-  // Check if record exists
-  const [existing] = await tx.executeSql(
-    `SELECT updated_at FROM ${table} WHERE ${pkField} = ?`,
-    [pkValue]
-  );
-  
-  if (existing.rows.length === 0) {
-    // Insert new record
-    const columns = Object.keys(record).join(', ');
-    const placeholders = Object.keys(record).map(() => '?').join(', ');
-    const values = Object.values(record);
-    
-    await tx.executeSql(`INSERT INTO ${table} (${columns}) VALUES (${placeholders})`, values);
-  } else {
-    // Last-Write-Wins: Compare timestamps
-    // SQLites updated_at is stored as ISO string in the app
-    const existingUpdated = toUnixTimestamp(existing.rows.item(0).updated_at);
-    const incomingUpdated = toUnixTimestamp(record.updated_at);
-    
-    if (incomingUpdated >= existingUpdated) {
-      // Incoming wins - update
-      const updates = Object.keys(record)
-        .filter(k => k !== pkField)
-        .map(k => `${k} = ?`)
-        .join(', ');
-      const values = Object.keys(record)
-        .filter(k => k !== pkField)
-        .map(k => record[k]);
-      values.push(pkValue);
-      
-      await tx.executeSql(`UPDATE ${table} SET ${updates} WHERE ${pkField} = ?`, values);
-    }
-    // Else: Existing wins - do nothing
-  }
 };
 
 /**

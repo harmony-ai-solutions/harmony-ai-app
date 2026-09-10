@@ -6,8 +6,95 @@
  */
 
 import { getDatabase } from '../connection';
-import { withTransaction } from '../transaction';
+import {
+  withTransaction,
+  runStatementsInTransaction,
+} from '../transaction';
 import { Entity, EntityModuleMapping } from '../models';
+import { deriveEntityId } from '../../utils/entityIdUtils';
+
+
+// ============================================================================
+// Profile-assignment guards (persona cards 3-3 / engine 1-1 parity)
+// ============================================================================
+
+/**
+ * Sentinel error messages mirroring the engine's persona-card assignment guards
+ * (harmony-link-private management/routes_entities.go, 1-1). The engine returns
+ * these as 400s; the RN repo throws them so callers can surface the same text.
+ */
+export const ERR_PROFILE_OWNED_BY_PERSONA =
+  'character profile is owned by a persona';
+export const ERR_PROFILE_ASSIGNED_TO_ANOTHER_PERSONA =
+  'character profile is already assigned to another persona';
+
+/**
+ * List the NON-deleted entities currently referencing a character profile
+ * (mirrors the engine's `ListEntitiesByCharacterProfileID` — `deleted_at IS
+ * NULL`, so a soft-deleted owner frees the profile).
+ */
+async function listProfileOwnerEntities(
+  profileId: string,
+): Promise<Array<{ id: string; entity_type: string }>> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    `SELECT id, entity_type FROM entities
+     WHERE character_profile_id = ? AND deleted_at IS NULL`,
+    [profileId],
+  );
+  const owners: Array<{ id: string; entity_type: string }> = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    owners.push({
+      id: results.rows.item(i).id,
+      entity_type: results.rows.item(i).entity_type ?? 'ai',
+    });
+  }
+  return owners;
+}
+
+/**
+ * True when a NON-deleted user-type entity owns the profile (a "persona-owned"
+ * card). Used by the persona-from-card copy helper (3-3) so a persona is never
+ * created from another persona's card (1:1 ownership, decisions 1/10).
+ */
+export async function isProfilePersonaOwned(profileId: string): Promise<boolean> {
+  const owners = await listProfileOwnerEntities(profileId);
+  return owners.some(owner => owner.entity_type === 'user');
+}
+
+/**
+ * Mirrors the engine 1-1 `enforceProfileAssignmentGuard` against live DB state:
+ *
+ *   - AI target: reject when the supplied profile is referenced by ANY user-type
+ *     entity (a persona-owned card is never linkable to an AI entity).
+ *   - user target: reject when the profile is already referenced by a DIFFERENT
+ *     user entity (persona↔profile 1:1); the entity's own reference is a no-op
+ *     and passes.
+ *
+ * @throws {@link ERR_PROFILE_OWNED_BY_PERSONA} /
+ *   {@link ERR_PROFILE_ASSIGNED_TO_ANOTHER_PERSONA} on a guard rejection.
+ */
+async function enforceProfileAssignmentGuard(
+  profileId: string,
+  targetEntityId: string,
+  targetEntityType: string,
+): Promise<void> {
+  const owners = await listProfileOwnerEntities(profileId);
+  for (const owner of owners) {
+    if (targetEntityType === 'user') {
+      // Persona 1:1 guard: any OTHER user entity owning the profile is a
+      // conflict; the entity's own reference passes (no-op).
+      if (owner.entity_type === 'user' && owner.id !== targetEntityId) {
+        throw new Error(ERR_PROFILE_ASSIGNED_TO_ANOTHER_PERSONA);
+      }
+    } else {
+      // AI entity guard: a persona-owned profile is never linkable to AI.
+      if (owner.entity_type === 'user') {
+        throw new Error(ERR_PROFILE_OWNED_BY_PERSONA);
+      }
+    }
+  }
+}
 
 // ============================================================================
 // Entity CRUD Operations
@@ -15,24 +102,50 @@ import { Entity, EntityModuleMapping } from '../models';
 
 /**
  * Create a new entity
+ *
+ * `entity_type` defaults to 'ai'; `is_muted` / `is_disabled` default 0. The
+ * new columns are optional on the input (pre-000042 construction sites stay
+ * compiling) but always persisted.
  */
 export async function createEntity(
-  entity: Omit<Entity, 'created_at' | 'updated_at' | 'deleted_at'>,
+  entity: Omit<
+    Entity,
+    'created_at' | 'updated_at' | 'deleted_at' | 'entity_type' | 'is_muted' | 'is_disabled'
+  >,
+  opts: { entity_type?: string; is_muted?: number; is_disabled?: number } = {},
 ): Promise<Entity> {
   const db = getDatabase();
+  const entityType = opts.entity_type ?? 'ai';
+  const isMuted = opts.is_muted ?? 0;
+  const isDisabled = opts.is_disabled ?? 0;
+
+  // Profile-assignment guard (persona cards 3-3 / engine 1-1): an AI entity
+  // must never link a persona-owned card, and a persona must never take a card
+  // already owned by a different persona. Fresh profiles have no owners, so the
+  // standard create paths (createPartner / createUserPersona / from-card) pass.
+  if (entity.character_profile_id) {
+    await enforceProfileAssignmentGuard(
+      entity.character_profile_id,
+      entity.id,
+      entityType,
+    );
+  }
 
   return withTransaction(db, async tx => {
     const now = new Date().toISOString();
 
     await tx.executeSql(
-      `INSERT INTO entities (id, alias, character_profile_id, lifecycle_config, rag_reindex_required, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO entities (id, alias, character_profile_id, lifecycle_config, rag_reindex_required, entity_type, is_muted, is_disabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         entity.id,
         entity.alias || '',
         entity.character_profile_id,
         entity.lifecycle_config ?? null,
         entity.rag_reindex_required ?? 1,
+        entityType,
+        isMuted,
+        isDisabled,
         now,
         now,
       ],
@@ -40,6 +153,9 @@ export async function createEntity(
 
     return {
       ...entity,
+      entity_type: entityType,
+      is_muted: isMuted,
+      is_disabled: isDisabled,
       created_at: new Date(now),
       updated_at: new Date(now),
       deleted_at: null,
@@ -74,6 +190,9 @@ export async function getEntity(
     character_profile_id: row.character_profile_id,
     lifecycle_config: row.lifecycle_config ?? null,
     rag_reindex_required: row.rag_reindex_required ?? 1,
+    entity_type: row.entity_type ?? 'ai',
+    is_muted: row.is_muted ?? 0,
+    is_disabled: row.is_disabled ?? 0,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -104,6 +223,9 @@ export async function getAllEntities(
       character_profile_id: row.character_profile_id,
       lifecycle_config: row.lifecycle_config ?? null,
       rag_reindex_required: row.rag_reindex_required ?? 1,
+      entity_type: row.entity_type ?? 'ai',
+      is_muted: row.is_muted ?? 0,
+      is_disabled: row.is_disabled ?? 0,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -111,6 +233,358 @@ export async function getAllEntities(
   }
 
   return entities;
+}
+
+/**
+ * Find an entity linked to the given character profile.
+ *
+ * A single character profile may be linked to multiple entities (e.g. the
+ * user acts as a character in one chat and chats with it in another), so
+ * multiple rows can share the same character_profile_id. This returns the
+ * most recently created active entity to keep navigation deterministic.
+ * Returns null if no active entity references the profile.
+ */
+export async function getEntityByCharacterProfileId(
+  characterProfileId: string,
+  includeDeleted = false,
+): Promise<Entity | null> {
+  const db = getDatabase();
+
+  const query = includeDeleted
+    ? `SELECT * FROM entities
+       WHERE character_profile_id = ?
+       ORDER BY created_at DESC LIMIT 1`
+    : `SELECT * FROM entities
+       WHERE character_profile_id = ? AND deleted_at IS NULL
+       ORDER BY created_at DESC LIMIT 1`;
+
+  const [results] = await db.executeSql(query, [characterProfileId]);
+
+  if (results.rows.length === 0) {
+    return null;
+  }
+
+  const row = results.rows.item(0);
+  return {
+    id: row.id,
+    alias: row.alias,
+    character_profile_id: row.character_profile_id,
+    lifecycle_config: row.lifecycle_config ?? null,
+    rag_reindex_required: row.rag_reindex_required ?? 1,
+    entity_type: row.entity_type ?? 'ai',
+    is_muted: row.is_muted ?? 0,
+    is_disabled: row.is_disabled ?? 0,
+    created_at: new Date(row.created_at),
+    updated_at: new Date(row.updated_at),
+    deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+  };
+}
+
+/**
+ * Strip a trailing copy-suffix (e.g. " 02", "-03", "_ 4") from a name to
+ * recover the true base name. Only strips when a separator precedes the
+ * number — real names without a separator (e.g. "B2") are left untouched.
+ *
+ *   stripCopySuffix("Aria")     → "Aria"
+ *   stripCopySuffix("Aria 02")  → "Aria"
+ *   stripCopySuffix("aria-05")  → "aria"
+ *   stripCopySuffix("B2")       → "B2"
+ */
+export function stripCopySuffix(name: string): string {
+  const trimmed = name.trim();
+  const match = trimmed.match(/^(.*?)[\s-_]+(\d+)$/);
+  if (!match) return trimmed;
+  return match[1].trim();
+}
+
+/**
+ * Compute the next available "copy" alias for duplicating an AI partner.
+ *
+ * The copy number always reflects the count of copies: duplicating "Max"
+ * yields "Max 2", duplicating that copy yields "Max 3", and so on. Any
+ * copy-suffix on the input name is stripped first so the series continues from
+ * the TRUE base name instead of producing "Max 2 2".
+ *
+ * The original name itself is treated as the "1" slot, so the first copy is
+ * always "<name> 2". Numbers are NOT zero-padded — the user-visible copy name
+ * reads naturally ("Max 2"), even though older copies may still exist as
+ * "Max 02" (they are detected by the trailing-number regex and occupy their
+ * slot, so the series continues past them).
+ *
+ * Examples:
+ *   - no copies yet                  → "Max 2"
+ *   - "Max 02" exists                → "Max 3"
+ *   - duplicating "Max 2"            → "Max 3" (continues the series)
+ *   - "Max" + "Max 05" exist         → "Max 2" (holes are not re-used)
+ *   - "Max" + "Max 2" exist          → "Max 3"
+ */
+export async function getNextEntityAliasCopy(baseName: string): Promise<string> {
+  const db = getDatabase();
+
+  // Recover the true base when the source is itself a copy ("Max 02" → "Max").
+  const base = stripCopySuffix(baseName);
+  const lowerBase = base.toLowerCase();
+
+  const [results] = await db.executeSql(
+    `SELECT alias FROM entities WHERE deleted_at IS NULL`,
+  );
+
+  const takenNumbers = new Set<number>();
+
+  for (let i = 0; i < results.rows.length; i++) {
+    const alias = String(results.rows.item(i).alias ?? '').trim();
+    const lowerAlias = alias.toLowerCase();
+
+    // Exact match (original) occupies slot 1.
+    if (lowerAlias === lowerBase) {
+      takenNumbers.add(1);
+      continue;
+    }
+
+    // "Aria 02" / "aria-02" / "Aria 2" — capture the trailing number
+    // (padded or not — both occupy their numeric slot).
+    const prefix = lowerAlias.startsWith(lowerBase) ? lowerAlias.slice(lowerBase.length) : '';
+    const match = prefix.match(/^[\s-_]+(\d+)$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (Number.isFinite(n) && n >= 1) {
+        takenNumbers.add(n);
+      }
+    }
+  }
+
+  let next = 2;
+  while (takenNumbers.has(next)) {
+    next += 1;
+  }
+  return `${base} ${next}`;
+}
+
+// ============================================================================
+// Ghost-aware id resolution (soft-deleted ids reserve the TEXT PRIMARY KEY)
+// ============================================================================
+
+/**
+ * True when ANY `entities` row carries the id — LIVE or SOFT-DELETED (ghost).
+ *
+ * `entities.id` is a TEXT PRIMARY KEY spanning soft-deleted rows (migration
+ * 000042), so a deleted row still reserves its id: recreating an entity with
+ * that id fails with a PK constraint. This probe mirrors the engine's
+ * `EntityExists` (harmony-link-private/database/repository/entities/) and is
+ * the ONLY existence check that may be used for id-creation decisions —
+ * `getEntity` filters `deleted_at IS NULL` and would miss the ghost.
+ */
+export async function entityIdExists(id: string): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT 1 FROM entities WHERE id = ?',
+    [id],
+  );
+  return results.rows.length > 0;
+}
+
+/**
+ * True when ANY LIVE `entities` row carries the alias — case-insensitive.
+ *
+ * The alias partial unique index `idx_entities_alias_unique` spans live rows
+ * only, so this is the LIVE-ONLY mirror of the engine's alias-uniqueness
+ * predicate (D30/D56). Used by create seams to decide whether the display
+ * name may be used verbatim as the alias or must auto-suffix.
+ */
+export async function entityAliasExists(alias: string): Promise<boolean> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT 1 FROM entities WHERE deleted_at IS NULL AND lower(alias) = lower(?)',
+    [alias.trim()],
+  );
+  return results.rows.length > 0;
+}
+
+/**
+ * D56 alias resolution for CREATES: the display name is used VERBATIM when no
+ * LIVE row already carries it; a live twin (case-insensitive) auto-suffixes
+ * via {@link getNextEntityAliasCopy} — live twin "Isabella" → alias
+ * "Isabella 2". Mirrors the engine's derived-create alias default (D30):
+ * "alias defaults to name; auto-suffix only on a live collision."
+ *
+ * NOTE: this is deliberately NOT `getNextEntityAliasCopy` alone — that helper
+ * treats the base as slot 1 (duplicate semantics: the source always exists)
+ * and would mint "Isabella 2" for a brand-new name.
+ */
+export async function resolveCreateAlias(displayName: string): Promise<string> {
+  const name = displayName.trim();
+  if (await entityAliasExists(name)) {
+    return getNextEntityAliasCopy(name);
+  }
+  return name;
+}
+
+/**
+ * Typed error for reserved display names (`user` / `deleted`, D33).
+ *
+ * Minting an entity id from a reserved name throws this so screens can
+ * surface a friendly, dedicated message instead of a bare generic failure
+ * (review-5 UX pin — the UI mapping ships in the later screen phase).
+ */
+export class ReservedEntityNameError extends Error {
+  constructor(name: string) {
+    super(`"${name}" is a reserved name — rename the card and retry`);
+    this.name = 'ReservedEntityNameError';
+  }
+}
+
+/**
+ * Ghost-aware next-free id for a FULL DERIVED id (D2/D68 backstop).
+ *
+ * The derived id is already timestamped (`Isabella-20260905123514`), so a
+ * same-second collision appends "-N" to the WHOLE derived id — never to a
+ * stripped base and never space-joined (D3): `…-20260905123514` →
+ * `…-20260905123514-2` → `…-3`. Probes live AND soft-deleted (ghost) rows via
+ * {@link entityIdExists} — a tombstone reserves the TEXT PRIMARY KEY.
+ *
+ *   nextFreeDerivedId("Isabella-20260905123514")        → same id when free
+ *   nextFreeDerivedId("Isabella-20260905123514") (taken) → "…-20260905123514-2"
+ */
+export async function nextFreeDerivedId(fullDerivedId: string): Promise<string> {
+  if (!(await entityIdExists(fullDerivedId))) {
+    return fullDerivedId;
+  }
+  let n = 2;
+  while (await entityIdExists(`${fullDerivedId}-${n}`)) {
+    n += 1;
+  }
+  return `${fullDerivedId}-${n}`;
+}
+
+/**
+ * THE one mint seam for entity ids (D68 — all five creation paths route
+ * here; seam drift is the N3 incident class, so future seams get correctness
+ * by construction).
+ *
+ * Compose:
+ *   1. `deriveEntityId(name)` — D2 schema (slug + UTC timestamp; see
+ *      `src/utils/entityIdUtils.ts`). Spaces never survive into an id (D3).
+ *   2. Reserved-name throw (`user` / `deleted`, case-insensitive — D33):
+ *      a TYPED {@link ReservedEntityNameError} for friendly UI surfacing.
+ *   3. Ghost-aware {@link nextFreeDerivedId} backstop for same-second
+ *      collisions (`-N` appended to the FULL derived id).
+ *
+ * @param name the display name to derive from (trimmed internally)
+ * @throws {@link ReservedEntityNameError} for reserved names
+ */
+export async function mintEntityId(name: string): Promise<string> {
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+  if (lower === 'user' || lower === 'deleted') {
+    throw new ReservedEntityNameError(trimmed);
+  }
+  const derived = deriveEntityId(trimmed);
+  return nextFreeDerivedId(derived);
+}
+
+/**
+ * Persona-identity mint: derived id + DEDUPED display-name alias (D56).
+ *
+ * `alias` = the display name VERBATIM when no live twin exists, else
+ * `getNextEntityAliasCopy(displayName)` — live twin "Max" → alias "Max 2"
+ * (live-only mirror of the engine's D30 derived-create alias default; the
+ * alias partial unique index `idx_entities_alias_unique` is live-only, so
+ * tombstoned aliases never block). Persona creates + the open-chat card alias
+ * route here so `alias` carries the human name (spaces allowed) while `id` is
+ * derived (D3/D56).
+ *
+ * @returns `{ id, alias }` — id = minted derived id, alias = deduped display name
+ */
+export async function mintPersonaIdentity(
+  displayName: string,
+): Promise<{ id: string; alias: string }> {
+  const name = displayName.trim();
+  const id = await mintEntityId(name);
+  // D56: alias = the display name VERBATIM when free; live twin → "Name 2"
+  // (engine D30 mirror — creates never 400 on a name collision).
+  const alias = await resolveCreateAlias(name);
+  return { id, alias };
+}
+
+/**
+ * Duplicate an AI partner entity (engine duplicate parity,
+ * harmony-link-private/database/controllers/entity_controller.go).
+ *
+ * Atomic copy of an existing AI entity:
+ *   - Source must be a LIVE `entity_type = 'ai'` entity; a `user` persona is
+ *     rejected with a clear error, and a missing/soft-deleted source throws a
+ *     not-found error.
+ *   - The duplicate keeps the SAME `character_profile_id` (a LIVE link — NO
+ *     character-card copy) and copies `lifecycle_config` + `rag_reindex_required`
+ *     verbatim; `is_muted` / `is_disabled` are reset to false.
+ *   - ALL 8 module-mapping slots are copied verbatim into a fresh mapping row
+ *     (an all-NULL mapping is created when the source has none — mirrors the
+ *     engine `CreateEntity` always-create-mapping convention).
+ *   - `id` = {@link mintEntityId} of the source display name (D52: duplicates
+ *     derive a FRESH timestamped id from the display name — `alias` when set,
+ *     else the id — never a copy-series on the source id, which is itself a
+ *     timestamp post-migration); `alias` = `getNextEntityAliasCopy` of the
+ *     source alias (live-only dedupe — the already-complying copy-suffix
+ *     convention, D56). The id and alias spaces may therefore diverge — by
+ *     design (engine parity).
+ *
+ * @param entityId the LIVE source entity id to duplicate
+ * @returns the newly created Entity: `{ id, alias, character_profile_id,
+ *   lifecycle_config, rag_reindex_required, entity_type: 'ai', is_muted: 0,
+ *   is_disabled: 0, created_at, updated_at, deleted_at: null }` — consumers
+ *   should read `id` / `alias` off the result to drive navigation + display.
+ * @throws not-found error when the source is missing or soft-deleted; a
+ *   `user persona` error when the source is a persona.
+ */
+export async function duplicateAIPartner(entityId: string): Promise<Entity> {
+  const source = await getEntity(entityId);
+  if (!source) {
+    throw new Error(`Entity not found: ${entityId}`);
+  }
+  if (source.entity_type === 'user') {
+    throw new Error(
+      `Cannot duplicate user persona '${entityId}' — only AI entities are duplicateable`,
+    );
+  }
+
+  // D52/D68: derive a fresh timestamped id from the source display name
+  // (alias → id; D63's linked-profile-name step is skipped — the app always
+  // populates alias on create, and entities.ts must not import characters.ts
+  // — circular). Alias keeps the copy-suffix convention (live-only, D56).
+  const displayName = source.alias || source.id;
+  const newId = await mintEntityId(displayName);
+  const newAlias = await getNextEntityAliasCopy(displayName);
+
+  // Same character profile (LIVE link — the duplicate shares the source card),
+  // lifecycle verbatim, flags reset to false.
+  const created = await createEntity(
+    {
+      id: newId,
+      alias: newAlias,
+      character_profile_id: source.character_profile_id,
+      lifecycle_config: source.lifecycle_config ?? '{}',
+      rag_reindex_required: source.rag_reindex_required ?? 1,
+    },
+    { entity_type: 'ai', is_muted: 0, is_disabled: 0 },
+  );
+
+  // Copy the source mapping verbatim into a fresh row; when the source has
+  // none, create the all-NULL mapping the engine's CreateEntity always makes.
+  const sourceMapping = await getEntityModuleMapping(entityId);
+  await createEntityModuleMapping({
+    entity_id: newId,
+    backend_config_id: sourceMapping?.backend_config_id ?? null,
+    cognition_config_id: sourceMapping?.cognition_config_id ?? null,
+    imagination_config_id: sourceMapping?.imagination_config_id ?? null,
+    movement_config_id: sourceMapping?.movement_config_id ?? null,
+    rag_config_id: sourceMapping?.rag_config_id ?? null,
+    stt_config_id: sourceMapping?.stt_config_id ?? null,
+    tts_config_id: sourceMapping?.tts_config_id ?? null,
+    vision_config_id: sourceMapping?.vision_config_id ?? null,
+    deleted_at: null,
+  });
+
+  return created;
 }
 
 /**
@@ -152,16 +626,35 @@ export async function updateEntity(entity: Entity): Promise<Entity> {
 
 /**
  * Update specific fields on an entity (partial update)
- * Supports updating character_profile_id, alias, and lifecycle_config fields.
+ * Supports updating character_profile_id, alias, lifecycle_config,
+ * rag_reindex_required, is_muted, and is_disabled fields.
+ * `entity_type` is intentionally NOT allowlisted — it is immutable by
+ * convention (the repo never changes it after create).
  * Throws error if entity not found.
  */
 export async function updateEntityFields(
   id: string,
   fields: Partial<
-    Pick<Entity, 'character_profile_id' | 'alias' | 'lifecycle_config' | 'rag_reindex_required'>
+    Pick<Entity, 'character_profile_id' | 'alias' | 'lifecycle_config' | 'rag_reindex_required' | 'is_muted' | 'is_disabled'>
   >,
 ): Promise<void> {
   const db = getDatabase();
+
+  // Profile-assignment guard (persona cards 3-3 / engine 1-1): the target
+  // entity's type is immutable, so the guard branch follows the EXISTING row.
+  // Unlinking (`character_profile_id → null`) assigns no profile and always
+  // passes. Self-reference re-assignment is a no-op and passes.
+  if ('character_profile_id' in fields && fields.character_profile_id) {
+    const existing = await getEntity(id);
+    if (!existing) {
+      throw new Error(`Entity not found: ${id}`);
+    }
+    await enforceProfileAssignmentGuard(
+      fields.character_profile_id,
+      id,
+      existing.entity_type ?? 'ai',
+    );
+  }
 
   const now = new Date().toISOString();
   const setClauses: string[] = ['updated_at = ?'];
@@ -183,6 +676,14 @@ export async function updateEntityFields(
     setClauses.push('rag_reindex_required = ?');
     values.push(fields.rag_reindex_required ?? 1);
   }
+  if ('is_muted' in fields) {
+    setClauses.push('is_muted = ?');
+    values.push(fields.is_muted ? 1 : 0);
+  }
+  if ('is_disabled' in fields) {
+    setClauses.push('is_disabled = ?');
+    values.push(fields.is_disabled ? 1 : 0);
+  }
 
   values.push(id);
 
@@ -196,14 +697,70 @@ export async function updateEntityFields(
   }
 }
 
+// ============================================================================
+// Entity flags (Q8) — mute / disable live on the entity, not conversation settings
+// ============================================================================
+
+/**
+ * Throw-safe guard: user entities can NEVER be muted/disabled targets (A3 —
+ * they are chat identities, not chat partners). The init/chat guard surfaces
+ * `entity_disabled` only for `entity_type='ai'`.
+ */
+async function assertEntityFlagTarget(entityId: string): Promise<void> {
+  const entity = await getEntity(entityId);
+  if (!entity) {
+    throw new Error(`Entity not found: ${entityId}`);
+  }
+  if (entity.entity_type === 'user') {
+    throw new Error(
+      `Cannot mute/disable user entity '${entityId}' — user entities are chat identities, not disable targets (A3)`,
+    );
+  }
+}
+
+/** Set an entity's muted flag (global per entity, Q8). Throws for user entities (A3). */
+export async function setEntityMuted(id: string, muted: boolean): Promise<void> {
+  await assertEntityFlagTarget(id);
+  await updateEntityFields(id, { is_muted: muted ? 1 : 0 });
+}
+
+/** Set an entity's disabled flag (global per entity, Q8). Throws for user entities (A3). */
+export async function setEntityDisabled(id: string, disabled: boolean): Promise<void> {
+  await assertEntityFlagTarget(id);
+  await updateEntityFields(id, { is_disabled: disabled ? 1 : 0 });
+}
+
+/** IDs of all non-deleted muted entities. */
+export async function getMutedEntityIds(): Promise<string[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT id FROM entities WHERE is_muted = 1 AND deleted_at IS NULL',
+  );
+  const ids: string[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    ids.push(results.rows.item(i).id);
+  }
+  return ids;
+}
+
+/** IDs of all non-deleted disabled entities. */
+export async function getDisabledEntityIds(): Promise<string[]> {
+  const db = getDatabase();
+  const [results] = await db.executeSql(
+    'SELECT id FROM entities WHERE is_disabled = 1 AND deleted_at IS NULL',
+  );
+  const ids: string[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    ids.push(results.rows.item(i).id);
+  }
+  return ids;
+}
+
 /**
  * Soft delete entity by ID
  * Throws error if entity not found
  */
-export async function deleteEntity(
-  id: string,
-  permanent = false,
-): Promise<void> {
+export async function deleteEntity(id: string): Promise<void> {
   const db = getDatabase();
 
   // First check if entity exists
@@ -212,30 +769,63 @@ export async function deleteEntity(
     throw new Error(`Entity not found: ${id}`);
   }
 
-  return withTransaction(db, async tx => {
-    if (permanent) {
-      // Hard delete - FK cascade will handle entity_module_mappings
-      await tx.executeSql('DELETE FROM entities WHERE id = ?', [id]);
-    } else {
-      // Soft delete - must manually cascade to entity_module_mappings
-      // (FK ON DELETE CASCADE only works for hard deletes, not soft deletes)
-      const now = new Date().toISOString();
-      await tx.executeSql(
-        'UPDATE entities SET deleted_at = ?, updated_at = ? WHERE id = ?',
-        [now, now, id],
-      );
-      // Also soft-delete the entity_module_mappings to maintain data integrity
-      await tx.executeSql(
-        'UPDATE entity_module_mappings SET deleted_at = ?, updated_at = ? WHERE entity_id = ?',
-        [now, now, id],
-      );
-    }
-  });
+  // Soft delete — cascade to child rows rooted at this entity ONLY.
+  //
+  // ⚠️ CRITICAL: this is a MULTI-statement transaction. Do NOT convert it to
+  // withTransaction + sequential `await tx.executeSql()` calls. react-native-
+  // sqlite-storage transactions follow run-to-completion semantics: the tx is
+  // finalized immediately after the callback's synchronous portion returns, so
+  // a second `await tx.executeSql()` throws
+  //   "InvalidStateError: DOM Exception 11: This transaction is already finalized."
+  // (see src/database/README.md — "Multiple sequential statements | ❌ NO").
+  // Use nested callbacks in a single transaction instead.
+  //
+  // ⚠️ BUSINESS RULE: every cascade predicate is `WHERE entity_id = ?` —
+  // NEVER match by participant_ids, participant_key, sender_entity_id, or via
+  // interaction joins. Conversations rooted at another entity that merely
+  // mention the deleted entity must remain untouched.
+  //
+  // D26 parity (D17 stamping): the cascade tombstones ALL EIGHT child tables in
+  // one shared `now` — entity_module_mappings, memories, emotion_state,
+  // entity_emoji_actions, interactions, conversation_messages,
+  // chat_conversation_settings (keyed entity_id) and lifecycle_state. The
+  // settings + lifecycle_state updates carry `AND deleted_at IS NULL` so an
+  // already-tombstoned child is never re-stamped (delaying the 4-1 GC).
+  const now = new Date().toISOString();
+  return runStatementsInTransaction(db, [
+    { sql: 'UPDATE entities SET deleted_at = ?, updated_at = ? WHERE id = ?', params: [now, now, id] },
+    { sql: 'UPDATE entity_module_mappings SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE memories SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE emotion_state SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE entity_emoji_actions SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE interactions SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE conversation_messages SET deleted_at = ?, updated_at = ? WHERE entity_id = ?', params: [now, now, id] },
+    { sql: 'UPDATE chat_conversation_settings SET deleted_at = ?, updated_at = ? WHERE entity_id = ? AND deleted_at IS NULL', params: [now, now, id] },
+    { sql: 'UPDATE lifecycle_state SET deleted_at = ?, updated_at = ? WHERE entity_id = ? AND deleted_at IS NULL', params: [now, now, id] },
+  ]);
 }
 
 // ============================================================================
 // EntityModuleMapping CRUD Operations
 // ============================================================================
+
+/**
+ * Normalize a module config ID for FK columns.
+ *
+ * Callers (CreateAIScreen — the single create + edit surface) default their config
+ * selectors to '' ("Disabled") and pass `id ?? null`, which still yields ''
+ * because '' is not nullish. Inserting '' into a column with a FOREIGN KEY to
+ * a config table fails with SQLITE_CONSTRAINT_FOREIGNKEY (787). Coerce any
+ * falsy/whitespace value to null so the FK columns stay valid and sync doesn't
+ * propagate garbage.
+ */
+function normalizeConfigId(
+  id: string | null | undefined,
+): string | null {
+  if (id == null) return null;
+  const trimmed = String(id).trim();
+  return trimmed === '' ? null : trimmed;
+}
 
 /**
  * Create entity module mapping
@@ -253,14 +843,14 @@ export async function createEntityModuleMapping(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         mapping.entity_id,
-        mapping.backend_config_id,
-        mapping.cognition_config_id,
-        mapping.imagination_config_id,
-        mapping.movement_config_id,
-        mapping.rag_config_id,
-        mapping.stt_config_id,
-        mapping.tts_config_id,
-        mapping.vision_config_id,
+        normalizeConfigId(mapping.backend_config_id),
+        normalizeConfigId(mapping.cognition_config_id),
+        normalizeConfigId(mapping.imagination_config_id),
+        normalizeConfigId(mapping.movement_config_id),
+        normalizeConfigId(mapping.rag_config_id),
+        normalizeConfigId(mapping.stt_config_id),
+        normalizeConfigId(mapping.tts_config_id),
+        normalizeConfigId(mapping.vision_config_id),
       ],
     );
   });
@@ -355,6 +945,7 @@ export async function createOrUpdateEntityModuleMapping(
   // the promise-based db.executeSql() API.  tx.executeSql() inside a
   // withTransaction callback is callback-only and does NOT return a Promise,
   // so awaiting it returns undefined and crashes on `.rows.length`.
+  // (See src/database/README.md — transaction run-to-completion semantics.)
   const [existingCheck] = await db.executeSql(
     'SELECT entity_id FROM entity_module_mappings WHERE entity_id = ?',
     [mapping.entity_id],
@@ -379,14 +970,14 @@ export async function createOrUpdateEntityModuleMapping(
              updated_at             = ?
          WHERE entity_id = ?`,
         [
-          mapping.backend_config_id ?? null,
-          mapping.cognition_config_id ?? null,
-          mapping.imagination_config_id ?? null,
-          mapping.movement_config_id ?? null,
-          mapping.rag_config_id ?? null,
-          mapping.stt_config_id ?? null,
-          mapping.tts_config_id ?? null,
-          mapping.vision_config_id ?? null,
+          normalizeConfigId(mapping.backend_config_id),
+          normalizeConfigId(mapping.cognition_config_id),
+          normalizeConfigId(mapping.imagination_config_id),
+          normalizeConfigId(mapping.movement_config_id),
+          normalizeConfigId(mapping.rag_config_id),
+          normalizeConfigId(mapping.stt_config_id),
+          normalizeConfigId(mapping.tts_config_id),
+          normalizeConfigId(mapping.vision_config_id),
           now,  // updated_at - ISO 8601 format
           mapping.entity_id,
         ],
@@ -401,14 +992,14 @@ export async function createOrUpdateEntityModuleMapping(
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           mapping.entity_id,
-          mapping.backend_config_id ?? null,
-          mapping.cognition_config_id ?? null,
-          mapping.imagination_config_id ?? null,
-          mapping.movement_config_id ?? null,
-          mapping.rag_config_id ?? null,
-          mapping.stt_config_id ?? null,
-          mapping.tts_config_id ?? null,
-          mapping.vision_config_id ?? null,
+          normalizeConfigId(mapping.backend_config_id),
+          normalizeConfigId(mapping.cognition_config_id),
+          normalizeConfigId(mapping.imagination_config_id),
+          normalizeConfigId(mapping.movement_config_id),
+          normalizeConfigId(mapping.rag_config_id),
+          normalizeConfigId(mapping.stt_config_id),
+          normalizeConfigId(mapping.tts_config_id),
+          normalizeConfigId(mapping.vision_config_id),
           now,  // created_at - ISO 8601 format
           now,  // updated_at - ISO 8601 format
         ],
@@ -422,24 +1013,14 @@ export async function createOrUpdateEntityModuleMapping(
  * Note: This is normally handled by CASCADE delete when entity is deleted,
  * but with soft delete we should manually mark it if needed.
  */
-export async function deleteEntityModuleMapping(
-  entityId: string,
-  permanent = false,
-): Promise<void> {
+export async function deleteEntityModuleMapping(entityId: string): Promise<void> {
   const db = getDatabase();
 
   return withTransaction(db, async tx => {
-    if (permanent) {
-      await tx.executeSql(
-        'DELETE FROM entity_module_mappings WHERE entity_id = ?',
-        [entityId],
-      );
-    } else {
-      const now = new Date().toISOString();
-      await tx.executeSql(
-        'UPDATE entity_module_mappings SET deleted_at = ? WHERE entity_id = ?',
-        [now, entityId],
-      );
-    }
+    const now = new Date().toISOString();
+    await tx.executeSql(
+      'UPDATE entity_module_mappings SET deleted_at = ? WHERE entity_id = ?',
+      [now, entityId],
+    );
   });
 }

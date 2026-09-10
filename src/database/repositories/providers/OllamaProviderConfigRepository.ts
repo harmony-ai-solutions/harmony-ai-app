@@ -65,7 +65,7 @@ export async function updateOllamaProviderConfig(config: OllamaProviderConfig): 
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_ollama SET name = ?, base_url = ?, model = ? WHERE id = ?',
+      'UPDATE provider_config_ollama SET name = ?, base_url = ?, model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.base_url, config.model, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`Ollama provider config not found: ${config.id}`);
@@ -76,17 +76,12 @@ export async function isOllamaProviderConfigInUse(id: string): Promise<boolean> 
   return isProviderConfigInUse('ollama', id);
 }
 
-export async function deleteOllamaProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteOllamaProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  if (!permanent && await isOllamaProviderConfigInUse(id)) throw new Error(`Ollama provider config ${id} is in use and cannot be soft deleted`);
+  if (await isOllamaProviderConfigInUse(id)) throw new Error(`Ollama provider config ${id} is in use and cannot be soft deleted`);
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_ollama WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) throw new Error(`Ollama provider config not found: ${id}`);
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql('UPDATE provider_config_ollama SET deleted_at = ? WHERE id = ?', [now, id]);
-      if (result.rowsAffected === 0) throw new Error(`Ollama provider config not found: ${id}`);
-    }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql('UPDATE provider_config_ollama SET deleted_at = ? WHERE id = ?', [now, id]);
+    if (result.rowsAffected === 0) throw new Error(`Ollama provider config not found: ${id}`);
   });
 }

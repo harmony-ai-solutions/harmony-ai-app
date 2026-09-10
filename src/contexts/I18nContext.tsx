@@ -26,13 +26,20 @@ import settings from '../i18n/locales/en/settings.json';
 import connection from '../i18n/locales/en/connection.json';
 import theme from '../i18n/locales/en/theme.json';
 import profile from '../i18n/locales/en/profile.json';
-import entityConfig from '../i18n/locales/en/entityConfig.json';
 import modals from '../i18n/locales/en/modals.json';
-import navigation from '../i18n/locales/en/navigation.json';
 import database from '../i18n/locales/en/database.json';
 import config from '../i18n/locales/en/config.json';
 import development from '../i18n/locales/en/development.json';
 import auth from '../i18n/locales/en/auth.json';
+import themeSettings from '../i18n/locales/en/themeSettings.json';
+import syncSettings from '../i18n/locales/en/syncSettings.json';
+import discover from '../i18n/locales/en/discover.json';
+import moduleConfig from '../i18n/locales/en/moduleConfig.json';
+import syncConnection from '../i18n/locales/en/syncConnection.json';
+import scenario from '../i18n/locales/en/scenario.json';
+import market from '../i18n/locales/en/market.json';
+import persona from '../i18n/locales/en/persona.json';
+import voiceInput from '../i18n/locales/en/voiceInput.json';
 
 // ── Storage key ─────────────────────────────────────────────────────────────
 
@@ -74,13 +81,20 @@ const resources = {
     connection,
     theme,
     profile,
-    entityConfig,
     modals,
-    navigation,
     database,
     config,
     development,
     auth,
+    themeSettings,
+    syncSettings,
+    discover,
+    moduleConfig,
+    syncConnection,
+    scenario,
+    market,
+    persona,
+    voiceInput,
   },
 };
 
@@ -102,13 +116,20 @@ const i18nConfig: InitOptions = {
     'connection',
     'theme',
     'profile',
-    'entityConfig',
     'modals',
-    'navigation',
     'database',
     'config',
     'development',
     'auth',
+    'themeSettings',
+    'syncSettings',
+    'discover',
+    'moduleConfig',
+    'syncConnection',
+    'scenario',
+    'market',
+    'persona',
+    'voiceInput',
   ],
   interpolation: {
     escapeValue: false, // React already escapes

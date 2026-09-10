@@ -1,6 +1,7 @@
 import EventEmitter from 'eventemitter3';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DeviceInfo from 'react-native-device-info';
+import Config from 'react-native-config';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[ConnectionStateManager]');
@@ -43,10 +44,10 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
     SERVER_CERT: 'harmony_server_cert',
     TOKEN_EXPIRES_AT: 'harmony_token_expires_at',
     DEVICE_ID: 'harmony_device_id',
-    LAST_SYNC_TIMESTAMP: 'last_sync_timestamp',
     CONNECTED: 'harmony_connected',
     PAIRED: 'harmony_paired',
     SECURITY_MODE: 'harmony_security_mode', // Per-device security preference
+    SYNC_ESTIMATE_LIMIT_MB: 'sync_estimate_limit_mb', // Sync size-estimate confirmation threshold (null = unlimited)
   };
   
   public static readonly SYNC_SOURCES = ['selfhosted', 'cloud'] as const;
@@ -77,6 +78,12 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
    */
   async initialize(): Promise<void> {
     try {
+      // Apply E2E override first — if HARMONY_LINK_WSS_URL is set via
+      // react-native-config (build-time env var from .env.e2e), pre-seed
+      // AsyncStorage so the app boots already paired. This completes the
+      // Phase 4-1 deferred work documented in tls-current-state.md.
+      await this.applyE2EOverride();
+
       // Get device ID
       this.deviceId = await DeviceInfo.getUniqueId();
       
@@ -132,6 +139,85 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
       log.error('Error initializing connection state:', error);
       this.emit('error', error);
     }
+  }
+
+  /**
+   * Apply E2E override from build-time env vars.
+   *
+   * When `HARMONY_LINK_WSS_URL` and `HARMONY_LINK_WS_URL` are set (via
+   * react-native-config from e2e/.env.e2e), pre-seed AsyncStorage so the
+   * app boots already "paired" against the harmony-link container —
+   * skipping the manual pairing UI for E2E runs.
+   *
+   * Strategy: cloud-mode auto-pairing via expired-token repair path.
+   *
+   * The harmony-link server (when CLOUD_MODE=true) auto-approves new
+   * devices during the handshake protocol — see harmony-link-private's
+   * eventserver/synchronization.go:260. To trigger the handshake on app
+   * boot, we pre-seed:
+   *   - harmony_paired = 'true'            (so isPaired check passes)
+   *   - harmony_jwt    = 'e2e-pending'     (any non-null value)
+   *   - harmony_token_expires_at = '0'     (forces requiresRepair=true)
+   *
+   * SyncConnectionContext.initializeConnection() then takes the
+   * `requiresRepair` branch and calls connectWithRefresh(), which:
+   *   1. Connects via plain WS (no JWT validation in cloud mode)
+   *   2. Sends HANDSHAKE_REQUEST → server auto-approves + registers device
+   *   3. Receives HANDSHAKE_ACCEPT (empty JWT in cloud mode — that's fine)
+   *   4. Disconnects WS, reconnects via WSS using insecure-ssl mode
+   *
+   * After the first boot, the device is registered in the server's
+   * sync_devices table. Subsequent boots repeat the handshake because
+   * the token is always "expired" — that's intentional and harmless
+   * for E2E.
+   *
+   * Behavior:
+   * 1. If env vars are unset → no-op (production behavior unchanged).
+   * 2. If env vars are set AND AsyncStorage already has real pairing data
+   *    (jwt != 'e2e-pending') → no-op (don't clobber existing state).
+   * 3. If env vars are set AND AsyncStorage is empty OR contains a prior
+   *    'e2e-pending' placeholder → (re-)seed.
+   */
+  private async applyE2EOverride(): Promise<void> {
+    const e2eWssUrl = Config.HARMONY_LINK_WSS_URL;
+    const e2eWsUrl = Config.HARMONY_LINK_WS_URL;
+    if (!e2eWssUrl || !e2eWsUrl) {
+      return; // Production path — no override.
+    }
+
+    log.info('E2E override: HARMONY_LINK_WSS_URL + WS_URL detected, pre-seeding pairing state');
+
+    // Don't clobber real pairing state from a non-E2E session.
+    const existingPaired = await AsyncStorage.getItem(
+      ConnectionStateManager.STORAGE_KEYS.PAIRED,
+    );
+    const existingJwt = await AsyncStorage.getItem(
+      ConnectionStateManager.STORAGE_KEYS.JWT_TOKEN,
+    );
+    if (existingPaired === 'true' && existingJwt && existingJwt !== 'e2e-pending') {
+      log.info('E2E override: skipping — device has real pairing state');
+      return;
+    }
+
+    // Pre-seed all keys required for SyncConnectionContext to take the
+    // connectWithRefresh() path on init.
+    await Promise.all([
+      AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.WSS_URL, e2eWssUrl),
+      AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.WS_URL, e2eWsUrl),
+      AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.SECURITY_MODE, 'insecure-ssl'),
+      AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.PAIRED, 'true'),
+      // Placeholder JWT — non-null so isPaired=true, but expired so
+      // requiresRepair=true triggers the handshake path.
+      AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.JWT_TOKEN, 'e2e-pending'),
+      // 0 = always expired = always triggers re-handshake on boot.
+      AsyncStorage.setItem(
+        ConnectionStateManager.STORAGE_KEYS.TOKEN_EXPIRES_AT,
+        '0',
+      ),
+    ]);
+
+    log.info(`E2E override: pre-seeded WSS=${e2eWssUrl}, WS=${e2eWsUrl}`);
+    log.info('E2E override: connectWithRefresh() will run on boot to register device');
   }
 
   /**
@@ -224,6 +310,40 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
     } catch (error) {
       log.error('Error clearing connection credentials:', error);
       this.emit('error', error);
+    }
+  }
+
+  /**
+   * Clear only self-hosted pairing credentials — does NOT affect cloud auth,
+   * connection_mode, or cloud session state.
+   * Called when the user switches from self-hosted to cloud mode.
+   */
+  async clearSelfHostedCredentials(): Promise<void> {
+    try {
+      log.info('Clearing self-hosted credentials');
+      this.jwtToken = null;
+      this.isConnected = false;
+      this.isPaired = false;
+      this.tokenExpiresAt = 0;
+
+      await Promise.all([
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.JWT_TOKEN),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.WS_URL),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.WSS_URL),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.SERVER_CERT),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.TOKEN_EXPIRES_AT),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.PAIRED),
+        AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.SECURITY_MODE),
+      ]);
+
+      this.emit('credentials:cleared', { isPaired: false });
+      this.emit('state:changed', {
+        isPaired: false,
+        isConnected: false,
+        jwtValid: false,
+      });
+    } catch (error) {
+      log.error('Error clearing self-hosted credentials:', error);
     }
   }
 
@@ -329,25 +449,99 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
 
   /**
    * Get the last sync timestamp for a given source.
-   * Falls back to the legacy global key for backward-compat (migrated once).
+   * Returns 0 when no watermark has been persisted for that source yet.
    */
   async getLastSync(source: SyncSource): Promise<number> {
     const stored = await AsyncStorage.getItem(ConnectionStateManager.lastSyncKey(source));
-    if (stored) return parseInt(stored, 10);
-    // backward-compat: fall back to the legacy global key, migrated once
-    const legacy = await AsyncStorage.getItem(ConnectionStateManager.STORAGE_KEYS.LAST_SYNC_TIMESTAMP);
-    return legacy ? parseInt(legacy, 10) : 0;
+    return stored ? parseInt(stored, 10) : 0;
   }
 
   /**
    * Set the last sync timestamp for a given source.
-   * Also writes the global alias for backward-compat so legacy readers still work.
    */
   async setLastSync(source: SyncSource, ts: number): Promise<void> {
-    await Promise.all([
-      AsyncStorage.setItem(ConnectionStateManager.lastSyncKey(source), String(ts)),
-      AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.LAST_SYNC_TIMESTAMP, String(ts)),
-    ]);
+    await AsyncStorage.setItem(ConnectionStateManager.lastSyncKey(source), String(ts));
+  }
+
+  /**
+   * Build the per-source AsyncStorage key for the per-table initial-upload set
+   * (Q7 — the app mirror of the engine's `sync_devices.synced_tables`).
+   */
+  static initialUploadDoneKey(source: SyncSource): string {
+    return `@harmony_sync_initial_upload_done:${source}`;
+  }
+
+  /**
+   * Read the per-table initial-upload set for a source (Q7).
+   *
+   * Returns the JSON array of table names whose initial full upload (since=0)
+   * has completed. An unset or invalid value returns [] — the caller treats
+   * that as "nothing initial-uploaded yet" (every table uploads in full).
+   */
+  async getInitialUploadDoneTables(source: SyncSource): Promise<string[]> {
+    try {
+      const stored = await AsyncStorage.getItem(
+        ConnectionStateManager.initialUploadDoneKey(source),
+      );
+      if (!stored) return [];
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed)
+        ? parsed.filter((x): x is string => typeof x === 'string')
+        : [];
+    } catch (error) {
+      log.warn('Failed to read initial upload set:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Persist the per-table initial-upload set for a source (Q7).
+   */
+  async setInitialUploadDoneTables(
+    source: SyncSource,
+    tables: string[],
+  ): Promise<void> {
+    await AsyncStorage.setItem(
+      ConnectionStateManager.initialUploadDoneKey(source),
+      JSON.stringify(tables),
+    );
+  }
+
+  /**
+   * Mark a set of tables as initial-uploaded (idempotent merge). Returns the
+   * updated set. Called on SYNC_FINALIZE so every registered table is marked
+   * initial-uploaded once the session completes (Q7).
+   */
+  async markTablesInitialUploadDone(
+    source: SyncSource,
+    tables: string[],
+  ): Promise<string[]> {
+    const current = await this.getInitialUploadDoneTables(source);
+    const merged = Array.from(new Set([...current, ...tables]));
+    await this.setInitialUploadDoneTables(source, merged);
+    return merged;
+  }
+
+  /**
+   * Clear ALL persisted last-sync timestamps (per-source keys) so the app
+   * starts from a clean initial state.
+   *
+   * Called by the full database wipe flows (wipeDatabaseCompletely /
+   * clearDatabaseData). Without this, the per-source keys that
+   * getLastSync()/setLastSync() actually use would survive the wipe, making
+   * the next sync an incremental request against a recent watermark — the
+   * engine then has nothing newer to send and no data is transferred.
+   *
+   * This only REMOVES the sync watermark keys. It never writes values and
+   * leaves every other AsyncStorage key (credentials, security mode, etc.)
+   * untouched. Normal per-source get/set behavior is unaffected.
+   */
+  async clearAllLastSyncTimestamps(): Promise<void> {
+    const keys = ConnectionStateManager.SYNC_SOURCES.map(source =>
+      ConnectionStateManager.lastSyncKey(source),
+    );
+    await Promise.all(keys.map(key => AsyncStorage.removeItem(key)));
+    log.info('Cleared all last sync timestamps from AsyncStorage');
   }
 
   /**
@@ -372,6 +566,56 @@ export class ConnectionStateManager extends EventEmitter<ConnectionStateEvents> 
       log.info('Security mode cleared');
     } catch (error) {
       log.error('Failed to clear security mode:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the sync size-estimate confirmation threshold in MB.
+   *
+   * Returns a number (the threshold) or null for "Unlimited" (never prompt).
+   * Defaults to 5 when the key is unset, empty, or holds an invalid value.
+   */
+  async getSyncEstimateLimitMB(): Promise<number | null> {
+    try {
+      const stored = await AsyncStorage.getItem(ConnectionStateManager.STORAGE_KEYS.SYNC_ESTIMATE_LIMIT_MB);
+      if (stored === null || stored === '') return 5; // unset → default
+      if (stored === 'unlimited') return null; // Unlimited
+      const parsed = Number(stored);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 5; // invalid → default
+    } catch (error) {
+      log.error('Failed to read sync estimate limit:', error);
+      return 5;
+    }
+  }
+
+  /**
+   * Persist the sync size-estimate confirmation threshold in MB.
+   *
+   * @param mb Numeric threshold, or null for "Unlimited" (stored as the
+   *           string 'unlimited' so it round-trips through AsyncStorage).
+   */
+  async setSyncEstimateLimitMB(mb: number | null): Promise<void> {
+    try {
+      const value = mb === null ? 'unlimited' : String(mb);
+      await AsyncStorage.setItem(ConnectionStateManager.STORAGE_KEYS.SYNC_ESTIMATE_LIMIT_MB, value);
+      log.info(`Sync estimate limit saved: ${value}`);
+    } catch (error) {
+      log.error('Failed to save sync estimate limit:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove the persisted sync size-estimate threshold so the default (5 MB)
+   * applies again.
+   */
+  async clearSyncEstimateLimitMB(): Promise<void> {
+    try {
+      await AsyncStorage.removeItem(ConnectionStateManager.STORAGE_KEYS.SYNC_ESTIMATE_LIMIT_MB);
+      log.info('Sync estimate limit cleared');
+    } catch (error) {
+      log.error('Failed to clear sync estimate limit:', error);
       throw error;
     }
   }

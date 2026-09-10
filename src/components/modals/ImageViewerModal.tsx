@@ -2,7 +2,7 @@
  * ImageViewerModal
  *
  * Full-screen image viewer with pinch-to-zoom and pan gesture support.
- * Reusable from both the CharacterProfileEditScreen and ChatDetailScreen.
+ * Reusable from both the CreateAI edit-mode image section and ChatDetailScreen.
  *
  * Props:
  *  - visible: boolean

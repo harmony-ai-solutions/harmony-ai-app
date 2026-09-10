@@ -6,44 +6,103 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { StatusBar } from 'react-native';
+import { StatusBar, View, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PaperProvider } from 'react-native-paper';
 import { NavigationContainerRef } from '@react-navigation/native';
 import { AppNavigator, RootStackParamList } from './src/navigation/AppNavigator';
 import { ThemeProvider, usePaperTheme, useAppTheme } from './src/contexts/ThemeContext';
 import { DatabaseProvider, useDatabase } from './src/contexts/DatabaseContext';
-import { AuthProvider } from './src/contexts/AuthContext';
+import { AuthProvider, useAuth } from './src/contexts/AuthContext';
+import { BiometricLockProvider, useBiometricLock } from './src/contexts/BiometricLockContext';
 import { SyncConnectionProvider, useSyncConnection } from './src/contexts/SyncConnectionContext';
 import { EntitySessionProvider } from './src/contexts/EntitySessionContext';
 import { EmojiProvider } from './src/contexts/EmojiContext';
 import { I18nProvider } from './src/contexts/I18nContext';
+import { AppAlertProvider } from './src/contexts/AppAlertContext';
+import { AppToastProvider } from './src/contexts/AppToastContext';
 import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoadingScreen';
 import { InitialPairingModal } from './src/components/modals/InitialPairingModal';
+import { LockScreen } from './src/components/lock/LockScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { DynamicBackground } from './src/components/background/DynamicBackground';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { loadHapticPreference } from './src/utils/haptics';
+import { onBubbleOpen } from './src/services/ChatBubbleService';
+import ChatPreferencesService from './src/services/ChatPreferencesService';
+import type { BubbleConversation } from './src/services/ChatBubbleService';
 
 /**
- * App content with theme, database, and connection
+ * Inner app shell — has access to BiometricLockContext for lock screen overlay.
  */
-function AppContent() {
+function AppShell() {
   const paperTheme = usePaperTheme();
   const { theme, loading: themeLoading } = useAppTheme();
   const { isReady, isLoading } = useDatabase();
   const { isPaired } = useSyncConnection();
+  const { isLocked } = useBiometricLock();
+  const { signInVersion } = useAuth();
   const [showPairingModal, setShowPairingModal] = useState(false);
   const [pairingModalChecked, setPairingModalChecked] = useState(false);
-  
-  // Create a ref that can be used for navigation
-  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+
+  const navigationRef = useRef<NavigationContainerRef<RootStackParamList> | null>(null);
+  // Skip the first render (signInVersion starts at 0) — only react to a real
+  // explicit sign-in. Returns early so the app-start bootstrap (persisted
+  // token) never triggers a redirect to the profile.
+  const prevSignInVersionRef = useRef(signInVersion);
 
   useEffect(() => {
-    // Check if we should show the initial pairing modal
+    if (prevSignInVersionRef.current === signInVersion) return;
+    prevSignInVersionRef.current = signInVersion;
+    if (signInVersion > 0) {
+      // Fresh sign-in → send the user straight to their profile page.
+      setTimeout(() => {
+        navigationRef.current?.navigate('MainTabs', { screen: 'MyProfile' });
+      }, 100);
+    }
+  }, [signInVersion]);
+
+  useEffect(() => {
+    // Apply the persisted "Haptic feedback" Settings toggle once at startup
+    // so the very first button press respects the user's preference.
+    loadHapticPreference();
+    // One-time sweep of dead legacy `chat_entity_pref_*` AsyncStorage keys
+    // (Q14) — best-effort, fire-and-forget. Chosen here (app bootstrap) rather
+    // than the chat-list seam so it runs exactly once per launch regardless of
+    // which screen first touches the preference service.
+    ChatPreferencesService.sweepLegacyEntityPrefs().catch(() => {});
+  }, []);
+
+  // Floating chat bubble → when the user taps the bubble, bring the app to
+  // the foreground and navigate straight into that conversation.
+  useEffect(() => {
+    const handleBubbleOpen = (conversation: BubbleConversation | null) => {
+      if (!conversation) return;
+      setTimeout(() => {
+        if (navigationRef.current?.isReady()) {
+          navigationRef.current.navigate('ChatDetail', {
+            interactionId: conversation.interactionId,
+            participantKey: conversation.participantKey,
+            participantIds:
+              conversation.participantIds ?? [
+                conversation.ownEntityId ?? '',
+                conversation.entityId,
+              ],
+            // ChatDetail's `entityId` param is the OWN (impersonated) entity.
+            entityId: conversation.ownEntityId ?? conversation.entityId,
+            entityName: conversation.entityName,
+          });
+        }
+      }, 150);
+    };
+    return onBubbleOpen(handleBubbleOpen);
+  }, []);
+
+  useEffect(() => {
     const checkFirstLaunch = async () => {
       const hasSeenPairingPrompt = await AsyncStorage.getItem('has_seen_pairing_prompt');
-      
+
       if (!hasSeenPairingPrompt && !isPaired && isReady) {
-        // First launch and not paired - show modal after a short delay
         setTimeout(() => {
           setShowPairingModal(true);
           setPairingModalChecked(true);
@@ -61,8 +120,7 @@ function AppContent() {
   const handlePairNow = async () => {
     await AsyncStorage.setItem('has_seen_pairing_prompt', 'true');
     setShowPairingModal(false);
-    
-    // Navigate to ConnectionSetupScreen using the navigation ref
+
     setTimeout(() => {
       if (navigationRef.current?.isReady()) {
         navigationRef.current.navigate('ConnectionSetup');
@@ -75,29 +133,31 @@ function AppContent() {
     setShowPairingModal(false);
   };
 
-  // Show loading screen while database OR theme initializes.
-  // themeLoading guards against the race where DB finishes init before
-  // ThemeContext.loadTheme() resolves — without it, every screen in the
-  // navigator returns null (if (!theme) return null) → blank white page.
   if (isLoading || !isReady || themeLoading) {
     return <DatabaseLoadingScreen />;
   }
 
-  // Database is ready, show main app
   return (
     <PaperProvider theme={paperTheme}>
       <StatusBar
         barStyle="light-content"
         backgroundColor={theme?.colors.background.base || '#000000'}
+        translucent
       />
-      <AppNavigator navigationRef={navigationRef} />
-      {pairingModalChecked && (
-        <InitialPairingModal
-          visible={showPairingModal}
-          onPair={handlePairNow}
-          onMaybeLater={handleMaybeLater}
-        />
-      )}
+      <View style={styles.backgroundLayer}>
+        <DynamicBackground />
+      </View>
+      <View style={styles.foregroundLayer}>
+        <AppNavigator navigationRef={navigationRef} />
+        {pairingModalChecked && (
+          <InitialPairingModal
+            visible={showPairingModal}
+            onPair={handlePairNow}
+            onMaybeLater={handleMaybeLater}
+          />
+        )}
+        {isLocked && <LockScreen />}
+      </View>
     </PaperProvider>
   );
 }
@@ -113,13 +173,19 @@ function App() {
           <I18nProvider>
             <DatabaseProvider>
               <AuthProvider>
-                <SyncConnectionProvider>
-                    <EntitySessionProvider>
-                      <EmojiProvider>
-                        <AppContent />
-                      </EmojiProvider>
-                    </EntitySessionProvider>
-                </SyncConnectionProvider>
+                <AppAlertProvider>
+                  <AppToastProvider>
+                    <SyncConnectionProvider>
+                      <EntitySessionProvider>
+                        <EmojiProvider>
+                          <BiometricLockProvider>
+                            <AppShell />
+                          </BiometricLockProvider>
+                        </EmojiProvider>
+                      </EntitySessionProvider>
+                    </SyncConnectionProvider>
+                  </AppToastProvider>
+                </AppAlertProvider>
               </AuthProvider>
             </DatabaseProvider>
           </I18nProvider>
@@ -128,5 +194,16 @@ function App() {
     </ErrorBoundary>
   );
 }
+
+const styles = StyleSheet.create({
+  backgroundLayer: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 0,
+  },
+  foregroundLayer: {
+    flex: 1,
+    zIndex: 1,
+  },
+});
 
 export default App;

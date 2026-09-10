@@ -1,6 +1,8 @@
 {
   "initializing": "Initializing Database",
   "settingUp": "Setting up encrypted storage...",
+  "rebuilding": "Rebuilding from Soulbits Engine...",
+  "rebuildingDescription": "A one-time rebuild is running. Your data will re-sync automatically.",
   "errorTitle": "Database Error",
   "errorDescription": "Failed to initialize the database. This may be due to:",
   "errorStorage": "• Insufficient storage space",

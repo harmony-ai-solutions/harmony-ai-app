@@ -15,7 +15,12 @@ import { loadTextColumn } from '../sync';
 
 /**
  * Derive the interaction scope from the number of participants:
- * 0 or 1 → "world", 2 → "private", 3+ → "group"
+ * 0 or 1 → "world", 2 → "private", 3+ → "group".
+ *
+ * ENGINE CONTRACT (mirrors harmony-link-private `DeriveScopeFromParticipants`,
+ * interaction_controller.go): `participantIds` is the FULL participant set
+ * INCLUDING the own entity. The own entity is part of the participant key
+ * EVERYWHERE (O3 ruling) — private/group scopes embed it; world has no key.
  */
 export function deriveScopeFromParticipants(participantIds: string[]): string {
   const count = participantIds.length;
@@ -28,10 +33,25 @@ export function deriveScopeFromParticipants(participantIds: string[]): string {
 }
 
 /**
- * Derive the participant key for interaction lookup.
- * - private: sorted pair of entity IDs joined by "+"
- * - group: all sorted participant IDs joined by "+" (unique per participant set)
+ * Derive the participant key for interaction lookup — EXACT engine contract
+ * (harmony-link-private `DeriveParticipantKey`, interaction_controller.go):
+ * - private: sorted pair of "own entity + partner" joined by "+" (the own
+ *   entity is ALWAYS in the key — per-persona semantics: two personas are
+ *   distinct entity ids, so each persona derives its OWN pair key and its
+ *   own conversation with the same partner)
+ * - group: ALL sorted participant IDs joined by "+" (unique per participant
+ *   set — the set ALWAYS includes the own entity; overlapping groups like
+ *   own+alice+bob vs own+alice+dave must NOT collide)
  * - world: "" (empty string)
+ *
+ * CALLER CONVENTION: `participantIds` MUST include the own entity (`entityId`)
+ * — every app caller passes the full participant set (session.participantIds,
+ * or route params built as [ownEntityId, ...partners]) exactly like the engine
+ * (FindActiveInteractionForPartner passes []string{entityID, partnerEntityID};
+ * ResolveInteraction receives sets that include the own entity). The function
+ * tolerates the own entity being absent (pairs own with the first other —
+ * engine parity, see engine TestDeriveParticipantKey_OwnEntityNotInSet), but
+ * that is NOT the caller convention.
  */
 export function deriveParticipantKey(
   participantIds: string[],
@@ -222,6 +242,64 @@ export async function getRecentPhoneInteractions(
   }
 
   return interactions;
+}
+
+/**
+ * One row per phone conversation (deduped by participant_key) for the chat
+ * list's paginated load-more. Recency is the conversation's LAST MESSAGE
+ * `created_at` (not `interactions.last_activity_at`), so a conversation whose
+ * interaction row is old but which just received a message sorts/pages by the
+ * message, matching the in-list sort (F6/O11).
+ *
+ * Conversations without any message sort last (NULL `last_message_at`).
+ * `interaction_id` is the lexicographically-greatest interaction id of the
+ * participant_key group (all rows of a key share scope/participants, so any
+ * id navigates to the same conversation — ChatDetail resolves via
+ * participantKey).
+ */
+export interface PhoneConversationPageRow {
+  interactionId: string;
+  interactionScope: string;
+  participantKey: string;
+  participantIds: string;
+}
+
+export async function getPhoneConversationsPage(
+  entity_id: string,
+  options: { limit: number; offset: number },
+): Promise<PhoneConversationPageRow[]> {
+  const db = getDatabase();
+
+  const [results] = await db.executeSql(
+    `SELECT MAX(i.id) AS interaction_id,
+            i.interaction_scope AS interaction_scope,
+            i.participant_key AS participant_key,
+            i.participant_ids AS participant_ids
+     FROM interactions i
+     LEFT JOIN conversation_messages cm
+            ON cm.interaction_id = i.id AND cm.deleted_at IS NULL
+     WHERE i.entity_id = ?
+       AND i.presence_type = 'phone'
+       AND i.deleted_at IS NULL
+       AND i.participant_key IS NOT NULL
+       AND i.participant_key != ''
+     GROUP BY i.participant_key
+     ORDER BY MAX(cm.created_at) DESC, MAX(i.updated_at) DESC
+     LIMIT ? OFFSET ?`,
+    [entity_id, options.limit, options.offset],
+  );
+
+  const rows: PhoneConversationPageRow[] = [];
+  for (let i = 0; i < results.rows.length; i++) {
+    const row = results.rows.item(i);
+    rows.push({
+      interactionId: row.interaction_id,
+      interactionScope: row.interaction_scope,
+      participantKey: row.participant_key,
+      participantIds: row.participant_ids,
+    });
+  }
+  return rows;
 }
 
 /**

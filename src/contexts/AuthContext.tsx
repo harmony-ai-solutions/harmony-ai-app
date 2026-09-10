@@ -24,10 +24,11 @@ import React, {
 } from 'react';
 import AuthService, {
   AuthExpiredError,
-  AuthError,
   type UserProfile,
 } from '../services/auth/AuthService';
 import { cloudSessionService } from '../services/cloud/CloudSessionService';
+import DeviceAuthService from '../services/cloud/DeviceAuthService';
+import { startSoulbitsTokenSync } from '../services/cloud/soulbitsTokenSync';
 import { createLogger } from '../utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -51,6 +52,13 @@ export interface AuthContextType {
   user: UserProfile | null;
   status: AuthStatus;
 
+  // Monotonic counter incremented after EVERY explicit sign-in action
+  // (email/password, Google, Apple). AppShell observes it to navigate the
+  // user straight to their profile (MyProfile tab) after a fresh sign-in —
+  // the app-start bootstrap path (persisted token) does NOT bump it, so
+  // returning users are not yanked to the profile on every launch.
+  signInVersion: number;
+
   // All login/register methods return void: the backend token-pair response
   // carries no user profile, so `user` is populated asynchronously by the
   // `auth:changed` listener (via getProfile). Callers should read `user`/
@@ -64,6 +72,8 @@ export interface AuthContextType {
   loginWithGoogle: (idToken: string) => Promise<void>;
   loginWithApple: (identityToken: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Re-fetch the current user's profile from the backend and update `user`. */
+  refreshUser: () => Promise<void>;
 }
 
 // ── Context ─────────────────────────────────────────────────────────────
@@ -81,6 +91,13 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
+  // Incremented on every explicit sign-in (login / social). AppShell watches
+  // this to navigate the freshly-signed-in user to their profile.
+  const [signInVersion, setSignInVersion] = useState(0);
+
+  const bumpSignInVersion = useCallback(() => {
+    setSignInVersion(v => v + 1);
+  }, []);
 
   // ── Bootstrap: load persisted tokens and attempt profile fetch ─────────
   useEffect(() => {
@@ -140,15 +157,35 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
   }, []);
 
+  // ── Propagate refreshed cloud PASETO into soulbitscloud provider rows ──
+  // Subscribes to `auth:changed` (login + refresh) and bulk-updates the api_key
+  // of every non-deleted soulbitscloud provider config. DB is guaranteed ready:
+  // AuthProvider sits BELOW DatabaseProvider in App.tsx.
+  useEffect(() => {
+    return startSoulbitsTokenSync();
+  }, []);
+
+  // ── Marketplace library hydration (non-blocking) ─────────────────────
+  // REMOVED in Phase 2 (A2): the in-memory stub backend owns the library
+  // (MarketplaceService.getLibrary()); there is no local cache to hydrate and
+  // the doomed content_library/marketplace_ownership_cache sidecar tables are
+  // deleted in Phase 4. MyLibraryScreen loads from the service on focus.
+
   // ── Listen for auth:changed events (login/refresh) ────────────────────
   useEffect(() => {
     const onChanged = async () => {
+      // D-DEV-01 first-run registration: upsert the per-install device row
+      // (authorized=false) so the broker's connect gate can find it. Best-
+      // effort — a registration failure must not block login.
+      DeviceAuthService.registerDevice().catch(e =>
+        log.warn('Device registration failed (non-fatal):', e instanceof Error ? e.message : String(e)),
+      );
       try {
         const profile = await AuthService.getProfile();
         setUser(profile);
         setStatus('authenticated');
         if (await isCloudMode()) {
-          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e));
+          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e)));
         }
       } catch {
         // Profile fetch failed, but the token pair is valid (just stored /
@@ -157,7 +194,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // unauthenticated, never a transient profile-read failure.
         setStatus('authenticated');
         if (await isCloudMode()) {
-          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e));
+          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e)));
         }
       }
     };
@@ -174,23 +211,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // AuthService.login stores the token pair and emits `auth:changed`; the
     // listener above fetches the profile and flips status to `authenticated`.
     await AuthService.login(email, password);
-  }, []);
+    bumpSignInVersion();
+  }, [bumpSignInVersion]);
 
   const registerAction = useCallback(
     async (email: string, password: string, displayName: string) => {
       await AuthService.register(email, password, displayName);
       // Registration does NOT return a token — user must verify email.
+      //
+      // The one-time first-signup SOUL bonus flow is REMOVED (A2): the wallet
+      // stub seeds a fixed 50-soul balance on every launch, so there is no
+      // bonus to claim.
     },
     [],
   );
 
   const loginWithGoogle = useCallback(async (idToken: string) => {
     await AuthService.loginWithGoogle(idToken);
-  }, []);
+    bumpSignInVersion();
+  }, [bumpSignInVersion]);
 
   const loginWithApple = useCallback(async (identityToken: string) => {
     await AuthService.loginWithApple(identityToken);
-  }, []);
+    bumpSignInVersion();
+  }, [bumpSignInVersion]);
 
   const logout = useCallback(async () => {
     await cloudSessionService.disconnect().catch(() => {});
@@ -199,17 +243,29 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setStatus('unauthenticated');
   }, []);
 
+  // ── Re-fetch the profile (after PATCH /v1/auth/me display-name saves) ──
+  const refreshUser = useCallback(async () => {
+    try {
+      const profile = await AuthService.getProfile();
+      setUser(profile);
+    } catch (err) {
+      log.warn('Failed to refresh user profile:', err);
+    }
+  }, []);
+
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <AuthContext.Provider
       value={{
         user,
         status,
+        signInVersion,
         login,
         register: registerAction,
         loginWithGoogle,
         loginWithApple,
         logout,
+        refreshUser,
       }}>
       {children}
     </AuthContext.Provider>

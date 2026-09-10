@@ -16,8 +16,12 @@ import {
     Dimensions,
     Modal,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { ThemedView } from '../../components/themed/ThemedView';
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
+import { hexToRgba } from '../../utils/colorUtils';
 import { executeRawQuery, clearDatabaseData } from '../../database/connection';
 import { createLogger } from '../../utils/logger';
 import { createDataURL } from '../../database/base64';
@@ -36,6 +40,7 @@ interface ColumnInfo {
 
 export const DatabaseTableViewerScreen: React.FC = () => {
     const { theme } = useAppTheme();
+    const navigation = useNavigation<any>();
     const [tables, setTables] = useState<TableInfo[]>([]);
     const [selectedTable, setSelectedTable] = useState<string | null>(null);
     const [columns, setColumns] = useState<ColumnInfo[]>([]);
@@ -265,11 +270,11 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                     ]}
                     onPress={() => setDropdownVisible(true)}
                 >
-                    <Icon name="table" size={10} color={theme.colors.text.secondary} />
+                    <Icon name="table" size={20} color={theme.colors.text.secondary} />
                     <Text style={[styles.dropdownButtonText, { color: theme.colors.text.primary }]}>
                         {selectedTable || 'Select Table'}
                     </Text>
-                    <Icon name="chevron-down" size={10} color={theme.colors.text.secondary} />
+                    <Icon name="chevron-down" size={20} color={theme.colors.text.secondary} />
                 </TouchableOpacity>
 
                 <Modal
@@ -288,8 +293,8 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                                 <Text style={[styles.dropdownTitle, { color: theme.colors.text.primary }]}>
                                     Select Table
                                 </Text>
-                                <TouchableOpacity onPress={() => setDropdownVisible(false)}>
-                                    <Icon name="close" size={12} color={theme.colors.text.secondary} />
+                                <TouchableOpacity onPress={() => setDropdownVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                                    <Icon name="close" size={22} color={theme.colors.text.secondary} />
                                 </TouchableOpacity>
                             </View>
                             <ScrollView style={styles.dropdownList}>
@@ -309,13 +314,13 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                                             setDropdownVisible(false);
                                         }}
                                     >
-                                        <Icon 
-                                            name="table" 
-                                            size={10} 
-                                            color={selectedTable === table.name 
-                                                ? theme.colors.accent.primary 
+                                        <Icon
+                                            name="table"
+                                            size={20}
+                                            color={selectedTable === table.name
+                                                ? theme.colors.accent.primary
                                                 : theme.colors.text.secondary
-                                            } 
+                                            }
                                         />
                                         <View style={styles.dropdownItemText}>
                                             <Text style={[
@@ -332,7 +337,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                                             </Text>
                                         </View>
                                         {selectedTable === table.name && (
-                                            <Icon name="check" size={10} color={theme.colors.accent.primary} />
+                                            <Icon name="check" size={20} color={theme.colors.accent.primary} />
                                         )}
                                     </TouchableOpacity>
                                 ))}
@@ -530,46 +535,15 @@ export const DatabaseTableViewerScreen: React.FC = () => {
     if (!theme) return null;
 
     return (
-        <View style={[styles.container, { backgroundColor: theme.colors.background.base }]}>
+        <ThemedView style={styles.container}>
             {/* Header */}
-            <View style={[styles.header, { backgroundColor: theme.colors.background.surface }]}>
-                <View style={styles.headerContent}>
-                    <Icon name="database-eye" size={28} color={theme.colors.accent.primary} />
-                    <View style={styles.headerText}>
-                        <Text style={[styles.title, { color: theme.colors.text.primary }]}>
-                            Database Table Viewer
-                        </Text>
-                        <Text style={[styles.subtitle, { color: theme.colors.text.secondary }]}>
-                            Browse table contents
-                        </Text>
-                    </View>
-                </View>
-                
-                <View style={styles.headerButtons}>
-                    <TouchableOpacity
-                        style={[
-                            styles.wipeButton,
-                            { backgroundColor: theme.colors.status.error },
-                            isLoading && styles.buttonDisabled
-                        ]}
-                        onPress={() => setWipeConfirmVisible(true)}
-                        disabled={isLoading}
-                    >
-                        <Icon name="database-remove" size={20} color="#ffffff" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[
-                            styles.refreshButton,
-                            { backgroundColor: theme.colors.accent.primary },
-                            isLoading && styles.buttonDisabled
-                        ]}
-                        onPress={() => selectedTable ? loadTableData(selectedTable, currentPage) : loadTables()}
-                        disabled={isLoading}
-                    >
-                        <Icon name="refresh" size={20} color="#ffffff" />
-                    </TouchableOpacity>
-                </View>
-            </View>
+            <ScreenHeader
+                title="Database Table Viewer"
+                titleSize={20}
+                titleNumberOfLines={1}
+                onBack={() => navigation.goBack()}
+                style={styles.headerOverride}
+            />
 
             {/* Error Display */}
             {error && (
@@ -582,7 +556,37 @@ export const DatabaseTableViewerScreen: React.FC = () => {
             {/* Table Dropdown for Portrait Mode */}
             {!isLoading && isPortrait && (
                 <View style={styles.dropdownContainer}>
-                    {renderTableDropdown()}
+                    <View style={styles.dropdownRow}>
+                        {renderTableDropdown()}
+                        <View style={styles.headerButtons}>
+                            <TouchableOpacity
+                                style={[
+                                    styles.iconButton,
+                                    { backgroundColor: hexToRgba(theme.colors.status.error, 0.12) },
+                                    isLoading && styles.buttonDisabled
+                                ]}
+                                onPress={() => setWipeConfirmVisible(true)}
+                                disabled={isLoading}
+                                activeOpacity={0.7}
+                                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                            >
+                                <Icon name="database-remove" size={18} color={theme.colors.status.error} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[
+                                    styles.iconButton,
+                                    { backgroundColor: hexToRgba(theme.colors.accent.primary, 0.12) },
+                                    isLoading && styles.buttonDisabled
+                                ]}
+                                onPress={() => selectedTable ? loadTableData(selectedTable, currentPage) : loadTables()}
+                                disabled={isLoading}
+                                activeOpacity={0.7}
+                                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                            >
+                                <Icon name="refresh" size={18} color={theme.colors.accent.primary} />
+                            </TouchableOpacity>
+                        </View>
+                    </View>
                 </View>
             )}
 
@@ -654,7 +658,7 @@ export const DatabaseTableViewerScreen: React.FC = () => {
                     </View>
                 </View>
             </Modal>
-        </View>
+        </ThemedView>
     );
 };
 
@@ -662,43 +666,20 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: 10,
-        paddingTop: 30,
-        borderBottomWidth: 0.5,
-        borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    headerContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        flex: 1,
-    },
-    headerText: {
-        marginLeft: 6,
-        flex: 1,
-    },
-    title: {
-        fontSize: 12,
-        fontWeight: 'bold',
-    },
-    subtitle: {
-        fontSize: 7,
-        marginTop: 2,
+    headerOverride: {
+        paddingBottom: 6,
     },
     headerButtons: {
         flexDirection: 'row',
+        alignItems: 'center',
         gap: 8,
     },
-    wipeButton: {
-        padding: 5,
-        borderRadius: 4,
-    },
-    refreshButton: {
-        padding: 5,
-        borderRadius: 4,
+    iconButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     buttonDisabled: {
         opacity: 0.5,
@@ -731,21 +712,29 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     dropdownContainer: {
-        padding: 8,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
         borderBottomWidth: 0.5,
         borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     },
-    dropdownButton: {
+    dropdownRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 6,
-        borderRadius: 4,
-        borderWidth: 0.5,
-        gap: 5,
+        gap: 8,
+    },
+    dropdownButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        gap: 10,
     },
     dropdownButtonText: {
         flex: 1,
-        fontSize: 7,
+        fontSize: 14,
         fontWeight: '500',
     },
     modalOverlay: {
@@ -755,42 +744,43 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     dropdownModal: {
-        width: '80%',
+        width: '85%',
         maxHeight: '70%',
-        borderRadius: 8,
+        borderRadius: 16,
         overflow: 'hidden',
     },
     dropdownHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: 8,
+        padding: 16,
         borderBottomWidth: 0.5,
         borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     },
     dropdownTitle: {
-        fontSize: 9,
+        fontSize: 16,
         fontWeight: 'bold',
     },
     dropdownList: {
-        maxHeight: 300,
+        maxHeight: 400,
     },
     dropdownItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 6,
-        gap: 5,
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        gap: 12,
     },
     dropdownItemText: {
         flex: 1,
     },
     dropdownTableName: {
-        fontSize: 7,
+        fontSize: 15,
         fontWeight: '500',
     },
     dropdownTableRowCount: {
-        fontSize: 5.5,
-        marginTop: 1,
+        fontSize: 12,
+        marginTop: 2,
     },
     tableList: {
         width: 125,

@@ -1,9 +1,8 @@
 import EventEmitter from 'eventemitter3';
 import DeviceInfo from 'react-native-device-info';
 import { Platform, AppState } from 'react-native';
-import ConnectionManager, { ConnectionMode } from './connection/ConnectionManager';
+import ConnectionManager from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
-import { cloudSessionService } from './cloud/CloudSessionService';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
 import { messageExists, createConversationMessage, updateConversationMessage, getConversationMessage } from '../database/repositories/conversation_messages';
@@ -12,12 +11,100 @@ import {
   deriveScopeFromParticipants,
   deriveParticipantKey,
 } from '../database/repositories/interactions';
+import { getEntity } from '../database/repositories/entities';
+import { getReplyMode as getSyncedReplyMode } from '../database/repositories/chatConversationSettings';
 import { Interaction } from '../database/models';
 import { SyncService } from './SyncService';
 import AudioPlayer, { AudioPlayer as AudioPlayerClass } from './AudioPlayer';
+import { cloudSessionService } from './cloud/CloudSessionService';
 import { v7 as uuidv7 } from 'uuid';
 
 const log = createLogger('[EntitySessionService]');
+
+/**
+ * Track E — INIT_ENTITY ingestion-error recovery bounds. The engine rejects
+ * INIT_ENTITY with an "entity not defined"-class error when the chat is opened
+ * before the fire-and-forget entity sync (CreateAIScreen) has been ingested.
+ * Recovery re-syncs (SyncService.syncAndWait) and re-sends INIT_ENTITY at most
+ * MAX_INIT_ENTITY_RETRIES times before failing the session normally.
+ */
+const MAX_INIT_ENTITY_RETRIES = 2;
+
+/** Engine ingestion-rejection code for an entity the engine hasn't ingested yet. */
+const INIT_ENTITY_INGESTION_ERROR = 'entity_not_defined';
+
+/**
+ * Engine rejection code for a DISABLED AI entity (Q8). The engine refuses to
+ * INIT_ENTITY for `is_disabled && entity_type='ai'` entities (A3 — user
+ * entities are valid INIT targets). App-side this is a TERMINAL state — no
+ * recovery retries (an entity_disabled rejection will not resolve by
+ * re-syncing), so the session fails immediately and the UI shows the honest
+ * disabled-partner toast + enables navigation to the AI profile.
+ */
+const INIT_ENTITY_DISABLED_ERROR = 'entity_disabled';
+
+/**
+ * 4-3 (D35) — structured INIT_ENTITY ERROR `error_code` classification
+ * (the field itself is added engine-side in phase 1-3; until that ships, old
+ * engines send only the free-text `error` and we fall back to string equality
+ * with the constants above).
+ *
+ * Ingestion class: the engine doesn't have the entity (yet) — recoverable by
+ * re-syncing + re-sending INIT_ENTITY.
+ *
+ * Terminal class: `entity_disabled` (Q8, above) and `entity_exists_deleted` —
+ * the engine holds a tombstone for the id. Deletion is final (no restore
+ * exists), so re-syncing CANNOT resolve it; it must NOT enter the recovery
+ * loop. It is grouped with the disabled class (immediate fail, generic error
+ * surface) rather than getting the "may need to sync" hint, which would be
+ * dishonest for a deleted entity.
+ */
+const INIT_ENTITY_INGESTION_ERROR_CODES: readonly string[] = ['entity_not_defined'];
+const INIT_ENTITY_DISABLED_ERROR_CODES: readonly string[] = ['entity_disabled', 'entity_exists_deleted'];
+
+/** Classification result for an INIT_ENTITY ERROR payload (4-3 / D35). */
+export interface InitEntityErrorClassification {
+  /** Ingestion-rejection class — recoverable via re-sync + re-send. */
+  isIngestionError: boolean;
+  /** Terminal class (disabled / deleted) — no recovery retries. */
+  isDisabledError: boolean;
+}
+
+/**
+ * Classify an INIT_ENTITY ERROR. D35: the structured `error_code` field is the
+ * canonical classifier WHEN PRESENT (brittle free-text matching is the
+ * fallback for old engines). Pure + exported for unit testing.
+ */
+export function classifyInitEntityError(
+  payload: any,
+  errorMessage: string,
+): InitEntityErrorClassification {
+  const errorCode =
+    typeof payload?.error_code === 'string' && payload.error_code.length > 0
+      ? payload.error_code
+      : null;
+  if (errorCode) {
+    return {
+      isIngestionError: INIT_ENTITY_INGESTION_ERROR_CODES.includes(errorCode),
+      isDisabledError: INIT_ENTITY_DISABLED_ERROR_CODES.includes(errorCode),
+    };
+  }
+  return {
+    isIngestionError: errorMessage === INIT_ENTITY_INGESTION_ERROR,
+    isDisabledError: errorMessage === INIT_ENTITY_DISABLED_ERROR,
+  };
+}
+
+/**
+ * 4-3 (D35): true when a surfaced `session:error` string denotes the
+ * engine ingestion-rejection class ("the AI couldn't be found on Harmony
+ * Link"). Consumers (ChatDetailScreen) use this to offer the sync-now hint.
+ * The service surfaces the structured code as the error string when available
+ * (see handleInitEntityResponse), so no free-text matching happens downstream.
+ */
+export function isIngestionSessionError(error: string): boolean {
+  return error === INIT_ENTITY_INGESTION_ERROR;
+}
 
 // ============================================================================
 // InteractionSession — replaces DualEntitySession
@@ -29,7 +116,7 @@ export interface InteractionSession {
   participantIds: string[];        // ALL participants including ownEntityId
   ownEntityId: string;             // The impersonated entity — all messages stored from this perspective
   connections: Map<string, {       // entityId -> connection info
-    connectionId: string;           // 'entity-{entityId}'
+    connectionId: string;           // 'entity-{entityId}[-{participantKey}]'
     status: 'connecting' | 'active' | 'disconnected';
   }>;
   pendingTranscriptions: Map<string, {
@@ -37,6 +124,73 @@ export interface InteractionSession {
     interactionId: string;
     timeout: ReturnType<typeof setTimeout>;
   }>;
+  // Guards a single session:started emission per InteractionSession. Without it,
+  // the two participants' INIT_ENTITY SUCCESS responses race through the
+  // own-entity's `await createInteraction(...)` window and BOTH re-enter the
+  // all-active check after both connections are already 'active' — emitting
+  // session:started twice (and double-triggering the on-start sync).
+  started?: boolean;
+  /**
+   * Render-only greeting support (§1-10): true when the character's card has an
+   * authored `first_mes` (read from the INIT_ENTITY SUCCESS payload). The
+   * greeting itself is NOT fabricated here — it arrives as a normal
+   * `message_type="greeting"` ConversationMessage via the message-load/sync
+   * path. `undefined` until the first INIT_ENTITY SUCCESS has been processed;
+   * on SUCCESS the value is ALWAYS boolean — the engine serializes the field
+   * with omitempty, so a payload WITHOUT `has_first_mes` means false (no
+   * authored greeting will be delivered for this chat).
+   */
+  hasFirstMes?: boolean;
+  /**
+   * Reply pacing preference ('instant' | 'realistic') captured from
+   * ChatPreferencesService at session start (A6). Sent in every INIT_ENTITY —
+   * including partner reconnects (sendInitEntityForEntity) so a reconnect
+   * never silently flips pacing.
+   */
+  replyMode: string;
+  /**
+   * Track E — INIT_ENTITY recovery bookkeeping. Number of engine-rejection
+   * recoveries already performed for this session (each = re-sync + fresh
+   * connection + re-sent INIT_ENTITY). Bounded by MAX_INIT_ENTITY_RETRIES;
+   * once reached, the session fails with session:error like any other
+   * initialization failure.
+   */
+  initRetryCount: number;
+  /**
+   * 4-3 (D36) — terminal failure marker. A failed session is RETAINED in
+   * `sessions` (flagged, not deleted) so the context retry/timer machinery
+   * and the UI can observe the terminal state; Retry replaces the entry
+   * (startInteractionSession purges flagged entries for the same participant
+   * set). `failed` is one source of truth shared by the service map and the
+   * context's activeSessions (same object / clone with the marker set).
+   */
+  failed?: {
+    /** Surfaced error (engine error string/code, transport or timeout message). */
+    error: string;
+    /** Epoch ms when the failure was flagged (diagnostics). */
+    at: number;
+  };
+}
+
+/**
+ * Guided scenario inputs (§2-4) — maps 1:1 to the engine `guided` payload
+ * shape for GENERATE_GREETING / START_NEW_SCENARIO. Structurally identical to
+ * `ScenarioGeneratorSheet`'s `ScenarioGuidedInputs` (the screen passes it
+ * through untouched).
+ */
+export interface GuidedScenarioInput {
+  mood: string[];
+  setting: string;
+  relationship: string;
+  timeOfDay: string;
+  whoFirst: 'character' | 'user';
+  premise: string;
+}
+
+/** Success result of a scenario generation dispatch. */
+export interface ScenarioGenerationResult {
+  greeting: string;
+  interactionId: string;
 }
 
 /**
@@ -84,7 +238,21 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   private pendingSessions: Map<string, EntitySession> = new Map(); // Track individual sessions during initialization (keyed by entityId)
   private transcriptionStates: Map<string, 'pending' | 'failed'> = new Map(); // Track transcription state (keyed by messageId)
   private reconnectTimers: Map<string, { interactionId: string; entityId: string; attempts: number; timer: ReturnType<typeof setTimeout> | null }> = new Map();
+  /**
+   * Pending GENERATE_GREETING / START_NEW_SCENARIO dispatches awaiting their
+   * engine response, keyed by event_id (§2-4). The engine replies on the same
+   * WebSocket asynchronously, so each dispatch registers a waiter that the
+   * matching response handler resolves/rejects.
+   */
+  private pendingGenerations: Map<string, {
+    resolve: (result: ScenarioGenerationResult) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = new Map();
   private appStateSubscription: any;
+  // Participant keys of conversations currently open on screen — incoming
+  // messages for these do NOT bump the unread counter.
+  private openConversationKeys: Set<string> = new Set();
 
   private constructor() {
     super();
@@ -141,19 +309,78 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
 
   private setupAppStateListener() {
-    // Close sessions when app goes to background
+    // Close entity sessions when the app goes to background (battery-friendly
+    // teardown of the per-entity WebSockets). The CLOUD session is deliberately
+    // NOT disconnected here: the floating chat overlay (ChatBubbleService) is a
+    // second React root sharing this same singleton and keeps running as a
+    // foreground service while the main activity is backgrounded. Tearing down
+    // the cloud session then makes the overlay report "offline / disconnected
+    // from cloud" and forces a slow broker re-provision on resume. Leaving the
+    // cloud session ready lets the sync WS reconnect instantly on foreground.
+    //
+    // D1-5 background-WS policy (her 20c985a removed background disconnect):
+    // keep the always-connected behavior, BUT yield to an in-flight cloud data
+    // purge. SyncConnectionContext.connect() already skips auto-connect while
+    // `cloudSessionService.isPurging()` is true (and the connect catch already
+    // handles PurgeInProgressError for another device's purge). The background
+    // disconnect/reconnect dance must NOT run during that window either: the
+    // purge owns the cloud/entity WS lifecycle until it settles, and re-dialing
+    // entity sockets mid-purge would race the purge's own teardown / broker 409
+    // (PurgeInProgressError path). Entity sessions simply stay connected while
+    // the purge completes; the existing foreground re-evaluate path restores
+    // normal state afterwards.
     this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'background') {
-        log.info('App going to background, closing all entity sessions');
+        if (cloudSessionService.isPurging()) {
+          log.info('App going to background during cloud data purge — keeping entity sessions connected (purge owns the WS lifecycle)');
+          return;
+        }
+        log.info('App going to background, closing entity sessions (cloud session stays ready)');
         this.closeAllSessions();
-        cloudSessionService.disconnect().catch(() => {});
       }
     });
   }
 
+  /**
+   * Register the entity connection listeners.
+   *
+   * IMPORTANT — idempotency across Metro hot reloads: this module default-
+   * exports a singleton and is re-executed on every Fast Refresh, which would
+   * normally create a NEW EntitySessionService instance that registers ANOTHER
+   * listener set on the RETAINED ConnectionManager singleton. Old instances
+   * are orphaned but their listeners persist, so every entity event would be
+   * delivered once per instance. The ConnectionManager singleton holds the
+   * CURRENT instance in `entitySessionEventTarget` and the actual listeners
+   * are installed only once per ConnectionManager lifetime.
+   */
   private setupConnectionListeners() {
-    this.connectionManager.on('event:entity', this.handleEntityEvent.bind(this));
-    this.connectionManager.on('disconnected:entity', this.handleEntityDisconnected.bind(this));
+    const cm = this.connectionManager as typeof ConnectionManager & {
+      entitySessionEventTarget?: EntitySessionService | null;
+      entitySessionListenersInstalled?: boolean;
+    };
+
+    // Make THIS instance the current event target (survives hot reloads).
+    cm.entitySessionEventTarget = this;
+
+    // Install the listeners exactly once per ConnectionManager lifetime.
+    if (cm.entitySessionListenersInstalled) {
+      return;
+    }
+    cm.entitySessionListenersInstalled = true;
+
+    cm.on('event:entity', (entityId: string, event: any, connectionId?: string) => {
+      cm.entitySessionEventTarget?.handleEntityEvent(entityId, event, connectionId);
+    });
+    cm.on('disconnected:entity', (entityId: string) => {
+      cm.entitySessionEventTarget?.handleEntityDisconnected(entityId);
+    });
+    // Transport-error path. BaseWebSocketConnection emits BOTH 'event' and
+    // 'error' for an ERROR-status message; handleEntityConnectionError defers
+    // to the event-path recovery when the error carries an INIT_ENTITY event
+    // (genuine transport errors stay fatal).
+    cm.on('error:entity', (entityId: string, error: any) => {
+      cm.entitySessionEventTarget?.handleEntityConnectionError(entityId, error);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -255,7 +482,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         device_platform: Platform.OS,
         capabilities: ['chat'],
         tts_output_type: 'binary',
-        reply_mode: 'realistic',
+        reply_mode: session.replyMode, // A6: honor the per-conversation preference on reconnect too (was hardcoded 'realistic')
       }
     };
 
@@ -290,12 +517,15 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       connection.status = 'disconnected';
 
       if (entityId === session.ownEntityId) {
-        // OWN entity connection dropped — this is fatal for the interaction
-        log.info(`Own entity connection lost for interaction ${interactionId} — terminating session`);
+        // OWN entity connection dropped. 4-3 (D65): this used to DELETE the
+        // session with no marker and no session:error — ChatDetail does not
+        // listen to session:stopped, so the screen stuck at the amber
+        // "connecting" dot forever. Instead: flag + RETAIN the entry so the
+        // context retry/timer machinery sees it, and surface session:error
+        // (ChatDetail listens) so the error banner + retry affordance appear.
+        log.info(`Own entity connection lost for interaction ${interactionId} — flagging session as failed (retryable)`);
         this.cleanupTranscriptionsForInteraction(interactionId);
-        this.cancelReconnectsForInteraction(interactionId);
-        this.sessions.delete(interactionId);
-        this.emit('session:stopped', interactionId);
+        this.failInteractionSession(interactionId, session, 'Connection lost');
       } else {
         // PARTNER entity connection dropped — interaction continues
         log.info(`Partner ${entityId} disconnected from interaction ${interactionId} — scheduling reconnect`);
@@ -335,6 +565,53 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error('Sync connection required for entity sessions');
     }
 
+    // Session dedup (recreation/effect-reentry guard): if a live session for
+    // the SAME own entity + participant set already exists, reuse it instead
+    // of stacking a parallel one. Re-entry happens when the chat screen's
+    // init effect re-fires (route/participant/connection deps change — e.g.
+    // an entity deleted + recreated while the screen is open) while the
+    // previous session is still alive. Parallel sessions for one chat fought
+    // over the same participant-set-scoped sockets ("already exists,
+    // disconnecting first"), split INIT responses across two session
+    // objects, and starved the all-active gate → 15s timeout → retry storm.
+    // (The context retry path is unaffected: retryInitialization stops the
+    // matching session BEFORE re-calling here, so nothing is found to reuse.)
+    const requestedParticipantKey = [...participantIds].sort().join('+');
+    for (const [, existing] of this.sessions.entries()) {
+      if (
+        existing.ownEntityId === ownEntityId &&
+        [...existing.participantIds].sort().join('+') === requestedParticipantKey
+      ) {
+        // 4-3 (D36): a retained FAILED session must NOT be reused — it is
+        // terminal. Fall through to the purge below + fresh session creation.
+        if (!existing.failed) {
+          log.info(
+            `Reusing existing interaction session for [${participantIds.join(', ')}] (${existing.interactionId}) instead of starting a parallel one`,
+          );
+          return existing;
+        }
+      }
+    }
+
+    // 4-3 (D36): Retry REPLACES the entry. Purge flagged sessions for the same
+    // participant set before creating the fresh one — both entries would share
+    // participant-key-derived connection ids, and connection-exact event
+    // routing could then land INIT responses on the stale failed session.
+    // No session:stopped emission: the terminal failure was already surfaced
+    // via session:error; the context drops the matching flagged entry on the
+    // next session:started for the set (bounded retention).
+    for (const [key, existing] of this.sessions.entries()) {
+      if (
+        existing.failed &&
+        existing.ownEntityId === ownEntityId &&
+        [...existing.participantIds].sort().join('+') === requestedParticipantKey
+      ) {
+        log.info(`Purging failed interaction session ${key} for [${participantIds.join(', ')}] (retry replaces the entry)`);
+        this.cancelReconnectsForInteraction(key);
+        this.sessions.delete(key);
+      }
+    }
+
     // Generate a temp UUIDv7 for optimistic navigation
     const tempInteractionId = uuidv7();
 
@@ -367,16 +644,57 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     // Build connections map
     const connections = new Map<string, { connectionId: string; status: 'connecting' | 'active' | 'disconnected' }>();
 
+    // Participant-set discriminator for the connection IDs. The engine keys
+    // interaction sessions by participant set (one canonical interaction_id per
+    // distinct participant set), so a Marcella+user chat and a claire+user chat
+    // each need their OWN `entity-user` socket — they must NOT share the single
+    // `entity-user` slot (ConnectionManager id + native per-URL socket key).
+    // Without this, rapid chat switching raced the previous session's
+    // `entity-user` teardown against the new session's `entity-user` setup →
+    // native "Already Connected"/stale-socket failures → 15s init timeouts →
+    // the "Scheduling retry 1/3…3/3" connection delay. ('+' from
+    // deriveParticipantKey is URL-unsafe in `?connection_id=`, so sanitize it.)
+    const scope = deriveScopeFromParticipants(participantIds);
+    const participantKey = deriveParticipantKey(participantIds, ownEntityId, scope);
+    const connKeySuffix = participantKey ? `-${participantKey.replace(/\+/g, '-')}` : '';
+
+    // 4-4 (A6): read the SYNCED reply-pacing value from the settings column.
+    // This supersedes the client-side ChatPreferencesService value passed by
+    // callers — the engine sees the same mode the rest of the app does. The
+    // passed replyMode stays as a fallback when the read fails (e.g. tests
+    // without a DB, or a transient DB error). SET_REPLY_MODE broadcasts and the
+    // InteractionSession.replyMode field STAY — live partner pacing still needs
+    // the WS push (Q8).
+    let effectiveReplyMode = replyMode;
+    try {
+      effectiveReplyMode = await getSyncedReplyMode(participantKey);
+    } catch (error) {
+      log.warn(`Failed to read synced reply mode for ${participantKey}, using passed value '${replyMode}':`, error);
+    }
+
     try {
       // Create the InteractionSession with temp interactionId
       const session: InteractionSession = {
         interactionId: tempInteractionId,
         interaction: null,
         participantIds,
+        replyMode: effectiveReplyMode,
         ownEntityId,
         connections,
         pendingTranscriptions: new Map(),
+        initRetryCount: 0,
       };
+
+      // Register the session BEFORE sending INIT_ENTITY. The engine can return
+      // INIT_ENTITY SUCCESS before this Promise.all resolves (notably the partner
+      // entity's response); if the session isn't in `this.sessions` yet,
+      // handleEntityEvent → handleInitEntityResponse runs with interactionSession
+      // === null and never marks the connection 'active', so the session can
+      // never reach all-active and stalls until the 15s init retry (observed
+      // on device: a chat stuck in "connecting" for ~15s). The connections map
+      // is shared by reference, so entries added below stay visible. Removed on
+      // error in the catch below.
+      this.sessions.set(tempInteractionId, session);
 
       // Create WebSocket connections for ALL participants in PARALLEL (N+1 per D-18).
       // Previously this was a serial for-loop with await — each WS connection (TCP + TLS +
@@ -384,7 +702,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       // that meant ~2-6 s of sequential network I/O.  Running all connections concurrently
       // collapses total wall-clock time to the single slowest handshake.
       await Promise.all(participantIds.map(async (entityId) => {
-        const connectionId = `entity-${entityId}`;
+        const connectionId = `entity-${entityId}${connKeySuffix}`;
         connections.set(entityId, {
           connectionId,
           status: 'connecting',
@@ -398,7 +716,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
           deviceType: 'phone',
           deviceId,
           capabilities: ['chat'],
-          replyMode,
+          replyMode: effectiveReplyMode,
           connectedAt: Date.now(),
           lastActivity: Date.now(),
           status: 'connecting',
@@ -430,7 +748,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
             device_platform: Platform.OS,
             capabilities: ['chat'],
             tts_output_type: 'binary', // Request binary audio output for mobile app
-            reply_mode: replyMode,
+            reply_mode: effectiveReplyMode,
           }
         };
 
@@ -439,14 +757,16 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         log.info(`INIT_ENTITY sent for ${entityId}, waiting for backend response via events...`);
       }));
 
-      // Store the session (all connections in 'connecting' status)
-      this.sessions.set(tempInteractionId, session);
-
       log.info(`Interaction session created for participants [${participantIds.join(', ')}] with temp interactionId ${tempInteractionId}`);
 
       return session;
     } catch (error) {
       log.error(`Failed to start interaction session:`, error);
+
+      // The session was registered before the parallel connect/send below;
+      // remove it so a failed start doesn't leave a half-initialized entry
+      // that later INIT_ENTITY responses (or the init timer) would act on.
+      this.sessions.delete(tempInteractionId);
 
       // Clean up any connections that were created
       for (const [entityId, conn] of connections.entries()) {
@@ -515,6 +835,193 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
 
   // ---------------------------------------------------------------------------
+  // generateGreeting / startNewScenario — scenario generation events (§2-4)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Resolve the connection to send a scenario event on. The generating entity
+   * is `entityId` (the character whose greeting is being authored), so prefer
+   * its own connection; fall back to any active partner connection.
+   */
+  private getGenerationConnection(
+    session: InteractionSession,
+    entityId: string,
+  ): { connectionId: string } | null {
+    const own = session.connections.get(entityId);
+    if (own && (own.status === 'active' || own.status === 'connecting')) {
+      return { connectionId: own.connectionId };
+    }
+    const partnerIds = this.getPartnerConnectionIds(session);
+    if (partnerIds.length > 0) {
+      return { connectionId: partnerIds[0] };
+    }
+    for (const [, conn] of session.connections.entries()) {
+      if (conn.status === 'active' || conn.status === 'connecting') {
+        return { connectionId: conn.connectionId };
+      }
+    }
+    return null;
+  }
+
+  private registerGenerationWaiter(
+    eventId: string,
+    timeoutMs: number,
+  ): Promise<ScenarioGenerationResult> {
+    return new Promise<ScenarioGenerationResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingGenerations.delete(eventId);
+        reject(new Error('Scenario generation timed out'));
+      }, timeoutMs);
+      this.pendingGenerations.set(eventId, { resolve, reject, timer });
+    });
+  }
+
+  /**
+   * Dispatch GENERATE_GREETING — first custom greeting + regenerate. Valid only
+   * while the greeting is the only message (the engine enforces this and
+   * returns ERROR otherwise; the client should fall back to START_NEW_SCENARIO).
+   *
+   * Resolves with the generated greeting + interaction_id from the engine.
+   */
+  async generateGreeting(payload: {
+    entityId: string;
+    targetEntityId: string;
+    interactionId: string;
+    mode: 'random' | 'directed';
+    guided?: GuidedScenarioInput;
+  }): Promise<ScenarioGenerationResult> {
+    const session = this.sessions.get(payload.interactionId);
+    if (!session) {
+      throw new Error(`No active session for interaction ${payload.interactionId}`);
+    }
+    const connection = this.getGenerationConnection(session, payload.entityId);
+    if (!connection) {
+      throw new Error('No active connection to generate a greeting on');
+    }
+
+    const eventId = this.generateEventId();
+    const waiter = this.registerGenerationWaiter(eventId, 30_000);
+
+    const event: any = {
+      event_id: eventId,
+      event_type: 'GENERATE_GREETING',
+      status: 'NEW',
+      payload: {
+        entity_id: payload.entityId,
+        target_entity_id: payload.targetEntityId,
+        interaction_id: payload.interactionId,
+        mode: payload.mode,
+      },
+    };
+    if (payload.guided) {
+      event.payload.guided = payload.guided;
+    }
+
+    log.info(`Sending GENERATE_GREETING (${payload.mode}) for interaction ${payload.interactionId}`);
+    await this.connectionManager.sendEvent(connection.connectionId, event);
+    return waiter;
+  }
+
+  /**
+   * Dispatch START_NEW_SCENARIO — scenario restart mid-conversation. The engine
+   * creates a BRAND-NEW interaction (fresh `interaction_id` in the SUCCESS
+   * payload); the caller swaps the active interactionId + runs a blocking sync.
+   *
+   * No interactionId in the payload (per the engine contract): the session is
+   * resolved from the entity's connection.
+   */
+  async startNewScenario(payload: {
+    entityId: string;
+    targetEntityId: string;
+    mode: 'random' | 'directed';
+    guided?: GuidedScenarioInput;
+  }): Promise<ScenarioGenerationResult> {
+    // The session map is keyed by interaction id; the caller may still be on
+    // the OLD id when restarting, so find the session via the entity connection.
+    let session: InteractionSession | null = null;
+    for (const [, s] of this.sessions.entries()) {
+      if (s.connections.has(payload.entityId)) {
+        session = s;
+        break;
+      }
+    }
+    if (!session) {
+      throw new Error(`No active session for entity ${payload.entityId}`);
+    }
+    const connection = this.getGenerationConnection(session, payload.entityId);
+    if (!connection) {
+      throw new Error('No active connection to start a scenario on');
+    }
+
+    const eventId = this.generateEventId();
+    const waiter = this.registerGenerationWaiter(eventId, 30_000);
+
+    const event: any = {
+      event_id: eventId,
+      event_type: 'START_NEW_SCENARIO',
+      status: 'NEW',
+      payload: {
+        entity_id: payload.entityId,
+        target_entity_id: payload.targetEntityId,
+        mode: payload.mode,
+      },
+    };
+    if (payload.guided) {
+      event.payload.guided = payload.guided;
+    }
+
+    log.info(`Sending START_NEW_SCENARIO (${payload.mode}) on interaction ${session.interactionId}`);
+    await this.connectionManager.sendEvent(connection.connectionId, event);
+    return waiter;
+  }
+
+  private handleGenerationResponse(
+    entityId: string,
+    event: any,
+    interactionSession: InteractionSession | null,
+    interactionId: string,
+  ): void {
+    const waiter = this.pendingGenerations.get(event.event_id);
+    if (!waiter) {
+      log.warn(`Scenario generation response for unknown event_id ${event.event_id} (${event.event_type})`);
+      return;
+    }
+    clearTimeout(waiter.timer);
+    this.pendingGenerations.delete(event.event_id);
+
+    if (event.status !== 'SUCCESS') {
+      const error =
+        event.payload?.error || `${event.event_type} failed (${event.status || 'unknown'})`;
+      waiter.reject(new Error(error));
+      return;
+    }
+
+    const greeting: string = event.payload?.greeting ?? '';
+    let resultInteractionId: string =
+      event.payload?.interaction_id ?? interactionId ?? '';
+
+    // START_NEW_SCENARIO returns a brand-new interaction — re-key the session
+    // so subsequent events (message:received, sendTextMessage, ...) route to
+    // the new interaction (mirrors the INIT_ENTITY canonical-id replacement).
+    if (event.event_type === 'START_NEW_SCENARIO' && interactionSession && resultInteractionId) {
+      if (resultInteractionId !== interactionSession.interactionId) {
+        const oldId = interactionSession.interactionId;
+        log.info(`START_NEW_SCENARIO: re-keying session ${oldId} → ${resultInteractionId}`);
+        interactionSession.interactionId = resultInteractionId;
+        this.sessions.delete(oldId);
+        this.sessions.set(resultInteractionId, interactionSession);
+      }
+      // The engine owns the interaction record on this path (sync delivers it).
+    } else if (event.event_type === 'START_NEW_SCENARIO' && !resultInteractionId) {
+      // Defensive: keep the current id rather than dropping it to ''.
+      resultInteractionId = interactionSession?.interactionId ?? '';
+      log.warn(`START_NEW_SCENARIO SUCCESS without interaction_id — keeping ${resultInteractionId}`);
+    }
+
+    waiter.resolve({ greeting, interactionId: resultInteractionId });
+  }
+
+  // ---------------------------------------------------------------------------
   // stopInteractionSession — replaces stopSession
   // ---------------------------------------------------------------------------
 
@@ -528,8 +1035,17 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     log.info(`Stopping interaction session for ${interactionId}`);
 
     try {
-      // Stop any playing audio
-      await AudioPlayer.stop();
+      // Stop any playing audio. Isolated on purpose: AudioPlayer.stop() throws
+      // 'player_not_initialized' when TrackPlayer was never set up (the chat
+      // had no audio playback). Letting that bubble into the outer catch used
+      // to SKIP the connection teardown below — leaking every entity WebSocket
+      // (live heartbeat, "already exists" on the next session, orphaned
+      // engine-side sessions).
+      try {
+        await AudioPlayer.stop();
+      } catch (audioError) {
+        log.warn('AudioPlayer.stop() failed during session stop (ignored):', audioError);
+      }
 
       // Clean up all pending transcriptions for this interaction
       this.cleanupTranscriptionsForInteraction(interactionId);
@@ -537,23 +1053,22 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       // Cancel any pending reconnect timers
       this.cancelReconnectsForInteraction(interactionId);
 
-      // Disconnect ALL connections
+      // Disconnect ALL connections — fault-isolated per connection so one
+      // failing disconnect can't strand the remaining connections (same leak
+      // class as the audio error above). Intentional: no end-of-session event
+      // is sent — the engine has no receiver for it; the socket close itself
+      // triggers the engine suspend path.
       for (const [entityId, conn] of session.connections.entries()) {
-        if (this.connectionManager.isConnected(conn.connectionId)) {
-          await this.connectionManager.sendEvent(
-            conn.connectionId,
-            {
-              event_id: this.generateEventId(),
-              event_type: 'ENTITY_SESSION_END',
-              status: 'NEW',
-              payload: { session_id: interactionId }
-            }
-          );
-          this.connectionManager.disconnectConnection(conn.connectionId);
-        }
+        try {
+          if (this.connectionManager.isConnected(conn.connectionId)) {
+            this.connectionManager.disconnectConnection(conn.connectionId);
+          }
 
-        // Clean up pending sessions
-        this.pendingSessions.delete(entityId);
+          // Clean up pending sessions
+          this.pendingSessions.delete(entityId);
+        } catch (connError) {
+          log.warn(`Error tearing down connection ${conn.connectionId} during session stop:`, connError);
+        }
       }
     } catch (error) {
       log.error('Error stopping session:', error);
@@ -563,6 +1078,17 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
   }
 
+  /**
+   * Deliberate FULL teardown of every session (app background, sync loss).
+   *
+   * 4-3 (D36) evaluation — flagged (failed) sessions are NOT retained here,
+   * on purpose: these triggers are deliberate battery/consistency teardowns,
+   * not failures; on foreground/reconnect the screen re-inits (the init
+   * effect re-runs on the sync connection), and full teardown is the
+   * garbage-collection point for flagged entries of chats that are NOT on
+   * screen (the bounded-retention cleaners — navigation-back and the next
+   * session:started for the set — only run for open chats).
+   */
   async closeAllSessions(): Promise<void> {
     const interactionIds = Array.from(this.sessions.keys());
     await Promise.all(interactionIds.map(id => this.stopInteractionSession(id)));
@@ -575,12 +1101,16 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   async sendTextMessage(
     interactionId: string,
     text: string,
-    additionalEffects?: any | null
+    additionalEffects?: any | null,
+    replyToMessageId?: string | null
   ): Promise<void> {
     const session = this.sessions.get(interactionId);
     if (!session) {
       throw new Error(`No active session for interaction ${interactionId}`);
     }
+
+    // Disabled conversations cannot send messages.
+    await this.assertNotDisabled(session);
 
     const partnerConnectionIds = this.getPartnerConnectionIds(session);
     if (partnerConnectionIds.length === 0) {
@@ -609,18 +1139,23 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       is_recon_followup: false,
       is_edited: false,
       edit_of_message_id: null,
+      reply_to_message_id: replyToMessageId ?? null,
     };
 
     await createConversationMessage(message);
     log.info(`Stored text message ${messageId} locally for interaction ${interactionId}`);
 
     // Send to ALL partner connections (participant-agnostic broadcast)
-    const utterance = {
+    const utterance: any = {
       message_id: messageId,
       entity_id: session.ownEntityId,
       content: text,
       type: 'UTTERANCE_COMBINED'
     };
+
+    if (replyToMessageId) {
+      utterance.reply_to_message_id = replyToMessageId;
+    }
 
     // Attach additional effects if present
     if (additionalEffects && additionalEffects.emotionEffects && additionalEffects.emotionEffects.length > 0) {
@@ -633,6 +1168,79 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
 
     log.info(`Sent message ${messageId} to ${partnerConnectionIds.length} partner(s) for interaction ${interactionId}`);
+  }
+
+  /**
+   * Forward a text message to a DIFFERENT interaction (participant set)
+   * without navigating the UI to that chat.
+   *
+   * The engine keys sessions by participant set, so multiple sessions can
+   * coexist. This method either reuses an already-active session for the
+   * target participant set, or starts one in the background and waits for
+   * it to become active before sending the message.
+   *
+   * @param ownEntityId    - The impersonated entity
+   * @param participantIds - ALL participants of the target chat (incl. ownEntityId)
+   * @param text           - The message content to forward
+   */
+  async forwardTextMessage(
+    ownEntityId: string,
+    participantIds: string[],
+    text: string
+  ): Promise<void> {
+    const scope = deriveScopeFromParticipants(participantIds);
+    const targetKey = deriveParticipantKey(participantIds, ownEntityId, scope);
+
+    // 1) Reuse an existing ACTIVE session for this participant set.
+    for (const [id, session] of this.sessions.entries()) {
+      if (session.ownEntityId !== ownEntityId) continue;
+      const sessionScope = deriveScopeFromParticipants(session.participantIds);
+      const sessionKey = deriveParticipantKey(
+        session.participantIds,
+        ownEntityId,
+        sessionScope,
+      );
+      if (sessionKey !== targetKey) continue;
+
+      const allActive = Array.from(session.connections.values()).every(
+        c => c.status === 'active',
+      );
+      if (allActive) {
+        log.info(`Reusing active session ${id} to forward message`);
+        return this.sendTextMessage(id, text);
+      }
+    }
+
+    // 2) No active session — start one in the background and wait for
+    //    session:started (fires when all INIT_ENTITY round-trips complete).
+    log.info(`Starting background session to forward message to ${targetKey}`);
+    await this.startInteractionSession(ownEntityId, participantIds, 'realistic');
+
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.off('session:started', onStarted);
+        reject(new Error('Forward session initialization timed out'));
+      }, 25000);
+
+      const onStarted = (interactionId: string, session: InteractionSession) => {
+        if (session.ownEntityId !== ownEntityId) return;
+        const sessionScope = deriveScopeFromParticipants(session.participantIds);
+        const sessionKey = deriveParticipantKey(
+          session.participantIds,
+          ownEntityId,
+          sessionScope,
+        );
+        if (sessionKey !== targetKey) return;
+
+        clearTimeout(timeout);
+        this.off('session:started', onStarted);
+        this.sendTextMessage(interactionId, text)
+          .then(resolve)
+          .catch(reject);
+      };
+
+      this.on('session:started', onStarted);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -649,6 +1257,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     if (!session) {
       throw new Error(`No active session for interaction ${interactionId}`);
     }
+
+    // Disabled conversations cannot send messages.
+    await this.assertNotDisabled(session);
 
     log.info(`Starting audio message flow for interaction ${interactionId}`);
 
@@ -761,6 +1372,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active session for interaction ${interactionId}`);
     }
 
+    // Disabled conversations cannot send messages.
+    await this.assertNotDisabled(session);
+
     const partnerConnectionIds = this.getPartnerConnectionIds(session);
     if (partnerConnectionIds.length === 0) {
       throw new Error(`No active partner connections for interaction ${interactionId}`);
@@ -854,11 +1468,57 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     return this.sessions.get(interactionId) || null;
   }
 
+  /**
+   * Register a conversation as currently open on screen so incoming messages
+   * do NOT bump the unread counter (ChatDetailScreen calls this on mount and
+   * unregisters on unmount). Uses the participant key (stable identifier).
+   */
+  registerOpenConversation(participantKey: string): void {
+    if (participantKey) this.openConversationKeys.add(participantKey);
+  }
+
+  unregisterOpenConversation(participantKey: string): void {
+    if (participantKey) this.openConversationKeys.delete(participantKey);
+  }
+
+  isConversationOpen(participantKey: string): boolean {
+    return this.openConversationKeys.has(participantKey);
+  }
+
+  /**
+   * The partner entity ids in a session (everything that is NOT the POV /
+   * own entity). For a 2-way phone chat this is exactly the one AI partner;
+   * for groups it is every other participant. Used by the entity-flag guards
+   * (Q8 — mute/disable live on the entity, not conversation settings).
+   */
+  private partnerEntityIds(session: InteractionSession): string[] {
+    return session.participantIds.filter(id => id !== session.ownEntityId);
+  }
+
+  /**
+   * Disable guard for the outbound send paths. Throws a friendly error when
+   * the partner entity is disabled (entities.is_disabled, Q8) so the UI can
+   * surface it without sending. User entities can never be disable targets
+   * (A3) — they are excluded by Nature since the partner is always the AI.
+   */
+  private async assertNotDisabled(session: InteractionSession): Promise<void> {
+    for (const partnerId of this.partnerEntityIds(session)) {
+      const partner = await getEntity(partnerId);
+      if (partner?.is_disabled) {
+        throw new Error('This AI is disabled. Enable it to chat again.');
+      }
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // handleEntityEvent — process incoming WebSocket events
   // ---------------------------------------------------------------------------
 
-  private async handleEntityEvent(entityId: string, event: any): Promise<void> {
+  private async handleEntityEvent(
+    entityId: string,
+    event: any,
+    connectionId?: string
+  ): Promise<void> {
     log.debug(`handleEntityEvent called for entity ${entityId}, event type: ${event.event_type}, status: ${event.status}`);
 
     // First, try to find in pending sessions (for sessions still initializing)
@@ -866,17 +1526,50 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     let interactionSession: InteractionSession | null = null;
     let interactionId: string | null = null;
 
-    // Find the InteractionSession that contains this entity
-    if (!targetSession) {
+    // Connection-exact routing (recreation-hijack fix): when the transport
+    // tells us WHICH socket delivered the event, resolve the
+    // InteractionSession by that exact connection id. Connection ids embed
+    // the participant-set key (`entity-<id>-<participantKey>`), so this
+    // disambiguates concurrent sessions sharing an entity (every chat
+    // contains the own entity, e.g. 'user'). The legacy first-match scan
+    // let a STALE session for a deleted partner hijack the new chat's
+    // INIT_ENTITY response — the canonical-id swap landed on the wrong
+    // session while the live greeting was persisted under the new
+    // session's abandoned temp id (observed on device: entity recreated
+    // from the chat screen → chat stuck on the preparing bubble with the
+    // greeting invisible and connectivity never turning active).
+    if (connectionId) {
       for (const [iid, session] of this.sessions.entries()) {
-        if (session.connections.has(entityId)) {
+        const conn = session.connections.get(entityId);
+        if (conn && conn.connectionId === connectionId) {
           interactionSession = session;
           interactionId = iid;
           break;
         }
       }
+      // pendingSessions is keyed by bare entityId — with concurrent
+      // sessions the entry may belong to a DIFFERENT chat; only trust it
+      // when its connection id matches the delivering socket.
+      if (targetSession && targetSession.connectionId !== connectionId) {
+        let pendingMatch: EntitySession | undefined;
+        for (const ps of this.pendingSessions.values()) {
+          if (ps.connectionId === connectionId) {
+            pendingMatch = ps;
+            break;
+          }
+        }
+        targetSession = pendingMatch;
+      }
+      if (!interactionSession) {
+        // The exact session is gone (torn down between emit and delivery) —
+        // the event is stale. Routing it to an unrelated session that
+        // happens to contain this entity would reintroduce the hijack.
+        log.debug(`Event ${event.event_type} for ${entityId} arrived on unknown connection ${connectionId}, dropping`);
+        return;
+      }
     } else {
-      // Also find if this entity belongs to an InteractionSession
+      // Legacy fallback (no connection id from the transport): first
+      // session whose connections contain the entity.
       for (const [iid, session] of this.sessions.entries()) {
         if (session.connections.has(entityId)) {
           interactionSession = session;
@@ -894,6 +1587,13 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     // Handle INIT_ENTITY responses (SUCCESS or ERROR)
     if (event.event_type === 'INIT_ENTITY') {
       await this.handleInitEntityResponse(entityId, event, targetSession ?? null, interactionSession, interactionId ?? '');
+      return;
+    }
+
+    // Handle scenario generation responses (§2-4) — GENERATE_GREETING and
+    // START_NEW_SCENARIO resolve their waiter (the screen awaits the dispatch).
+    if (event.event_type === 'GENERATE_GREETING' || event.event_type === 'START_NEW_SCENARIO') {
+      this.handleGenerationResponse(entityId, event, interactionSession, interactionId ?? '');
       return;
     }
 
@@ -1012,6 +1712,33 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
       // Update the connection status in the InteractionSession
       if (interactionSession) {
+        // 4-3 (D36): a late SUCCESS after a transient flag (e.g. a recovery
+        // re-send racing the fail path) means the engine accepted the session
+        // — the terminal marker must not outlive it.
+        if (interactionSession.failed) {
+          log.info(`INIT_ENTITY SUCCESS for previously flagged session (interaction ${interactionId}) — clearing failed marker`);
+          interactionSession.failed = undefined;
+        }
+
+        // Render-only greeting support (§1-10): surface `has_first_mes` from
+        // the INIT_ENTITY SUCCESS payload so ChatDetailScreen can branch
+        // synchronously (GreetingBubble vs EmptyChatCTA). The greeting itself
+        // is NOT fabricated here — the engine delivers it as a normal
+        // message_type="greeting" message via the message-load/sync path.
+        // Read BEFORE the all-active check so the value is on the session by
+        // the time session:started emits (which carries the session object).
+        //
+        // The engine serializes the field with omitempty (pinned by its
+        // TestInitEntityResponse_HasFirstMesJSONShape): a SUCCESS payload
+        // WITHOUT `has_first_mes` means FALSE. Mapping absence to false is
+        // what lets the empty-chat UI reveal for cards with no authored
+        // first_mes — treating absence as "unknown" left those chats on the
+        // splash forever (no message can ever arrive for them).
+        interactionSession.hasFirstMes = event.payload?.has_first_mes === true;
+        log.info(
+          `Entity ${entityId} reports has_first_mes=${interactionSession.hasFirstMes} (interaction ${interactionId})`,
+        );
+
         const connection = interactionSession.connections.get(entityId);
         if (connection) {
           connection.status = 'active';
@@ -1124,7 +1851,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
           }
         }
 
-        if (allActive) {
+        if (allActive && !interactionSession.started) {
+          interactionSession.started = true;
           log.info(`All connections active for interaction ${interactionSession.interactionId} — emitting session:started`);
 
           // Remove from pending sessions now that all are fully active
@@ -1158,25 +1886,192 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
       // If we have an interaction session, handle error
       if (interactionSession && interactionId) {
-        this.emit('session:error', interactionId,
-          event.payload?.error || 'Session initialization failed');
+        const rawMessage = event.payload?.error || 'Session initialization failed';
+        // 4-3 (D35): the structured `error_code` (engine phase 1-3) is the
+        // canonical classifier — free-text `error` is brittle against engine
+        // copy changes. When the code is present it ALSO becomes the surfaced
+        // error string, so downstream consumers (ChatDetail banner hint)
+        // classify without free-text matching. Old engines (no field) fall
+        // back to string equality with today's constants.
+        const errorCode =
+          typeof event.payload?.error_code === 'string' && event.payload.error_code.length > 0
+            ? event.payload.error_code
+            : null;
+        const errorMessage = errorCode ?? rawMessage;
 
-        // Clean up the interaction session
-        this.cancelReconnectsForInteraction(interactionId);
-        this.sessions.delete(interactionId);
+        // Track E — INIT_ENTITY ingestion-error recovery. CreateAIScreen syncs
+        // new entities fire-and-forget; when the chat is opened before the
+        // engine ingested the entity, the engine rejects INIT_ENTITY with an
+        // "entity not defined"-class error. Instead of tearing the session down
+        // instantly (and letting context-level retries re-send INIT_ENTITY
+        // WITHOUT syncing, failing identically every time), re-sync + re-send
+        // INIT_ENTITY, bounded by MAX_INIT_ENTITY_RETRIES. Only after exhausting
+        // the retries (or for non-ingestion errors) does the session fail.
+        // D35: classification prefers the structured `error_code` (when
+        // present) over string equality — see classifyInitEntityError.
+        const { isIngestionError, isDisabledError } = classifyInitEntityError(event.payload, rawMessage);
+        const retryCount = interactionSession.initRetryCount ?? 0;
+        if (isDisabledError) {
+          // Terminal (A3/Q8): a disabled AI entity is off — re-syncing will NOT
+          // clear `is_disabled`, so NO recovery retries. Fail immediately with
+          // the honest error; the UI (ChatDetailScreen) keys off the
+          // 'entity_disabled' session:error to show the disabled-partner toast
+          // + navigate to the AI profile (which offers the enable action).
+          log.info(`INIT_ENTITY rejected for ${entityId}: entity disabled (${errorMessage}) — no recovery attempted (interaction ${interactionId})`);
+          this.failInteractionSession(interactionId, interactionSession, errorMessage);
+          return;
+        }
+        if (isIngestionError && retryCount < MAX_INIT_ENTITY_RETRIES) {
+          interactionSession.initRetryCount = retryCount + 1;
+          log.info(`INIT_ENTITY rejected by engine for ${entityId} (${errorMessage}) — recovery attempt ${interactionSession.initRetryCount}/${MAX_INIT_ENTITY_RETRIES} (interaction ${interactionId})`);
 
-        // Disconnect all connections for this interaction
-        for (const [, conn] of interactionSession.connections) {
-          if (this.connectionManager.isConnected(conn.connectionId)) {
-            this.connectionManager.disconnectConnection(conn.connectionId);
-          }
+          // Fire-and-forget recovery (non-blocking): any throw inside recovery
+          // is logged and falls through to the normal teardown path.
+          this.recoverInitEntity(entityId, interactionSession, interactionId).catch((err) => {
+            log.error(`INIT_ENTITY recovery failed for ${entityId} (interaction ${interactionId}):`, err);
+            this.failInteractionSession(interactionId, interactionSession, errorMessage);
+          });
+          return;
         }
 
-        // Clean up pending sessions
-        for (const pid of interactionSession.participantIds) {
-          this.pendingSessions.delete(pid);
-        }
+        // Normal failure path: retry cap reached, non-ingestion error, or the
+        // recovery above threw — emit session:error + tear down.
+        this.failInteractionSession(interactionId, interactionSession, errorMessage);
       }
+    }
+  }
+
+  /**
+   * Emit session:error and FLAG a terminal failure on the interaction session.
+   * Shared by the INIT_ENTITY ERROR branch, the recovery-failure path, the
+   * transport error path and the own-entity disconnect path.
+   *
+   * 4-3 (D36): this used to DELETE the session — the deletion site that left
+   * ChatDetail stuck on the amber "Connecting…" dot forever (the context init
+   * timer found no session and silently stopped retrying). Instead the session
+   * is now flagged (`failed` marker) and RETAINED so the context retry/timer
+   * machinery and the UI observe the terminal state; `isSessionActive` stays
+   * false for a flagged session and Retry replaces the entry
+   * (startInteractionSession purges flagged same-participant-set entries).
+   * Sockets are still torn down — retention is a marker, not a live session.
+   */
+  private failInteractionSession(
+    interactionId: string,
+    interactionSession: InteractionSession,
+    errorMessage: string
+  ): void {
+    // Flag BEFORE the emission so listeners observe a consistent object.
+    interactionSession.failed = { error: errorMessage, at: Date.now() };
+    this.emit('session:error', interactionId, errorMessage);
+    this.cancelReconnectsForInteraction(interactionId);
+
+    // Disconnect all connections for this interaction. The statuses are also
+    // reset so a retained flagged session can never pass an all-active check
+    // (belt-and-braces: the context's isSessionActive already gates on the
+    // failed marker, and stale 'active' statuses would otherwise let
+    // forwardTextMessage reuse a dead session).
+    for (const [, conn] of interactionSession.connections) {
+      conn.status = 'disconnected';
+      if (this.connectionManager.isConnected(conn.connectionId)) {
+        this.connectionManager.disconnectConnection(conn.connectionId);
+      }
+    }
+
+    // Clean up pending sessions
+    for (const pid of interactionSession.participantIds) {
+      this.pendingSessions.delete(pid);
+    }
+  }
+
+  /**
+   * Track E — INIT_ENTITY engine-rejection recovery. Best-effort BLOCKING
+   * re-sync (SyncService.syncAndWait) so the engine ingests the freshly-created
+   * entity → create a fresh entity connection for that entity → re-send
+   * INIT_ENTITY. Fire-and-forget from the ERROR branch; any throw here is
+   * caught there and falls through to the normal teardown.
+   */
+  private async recoverInitEntity(
+    entityId: string,
+    session: InteractionSession,
+    interactionId: string
+  ): Promise<void> {
+    // Purge interplay: the cloud data purge owns the WS lifecycle — never
+    // re-sync / re-dial entity sockets mid-purge (fail fast → teardown path).
+    if (cloudSessionService.isPurging?.()) {
+      throw new Error('Cloud data purge in progress — skipping INIT_ENTITY recovery');
+    }
+
+    log.info(`INIT_ENTITY recovery for ${entityId} (interaction ${interactionId}): re-syncing entity state (attempt ${session.initRetryCount}/${MAX_INIT_ENTITY_RETRIES})`);
+
+    // 1) Blocking re-sync (best-effort): ensure the engine has ingested the entity.
+    await SyncService.getInstance().syncAndWait();
+
+    // 2) Create a fresh entity connection for this entity.
+    const connection = session.connections.get(entityId);
+    if (!connection) {
+      throw new Error(`No connection found for ${entityId} during INIT_ENTITY recovery`);
+    }
+
+    const source = await ConnectionStateManager.getCurrentSource();
+    let wsUrl: string;
+    let mode: string;
+    if (source === 'cloud') {
+      wsUrl = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`;
+      mode = 'cloud';
+    } else {
+      mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
+      wsUrl = mode === 'unencrypted'
+        ? (await ConnectionStateManager.getWSUrl()) ?? ''
+        : (await ConnectionStateManager.getWSSUrl()) ?? '';
+    }
+    if (!wsUrl) {
+      throw new Error('No connection URL available for INIT_ENTITY recovery');
+    }
+
+    await this.connectionManager.createConnection(
+      connection.connectionId,
+      'entity',
+      wsUrl,
+      mode as any,
+      entityId,
+    );
+
+    // 3) Re-send INIT_ENTITY (honors session.replyMode + participant list).
+    await this.sendInitEntityForEntity(entityId, session);
+
+    log.info(`INIT_ENTITY re-sent for ${entityId} after recovery sync (attempt ${session.initRetryCount}/${MAX_INIT_ENTITY_RETRIES})`);
+  }
+
+  /**
+   * Transport-error path (ConnectionManager 'error:entity'). Guard: when the
+   * incoming error carries an app-level harmony event (BaseWebSocketConnection
+   * emits BOTH 'event' and 'error' for an ERROR-status message), defer to the
+   * event-path recovery (handleEntityEvent → handleInitEntityResponse) instead
+   * of tearing the session down — the bug that defeated recovery. Genuine
+   * transport errors (no attached event) stay fatal.
+   */
+  private async handleEntityConnectionError(entityId: string, error: any): Promise<void> {
+    if (error?.event?.event_type === 'INIT_ENTITY') {
+      log.info(`Transport error for ${entityId} carries an INIT_ENTITY app event — deferring to event-path recovery`);
+      return;
+    }
+
+    log.error(`Entity connection error for ${entityId}:`, error);
+
+    // Find the InteractionSession that contains this entity's connection.
+    for (const [interactionId, session] of this.sessions.entries()) {
+      const connection = session.connections.get(entityId);
+      if (!connection) continue;
+
+      this.failInteractionSession(interactionId, session, error?.message || 'Entity connection error');
+      return;
+    }
+
+    // No matching interaction session — drop any pending session for this entity.
+    if (this.pendingSessions.has(entityId)) {
+      const pending = this.pendingSessions.get(entityId)!;
+      pending.status = 'disconnected';
+      this.pendingSessions.delete(entityId);
     }
   }
 
@@ -1191,6 +2086,22 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   ): Promise<void> {
     try {
       log.info(`Incoming message from ${event.entity_id} in interaction ${interactionId}`);
+
+      // Disabled entities cannot RECEIVE messages either — drop before they
+      // reach the database (defense-in-depth; primary enforcement is the
+      // engine-side INIT_ENTITY rejection, 4-3). Q8: the disabled flag lives
+      // on the partner entity.
+      const partnerEntity = await getEntity(event.entity_id);
+      if (partnerEntity?.is_disabled) {
+        log.info(`Dropping incoming message from ${event.entity_id}: entity is disabled`);
+        return;
+      }
+
+      // Unread is DERIVED from conversation_messages.is_read (A5/A2) — there is
+      // no counter to increment here anymore. The ChatList badge recomputes from
+      // the message rows, so a live increment is unnecessary AND would race the
+      // derived count. The open-conversation guard lives at the badge seam in
+      // ChatListScreen, not here.
 
       // Save to database
       await this.handleIncomingUtterance(interactionSession, interactionId, event.payload, event.event_id);
@@ -1266,9 +2177,16 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       return;
     }
 
-    // Determine message type
-    let messageType: 'text' | 'audio' | 'combined' | 'image' = 'text';
-    if (utterance.image_data) {
+    // Determine message type. The engine flags the authored first_mes
+    // (DeliverGreeting) with `message_type: "greeting"` on the wire — persist
+    // it verbatim so the chat renders the greeting through the
+    // AlternateGreetingSwiper (alternate-greeting cycling + regenerate slot)
+    // instead of a plain bubble. Media fields decide the remaining types.
+    let messageType: 'text' | 'audio' | 'combined' | 'image' | 'greeting' =
+      'text';
+    if (utterance.message_type === 'greeting') {
+      messageType = 'greeting';
+    } else if (utterance.image_data) {
       messageType = 'image';
     } else if (utterance.audio && utterance.content) {
       messageType = 'combined';

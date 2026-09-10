@@ -1,7 +1,25 @@
 /**
  * EmojiContext - Manages emoji style preferences and recent emojis
+ *
+ * The provider is split into TWO narrow contexts so that a change to recent
+ * emojis (which happens on every emoji tap in the picker) does NOT re-render
+ * the entire emoji grid. Every cell in the grid (EmojiItem/EmojiText) only
+ * depends on the *preferences* (emojiSet, skinTone), which rarely change.
+ *
+ *   - EmojiPreferencesContext: emojiSet, skinTone + setters (rarely change)
+ *   - EmojiRecentsContext:      recentEmojis, addRecentEmoji, clearRecentEmojis
+ *
+ * This keeps the picker responsive: tapping an emoji commits to the input bar
+ * immediately instead of being delayed while hundreds of grid cells re-render.
  */
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { EmojiSet } from '../types/emoji';
 import { createLogger } from '../utils/logger';
@@ -24,21 +42,25 @@ export interface RecentEmoji {
   timestamp: number;
 }
 
-// Context type
-interface EmojiContextType {
+// ── Preferences context (emojiSet + skinTone) ───────────────────────────────
+interface EmojiPreferencesContextType {
   emojiSet: EmojiSet;
   skinTone: number;
-  recentEmojis: RecentEmoji[];
   loading: boolean;
   setEmojiSet: (set: EmojiSet) => Promise<void>;
   setSkinTone: (tone: number) => Promise<void>;
-  addRecentEmoji: (id: string, native: string) => Promise<void>;
-  clearRecentEmojis: () => Promise<void>;
-  emojiService: typeof EmojiService;
 }
 
-// Create context
-const EmojiContext = createContext<EmojiContextType | undefined>(undefined);
+const EmojiPreferencesContext = createContext<EmojiPreferencesContextType | undefined>(undefined);
+
+// ── Recents context ──────────────────────────────────────────────────────────
+interface EmojiRecentsContextType {
+  recentEmojis: RecentEmoji[];
+  addRecentEmoji: (id: string, native: string) => Promise<void>;
+  clearRecentEmojis: () => Promise<void>;
+}
+
+const EmojiRecentsContext = createContext<EmojiRecentsContextType | undefined>(undefined);
 
 /**
  * Emoji Provider Component
@@ -175,35 +197,65 @@ export const EmojiProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadPreferences();
   }, [loadPreferences]);
 
-  // Context value
-  const value: EmojiContextType = {
-    emojiSet,
-    skinTone,
-    recentEmojis,
-    loading,
-    setEmojiSet,
-    setSkinTone,
-    addRecentEmoji,
-    clearRecentEmojis,
-    emojiService: EmojiService,
-  };
+  // Preferences value — memoized so identity only changes when prefs change.
+  const preferencesValue = useMemo<EmojiPreferencesContextType>(
+    () => ({ emojiSet, skinTone, loading, setEmojiSet, setSkinTone }),
+    [emojiSet, skinTone, loading, setEmojiSet, setSkinTone],
+  );
+
+  // Recents value — memoized so identity only changes when recents change.
+  const recentsValue = useMemo<EmojiRecentsContextType>(
+    () => ({ recentEmojis, addRecentEmoji, clearRecentEmojis }),
+    [recentEmojis, addRecentEmoji, clearRecentEmojis],
+  );
 
   return (
-    <EmojiContext.Provider value={value}>
-      {children}
-    </EmojiContext.Provider>
+    <EmojiPreferencesContext.Provider value={preferencesValue}>
+      <EmojiRecentsContext.Provider value={recentsValue}>
+        {children}
+      </EmojiRecentsContext.Provider>
+    </EmojiPreferencesContext.Provider>
   );
 };
 
 /**
- * Hook to use emoji context
+ * Hook to use emoji preferences (emojiSet, skinTone).
+ * Components that render individual emoji glyphs (EmojiItem, EmojiText,
+ * EmojiAwareText) should use this hook — it is immune to recent-emoji churn.
  */
-export const useEmoji = (): EmojiContextType => {
-  const context = useContext(EmojiContext);
+export const useEmojiPreferences = (): EmojiPreferencesContextType => {
+  const context = useContext(EmojiPreferencesContext);
   if (!context) {
-    throw new Error('useEmoji must be used within EmojiProvider');
+    throw new Error('useEmojiPreferences must be used within EmojiProvider');
   }
   return context;
 };
 
-export default EmojiContext;
+/**
+ * Hook to use emoji recents (recentEmojis, addRecentEmoji, clearRecentEmojis).
+ */
+export const useEmojiRecents = (): EmojiRecentsContextType => {
+  const context = useContext(EmojiRecentsContext);
+  if (!context) {
+    throw new Error('useEmojiRecents must be used within EmojiProvider');
+  }
+  return context;
+};
+
+/**
+ * Backwards-compatible aggregate hook.
+ * Prefer the narrow hooks (useEmojiPreferences / useEmojiRecents) in new code
+ * to avoid re-rendering emoji grid cells on recent-emoji changes.
+ */
+export const useEmoji = (): EmojiPreferencesContextType &
+  EmojiRecentsContextType & { emojiService: typeof EmojiService } => {
+  const preferences = useEmojiPreferences();
+  const recents = useEmojiRecents();
+  // emojiService is a singleton module — stable identity, safe to expose here.
+  return {
+    ...preferences,
+    ...recents,
+    emojiService: EmojiService,
+  };
+};
+

@@ -1,11 +1,16 @@
 # Harmony AI App Tech Context
-@Core: React Native 0.83.1, TypeScript, React Navigation (Native Stack), React Native Paper (MD3).
+@Core: React Native 0.86.0, TypeScript, React Navigation (Native Stack), React Native Paper (MD3).
 @State: React Hooks (current), Context API (theme/auth/emoji), Redux/Zustand (future complex state).
-@Data: SQLite (messages/characters/interactions/emoji_actions, future), AsyncStorage (settings/preferences/reply mode), SQLCipher encryption, React Native Keychain (secure storage).
+@Data: SQLite (messages/characters/interactions/emoji_actions, future), AsyncStorage (settings/preferences/reply mode, per-source sync watermark `last_sync_timestamp:<selfhosted|cloud>` — NO legacy global key since 2026-08-02), SQLCipher encryption, React Native Keychain (secure storage).
+@Sync:
+- SyncService watermarks: `ConnectionStateManager.getLastSync(source)`/`setLastSync(source, ts)` read/write `last_sync_timestamp:<source>` per `SyncSource` (`selfhosted`/`cloud`, keyed by `connection_mode`). `clearAllLastSyncTimestamps()` removes both per-source keys; called by `wipeDatabaseCompletely` + `clearDatabaseData` (full-DB-wipe flows) so a wiped app re-pulls everything. `getLastSync()===0` ⇒ no watermark ⇒ `initiateSync` escalates to `force_full_sync` (used by `isInitialSync` detection for the estimate prompt — watermark only written at SYNC_FINALIZE).
+- Sync transport settlement: `isSyncTransportSettled(connMode, persistedMode)` in `src/contexts/syncSettlementHelper.ts` gates auto-sync in `SyncConnectionContext.handleSyncConnected` (provisional ws:// → defer; TLS/cloud → sync). Abort safety net: `SyncService.abortSync()` on `disconnected:sync`/`error:sync`/`sync:connection_replaced` (new ConnectionManager event emitted before sync-connection teardown). Toast gate `shouldShowConnectionErrorToast(...)` (same file) suppresses connection-error toasts during the expected handshake/cert flow and the reconnect backoff loop.
+- Size-estimate confirmation: engine sends `SYNC_DATA_SIZE_ESTIMATE` (snake_case payload: `sync_session_id`, `event_id`, `estimated_download_mb`, `total_records`, `includes_images`, `image_count`, `image_size_mb`) and BLOCKS until the app sends `SYNC_DATA_SIZE_ESTIMATE_CONFIRM` (60s timeout → SYNC_REJECT + abort). App: `SyncService.handleSizeEstimate`/`confirmSizeEstimate(accepted)`/`pendingSizeEstimate`, events `sync:estimate`/`sync:estimate:confirm`. Prompt decision: `shouldPromptForSyncEstimate` (`src/contexts/syncEstimateHelper.ts`) with limit from `ConnectionStateManager.getSyncEstimateLimitMB()` (AsyncStorage key `sync_estimate_limit_mb`, default 5, `'unlimited'` sentinel → null). Dialog is themed `useAppAlert()` (AppAlertProvider now wraps SyncConnectionProvider in App.tsx).
+- Sync name-clash resolution: `src/services/syncNameClash.ts` (pure) + `SyncService.ts` — clash plan over the 8 `NAME_UNIQUE_TABLES` + `CONFIG_ID_REFERENCES` before applying buffered server data; resolution modes overwrite/keep/rename (UI dialog via `sync:name_clash`); migration 000034 adds UNIQUE name to vision/imagination configs. Provider refs are per-table via `PROVIDER_CONFIG_REFERENCES` (`stt_configs` has TWO: transcription + vad; others single `provider_config_id`) with `KeepProviderRefCapture` pre-captured in `buildApplyPlan`. Keep = rename local provider config to server id (`cascadeKeepProviderConfig`), skip incoming duplicate (`keptProviderServerIds`), re-send both (`keepCascadedProviderKeys` un-excluded from `serverRecordIds`).
 @Network: Axios (REST), WebSocket (real-time), reconnection logic, retry with backoff, session resume on reconnect.
 @Build: Metro Bundler, Gradle 8.13 (NOT 9.0+), Android SDK API 24-33, JDK 17.
-@BuildFlavors: react-native-config@1.6.1 wired into src/config/cloud.ts; IS_BETA coercion (=== true || === 'true'). Android productFlavors dev/prod (buildConfigField, applicationIdSuffix ".dev"). iOS CI-driven (env regeneration + PRODUCT_BUNDLE_IDENTIFIER override). google-services plugin 4.4.2.
-@Dev Tools: TypeScript compiler, ESLint, Prettier, Jest, React Native Debugger, hot reload.
+@BuildFlavors: react-native-config@1.6.1 wired into src/config/cloud.ts; IS_BETA coercion (=== true || === 'true'). Android productFlavors dev/prod (buildConfigField, applicationIdSuffix ".dev"). iOS CI-driven (env regeneration + PRODUCT_BUNDLE_IDENTIFIER override). google-services plugin 4.4.2. OAuth secrets: scripts/oauth-secrets.cjs reads gitignored client_secret_*.json per env → generates .env + android/gradle-secrets.<flavor>.properties (both gitignored). Resolve priority: -P flag > gradle-secrets file > ''. cloud.ts exports APP_ENV/APP_ENVIRONMENT (env: dev|prod, label). CI uses vars.GOOGLE_WEB_CLIENT_ID / vars.APPLE_SERVICES_ID.
+@Dev Tools: TypeScript compiler, ESLint, Prettier, Jest, React Native Debugger, hot reload. `test:unit` runs with `--maxWorkers=40` (must be >= number of unit test files — 35 — or the documented better-sqlite3 cross-worker contamination intermittently fails UNIQUE/FK/rollback tests).
 @Future Integrations:
 - On-Device AI: React Native Executorch (PyTorch models, quantized up to 7B)
 - Audio: React Native Voice (STT), React Native TTS
@@ -16,7 +21,7 @@
 @Security: EncryptedStorage, HTTPS, token auth, SSL pinning (consideration), no plaintext credentials.
 @Platforms: Android 7.0+ (API 24), target API 33.
 @Workflow: Local dev with Metro → emulator/ADB testing → release builds → Play Store (future).
-@Key Deps: react 19.2.0, react-native 0.83.1, @react-navigation/*  ^7.x, react-native-paper ^5.x, @react-native-async-storage/async-storage ^2.x, react-native-sqlite-storage ^6.x, eventemitter3 ^5.x, uuid ^10.x, music-metadata v11, react-native-device-info.
+@Key Deps: react 19.2.7, react-native 0.86.0, @react-navigation/*  ^7.x, react-native-paper ^5.x, @react-native-async-storage/async-storage ^2.x, react-native-sqlite-storage ^6.x, eventemitter3 ^5.x, uuid ^13.x, music-metadata v11, react-native-device-info, @harmony-ai-solutions/soulbits-api-client (GitHub git dep, commit 518c9e8).
 @ModularConfig:
 - App mirrors Harmony Link frontend's schema-driven provider configuration approach
 - providerFieldSchemas.ts: 15 provider schemas (openai, openaicompatible, openrouter, elevenlabs, kindroid, kajiwoto, characterai, harmonyspeech_stt/vad/tts, comfyui, tts_openai, rag_*, stt_openai/vad_openai, google, xai, anthropic). No module-specific schemas — one schema per provider, module-specific fields merged into main schemas with tooltips.
@@ -28,6 +33,9 @@
 - Dual-slot support: standard modules (single "provider" slot), STT (dual "transcription"/"vad" slots)
 - Model field unification: migration 000030, single `model` column per provider config table
 - Shared isProviderConfigInUse() helper with UNION ALL for existence checks
+- Soulbits model catalog: `soulbitsModelsCatalog.ts` fetches live `GET /v1/models` (credential-less, 5-min TTL, never throws → static fallback from `soulbitsModels.ts`, whose ids are verified against the live catalog by a guard test); `SoulbitsModelSelect.tsx` renders the dropdown for soulbitscloud.
+- Cloud PASETO token handling: `soulbitsTokenSync.ts` — `startSoulbitsTokenSync()` (AuthContext) subscribes `AuthService.auth:changed` → `updateAllSoulbitsCloudApiKeys` repo bulk-update (bumps updated_at) → `SyncService.initiateSync()`; `injectSoulbitsToken()` seeds api_key on new soulbitscloud configs; `syncCurrentToken()` one-shot. `FormField.readOnly` (locked masked password, no eye/copy) for managed credentials.
+- Beta release build: `cd android; .\gradlew.bat assembleDevRelease -PE2E_DEBUG_SIGNING=true` → `app\build\outputs\apk\dev\release\app-dev-release.apk` (JS-bundled, debug-signed; only debug.keystore exists locally). Install: `adb -s d608825c install -r <apk>`.
 @Phase09-LifecycleUI:
 - Harmony Link management UI adds Lifecycle Settings tab to character profile
 - Exposes lifecycle_config fields for per-entity autonomy configuration

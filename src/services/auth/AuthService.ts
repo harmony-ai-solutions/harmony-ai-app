@@ -16,7 +16,6 @@ import {
   saveTokens,
   loadTokens,
   clearTokens,
-  type TokenBlob,
 } from './tokenStorage';
 
 // ── Error types ─────────────────────────────────────────────────────────
@@ -67,6 +66,13 @@ export interface UserProfile {
   // optional so the type reflects the wire contract honestly.
   tier_id?: string;
   created_at: string;
+  // Optional social-profile extras. The current backend MeResponse does not
+  // return these yet — they are kept optional so the type stays truthful to
+  // the wire contract. The backend PATCH /v1/auth/me accepts display_name only
+  // (Phase 9 extension items: username/bio in PATCH + avatar_url in responses).
+  username?: string;
+  bio?: string;
+  avatar_url?: string;
 }
 
 interface TokenResponse {
@@ -337,6 +343,35 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
     return (await res.json()) as UserProfile;
   }
 
+  /**
+   * Update the current user's display name via `PATCH /v1/auth/me`.
+   *
+   * The backend accepts `display_name` ONLY (cross-verified 2026-08-24) —
+   * username, bio and avatar uploads are extension items (Phase 9). The PATCH
+   * follows the same authenticated-fetch path as getProfile() (single
+   * deduplicated 401 refresh). Callers should then re-fetch the profile
+   * (AuthContext.refreshUser) so `useAuth().user` reflects the new name.
+   *
+   * @returns The freshly-fetched profile after the PATCH succeeds.
+   */
+  async updateDisplayName(displayName: string): Promise<UserProfile> {
+    const res = await this.fetch(AUTH_ENDPOINTS.me, {
+      method: 'PATCH',
+      body: JSON.stringify({ display_name: displayName.trim() }),
+    });
+
+    if (!res.ok) {
+      const body = await parseErrorBody(res);
+      throw new AuthError(
+        'updateDisplayName',
+        body?.error ?? `HTTP ${res.status}`,
+        res.status,
+      );
+    }
+
+    return this.getProfile();
+  }
+
   // ──── Token access ──────────────────────────────────────────────────
 
   /**
@@ -372,6 +407,21 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
    */
   getTokenExpiresAt(): number {
     return this._expiresAtMs;
+  }
+
+  /**
+   * Check whether the cached PASETO has already expired.
+   *
+   * Returns `true` when `_expiresAtMs` is set AND `Date.now()` is at or past
+   * it.  Returns `false` when no token is cached (`_expiresAtMs === 0`) so
+   * callers can always call this safely (if there is no token, the pre-check
+   * is a no-op — the subsequent WS dial will fail with a clearer error).
+   *
+   * Unlike `ConnectionStateManager.getIsTokenExpired()` (which checks the
+   * self-hosted JWT), this checks the cloud PASETO expiry.
+   */
+  isTokenExpired(): boolean {
+    return this._expiresAtMs > 0 && Date.now() >= this._expiresAtMs;
   }
 
   // ──── Invalidation ──────────────────────────────────────────────────

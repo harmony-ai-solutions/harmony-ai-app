@@ -1,0 +1,20 @@
+{
+  "title": "Scenario",
+  "ctaScenario": "Scenario",
+  "preparingOpening": "Preparing the opening…",
+  "noGreetingHint": "This character has no greeting yet — start the conversation your way.",
+  "swipeIndicator": "{{n}}/{{total}}",
+  "scenarioRestart": "Restart scenario",
+  "generate": "Generate",
+  "generating": "Generating…",
+  "generateAnother": "Generate another",
+  "generateFailedBackend": "Couldn't generate the opening right now. Please try again.",
+  "mood": "Mood",
+  "setting": "Setting",
+  "relationship": "Relationship",
+  "timeOfDay": "Time of day",
+  "whoStarts": "Who starts",
+  "premise": "Premise",
+  "surpriseMe": "Surprise me",
+  "comingSoon": "Scenario generation is coming soon."
+}

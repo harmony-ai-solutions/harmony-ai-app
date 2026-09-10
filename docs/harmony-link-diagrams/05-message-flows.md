@@ -87,7 +87,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant User
-    participant UI as ChatInput
+    participant UI as ChatDetailScreen
     participant AR as AudioRecorder
     participant ESS as EntitySessionService
     participant DB as SQLite DB
@@ -190,7 +190,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant User
-    participant UI as ChatInput
+    participant UI as ChatDetailScreen
     participant Picker as ImagePicker
     participant ESS as EntitySessionService
     participant HL as Harmony Link

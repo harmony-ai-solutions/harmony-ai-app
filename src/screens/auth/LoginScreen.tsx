@@ -10,7 +10,7 @@
  *  - Navigation link to RegisterScreen
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -19,8 +19,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { Appbar } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -32,7 +32,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedButton } from '../../components/themed/ThemedButton';
-import { ThemedAppbar } from '../../components/themed/ThemedAppbar';
+import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { VerifyPrompt } from './VerifyPrompt';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import {
@@ -65,9 +65,28 @@ export const LoginScreen: React.FC = () => {
   // ── Error state ────────────────────────────────────────────────────────
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showVerify, setShowVerify] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 800);
+  }, []);
 
   // ── Password field ref for "next" focus ────────────────────────────────
   const passwordRef = useRef<TextInput>(null);
+
+  // ── Navigate back when auth succeeds ──────────────────────────────────
+  // Covers all sign-in methods (email, Google, Apple). AuthService.login()
+  // emits 'auth:changed'; AuthContext processes that asynchronously
+  // (getProfile + cloudSessionService.connect), eventually setting status
+  // to 'authenticated'. This effect fires on that transition and pops the
+  // Login screen back to the screen that pushed it (typically
+  // ConnectionSetupScreen, where the cloud session status is visible).
+  useEffect(() => {
+    if (status === 'authenticated') {
+      navigation.goBack();
+    }
+  }, [status, navigation]);
 
   // ── Login handler ──────────────────────────────────────────────────────
   const handleLogin = useCallback(async () => {
@@ -124,38 +143,64 @@ export const LoginScreen: React.FC = () => {
       if (err instanceof GoogleSignInError) {
         switch (err.type) {
           case GoogleSignInErrorType.CANCELLED:
-            // Silently dismiss — no error toast
+            // Silently dismiss — no error toast (user tapped "Cancel")
             log.info('Google Sign-In cancelled by user');
-            return;
+            break;
 
           case GoogleSignInErrorType.PLAY_SERVICES:
             log.warn('Google Sign-In — Play Services unavailable');
             setLoginError(t('googleErrorPlayServices'));
-            return;
+            break;
 
           case GoogleSignInErrorType.DEVELOPER_ERROR:
             log.warn('Google Sign-In — developer error (SHA-1 / OAuth config)');
             setLoginError(t('googleErrorDeveloperError'));
-            return;
+            break;
 
           case GoogleSignInErrorType.UNKNOWN:
+            // Include the raw error message so users can report it for debugging
             log.error('Google Sign-In unknown error:', err.message);
-            setLoginError(t('googleErrorGeneric'));
-            return;
+            setLoginError(
+              err.message
+                ? `${t('googleErrorGeneric')}\n\nDetails: ${err.message}`
+                : t('googleErrorGeneric'),
+            );
+            break;
         }
+        return;
+      }
+
+      // Handle backend 403 — email not verified (edge case for Google
+      // accounts where email hasn't been verified through the cloud)
+      if (err instanceof AuthError && err.status === 403) {
+        log.warn('Google Sign-In — email not verified (403)');
+        setLoginError(t('loginErrorEmailNotVerified'));
+        return;
       }
 
       // Handle backend 409 conflict (email already registered with another
-      // sign-in method). Branch on AuthError.status — the 409 body carries an
-      // "already exists" error string (not the status code), so a substring
-      // match on "409" would never hit.
+      // sign-in method)
       if (err instanceof AuthError && err.status === 409) {
         log.warn('Google Sign-In — email collision (409)');
         setLoginError(t('googleErrorEmailConflict'));
         return;
       }
 
-      // Generic fallback
+      // Handle backend 401 — Google token rejected
+      if (err instanceof AuthError && err.status === 401) {
+        log.warn('Google Sign-In — Google token rejected by backend (401)');
+        setLoginError(t('loginErrorInvalidCredentials'));
+        return;
+      }
+
+      // Any other AuthError (network, server error, etc.)
+      if (err instanceof AuthError) {
+        log.error('Google Sign-In backend error:', err.message, 'status:', err.status);
+        setLoginError(t('googleErrorGeneric'));
+        return;
+      }
+
+      // Generic fallback (network error, unexpected exception)
       log.error('Google Sign-In failed:', err);
       setLoginError(t('googleErrorGeneric'));
     } finally {
@@ -226,19 +271,10 @@ export const LoginScreen: React.FC = () => {
   return (
     <ThemedView style={styles.container}>
       {/* ── Header ── */}
-      <ThemedAppbar style={styles.header}>
-        <Appbar.BackAction
-          color={theme.colors.text.primary}
-          onPress={() => navigation.goBack()}
-        />
-        <Appbar.Content
-          title={t('login_title')}
-          titleStyle={{
-            color: theme.colors.text.primary,
-            fontWeight: 'bold',
-          }}
-        />
-      </ThemedAppbar>
+      <ScreenHeader
+        title={t('login_title')}
+        onBack={() => navigation.goBack()}
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
@@ -251,6 +287,15 @@ export const LoginScreen: React.FC = () => {
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[theme!.colors.accent.primary]}
+              tintColor={theme!.colors.accent.primary}
+              progressBackgroundColor={theme!.colors.background.surface}
+            />
+          }
         >
           {/* ── Title / Subtitle ── */}
           <View style={styles.headerSection}>

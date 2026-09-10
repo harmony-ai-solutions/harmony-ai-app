@@ -5,13 +5,14 @@
  * container width without being squeezed into a single numColumns cell.
  * Each row is either a "header" row or an array of emoji entries.
  */
-import React, { memo, useMemo } from 'react';
+import React, { memo, useCallback, useMemo } from 'react';
 import { FlatList, StyleSheet, View, Dimensions } from 'react-native';
 import { Theme } from '../../theme/types';
 import { EmojiCategory, EmojiEntry } from '../../types/emoji';
 import { EmojiAction } from '../../database/models';
 import EmojiItem from './EmojiItem';
 import { ThemedText } from '../themed/ThemedText';
+import { ThemedEmptyState } from '../themed/ThemedEmptyState';
 
 interface EmojiGridProps {
   categories: EmojiCategory[];
@@ -74,8 +75,9 @@ export const EmojiGrid: React.FC<EmojiGridProps> = memo(({
     return rows;
   }, [categories, activeCategory, emojisPerRow]);
 
-  // Render each row
-  const renderItem = ({ item }: { item: GridRow }) => {
+  // Render each row — memoized so FlatList rows don't re-render when the
+  // picker re-renders for other reasons (e.g. recent-emoji churn).
+  const renderItem = useCallback(({ item }: { item: GridRow }) => {
     if (item.type === 'header') {
       return (
         <View style={styles.headerContainer}>
@@ -101,7 +103,7 @@ export const EmojiGrid: React.FC<EmojiGridProps> = memo(({
         ))}
       </View>
     );
-  };
+  }, [emojiSize, onEmojiPress, onEmojiLongPress, actionsMap, theme]);
 
   const keyExtractor = (item: GridRow) => item.id;
 
@@ -115,6 +117,15 @@ export const EmojiGrid: React.FC<EmojiGridProps> = memo(({
       keyExtractor={keyExtractor}
       showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.contentContainer}
+      ListEmptyComponent={
+        <ThemedEmptyState
+          icon="emoticon-search-outline"
+          title="No emoji found"
+          subtitle="Try a different search term."
+          compact
+          style={styles.emptyState}
+        />
+      }
       removeClippedSubviews={true}
       maxToRenderPerBatch={20}
       windowSize={5}
@@ -138,6 +149,10 @@ const styles = StyleSheet.create({
   contentContainer: {
     paddingHorizontal: 12,
     paddingBottom: 8,
+    flexGrow: 1,
+  },
+  emptyState: {
+    width: '100%',
   },
   headerContainer: {
     width: '100%',

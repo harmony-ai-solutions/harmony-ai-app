@@ -110,7 +110,8 @@ export async function updateGoogleProviderConfig(config: GoogleProviderConfig): 
       `UPDATE provider_config_google
        SET name = ?, api_key = ?, model = ?, max_output_tokens = ?, temperature = ?, top_p = ?, top_k = ?,
            stop_tokens = ?, seed = ?, response_mime_type = ?, sampling_preset_name = ?, extra_params = ?,
-           number_of_images = ?, aspect_ratio = ?
+           number_of_images = ?, aspect_ratio = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         config.name, config.api_key, config.model, config.max_output_tokens, config.temperature, config.top_p, config.top_k,
@@ -126,17 +127,12 @@ export async function isGoogleProviderConfigInUse(id: string): Promise<boolean> 
   return isProviderConfigInUse('google', id);
 }
 
-export async function deleteGoogleProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteGoogleProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  if (!permanent && await isGoogleProviderConfigInUse(id)) throw new Error(`Google provider config ${id} is in use and cannot be soft deleted`);
+  if (await isGoogleProviderConfigInUse(id)) throw new Error(`Google provider config ${id} is in use and cannot be soft deleted`);
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_google WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) throw new Error(`Google provider config not found: ${id}`);
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql('UPDATE provider_config_google SET deleted_at = ? WHERE id = ?', [now, id]);
-      if (result.rowsAffected === 0) throw new Error(`Google provider config not found: ${id}`);
-    }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql('UPDATE provider_config_google SET deleted_at = ? WHERE id = ?', [now, id]);
+    if (result.rowsAffected === 0) throw new Error(`Google provider config not found: ${id}`);
   });
 }

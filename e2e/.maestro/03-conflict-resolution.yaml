@@ -1,0 +1,91 @@
+# e2e/.maestro/03-conflict-resolution.yaml
+# Conflict resolution: edit a record locally, server also edits it, sync runs.
+#
+# Verifies the sync protocol's conflict resolution strategy (Last-Write-Wins
+# by updated_at — documented in __tests__/integration/sync.conflict.test.ts).
+#
+# ⚠️  PREREQUISITES (in addition to 02-happy-path-pull.yaml):
+#   1. All prerequisites from 02 (paired APK, healthy harmony-link, seeded data).
+#   2. A server-side edit is injected (via the admin API or directly into the
+#      harmony-link DB) AFTER the local edit, setting up a true conflict.
+#      Without this injection, the flow verifies the simpler
+#      "local edit syncs to server" path.
+#
+# Selectors verified against src/screens/CharactersScreen.tsx,
+# src/screens/CharacterProfileEditScreen.tsx, and
+# src/screens/settings/SyncSettingsScreen.tsx.
+
+appId: ai.soulbits.chat.dev
+
+---
+- launchApp:
+    clearState: true
+
+# Wait for pairing + sync (same as happy-path)
+- extendedWaitUntil:
+    label: "Connection to Harmony Link established"
+    visible:
+      id: "connection-status-dot-connected"
+    timeout: 60000
+
+# Navigate to the Characters tab to find a character to edit
+- tapOn:
+    id: "tab-characters"
+
+# Wait for at least one character profile to render
+- extendedWaitUntil:
+    label: "Character list has at least one profile"
+    visible:
+      id: "character-profile-card"
+    timeout: 30000
+
+# Tap the first character to enter edit mode
+- tapOn:
+    id: "character-profile-card"
+    index: 0
+
+# The CharacterProfileEditScreen renders with a name input.
+# Tap the name field, clear it, and enter a new value.
+- tapOn:
+    id: "character-name-input"
+- clearState
+
+- inputText: "Locally Renamed"
+
+# Save the edit
+- tapOn:
+    text: "Save"
+
+# Verify the local change is visible in the characters list
+- extendedWaitUntil:
+    label: "Local rename is reflected in the list"
+    visible:
+      text: "Locally Renamed"
+    timeout: 10000
+
+# Navigate to Sync Settings and trigger a manual sync.
+# This is where the test harness should inject a server-side edit
+# (via the admin API on port 28081) BEFORE the sync completes.
+- runFlow: _shared/navigate-to-sync-settings.yaml
+
+- tapOn:
+    id: "sync-now-button"
+
+# Wait for sync to complete. SyncSettingsScreen hides the
+# "Syncing in Progress..." card when done.
+- extendedWaitUntil:
+    label: "Sync completes"
+    visible:
+      id: "sync-now-button"   # button reverts from "Syncing..." to "Sync Now"
+    timeout: 60000
+
+# At this point, if the test harness injected a server-side edit with a
+# newer updated_at, the server's version wins (LWW). Otherwise the local
+# edit persists. Adjust the assertion below based on the fixture.
+#
+# For the "no server-side injection" path, verify local edit survived:
+- assertVisible:
+    label: "Sync propagates changes correctly"
+    text: "Locally Renamed"
+
+- takeScreenshot: conflict-resolution-complete

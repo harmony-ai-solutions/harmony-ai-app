@@ -1,0 +1,121 @@
+# PR Test Workflow
+#
+# Runs on every pull request and push to main. Four parallel jobs:
+#   - typecheck:     TypeScript compilation check + lint
+#   - unit-tests:    Unit tests with coverage (Node environment)
+#   - integration-tests: Integration tests (Node environment, mocking ConnectionManager)
+#   - migration-tests:   Database migration snapshot + rollforward tests
+#
+# Combined timeout budget: ~15 min typical, 20 min worst-case.
+
+name: Tests
+
+on:
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.current_work/**'
+      - 'memory-bank/**'
+      - 'design/**'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JEST_JUNIT_OUTPUT_DIR: ./reports
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # Type-check + lint
+  # ─────────────────────────────────────────────────────────────────
+  typecheck:
+    name: Type-check & lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+
+  # ─────────────────────────────────────────────────────────────────
+  # Unit tests (Node environment — fast)
+  # ─────────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Run unit tests
+        run: npx jest --selectProjects unit --coverage --reporters=default --reporters=jest-junit
+        env:
+          JEST_JUNIT_OUTPUT_NAME: unit-tests.xml
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-coverage
+          path: coverage/
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: reports/unit-tests.xml
+
+  # ─────────────────────────────────────────────────────────────────
+  # Integration tests (Node environment, mocking ConnectionManager)
+  # ─────────────────────────────────────────────────────────────────
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Run integration tests
+        run: npx jest --selectProjects integration --reporters=default --reporters=jest-junit
+        env:
+          JEST_JUNIT_OUTPUT_NAME: integration-tests.xml
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: reports/integration-tests.xml
+
+  # ─────────────────────────────────────────────────────────────────
+  # Migration snapshot tests (subset of unit suite)
+  # ─────────────────────────────────────────────────────────────────
+  migration-tests:
+    name: DB migration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Run migration tests
+        run: npx jest --selectProjects unit --testPathPatterns migrations

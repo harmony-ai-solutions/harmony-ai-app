@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<testsuites>
+  <testsuite name="Test Suite" device="android-emulator:5555" tests="4" failures="3" time="213.0">
+    <testcase id="01-smoke-boot" name="01-smoke-boot" classname="01-smoke-boot" file=".maestro/01-smoke-boot.yaml" time="9.0" status="SUCCESS"/>
+    <testcase id="02-happy-path-pull" name="02-happy-path-pull" classname="02-happy-path-pull" file=".maestro/02-happy-path-pull.yaml" time="69.0" status="ERROR">
+      <failure>Assertion is false: id: connection-status-dot-connected is visible</failure>
+    </testcase>
+    <testcase id="03-conflict-resolution" name="03-conflict-resolution" classname="03-conflict-resolution" file=".maestro/03-conflict-resolution.yaml" time="67.0" status="ERROR">
+      <failure>Assertion is false: id: connection-status-dot-connected is visible</failure>
+    </testcase>
+    <testcase id="04-network-reconnect" name="04-network-reconnect" classname="04-network-reconnect" file=".maestro/04-network-reconnect.yaml" time="68.0" status="ERROR">
+      <failure>Assertion is false: id: connection-status-dot-connected is visible</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

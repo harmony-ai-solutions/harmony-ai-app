@@ -1,0 +1,20 @@
+{
+  "purpose": "Script additions for Phase 6 (E2E with Maestro). Merge these into root package.json after Phase 1-1 (Jest 30 upgrade) completes to avoid merge conflicts.",
+  "context": "See .current_work/test-framework-overhaul/6-6-IOSMacOSRunner.md step 1 for the build:ios:simulator script rationale.",
+  "scripts": {
+    "build:ios:simulator": "cd ios && xcodebuild -workspace HarmonyAIChat.xcworkspace -scheme HarmonyAIChat -configuration Debug -sdk iphonesimulator -derivedDataPath build -destination 'generic/platform=iOS Simulator' && cd build/Build/Products/Debug-iphonesimulator && zip -r HarmonyAIChat.app.zip HarmonyAIChat.app",
+    "build:e2e:android": "ENVFILE=.env.e2e cd android && ./gradlew assembleDevDebug",
+    "build:e2e:ios": "ENVFILE=.env.e2e.ios npm run build:ios:simulator",
+    "e2e:android": "docker compose -f e2e/docker-compose.yml up --abort-on-container-exit",
+    "e2e:android:up": "docker compose -f e2e/docker-compose.yml up -d harmony-link android-emulator",
+    "e2e:android:run": "docker compose -f e2e/docker-compose.yml up maestro-runner"
+  },
+  "notes": [
+    "build:ios:simulator: Builds a Debug configuration .app for the iOS Simulator and zips it.",
+    "build:e2e:android: Builds the Android APK with the e2e/.env.e2e env file (WSS URL for emulator).",
+    "build:e2e:ios: Builds the iOS Simulator .app with the e2e/.env.e2e.ios env file.",
+    "e2e:android: Starts the full Docker Compose stack and runs Maestro flows.",
+    "e2e:android:up: Starts harmony-link + android-emulator services in background.",
+    "e2e:android:run: Runs only the maestro-runner service (useful after stack is already up)."
+  ]
+}

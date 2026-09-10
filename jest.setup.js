@@ -27,11 +27,47 @@ jest.mock('react-native-fs', () => ({
 jest.mock('react-native-keychain', () => ({
   ACCESSIBLE: {
     WHEN_UNLOCKED: 'WhenUnlocked',
+    WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'WhenUnlockedThisDeviceOnly',
+  },
+  // Full enum surface — BiometricLockService reads ACCESS_CONTROL at module load
+  // to build its shared access-control constant, so the mock must provide it.
+  ACCESS_CONTROL: {
+    USER_PRESENCE: 'UserPresence',
+    BIOMETRY_ANY: 'BiometryAny',
+    BIOMETRY_CURRENT_SET: 'BiometryCurrentSet',
+    BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE: 'BiometryCurrentSetOrDevicePasscode',
+    DEVICE_PASSCODE: 'DevicePasscode',
+    APPLICATION_PASSWORD: 'ApplicationPassword',
+  },
+  AUTHENTICATION_TYPE: {
+    DEVICE_PASSCODE_OR_BIOMETRICS: 'DevicePasscodeOrBiometrics',
   },
   getGenericPassword: jest.fn(() => Promise.resolve(false)),
   setGenericPassword: jest.fn(() => Promise.resolve()),
   resetGenericPassword: jest.fn(() => Promise.resolve()),
+  getSupportedBiometryType: jest.fn(() => Promise.resolve(null)),
+  hasGenericPassword: jest.fn(() => Promise.resolve(false)),
 }));
+
+// Mock react-native-biometrics (default export is a constructor; return a shared
+// instance so tests drive the same jest.fn instances the service holds).
+jest.mock('react-native-biometrics', () => {
+  const shared = {
+    allowDeviceCredentials: false,
+    isSensorAvailable: jest.fn(() => Promise.resolve({ available: false })),
+    simplePrompt: jest.fn(() => Promise.resolve({ success: false })),
+    createKeys: jest.fn(() => Promise.resolve({ publicKey: 'pk' })),
+    biometricKeysExist: jest.fn(() => Promise.resolve({ keysExist: false })),
+    deleteKeys: jest.fn(() => Promise.resolve({ keysDeleted: true })),
+    createSignature: jest.fn(() => Promise.resolve({ success: false })),
+  };
+  return {
+    __esModule: true,
+    default: function MockReactNativeBiometrics() {
+      return shared;
+    },
+  };
+});
 
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -69,6 +105,119 @@ jest.mock('react-native-paper', () => ({
   Text: 'Text',
 }));
 
+// Mock @react-native-google-signin/google-signin
+jest.mock('@react-native-google-signin/google-signin', () => ({
+  GoogleSignin: {
+    configure: jest.fn(),
+    signIn: jest.fn(() => Promise.resolve({ idToken: 'mock-token' })),
+    signOut: jest.fn(() => Promise.resolve()),
+    hasPlayServices: jest.fn(() => Promise.resolve(true)),
+    isSignedIn: jest.fn(() => Promise.resolve(false)),
+    getCurrentUser: jest.fn(() => Promise.resolve(null)),
+  },
+  isSuccessResponse: jest.fn(() => true),
+  statusCodes: {
+    SIGN_IN_CANCELLED: 'SIGN_IN_CANCELLED',
+    IN_PROGRESS: 'IN_PROGRESS',
+    PLAY_SERVICES_NOT_AVAILABLE: 'PLAY_SERVICES_NOT_AVAILABLE',
+  },
+}));
+
+// Mock @invertase/react-native-apple-authentication
+jest.mock('@invertase/react-native-apple-authentication', () => ({
+  AppleButton: 'AppleButton',
+  appleAuth: {
+    performRequest: jest.fn(() => Promise.resolve({})),
+    getCredentialState: jest.fn(() => Promise.resolve(0)),
+  },
+}));
+
+// Mock react-native-config
+jest.mock('react-native-config', () => ({
+  __esModule: true,
+  default: {
+    APP_ENV: 'dev',
+    IS_BETA: true,
+    GOOGLE_WEB_CLIENT_ID: 'test-client.apps.googleusercontent.com',
+    APPLE_SERVICES_ID: '',
+    API_BASE_URL: 'https://api.example.com',
+  },
+}));
+
+// Mock react-native-device-info (prevents NativeEventEmitter error during import)
+jest.mock('react-native-device-info', () => ({
+  getUniqueId: jest.fn(() => Promise.resolve('test-device-001')),
+  getDeviceName: jest.fn(() => Promise.resolve('Test Device')),
+  getVersion: jest.fn(() => '1.0.0'),
+  getBuildNumber: jest.fn(() => '1'),
+}));
+
+// Mock react-native-track-player
+jest.mock('react-native-track-player', () => ({
+  State: {
+    None: 'none',
+    Ready: 'ready',
+    Playing: 'playing',
+    Paused: 'paused',
+    Stopped: 'stopped',
+    Buffering: 'buffering',
+    Connecting: 'connecting',
+  },
+  Capability: {
+    Play: 'play',
+    Pause: 'pause',
+    Stop: 'stop',
+    SeekTo: 'seekTo',
+  },
+  Track: class Track {},
+  addEventListener: jest.fn(),
+  setupPlayer: jest.fn(() => Promise.resolve()),
+  registerPlaybackService: jest.fn(),
+  add: jest.fn(() => Promise.resolve('track-1')),
+  play: jest.fn(),
+  pause: jest.fn(),
+  stop: jest.fn(),
+  seekTo: jest.fn(),
+  reset: jest.fn(),
+  destroy: jest.fn(),
+  getQueue: jest.fn(() => Promise.resolve([])),
+  skip: jest.fn(),
+  skipToNext: jest.fn(),
+  skipToPrevious: jest.fn(),
+  remove: jest.fn(),
+  setVolume: jest.fn(),
+  getState: jest.fn(() => Promise.resolve('none')),
+  getProgress: jest.fn(() => Promise.resolve({ position: 0, duration: 0, buffered: 0 })),
+}));
+
+// Mock music-metadata (ESM-only, can't be loaded by Jest; use virtual:true to bypass resolver)
+jest.mock('music-metadata', () => ({
+  parseBuffer: jest.fn(() => Promise.resolve({
+    format: { duration: 0 },
+    common: { title: '', artist: '', album: '' },
+  })),
+}), { virtual: true });
+
+// Mock react-native-audio-record
+jest.mock('react-native-audio-record', () => ({
+  init: jest.fn(),
+  start: jest.fn(),
+  stop: jest.fn(() => Promise.resolve('')),
+  on: jest.fn(),
+}));
+
+// Mock react-native-image-picker
+jest.mock('react-native-image-picker', () => ({
+  launchImageLibrary: jest.fn(() => Promise.resolve({ assets: [] })),
+  launchCamera: jest.fn(() => Promise.resolve({ assets: [] })),
+}));
+
+// Mock @react-native-clipboard/clipboard
+jest.mock('@react-native-clipboard/clipboard', () => ({
+  getString: jest.fn(() => Promise.resolve('')),
+  setString: jest.fn(),
+}));
+
 // Mock react-native-vector-icons
 jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => 'Icon');
 
@@ -83,10 +232,13 @@ jest.mock('react-native-websocket-self-signed', () => ({
   })),
 }));
 
-// Mock react-native Platform.select
+// Mock react-native Platform (RN 0.86+ exports Platform as `.default` from this module)
 jest.mock('react-native/Libraries/Utilities/Platform', () => ({
-  OS: 'ios',
-  select: jest.fn((obj) => obj.ios || obj.default),
+  __esModule: true,
+  default: {
+    OS: 'ios',
+    select: jest.fn((obj) => obj.ios || obj.default),
+  },
 }));
 
 // Suppress console warnings in tests

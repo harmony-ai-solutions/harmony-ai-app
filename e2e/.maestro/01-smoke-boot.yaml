@@ -1,0 +1,42 @@
+# e2e/.maestro/01-smoke-boot.yaml
+# Smoke test: the E2E devRelease APK boots and renders the Chat screen.
+#
+# This is the MINIMUM viable E2E assertion: the JS bundle (baked by the
+# devRelease build) loads, ~32 SQLite migrations run, and the main Chat
+# tab renders its title. That proves the whole boot path end-to-end.
+#
+# Connection to harmony-link is NOT asserted here, for two reasons:
+#  1. The app is mid-redesign — the current start screen shows connection
+#     success only as a transient toast, with no stable assertable element.
+#  2. Connection is validated more reliably on the BACKEND: the CI job
+#     greps harmony-link's logs for "Emitting handshake accept" after this
+#     flow, which proves app → socat bridge → harmony-link → HANDSHAKE_ACCEPT.
+# (When the redesign lands a stable connection indicator on the start
+#  screen, move that assertion into 02-happy-path-pull.yaml.)
+
+appId: ai.soulbits.chat.dev
+
+---
+- launchApp:
+    clearState: true         # start fresh — no leftover DB from previous runs
+
+# Wait for the Chat tab screen to render its title.
+# First launch runs ~32 SQLite migrations — this can take 15-30s on emulator.
+- extendedWaitUntil:
+    label: "Chat screen title renders"
+    visible:
+      text: "Chats"
+    timeout: 60000
+
+# NOTE: the E2E app also attempts the WS handshake in the background here
+# (pre-paired via applyE2EOverride + the socat bridge). We don't assert on
+# it from the UI (see header comment); CI verifies it via harmony-link logs.
+# A short settle lets the handshake + toast land before the screenshot.
+- extendedWaitUntil:
+    label: "App is interactive (settled post-boot)"
+    visible:
+      text: "Chats"
+    timeout: 10000
+
+# Take a screenshot for test reports.
+- takeScreenshot: smoke-boot-complete

@@ -1,0 +1,69 @@
+# e2e/.maestro/04-network-reconnect.yaml
+# Network resilience: connection drops, app shows reconnecting state,
+# server restarts, app reconnects automatically, sync resumes.
+#
+# ⚠️  ORCHESTRATION REQUIREMENT
+# Maestro alone cannot control Docker containers. The required external
+# orchestration must be executed by a wrapper script or sidecar.
+#
+# Recommended pattern (split into two flows):
+#   04a-disconnect.yaml:
+#     - docker compose -f e2e/docker-compose.yml stop harmony-link
+#     - maestro test 04a-disconnect.yaml
+#   04b-reconnect.yaml:
+#     - docker compose -f e2e/docker-compose.yml start harmony-link
+#     - maestro test 04b-reconnect.yaml
+#
+# This single-file version documents both phases; use the runScript
+# command once an external orchestration script exists.
+#
+# Selectors verified against src/screens/settings/SyncSettingsScreen.tsx
+# and src/screens/ChatDetailScreen.tsx.
+
+appId: ai.soulbits.chat.dev
+
+---
+- launchApp:
+    clearState: true
+
+# Verify initial connection
+- extendedWaitUntil:
+    label: "App initially connected"
+    visible:
+      id: "connection-status-dot-connected"
+    timeout: 60000
+
+# Navigate to Sync Settings to observe status changes
+- runFlow: _shared/navigate-to-sync-settings.yaml
+
+# ─── EXTERNAL ORCHESTRATION POINT 1 ───────────────────────────────────────
+# Stop the harmony-link container BEFORE continuing:
+#   docker compose -f e2e/docker-compose.yml stop harmony-link
+# ──────────────────────────────────────────────────────────────────────────
+
+# Wait for the app to detect the dropped connection. SyncSettingsScreen's
+# status text changes from "Connected to Harmony Link" to one of:
+#   - "Connection lost - Reconnecting..."
+#   - "Reconnecting (N failed retries) in Ns"
+# The testID `connection-status-dot-reconnecting` covers both.
+- extendedWaitUntil:
+    label: "App detects disconnection and shows reconnecting state"
+    visible:
+      id: "connection-status-dot-reconnecting"
+    timeout: 60000
+
+# ─── EXTERNAL ORCHESTRATION POINT 2 ───────────────────────────────────────
+# Restart the harmony-link container:
+#   docker compose -f e2e/docker-compose.yml start harmony-link
+# ──────────────────────────────────────────────────────────────────────────
+
+# Wait for the app to automatically reconnect. SyncConnectionContext
+# has exponential backoff (1s, 2s, 4s, 8s, 16s, 30s) so this can take
+# up to ~60s after the server is back.
+- extendedWaitUntil:
+    label: "App automatically reconnects after network restoration"
+    visible:
+      id: "connection-status-dot-connected"
+    timeout: 90000
+
+- takeScreenshot: reconnect-recovered

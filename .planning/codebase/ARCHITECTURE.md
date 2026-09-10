@@ -1,193 +1,206 @@
 # Architecture
 
-**Analysis Date:** 2026-05-24
+**Analysis Date:** 2026-08-07
 
 ## Pattern Overview
 
-**Overall:** React Native Mobile Application with Context-Based State Management
+**Overall:** Layered feature-folder architecture — a React Native TypeScript mobile client with:
+1. **React Context provider tree** for cross-cutting app state (theme, auth, database readiness, sync connection, entity sessions, biometrics, i18n, emoji, alerts).
+2. **Singleton service classes built on `eventemitter3`** for long-lived business logic (sync engine, WebSocket connection manager, auth, cloud session, entity sessions, connection state).
+3. **Repository pattern over encrypted SQLite** (`react-native-sqlite-storage`) with forward-only versioned migrations and a dedicated second DB connection for sync writes.
+4. **Feature-sliced `src/` layout** (`screens/`, `components/`, `services/`, `contexts/`, `database/`, `navigation/`, `theme/`, `i18n/`).
 
 **Key Characteristics:**
-- React Native 0.83.1 with TypeScript
-- Context API for state management (ThemeContext, DatabaseContext, SyncConnectionContext, EntitySessionContext, EmojiContext)
-- SQLite database with repository pattern for data access
-- WebSocket-based synchronization with Harmony Link backend
-- Component-based UI with react-native-paper for Material Design 3 components
-- Interaction Session model for chat management (private/group/world scopes)
+- React Native 0.86 bare workflow (NOT Expo) with native `ios/` and `android/` projects — see `package.json`.
+- Navigation via React Navigation v7: native-stack root (`src/navigation/AppNavigator.tsx`) wrapping a 5-tab bottom navigator with a custom `GlassTabBar` (`src/components/navigation/GlassTabBar.tsx`).
+- UI framework: `react-native-paper` v5 (MD3 themes) wrapped by a custom theme system (`src/contexts/ThemeContext.tsx`, `src/theme/`) with 9 built-in themes.
+- Persistent atmospheric background layer (`src/components/background/DynamicBackground.tsx`) rendered behind a transparent navigation stack — screens use transparent backgrounds so the aurora layer shows through.
+- State is NOT centralized (no Redux/Zustand); contexts + singleton services + EventEmitter events are the wiring mechanism.
+- Local-first: all data is persisted in an on-device SQLite DB; the app syncs with a backend (self-hosted Harmony Link or cloud conduct-proxy) over WebSocket.
+- TypeScript throughout (`tsconfig.json`); path alias `@test-utils/database` for tests only (`jest.config.js`).
 
 ## Layers
 
-**UI Layer:**
-- Purpose: Render screens and components, handle user input
-- Location: `src/screens/`, `src/components/`
-- Contains: React Native screens, UI components, navigation, themed wrappers
-- Depends on: Context providers, services
-- Used by: Navigation system
+**Presentation (Screens):**
+- Purpose: Full-screen route components; compose components + services + repositories.
+- Location: `src/screens/` (30 screens) with subfolders `auth/`, `settings/`, `setup/`, `config/`, `development/`.
+- Contains: Screen components (e.g. `src/screens/ChatDetailScreen.tsx`, `src/screens/ChatListScreen.tsx`, `src/screens/settings/SyncSettingsScreen.tsx`).
+- Depends on: `src/contexts/` (hooks), `src/components/`, `src/database/repositories/`, `src/services/`.
+- Used by: `src/navigation/AppNavigator.tsx` (stack routes), `src/navigation/MainTabNavigator.tsx` (tab routes).
 
-**Context Layer:**
-- Purpose: Provide application-wide state and share data between components
-- Location: `src/contexts/`
-- Contains: ThemeContext, DatabaseContext, SyncConnectionContext, EntitySessionContext, EmojiContext
-- Depends on: Services, database
-- Used by: UI components, screens
+**Presentation (Components):**
+- Purpose: Reusable UI building blocks, feature-sliced into folders.
+- Location: `src/components/` (66 `.tsx` files), subfolders: `themed/`, `chat/`, `emoji/`, `modals/`, `settings/`, `background/`, `characters/`, `cloud/`, `config/`, `database/`, `entities/`, `landing/`, `lock/`, `navigation/`, `sync/`, plus `src/components/ErrorBoundary.tsx`.
+- Contains: `ThemedText`, `ThemedButton`, `ThemedCard`, `ChatBubble`, `EmojiPickerModal`, `GlassTabBar`, `LockScreen`, `SyncProgressVisualizer`.
+- Depends on: `src/contexts/ThemeContext.tsx`, `src/utils/`, `react-native-paper`.
+- Used by: screens and other components.
 
-**Service Layer:**
-- Purpose: Business logic, external communication, data operations
-- Location: `src/services/`
-- Contains: SyncService, EntitySessionService, ChatPreferencesService, ConnectionStateManager, EmojiService, EntityEmojiActionService, AudioPlayer, AudioRecorder
-- Depends on: Database repositories, WebSocket connections
-- Used by: Contexts, screens
+**Navigation:**
+- Purpose: Declares the route graph and navigation theming.
+- Location: `src/navigation/AppNavigator.tsx` (root native stack, `RootStackParamList` type), `src/navigation/MainTabNavigator.tsx` (4 tabs: Chat | Discover | Characters | Market; Settings is a root-stack screen pushed over the tabs, opened from the header hamburger `HeaderMenuButton`).
+- Contains: `RootStackParamList` and `MainTabParamList` route param types.
+- Depends on: `@react-navigation/native`, `@react-navigation/native-stack`, `@react-navigation/bottom-tabs`, screens.
+- Used by: `App.tsx` (`AppShell`).
 
-**Data Layer:**
-- Purpose: Database operations, data persistence, migrations
-- Location: `src/database/`
-- Contains: SQLite connection, migrations, repositories, models, transaction helpers, sync utilities
-- Depends on: react-native-sqlite-storage
-- Used by: Services, contexts
+**State Management (Contexts):**
+- Purpose: Provide cross-cutting state via React Context + `useX()` hooks.
+- Location: `src/contexts/` — `AuthContext.tsx`, `BiometricLockContext.tsx`, `DatabaseContext.tsx`, `EmojiContext.tsx`, `EntitySessionContext.tsx`, `I18nContext.tsx`, `SyncConnectionContext.tsx`, `ThemeContext.tsx`, `AppAlertContext.tsx`; pure helpers `connectionStatusHelper.ts`, `syncEstimateHelper.ts`, `syncSettlementHelper.ts`.
+- Contains: Provider components + typed hooks; thin adapters over the singleton services.
+- Depends on: `src/services/` singletons, `src/database/`.
+- Used by: every screen/component needing app state.
+- Note: The provider nesting order is defined once in `App.tsx` (`ThemeProvider` → `I18nProvider` → `DatabaseProvider` → `AuthProvider` → `AppAlertProvider` → `SyncConnectionProvider` → `EntitySessionProvider` → `EmojiProvider` → `BiometricLockProvider` → `AppShell`).
 
-**WebSocket Layer:**
-- Purpose: Real-time communication with Harmony Link backend
-- Location: `src/services/websocket/`, `src/services/connection/`
-- Contains: WebSocket connections (secure, insecure, unencrypted), ConnectionManager, WebSocketConnectionFactory
-- Depends on: react-native-websocket-self-signed
-- Used by: SyncService
+**Business Logic (Services):**
+- Purpose: Long-lived singleton services owning protocol state machines, connections, and persistence orchestration. All are `EventEmitter` subclasses with `getInstance()`.
+- Location: `src/services/` — `SyncService.ts` (1746 lines, sync engine), `EntitySessionService.ts` (1449 lines, chat sessions), `ConnectionStateManager.ts` (persisted sync watermarks), `AudioPlayer.ts`, `AudioRecorder.ts`, `BiometricLockService.ts`, `CharacterCardImportService.ts`, `ChatPreferencesService.ts`, `EmojiService.ts`, `EntityEmojiActionService.ts`, `SyncService.ts`; subfolders `auth/`, `cloud/`, `connection/`, `websocket/`.
+- Contains: `src/services/auth/AuthService.ts` (PASETO lifecycle), `src/services/cloud/CloudSessionService.ts`, `src/services/cloud/soulbitsClient.ts` (Soulbits API client factory), `src/services/connection/ConnectionManager.ts`, `src/services/websocket/*` (connection implementations).
+- Depends on: `src/database/`, `src/config/cloud.ts`, `src/utils/logger.ts`, `eventemitter3`.
+- Used by: contexts (which re-expose events to components) and directly by screens.
 
-**Config Layer:**
-- Purpose: Module and provider configuration metadata
-- Location: `src/constants/`
-- Contains: Module type definitions, provider field schemas, default configurations, extended parameter metadata
-- Used by: ModuleConfigEditScreen, EntityConfigEditScreen, EntityModuleSelector
+**Data Access (Database):**
+- Purpose: SQLite connection management, schema migrations, repository functions.
+- Location: `src/database/` — `connection.ts`, `index.ts` (barrel), `migrations.ts`, `models.ts` (613 lines of TypeScript interfaces matching Go structs), `sync.ts` (chunked serialization helpers), `transaction.ts`, `types.ts`, `reactNativeDatabase.ts` (adapter), `base64.ts`; `migrations/` (34 numbered SQL files), `repositories/` (per-table modules: `entities.ts`, `characters.ts`, `modules.ts`, `conversation_messages.ts`, `interactions.ts`, `memories.ts`, `emoji_actions.ts`, `emotion_state.ts`, `sync.ts`; `providers/` has 16 per-provider config repositories).
+- Contains: `initializeDatabase`, `getDatabase`, `getSyncDatabase` (secondary connection for sync writes), `clearDatabaseData`, `wipeDatabaseCompletely`.
+- Depends on: `react-native-sqlite-storage`, `react-native-fs`, `react-native-keychain`.
+- Used by: services, contexts, screens (via repository imports).
 
-**Emoji/Asset Layer:**
-- Purpose: Emoji sprite rendering and data management
-- Location: `src/assets/emoji/`, `src/services/EmojiService.ts`, `src/components/emoji/`, `src/types/emoji.ts`
-- Contains: Sprite sheet PNGs (google-64.png, twitter-64.png), EmojiService singleton, emoji UI components, type definitions
-- Depends on: @emoji-mart/data, emoji-datasource-twitter, emoji-regex
+**Configuration & Constants:**
+- Purpose: Environment/host resolution and static metadata.
+- Location: `src/config/cloud.ts` (hosts, OAuth IDs, WS paths, endpoints), `src/constants/` (`soulbitsModels.ts`, `moduleConfiguration.ts`, `moduleDefaults.ts`, `providerFieldSchemas.ts`, `extendedParamMetadata.ts`).
+- Depends on: `react-native-config` (env injection from native build), `src/types/react-native-config.d.ts`.
+
+**Theme:**
+- Purpose: Custom theme definitions and typing.
+- Location: `src/theme/types.ts`, `src/theme/themes/` (9 themes incl. `classicHarmony.ts`, `pureDark.ts`, `soulBitsLight.ts`).
+- Used by: `src/contexts/ThemeContext.tsx` → `PaperProvider` in `App.tsx`.
+
+**i18n:**
+- Purpose: Localization via i18next.
+- Location: `src/i18n/locales/en/*.json` (24 namespaced files), `src/contexts/I18nContext.tsx`.
+- Used by: all screens/components via `useTranslation(namespace)`.
 
 ## Data Flow
 
-**App Initialization:**
-1. `App.tsx` mounts → ThemeProvider initializes theme from AsyncStorage
-2. DatabaseProvider initializes SQLite via `src/database/connection.ts`
-3. SyncConnectionProvider checks pairing status
-4. EntitySessionProvider initializes entity session management
-5. EmojiProvider initializes emoji preferences and EmojiService
-6. Navigation renders based on pairing state (shows LandingScreen unless redirected)
+**App Boot:**
 
-**Chat Flow:**
-1. User navigates to ChatDetailScreen via AppNavigator with interactionId and participant params
-2. Screen loads messages from `conversation_messages` repository scoped to the interaction
-3. User sends message → stored in local database with interaction_id
-4. Emoji actions resolved via EntityEmojiActionService (substitutions + emotion effects)
-5. Message sent via EntitySessionService to backend
-6. Response received and displayed in chat bubble
-7. Unread tracking via ChatPreferencesService (last-read timestamps per partner)
+1. `index.js` imports `react-native-get-random-values` first (uuid polyfill), registers `App` via `AppRegistry`.
+2. `App.tsx` renders the provider tree: `ErrorBoundary` → `SafeAreaProvider` → `ThemeProvider` → `I18nProvider` → `DatabaseProvider` → `AuthProvider` → `AppAlertProvider` → `SyncConnectionProvider` → `EntitySessionProvider` → `EmojiProvider` → `BiometricLockProvider` → `AppShell`.
+3. `DatabaseProvider` (`src/contexts/DatabaseContext.tsx`) calls `initializeDatabase()` (`src/database/connection.ts`) — opens `harmony.db`, applies PRAGMAs (foreign_keys=ON, WAL, synchronous=NORMAL), runs 34 migrations (`src/database/migrations.ts`).
+4. `AppShell` blocks on `DatabaseLoadingScreen` until `isReady`, then renders `AppNavigator` behind `DynamicBackground`; shows `InitialPairingModal` on first launch and overlays `LockScreen` when biometric lock is active.
+5. `AppNavigator` starts at `MainTabs` (initial tab `Chat`).
 
-**Sync Flow:**
-1. SyncService initiates WebSocket connection via ConnectionManager
-2. Handshake performed with paired device
-3. Bidirectional data sync via sync tables
-4. Changes applied atomically to local database
-5. Recon tracking identifies stale/corrupted records
+**Sync Flow (local ↔ backend):**
 
-**Entity & Character Management Flow:**
-1. User creates entity via CreateAIScreen or EntityConfigEditScreen
-2. Character profile linked to entity via CharacterProfileEditScreen
-3. Module mappings assigned via EntityModuleSelector (backend, cognition, imagination, movement, etc.)
-4. Provider configurations managed via ModuleConfigEditScreen with field schemas from `src/constants/`
-5. Emoji actions seeded via EntityEmojiActionService.defaults()
+1. `SyncService` (`src/services/SyncService.ts`, singleton) drives the sync protocol over a WebSocket managed by `ConnectionManager` (`src/services/connection/ConnectionManager.ts`).
+2. `ConnectionManager.createConnection()` builds a `WebSocketConnection` via `WebSocketConnectionFactory` (`src/services/websocket/WebSocketConnectionFactory.ts`) — mode selection: `unencrypted` | `secure` | `insecure-ssl` | `cloud` (map to `UnencryptedWebSocketConnection`, `SecureWebSocketConnection`, `InsecureSSLWebSocketConnection`, `CloudWebSocketConnection`).
+3. Incoming server records are buffered (`incomingDataBuffer`) and applied atomically on `SYNC_COMPLETE` using the **secondary** sync connection `getSyncDatabase()` (`src/database/connection.ts`) so UI reads on the main connection are never blocked.
+4. Sync writes happen in `src/database/sync.ts` with chunked base64 handling for `character_image.image_data` and `conversation_messages.image_data/audio_data` (1 MB chunks, 2 MB threshold).
+5. The sync pipeline can pause for user decisions: name-clash resolution (`src/services/syncNameClash.ts` → `'sync:nameclash'` event) and size-estimate confirmation (`'sync:estimate'` / `'sync:estimate:confirm'`).
+6. `ConnectionStateManager` (`src/services/ConnectionStateManager.ts`) persists per-source `last_sync_timestamp` watermarks to AsyncStorage.
+7. UI subscribes via `SyncConnectionContext` (`src/contexts/SyncConnectionContext.tsx`), surfaced to screens as `useSyncConnection()` (e.g. `canUseChat`, `connectionStatus` in `src/screens/ChatListScreen.tsx`).
 
-**Emoji Resolution Flow:**
-1. User types emoji in ChatDetailScreen
-2. EntityEmojiActionService.resolveMessageActions() splits text via EmojiService.splitTextOnEmojis()
-3. Each emoji looked up in per-entity action map (cached in-memory)
-4. Substitution text replaces emoji, emotion effects aggregated with clamping
-5. Effects sent alongside utterance to backend
+**Chat / Entity Session Flow:**
+
+1. `EntitySessionService` (`src/services/EntitySessionService.ts`, singleton) opens one WebSocket per participant (`entity-{entityId}`) through `ConnectionManager`; dual-participant chats create two concurrent connections (URLs uniquified by `makeUrlUnique`).
+2. `INIT_ENTITY` handshake establishes `EntitySession`s; an `InteractionSession` is created locally via `createInteraction` (`src/database/repositories/interactions.ts`) and persisted on first message.
+3. Messages are stored through `src/database/repositories/conversation_messages.ts`; audio playback/recording via `src/services/AudioPlayer.ts` / `AudioRecorder.ts`; transcriptions time out and are reconciled (`pendingTranscriptions`).
+4. `ChatDetailScreen` reads messages from the repository; `ChatListScreen` derives the conversation list from `interactions` + `conversation_messages` repositories.
+
+**Cloud Auth & Session Flow:**
+
+1. `AuthService` (`src/services/auth/AuthService.ts`, singleton) manages the cloud **PASETO + refresh-token** pair in Keychain (service `com.harmonyai.cloud.auth`), emits `auth:changed` / `auth:expired`. It is deliberately the only token owner — the Soulbits API client is built in PASETO-only mode (no refresh) to avoid in-memory/client refresh desync.
+2. `src/services/auth/authFetch.ts` provides typed fetch wrappers; OAuth via `src/services/auth/googleSignIn.ts` (Google) and `src/services/auth/appleSignIn.ts` (Apple), with `src/services/auth/tokenStorage.ts` for Keychain persistence.
+3. `CloudSessionService` (`src/services/cloud/CloudSessionService.ts`) brokers cloud session connect/disconnect via `buildSoulbitsClient()` (`src/services/cloud/soulbitsClient.ts`) against the session-broker host (`CLOUD_HOSTS.session`), then the conduct-proxy WebSocket (`WS_PATHS.sync`) carries the sync protocol.
+4. All hosts/OAuth IDs resolved in `src/config/cloud.ts` from `react-native-config` values injected by `scripts/oauth-secrets.cjs` (build flavor dev/prod).
+
+**State Management:**
+- No Redux/Zustand/MobX. State lives in: React Context (UI-facing state per provider), EventEmitter singletons (protocol/service state), SQLite (persistence), AsyncStorage (watermarks, flags, JWT for self-hosted HL path), Keychain (cloud tokens, DB encryption key).
+- `react-native-logs` (`src/utils/logger.ts`, `createLogger('[Tag]')`) is the logging convention used by every layer.
 
 ## Key Abstractions
 
-**Repository Pattern:**
-- Purpose: Encapsulate database operations for each entity type
-- Examples: `src/database/repositories/characters.ts`, `src/database/repositories/entities.ts`, `src/database/repositories/conversation_messages.ts`, `src/database/repositories/interactions.ts`, `src/database/repositories/emoji_actions.ts`, `src/database/repositories/modules.ts`, `src/database/repositories/providers.ts`, `src/database/repositories/memories.ts`, `src/database/repositories/sync.ts`
-- Pattern: Each repository provides CRUD operations for a specific model
-- Repository-level business logic includes derivation functions (e.g., `deriveScopeFromParticipants()` in interactions)
+**Database adapter interface:**
+- Purpose: Abstract SQLite so the same code runs on-device (react-native-sqlite-storage) and in Node tests (better-sqlite3).
+- Examples: interface in `src/database/types.ts`, device impl `src/database/reactNativeDatabase.ts`, node/test impl `src/database/__test_utils__/nodeDatabase.ts`.
+- Pattern: Repository functions receive/use the `Database` interface from `getDatabase()` / `getSyncDatabase()`.
 
-**Context Providers:**
-- Purpose: React Context for dependency injection and state sharing
-- Examples: `src/contexts/ThemeContext.tsx`, `src/contexts/DatabaseContext.tsx`, `src/contexts/EmojiContext.tsx`
-- Pattern: Custom hooks (useTheme, useAppTheme, useDatabase, useSyncConnection, useEntitySession, useEmoji) for accessing context
-- Provider hierarchy: SafeAreaProvider → ThemeProvider → DatabaseProvider → SyncConnectionProvider → EntitySessionProvider → EmojiProvider
+**WebSocketConnection hierarchy:**
+- Purpose: Uniform connection contract with mode-specific TLS/cloud behaviors.
+- Examples: interface `src/services/websocket/WebSocketConnection.ts`; impls `UnencryptedWebSocketConnection.ts`, `SecureWebSocketConnection.ts`, `InsecureSSLWebSocketConnection.ts`, `CloudWebSocketConnection.ts`; created via `WebSocketConnectionFactory.ts`.
+- Pattern: Abstract Factory keyed on `ConnectionMode` (`'unencrypted' | 'secure' | 'insecure-ssl' | 'cloud'`).
 
-**Service Singletons:**
-- Purpose: Manage application-wide business logic
-- Examples: SyncService (singleton), ConnectionManager (singleton), EmojiService (singleton), EntityEmojiActionService (singleton)
-- Pattern: EventEmitter-based for async operations, in-memory caching for performance
+**Singleton EventEmitter services:**
+- Purpose: Long-lived, app-wide service instances with typed event contracts.
+- Examples: `SyncService`, `EntitySessionService`, `AuthService`, `CloudSessionService`, `ConnectionManager`, `ConnectionStateManager` — all `class X extends EventEmitter<XEvents>` with `private constructor()` + `static getInstance()`.
+- Pattern: Consumers subscribe to typed event interfaces; contexts bridge events to React state.
 
-**Transaction Helpers:**
-- Location: `src/database/transaction.ts`
-- `withTransaction<T>(db, fn)` - Wraps operations in atomic transactions with auto-rollback
-- `execInTransaction(db, sql, params)` - Simple single-statement transaction wrapper
+**Per-table repositories:**
+- Purpose: All SQL lives in repository modules; screens/services never write raw SQL in production code.
+- Examples: `src/database/repositories/entities.ts`, `characters.ts`, `interactions.ts`, `conversation_messages.ts`, `modules.ts`, `memories.ts`, `emoji_actions.ts`, `emotion_state.ts`, `sync.ts`.
+- Pattern: Plain exported async functions (`getAllEntities()`, `createInteraction(...)`), selected from barrel `src/database/index.ts`.
 
-**Config Schema System:**
-- Location: `src/constants/`
-- Module types defined with provider options and field definitions
-- Provider field schemas define form rendering metadata
-- Extended param metadata for LLM sampling parameters (top_k, min_p, etc.)
+**Per-provider config repositories:**
+- Purpose: Isolated config persistence for each backend provider.
+- Examples: 16 files in `src/database/repositories/providers/` (e.g. `OpenAIProviderConfigRepository.ts`, `SoulbitsCloudProviderConfigRepository.ts`, `AnthropicProviderConfigRepository.ts`) plus `shared.ts`.
+- Pattern: One repository file per provider, re-exported from `src/database/index.ts`.
 
-## Interaction Session Model
-
-**Purpose:** Replace simple entity-pair chat with session-based interactions supporting private, group, and world scopes.
-
-**Scope Derivation:**
-- 0 or 1 participants → `world`
-- 2 participants → `private`
-- 3+ participants → `group`
-
-**Participant Key:**
-- private: sorted pair of entity IDs joined by `+`
-- group: all sorted participant IDs joined by `+`
-- world: empty string
-
-**Key files:** `src/database/repositories/interactions.ts`, `src/database/models.ts` (Interaction interface)
+**Versioned migrations:**
+- Purpose: Forward-only schema evolution with a schema dump for parity checks.
+- Examples: `src/database/migrations/000001_initial_schema.ts` … `000036_backfill_character_profile_source.ts`, orchestrated by `src/database/migrations.ts`; dump tool `scripts/dump-schema.ts` + comparison `scripts/compare-schemas.py` against `schema/rn-schema.json`.
+- Note: Migrations 000035/000036 add a CLIENT-ONLY table (`character_profile_sources`) that is excluded from the RN↔Go schema parity dump via `CLIENT_ONLY_TABLES` in `scripts/dump-schema.ts` — it never exists on the engine.
 
 ## Entry Points
 
-**App Entry:**
+**index.js:**
+- Location: `index.js`
+- Triggers: Native app launch (`AppRegistry.registerComponent`).
+- Responsibilities: Install `crypto.getRandomValues` polyfill first, register root component.
+
+**App.tsx:**
 - Location: `App.tsx`
-- Triggers: React Native app launch
-- Responsibilities: Initialize all providers (Theme, Database, SyncConnection, EntitySession, Emoji), show loading screen, handle first-launch pairing modal
+- Triggers: Registered by `index.js`.
+- Responsibilities: Compose provider tree; `AppShell` gates rendering on DB readiness, shows pairing modal / lock screen overlays, renders background + navigator inside `PaperProvider`.
 
-**Navigation Entry:**
+**AppNavigator:**
 - Location: `src/navigation/AppNavigator.tsx`
-- Triggers: App ready state
-- Responsibilities: Native stack navigation, route definitions (18 screens), screen composition
-- Initial route: Landing (not ChatList as in earlier versions)
+- Triggers: Mounted by `AppShell`.
+- Responsibilities: Define root stack (`RootStackParamList`), transparent nav theme, register `MainTabs` + ~25 pushed routes (ChatDetail, settings subpages, auth, setup, dev-only `DatabaseTableViewer` behind `__DEV__`).
 
-**Database Entry:**
-- Location: `src/database/index.ts`
-- Triggers: DatabaseProvider initialization
-- Responsibilities: Export all database functionality, migrations, repositories, transaction helpers
+**MainTabNavigator:**
+- Location: `src/navigation/MainTabNavigator.tsx`
+- Triggers: `MainTabs` stack route.
+- Responsibilities: 5-tab layout (Discover, Search, Chat, Characters, Settings) with custom `GlassTabBar` and center-anchored Chat default.
+
+**Native entry points:**
+- Android: `android/app/src/main/java/ai/soulbits/chat/MainActivity.kt` + `MainApplication.kt` (package `ai.soulbits.chat`).
+- iOS: `ios/HarmonyAIChat/AppDelegate.swift` (standard RN bootstrap), `ios/HarmonyAIChat/Info.plist`, Google/Apple OAuth plists (`GoogleService-Info.plist`, `GoogleService-Info-Dev.plist`).
 
 ## Error Handling
 
-**Strategy:** Try-catch with logging, user-facing error states
+**Strategy:** Layered — render-level guard via ErrorBoundary; service-level typed errors; per-call try/catch with structured logging.
 
 **Patterns:**
-- Service methods throw errors with descriptive messages
-- Screens catch errors and display Alert/Toast messages
-- Database operations wrapped in transactions with rollback via `withTransaction()`
-- WebSocket errors trigger reconnection attempts
-- Emoji service initialization errors logged and surfaced to user
+- `src/components/ErrorBoundary.tsx` wraps the whole app (catches render errors in the provider/screen tree).
+- Typed error classes with actionable metadata: `AuthError` (carries `status` number for screen branching) and `AuthExpiredError` in `src/services/auth/AuthService.ts`.
+- Database failures: `openDatabase` deletes a corrupt DB file and retries (`src/database/connection.ts`); `clearDatabaseData`/`wipeDatabaseCompletely` are test/recovery paths.
+- Connection errors propagate through `ConnectionManager` events (`connection:error`, `cert:verification_failed`) surfaced by `SyncConnectionContext`.
+- Fallback values over crashes: e.g. `normalizeTimestampForSync` returns current time on parse failure (`src/database/sync.ts`).
+- Logging everywhere via `createLogger('[Tag]')` (`src/utils/logger.ts`).
 
 ## Cross-Cutting Concerns
 
-**Logging:** Custom logger via `src/utils/logger.ts` using react-native-logs with per-module prefixes (e.g., `[EmojiService]`, `[EntityEmojiActionService]`)
+**Logging:** `react-native-logs` through `createLogger('[Tag]')` in `src/utils/logger.ts`; every module creates its own tagged logger (`[Database]`, `[SyncService]`, `[EntitySessionService]`, ...).
 
-**Validation:** Not centralized - validation logic embedded in services and repositories
+**Validation:** Lightweight — mostly manual parameter checks (e.g. `ConnectionManager.createConnection` requires `entityId` for entity connections); config schemas driven by constants (`src/constants/providerFieldSchemas.ts`, `src/constants/soulbitsModels.ts`). No zod/joi.
 
-**Authentication:** Device pairing via WebSocket, stored in AsyncStorage
+**Authentication:** Two independent credential paths — cloud PASETO in Keychain (`src/services/auth/AuthService.ts`, tokenStorage) and self-hosted HL `harmony_jwt` in AsyncStorage (referenced in AuthService docs, kept separate by design).
 
-**Theme:** Centralized in ThemeContext with support for 9 themes (classicHarmony, forestNight, midnightRose, oceanBreeze, pureDark, sunsetGlow, soulBitsDark, soulBitsLight). Themed component wrappers in `src/components/themed/` (ThemedView, ThemedText, ThemedButton, ThemedCard, ThemedAppbar, ThemedGradient, SectionHeader)
+**Theming:** `ThemeContext` → `PaperProvider` (react-native-paper MD3) + custom `Theme` objects (`src/theme/`); `useAppTheme()` returns `theme` with semantic color groups (e.g. `theme.colors.background.base`).
+
+**Localization:** i18next via `I18nContext`; `useTranslation('namespace')` throughout; 24 `en` namespaces in `src/i18n/locales/en/`.
+
+**Security:** DB at rest in app documents dir with encryption-key machinery (SQLCipher not currently linked — `getOrCreateEncryptionKey` is a passthrough, see `src/database/connection.ts`); TLS variants for self-hosted links (`InsecureSSLWebSocketConnection` with cert verification); biometric lock overlay (`src/components/lock/LockScreen.tsx`, `src/services/BiometricLockService.ts`).
 
 ---
 
-*Architecture analysis: 2026-05-24*
+*Architecture analysis: 2026-08-07*

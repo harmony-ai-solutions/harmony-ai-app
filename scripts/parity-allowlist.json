@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "description": "Versioned allowlist of deliberate, sanctioned cross-repo schema divergences loaded by scripts/compare-schemas.py. A divergence present here is an intentional difference between the RN schema and the Go engine schema — NOT drift. The comparator exits 0 only when (actual divergence set − allowlist set) is empty AND every allowlist entry still matches a real divergence.",
+  "policy": "Allowlist entries may only be REMOVED (as a drift is reconciled), never ADDED, without a senior-dev ruling. The 4-2 additions (table:sync_devices, and table:sync_history converting to go-only) are pre-sanctioned by engine contract 21-Engine-Contract-Persona-Enums.md §9-A14 and are cited in the entry reasons below. kind values: 'rn-only' | 'go-only' | 'different-sql'.",
+  "entries": [
+    {
+      "key": "table:device_push_tokens",
+      "kind": "go-only",
+      "reason": "Engine push infrastructure; the app's migration 000039 is the reserved-name placeholder that deliberately never creates this table. Stays Go-only in the §9-A14 end state."
+    },
+    {
+      "key": "table:sync_devices",
+      "kind": "go-only",
+      "reason": "Engine-local sync-infra table; the app copy was dead code and dropped by paired app migration 000043 (zero-caller repo sync.ts deleted). Sanctioned by §9-A14."
+    },
+    {
+      "key": "table:sync_history",
+      "kind": "go-only",
+      "reason": "Engine-local sync-infra table; the app copy was dead code and dropped by paired app migration 000043 (zero-caller repo sync.ts deleted). Converted from the interim different-sql entry per §9-A14 sanction."
+    }
+  ]
+}

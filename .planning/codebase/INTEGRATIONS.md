@@ -1,186 +1,104 @@
 # External Integrations
 
-**Analysis Date:** 2026-05-24
+**Analysis Date:** 2026-08-07
 
-## Primary Integration
+## APIs & External Services
 
-**Harmony Link (Backend):**
-- Primary integration point - all AI capabilities provided through Harmony Link
-- Connection via WebSocket (ws:// or wss://) with three security modes: unencrypted, secure (WSS with CA certs), insecure-ssl (self-signed certs)
-- Connection management: `src/services/connection/ConnectionManager.ts`
-- Connection state & JWT lifecycle: `src/services/ConnectionStateManager.ts`
-- Sync service: `src/services/SyncService.ts`
-- WebSocket protocol implementations in `src/services/websocket/`:
-  - `BaseWebSocketConnection.ts` - Abstract base class
-  - `SecureWebSocketConnection.ts` - WSS with CA-signed certificates
-  - `InsecureSSLWebSocketConnection.ts` - WSS with self-signed certificates
-  - `UnencryptedWebSocketConnection.ts` - Plain WS
-  - `WebSocketConnectionFactory.ts` - Factory for connection creation
-- Entity session management: `src/services/EntitySessionService.ts` (replaces old DualEntitySession)
-- Participants have N+1 WebSocket connections per interaction (D-18)
+**Soulbits Cloud Backend (first-party, primary cloud integration):**
+- Backend repo: sibling `soulbits-cloud-backend` (Go, REST + WebSocket) in the same GOPATH org — NOT part of this repo
+- REST client: `@harmony-ai-solutions/soulbits-api-client` (git dependency pinned to commit `518c9e8...`, built on `openapi-fetch`), factory at `src/services/cloud/soulbitsClient.ts`
+- Host resolution: `src/config/cloud.ts` — `https://{beta.}cloud.soulbits.app` (API gateway routing `/v1/auth/*` → auth-service, `/v1/session/*` → session-broker), `https://{beta.}api.soulbits.app` (inference), `wss://{beta.}connect.soulbits.app` (conduct proxy)
+- Endpoints (auth-service, `AUTH_ENDPOINTS` in `src/config/cloud.ts`): `POST /v1/auth/login`, `/register`, `/refresh`, `/logout`, `/google`, `/apple`, `/resend-verification`, `GET /v1/auth/me`
+- Session broker: `POST /v1/session/connect`, `/disconnect` via `CloudSessionService` (`src/services/cloud/CloudSessionService.ts`) — async provisioning with 202 polling, max 95 attempts, 2s retry (`DEFAULT_CLOUD_RETRY_MS`, `MAX_PROVISIONING_ATTEMPTS` in `src/config/cloud.ts`)
+- Inference: public `GET /v1/models` model catalog with 5-min cache + static fallback (`src/services/cloud/soulbitsModelsCatalog.ts`); inference URL passed to the soulbits client
+- WebSocket conduct proxy: `/ws/sync`, `/ws/worker` paths (`WS_PATHS` in `src/config/cloud.ts`); classes in `src/services/websocket/CloudWebSocketConnection.ts`
+- Auth: **PASETO v4.local** bearer tokens + rotating refresh tokens; the client is built PASETO-only (no auto-refresh — refresh is owned by `AuthService`, see `src/services/cloud/soulbitsClient.ts`)
 
-**Connection Protocol:**
-- JWT token obtained via HTTP handshake (stored in AsyncStorage key `harmony_jwt`)
-- Bearer token sent in `Sec-WebSocket-Protocol` header during WebSocket upgrade
-- Three connection lifecycle modes: pairing → JWT grant → WebSocket session
-- Security mode per-device stored in AsyncStorage (`harmony_security_mode`)
-- Auto-reconnect with exponential backoff capped at 30s for partner disconnects
-
-**Event Flow:**
-- `INIT_ENTITY` - Register an entity for a chat session
-- `ENTITY_UTTERANCE` - Send/receive chat messages
-- `ENTITY_UTTERANCE_EDIT` - Edit sent messages
-- `STT_INPUT_AUDIO` / `STT_OUTPUT_TEXT` - Speech-to-text transcription
-- `TYPING_INDICATOR` / `RECORDING_INDICATOR` - Presence indicators
-- `SET_REPLY_MODE` - Toggle instant vs realistic reply mode
-- `ENTITY_SESSION_END` - End a session
-- `SYNC_*` - Database synchronization events
-
-**Harmony Cloud:**
-- Optional cloud backend (future)
-- Not currently implemented - database table placeholders exist
+**Harmony Link (self-hosted desktop bridge, Go/Wails):**
+- Backend repo: sibling `harmony-link-private` (Go, `go.mod` present there) — a desktop app the mobile app pairs with over LAN
+- WebSocket endpoints: WSS `/events` (secure) / WS (unencrypted) — URLs + JWT + server cert persisted in AsyncStorage (`src/services/ConnectionStateManager.ts`, storage keys `harmony_wss_url`, `harmony_jwt`, `harmony_server_cert`, `harmony_security_mode`)
+- Security modes: `secure` (wss + pinned self-signed cert), `insecure-ssl`, `unencrypted`, `cloud` — implemented by `src/services/websocket/InsecureSSLWebSocketConnection.ts`, `SecureWebSocketConnection.ts`, `UnencryptedWebSocketConnection.ts`, factory in `src/services/websocket/WebSocketConnectionFactory.ts`
+- Pairing flow: `ConnectionSetupScreen` (`src/screens/setup/ConnectionSetupScreen.tsx`), `InitialPairingModal` (`src/components/modals/InitialPairingModal.tsx`)
+- Sync protocol: `src/services/SyncService.ts`, `src/services/websocket/BaseWebSocketConnection.ts`, `src/database/sync.ts`; schema parity between the RN app and the Go engine is enforced in CI (`.github/workflows/build-release.yml` job `schema-parity`, using `scripts/compare-schemas.py` + `scripts/dump-schema.ts`)
+- E2E override: `HARMONY_LINK_WSS_URL`/`HARMONY_LINK_WS_URL` injected as Android buildConfigFields (dev flavor only) — `applyE2EOverride()` in `ConnectionStateManager`
 
 ## Data Storage
 
-**Database:**
-- SQLite via react-native-sqlite-storage 6.0.1
-- Database name: `harmony.db`
-- Location: App's document directory
-- Encryption: SQLCipher with 256-bit key stored in device keychain (service: `com.harmonyai.database`)
-- Connection: `src/database/connection.ts`
-- Schema: `src/database/migrations/` (28 migrations, up from 11 in March 2026)
-
-**New Tables Since March 2026:**
-- `entity_emoji_actions` - Per-entity emoji-to-RP-text mappings with emotion effects and metabolism vectors
-- `interactions` - Interaction session tracking with scope-aware indexing (world/private/group), presence_type, memory_id, continued_interaction_id
-
-**Schema Changes Since March 2026:**
-- `entities` - Added `alias` column (unique, human-readable name)
-- `conversation_messages` - Added `is_recon_followup`, `is_edited`, `edit_of_message_id`; removed `session_id`; added `interaction_id`
-- `provider_config_openai` - Added 10 LLM params (frequency_penalty, presence_penalty, max_completion_tokens, seed, response_format, reasoning_effort, top_k, top_a, min_p, repetition_penalty, sampling_preset_name, extra_params); dropped chat_template_kwargs
-- `provider_config_openaicompatible` - Added 9+ LLM params; dropped chat_template_kwargs
-- `provider_config_openrouter` - Added 9+ LLM params; dropped chat_template_kwargs
+**Databases:**
+- SQLite via `react-native-sqlite-storage` `^6.0.1` — local DB `harmony.db` at `RNFS.DocumentDirectoryPath` (`src/database/connection.ts`); WAL mode, foreign keys ON, synchronous NORMAL; secondary connection for sync write-transactions (`getSyncDatabase()`)
+- 36 migration files in `src/database/migrations/0000XX_*.ts` (initial schema through `000036_backfill_character_profile_source`), applied by `src/database/migrations.ts`. Migrations 000035/000036 create a CLIENT-ONLY sidecar `character_profile_sources` (source tagging for the Discover community grid) — excluded from the schema-parity dump.
+- Repository layer: `src/database/repositories/` (characters, conversation_messages, entities, interactions, memories, modules, sync, emotion_state, emoji_actions, providers)
+- Node-side SQLite (`better-sqlite3`, devDependency) mirrors the schema for tests: `src/database/__test_utils__/nodeDatabase.ts`, `schema/rn-schema.json`
 
 **File Storage:**
-- Local filesystem only (react-native-fs 20.0.0)
-- Audio files, images stored in app's document directory
-- Emoji sprite sheets: `src/assets/emoji/sheets/google-64.png`, `twitter-64.png`
-- No cloud storage integration
+- Local filesystem only (`react-native-fs`): database files, audio recordings, imported images/character cards. No cloud object-storage client in the app
 
 **Caching:**
-- @react-native-async-storage/async-storage for key-value caching
-- Stores: JWT tokens, WebSocket URLs (WS + WSS), server certificates, user preferences, global impersonated entity, reply mode preferences, last-read timestamps
+- In-memory caches only: `soulbitsModelsCatalog` model cache (5-min TTL + single-flight, `src/services/cloud/soulbitsModelsCatalog.ts`); AuthService in-memory token cache (`src/services/auth/AuthService.ts`). No Redis/Memcached
+
+**Secure Storage:**
+- `react-native-keychain` — Keychain service `com.harmonyai.cloud.auth` for cloud PASETO/refresh tokens (`src/services/auth/tokenStorage.ts`); service `com.harmonyai.database` for the DB encryption key (SQLCipher not linked — key generated but unused for encryption, per comments in `src/database/connection.ts`)
 
 ## Authentication & Identity
 
 **Auth Provider:**
-- Custom JWT-based authentication with Harmony Link
-- JWT stored in AsyncStorage (`harmony_jwt` key)
-- Token expiry tracked in AsyncStorage (`harmony_token_expires_at`)
-- WebSocket connections use Bearer token in Sec-WebSocket-Protocol header
-- Connection state managed by singleton `ConnectionStateManager` (`src/services/ConnectionStateManager.ts`)
-- States: paired/unpaired, connected/disconnected, token valid/expired, requires re-pairing
+- First-party Soulbits auth-service (JWT-alternative: PASETO v4.local + rotating refresh tokens), flows in `src/services/auth/AuthService.ts`
+- **Google Sign-In**: `@react-native-google-signin/google-signin` `^16.1.2` (`src/services/auth/googleSignIn.ts`) — native id_token flow; Android auto-discovers OAuth client from `android/app/google-services.json`; iOS uses `GOOGLE_WEB_CLIENT_ID` (webClientId) + `GoogleService-Info.plist` (`ios/HarmonyAIChat/GoogleService-Info.plist`, `-Dev.plist`); backend endpoint `POST /v1/auth/google`
+- **Apple Sign-In**: `@invertase/react-native-apple-authentication` `^2.5.1` (`src/services/auth/appleSignIn.ts`) — identity_token flow, `POST /v1/auth/apple`; needs `APPLE_SERVICES_ID` (injected per-flavor)
+- OAuth identifiers injected at build time by `scripts/oauth-secrets.cjs` from gitignored GCP `client_secret_*.json` — never hardcoded (`OAUTH` object in `src/config/cloud.ts`)
+- Local/Harmony-Link auth is a separate self-hosted JWT (`harmony_jwt` in AsyncStorage), independent of cloud credentials
 
-**Secure Storage:**
-- React Native Keychain for sensitive data (service: `com.harmonyai.database`)
-- Database encryption key stored in keychain
-- JWT tokens and connection URLs stored in AsyncStorage (non-keychain, encrypted at rest by OS)
+## Third-Party AI Providers (user-configured)
 
-**Device Identity:**
-- Device unique ID via `react-native-device-info` used during pairing
-- Device ID used in INIT_ENTITY payload
+- Provider configs stored in SQLite and synced to the engine; repos in `src/database/repositories/providers/`:
+  - Anthropic, OpenAI, OpenRouter, Mistral, XAI, Google, Ollama (local), LocalAI, OpenAI-compatible, CharacterAI, Kindroid, Kajiwoto, ElevenLabs (TTS), ComfyUI (image), HarmonySpeech (speech engine), SoulbitsCloud (cloud inference)
+- The SoulbitsCloud provider stores the current cloud PASETO as its `api_key` and is bulk-refreshed on token rotation (`updateAllSoulbitsCloudApiKeys` in `src/database/repositories/providers/SoulbitsCloudProviderConfigRepository.ts`)
+- The app does not call these providers directly — it passes their configs to Harmony Link / Soulbits engine over sync (`src/services/SyncService.ts`)
 
 ## Monitoring & Observability
 
 **Error Tracking:**
-- Not detected - No external error tracking service integrated
+- None external. `src/components/ErrorBoundary.tsx` catches render errors in-app; no Sentry/Bugsnag/Crashlytics SDK detected
 
 **Logs:**
-- react-native-logs 5.5.0 - Structured logging
-- Custom logger in `src/utils/logger.ts`
-- Log tags: `[ConnectionManager]`, `[ConnectionStateManager]`, `[EntitySessionService]`, `[EmojiService]`, `[SyncService]`, `[AudioPlayer]`, `[AudioRecorder]`
+- `react-native-logs` `^5.5.0` with console transport (`src/utils/logger.ts`) — namespace loggers via `createLogger('[Namespace]')`, `[SOULBITS]` tag for ADB logcat filtering, severity `error` in production. No remote log shipping
 
 ## CI/CD & Deployment
 
 **Hosting:**
-- Not applicable - Mobile app distributed via app stores
+- Artifact distribution: AWS S3 bucket `soulbits-releases` (region `eu-central-1`) served via `download.soulbits.app`; APK/IPA uploaded per version and per environment (`dev`/`prod`) by `.github/workflows/build-release.yml`; GitHub Releases created with download links
 
 **CI Pipeline:**
-- Not detected - No CI/CD configuration found
+- GitHub Actions (`.github/workflows/`):
+  - `test.yml` — PR/push gate: typecheck (`tsc --noEmit`) + lint, unit tests w/ coverage, integration tests, migration tests (Node 20, ubuntu-latest)
+  - `build-release.yml` — tag/`workflow_dispatch` builds: schema-parity gate (vs `harmony-link-private` Go schema, requires `HARMONY_LINK_REPO_PAT`), test gate, Android APK matrix (dev/prod, JDK 17, release keystore from secrets), iOS IPA matrix (macos-15, unsigned `xcodebuild archive`), S3 upload, GitHub Release
+  - `e2e-android.yml` — Maestro E2E in Docker (KVM, Android 14 emulator, `soulbits/harmony-link:latest` image)
+  - `e2e-ios.yml` — Maestro E2E against iOS Simulator on macos-15 with native Go Harmony Link binary
+  - `schema-parity.yml` — dedicated schema drift check
+- Secrets used: `HARMONY_LINK_REPO_PAT`, `ANDROID_RELEASE_KEYSTORE_BASE64`/`_PASSWORD`/`_ALIAS`/`KEY_PASSWORD`, `AWS_S3_UPLOAD_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`; vars `GOOGLE_WEB_CLIENT_ID`, `APPLE_SERVICES_ID`
 
 ## Environment Configuration
 
-**Required env vars:**
-- None detected - All configuration stored in-app or synced from Harmony Link
+**Required env vars** (per `src/config/cloud.ts`, injected natively, exposed via `react-native-config`):
+- `APP_ENV` — `'dev' | 'prod'` (defaults to `__DEV__ ? 'dev' : 'prod'`)
+- `IS_BETA` — boolean build flavor switch (Android: real boolean; iOS: string from xcconfig — handled with `=== true || === 'true'`)
+- `GOOGLE_WEB_CLIENT_ID` — iOS Google OAuth web client ID
+- `APPLE_SERVICES_ID` — Apple Sign-In services ID
+- `HARMONY_LINK_WSS_URL` / `HARMONY_LINK_WS_URL` — E2E-only Android buildConfigFields (dev flavor; empty in prod)
 
 **Secrets location:**
-- Provider API keys: SQLite database (`provider_config_*` tables)
-- Database encryption key: Device keychain
-- JWT tokens: AsyncStorage (key `harmony_jwt`)
-- Server certificate: AsyncStorage (key `harmony_server_cert`)
-- Harmony Link WebSocket URLs: AsyncStorage (keys `harmony_ws_url`, `harmony_wss_url`)
+- Build-time OAuth secrets sourced from gitignored GCP `client_secret_*.json` files via `npm run oauth:dev|prod` (`scripts/oauth-secrets.cjs`), writing `.env` (iOS/Metro) and `android/gradle-secrets.<flavor>.properties` (Android)
+- Runtime secrets: Keychain (cloud tokens, DB key), AsyncStorage (Harmony Link JWT + server cert)
+- `.env.example` present (repo root) — template; actual `.env` is gitignored
 
 ## Webhooks & Callbacks
 
 **Incoming:**
-- WebSocket connections from Harmony Link devices
-- Connection modes: unencrypted (ws://), secure (wss://), insecure-ssl (for self-signed certs)
-- Endpoints configured by user in settings screen
-- Event types handled: INIT_ENTITY responses, ENTITY_UTTERANCE, ENTITY_UTTERANCE_EDIT, STT_OUTPUT_TEXT, TYPING_INDICATOR, RECORDING_INDICATOR
+- None (mobile client — no public webhook endpoints)
 
 **Outgoing:**
-- WebSocket connections to Harmony Link sync server and per-entity session connections (N+1 per interaction)
-- Entity session events: INIT_ENTITY, ENTITY_UTTERANCE, STT_INPUT_AUDIO, SET_REPLY_MODE, ENTITY_SESSION_END
-
-## AI Provider Integration (On-Device Mode)
-
-**Database tables exist for future AI provider configuration:**
-- `provider_config_openai` - OpenAI API (now with 10+ LLM sampling parameters)
-- `provider_config_ollama` - Local Ollama
-- `provider_config_openaicompatible` - Custom OpenAI-compatible endpoints
-- `provider_config_openrouter` - OpenRouter aggregator
-- `provider_config_mistral` - Mistral AI
-- Repository: `src/database/repositories/providers/` (per-file repos after Phase 7-0a split, e.g., `MistralProviderConfigRepository.ts`)
-- UI: `src/screens/AIConfigScreen.tsx` (currently non-functional)
-- These are placeholders for Phase 2 "On-Device AI model integration"
-- Migration 020 added per-provider LLM params (frequency_penalty, presence_penalty, top_k, top_a, min_p, repetition_penalty, etc.)
-- Migration 021 added sampling preset names and extra_params (JSON); dropped deprecated chat_template_kwargs
-
-## Special Integration Notes
-
-**Emoji System:**
-- Dual-data-source architecture: `@emoji-mart/data` for structure (categories, names, keywords), `emoji-datasource-twitter` for authoritative sprite sheet coordinates matching bundled PNGs
-- Local sprite sheets: `src/assets/emoji/sheets/google-64.png`, `twitter-64.png`
-- Service: `src/services/EmojiService.ts` (singleton, lazy-loaded)
-- Per-entity emoji action mappings in `entity_emoji_actions` table
-- Actions resolve emoji → RP substitution text with aggregated emotion effects (Ekman 8 emotions)
-- Service: `src/services/EntityEmojiActionService.ts` (singleton, cached)
-- 20 default emoji action seeds matching food/drink/emotion/action categories
-
-**Harmony Link Sync:**
-- Local network device pairing via WebSocket
-- Certificate-based secure connections supported
-- Multiple concurrent entity sessions supported (N+1 connections per interaction)
-- Session persistence with JWT expiry tracking (auto-detects expired tokens, flags for re-pairing)
-- Auto-sync triggers on session start, incoming messages, and explicit sync requests
-- Partner auto-reconnect with exponential backoff (1s → 30s max, 5+ attempts)
-- App background → all sessions closed gracefully
-- See `src/services/SyncService.ts`, `src/services/EntitySessionService.ts`, `src/services/ConnectionStateManager.ts`
-
-**Audio Processing:**
-- Audio recording via `react-native-audio-record` (`src/services/AudioRecorder.ts`)
-- Audio playback via `react-native-track-player` (`src/services/AudioPlayer.ts`) - binary TTS output
-- STT transcription flow: record → store locally → send via WebSocket → receive text on callback
-- 30-second transcription timeout with retry support
-- music-metadata for audio duration parsing on incoming audio messages
-
-**Chat Preferences:**
-- Per-chat impersonated entity stored in AsyncStorage (`chat_entity_pref_*`)
-- Global impersonated entity stored in AsyncStorage (`chat_global_impersonated_entity`)
-- Per-chat reply mode (instant/realistic) stored in AsyncStorage (`chat_reply_mode_*`)
-- Last-read timestamp tracking for unread indicators
-- Service: `src/services/ChatPreferencesService.ts`
+- No outgoing webhooks; all push-style traffic is over WebSocket: `wss://connect.soulbits.app/ws/sync` + `/ws/worker` (cloud, `src/config/cloud.ts`) and the Harmony Link WSS `/events` endpoint (`src/services/ConnectionStateManager.ts`)
 
 ---
 
-*Integration audit: 2026-05-24 (updated from 2026-03-05)*
+*Integration audit: 2026-08-07*

@@ -65,7 +65,7 @@ export async function updateKindroidProviderConfig(config: KindroidProviderConfi
   const db = getDatabase();
   return withTransaction(db, async (tx) => {
     const [result] = await tx.executeSql(
-      'UPDATE provider_config_kindroid SET name = ?, api_key = ?, kindroid_id = ? WHERE id = ?',
+      'UPDATE provider_config_kindroid SET name = ?, api_key = ?, kindroid_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [config.name, config.api_key, config.kindroid_id, config.id]
     );
     if (result.rowsAffected === 0) throw new Error(`Kindroid provider config not found: ${config.id}`);
@@ -76,17 +76,12 @@ export async function isKindroidProviderConfigInUse(id: string): Promise<boolean
   return isProviderConfigInUse('kindroid', id);
 }
 
-export async function deleteKindroidProviderConfig(id: string, permanent = false): Promise<void> {
+export async function deleteKindroidProviderConfig(id: string): Promise<void> {
   const db = getDatabase();
-  if (!permanent && await isKindroidProviderConfigInUse(id)) throw new Error(`Kindroid provider config ${id} is in use and cannot be soft deleted`);
+  if (await isKindroidProviderConfigInUse(id)) throw new Error(`Kindroid provider config ${id} is in use and cannot be soft deleted`);
   return withTransaction(db, async (tx) => {
-    if (permanent) {
-      const [result] = await tx.executeSql('DELETE FROM provider_config_kindroid WHERE id = ?', [id]);
-      if (result.rowsAffected === 0) throw new Error(`Kindroid provider config not found: ${id}`);
-    } else {
-      const now = new Date().toISOString();
-      const [result] = await tx.executeSql('UPDATE provider_config_kindroid SET deleted_at = ? WHERE id = ?', [now, id]);
-      if (result.rowsAffected === 0) throw new Error(`Kindroid provider config not found: ${id}`);
-    }
+    const now = new Date().toISOString();
+    const [result] = await tx.executeSql('UPDATE provider_config_kindroid SET deleted_at = ? WHERE id = ?', [now, id]);
+    if (result.rowsAffected === 0) throw new Error(`Kindroid provider config not found: ${id}`);
   });
 }

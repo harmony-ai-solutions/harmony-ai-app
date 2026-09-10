@@ -1,7 +1,7 @@
 import React, { memo, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { EmojiText } from './EmojiText';
-import { useEmoji } from '../../contexts/EmojiContext';
+import { useEmojiPreferences } from '../../contexts/EmojiContext';
 import EmojiService from '../../services/EmojiService';
 
 interface EmojiAwareTextProps {
@@ -12,7 +12,7 @@ interface EmojiAwareTextProps {
 }
 
 export const EmojiAwareText: React.FC<EmojiAwareTextProps> = memo(({ content, style, fontSize = 16, color }) => {
-  const { emojiSet } = useEmoji();
+  const { emojiSet } = useEmojiPreferences();
 
   const normalizedText = useMemo(() => EmojiService.parseShortcodes(content), [content]);
 

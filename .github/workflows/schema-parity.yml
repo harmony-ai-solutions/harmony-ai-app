@@ -1,0 +1,101 @@
+# Schema Parity Gate
+#
+# This workflow compares the schema produced by the RN migrations against the
+# schema produced by the Harmony Link Go migrations. They must match exactly
+# because the two databases exchange data via bidirectional sync.
+#
+# How to interpret failures:
+#   - "RN-only entries": Table/index exists in RN but not in Go → fix Go migrations
+#   - "Go-only entries": Table/index exists in Go but not in RN → fix RN migrations
+#   - "Different SQL": Column types, constraints, or defaults diverge → fix one side
+#   - Comments in SQL are cosmetic; they are stored in sqlite_master and will cause
+#     a diff even if the schema is functionally identical.
+#
+# How to update the baseline when intentionally changing the schema:
+#   1. Update migrations in BOTH repos (RN + Go)
+#   2. Regenerate RN baseline:
+#      npm run schema:dump -- --output schema/rn-schema.json
+#   3. Regenerate Go baseline:
+#      cd harmony-link-private && go run . dump-schema 2>/dev/null | tail -n +4 > schema/go-schema.json
+#   4. Commit both baseline files alongside the migration change
+#
+# Note: The Go `dump-schema` command outputs 3 informational lines to stdout
+# from initConfig() before the JSON dump. The `tail -n +4` filter strips them.
+# See .current_work/test-framework-overhaul/5-2-GoSchemaDumpCommand.md for details.
+
+name: Schema Parity
+
+on:
+  pull_request:
+    paths:
+      - 'src/database/migrations/**'
+      - 'schema/**'
+      - 'scripts/dump-schema.ts'
+      - 'scripts/compare-schemas.py'
+      - '.github/workflows/schema-parity.yml'
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parity:
+    name: RN ↔ Harmony Link schema parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout RN app
+        uses: actions/checkout@v4
+
+      - name: Checkout Harmony Link (Go)
+        uses: actions/checkout@v4
+        with:
+          repository: harmony-ai-solutions/harmony-link-private
+          token: ${{ secrets.HARMONY_LINK_REPO_PAT }}
+          path: harmony-link
+          # Pin to the branch/ref the RN app currently targets. Use 'main' for development.
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install RN dependencies
+        run: npm ci
+
+      - name: Install Go dependencies
+        working-directory: harmony-link
+        run: go mod download
+
+      - name: Dump RN schema
+        run: npm run schema:dump -- --output rn-schema.current.json
+
+      - name: Dump Go schema
+        working-directory: harmony-link
+        # initConfig() prints 3 informational lines to stdout before the JSON.
+        # Strip them with tail -n +4 so the comparison is clean.
+        # stderr (compilation output, database log messages) goes to the CI log directly.
+        run: go run . dump-schema | tail -n +4 > ../go-schema.current.json
+
+      - name: Compare schemas
+        run: python3 scripts/compare-schemas.py rn-schema.current.json go-schema.current.json
+
+      - name: Upload schemas on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-diff
+          path: |
+            rn-schema.current.json
+            go-schema.current.json

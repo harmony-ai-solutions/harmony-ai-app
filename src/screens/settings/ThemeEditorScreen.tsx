@@ -7,6 +7,7 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { Theme, ThemeColors } from '../../theme/types';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
+import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/AppNavigator';
@@ -111,7 +112,7 @@ export const ThemeEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         return (
             <TouchableOpacity
                 key={`${category}-${key}`}
-                style={[styles.colorItem, { borderBottomColor: currentAppTheme.colors.border.default }]}
+                style={styles.colorItem}
                 onPress={() => openColorPicker(category, key)}
             >
                 <View style={[styles.colorPreview, { backgroundColor: color, borderColor: currentAppTheme.colors.border.default }]} />
@@ -133,7 +134,10 @@ export const ThemeEditorScreen: React.FC<Props> = ({ navigation, route }) => {
                 <ThemedText weight="bold" size={18}>
                     {editingThemeId && baseTheme.isCustom ? 'Edit Theme' : 'New Theme'}
                 </ThemedText>
-                <TouchableOpacity onPress={handleSave}>
+                <TouchableOpacity onPress={() => {
+                    hapticLightPress();
+                    handleSave();
+                }}>
                     <ThemedText variant="accent" weight="bold">Save</ThemedText>
                 </TouchableOpacity>
             </View>
@@ -244,7 +248,10 @@ export const ThemeEditorScreen: React.FC<Props> = ({ navigation, route }) => {
                             <TouchableOpacity style={styles.modalButton} onPress={() => setPickerVisible(false)}>
                                 <ThemedText variant="secondary">Cancel</ThemedText>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={handleColorSave}>
+                            <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={() => {
+                                hapticLightPress();
+                                handleColorSave();
+                            }}>
                                 <ThemedText weight="bold" style={{ color: '#fff' }}>Apply</ThemedText>
                             </TouchableOpacity>
                         </View>
@@ -294,8 +301,7 @@ const styles = StyleSheet.create({
     colorItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 12,
-        borderBottomWidth: 1,
+        paddingVertical: 14,
     },
     colorPreview: {
         width: 40,

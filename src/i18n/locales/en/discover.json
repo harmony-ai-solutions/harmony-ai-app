@@ -1,0 +1,16 @@
+{
+  "title": "Discover",
+  "subtitle": "Discover AI characters created by other users",
+  "searchPlaceholder": "Search characters...",
+  "noResults": "No results found for \"{{query}}\"",
+  "noResultsHint": "Try a different name or letter.",
+  "noCharacters": "No characters to discover yet",
+  "noCharactersHint": "Characters created by other users will show up here.",
+  "previewHint": "Preview content while the community backend is in development",
+  "chatOpenFailed": "Could not open chat with this character.",
+  "recentPosts": "Recent Posts",
+  "tabCharacters": "Characters",
+  "tabPosts": "Posts",
+  "noPosts": "No posts yet",
+  "noPostsHint": "Posts shared by users will show up here."
+}

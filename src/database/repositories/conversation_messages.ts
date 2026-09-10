@@ -18,8 +18,9 @@ export async function createConversationMessage(
       image_data, image_mime_type, vl_model, vl_model_interpretation,
       emotional_state_bits,
       is_recon_followup, is_edited, edit_of_message_id,
+      reactions_json, reply_to_message_id, is_pinned,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       message.id,
       message.entity_id,
@@ -38,6 +39,9 @@ export async function createConversationMessage(
       message.is_recon_followup ? 1 : 0,
       message.is_edited ? 1 : 0,
       message.edit_of_message_id ?? null,
+      message.reactions_json ?? null,
+      message.reply_to_message_id ?? null,
+      message.is_pinned ? 1 : 0,
       now,
       now,
     ]
@@ -68,6 +72,7 @@ export async function getConversationMessagesByParticipantKey(
            cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
            cm.emotional_state_bits,
            cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
+           cm.reactions_json, cm.reply_to_message_id, cm.is_pinned, cm.is_read,
            cm.created_at, cm.updated_at, cm.deleted_at
     FROM conversation_messages cm
     JOIN interactions i ON cm.interaction_id = i.id
@@ -115,6 +120,10 @@ export async function getConversationMessagesByParticipantKey(
       is_recon_followup: row.is_recon_followup === 1,
       is_edited: row.is_edited === 1,
       edit_of_message_id: row.edit_of_message_id || null,
+      reactions_json: row.reactions_json || null,
+      reply_to_message_id: row.reply_to_message_id || null,
+      is_pinned: row.is_pinned === 1,
+      is_read: row.is_read === 1,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -168,6 +177,7 @@ export async function getRecentConversationMessages(
             cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
             cm.emotional_state_bits,
             cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
+            cm.reactions_json, cm.reply_to_message_id, cm.is_pinned, cm.is_read,
             cm.created_at, cm.updated_at, cm.deleted_at
      FROM conversation_messages cm
      WHERE cm.id IN (${placeholders})
@@ -202,6 +212,10 @@ export async function getRecentConversationMessages(
       is_recon_followup: row.is_recon_followup === 1,
       is_edited: row.is_edited === 1,
       edit_of_message_id: row.edit_of_message_id || null,
+      reactions_json: row.reactions_json || null,
+      reply_to_message_id: row.reply_to_message_id || null,
+      is_pinned: row.is_pinned === 1,
+      is_read: row.is_read === 1,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at),
       deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -229,6 +243,7 @@ export async function getLastConversationMessage(
             cm.image_mime_type, cm.vl_model, cm.vl_model_interpretation,
             cm.emotional_state_bits,
             cm.is_recon_followup, cm.is_edited, cm.edit_of_message_id,
+            cm.reactions_json, cm.reply_to_message_id, cm.is_pinned, cm.is_read,
             cm.created_at, cm.updated_at, cm.deleted_at
      FROM conversation_messages cm
      JOIN interactions i ON cm.interaction_id = i.id
@@ -266,6 +281,10 @@ export async function getLastConversationMessage(
     is_recon_followup: row.is_recon_followup === 1,
     is_edited: row.is_edited === 1,
     edit_of_message_id: row.edit_of_message_id || null,
+    reactions_json: row.reactions_json || null,
+    reply_to_message_id: row.reply_to_message_id || null,
+    is_pinned: row.is_pinned === 1,
+    is_read: row.is_read === 1,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
@@ -354,6 +373,21 @@ export async function updateConversationMessage(
     values.push(updates.edit_of_message_id ?? null);
   }
 
+  if (updates.reactions_json !== undefined) {
+    updateFields.push('reactions_json = ?');
+    values.push(updates.reactions_json ?? null);
+  }
+
+  if (updates.reply_to_message_id !== undefined) {
+    updateFields.push('reply_to_message_id = ?');
+    values.push(updates.reply_to_message_id ?? null);
+  }
+
+  if (updates.is_pinned !== undefined) {
+    updateFields.push('is_pinned = ?');
+    values.push(updates.is_pinned ? 1 : 0);
+  }
+
   if (updateFields.length === 0) {
     throw new Error('No fields to update');
   }
@@ -406,6 +440,192 @@ export async function deleteConversationMessage(id: string): Promise<void> {
   );
 }
 
+/**
+ * Delete an entire conversation (soft delete) by participant_key + entity_id.
+ *
+ * Soft-deletes the messages AND the owning interaction row so the chat
+ * disappears from the chat list. Used by the chat-list "Delete" long-press
+ * action. Deleting the interaction's messages with the entity scope predicate
+ * matches the deleteEntity cascade convention (never touch conversations
+ * rooted at another entity).
+ *
+ * F3 cascade (D18): also TOMBSTONES the `chat_conversation_settings` row for
+ * the key so no stale pinned/muted/archived/disabled/unread state resurrects
+ * when the conversation is re-created (the settings table has no FK to
+ * interactions, so this is an explicit repo-level cascade). Full soft delete —
+ * the row stays physically present; every settings read predicates
+ * `deleted_at IS NULL` and `upsertSettings` resurrects (deleted_at = NULL) on
+ * re-open, per D18.
+ */
+export async function deleteConversationByParticipantKey(
+  entityId: string,
+  participantKey: string,
+): Promise<void> {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const [interactions] = await db.executeSql(
+    'SELECT id FROM interactions WHERE entity_id = ? AND participant_key = ? AND deleted_at IS NULL',
+    [entityId, participantKey],
+  );
+
+  const interactionIds: string[] = [];
+  for (let i = 0; i < interactions.rows.length; i++) {
+    interactionIds.push(interactions.rows.item(i).id as string);
+  }
+
+  for (const interactionId of interactionIds) {
+    await db.executeSql(
+      `UPDATE conversation_messages SET deleted_at = ?, updated_at = ?
+       WHERE interaction_id = ? AND deleted_at IS NULL`,
+      [now, now, interactionId],
+    );
+    await db.executeSql(
+      `UPDATE interactions SET deleted_at = ?, updated_at = ?
+       WHERE id = ?`,
+      [now, now, interactionId],
+    );
+  }
+
+  // F3/D18: tombstone the client-side settings row (pinned / archived /
+  // reply_mode) so deleted conversations never resurrect stale badge or
+  // preference state — and so re-opening the same participant_key resurrects
+  // fresh via upsertSettings' ON CONFLICT deleted_at = NULL.
+  await db.executeSql(
+    'UPDATE chat_conversation_settings SET deleted_at = ?, updated_at = ? WHERE participant_key = ?',
+    [now, now, participantKey],
+  );
+}
+
+// ============================================================================
+// Derived unread (A5 pull-forward) — is_read is the single source of read state
+// ============================================================================
+// Every query scopes `cm.entity_id = own POV` (A2): engine-perspective copies
+// sync in under different uuids joining the same interaction_id; unscoped
+// queries double-count / double-render. Own-sent messages always stay is_read=0.
+
+/**
+ * Mark every partner-sent, unread, non-deleted message in the conversation
+ * (identified by participant_key scoped to the POV entity) as read. Returns the
+ * number of rows updated.
+ *
+ * @param participantKey the conversation key (interactions.participant_key)
+ * @param ownEntityId   the POV entity id (A2 scope)
+ * @param upToMessageId optional boundary — only messages created at-or-before
+ *                      this message's created_at are marked
+ */
+export async function markConversationMessagesRead(
+  participantKey: string,
+  ownEntityId: string,
+  upToMessageId?: string,
+): Promise<number> {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  let sql = `
+    UPDATE conversation_messages
+    SET is_read = 1, updated_at = ?
+    WHERE id IN (
+      SELECT cm.id
+      FROM conversation_messages cm
+      JOIN interactions i ON cm.interaction_id = i.id
+      WHERE i.entity_id = ?
+        AND i.participant_key = ?
+        AND cm.entity_id = ?
+        AND cm.sender_entity_id != ?
+        AND cm.is_read = 0
+        AND cm.deleted_at IS NULL
+    `;
+  const params: any[] = [now, ownEntityId, participantKey, ownEntityId, ownEntityId];
+
+  if (upToMessageId) {
+    sql += ` AND cm.created_at <= (
+        SELECT created_at FROM conversation_messages WHERE id = ?
+      )`;
+    params.push(upToMessageId);
+  }
+
+  sql += ')';
+
+  const [result] = await db.executeSql(sql, params);
+  return result.rowsAffected ?? 0;
+}
+
+/**
+ * Mark the LAST partner-sent message in the conversation as unread (set-to-1
+ * semantics: exactly `count` messages, default 1). Used by the "mark unread"
+ * context-menu action.
+ *
+ * @returns number of rows updated (0 or count)
+ */
+export async function markConversationMessagesUnread(
+  participantKey: string,
+  ownEntityId: string,
+  count: number = 1,
+): Promise<number> {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  const [result] = await db.executeSql(
+    `UPDATE conversation_messages
+     SET is_read = 0, updated_at = ?
+     WHERE id IN (
+       SELECT cm.id
+       FROM conversation_messages cm
+       JOIN interactions i ON cm.interaction_id = i.id
+       WHERE i.entity_id = ?
+         AND i.participant_key = ?
+         AND cm.entity_id = ?
+         AND cm.sender_entity_id != ?
+         AND cm.deleted_at IS NULL
+       ORDER BY cm.created_at DESC
+       LIMIT ?
+     )`,
+    [now, ownEntityId, participantKey, ownEntityId, ownEntityId, count],
+  );
+  return result.rowsAffected ?? 0;
+}
+
+/**
+ * Batched unread counts (unread partner-sent, non-deleted, POV-scoped) keyed by
+ * participant_key. Mirrors getChatConversationSettingsBatch's 300-key chunking.
+ *
+ * @param keys         conversation participant keys
+ * @param ownEntityId  the POV entity id (A2 scope)
+ */
+export async function getUnreadCountByParticipantKeys(
+  keys: string[],
+  ownEntityId: string,
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (keys.length === 0) return result;
+
+  const db = getDatabase();
+  const chunkSize = 300;
+  for (let i = 0; i < keys.length; i += chunkSize) {
+    const chunk = keys.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const [results] = await db.executeSql(
+      `SELECT i.participant_key AS participant_key, COUNT(*) AS cnt
+       FROM conversation_messages cm
+       JOIN interactions i ON cm.interaction_id = i.id
+       WHERE i.entity_id = ?
+         AND i.participant_key IN (${placeholders})
+         AND cm.entity_id = ?
+         AND cm.sender_entity_id != ?
+         AND cm.is_read = 0
+         AND cm.deleted_at IS NULL
+       GROUP BY i.participant_key`,
+      [ownEntityId, ...chunk, ownEntityId, ownEntityId],
+    );
+    for (let j = 0; j < results.rows.length; j++) {
+      const row = results.rows.item(j);
+      result.set(row.participant_key, Number(row.cnt) || 0);
+    }
+  }
+  return result;
+}
+
 // Helper function to map DB row to ConversationMessage
 function mapRowToConversationMessage(row: any): ConversationMessage {
   return {
@@ -426,6 +646,10 @@ function mapRowToConversationMessage(row: any): ConversationMessage {
     is_recon_followup: row.is_recon_followup === 1,
     is_edited: row.is_edited === 1,
     edit_of_message_id: row.edit_of_message_id || null,
+    reactions_json: row.reactions_json || null,
+    reply_to_message_id: row.reply_to_message_id || null,
+    is_pinned: row.is_pinned === 1,
+    is_read: row.is_read === 1,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,

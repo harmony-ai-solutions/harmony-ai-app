@@ -16,21 +16,22 @@ import {
   Image,
   StyleSheet,
   Modal,
-  Alert,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useAppAlert } from '../../contexts/AppAlertContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ImageViewerModal } from '../modals/ImageViewerModal';
+import { hapticLightPress } from '../../utils/haptics';
 import { CharacterImage } from '../../database/models';
 
 interface ProfileImagePickerProps {
   images: CharacterImage[];
-  primaryImageId: number | null;
+  primaryImageId: string | null;
   onAddImage: () => void;
-  onSetPrimary: (id: number) => void;
-  onDeleteImage: (id: number) => void;
+  onSetPrimary: (id: string) => void;
+  onDeleteImage: (id: string) => void;
 }
 
 export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
@@ -41,6 +42,7 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
   onDeleteImage,
 }) => {
   const { theme } = useAppTheme();
+  const { showAlert } = useAppAlert();
 
   // Image viewer state
   const [viewerVisible, setViewerVisible] = useState(false);
@@ -49,7 +51,7 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
 
   // Action sheet state
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
-  const [actionTargetId, setActionTargetId] = useState<number | null>(null);
+  const [actionTargetId, setActionTargetId] = useState<string | null>(null);
   const [actionTargetIsPrimary, setActionTargetIsPrimary] = useState(false);
 
   const openViewer = (img: CharacterImage) => {
@@ -75,7 +77,7 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
     setActionSheetVisible(false);
     if (actionTargetId === null) return;
     const id = actionTargetId;
-    Alert.alert('Delete Image', 'Remove this image from the profile?', [
+    showAlert('Delete Image', 'Remove this image from the profile?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -135,7 +137,10 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
               backgroundColor: theme?.colors.background.elevated,
             },
           ]}
-          onPress={onAddImage}
+          onPress={() => {
+            hapticLightPress();
+            onAddImage();
+          }}
           activeOpacity={0.7}
         >
           <Icon name="plus" size={28} color={theme?.colors.accent.primary} />
@@ -171,7 +176,7 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
               ]}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
-              style={[StyleSheet.absoluteFillObject, styles.sheetGradientRadius]}
+              style={[StyleSheet.absoluteFill, styles.sheetGradientRadius]}
             />
 
             {/* Drag handle */}
@@ -218,7 +223,10 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
                   styles.sheetAction,
                   { borderBottomColor: (theme?.colors.border.default ?? '#333') + '55' },
                 ]}
-                onPress={handleSetPrimary}
+                onPress={() => {
+                  hapticLightPress();
+                  handleSetPrimary();
+                }}
                 activeOpacity={0.65}
               >
                 <View
@@ -243,7 +251,10 @@ export const ProfileImagePicker: React.FC<ProfileImagePickerProps> = ({
                 styles.sheetAction,
                 { borderBottomColor: (theme?.colors.border.default ?? '#333') + '55' },
               ]}
-              onPress={handleDelete}
+              onPress={() => {
+                hapticLightPress();
+                handleDelete();
+              }}
               activeOpacity={0.65}
             >
               <View
@@ -330,7 +341,7 @@ const styles = StyleSheet.create({
   // Action sheet
   sheetOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.18)',
     justifyContent: 'flex-end',
   },
   sheetWrapper: {

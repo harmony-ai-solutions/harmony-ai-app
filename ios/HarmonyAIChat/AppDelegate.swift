@@ -2,6 +2,7 @@ import UIKit
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
+import GoogleSignIn
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -23,6 +24,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     window = UIWindow(frame: UIScreen.main.bounds)
 
+    // Restore any previous Google Sign-In session
+    GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
+      if let error = error {
+        // Silent — no previous sign-in is expected on first launch
+        _ = error
+      }
+    }
+
     factory.startReactNative(
       withModuleName: "HarmonyAIChat",
       in: window,
@@ -30,6 +39,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     )
 
     return true
+  }
+
+  /// Handle the OAuth redirect URL from Google Sign-In.
+  /// This is REQUIRED for the iOS native flow to complete — without it,
+  /// the GIDSignIn callback never fires and the promise hangs forever.
+  func application(
+    _ app: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+  ) -> Bool {
+    return GIDSignIn.sharedInstance.handle(url)
   }
 }
 

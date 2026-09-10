@@ -1,7 +1,7 @@
 /**
  * EmojiPickerModal - Modal wrapper around EmojiPickerInline
  *
- * Used by screens that need a standalone modal emoji picker (e.g., EmojiActionEditModal).
+ * Used by screens that need a standalone modal emoji picker.
  * For inline chat use, use EmojiPickerInline directly.
  */
 import React, { memo } from 'react';
@@ -20,7 +20,6 @@ interface EmojiPickerModalProps {
   onClose: () => void;
   onEmojiSelected: (emoji: EmojiEntry) => void;
   entityId?: string | null;
-  onOpenActionEditor?: () => void;
 }
 
 export const EmojiPickerModal: React.FC<EmojiPickerModalProps> = memo(({
@@ -28,7 +27,6 @@ export const EmojiPickerModal: React.FC<EmojiPickerModalProps> = memo(({
   onClose,
   onEmojiSelected,
   entityId,
-  onOpenActionEditor,
 }) => {
   const { theme } = useAppTheme();
 
@@ -53,7 +51,6 @@ export const EmojiPickerModal: React.FC<EmojiPickerModalProps> = memo(({
               <EmojiPickerInline
                 onEmojiSelected={onEmojiSelected}
                 entityId={entityId}
-                onOpenActionEditor={onOpenActionEditor}
                 theme={theme}
               />
             </View>

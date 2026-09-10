@@ -10,6 +10,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
+import { hapticLightPress } from '../../utils/haptics';
 
 export interface ModuleConfigOption {
   id: string;
@@ -24,6 +25,8 @@ interface EntityModuleSelectorProps {
   isLoading?: boolean;
   /** Hide the inline label — used by EntityModuleSelectorWithActions which renders its own label row */
   hideLabel?: boolean;
+  /** When provided, renders a "Create new config…" row at the bottom of the sheet. */
+  onCreateNew?: () => void;
 }
 
 export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
@@ -33,12 +36,17 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
   onChange,
   isLoading = false,
   hideLabel = false,
+  onCreateNew,
 }) => {
   const { theme } = useAppTheme();
   const [modalVisible, setModalVisible] = useState(false);
 
   if (!theme) return null;
 
+  // The '' (no-config) state is a legitimate, selectable end state: the sheet
+  // always offers a "Disabled" option so the user can clear a module slot.
+  // Engine-seeded default configs arrive via normal sync and appear as
+  // ordinary options.
   const options = [
     { id: -1, name: 'Disabled', value: '' },
     ...configs.map(c => ({ id: c.id, name: c.name, value: String(c.id) })),
@@ -67,7 +75,11 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
             opacity: isLoading ? 0.5 : 1,
           },
         ]}
-        onPress={() => !isLoading && setModalVisible(true)}
+        onPress={() => {
+          if (isLoading) return;
+          hapticLightPress();
+          setModalVisible(true);
+        }}
         activeOpacity={0.7}
         disabled={isLoading}
       >
@@ -85,7 +97,7 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
           }
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
         {/* Left accent pip for active selection */}
         {!isDisabled && (
@@ -137,7 +149,7 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
               ]}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
-              style={[StyleSheet.absoluteFillObject, styles.sheetGradientRadius]}
+              style={[StyleSheet.absoluteFill, styles.sheetGradientRadius]}
             />
 
             {/* Drag handle */}
@@ -232,6 +244,40 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
               }}
               style={styles.optionsList}
             />
+
+            {/* Create new config row */}
+            {onCreateNew && (
+              <>
+                <View
+                  style={[
+                    styles.separator,
+                    { backgroundColor: theme.colors.border.default + '66' },
+                  ]}
+                />
+                <TouchableOpacity
+                  style={styles.createNewRow}
+                  onPress={() => {
+                    setModalVisible(false);
+                    onCreateNew();
+                  }}
+                  activeOpacity={0.65}
+                >
+                  <Icon
+                    name="plus-circle-outline"
+                    size={18}
+                    color={theme.colors.accent.primary}
+                  />
+                  <ThemedText
+                    size={14}
+                    variant="accent"
+                    weight="medium"
+                    style={styles.createNewText}
+                  >
+                    Create new config…
+                  </ThemedText>
+                </TouchableOpacity>
+              </>
+            )}
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -268,7 +314,7 @@ const styles = StyleSheet.create({
   // ── Modal sheet ──
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.18)',
     justifyContent: 'flex-end',
   },
   sheetWrapper: {
@@ -325,5 +371,15 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 2,
     marginRight: 0,
+  },
+  createNewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  createNewText: {
+    flex: 1,
   },
 });

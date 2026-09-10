@@ -7,7 +7,8 @@ ALTER TABLE chat_messages ADD COLUMN vl_model_interpretation TEXT;
 ALTER TABLE chat_messages ADD COLUMN vl_model_embedding TEXT;
 
 -- 2. AUDIO: Replace audio_file with text+mime_type
-ALTER TABLE chat_messages DROP COLUMN audio_file;
+-- FIXME: Properly handle drop columns here in a later migration, since SQLite does NOT support this pattern
+-- ALTER TABLE chat_messages DROP COLUMN audio_file;
 ALTER TABLE chat_messages ADD COLUMN audio_data TEXT;
 ALTER TABLE chat_messages ADD COLUMN audio_mime_type TEXT;
 
