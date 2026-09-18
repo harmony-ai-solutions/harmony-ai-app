@@ -20,6 +20,7 @@ import {
   SettingsToggleRow,
   SettingsDetailRow,
 } from '../components/settings/SettingsRows';
+import { IS_DEV } from '../config/cloud';
 
 type ConnectionType = 'Harmony Link' | 'Cloud' | 'Not configured';
 
@@ -270,8 +271,8 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
-        {/* ── Development Card (DEV only) ── */}
-        {__DEV__ && (
+        {/* ── Development Card (Metro dev + dev-flavor builds) ── */}
+        {IS_DEV && (
           <ThemedCard elevated accentStripe style={styles.card}>
             <SectionHeader title={t('development')} style={styles.sectionHeader} />
             <SettingsLinkRow

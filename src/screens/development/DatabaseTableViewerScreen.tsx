@@ -2,7 +2,8 @@
  * Database Table Viewer Screen (DEV ONLY)
  * 
  * Provides an in-app interface to browse database tables and their contents
- * Only available in development builds (__DEV__ === true)
+ * Gated by IS_DEV (src/config/cloud.ts): reachable in Metro dev builds and in
+ * dev-flavor (beta) release builds — hidden in prod-flavor builds.
  */
 
 import React, { useState, useEffect, useRef } from 'react';

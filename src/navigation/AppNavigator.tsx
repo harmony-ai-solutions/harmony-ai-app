@@ -40,6 +40,10 @@ import { MarketplaceItemDetailScreen } from '../screens/MarketplaceItemDetailScr
 import { MyLibraryScreen } from '../screens/MyLibraryScreen';
 import { MyListingsScreen } from '../screens/MyListingsScreen';
 import { ContentAssetScreen } from '../screens/ContentAssetScreen';
+// Dev-tools gate (src/config/cloud.ts): true in Metro dev builds AND
+// dev-flavor (beta) release builds — keeps the DB viewer reachable after a
+// release install (e.g. sync poison-pill recovery). Hidden in prod builds.
+import { IS_DEV } from '../config/cloud';
 
 export type RootStackParamList = {
   /** Tab container — the primary navigation surface (5-tab layout) */
@@ -228,8 +232,8 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           component={ModuleConfigEditScreen}
         />
 
-        {/* ── DEV-only screens ──────────────────────────────────────── */}
-        {__DEV__ && (
+        {/* ── Dev-tools screens (Metro dev + dev-flavor builds) ────── */}
+        {IS_DEV && (
           <Stack.Screen
             name="DatabaseTableViewer"
             component={DatabaseTableViewerScreen}
