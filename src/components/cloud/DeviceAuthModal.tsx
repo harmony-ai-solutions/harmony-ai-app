@@ -31,7 +31,10 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedButton } from '../themed/ThemedButton';
-import DeviceAuthService, { DeviceAuthError } from '../../services/cloud/DeviceAuthService';
+import DeviceAuthService, {
+  DeviceAuthError,
+  isDeviceAuthRequestPending,
+} from '../../services/cloud/DeviceAuthService';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[DeviceAuthModal]');
@@ -108,14 +111,23 @@ export const DeviceAuthModal: React.FC<DeviceAuthModalProps> = ({
   // loop (the flicker bug). The manual Resend button is the retry path.
   const hasAutoRequestedRef = useRef(false);
 
-  // Auto-request the code the first time the modal is shown. The guard resets
-  // when the modal is hidden so the next show re-requests.
+  // Auto-request the code the first time the modal is shown. The per-show guard
+  // resets when the modal is hidden — BUT we must NOT request again while a
+  // secret is already outstanding: the auth-service keeps a single live secret
+  // per device, so a second request silently invalidates the link in the email
+  // already sent (the reported "approve says outdated" bug). The manual Resend
+  // button remains the explicit way to supersede a pending request.
   useEffect(() => {
     if (!visible) {
       hasAutoRequestedRef.current = false;
       return;
     }
-    if (!hasAutoRequestedRef.current && !codeSent && !isSending) {
+    if (
+      !hasAutoRequestedRef.current &&
+      !codeSent &&
+      !isSending &&
+      !isDeviceAuthRequestPending()
+    ) {
       hasAutoRequestedRef.current = true;
       requestCode();
     }
