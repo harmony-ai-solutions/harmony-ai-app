@@ -160,6 +160,7 @@ jobs:
       - name: Build ${{ matrix.environment }} release APK
         working-directory: android
         run: |
+          if [ -z "$GOOGLE_WEB_CLIENT_ID" ]; then echo "::error::GOOGLE_WEB_CLIENT_ID_DEV/_PROD variable not set"; exit 1; fi
           # Update versionName in build.gradle
           sed -i "s/versionName \"[^\"]*\"/versionName \"${VERSION}\"/" app/build.gradle
           chmod +x gradlew
@@ -168,8 +169,10 @@ jobs:
             -PRELEASE_KEYSTORE_PASSWORD="${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}" \
             -PRELEASE_KEY_ALIAS="${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}" \
             -PRELEASE_KEY_PASSWORD="${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}" \
-            -PGOOGLE_WEB_CLIENT_ID="${{ vars.GOOGLE_WEB_CLIENT_ID }}" \
+            -PGOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID" \
             -PAPPLE_SERVICES_ID="${{ vars.APPLE_SERVICES_ID }}"
+        env:
+          GOOGLE_WEB_CLIENT_ID: ${{ matrix.environment == 'dev' && vars.GOOGLE_WEB_CLIENT_ID_DEV || vars.GOOGLE_WEB_CLIENT_ID_PROD }}
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -243,12 +246,15 @@ jobs:
 
       - name: Generate .env for ${{ matrix.environment }}
         run: |
+          if [ -z "$GOOGLE_WEB_CLIENT_ID" ]; then echo "::error::GOOGLE_WEB_CLIENT_ID_DEV/_PROD variable not set"; exit 1; fi
           printf 'APP_ENV=%s\nIS_BETA=%s\nGOOGLE_WEB_CLIENT_ID=%s\nAPPLE_SERVICES_ID=%s\n' \
             "${{ matrix.environment }}" \
             "${{ matrix.environment == 'dev' && 'true' || 'false' }}" \
-            "${{ vars.GOOGLE_WEB_CLIENT_ID }}" \
+            "$GOOGLE_WEB_CLIENT_ID" \
             "${{ vars.APPLE_SERVICES_ID }}" > .env
           echo "::notice::Generated .env for ${{ matrix.environment }} (APP_ENV=${{ matrix.environment }}, IS_BETA=${{ matrix.environment == 'dev' && 'true' || 'false' }})"
+        env:
+          GOOGLE_WEB_CLIENT_ID: ${{ matrix.environment == 'dev' && vars.GOOGLE_WEB_CLIENT_ID_DEV || vars.GOOGLE_WEB_CLIENT_ID_PROD }}
 
       - name: Build ${{ matrix.environment }} iOS app
         working-directory: ios
