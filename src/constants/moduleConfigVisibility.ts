@@ -30,6 +30,7 @@ export const SIMPLE_FIELD_KEYS: ReadonlySet<string> = new Set([
   'model_id',
   'voice_id',
   'voice',
+  'language',
   'speed',
   'format',
   'kindroid_id',

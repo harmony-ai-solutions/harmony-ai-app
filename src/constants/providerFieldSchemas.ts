@@ -266,6 +266,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'stop_tokens', label: 'Stop Tokens', type: 'comma-list' },
       { key: 'n', label: 'N', type: 'number', disabledValue: 0, tooltip: 'Number of completions.' },
       { key: 'voice', label: 'Voice', type: 'text', placeholder: 'alloy', tooltip: 'Used by TTS module.' },
+      { key: 'language', label: 'Language', type: 'text', placeholder: 'default', tooltip: 'Used by TTS module.' },
       { key: 'speed', label: 'Speed', type: 'number', step: 0.1, min: 0.25, max: 4, tooltip: 'Used by TTS module.' },
       { key: 'format', label: 'Format', type: 'text', placeholder: 'mp3', tooltip: 'Used by TTS module.' },
       { key: 'image_aspect_ratio', label: 'Image Aspect Ratio', type: 'text', placeholder: '1:1', tooltip: 'Used by Imagination module.' },

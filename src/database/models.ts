@@ -331,6 +331,7 @@ export interface SoulbitsCloudProviderConfig {
   sampling_preset_name: string;
   extra_params: string; // JSON string
   voice: string | null;
+  language: string | null;
   speed: number | null;
   format: string | null;
   image_aspect_ratio: string | null;

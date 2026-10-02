@@ -55,6 +55,7 @@ import { migration043 } from './migrations/000043_drop_dead_sync_infra';
 import { migration044 } from './migrations/000044_favorite_column';
 import { migration045 } from './migrations/000045_engine_id_pattern_placeholder';
 import { migration046 } from './migrations/000046_sync_gc_state_placeholder';
+import { migration047 } from './migrations/000047_add_soulbitscloud_language';
 
 // Migration definition
 export interface Migration {
@@ -296,6 +297,11 @@ export const MIGRATIONS: Migration[] = [
       version: 46,
       description: 'Placeholder — engine counterpart 000046 adds engine-local `sync_gc_state` (tombstone-GC purge floor); the app needs no schema change.',
       sql: migration046,
+    },
+    {
+      version: 47,
+      description: "Add `language` column to provider_config_soulbitscloud (paired engine 000047 — soulbitscloud TTS provider gains `language`; beta TTS worker requires language \"default\" + a preset voice for kitten-tts-mini).",
+      sql: migration047,
     },
   ];
 

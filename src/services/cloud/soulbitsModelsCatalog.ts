@@ -10,6 +10,7 @@
  */
 
 import { createClient } from '@harmony-ai-solutions/soulbits-api-client';
+import type { components } from '@harmony-ai-solutions/soulbits-api-client';
 import { CLOUD_HOSTS } from '../../config/cloud';
 import { getModelsQueryForModule, getFallbackModelsForModule } from '../../constants/soulbitsModels';
 import { createLogger } from '../../utils/logger';
@@ -25,6 +26,13 @@ export interface CatalogModel {
   id: string;
   name?: string;
   description?: string;
+  /**
+   * Speech-specific model options (languages / voices / cloning support) from
+   * the live catalog. Carried through instead of discarded so voice/language
+   * pickers can later be driven by the catalog. Optional — absent on
+   * non-speech models and on fallback entries.
+   */
+  speech_options?: components['schemas']['SpeechOptions'];
 }
 
 export interface FetchModelsResult {
@@ -119,6 +127,7 @@ async function doFetch(
       id: e.model_id,
       name: e.display_name ?? e.model_id,
       description: e.description,
+      speech_options: e.speech_options,
     }));
 
     cache.set(moduleType, { models, at: Date.now() });

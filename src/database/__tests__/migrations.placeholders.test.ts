@@ -47,8 +47,11 @@ describe('placeholder migrations 000045 / 000046', () => {
     );
 
     // Sequential numbering is preserved (the roll-forward harness relies on it).
-    expect(MIGRATIONS[MIGRATIONS.length - 1].version).toBe(46);
-    expect(MIGRATIONS[MIGRATIONS.length - 2].version).toBe(45);
+    // Migration 000047 (soulbitscloud `language` column) now occupies the last
+    // slot; the placeholders remain 000045 / 000046 right before it.
+    expect(MIGRATIONS[MIGRATIONS.length - 1].version).toBe(47);
+    expect(MIGRATIONS[MIGRATIONS.length - 2].version).toBe(46);
+    expect(MIGRATIONS[MIGRATIONS.length - 3].version).toBe(45);
   });
 
   it('000045 records its version and executes zero SQL statements', async () => {

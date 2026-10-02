@@ -18,8 +18,8 @@ export async function createSoulbitsCloudProviderConfig(
             id, name, base_url, api_key, model, max_tokens, max_completion_tokens,
             temperature, top_p, frequency_penalty, presence_penalty, n,
             stop_tokens, seed, response_format, sampling_preset_name, extra_params,
-            voice, speed, format, image_aspect_ratio, image_size
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            voice, language, speed, format, image_aspect_ratio, image_size
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             id,
             config.name,
@@ -39,6 +39,7 @@ export async function createSoulbitsCloudProviderConfig(
             config.sampling_preset_name,
             config.extra_params,
             config.voice,
+            config.language,
             config.speed,
             config.format,
             config.image_aspect_ratio,
@@ -65,12 +66,12 @@ export async function getSoulbitsCloudProviderConfig(id: string, includeDeleted 
     ? `SELECT id, name, base_url, api_key, model, max_tokens, max_completion_tokens,
             temperature, top_p, frequency_penalty, presence_penalty, n,
             stop_tokens, seed, response_format, sampling_preset_name, extra_params,
-            voice, speed, format, image_aspect_ratio, image_size, deleted_at
+            voice, language, speed, format, image_aspect_ratio, image_size, deleted_at
      FROM provider_config_soulbitscloud WHERE id = ?`
     : `SELECT id, name, base_url, api_key, model, max_tokens, max_completion_tokens,
             temperature, top_p, frequency_penalty, presence_penalty, n,
             stop_tokens, seed, response_format, sampling_preset_name, extra_params,
-            voice, speed, format, image_aspect_ratio, image_size, deleted_at
+            voice, language, speed, format, image_aspect_ratio, image_size, deleted_at
      FROM provider_config_soulbitscloud WHERE id = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [id]);
@@ -99,6 +100,7 @@ export async function getSoulbitsCloudProviderConfig(id: string, includeDeleted 
     sampling_preset_name: row.sampling_preset_name,
     extra_params: row.extra_params,
     voice: row.voice,
+    language: row.language,
     speed: row.speed,
     format: row.format,
     image_aspect_ratio: row.image_aspect_ratio,
@@ -114,12 +116,12 @@ export async function getSoulbitsCloudProviderConfigByName(name: string, include
     ? `SELECT id, name, base_url, api_key, model, max_tokens, max_completion_tokens,
             temperature, top_p, frequency_penalty, presence_penalty, n,
             stop_tokens, seed, response_format, sampling_preset_name, extra_params,
-            voice, speed, format, image_aspect_ratio, image_size, deleted_at
+            voice, language, speed, format, image_aspect_ratio, image_size, deleted_at
      FROM provider_config_soulbitscloud WHERE name = ?`
     : `SELECT id, name, base_url, api_key, model, max_tokens, max_completion_tokens,
             temperature, top_p, frequency_penalty, presence_penalty, n,
             stop_tokens, seed, response_format, sampling_preset_name, extra_params,
-            voice, speed, format, image_aspect_ratio, image_size, deleted_at
+            voice, language, speed, format, image_aspect_ratio, image_size, deleted_at
      FROM provider_config_soulbitscloud WHERE name = ? AND deleted_at IS NULL`;
 
   const [results] = await db.executeSql(query, [name]);
@@ -148,6 +150,7 @@ export async function getSoulbitsCloudProviderConfigByName(name: string, include
     sampling_preset_name: row.sampling_preset_name,
     extra_params: row.extra_params,
     voice: row.voice,
+    language: row.language,
     speed: row.speed,
     format: row.format,
     image_aspect_ratio: row.image_aspect_ratio,
@@ -163,12 +166,12 @@ export async function getAllSoulbitsCloudProviderConfigs(includeDeleted = false)
     ? `SELECT id, name, base_url, api_key, model, max_tokens, max_completion_tokens,
             temperature, top_p, frequency_penalty, presence_penalty, n,
             stop_tokens, seed, response_format, sampling_preset_name, extra_params,
-            voice, speed, format, image_aspect_ratio, image_size, deleted_at
+            voice, language, speed, format, image_aspect_ratio, image_size, deleted_at
      FROM provider_config_soulbitscloud ORDER BY name`
     : `SELECT id, name, base_url, api_key, model, max_tokens, max_completion_tokens,
             temperature, top_p, frequency_penalty, presence_penalty, n,
             stop_tokens, seed, response_format, sampling_preset_name, extra_params,
-            voice, speed, format, image_aspect_ratio, image_size, deleted_at
+            voice, language, speed, format, image_aspect_ratio, image_size, deleted_at
      FROM provider_config_soulbitscloud WHERE deleted_at IS NULL ORDER BY name`;
 
   const [results] = await db.executeSql(query);
@@ -195,6 +198,7 @@ export async function getAllSoulbitsCloudProviderConfigs(includeDeleted = false)
       sampling_preset_name: row.sampling_preset_name,
       extra_params: row.extra_params,
       voice: row.voice,
+      language: row.language,
       speed: row.speed,
       format: row.format,
       image_aspect_ratio: row.image_aspect_ratio,
@@ -216,7 +220,7 @@ export async function updateSoulbitsCloudProviderConfig(config: SoulbitsCloudPro
            max_tokens = ?, max_completion_tokens = ?,
            temperature = ?, top_p = ?, frequency_penalty = ?, presence_penalty = ?, n = ?,
            stop_tokens = ?, seed = ?, response_format = ?, sampling_preset_name = ?, extra_params = ?,
-           voice = ?, speed = ?, format = ?, image_aspect_ratio = ?, image_size = ?,
+           voice = ?, language = ?, speed = ?, format = ?, image_aspect_ratio = ?, image_size = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
@@ -237,6 +241,7 @@ export async function updateSoulbitsCloudProviderConfig(config: SoulbitsCloudPro
         config.sampling_preset_name,
         config.extra_params,
         config.voice,
+        config.language,
         config.speed,
         config.format,
         config.image_aspect_ratio,
