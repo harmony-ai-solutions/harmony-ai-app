@@ -29,6 +29,9 @@ let mockConnectionManager: EventEmitter & {
 };
 let mockSyncAndWait: jest.Mock;
 let mockInitiateSync: jest.Mock;
+let mockGetLastSyncTimestamp: jest.Mock;
+let mockMarkFullResyncRequired: jest.Mock;
+let mockIsPurging: jest.Mock;
 
 jest.mock('react-native-device-info', () => ({
   getUniqueId: jest.fn().mockResolvedValue('test-device'),
@@ -77,17 +80,22 @@ jest.mock('../connection/ConnectionManager', () => {
   return { __esModule: true, default: cm };
 });
 
-// SyncService is a NAMED export; mock syncAndWait + initiateSync so the
-// recovery path can be observed.
+// SyncService is a NAMED export; mock syncAndWait, initiateSync,
+// getLastSyncTimestamp and markFullResyncRequired so the recovery path can be
+// observed.
 jest.mock('../SyncService', () => {
   mockSyncAndWait = jest.fn().mockResolvedValue(undefined);
   mockInitiateSync = jest.fn().mockResolvedValue(undefined);
+  mockGetLastSyncTimestamp = jest.fn().mockResolvedValue(1750000000); // non-zero → incremental by default
+  mockMarkFullResyncRequired = jest.fn().mockResolvedValue(undefined);
   return {
     __esModule: true,
     SyncService: {
       getInstance: () => ({
         syncAndWait: mockSyncAndWait,
         initiateSync: mockInitiateSync,
+        getLastSyncTimestamp: mockGetLastSyncTimestamp,
+        markFullResyncRequired: mockMarkFullResyncRequired,
       }),
     },
   };
@@ -111,14 +119,20 @@ jest.mock('../../database/connection', () => ({
   getSyncDatabase: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    getStatus: jest.fn().mockReturnValue('idle'),
-  },
-  default: {},
-}));
+jest.mock('../cloud/CloudSessionService', () => {
+  // isPurging is accessed with optional chaining in EntitySessionService;
+  // provide an explicit mock so tests can pin the purge-in-flight guard.
+  mockIsPurging = jest.fn().mockReturnValue(false);
+  return {
+    cloudSessionService: {
+      connect: jest.fn().mockResolvedValue(undefined),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      getStatus: jest.fn().mockReturnValue('idle'),
+      isPurging: mockIsPurging,
+    },
+    default: {},
+  };
+});
 
 jest.mock('../ConnectionStateManager', () => ({
   __esModule: true,
@@ -159,6 +173,9 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     jest.clearAllMocks();
     mockSyncAndWait.mockClear().mockResolvedValue(undefined);
     mockInitiateSync.mockClear().mockResolvedValue(undefined);
+    mockGetLastSyncTimestamp.mockClear().mockResolvedValue(1750000000);
+    mockMarkFullResyncRequired.mockClear().mockResolvedValue(undefined);
+    mockIsPurging.mockClear().mockReturnValue(false);
     mockConnectionManager.removeAllListeners();
     mockConnectionManager.sendEvent.mockClear().mockResolvedValue(undefined);
     mockConnectionManager.isConnected.mockClear().mockReturnValue(true);
@@ -367,6 +384,83 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     await new Promise<void>(resolve => setImmediate(resolve));
     expect(mockSyncAndWait).toHaveBeenCalledTimes(1);
     expect(errors).toHaveLength(0);
+  });
+
+  it('escalates to a full re-sync for entity_not_defined when the sync watermark is 0 (purge cleared it / never synced)', async () => {
+    // The purge-completion observer cleared the per-source watermarks
+    // (markFullResyncRequired) — the recovery detects the 0 watermark,
+    // re-marks the full re-sync, and waits on a PLAIN syncAndWait (the kicked
+    // sync self-escalates to force_full_sync via the cleared watermark).
+    mockGetLastSyncTimestamp.mockResolvedValue(0);
+
+    const svc = EntitySessionService.getInstance();
+    const session = makeSession();
+    (svc as any).sessions.set(session.interactionId, session);
+
+    const errors: string[] = [];
+    svc.on('session:error', (_id: string, err: string) => errors.push(err));
+
+    await (svc as any).handleInitEntityResponse(
+      'claire',
+      initEntityError('entity_not_defined'),
+      null,
+      session,
+      session.interactionId,
+    );
+    await new Promise<void>(resolve => setImmediate(resolve));
+
+    expect(errors).toHaveLength(0);
+    expect(mockMarkFullResyncRequired).toHaveBeenCalledTimes(1);
+    expect(mockSyncAndWait).toHaveBeenCalledTimes(1);
+    expect(mockSyncAndWait).toHaveBeenCalledWith(); // plain — no options
+    expect(mockConnectionManager.createConnection).toHaveBeenCalled();
+  });
+
+  it('uses an INCREMENTAL syncAndWait when a watermark exists (no regression)', async () => {
+    // Default mocks: watermark non-zero — the recovery keeps its historical
+    // behaviour (plain incremental syncAndWait, no full-resync marking).
+    const svc = EntitySessionService.getInstance();
+    const session = makeSession();
+    (svc as any).sessions.set(session.interactionId, session);
+
+    await (svc as any).handleInitEntityResponse(
+      'claire',
+      initEntityError('entity_not_defined'),
+      null,
+      session,
+      session.interactionId,
+    );
+    await new Promise<void>(resolve => setImmediate(resolve));
+
+    expect(mockMarkFullResyncRequired).not.toHaveBeenCalled();
+    expect(mockSyncAndWait).toHaveBeenCalledTimes(1);
+    expect(mockSyncAndWait).toHaveBeenCalledWith(); // plain — no options
+  });
+
+  it('still bails out of INIT_ENTITY recovery while a purge is in flight (purge guard preserved)', async () => {
+    mockIsPurging.mockReturnValue(true);
+
+    const svc = EntitySessionService.getInstance();
+    const session = makeSession();
+    (svc as any).sessions.set(session.interactionId, session);
+
+    const errors: string[] = [];
+    svc.on('session:error', (_id: string, err: string) => errors.push(err));
+
+    await (svc as any).handleInitEntityResponse(
+      'claire',
+      initEntityError('entity_not_defined'),
+      null,
+      session,
+      session.interactionId,
+    );
+    await new Promise<void>(resolve => setImmediate(resolve));
+
+    // Recovery threw (purge guard) → normal teardown: session:error surfaced.
+    expect(errors).toEqual(['entity_not_defined']);
+    expect(session.failed).toMatchObject({ error: 'entity_not_defined' });
+    expect(mockSyncAndWait).not.toHaveBeenCalled();
+    expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
   });
 
   it('does not tear down when the transport error storm delivers an INIT_ENTITY app-level error', async () => {

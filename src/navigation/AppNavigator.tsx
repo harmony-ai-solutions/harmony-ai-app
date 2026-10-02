@@ -40,6 +40,9 @@ import { MarketplaceItemDetailScreen } from '../screens/MarketplaceItemDetailScr
 import { MyLibraryScreen } from '../screens/MyLibraryScreen';
 import { MyListingsScreen } from '../screens/MyListingsScreen';
 import { ContentAssetScreen } from '../screens/ContentAssetScreen';
+// Global cloud-data-purge notice (mounted once near the navigation root; a
+// passive observer of CloudSessionService — never drives the connection).
+import { CloudPurgeBanner } from '../components/cloud/CloudPurgeBanner';
 // Dev-tools gate (src/config/cloud.ts): true in Metro dev builds AND
 // dev-flavor (beta) release builds — keeps the DB viewer reachable after a
 // release install (e.g. sync poison-pill recovery). Hidden in prod builds.
@@ -241,6 +244,12 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           />
         )}
       </Stack.Navigator>
+      {/* ── Global cloud-data-purge banner ────────────────────────────────
+          Rendered as a sibling of the stack navigator (still inside the
+          container so useNavigation works) — floats above every screen.
+          Passive CloudSessionService observer: shows while a purge blocks
+          connecting; tap jumps to SyncSettings. */}
+      <CloudPurgeBanner />
     </NavigationContainer>
   );
 };

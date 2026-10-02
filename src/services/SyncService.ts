@@ -892,6 +892,37 @@ export class SyncService extends EventEmitter<SyncServiceEvents> {
   }
 
   /**
+   * Mark that the NEXT sync (auto-on-connect or manual, in THIS session or
+   * after an app restart) must be a FULL FORCED re-sync.
+   *
+   * Post-cloud-purge escalation: the purge deletes ALL engine-side data for
+   * the user, but the engine keeps its OWN per-device sync watermark and
+   * ignores the client's `last_sync_timestamp` re-send trigger — so a plain
+   * incremental sync returns zero records and the freshly-purged engine keeps
+   * rejecting INIT_ENTITY with `entity_not_defined`.
+   *
+   * Mechanism (reuses the proven boot-wipe path, phase 3-2 / D11): clear the
+   * per-source sync watermarks → initiateSync's own escalation
+   * (`storedLastSync === 0 → effectiveForceFullSync`) turns the NEXT sync
+   * into `force_full_sync: true` (SyncService.ts initiateSync). The marker is
+   * PERSISTED (AsyncStorage) so it survives an app restart before the first
+   * post-purge sync, and it stops forcing automatically: the first completed
+   * sync rewrites the watermark on SYNC_FINALIZE, so the sync after that is
+   * incremental again.
+   *
+   * The purge-completion observer (SyncConnectionContext) calls this; UI
+   * consumers (purge success dialog) may call forceFullSync() for immediacy —
+   * both are idempotent (the second sync sees a non-zero watermark again and
+   * stays incremental).
+   */
+  async markFullResyncRequired(): Promise<void> {
+    await ConnectionStateManager.clearAllLastSyncTimestamps();
+    log.warn(
+      'Full re-sync marked as required — per-source sync watermarks cleared; the next sync will escalate to force_full_sync',
+    );
+  }
+
+  /**
    * Initiate a sync (if one isn't already running) and resolve once it actually
    * COMPLETES (SYNC_FINALIZE → 'sync:completed').
    *

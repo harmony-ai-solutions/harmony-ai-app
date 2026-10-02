@@ -1989,6 +1989,16 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
    * entity → create a fresh entity connection for that entity → re-send
    * INIT_ENTITY. Fire-and-forget from the ERROR branch; any throw here is
    * caught there and falls through to the normal teardown.
+   *
+   * Post-purge escalation (cloud-data-deletion.md §7 follow-up): after a
+   * cloud purge deleted ALL engine-side data, an INCREMENTAL re-sync cannot
+   * recover the entity — the engine keeps its own per-device watermark and
+   * ignores the client's `last_sync_timestamp` for re-sends, so incremental
+   * syncs return zero records and the engine stays empty. When the sync
+   * watermark is 0 (the purge's markFullResyncRequired observer cleared it,
+   * or never synced / post-wipe), the recovery re-marks the full re-sync and
+   * the waited sync self-escalates to `force_full_sync` via the cleared
+   * watermark (SyncService.initiateSync). Otherwise it stays incremental.
    */
   private async recoverInitEntity(
     entityId: string,
@@ -2003,7 +2013,15 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
     log.info(`INIT_ENTITY recovery for ${entityId} (interaction ${interactionId}): re-syncing entity state (attempt ${session.initRetryCount}/${MAX_INIT_ENTITY_RETRIES})`);
 
-    // 1) Blocking re-sync (best-effort): ensure the engine has ingested the entity.
+    // 1) Blocking re-sync (best-effort): ensure the engine has ingested the
+    // entity. When the sync watermark is 0 (the post-purge markFullResyncRequired
+    // observer cleared it — or never synced / post-wipe), an incremental sync
+    // CANNOT re-upload already-synced records: re-mark the full re-sync so the
+    // waited sync escalates to force_full_sync via the cleared watermark.
+    if ((await SyncService.getInstance().getLastSyncTimestamp()) === 0) {
+      log.info(`INIT_ENTITY recovery for ${entityId}: sync watermark is 0 — escalating to a full re-sync`);
+      await SyncService.getInstance().markFullResyncRequired();
+    }
     await SyncService.getInstance().syncAndWait();
 
     // 2) Create a fresh entity connection for this entity.

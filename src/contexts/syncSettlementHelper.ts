@@ -70,6 +70,9 @@ export function isSyncTransportSettled(
  *    the intended UX, not a toast).
  *  - NEVER show if `isReconnecting || reconnectAttempt > 0` (avoid toast spam
  *    during the reconnect backoff loop — only the first failure may toast).
+ *  - NEVER show if `isPurgeBlocking` — WS drops during a cloud data purge's
+ *    kill phase are EXPECTED (the session is gone by design); the purge
+ *    banner + status text carry the message instead of an error.
  *  - Otherwise true.
  *
  * Pure — no side effects. The callers (SyncConnectionContext,
@@ -80,7 +83,15 @@ export function shouldShowConnectionErrorToast(params: {
   isReconnecting: boolean;
   reconnectAttempt: number;
   isCertFlowActive: boolean; // true when a cert-verification decision is pending/in-progress
+  /** True while a cloud data purge blocks connecting (expected WS churn). */
+  isPurgeBlocking?: boolean;
 }): boolean {
+  // Cloud data purge in flight — disconnects/errors are by design, and the
+  // purge banner + "your data is being deleted" status text carry the message.
+  if (params.isPurgeBlocking) {
+    return false;
+  }
+
   // Provisional handshake connection — expected errors, no toast.
   if (!params.isTransportSettled) {
     return false;
@@ -122,6 +133,8 @@ export async function shouldShowConnectionErrorToastForConnection(params: {
   isReconnecting: boolean;
   reconnectAttempt: number;
   isCertFlowActive: boolean;
+  /** True while a cloud data purge blocks connecting (expected WS churn). */
+  isPurgeBlocking?: boolean;
 }): Promise<boolean> {
   const conn = params.getConnectionInfo();
   const persistedMode = await params.getSecurityMode();
@@ -130,5 +143,6 @@ export async function shouldShowConnectionErrorToastForConnection(params: {
     isReconnecting: params.isReconnecting,
     reconnectAttempt: params.reconnectAttempt,
     isCertFlowActive: params.isCertFlowActive,
+    isPurgeBlocking: params.isPurgeBlocking,
   });
 }

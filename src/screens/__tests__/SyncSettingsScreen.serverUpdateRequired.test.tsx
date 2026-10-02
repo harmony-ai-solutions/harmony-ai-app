@@ -65,7 +65,6 @@ jest.mock('../../contexts/ThemeContext', () => ({
 }));
 
 jest.mock('@react-navigation/native', () => {
-  const React = require('react');
   const { View } = require('react-native');
   return {
     useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }),
@@ -161,6 +160,10 @@ jest.mock('../../services/cloud/CloudSessionService', () => ({
     off: jest.fn(),
     isPurging: jest.fn(() => false),
     getStatus: jest.fn(() => 'idle'),
+    // Async purge surface (cold-start attach on mount + card snapshot).
+    getPurgeRunState: jest.fn(() => 'idle'),
+    getLastPurgeTerminal: jest.fn(() => null),
+    attachToRunningPurge: jest.fn(() => Promise.resolve({ kind: 'none' })),
   },
 }));
 
@@ -227,13 +230,13 @@ describe('SyncSettingsScreen — serverUpdateRequired sticky gate', () => {
     expect(utils.getByTestId('server-update-required-card')).toBeTruthy();
     expect(
       utils.getByText(
-        'Harmony Link must be updated before syncing can continue. Please update Harmony Link to the latest version — this device will reconnect and resume syncing automatically once the update is installed.',
+        'Soulbits Engine must be updated before syncing can continue. Please update Soulbits Engine to the latest version — this device will reconnect and resume syncing automatically once the update is done.',
       ),
     ).toBeTruthy();
 
     // textKey → human label (NOT the raw 'serverUpdateRequired' key). The
     // label renders in the hero AND the status detail row.
-    expect(utils.getAllByText('Harmony Link update required').length).toBeGreaterThan(0);
+    expect(utils.getAllByText('Backend update required').length).toBeGreaterThan(0);
     expect(utils.queryByText('serverUpdateRequired')).toBeNull();
 
     // Manual sync attempts are visually disabled while the service choke

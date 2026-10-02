@@ -169,6 +169,34 @@ describe('shouldShowConnectionErrorToast', () => {
     // isReconnecting flips back to false — a fresh failure may toast again.
     expect(shouldShowConnectionErrorToast(settledIdle)).toBe(true);
   });
+
+  // ── Cloud data purge blocking (cloud-data-deletion.md §7 UX 3) ──────────
+  // WS drops during a purge's kill phase are EXPECTED — the session is gone
+  // by design. The purge banner + "Your data is being deleted" status text
+  // carry the message; a connection-error toast must never compete with it.
+  it('is NEVER true while a cloud data purge is blocking (expected WS churn)', () => {
+    expect(shouldShowConnectionErrorToast({ ...settledIdle, isPurgeBlocking: true })).toBe(false);
+    // Purge blocking beats every other condition, even a fully settled
+    // transport with quiet reconnect state.
+    expect(
+      shouldShowConnectionErrorToast({
+        ...settledIdle,
+        isPurgeBlocking: true,
+        isTransportSettled: false,
+        isCertFlowActive: true,
+        isReconnecting: true,
+        reconnectAttempt: 3,
+      }),
+    ).toBe(false);
+  });
+
+  it('does not change behavior when the purge flag is absent (back-compat)', () => {
+    // Existing callers that don't know about the flag behave exactly as before.
+    expect(shouldShowConnectionErrorToast(settledIdle)).toBe(true);
+    expect(
+      shouldShowConnectionErrorToast({ ...settledIdle, isCertFlowActive: true }),
+    ).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -249,5 +277,17 @@ describe('shouldShowConnectionErrorToastForConnection', () => {
         getSecurityMode: async () => 'unencrypted',
       }),
     ).resolves.toBe(true);
+  });
+
+  it('is false while a cloud data purge is blocking, even on a settled cloud connection', async () => {
+    // During a purge the WS is expected to drop (kill phase); no toast.
+    await expect(
+      shouldShowConnectionErrorToastForConnection({
+        ...quiet,
+        isPurgeBlocking: true,
+        getConnectionInfo: () => ({ mode: 'cloud' }),
+        getSecurityMode: async () => 'secure',
+      }),
+    ).resolves.toBe(false);
   });
 });

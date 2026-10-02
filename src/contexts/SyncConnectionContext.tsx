@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback, ReactNode } from 'react';
 import ConnectionStateManager, { type SyncSource } from '../services/ConnectionStateManager';
 import ConnectionManager from '../services/connection/ConnectionManager';
 import SyncService, { SyncService as SyncServiceClass } from '../services/SyncService';
-import { cloudSessionService, type CloudSessionStatus, type CloudSessionInfo } from '../services/cloud/CloudSessionService';
+import { cloudSessionService, type CloudSessionStatus, type CloudSessionInfo, type PurgeTerminalPayload } from '../services/cloud/CloudSessionService';
 import { PurgeInProgressError } from '@harmony-ai-solutions/soulbits-api-client';
 import AuthService from '../services/auth/AuthService';
 import DeviceAuthService from '../services/cloud/DeviceAuthService';
@@ -77,6 +77,24 @@ interface SyncConnectionContextType {
    *  the app's — syncs are suppressed (initiateSync choke point + suppressed
    *  auto-reconnect) until the engine is updated and re-handshakes. */
   serverUpdateRequired: boolean;
+  /** True while a cloud data purge blocks connecting: OUR purge is running
+   *  (initiating/polling/deadline), a connect was 409-blocked by another
+   *  device's purge (PurgeInProgressError → we adopt its status), or a
+   *  cold-start attach found a purge in flight. While true, auto-reconnect
+   *  scheduling is suppressed, connection-lost toasts are suppressed (WS
+   *  drops during the purge's kill phase are expected), and the status text
+   *  renders "Your data is being deleted" instead of disconnected/reconnecting. */
+  purgeBlocking: boolean;
+  /** True from a successful cloud purge (purge:done) until the user
+   *  acknowledges the result (the settings screen's persistent success card /
+   *  the success dialog's buttons). While true, the post-purge forced
+   *  re-sync's SYNC_DATA_SIZE_ESTIMATE prompt is HELD BACK (never
+   *  auto-confirmed) so it cannot clobber the purge success dialog in the
+   *  single-slot AppAlertContext — dismissPurgeResult() presents it. */
+  purgeResultPending: boolean;
+  /** Acknowledge the post-purge result: clears purgeResultPending and
+   *  immediately presents any deferred size-estimate prompt. */
+  dismissPurgeResult: () => void;
 }
 
 const SyncConnectionContext = createContext<SyncConnectionContextType | undefined>(undefined);
@@ -108,6 +126,30 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   // Mirrored from SyncService (single source of truth); drives the derived
   // connectionStatus member AND the reconnect/on-connect suppression below.
   const [serverUpdateRequired, setServerUpdateRequired] = useState(false);
+
+  // ── Cloud data purge blocking gate ──────────────────────────────────────
+  // True while a purge (ours, an adopted other-device purge, or a cold-start
+  // attach) blocks connecting — see purgeBlocking on the context type.
+  // Ref-mirrored like serverUpdateRequired because reconnect/disconnect event
+  // closures registered with [] deps must never read stale React state.
+  const [purgeBlocking, setPurgeBlocking] = useState<boolean>(cloudSessionService.isPurging());
+  const purgeBlockingRef = useRef<boolean>(cloudSessionService.isPurging());
+
+  // ── Post-purge result surface + estimate-prompt deferral ────────────────
+  // A successful purge (purge:done) raises this; the settings screen renders a
+  // PERSISTENT success card while it is true — the one-shot success alert can
+  // be clobbered by the post-purge re-sync's size-estimate prompt (the
+  // single-slot AppAlertContext is LAST-WINS). Ref-mirrored like purgeBlocking
+  // because the []-deps estimate listener must never read stale React state.
+  const [purgeResultPending, setPurgeResultPending] = useState(false);
+  const purgeResultPendingRef = useRef(false);
+  // The prompt-worthy estimate parked while the purge result is unacknowledged
+  // — presented VERBATIM (never auto-confirmed) by dismissPurgeResult().
+  const deferredEstimatePromptRef = useRef<(() => void) | null>(null);
+  const setPurgeResultPendingSync = (value: boolean) => {
+    purgeResultPendingRef.current = value;
+    setPurgeResultPending(value);
+  };
 
   // Themed alert dialog (AppAlertProvider is mounted ABOVE this provider in
   // App.tsx). Captured in a ref because handleSyncEstimate is registered in a
@@ -171,6 +213,10 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     serverUpdateRequiredRef.current = value;
     setServerUpdateRequired(value);
   };
+  const setPurgeBlockingSync = (value: boolean) => {
+    purgeBlockingRef.current = value;
+    setPurgeBlocking(value);
+  };
 
   const RECONNECT_INTERVALS = [1000, 2000, 4000, 8000, 16000, 30000];
 
@@ -186,6 +232,16 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   // Reconnect scheduling (uses refs – never stale)
   // ---------------------------------------------------------------------------
   const scheduleReconnect = () => {
+    // ── Cloud data purge blocking: never auto-reconnect while a purge is in
+    // flight — the broker would 409 every dial (purge_in_progress), and WS
+    // drops during the purge's kill phase are expected, not failures. The
+    // purge banner + "Your data is being deleted" status text carry the
+    // message; connecting resumes when the purge settles (purge:done /
+    // purge:failed / status idle clear the gate below).
+    if (purgeBlockingRef.current) {
+      log.info('Cloud data purge blocking — suppressing auto-reconnect scheduling');
+      return;
+    }
     // ── 3-3 / D57: while the server-update-required gate is sticky, do NOT
     // auto-reconnect — the loop connect → handshake → abort → reconnect is
     // exactly what D57 forbids (the gate must never tear down the WS as its
@@ -281,6 +337,9 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     const handleSyncConnected = async () => {
       log.info('Sync connected');
       ConnectionStateManager.markConnected();
+      // A live WS means no purge can be blocking (the broker 409s connects
+      // mid-purge) — belt-and-braces clear so the gate can never stick on.
+      setPurgeBlockingSync(false);
       setIsConnectedSync(true);
       setIsConnectingSync(false);
       setIsReconnectingSync(false);
@@ -338,7 +397,17 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       log.info('Sync disconnected');
       ConnectionStateManager.markDisconnected();
       setIsConnectedSync(false);
-      
+
+      // While a cloud data purge blocks connecting, a WS drop is EXPECTED —
+      // the purge hard-kills the session (kill phase). Do not schedule a
+      // reconnect and do not treat this as an error: the purge banner +
+      // "Your data is being deleted" status text carry the message.
+      if (purgeBlockingRef.current) {
+        log.info('Connection lost during cloud data purge — expected (session killed by purge); not scheduling reconnect');
+        setIsConnectingSync(false);
+        return;
+      }
+
       // Use ConnectionStateManager.getIsPaired() instead of isPairedRef.current
       // to avoid stale-value races when clearSelfHostedCredentials() +
       // disconnectConnection() are called in sequence (mode switch).
@@ -388,6 +457,9 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
           isReconnecting: isReconnectingRef.current,
           reconnectAttempt: reconnectAttemptsRef.current,
           isCertFlowActive: isCertFlowActiveRef.current,
+          // WS errors during a cloud data purge are expected (kill phase);
+          // the purge banner + status text carry the message instead.
+          isPurgeBlocking: purgeBlockingRef.current,
         });
         if (shouldToast) {
           showToast(i18n.t('syncConnection:connectionError', { message: errorMessage }));
@@ -545,30 +617,52 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       // Themed dialog via AppAlertContext (AppAlertProvider is now mounted
       // ABOVE SyncConnectionProvider in App.tsx). Use the ref-mirrored
       // showAlertRef so this []-deps listener never closes over a stale one.
-      showAlertRef.current(
-        i18n.t('syncConnection:alertTitle'),
-        message,
-        [
-          {
-            text: i18n.t('common:cancel'),
-            style: 'cancel',
-            onPress: () => {
-              SyncService.confirmSizeEstimate(false).catch((err: any) => {
-                log.warn('Reject size estimate failed:', err);
-              });
+      // Presented NOW, or AFTER the pending post-purge result is acknowledged
+      // (below) — never dropped, never auto-confirmed.
+      const presentEstimatePrompt = () => {
+        showAlertRef.current(
+          i18n.t('syncConnection:alertTitle'),
+          message,
+          [
+            {
+              text: i18n.t('common:cancel'),
+              style: 'cancel',
+              onPress: () => {
+                SyncService.confirmSizeEstimate(false).catch((err: any) => {
+                  log.warn('Reject size estimate failed:', err);
+                });
+              },
             },
-          },
-          {
-            text: i18n.t('common:confirm'),
-            onPress: () => {
-              SyncService.confirmSizeEstimate(true).catch((err: any) => {
-                log.warn('Confirm size estimate failed:', err);
-              });
+            {
+              text: i18n.t('common:confirm'),
+              onPress: () => {
+                SyncService.confirmSizeEstimate(true).catch((err: any) => {
+                  log.warn('Confirm size estimate failed:', err);
+                });
+              },
             },
-          },
-        ],
-        { icon: 'cloud-download-outline', blockBackdropDismiss: true },
-      );
+          ],
+          { icon: 'cloud-download-outline', blockBackdropDismiss: true },
+        );
+      };
+
+      // ── Post-purge deferral ───────────────────────────────────────────────
+      // A successful purge raises purgeResultPending until the user
+      // acknowledges the persistent success surface (settings card / success
+      // dialog). The forced post-purge re-sync ALWAYS classifies as
+      // isInitialSync (the purge cleared the watermark) → its estimate is
+      // prompt-worthy → presenting it now would instantly REPLACE the purge
+      // success dialog in the single-slot, LAST-WINS AppAlertContext. Park the
+      // prompt instead — SyncService.pendingSizeEstimate keeps the engine
+      // blocked, and dismissPurgeResult() presents it verbatim. It is NEVER
+      // auto-confirmed: the user always makes the accept/reject decision.
+      if (purgeResultPendingRef.current) {
+        log.info('Post-purge result not acknowledged yet — deferring the size estimate prompt (the engine stays blocked until it is answered)');
+        deferredEstimatePromptRef.current = presentEstimatePrompt;
+        return;
+      }
+
+      presentEstimatePrompt();
     };
 
     // A name clash during sync apply: an incoming server record's unique
@@ -810,27 +904,186 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     return () => { cloudSessionService.off('status', onCloudStatus); };
   }, []);
 
+  // Acknowledge the post-purge result: clears the pending surface and presents
+  // any deferred size-estimate prompt verbatim. Stable ([] deps — refs only)
+  // so the settings screen can call it from its own []-deps listeners.
+  const dismissPurgeResult = useCallback(() => {
+    setPurgeResultPendingSync(false);
+    const presentDeferred = deferredEstimatePromptRef.current;
+    deferredEstimatePromptRef.current = null;
+    presentDeferred?.();
+  }, []);
+
   // ── Purge re-evaluation (Phase 6) ──────────────────────────────────────
-  // When a user-initiated cloud purge finishes (success OR failure), clear any
-  // in-flight reconnect scheduling so the UI isn't left ticking a reconnect
-  // timer against a session that no longer exists. We deliberately do NOT
-  // auto-connect here — the success dialog explicitly guides the user to
-  // reconnect and Force full re-sync afterwards.
+  // When a user-initiated cloud purge finishes (success), clear any in-flight
+  // reconnect scheduling, mark a persisted "full re-sync pending" (cleared
+  // watermarks → the NEXT sync escalates to force_full_sync, even across an
+  // app restart), and re-establish the connection so the on-connect auto-sync
+  // runs that forced re-sync AUTOMATICALLY — the purge's own WS kill made the
+  // old broker session dead, so we force a fresh broker round-trip first.
+  //
+  // Before this follow-up, the app deliberately did NOT reconnect here and the
+  // success dialog manually guided the user to "Reconnect, then use Force full
+  // re-sync" — but the on-connect auto-sync was INCREMENTAL (the engine keeps
+  // its own per-device watermark and resends nothing), so the engine stayed
+  // empty and kept rejecting INIT_ENTITY with entity_not_defined. The cleared
+  // watermark now makes that same auto-sync a FULL forced re-sync.
+  //
+  // `purge:done` fires ONLY for outcome 'deleted' (failed/deadline settle via
+  // purge:failed / purge:terminal — neither re-syncs: re-uploading after a
+  // FAILED purge would defeat the user's deletion intent).
   useEffect(() => {
-    const reEvaluateAfterPurge = () => {
-      log.info('Cloud data purge settled — resetting reconnect state (no auto-connect)');
+    const reEvaluateAfterPurge = async () => {
+      log.info('Cloud data purge deleted — resetting reconnect state and scheduling the forced full re-sync');
       cancelReconnect();
       setIsReconnectingSync(false);
       setIsConnectingSync(false);
       setNextReconnectIn(0);
+
+      // Raise the pending-result gate: the settings screen's PERSISTENT
+      // success card renders until the user acknowledges, and the forced
+      // re-sync's size-estimate prompt defers (never clobbers the success
+      // dialog). Cleared by dismissPurgeResult / a completed forced sync.
+      setPurgeResultPendingSync(true);
+
+      // Mark the full re-sync BEFORE dialing so the on-connect auto-sync
+      // observes the cleared watermark and escalates to force_full_sync.
+      try {
+        await SyncServiceClass.getInstance().markFullResyncRequired();
+      } catch (e) {
+        log.warn('Failed to mark full re-sync required after purge:', e instanceof Error ? e.message : String(e));
+      }
+
+      try {
+        // The purge killed the broker session (hard-kill) — force a fresh
+        // POST /v1/session/connect round-trip so the first dial doesn't 404
+        // against the dead session, then open the sync WS. connect() itself
+        // provisions when the status isn't cached-'ready'; force:true also
+        // covers a stale cached 'ready' (the 404 / backend dial failed loop).
+        await cloudSessionService.connect({ force: true });
+        await connect();
+      } catch (err) {
+        log.warn('Post-purge reconnect failed — scheduling reconnect:', err instanceof Error ? err.message : String(err));
+        scheduleReconnect();
+      }
+    };
+    const onPurgeFailed = () => {
+      // Failed deletion: mere reconnect-state reset (no auto-reconnect, no
+      // re-sync — re-uploading would defeat the deletion intent; the screen's
+      // Retry-deletion card is the recovery path). The success surface (and
+      // with it the estimate deferral) is gone — a failed purge triggers no
+      // forced re-sync whose estimate could be pending, so restore normal
+      // estimate prompting.
+      log.info('Cloud data purge failed — resetting reconnect state (no auto-reconnect)');
+      cancelReconnect();
+      setIsReconnectingSync(false);
+      setIsConnectingSync(false);
+      setNextReconnectIn(0);
+      setPurgeResultPendingSync(false);
+      deferredEstimatePromptRef.current = null;
+    };
+    // The post-purge FORCED re-sync completed (its estimate was presented and
+    // answered) — the pending result surface and any still-deferred prompt are
+    // moot. Only a forced session clears the gate: it is the only sync whose
+    // estimate was (or would have been) deferred.
+    const onSyncCompleted = (session: any) => {
+      if (!session?.forceFullSync) {
+        return;
+      }
+      setPurgeResultPendingSync(false);
+      deferredEstimatePromptRef.current = null;
+    };
+    // Any sync session died while its estimate prompt was deferred (e.g. the
+    // engine aborts an never-confirmed session after ~60s): drop the stale
+    // deferred prompt so it cannot outlive its session. The pending RESULT
+    // surface stays up (still unacknowledged); the watermark rewrite only
+    // happens on SYNC_FINALIZE, so the next auto-sync re-forces and its
+    // estimate re-defers fresh.
+    const onSyncDied = () => {
+      deferredEstimatePromptRef.current = null;
     };
     cloudSessionService.on('purge:done', reEvaluateAfterPurge);
-    cloudSessionService.on('purge:failed', reEvaluateAfterPurge);
+    cloudSessionService.on('purge:failed', onPurgeFailed);
+    SyncService.on('sync:completed', onSyncCompleted);
+    SyncService.on('sync:aborted', onSyncDied);
+    SyncService.on('sync:error', onSyncDied);
+    SyncService.on('sync:rejected', onSyncDied);
     return () => {
       cloudSessionService.off('purge:done', reEvaluateAfterPurge);
-      cloudSessionService.off('purge:failed', reEvaluateAfterPurge);
+      cloudSessionService.off('purge:failed', onPurgeFailed);
+      SyncService.off('sync:completed', onSyncCompleted);
+      SyncService.off('sync:aborted', onSyncDied);
+      SyncService.off('sync:error', onSyncDied);
+      SyncService.off('sync:rejected', onSyncDied);
     };
   }, []);
+
+  // ── Cloud data purge blocking gate ─────────────────────────────────────
+  // Drives `purgeBlocking` (see the context type). Event-observing only —
+  // passive in BOTH roots, so this effect is registered for readOnly roots
+  // too (second React roots must observe, never mutate the connection).
+  // Raised by: status 'purging' (our purge or an adopted other-device purge),
+  // and a connect() PurgeInProgressError (handled in the connect catch).
+  // Cleared by: status 'idle' (purge settled deleted/failed), the terminal
+  // events themselves, a successful WS connect (belt-and-braces), and a
+  // cold-start attach resolving to none (below). Deadline keeps blocking —
+  // connecting stays paused until the server-side purge finishes.
+  useEffect(() => {
+    const onStatus = (s: CloudSessionStatus) => {
+      if (s === 'purging') {
+        setPurgeBlockingSync(true);
+      } else if (s === 'idle') {
+        setPurgeBlockingSync(false);
+      }
+    };
+    const onTerminal = (payload: PurgeTerminalPayload) => {
+      if (payload.outcome !== 'deadline') {
+        setPurgeBlockingSync(false);
+      }
+    };
+    const onLegacySettled = () => setPurgeBlockingSync(false);
+    // A deadline-latched run was reconciled away (re-probe GET reported none):
+    // the server-side run is gone — connecting unblocks immediately.
+    const onCleared = () => setPurgeBlockingSync(false);
+    cloudSessionService.on('status', onStatus);
+    cloudSessionService.on('purge:terminal', onTerminal);
+    cloudSessionService.on('purge:done', onLegacySettled);
+    cloudSessionService.on('purge:failed', onLegacySettled);
+    cloudSessionService.on('purge:cleared', onCleared);
+    return () => {
+      cloudSessionService.off('status', onStatus);
+      cloudSessionService.off('purge:terminal', onTerminal);
+      cloudSessionService.off('purge:done', onLegacySettled);
+      cloudSessionService.off('purge:failed', onLegacySettled);
+      cloudSessionService.off('purge:cleared', onCleared);
+    };
+  }, []);
+
+  // Cold-start attach (MAIN root only): if a purge was already running when
+  // the app launched (initiated here before a kill, or on another device),
+  // one status GET adopts it → CloudSessionService starts polling and the
+  // status/terminal events above raise/clear the gate. A `none` result is a
+  // no-op (and clears any stale gate from a previous run).
+  useEffect(() => {
+    if (readOnly) return;
+    let cancelled = false;
+    cloudSessionService.attachToRunningPurge()
+      .then(result => {
+        if (cancelled) return;
+        if (result.kind === 'none' && !cloudSessionService.isPurging()) {
+          // Server reports no run AND the service isn't holding a deadline
+          // latch (a failed re-probe GET preserves the latch and returns
+          // 'none' too — that must NOT unblock connecting).
+          setPurgeBlockingSync(false);
+        }
+        // 'adopted' / 'terminal': CloudSessionService emitted the status /
+        // terminal events synchronously — the listeners above set the gate.
+      })
+      .catch(e => {
+        log.warn('Cold-start purge attach failed:', e instanceof Error ? e.message : String(e));
+      });
+    return () => { cancelled = true; };
+  }, [readOnly]);
 
   // ---------------------------------------------------------------------------
   // Connection actions
@@ -908,7 +1161,12 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       // currently resetting its cloud data. This is expected — do NOT treat it
       // as a connection failure or schedule a reconnect (the reconnect loop
       // would spin uselessly until the other purge finishes). Drop to a
-      // non-reconnecting state and toast so the user knows to wait.
+      // non-reconnecting state, toast so the user knows to wait, raise the
+      // purgeBlocking gate (status text → "Your data is being deleted"), and
+      // ADOPT the running purge's status so this device tracks it: the one
+      // GET makes the banner/status drive off the same purge:progress /
+      // purge:terminal events as our own purges, and the gate clears on the
+      // other purge's terminal event.
       if (error instanceof PurgeInProgressError) {
         log.info('Cloud connect blocked: purge in progress on another device');
         cancelReconnect();
@@ -916,7 +1174,11 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
         setIsConnectingSync(false);
         setIsConnectedSync(false);
         setNextReconnectIn(0);
+        setPurgeBlockingSync(true);
         showToast(i18n.t('syncSettings:purgeInProgressOtherDevice'));
+        cloudSessionService.attachToRunningPurge().catch((e) => {
+          log.warn('Purge status attach after 409 connect-block failed:', e instanceof Error ? e.message : String(e));
+        });
         return;
       }
 
@@ -925,15 +1187,16 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       setIsConnectedSync(false);
       
       // Same toast gate as handleSyncError: suppress failedToConnect when this
-      // failure is an expected byproduct of the pairing/cert flow or a
-      // reconnect attempt (only the very first failure on a settled transport
-      // may toast).
+      // failure is an expected byproduct of the pairing/cert flow, a
+      // reconnect attempt, or the cloud data purge window (only the very
+      // first failure on a settled transport may toast).
       const shouldToast = await shouldShowConnectionErrorToastForConnection({
         getConnectionInfo: () => connectionManager.getSyncConnection(),
         getSecurityMode: () => ConnectionStateManager.getSecurityMode(),
         isReconnecting: isReconnectingRef.current,
         reconnectAttempt: reconnectAttemptsRef.current,
         isCertFlowActive: isCertFlowActiveRef.current,
+        isPurgeBlocking: purgeBlockingRef.current,
       });
       if (shouldToast) {
         showToast(i18n.t('syncConnection:failedToConnect'));
@@ -1123,11 +1386,14 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     canUseChat,
     connectionStatus,
     serverUpdateRequired,
+    purgeBlocking,
+    purgeResultPending,
+    dismissPurgeResult,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
     isPaired, isConnected, isConnecting, isReconnecting,
     reconnectAttempts, nextReconnectIn, canUseChat, connectionStatus,
-    serverUpdateRequired,
+    serverUpdateRequired, purgeBlocking, purgeResultPending,
   ]);
 
   return (

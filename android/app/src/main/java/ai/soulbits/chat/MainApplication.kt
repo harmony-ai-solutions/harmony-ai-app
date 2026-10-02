@@ -19,6 +19,12 @@ class MainApplication : Application(), ReactApplication {
           // Floating chat bubble (display over other apps)
           add(ChatBubblePackage())
         },
+      // Explicitly gate dev support on OUR variant's BuildConfig. The RN 0.86
+      // overload defaults this to ReactBuildConfig.DEBUG (the react-android
+      // library's own flag, false in published Maven artifacts), which silently
+      // disables Metro in debug builds -> "Unable to load script" from the
+      // asset loader.
+      useDevSupport = BuildConfig.DEBUG,
     )
   }
 

@@ -7,6 +7,7 @@ import {
   Animated,
   Easing,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
@@ -25,13 +26,73 @@ import { SelectPicker } from '../../components/config/SelectPicker';
 import { SyncProgressVisualizer } from '../../components/sync/SyncProgressVisualizer';
 import SyncService, { SyncSession } from '../../services/SyncService';
 import ConnectionStateManager from '../../services/ConnectionStateManager';
-import { cloudSessionService, type CloudSessionStatus } from '../../services/cloud/CloudSessionService';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  cloudSessionService,
+  type PurgeProgress,
+  type PurgeTerminalPayload,
+} from '../../services/cloud/CloudSessionService';
 import { createLogger } from '../../utils/logger';
 import { hexToRgba } from '../../utils/colorUtils';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 
 const log = createLogger('[SyncSettingsScreen]');
+
+// ── Async cloud purge card (cloud-data-deletion.md §7 UX) ──────────────────
+
+/** Local card sub-state — mirrors CloudSessionService's purge run state.
+ *  'succeeded' = deletion done, forced re-sync running; PERSISTENT (survives
+ *  the size-estimate prompt that used to clobber the one-shot success alert)
+ *  until the user acknowledges it or the forced re-sync completes. */
+type PurgeCardState = 'idle' | 'initiating' | 'in_progress' | 'failed' | 'deadline' | 'succeeded';
+
+/** Server purge phase → stepper row. start|kill = row 0, routing/s3/beats/dek
+ *  = row 1, done = row 2 (absent phase = initiating → row 0). */
+function purgeStepIndexForPhase(phase: string | undefined): number {
+  if (!phase || phase === 'start' || phase === 'kill') return 0;
+  if (phase === 'routing' || phase === 's3' || phase === 'beats' || phase === 'dek') return 1;
+  return 2; // 'done'
+}
+
+const PURGE_STEP_KEYS = ['purgeStepStopping', 'purgeStepDeleting', 'purgeStepFinishing'] as const;
+
+/**
+ * 3-step purge progress stepper (SyncProgressVisualizer idioms: theme accent
+ * colors, completed → check, active → spinner, upcoming → hollow dot).
+ */
+const PurgeStepper: React.FC<{ phase: string | undefined }> = ({ phase }) => {
+  const { t } = useTranslation('syncSettings');
+  const { theme } = useAppTheme();
+  const current = purgeStepIndexForPhase(phase);
+  const accent = theme?.colors.accent.primary ?? '#b84fd0';
+  const success = theme?.colors.status.success ?? '#4caf82';
+  const muted = theme?.colors.text.muted ?? '#aaaaaa';
+
+  return (
+    <View style={styles.stepper}>
+      {PURGE_STEP_KEYS.map((key, i) => {
+        const state = i < current ? 'done' : i === current ? 'active' : 'pending';
+        return (
+          <View style={styles.stepperRow} key={key}>
+            {state === 'done' ? (
+              <Icon name="check-circle" size={18} color={success} style={styles.stepperIcon} />
+            ) : state === 'active' ? (
+              <ActivityIndicator size="small" color={accent} style={styles.stepperIcon} />
+            ) : (
+              <Icon name="circle-outline" size={18} color={muted} style={styles.stepperIcon} />
+            )}
+            <ThemedText
+              size={13}
+              variant={state === 'pending' ? 'muted' : 'primary'}
+              weight={state === 'active' ? 'medium' : 'normal'}
+            >
+              {t(key)}
+            </ThemedText>
+          </View>
+        );
+      })}
+    </View>
+  );
+};
 
 /**
  * Data Synchronization screen — premium animated redesign.
@@ -49,7 +110,7 @@ export const SyncSettingsScreen: React.FC = () => {
 
   const { theme } = useAppTheme();
   const { showAlert } = useAppAlert();
-  const { isConnected, isPaired, isReconnecting, reconnectAttempt, nextReconnectIn, showToast, canUseChat, connectionStatus, serverUpdateRequired } =
+  const { isConnected, isPaired, isReconnecting, reconnectAttempt, nextReconnectIn, showToast, canUseChat, connectionStatus, serverUpdateRequired, purgeBlocking, purgeResultPending, dismissPurgeResult } =
     useSyncConnection();
 
   // ── Existing state (preserved from original) ────────────────────────────────
@@ -61,8 +122,45 @@ export const SyncSettingsScreen: React.FC = () => {
   const [countdown, setCountdown] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Phase 6: whether the user-initiated cloud data purge is currently running.
-  const [isPurging, setIsPurging] = useState(cloudSessionService.isPurging());
+  // ── Async cloud purge card state ───────────────────────────────────────────
+  // Initial value from the service snapshot covers re-mounts mid-purge; the
+  // mount-time attachToRunningPurge() below covers cold-start adoption.
+  const [purgeCard, setPurgeCard] = useState<PurgeCardState>(() => {
+    switch (cloudSessionService.getPurgeRunState()) {
+      case 'initiating': return 'initiating';
+      case 'polling': return 'in_progress';
+      case 'failed': return 'failed';
+      case 'deadline': return 'deadline';
+      default:
+        // A successful purge whose result the user has NOT acknowledged yet
+        // (the provider-level post-purge gate) → re-render the persistent
+        // success card, so the ack surface survives navigation/remounts and
+        // the deferred size-estimate prompt can always be released.
+        return purgeResultPending ? 'succeeded' : 'idle';
+    }
+  });
+  const [purgeProgress, setPurgeProgress] = useState<PurgeProgress | null>(null);
+  // Elapsed-minutes ticker while the card is busy (initiating/in_progress).
+  const [purgeElapsedMin, setPurgeElapsedMin] = useState(0);
+  const purgeStartedAtRef = useRef<number | null>(null);
+
+  // Kick off (or retry) the async purge. Resolves normally — contract-level
+  // outcomes arrive as purge:progress / purge:terminal events (handled in the
+  // effect below); a REJECTION is an unexpected internal error.
+  const beginPurge = useCallback(() => {
+    setPurgeCard('initiating'); // optimistic; the first purge:progress confirms
+    cloudSessionService.purgeCloudData().catch((err: any) => {
+      log.error('PurgeCloudData threw:', err?.message || err);
+      setPurgeCard('failed');
+      showToast(t('resetCloudDataFailedUnknown'));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Ref so the []-deps event listener never closes over a stale handler.
+  const beginPurgeRef = useRef(beginPurge);
+  useEffect(() => {
+    beginPurgeRef.current = beginPurge;
+  }, [beginPurge]);
 
   const loadSettings = useCallback(async () => {
     // Read the per-source sync watermark (legacy global key was removed).
@@ -111,10 +209,17 @@ export const SyncSettingsScreen: React.FC = () => {
       setIsSyncing(session.status === 'in_progress' || session.status === 'pending');
     };
 
-    const completedListener = (_session: SyncSession) => {
+    const completedListener = (session: SyncSession) => {
       setCurrentSession(null);
       setIsSyncing(false);
       setLastSyncTime(new Date().toLocaleString());
+      // The post-purge FORCED re-sync completed — the "re-syncing your data
+      // now" success card has served its purpose. (Between purge:done and the
+      // first SYNC_FINALIZE the watermark is 0, so ANY completed sync is the
+      // forced one; the flag check keeps other sessions from clearing it.)
+      if ((session as any)?.forceFullSync) {
+        setPurgeCard(prev => (prev === 'succeeded' ? 'idle' : prev));
+      }
     };
 
     const errorListener = (_error: string) => {
@@ -177,33 +282,171 @@ export const SyncSettingsScreen: React.FC = () => {
     return () => clearInterval(interval);
   }, [isReconnecting, nextReconnectIn]);
 
-  // ── Purge state tracking (Phase 6) ────────────────────────────────────────
-  // Mirrors the CloudSessionService purge lifecycle so the destructive card can
-  // disable its button + show progress while a purge is in flight, then surface
-  // a success alert or failure toast when it settles. This effect also listens
-  // for the `status` event so a purge started from another screen keeps this
-  // screen's button state in sync.
+  // ── Purge event tracking (async contract) ─────────────────────────────────
+  // purge:progress drives the busy card (initiating → in_progress + stepper
+  // phase); purge:terminal settles it (success alert / failed card + retry
+  // alert / deadline info state). The legacy purge:done / purge:failed
+  // events are intentionally NOT re-listened here — the service always emits
+  // purge:terminal right after them, and handling both would double-fire.
   useEffect(() => {
-    const onStatus = (s: CloudSessionStatus) => {
-      setIsPurging(s === 'purging');
+    const onProgress = (p: PurgeProgress) => {
+      setPurgeProgress(p);
+      setPurgeCard(p.runState === 'initiating' ? 'initiating' : 'in_progress');
     };
-    const onPurgeDone = () => {
-      setIsPurging(false);
-      showAlert(t('resetCloudDataSuccessTitle'), t('resetCloudDataSuccessMessage'));
+    const onCleared = () => {
+      // A deadline-latched run was reconciled away (server reports none) —
+      // the card returns to the idle confirm state.
+      setPurgeProgress(null);
+      setPurgeCard('idle');
     };
-    const onPurgeFailed = (reason: string) => {
-      setIsPurging(false);
-      showToast(t('resetCloudDataFailed', { message: reason }));
+    const onTerminal = (payload: PurgeTerminalPayload) => {
+      if (payload.outcome === 'deleted') {
+        setPurgeProgress(null);
+        // PERSISTENT success state (not idle): renders the "re-syncing your
+        // data now" card until the user acknowledges it or the forced
+        // re-sync completes — the one-shot alert below alone can be clobbered
+        // by the re-sync's size-estimate prompt (single-slot alert context).
+        setPurgeCard('succeeded');
+        // The app already auto-reconnects + runs a FORCED full re-sync after a
+        // successful purge (SyncConnectionContext marks full-resync-required on
+        // purge:done — the cleared watermark escalates the on-connect
+        // auto-sync). This dialog's action gives the user an immediate,
+        // in-place start; after the purge the watermark is 0, so any sync it
+        // triggers is a forced full re-sync anyway. Either button
+        // acknowledges the result, which releases any deferred estimate
+        // prompt AFTER the user has seen the success message.
+        showAlert(
+          t('resetCloudDataSuccessTitle'),
+          t('resetCloudDataSuccessMessage'),
+          [
+            {
+              text: t('common:cancel'),
+              style: 'cancel',
+              onPress: () => dismissPurgeResult(),
+            },
+            {
+              text: t('resetCloudDataSyncNow'),
+              onPress: () => {
+                dismissPurgeResult();
+                SyncService.forceFullSync().catch((err: any) => {
+                  log.error('Force full re-sync from purge success dialog failed:', err?.message || err);
+                  showToast(t('failedToStartFullResync', { message: err?.message || 'Unknown error' }));
+                });
+              },
+            },
+          ],
+          { icon: 'cloud-sync-outline' },
+        );
+      } else if (payload.outcome === 'failed') {
+        setPurgeProgress(null);
+        setPurgeCard('failed');
+        showAlert(
+          t('resetCloudDataFailedTitle'),
+          t('resetCloudDataFailedUnknown'),
+          [
+            { text: t('common:cancel'), style: 'cancel' },
+            {
+              text: t('resetCloudDataFailedRetry'),
+              style: 'destructive',
+              // Ref: this []-deps listener must never close over a stale handler.
+              onPress: () => beginPurgeRef.current(),
+            },
+          ],
+        );
+      } else {
+        // deadline — connecting stays paused; card goes non-interactive.
+        setPurgeCard('deadline');
+      }
     };
-    cloudSessionService.on('status', onStatus);
-    cloudSessionService.on('purge:done', onPurgeDone);
-    cloudSessionService.on('purge:failed', onPurgeFailed);
+    cloudSessionService.on('purge:progress', onProgress);
+    cloudSessionService.on('purge:terminal', onTerminal);
+    cloudSessionService.on('purge:cleared', onCleared);
     return () => {
-      cloudSessionService.off('status', onStatus);
-      cloudSessionService.off('purge:done', onPurgeDone);
-      cloudSessionService.off('purge:failed', onPurgeFailed);
+      cloudSessionService.off('purge:progress', onProgress);
+      cloudSessionService.off('purge:terminal', onTerminal);
+      cloudSessionService.off('purge:cleared', onCleared);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Post-purge success card actions ────────────────────────────────────────
+  // The persistent success card's "Full re-sync now" — same forced start as
+  // the success dialog's action. After the purge the watermark is 0, so the
+  // in-flight auto-sync (if any) is already forced and this resolves onto it.
+  const handlePurgeSuccessResync = () => {
+    SyncService.forceFullSync().catch((err: any) => {
+      log.error('Force full re-sync from purge success card failed:', err?.message || err);
+      showToast(t('failedToStartFullResync', { message: err?.message || 'Unknown error' }));
+    });
+  };
+  // "Got it" — acknowledge the purge result. Clears the card AND the
+  // provider-level gate, which immediately presents any size-estimate prompt
+  // that was deferred while the result was pending.
+  const handlePurgeSuccessDismiss = () => {
+    setPurgeCard(prev => (prev === 'succeeded' ? 'idle' : prev));
+    dismissPurgeResult();
+  };
+
+  // ── Cold-start attach ──────────────────────────────────────────────────────
+  // Covers: app killed mid-purge + relaunch, a purge started on ANOTHER
+  // device, AND a deadline latch from a previous app session — attach is now
+  // a real re-probe in every non-active state (never a replay for deadline).
+  useEffect(() => {
+    let cancelled = false;
+    cloudSessionService.attachToRunningPurge()
+      .then(result => {
+        if (cancelled) return;
+        if (result.kind === 'adopted') {
+          setPurgeProgress(result.progress);
+          setPurgeCard(result.progress.runState === 'initiating' ? 'initiating' : 'in_progress');
+        } else if (result.kind === 'terminal') {
+          if (result.terminal.outcome === 'failed') setPurgeCard('failed');
+          else if (result.terminal.outcome === 'deadline') setPurgeCard('deadline');
+        } else if (!cloudSessionService.isPurging()) {
+          // Server reports no run AND the service isn't holding a deadline
+          // latch (a FAILED re-probe GET also resolves `none` while keeping
+          // the latch — that must not reset the card out of its deadline
+          // state). Also self-heals a stale deadline render: the service has
+          // already cleared itself (purge:cleared) by the time we see none.
+          // A pending post-purge SUCCESS surface (unacknowledged result) is
+          // NOT stale — it must survive the attach probe so the ack button
+          // (and any deferred estimate prompt) stays reachable.
+          setPurgeProgress(null);
+          setPurgeCard(prev => (prev === 'succeeded' ? prev : 'idle'));
+        }
+      })
+      .catch((err: any) => {
+        log.warn('attachToRunningPurge failed:', err?.message || err);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Elapsed-minutes ticker (busy card) ─────────────────────────────────────
+  useEffect(() => {
+    if (purgeCard !== 'initiating' && purgeCard !== 'in_progress') {
+      setPurgeElapsedMin(0);
+      purgeStartedAtRef.current = null;
+      return;
+    }
+    // Derive the wall-clock start from the newest progress payload so the
+    // ticker keeps true time across re-renders/adopted runs.
+    if (purgeProgress) {
+      const base = Date.now() - purgeProgress.elapsedMs;
+      if (
+        purgeStartedAtRef.current === null ||
+        Math.abs(base - purgeStartedAtRef.current) > 5_000
+      ) {
+        purgeStartedAtRef.current = base;
+      }
+    }
+    const tick = () => {
+      const start = purgeStartedAtRef.current ?? Date.now();
+      setPurgeElapsedMin(Math.floor((Date.now() - start) / 60_000));
+    };
+    tick();
+    const interval = setInterval(tick, 1_000);
+    return () => clearInterval(interval);
+  }, [purgeCard, purgeProgress]);
 
   // ── Handlers (preserved from original) ─────────────────────────────────────
   const handleSyncNow = async () => {
@@ -266,12 +509,12 @@ export const SyncSettingsScreen: React.FC = () => {
     );
   };
 
-  // ── Phase 6: Reset Cloud Data (user-initiated purge) ─────────────────────
-  // Destructive, cloud-mode-only action. Confirms the scope, then delegates to
-  // CloudSessionService.purgeCloudData() (which disconnects, POSTs the delete
-  // with bounded retries, and emits purge:done / purge:failed). This screen
-  // reacts to those events (progress / success alert / failure toast) via the
-  // effect above.
+  // ── Reset Cloud Data (user-initiated async purge) ────────────────────────
+  // Destructive, cloud-mode-only action. Confirms the scope (updated copy —
+  // device data survives; cloud deletion is irreversible and unstoppable),
+  // then delegates to CloudSessionService.purgeCloudData(). Progress, success
+  // and failure all arrive via purge:progress / purge:terminal events handled
+  // in the effect above — including a full "Retry deletion" path.
   const handleResetCloudData = () => {
     showAlert(
       t('resetCloudDataTitle'),
@@ -281,16 +524,7 @@ export const SyncSettingsScreen: React.FC = () => {
         {
           text: t('resetCloudDataConfirm'),
           style: 'destructive',
-          onPress: () => {
-            cloudSessionService.purgeCloudData().catch((err: any) => {
-              // purgeCloudData resolves normally and emits purge:failed on
-              // retry-exhaustion; a rejection here is an unexpected internal
-              // error the service didn't swallow.
-              log.error('PurgeCloudData threw:', err?.message || err);
-              setIsPurging(false);
-              showToast(t('resetCloudDataFailed', { message: err?.message || 'Unknown error' }));
-            });
-          },
+          onPress: () => beginPurge(),
         },
       ],
     );
@@ -298,6 +532,10 @@ export const SyncSettingsScreen: React.FC = () => {
 
   // ── Helpers (preserved from original) ──────────────────────────────────────
   const getConnectionStatusText = () => {
+    // Cloud data purge blocking — overrides disconnected/reconnecting: the
+    // WS drops during a purge are EXPECTED (the session is killed by design),
+    // so the status reads the purge state instead of an error state.
+    if (purgeBlocking) return t('purgeBlockingStatus');
     // Use shared connectionStatus for standard labels; override the
     // reconnecting-retries detail locally (syncSettings namespace has the
     // richer reconnectingRetries key).
@@ -554,6 +792,10 @@ export const SyncSettingsScreen: React.FC = () => {
         />
 
         {/* ── Reset Cloud Data (destructive, cloud-mode only) ───────────── */}
+        {/* Stateful card: idle → confirm → initiating → in_progress →
+            deleted | failed | deadline. deleted settles back to idle with a
+            success alert; failed keeps a Retry-deletion card; deadline is
+            non-interactive info (connecting stays paused server-side). */}
 
         {connectionStatus.mode === 'cloud' && (
           <ThemedCard style={styles.resetCloudDataCard}>
@@ -564,26 +806,116 @@ export const SyncSettingsScreen: React.FC = () => {
               </ThemedText>
             </View>
 
-            <ThemedText variant="secondary" size={13} style={styles.resetCloudDataDescription}>
-              {t('resetCloudDataCardDescription')}
-            </ThemedText>
+            {purgeCard === 'idle' && (
+              <>
+                <ThemedText variant="secondary" size={13} style={styles.resetCloudDataDescription}>
+                  {t('resetCloudDataCardDescription')}
+                </ThemedText>
+                <ThemedButton
+                  label={t('resetCloudDataConfirm')}
+                  icon="cloud-remove-outline"
+                  onPress={handleResetCloudData}
+                  variant="outline"
+                  iconColor={theme.colors.status.error}
+                  style={styles.resetCloudDataButton}
+                  testID="reset-cloud-data-button"
+                  accessibilityLabel="Reset cloud data"
+                />
+              </>
+            )}
 
-            <ThemedButton
-              label={isPurging ? t('resetCloudDataInProgress') : t('resetCloudDataConfirm')}
-              icon="cloud-remove-outline"
-              onPress={handleResetCloudData}
-              disabled={isPurging}
-              variant="outline"
-              iconColor={theme.colors.status.error}
-              style={styles.resetCloudDataButton}
-              testID="reset-cloud-data-button"
-              accessibilityLabel="Reset cloud data"
-            />
+            {purgeCard === 'initiating' && (
+              <View style={styles.purgeBusyBlock} testID="purge-initiating-block">
+                <View style={styles.purgeBusyRow}>
+                  <ActivityIndicator size="small" color={accentPrimary} />
+                  <ThemedText variant="secondary" size={13}>
+                    {t('purgeInitiating')}
+                  </ThemedText>
+                </View>
+                <ThemedText variant="muted" size={12} style={styles.resetCloudDataHint}>
+                  {t('resetCloudDataProgressHint')}
+                </ThemedText>
+              </View>
+            )}
 
-            {isPurging && (
-              <ThemedText variant="muted" size={12} style={styles.resetCloudDataHint}>
-                {t('resetCloudDataProgressHint')}
+            {purgeCard === 'in_progress' && (
+              <View style={styles.purgeBusyBlock} testID="purge-progress-block">
+                <PurgeStepper phase={purgeProgress?.phase} />
+                <ThemedText variant="secondary" size={12} style={styles.purgeElapsed}>
+                  {t('purgeElapsed', { minutes: purgeElapsedMin })}
+                </ThemedText>
+                <ThemedText variant="muted" size={12} style={styles.resetCloudDataHint}>
+                  {t('resetCloudDataProgressHint')}
+                </ThemedText>
+              </View>
+            )}
+
+            {purgeCard === 'failed' && (
+              <>
+                <ThemedText
+                  variant="secondary"
+                  size={13}
+                  style={styles.resetCloudDataDescription}
+                  testID="purge-failed-text"
+                >
+                  {t('resetCloudDataFailedUnknown')}
+                </ThemedText>
+                <ThemedButton
+                  label={t('resetCloudDataFailedRetry')}
+                  icon="cloud-refresh"
+                  onPress={beginPurge}
+                  variant="outline"
+                  iconColor={theme.colors.status.error}
+                  style={styles.resetCloudDataButton}
+                  testID="retry-purge-button"
+                  accessibilityLabel={t('resetCloudDataFailedRetry')}
+                />
+              </>
+            )}
+
+            {purgeCard === 'deadline' && (
+              <ThemedText
+                variant="secondary"
+                size={13}
+                style={styles.resetCloudDataDescription}
+                testID="purge-deadline-text"
+              >
+                {t('resetCloudDataDeadline')}
               </ThemedText>
+            )}
+
+            {purgeCard === 'succeeded' && (
+              <>
+                <View style={styles.purgeBusyBlock} testID="purge-success-block">
+                  <View style={styles.purgeBusyRow}>
+                    <Icon name="cloud-check-outline" size={18} color={theme.colors.status.success} />
+                    <ThemedText variant="secondary" size={13}>
+                      {t('purgeSuccessResyncing')}
+                    </ThemedText>
+                  </View>
+                  <ThemedText variant="muted" size={12} style={styles.resetCloudDataHint}>
+                    {t('resetCloudDataProgressHint')}
+                  </ThemedText>
+                </View>
+                <ThemedButton
+                  label={t('resetCloudDataSyncNow')}
+                  icon="cloud-sync-outline"
+                  onPress={handlePurgeSuccessResync}
+                  variant="outline"
+                  iconColor={theme.colors.status.success}
+                  style={styles.resetCloudDataButton}
+                  testID="purge-success-resync-button"
+                  accessibilityLabel={t('resetCloudDataSyncNow')}
+                />
+                <ThemedButton
+                  label={t('purgeSuccessDismiss')}
+                  icon="check"
+                  onPress={handlePurgeSuccessDismiss}
+                  variant="outline"
+                  testID="purge-success-dismiss-button"
+                  accessibilityLabel={t('purgeSuccessDismiss')}
+                />
+              </>
             )}
           </ThemedCard>
         )}
@@ -800,6 +1132,33 @@ const styles = StyleSheet.create({
   resetCloudDataHint: {
     textAlign: 'center',
     marginTop: 6,
+  },
+  purgeBusyBlock: {
+    alignItems: 'stretch',
+  },
+  purgeBusyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 4,
+  },
+  purgeElapsed: {
+    textAlign: 'center',
+    marginTop: 8,
+    fontVariant: ['tabular-nums'] as any,
+  },
+  stepper: {
+    gap: 8,
+    paddingVertical: 4,
+  },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stepperIcon: {
+    width: 22,
+    alignItems: 'center',
   },
 
   // ── Warning / Info Cards ────────────────────────────────────────────────────
