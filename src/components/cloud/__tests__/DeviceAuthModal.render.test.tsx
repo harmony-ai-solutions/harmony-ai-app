@@ -19,7 +19,10 @@
 import React from 'react';
 import { render } from '@testing-library/react-native';
 import { DeviceAuthModal } from '../DeviceAuthModal';
-import { DeviceAuthError } from '../../../services/cloud/DeviceAuthService';
+import {
+  DeviceAuthError,
+  isDeviceAuthRequestPending,
+} from '../../../services/cloud/DeviceAuthService';
 
 // ── Module-level mocks for child component dependencies ──────────────────
 // NOTE: jest.mock factories are hoisted before imports, so they CANNOT
@@ -103,6 +106,7 @@ jest.mock('../../../services/cloud/DeviceAuthService', () => {
   const getStatus = jest.fn();
   const requestCode = jest.fn(async () => {});
   const verifyCode = jest.fn(async () => {});
+  const isDeviceAuthRequestPending = jest.fn(() => false);
   const mockDeviceAuthError = class DeviceAuthError extends Error {
     action: string;
     status?: number;
@@ -117,6 +121,7 @@ jest.mock('../../../services/cloud/DeviceAuthService', () => {
     __esModule: true,
     default: { getStatus, requestCode, verifyCode },
     DeviceAuthError: mockDeviceAuthError,
+    isDeviceAuthRequestPending,
   };
 });
 
@@ -124,6 +129,7 @@ import DeviceAuthService from '../../../services/cloud/DeviceAuthService';
 
 const mockGetStatus = DeviceAuthService.getStatus as jest.Mock;
 const mockRequestCode = DeviceAuthService.requestCode as jest.Mock;
+const mockIsDeviceAuthRequestPending = isDeviceAuthRequestPending as jest.Mock;
 
 // Real Modal renders children when visible in the RN jest preset — good enough
 // for the poll assertions. useAppTheme is mocked, so theme is never null.
@@ -140,6 +146,9 @@ beforeEach(() => {
   // successful requestCode so a test that overrides it (mockRejectedValue*)
   // cannot leak a failure into later tests.
   mockRequestCode.mockResolvedValue(undefined);
+  // Default: no secret outstanding, so the auto-request path stays active
+  // unless a test opts into the "already pending" state.
+  mockIsDeviceAuthRequestPending.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -177,6 +186,22 @@ describe('DeviceAuthModal — Phase 4-2 auto-resolve polling', () => {
     await rerender(<DeviceAuthModal {...baseProps} visible={false} />);
     await rerender(<DeviceAuthModal {...baseProps} visible={true} />);
     expect(mockRequestCode).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT request a new code while one is already pending — a re-show must not kill the emailed link', async () => {
+    // Root cause of the "approve says outdated" bug: a second requestCode
+    // replaces the single live secret, invalidating the link in the email the
+    // user is about to click. While a request is outstanding the modal must not
+    // issue another (the manual Resend button remains the explicit override).
+    mockIsDeviceAuthRequestPending.mockReturnValue(true);
+
+    const { rerender } = await render(<DeviceAuthModal {...baseProps} />);
+
+    // No request on first show, and none after a dismiss + re-show either.
+    expect(mockRequestCode).not.toHaveBeenCalled();
+    await rerender(<DeviceAuthModal {...baseProps} visible={false} />);
+    await rerender(<DeviceAuthModal {...baseProps} visible={true} />);
+    expect(mockRequestCode).not.toHaveBeenCalled();
   });
 
   it('polls every 5 s and closes via onVerified once the device is authorized', async () => {

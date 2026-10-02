@@ -30,6 +30,29 @@ import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[DeviceAuth]');
 
+// ── Pending-request guard ───────────────────────────────────────────────────
+// The auth-service keeps exactly ONE live secret pair (6-digit code +
+// approval token) per device: a second requestDeviceAuthCode REPLACES the
+// first, so the link in the earlier email stops working. The modal auto-requests
+// a code on every show, and the app re-triggers connect on `auth:changed`
+// (including token refresh) which can re-show the modal — so without a guard a
+// second email was silently minted and the first email's "Authorize device"
+// button returned 401 "invalid or expired approval link" (the reported bug).
+//
+// Module-level (not component state) so it survives the modal unmount/remount:
+// while a secret is outstanding we must not issue another.
+let requestPending = false;
+
+/** True while an emailed device-auth secret is outstanding for this device. */
+export function isDeviceAuthRequestPending(): boolean {
+  return requestPending;
+}
+
+/** Clears the pending guard (e.g. after the device is authorized or for tests). */
+export function clearDeviceAuthRequestPending(): void {
+  requestPending = false;
+}
+
 // ── Error type ──────────────────────────────────────────────────────────────
 
 /** Structured error code the auth-service returns (HTTP 404) when the device
@@ -144,6 +167,7 @@ class DeviceAuthServiceClass {
       try {
         const paseto = await AuthService.getToken();
         await buildSoulbitsClient({ paseto }).devices.requestDeviceAuthCode(deviceId);
+        requestPending = true;
         log.info('Device auth code requested for:', deviceId);
       } catch (e) {
         throw toDeviceAuthError('requestCode', e);
@@ -166,6 +190,7 @@ class DeviceAuthServiceClass {
           deviceId,
           code.trim(),
         );
+        requestPending = false;
         log.info('Device authorized:', deviceId);
       } catch (e) {
         throw toDeviceAuthError('verifyCode', e);
@@ -194,6 +219,9 @@ class DeviceAuthServiceClass {
       try {
         const paseto = await AuthService.getToken();
         const status = await buildSoulbitsClient({ paseto }).devices.getDeviceAuthorizationStatus(id);
+        if (status.authorized) {
+          requestPending = false;
+        }
         return {
           authorized: status.authorized,
           authorizationPending: status.authorizationPending,
