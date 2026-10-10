@@ -1,6 +1,6 @@
 # Phase 3-4 — App: Migration Bridge Execution & TS Stack Deletion
 
-> **Repo:** `harmony-ai-app` (branch `app-engine-parity`) + engine coordination
+> **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`) + engine coordination
 > **Assessment basis:** §12.6 (what dies), §12.8 step 4 (old protocol as the bridge, then deleted)
 > **Depends on:** 1-4 (bridge proven), 2-5 (cloud path live), 3-2 (flagged API layer), 3-3 (verdicts)
 

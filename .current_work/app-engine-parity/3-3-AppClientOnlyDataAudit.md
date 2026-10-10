@@ -1,6 +1,6 @@
 # Phase 3-3 — App: Client-Only Data Audit & Relocation
 
-> **Repo:** `harmony-ai-app` (branch `app-engine-parity`)
+> **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §12.6 (what survives: client-only prefs), memory-bank history of client-only tables
 
 ## Objective

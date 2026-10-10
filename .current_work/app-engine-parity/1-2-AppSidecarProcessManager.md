@@ -1,6 +1,6 @@
 # Phase 1-2 — App: Sidecar Process Manager (Android)
 
-> **Repo:** `harmony-ai-app` (branch `app-engine-parity`)
+> **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §7.2 channel B, §12.3 relationship 1
 
 ## Objective

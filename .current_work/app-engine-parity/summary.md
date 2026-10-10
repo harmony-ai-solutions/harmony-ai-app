@@ -3,7 +3,7 @@
 > **Status:** DRAFT — pending detail review & go/no-go decision
 > **Created:** 2026-10-10
 > **Research basis:** [`docs/engine-parity-vs-cloud-assessment.md`](../../docs/engine-parity-vs-cloud-assessment.md) (§1–§12; especially §7 embedding channels, §10 design directives D1/D2, §11 local-engine variant, §12 consolidation)
-> **Branch (this repo):** `app-engine-parity`
+> **Branch (this repo):** `feat/app-engine-parity`
 
 ## Plan Overview
 
@@ -24,7 +24,7 @@ The app stops being a second implementation of the engine's data layer and becom
 
 | Repo | Branch (to create) | Role in this plan |
 |---|---|---|
-| `harmony-ai-app` | `app-engine-parity` (exists — this plan) | Sidecar/module integration, management-API frontend, TS stack deletion |
+| `harmony-ai-app` | `feat/app-engine-parity` (exists — this plan) | Sidecar/module integration, management-API frontend, TS stack deletion |
 | `harmony-link-private` | `feat/app-engine-parity` | D1/D2 refactors, session-extension wrapper, changeset sync module, embedding facade, mobile read endpoints |
 | `soulbits-cloud-backend` | `feat/app-engine-parity` | Engine dependency bump, lifecycle-worker compatibility gates, schema support window. **NO infra cleanup** |
 

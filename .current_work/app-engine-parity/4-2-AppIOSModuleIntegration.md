@@ -1,6 +1,6 @@
 # Phase 4-2 — App: iOS Module Integration (Turbo Native Module)
 
-> **Repo:** `harmony-ai-app` (branch `app-engine-parity`)
+> **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §7.2 channel A, §8.5 (foreground-only engine semantics)
 
 ## Objective

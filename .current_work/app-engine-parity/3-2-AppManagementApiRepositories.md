@@ -1,6 +1,6 @@
 # Phase 3-2 — App: Management-API Client & Repository Adapter Swap
 
-> **Repo:** `harmony-ai-app` (branch `app-engine-parity`)
+> **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §12.4, §12.8 step 3 (per-screen swap)
 
 ## Objective

@@ -1,6 +1,6 @@
 # Phase 1-3 — App: "Local Engine" Connection Source
 
-> **Repo:** `harmony-ai-app` (branch `app-engine-parity`)
+> **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §12.3 relationship 1; app memory-bank per-source model (`selfhosted`/`cloud` watermarks, switch warnings)
 
 ## Objective
