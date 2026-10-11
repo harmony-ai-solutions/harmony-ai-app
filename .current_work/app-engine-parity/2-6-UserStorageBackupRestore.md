@@ -1,8 +1,9 @@
 # Phase 2-6 — App+Engine: User-Owned Storage Backup & Restore
 
-> **Repos:** `harmony-ai-app` + `harmony-link-private` (engine) + cloud backend (W1 escrow only — built in [2-5](2-5-CloudChangesetPath.md))
+> **Repos:** `harmony-ai-app` + `harmony-link-private` (engine) + cloud backend (W1 escrow only — built in [2-5](2-5-CloudAccountMode.md))
 > **Research basis:** [research-user-storage-backup.md](research-user-storage-backup.md) (decided 2026-10-11) — supersedes the original S3-snapshot-plane backup design: that plane belonged to the removed in-cloud session feature and is retired in [6-2](6-2-SnapshotPlaneAndKeyInfraRetirement.md)
-> **Depends on:** 1-1/1-2 (Android embedding) for the Android path; 4-1/4-2 for the iOS path (native module lands with the engine module); 2-5 (W1 escrow endpoint). **Not** dependent on the changeset machinery (v1 = full snapshots; deltas are a v2 consumer of 2-2's store).
+> **Depends on:** 1-1/1-2 (Android embedding) for the Android path; 4-1/4-2 for the iOS path (native module lands with the engine module); 4-3 (iOS automatic scheduling — the backup rides its overnight `BGProcessingTask`); 2-5 (W1 escrow endpoint). **Not** dependent on the changeset machinery (v1 = full snapshots; deltas are a v2 consumer of 2-2's store).
+> **Codebase mapping consulted:** `.planning/codebase/` — all three repos (ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md; TESTING.md where present)
 
 ## Objective
 
@@ -12,7 +13,7 @@ A WhatsApp-style continuity story with the operator storing **no user database d
 
 ### 1. Backup artifact pipeline (engine, Go — `modules/backup/`)
 
-- **Snapshot:** `VACUUM INTO` the live WAL DB to a **plaintext temp file** in an app-private, no-backup-flagged staging dir → **zstd-3** (`klauspost/compress` — new, bounded dependency; the engine has no compression today) → **AEAD ChaCha20-Poly1305** under the **backup DEK** (per-object random nonce). Compress-then-encrypt, never the reverse (page-encrypted output is incompressible). Integrity = sha256 over the final object.
+- **Snapshot:** `VACUUM INTO` the live WAL DB to a **plaintext temp file** in an app-private, no-backup-flagged staging dir → **zstd-3** (`klauspost/compress` — already in the engine's `go.mod` as a transitive **indirect** dep, v1.17.7; **promote to direct**, no new dependency weight) → **AEAD ChaCha20-Poly1305** under the **backup DEK** (per-object random nonce). Compress-then-encrypt, never the reverse (page-encrypted output is incompressible). Integrity = sha256 over the final object.
 - **Side objects (content-addressed):** RAG store files + engine media blobs (data-dir audit in step 1 enumerates them) named by plaintext sha256, each zstd+AEAD'd, **uploaded on creation** (not per snapshot), deduped forever; the manifest references them. Rebuild-if-absent stays the engine's fallback (existing behavior).
 - **Manifest (`manifest.json`) = single commit point:** format version, engine schema version, created_at, device label, baseline object (id, size, sha256), side-object list, AEAD/KDF params, **wrap entries W3 (+W4 if set)** — W1 lives at the account service (2-5), W2 in the keychain. Sequence per generation: upload objects → upload manifest (whole-object replace) → rotate previous to `manifest.prev.json` → GC unreferenced objects. Crash at any point leaves the old generation authoritative. **Retention: 2 generations.** Manifest fields (sizes/timestamps/count) are visible to the storage provider — accepted, documented.
 - **Facade/management surface:** no engine "snapshot to file" API exists today; add facade + management route (`management/routes_backup.go`, pattern: `routes_config.go`): `CreateBackupArtifact(destDir)` / `RestoreArtifact(srcDir)` / `DataVersion()`.

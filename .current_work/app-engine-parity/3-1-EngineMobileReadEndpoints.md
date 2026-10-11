@@ -2,6 +2,7 @@
 
 > **Repo:** `harmony-link-private` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §12.4 (Wails frontend is the proof; add what mobile lists need)
+> **Codebase mapping consulted:** `.planning/codebase/` (engine — harmony-link-private): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 

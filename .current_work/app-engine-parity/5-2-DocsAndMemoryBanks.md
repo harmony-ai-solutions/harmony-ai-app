@@ -2,6 +2,7 @@
 
 > **Repos:** all three
 > **Workspace rules:** memory-bank conventions (`.toon` first, then markdown; docs + changelogs checked in every touched repo)
+> **Codebase mapping consulted:** `.planning/codebase/` — all three repos (ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md; TESTING.md where present)
 
 ## Objective
 

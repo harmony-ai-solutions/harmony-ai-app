@@ -3,6 +3,7 @@
 > **Repo:** `soulbits-cloud-backend` (branch `feat/app-engine-parity`)
 > **Assessment basis:** 2026-10-11 review ruling — on-device lifecycle authority; the cloud becomes data-blind for lifecycle
 > **Depends on:** 0-4 (engine batch API shipped to the app); 4-2/4-3 consume it. The cron + relay can ship earlier (no-op until the app registers handlers).
+> **Codebase mapping consulted:** `.planning/codebase/` (cloud — soulbits-cloud-backend): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md, INTEGRATIONS.md
 
 ## Objective
 
@@ -18,7 +19,7 @@ The lifecycle-worker today downloads each user's encrypted snapshot, opens it wi
 
 ### 1. Keepalive cron (best-effort, iOS only) — independently shippable, droppable
 
-- One cron job in the existing push-service (or adjacent): **hourly, send a `content-available: 1` silent push to every known iOS device token** (`device_push_tokens` + FCM/APNs plumbing already exists).
+- One cron job in the existing push-service (or adjacent): **hourly, send a `content-available: 1` silent push to every known iOS device token**. Token source on the cloud side is Postgres **`user_devices`** (`cmd/push-service/resolver.go` — authorized devices with a `push_token`; FCM/APNs plumbing already exists). Do **not** grep for `device_push_tokens`: that is the *engine-side* SQLite table (engine migration 000039), which the backend never reads.
 - No enrollment API, no per-entity tracking, no new tables, no version filtering (unlaunched — every token belongs to a current build).
 - Delivery semantics: **fire-and-forget**. No retries, no delivery tracking (metrics counters only: sent/apns-accepted). Apple throttles by design (~few/hour budget, usage-pattern dependent, zero with Background App Refresh off) — correctness never depends on it (0-1 lazy + 0-4 catch-up converge on any later wake).
 - Rationale on record: without it, iOS entities only advance on app-open/overnight — background outreach would never originate. With it, best-effort background presence. **Product may drop this component entirely** without any other phase changing.

@@ -3,6 +3,7 @@
 > **Repo:** `harmony-link-private` (branch `feat/app-engine-parity`)
 > **Assessment basis:** 2026-10-11 review ruling — on-device lifecycle authority, blind cloud scheduler (see 4-3 / 4-4)
 > **Depends on:** 0-1, 0-2
+> **Codebase mapping consulted:** `.planning/codebase/` (engine — harmony-link-private): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 

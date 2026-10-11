@@ -2,6 +2,7 @@
 
 > **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §12.4, §12.8 step 3 (per-screen swap)
+> **Codebase mapping consulted:** `.planning/codebase/` (app — harmony-ai-app): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 
@@ -11,7 +12,7 @@ Replace the app's TS SQLite repositories with management-API-backed implementati
 
 - NEW `src/services/engine/EngineApiClient.ts`: axios instance against `http://127.0.0.1:<adminPort>` + loopback token (1-2/3-1); DTO→domain mappers mirroring the established snake_case-wire/camelCase-domain convention (regression lesson from memory bank: Go silently drops unknown camelCase keys).
 - NEW `src/services/engine/repositories/*`: API implementations of the existing repository interfaces (`characters`, `entities`, `interactions`, `conversation_messages`, `emoji_actions`, providers/modules read paths…). Write operations go through the same API where endpoints exist; anything lacking a write endpoint routes through the entity-session/facade events as today (audit in 3-1 covers reads; writes audit here — add missing write endpoints to 3-1 scope if gaps found).
-- Feature flag `ENGINE_API_DATA_LAYER` (AsyncStorage + build-time default): per repo module, API or SQLite implementation (DI at the repository module boundary — the app already consumes repos via a default-export module seam; formalize the switch there).
+- Feature flag `ENGINE_API_DATA_LAYER` (AsyncStorage + build-time default): per repo module, API or SQLite implementation. **Seam correction (2026-10-11 review): there is no repositories barrel/index today** — screens do named imports from individual repo modules (`export default` count in `src/database/repositories/`: 0; no `index.ts`). The seam must be **created**: add `src/database/repositories/index.ts` re-exporting each function from a flag-selected implementation (API vs SQLite), then swap the ~import sites per screen group as each lands. Budget the import-site sweep explicitly — it is the real cost of this phase, not the client itself.
 - Swap order (dependency-lean, each shippable): ① read-only lists (characters, emoji, config views) → ② chat list + message windows (exercises byte endpoints) → ③ interactions + emotion/memory reads → ④ writes (config CRUD, persona/entity CRUD via API/facade).
 - Cache discipline: NO local re-cache of engine data (the engine is local); only in-memory request-level memoization. AsyncStorage remains for UI prefs only.
 
@@ -25,7 +26,7 @@ Replace the app's TS SQLite repositories with management-API-backed implementati
 ## Files to create/modify
 
 - `src/services/engine/EngineApiClient.ts` + `src/services/engine/repositories/*` (NEW)
-- Repository module seam (flag switch)
+- NEW `src/database/repositories/index.ts` barrel (flag-selected re-exports) + per-screen-group import-site swaps
 - `src/config/engineFeatures.ts` (flag)
 - Mock management server for jest
 - CHANGELOG.md at completion

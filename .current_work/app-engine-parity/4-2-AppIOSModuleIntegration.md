@@ -2,6 +2,7 @@
 
 > **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §7.2 channel A, §8.5 (foreground-only engine semantics)
+> **Codebase mapping consulted:** `.planning/codebase/` (app — harmony-ai-app): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 

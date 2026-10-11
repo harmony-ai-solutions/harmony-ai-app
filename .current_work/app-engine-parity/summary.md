@@ -54,7 +54,7 @@ The app stops being a second implementation of the engine's data layer and becom
 
 ### Phase 0 — Engine Core Prerequisites [engine]
 The core refactors everything else depends on (assessment §10.2 directives D1/D2 + the 2026-10-11 batch ruling). Improve the desktop host immediately; required for changeset reconciliation and the mobile batch runtime later. (0-3 — cloud engine bump & compatibility window — is removed: unlaunched, no old versions to support; the cloud's first and only plan changes are in 4-4.)
-- **0-1** Lazy temporal evaluation — refactor tick-applied state (emotion decay/dampening/crystallization, exhaustion/sleep progression, Dream TTL) into pure functions of `(state₀, elapsed)` evaluated on read
+- **0-1** Lazy temporal evaluation — anchor the remaining tick-coupled state (exhaustion/sleep progression, Dream TTL sweep) into pure functions of `(state₀, elapsed)` evaluated on read; emotion decay/dampening/crystallization are already read-time lazy in the engine — extract pure functions + pin with equivalence tests (audit-corrected 2026-10-11)
 - **0-2** Catch-up seam — formalize `FireCatchUp(elapsed)`: sampled K beats for short gaps, collapsing to a single hiatus-framed re-entry beat for gaps ≥48h; non-LLM state advances exactly via 0-1; LLM spend is O(1) in elapsed time — built on the existing one-shot `FireBeat`/`FireDreamBeat`/`FireOutreachBeat`
 - **0-4** Lifecycle batch orchestrator — `ProcessLifecycleBatch`: per-entity tx isolation, priority ordering, deadline/budget truncation, non-LLM degradation (the mobile lifecycle runtime)
 
@@ -68,7 +68,7 @@ Replace the sync mechanism for engine peers, using SQLite's session extension; r
 - **2-1** go-sqlite3 fork: enable session extension (build flags) + thin CGO wrapper package
 - **2-2** Changeset store & epoch manager (baselines, retention, snapshot re-pull policy, per-table-class conflict policy)
 - **2-3** Peer changeset protocol (engine↔engine over WS; `sync_schema_version` bump; desktop ↔ embedded)
-- **2-4** Go sync **client** role (dial-out, TLS security modes, PASETO injection — engines have only ever served)
+- **2-4** Go sync **client** role (dial-out to a desktop peer over LAN; engine TLS security modes + device-approval auth — engines have only ever served; no PASETO/token machinery, no cloud peer)
 - **2-5** Cloud data path — cloud-account mode: on-device engine + injected inference configs + W1 backup-key escrow (no cloud engine peer, no user-data storage)
 - **2-6** User-owned storage backup & restore — engine artifact pipeline (VACUUM INTO → zstd → AEAD), hybrid key-wrap set, targets (iCloud ubiquity container / WebDAV / Dropbox / OneDrive / local export; Drive consent-gated), restore onboarding
 
@@ -114,22 +114,22 @@ Track the completion of each phase as implementation progresses:
   - [ ] 2-2 Changeset Store & Epochs ([2-2-ChangesetStoreAndEpochs.md](2-2-ChangesetStoreAndEpochs.md))
   - [ ] 2-3 Peer Changeset Protocol ([2-3-PeerChangesetProtocol.md](2-3-PeerChangesetProtocol.md))
   - [ ] 2-4 Go Sync Client Role ([2-4-GoSyncClientRole.md](2-4-GoSyncClientRole.md))
-  - [ ] 2-5 Cloud Data Path: Cloud-Account Mode ([2-5-CloudChangesetPath.md](2-5-CloudChangesetPath.md))
+  - [ ] 2-5 Cloud Data Path: Cloud-Account Mode ([2-5-CloudAccountMode.md](2-5-CloudAccountMode.md))
   - [ ] 2-6 User-Owned Storage Backup & Restore ([2-6-UserStorageBackupRestore.md](2-6-UserStorageBackupRestore.md))
 - [ ] **Phase 3: App Becomes Management-API Frontend**
   - [ ] 3-1 Engine Mobile Read Endpoints ([3-1-EngineMobileReadEndpoints.md](3-1-EngineMobileReadEndpoints.md))
   - [ ] 3-2 App Management-API Repositories ([3-2-AppManagementApiRepositories.md](3-2-AppManagementApiRepositories.md))
   - [ ] 3-3 Client-Only Data Audit ([3-3-AppClientOnlyDataAudit.md](3-3-AppClientOnlyDataAudit.md))
-  - [ ] 3-4 TS Stack Deletion ([3-4-MigrationBridgeAndDeletion.md](3-4-MigrationBridgeAndDeletion.md))
+  - [ ] 3-4 TS Stack Deletion ([3-4-TsStackDeletion.md](3-4-TsStackDeletion.md))
 - [ ] **Phase 4: iOS In-Process Module**
   - [ ] 4-1 Engine Gomobile Facade ([4-1-EngineGomobileFacade.md](4-1-EngineGomobileFacade.md))
   - [ ] 4-2 App iOS Module Integration ([4-2-AppIOSModuleIntegration.md](4-2-AppIOSModuleIntegration.md))
-  - [ ] 4-3 iOS Blind-Tick Lifecycle ([4-3-IOSDegradedTierBehaviors.md](4-3-IOSDegradedTierBehaviors.md))
+  - [ ] 4-3 iOS Blind-Tick Lifecycle ([4-3-IOSBlindTickLifecycle.md](4-3-IOSBlindTickLifecycle.md))
   - [ ] 4-4 Cloud Keepalive & Push Relay ([4-4-CloudBlindTickScheduler.md](4-4-CloudBlindTickScheduler.md))
 - [ ] **Phase 5: Hardening, Gates Retooling, Rollout**
   - [ ] 5-1 Parity Gates Retooling ([5-1-ParityGatesRetooling.md](5-1-ParityGatesRetooling.md))
   - [ ] 5-2 Docs & Memory Banks ([5-2-DocsAndMemoryBanks.md](5-2-DocsAndMemoryBanks.md))
-  - [ ] 5-3 Release Sequencing & Rollback ([5-3-RolloutAndVersionMatrix.md](5-3-RolloutAndVersionMatrix.md))
+  - [ ] 5-3 Release Sequencing & Rollback ([5-3-ReleaseSequencing.md](5-3-ReleaseSequencing.md))
 - [ ] **Phase 6: Cloud Cleanup (previously deferred)**
   - [ ] 6-1 Session Infra Retirement ([6-1-CloudSessionInfraRetirement.md](6-1-CloudSessionInfraRetirement.md))
   - [ ] 6-2 Snapshot Plane + DEK Retirement & Purge Rework ([6-2-SnapshotPlaneAndKeyInfraRetirement.md](6-2-SnapshotPlaneAndKeyInfraRetirement.md))
@@ -156,7 +156,7 @@ Track the completion of each phase as implementation progresses:
 **Ruled 2026-10-11 (offline handling — resource-preserving catch-up):** the engine never replays offline time. Non-LLM state (emotion, exhaustion, sleep, dream TTL) advances exactly and for free through any gap; LLM narrative is hard-bounded: short gaps fire ≤ MaxCatchUpBeats sampled beats, gaps ≥ 48h (configurable `LongGapThreshold`) collapse to a single hiatus-framed re-entry beat — ≤3 LLM calls total per entity after any outage (re-entry + dream + outreach), on any wake (keepalive, BGTask, or app open). The entity returns from a two-week outage acknowledging the absence, not simulating it.
 
 1. **Epoch model:** strict single-writer epochs — SIMPLIFIED by the ruling (there is no cloud lifecycle writer; epochs only arbitrate desktop ↔ phone). Strict single-writer remains recommended.
-2. **Changeset retention window:** how long deltas are retained before baseline snapshot re-pull replaces them (replaces purge-floor semantics; propose 7–30 days).
+2. **Changeset retention window:** how long deltas are retained before baseline snapshot re-pull replaces them (replaces purge-floor semantics; window 7–30 days — 2-2 proposes 14 as the midpoint).
 3. **Conflict policy table:** confirm per-table-class resolutions (append-only → keep both; configs → LWW REPLACE; deletes → native changeset DELETE replay).
 4. ~~Cloud changeset path~~ **RESOLVED 2026-10-11: obsolete** — no cloud engine peer; 2-5 reworked to cloud-account mode with the engine on-device + user-owned-storage backup/restore (2-6; research doc supersedes the original S3-based design).
 5. **iOS module timing:** Phase 4 is independently schedulable after Phase 3; confirm whether it ships with the first release or follows.

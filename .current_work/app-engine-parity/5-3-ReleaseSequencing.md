@@ -2,6 +2,7 @@
 
 > **Repos:** all; process/ops phase
 > **Assessment basis:** §12.5 (coupled releases) — reduced 2026-10-11: the product is unlaunched, so there is no version matrix to enforce and no staged rollout; every build goes to fresh installs on our own devices.
+> **Codebase mapping consulted:** `.planning/codebase/` — all three repos (ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md; TESTING.md where present)
 
 ## Objective
 

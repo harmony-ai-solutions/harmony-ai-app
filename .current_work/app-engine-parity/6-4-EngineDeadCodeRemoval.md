@@ -3,6 +3,7 @@
 > **Repo:** `harmony-link-private` (branch `feat/app-engine-parity`) incl. Wails frontend
 > **Assessment basis:** two engine-side surfaces are dead code once this plan lands — (a) the rows-v1 sync server (the app's rows-v1 client died in 3-4; changeset-v1 from 2-3 is the only sync protocol left), (b) the cloud-mode machinery built for session hosting (retired in 6-1/6-2)
 > **Depends on:** 3-4 (app rows-v1 client gone), 6-1 (backend consumers gone — incl. the BE e2e `sync_request.go` guard, deleted there); 5-1 coordination (schema-parity gates retire in the same window — sequence either order, not both mid-flight)
+> **Codebase mapping consulted:** `.planning/codebase/` (engine — harmony-link-private): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 
@@ -10,9 +11,9 @@ Delete the rows-v1 sync server and the cloud-mode machinery outright (pre-launch
 
 ## Deletion scope A — rows-v1 sync server
 
-- `eventserver/synchronization.go` (~3.1k lines: SYNC_*/HANDSHAKE_* handling, 35-table master-slave LWW `sendLocalChanges`, size-estimate confirm + 60 s timeout, schema-version gate (`SyncSchemaVersion=2` constants), purge floor (`GetMaxPurgedDeletedAt`), sync error codes) + its test suites (incl. `synchronization_gc_test.go`'s 35-table assertion)
+- `eventserver/synchronization.go` (~3.1k lines: SYNC_*/HANDSHAKE_* handling, 35-table master-slave LWW `sendLocalChanges`, size-estimate confirm + 60 s timeout, schema-version gate (`SyncSchemaVersion=2` constants), purge floor (`GetMaxPurgedDeletedAt`), sync error codes) + its named test suite: `eventserver/synchronization_test.go`, `synchronization_gc_test.go`, `synchronization_registration_test.go`, `synchronization_version_gate_test.go`, `synchronization_cloudmode_test.go` (the gc test's 35-table assertion dies with it)
 - `database/repository/synchronization/` (`device.go`, `history.go`, `lww.go`, `gc_state.go`, `maintenance.go` + tests) — sync_devices/sync_history bookkeeping; soft-delete stamp columns across the 35 tables **stay** (data model; `utils/delete_stamps.go` survives — verify remaining callers)
-- `management/routes_sync.go` (device approve/reject/revoke/pending/history) + `config/db/handler.go` facade methods
+- `management/routes_sync.go` (device approve/reject/revoke/pending/history) + `database/controllers/sync_controller.go` (the management-API sync controller — named explicitly so it isn't missed in the controllers dir sweep) + `config/db/handler.go` facade methods
 - Wails frontend: `DeviceManagementView.jsx`, `DeviceManagementModal.jsx`, `deviceApprovalWatcher.js`, `syncService.js`, pending-device wiring in `HarmonyLinkApp.jsx`
 - **Seam edits:** `eventprocessor.go` (`synchronizationHandler` field/construction/dispatch, `SetRAGSyncHelper` wiring), `handler_http.go` attach, `handler_websocket.go` `ReapActiveSyncs`, `request.go` event-routing entries — remove the rows-v1 `SyncProtocol` implementation, keep the interface shape 2-3 introduced (only `changesetV1` remains)
 - **RAG write-mirror re-home:** `modules/rag/sync.go`'s `SyncHelper` (memories/messages/lore → vector store on sync-apply) must move to the direct mutation paths (changeset apply already routes through 2-2's store hooks — verify the mirror rides those; otherwise wire repository-level hooks) — this is the one place deletion touches live behavior

@@ -2,7 +2,7 @@
 
 > **Compiled:** 2026-10-11, via parallel research subagents (web-verified, primary sources fetched live) + codebase inventory
 > **Purpose:** design basis for the backup subsystem replacing the retired S3 snapshot plane + per-user DEK infrastructure (the in-cloud session feature's backup mechanic). The operator's cloud stores **no user database data** after this plan; backups go to the **user's own cloud storage**, WhatsApp-style, with least friction.
-> **Consumed by:** [2-5-CloudChangesetPath.md](2-5-CloudChangesetPath.md), [2-6-UserStorageBackupRestore.md](2-6-UserStorageBackupRestore.md), Phase 6 (6-2 especially)
+> **Consumed by:** [2-5-CloudAccountMode.md](2-5-CloudAccountMode.md), [2-6-UserStorageBackupRestore.md](2-6-UserStorageBackupRestore.md), Phase 6 (6-2 especially)
 > Labels: VERIFIED (primary source) / REPORTED (secondary source) / INFERRED (synthesis)
 
 ## FINAL DECISIONS (ruled 2026-10-11)
@@ -17,7 +17,7 @@
 | Cadence & retention | Daily opportunistic (Wi-Fi + charging + idle; cellular opt-in), manual "Back up now", **keep 2 generations** (manifest.prev), upload-then-commit | WhatsApp/Signal keep 1; 2 is nearly free and rescues "I deleted something yesterday" |
 | Cleanup decomposition | **Phase 6, 4 sub-phases**: 6-1 session infra · 6-2 snapshot plane + DEK + purge rework · 6-3 engine-import zeroing + relicensing · 6-4 engine dead-code | Inventory §5; natural blast-radius boundaries |
 
-Also ruled: GDPR Art. 20 plaintext export = flagged follow-up (encrypted blob ≠ portability); `baremetal-scheduler` stub deleted (its rationale dies with the warm pool); lifecycle-dispatcher's DLQ-drainer split carefully (inference gateway shares `pkg/dlqarchive`); desktop gets the same artifact pipeline behind the Wails UI (engine-side targets make this nearly free).
+Also ruled: GDPR Art. 20 plaintext export = flagged follow-up (encrypted blob ≠ portability); `baremetal-scheduler` stub deleted (its rationale dies with the warm pool); lifecycle-dispatcher's DLQ-drainer deleted wholesale with the dispatcher (correction: `pkg/dlqarchive` has no other importer — the inference gateway's `drainer/` is ALB connection-draining; `dlq-archive` is a prefix inside s3-internal-assets, not a bucket); desktop gets the same artifact pipeline behind the Wails UI (engine-side targets make this nearly free).
 
 ---
 
@@ -102,7 +102,7 @@ No mature CloudKit OSS; `react-native-cloud-storage` (ubiquity wrapper) has comm
 ### 3.2 Artifact pipeline (engine-side, Go)
 
 - **Consistent snapshot:** `VACUUM INTO` from the live WAL DB = consistent, compacted, purged-of-deleted-content standalone file (VERIFIED: sqlite.org/lang_vacuum). SQLite3MultipleCiphers supports `VACUUM INTO 'file:…?cipher=…&key=…'` writing an encrypted output under a *different* key (VERIFIED: utelle S3MC FAQ + maintainer discussion #72; jgiannuzzi fork is a listed S3MC integration).
-- **Compression order matters:** compress-then-encrypt, never the reverse — page-encrypted output is incompressible. Pipeline: `VACUUM INTO` plaintext temp (app-private, no-backup-flagged staging dir) → **zstd-3** (`klauspost/compress`, pure Go; ~3–6× on chat/memory SQLite, 6–10× on float32 vector data; ~100–300 MB/s/mobile core) → **AEAD (ChaCha20-Poly1305)** under the backup DEK with per-object nonce → `.blob` object. Integrity = sha256 over the final object. Cost at 500 MB ≈ seconds — fine for nightly windows. (The engine currently has NO compression anywhere — zstd is a new, bounded dependency.)
+- **Compression order matters:** compress-then-encrypt, never the reverse — page-encrypted output is incompressible. Pipeline: `VACUUM INTO` plaintext temp (app-private, no-backup-flagged staging dir) → **zstd-3** (`klauspost/compress`, pure Go; ~3–6× on chat/memory SQLite, 6–10× on float32 vector data; ~100–300 MB/s/mobile core) → **AEAD (ChaCha20-Poly1305)** under the backup DEK with per-object nonce → `.blob` object. Integrity = sha256 over the final object. Cost at 500 MB ≈ seconds — fine for nightly windows. (Correction: `klauspost/compress` v1.17.7 already sits in the engine's `go.mod` as a transitive indirect dep — 2-6 promotes it to direct; no new dependency weight.)
 - **Incrementals (v2, deferred):** daily logical churn ≈ 0.5–5 MB raw → ~100 KB–1 MB compressed; session-extension changesets are dual-use with 2-2's sync store. Caveats already known: virtual tables are not captured by sessions (RAG must live in ordinary files/tables or be rebuilt); NULL-PK rows ignored. Manifest format accepts delta objects without format change.
 - **Content-addressed side objects (v1):** RAG store + media files named by plaintext sha256, uploaded on creation not per-snapshot, deduped forever; manifest references them. Content-defined chunking (restic-style) explicitly rejected — overkill for one structured file + exact objects.
 
@@ -155,7 +155,7 @@ An encrypted blob in the user's storage **does not satisfy Art. 20** portability
 4. **Engine cloud-mode machinery is a third deletion surface** (`cmd/cloud_mode.go`, `cloud_reload.go`, snapshot watchers, PASETO seeder, cloud-mode docs) → 6-4 (with rows-v1 sync server).
 5. **No engine "snapshot to file" API exists; no compression exists** — the "checkpoint→gzip→S3" recollection was wrong (sidecar uploaded the raw trio). 2-6 builds the real artifact pipeline from `CheckpointWAL`/encryption helpers.
 6. **Desktop DB key sits in plaintext `config.json`** — cloud DEK infra was the only cross-device escrow → W1/W2/W3 replace it; `docs/Database-Encryption.md` custody section updates in 6-4.
-7. Smaller: sessions bucket is versioned (teardown = explicit all-version purge); lifecycle-**dispatcher** owns a DLQ drainer shared with inference-gateway (`pkg/dlqarchive` + `dlq-archive` bucket survive); `pkg/valkey/session.go` = auth sign-in sessions (keep — name collision with `pkg/session`); E2E harness hard-depends on `CLOUD_SESSIONS_BUCKET` (reworked in 6-2); openapi.yaml session-path removal regenerates `soulbits-api-client-go` + the app's `soulbits-api-client`; iOS has zero custom native modules today (4-2's Turbo Module is first; HarmonyBackup is second); app already ships `react-native-fs`, `react-native-keychain`, `@react-native-documents/picker`.
+7. Smaller: sessions bucket is versioned (teardown = explicit all-version purge); lifecycle-**dispatcher** owns the DLQ drainer and it dies with it — `pkg/dlqarchive`'s only importer is the dispatcher, and `dlq-archive` is a prefix + lifecycle rule inside s3-internal-assets, not a separate bucket (nothing survives; corrected 2026-10-11 review); `pkg/valkey/session.go` = auth sign-in sessions (keep — name collision with `pkg/session`); E2E harness hard-depends on `CLOUD_SESSIONS_BUCKET` (reworked in 6-2); openapi.yaml session-path removal regenerates `soulbits-api-client-go` + the app's `soulbits-api-client`; iOS has zero custom native modules today (4-2's Turbo Module is first; HarmonyBackup is second); app already ships `react-native-fs`, `react-native-keychain`, `@react-native-documents/picker`.
 
 ## 6. Primary sources (index)
 

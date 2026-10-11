@@ -3,6 +3,7 @@
 > **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`) + engine coordination
 > **Assessment basis:** §12.6 (what dies), §12.8 step 4 (old protocol deleted without a bridge — pre-launch ruling)
 > **Depends on:** 2-5 (cloud path live), 3-2 (API layer complete + default-on), 3-3 (verdicts)
+> **Codebase mapping consulted:** `.planning/codebase/` — app + engine repos (ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md)
 
 ## Objective
 

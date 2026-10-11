@@ -4,6 +4,7 @@
 > **Assessment basis:** 2026-10-11 review ruling — the planned embedded↔cloud-session-engine changeset path is **obsolete**: new clients never sync lifecycle/chat data to a cloud engine peer. Backup/continuity: **user-owned cloud storage** ([research](research-user-storage-backup.md), decided 2026-10-11) — implemented in [2-6](2-6-UserStorageBackupRestore.md); this phase covers the cloud-account orchestration and the account-side key escrow.
 > **Depends on:** 2-3, 2-4 (peer protocol, client role — desktop ↔ embedded only); supersedes the original dual-protocol cloud path of this phase
 > **Note:** session hosting infra retirement itself is **Phase 6 (this plan)** — until then the running infra is simply unused by the app.
+> **Codebase mapping consulted:** `.planning/codebase/` — app + cloud backend repos (ARCHITECTURE.md, STRUCTURE.md, INTEGRATIONS.md)
 
 ## Objective
 

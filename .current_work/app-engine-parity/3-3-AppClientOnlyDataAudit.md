@@ -2,6 +2,7 @@
 
 > **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §12.6 (what survives: client-only prefs), memory-bank history of client-only tables
+> **Codebase mapping consulted:** `.planning/codebase/` (app — harmony-ai-app): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 
@@ -15,11 +16,13 @@ Known candidates from memory bank history — verify current state on the branch
 |---|---|---|---|
 | Themes, emoji style/set/skin tone, haptics, UI prefs | AsyncStorage | already local | unchanged |
 | Reply-mode per partner, impersonated persona | AsyncStorage / flags | partially engine-synced now (`reply_mode` sync exists) | engine (already) — verify nothing app-local remains |
-| `character_categories` + members | client-only tables (migration 000039-era) | favorites later moved to `character_profiles.is_favorite` | **engine tables** (new migration; they're entity data, belong in the one DB) or AsyncStorage if treated as pure UI grouping — decision point |
-| Blocked users / social / marketplace stubs | client-only tables | stub-service backed | stub backends stay app-local (server features, not engine) — move to their own small app DB or keep TS SQLite **only for stub tables**? → preferred: AsyncStorage/simple stores until real backend lands |
+| `character_categories` + members | **already AsyncStorage** (`CategoryPreferencesService` — verified on branch; the old 000039-era client-only tables no longer exist in the consolidated migration chain) | favorites separately resolved → `character_profiles.is_favorite` (created 000041, dropped to column 000044) | unchanged (already app-local) — engine-ward move remains a decision point **only if** grouping should roam across devices |
+| Favorites flag | `character_profiles.is_favorite` (engine-synced column) | `character_favorites` table created (000041) → dropped, column added (000044) | stays engine |
+| Blocked users / social / marketplace | **in-memory stub services** (`MarketplaceService`/`SocialService`/etc. — no tables behind them today) | stub-service backed since the follow-up phase | stay app-local stubs until the real backend lands (no store migration needed — nothing persists) |
 | Chat bubble / floating window prefs | AsyncStorage | already local | unchanged |
 | Sync estimate limit, connection prefs | AsyncStorage | already local | unchanged (keyed per source incl. `local`) |
 | `chat_conversation_settings` (pin/mute/archive/disable/unread) | synced table (post-senju) | engine-managed now | stays engine (verify sync coverage) |
+| App migration `000039` | reserved no-op (`000039_device_push_tokens_reserved.ts` — numbering-parity placeholder) | engine owns the real `device_push_tokens` table (engine 000039) | dies with the TS migration chain (3-4) |
 | Dev/test fixtures, migration snapshots | repo files | n/a | n/a |
 
 ## Rules

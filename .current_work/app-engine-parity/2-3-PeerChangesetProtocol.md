@@ -3,6 +3,7 @@
 > **Repo:** `harmony-link-private` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §12.3 relationship 2; memory-bank sync protocol conventions (handshake, version gate)
 > **Depends on:** 2-1, 2-2
+> **Codebase mapping consulted:** `.planning/codebase/` (engine — harmony-link-private): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 
@@ -10,7 +11,7 @@ The wire protocol by which two engines exchange epoch/changeset state over the e
 
 ## Design
 
-- Rides the **existing `/ws/sync` connection + handshake** with a new negotiated mode: `HANDSHAKE_ACCEPT` advertises `sync_protocol: "changeset-v1"` alongside legacy `"rows-v1"`. Peers pick the highest common. **`sync_schema_version` bumps to 3** (bump policy: semantics of sync change).
+- Rides the **shared eventserver WebSocket** (the eventserver upgrades any request carrying `Upgrade: websocket`, regardless of path — `eventserver/request.go`; there is no dedicated `/ws/sync` route, that path convention is app/cloud-side only) with a new negotiated mode: `HANDSHAKE_ACCEPT` advertises `sync_protocol: "changeset-v1"` alongside legacy `"rows-v1"`. Peers pick the highest common. **`sync_schema_version` bumps to 3** (bump policy: semantics of sync change).
 - Message set (eventserver events, snake_case wire, gzipped binary payloads base64 or binary frames per existing binary event support):
   - `EPOCH_STATE` — announce `(current_epoch, seq, baseline_id)`; peers compute delta or rejoin need
   - `CHANGESET_BATCH` — ordered `(epoch_id, seq…)` blobs with cumulative checksum

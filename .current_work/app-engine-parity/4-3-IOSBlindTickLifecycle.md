@@ -3,6 +3,7 @@
 > **Repo:** `harmony-ai-app` (+ engine facade calls)
 > **Assessment basis:** 2026-10-11 review ruling — on-device lifecycle authority, blind cloud keepalive (4-4); §8.5, §9.4 patterns 2–4, §9.5 retained
 > **Depends on:** 4-1, 4-2, 0-4 (engine batch API); consumes 4-4 (keepalive + relay)
+> **Codebase mapping consulted:** `.planning/codebase/` — app + engine repos (ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md)
 
 ## Objective
 

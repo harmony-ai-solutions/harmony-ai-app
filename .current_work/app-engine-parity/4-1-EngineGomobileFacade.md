@@ -2,6 +2,8 @@
 
 > **Repo:** `harmony-link-private` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §7.2 channel A (in-process module; gomobile type constraints → JSON facade)
+> **Depends on:** 1-1 (the facade hosts the same loopback servers the sidecar build packages — see design below)
+> **Codebase mapping consulted:** `.planning/codebase/` (engine — harmony-link-private): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 

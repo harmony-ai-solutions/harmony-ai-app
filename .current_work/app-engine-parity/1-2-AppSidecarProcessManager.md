@@ -2,6 +2,7 @@
 
 > **Repo:** `harmony-ai-app` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §7.2 channel B, §12.3 relationship 1
+> **Codebase mapping consulted:** `.planning/codebase/` (app — harmony-ai-app): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 
@@ -9,7 +10,7 @@ Native Android layer that owns the engine sidecar process: start/health/stop, po
 
 ## Design
 
-- New Kotlin module under `android/app/src/main/java/ai/soulbits/engine/`:
+- New Kotlin module under `android/app/src/main/java/ai/soulbits/chat/engine/` (the app's existing package root is `ai.soulbits.chat` — e.g. `ai/soulbits/chat/ChatBubbleService.kt`; engine code nests under it):
   - `EngineSidecarService` — foreground service (type `dataSync` on API 34+; `<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>`), persistent notification ("Soulbits engine running"), lifecycle tied to app usage window
   - `EngineProcessManager` — resolves `nativeLibraryDir` + ABI (`Build.SUPPORTED_ABIS` → `libengine.so`), `ProcessBuilder` exec with flags: `--data-dir <appFilesDir>/engine`, `--ws-port 0 --admin-port 0` (ephemeral ports reported via readiness line on stdout), env `ENGINE_DB_KEY` (from React Native Keychain via bridge param — never logged)
   - Readiness: read stdout line `ENGINE_READY {...}` → parse ports → callback to JS
@@ -29,8 +30,8 @@ Native Android layer that owns the engine sidecar process: start/health/stop, po
 
 ## Files to create/modify
 
-- `android/app/src/main/java/ai/soulbits/engine/EngineProcessManager.kt` (NEW)
-- `android/app/src/main/java/ai/soulbits/engine/EngineSidecarService.kt` (NEW)
+- `android/app/src/main/java/ai/soulbits/chat/engine/EngineProcessManager.kt` (NEW)
+- `android/app/src/main/java/ai/soulbits/chat/engine/EngineSidecarService.kt` (NEW)
 - `android/app/src/main/AndroidManifest.xml` (permissions + service registration)
 - `android/app/build.gradle` (jniLibs task, engine artifact pin)
 - `src/services/engine/EngineSidecarModule.ts` (NEW, RN wrapper), `src/types/engineSidecar.ts`

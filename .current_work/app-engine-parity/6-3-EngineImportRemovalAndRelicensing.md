@@ -3,6 +3,7 @@
 > **Repo:** `soulbits-cloud-backend`
 > **Assessment basis:** 4-4 deleted the lifecycle engine code; the relicense-to-source-available option (e.g. SSPL-family) completes only when the backend carries **zero** engine dependencies. One blocker remains: a keeper service imports the engine. Resolution ruled 2026-10-11 after a Go push-library survey (recorded below).
 > **Depends on:** 6-1 (worker/dispatcher gone — the only other engine importers), 4-3 verified (outreach eligibility is evaluated on-device, so the engine-side decay-context SQL is dead weight)
+> **Codebase mapping consulted:** `.planning/codebase/` (cloud — soulbits-cloud-backend): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md, INTEGRATIONS.md
 
 ## Objective
 
@@ -10,7 +11,7 @@ Make `soulbits-cloud-backend` build and deploy with **zero references to `harmon
 
 ## The blocker: `cmd/push-service` imports `harmony-link-private/push`
 
-Current imports: `resolver.go`, `push.go`, `push_test.go` (FCM notifier, `LocalTokenResolver` reading the DB, `decay_context.go` — engine-SQLite-shaped SQL for composing outreach notification context server-side, a lifecycle-worker fossil).
+What the backend actually pulls from the engine package (verified in `cmd/push-service/push.go`/`resolver.go`/`push_test.go`): the **FCM notifier wrapper** (`push.Notifier`, `push.NewNotifierFromCreds`, `push.FCMNotifier`, `push.NoopNotifier`, `push.BuildFCMPayload`, `push.ErrDeviceUnregistered`, `push.Notification`) plus the `push.DeviceTokenResolver` interface — implemented backend-side by the **Postgres `user_devices` resolver** (`resolver.go`). Attribution correction (2026-10-11 review): `LocalTokenResolver` (`push/local.go` — engine SQLite `device_push_tokens`) and `GatherDecayContext` (`push/decay_context.go`) are **engine-side** code the backend never imported; `GatherDecayContext`'s only consumer was `cmd/lifecycle-worker/job.go`, deleted in 4-4.
 
 ## Resolution — backend adopts the Firebase Admin SDK; engine keeps its light path (ruled 2026-10-11)
 
@@ -22,12 +23,12 @@ Current imports: `resolver.go`, `push.go`, `push_test.go` (FCM notifier, `LocalT
    - Client construction from the existing service-account credentials/config
    - Keepalive cron fan-out via `SendEachForMulticast` chunks (≤500 tokens/call) — maps 1:1 onto the 4-4 hourly job
    - Relay dispatch via `Send` (single opaque payload, 4-4)
-   - **New hygiene the old code lacked:** per-token `IsUnregistered` → prune `device_push_tokens`; `IsQuotaExceeded`/`IsUnavailable` → backoff + metric counters (keepalive stays fire-and-forget semantically)
-   - Token resolution stays backend-side (user → device tokens from Postgres). `LocalTokenResolver`'s engine-DB reading and `decay_context.go` die **unported** — outreach eligibility is on-device per 4-3/D-PUSH-04; the relay never composes content
+   - **New hygiene the old code lacked:** per-token `IsUnregistered` → prune the `user_devices` push tokens (Postgres — `UPDATE user_devices SET push_token = NULL …` per the existing resolver contract); `IsQuotaExceeded`/`IsUnavailable` → backoff + metric counters (keepalive stays fire-and-forget semantically)
+   - Token resolution stays backend-side (user → device tokens from Postgres `user_devices`). Engine-side `push/decay_context.go` (dead since 4-4 deleted its only caller) is deleted in **6-4**; engine `push/local.go` (`LocalTokenResolver` — engine-internal SQLite path) stays with the engine's internal `push/` package, untouched by this phase
 2. **Engine: zero change in this phase** (its `push/` package stays internal; 6-4 deletes only `decay_context.go` from it)
 3. **Module-graph cleanup:** remove `require harmony-ai-solutions/harmony-link-private` and the three `replace` directives (engine, `jgiannuzzi/go-sqlite3` fork — only needed to open encrypted engine DBs, `chromem-go` fork), regenerate `go.sum`; `vendor/` (committed) is deleted — note the Admin SDK's dependency tree enters `go.mod` but lives in the module cache, not a vendor tree; `Dockerfile` drops `-mod=vendor` + the vendor-prereq comment; deploy workflows delete the "Authenticate git for private harmony-ai-solutions modules", "Clone Harmony Link engine (sibling)", and "Generate vendor directory" steps (dev + prod)
 4. **Permanent CI grep gate:** zero occurrences of `harmony-link-private` / `hl_database` / engine `replace` patterns in the backend repo — so the dependency cannot silently return
-5. Cleanup leftovers if 6-1 didn't catch them: `docker-compose.yml` engine-image env blocks, `pkg/config` image fields, stale root CGO probes (`lifecycle-cgo-smoke.exe`, `tmp_cgo_probe.exe`) + .gitignore hygiene
+5. Cleanup leftovers if 6-1 didn't catch them: `docker-compose.yml` engine-image env blocks, `pkg/config` image fields, stray build artifacts + .gitignore hygiene — sweep **all** stray `*.exe` at repo root and under `cmd/`/`scripts/` (verified present: `auth-service.exe`, `baremetal-scheduler.exe`, `cmd/conduct-proxy/conduct-proxy.exe`, `cmd/session-broker/session-broker.exe`, `cmd/session-sidecar/session-sidecar.exe`, `fcm-mock.exe`, `inference-gateway.exe`, `lifecycle-cgo-smoke.exe`, `tmp_cgo_probe.exe`), excluding `.terraform/` provider caches
 
 ## Verification gates
 

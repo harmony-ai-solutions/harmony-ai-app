@@ -2,6 +2,7 @@
 
 > **Repo:** `harmony-link-private` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §12.2 (session extension, verified capabilities + caveats)
+> **Codebase mapping consulted:** `.planning/codebase/` (engine — harmony-link-private): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 

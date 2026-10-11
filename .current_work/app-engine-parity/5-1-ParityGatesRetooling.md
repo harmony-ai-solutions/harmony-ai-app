@@ -2,6 +2,7 @@
 
 > **Repos:** `harmony-ai-app` + `harmony-link-private` (CI)
 > **Assessment basis:** §12.6 (the parity tax ends)
+> **Codebase mapping consulted:** `.planning/codebase/` — app + engine repos (ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md)
 
 ## Objective
 
@@ -9,7 +10,7 @@ Retire the cross-repo parity enforcement machinery that exists only because the 
 
 ## Outgoing (delete/retire)
 
-- App `scripts/dump-schema.ts` + `CLIENT_ONLY_TABLES` registry + schema-parity compare vs engine
+- App `scripts/dump-schema.ts` + schema-parity compare vs engine (the `CLIENT_ONLY_TABLES` registry is **already gone** from `dump-schema.ts` — removed in the D6-era cleanup; nothing to retire there, don't go looking for it)
 - `syncGcTablesParity.test.ts` (35-table allowlist pin) and siblings
 - Cross-repo migration-numbering coordination convention (placeholder migrations for numbering parity)
 - Docs: `docs/schema-parity.md` → move to `docs/history/` with a retirement note

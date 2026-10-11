@@ -3,6 +3,7 @@
 > **Repo:** `harmony-link-private` (branch `feat/app-engine-parity`)
 > **Assessment basis:** §10.2 D2, §9.4 pattern 3 (time-compressed catch-up), §7.1 (existing one-shot seam)
 > **Depends on:** 0-1
+> **Codebase mapping consulted:** `.planning/codebase/` (engine — harmony-link-private): ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md
 
 ## Objective
 
