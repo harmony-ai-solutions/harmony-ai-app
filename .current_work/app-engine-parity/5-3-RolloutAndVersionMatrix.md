@@ -1,45 +1,41 @@
-# Phase 5-3 — Rollout & Version Matrix
+# Phase 5-3 — Release Sequencing & Rollback
 
 > **Repos:** all; process/ops phase
-> **Assessment basis:** §12.5 (coupled releases, gates), memory-bank release-order conventions
+> **Assessment basis:** §12.5 (coupled releases) — reduced 2026-10-11: the product is unlaunched, so there is no version matrix to enforce and no staged rollout; every build goes to fresh installs on our own devices.
 
 ## Objective
 
-A staged rollout that never strands a user on either side of the protocol transition, with an explicit rollback story.
+Land the three repos in a working order on fresh installs, with a rollback story that is purely git/image-level (no user-data migration ever runs).
 
-## Version compatibility matrix (the contract this phase enforces)
+## Pairing contract (the only compatibility that matters)
 
-| Client | Engine peer | Path | Gate |
-|---|---|---|---|
-| New app (embedded engine) | New desktop/cloud engine | changeset-v1 | — |
-| New app (embedded engine) | OLD desktop engine | rejected cleanly | handshake typed reject + UI "update Harmony Link" (mirror of sticky `serverUpdateRequired`) |
-| OLD app (rows-v1 TS sync) | New cloud/desktop engine | legacy rows-v1 | dual-protocol server window (2-3/2-5) |
-| OLD app | OLD engine | unchanged | — |
+| Relationship | Path | Guard |
+|---|---|---|
+| New app (embedded engine) ↔ desktop engine | changeset-v1 (2-3) | handshake negotiation; mismatched engine → typed reject + "update Harmony Link" UX (existing sticky pattern) |
+| New app ↔ cloud | **no engine peer** — inference API + device-owned backup/restore (2-5); keepalive cron + push relay (4-4) | — |
 
-## Rollout stages
+## Release order
 
-1. **Engine release** (desktop + cloud session images + lifecycle-worker bump) — dual protocol live; nothing user-visible changes.
-2. **App beta channel** (Android first): Phase 1–2 behaviors flagged off by default; local mode opt-in for internal/testers (1-4 cohort).
-3. **Transition release** (3-4): import mode + new paths default for opt-in; soak ≥2 weeks with telemetry thresholds before deletion PR.
-4. **Deletion release** (3-4 final): TS stack removed; legacy backup files retained on devices.
-5. **iOS release** (4-x): follow Android by ≥1 cycle unless matrix review clears simultaneous shipping.
-6. **Cloud-cleanup plan kickoff** (separate, deferred): session-broker/warm-pool/conduct-proxy retirement + thin-lifecycle service — only after deletion-release stability.
+1. **Engine** (desktop builds updated): changeset protocol + lazy/catch-up/batch live; desktop↔embedded pairing available.
+2. **Cloud backend** (4-4): keepalive cron + relay + tier extension deployed. The lifecycle-worker deletion lands here only after 4-3 is verified on devices (order 4) — otherwise it follows in the same step as order 4.
+3. **App, Android** (1-x + 2-x + 3-x complete): management-API-only data layer, TS stack deleted (3-4), cloud mode = 2-5 path.
+4. **App, iOS** (4-x): requires 4-1/4-2 in the build, because 3-4 made the embedded engine mandatory — ship in the same release cycle as Android or after it. Verify 4-3 wakes against the deployed 4-4 cloud pieces; then execute the worker deletion if it hasn't run yet.
+5. **Cloud-cleanup plan kickoff** (separate, deferred): physical session-broker/warm-pool/conduct-proxy/Fargate retirement, engine-dependency removal from the backend (relicensing option), rows-v1 server dead-code removal in the engine.
 
 ## Rollback story
 
-- Engine: revert images (dual protocol keeps old apps alive); changeset data written by new peers remains valid (epoch ledger readable by the reverted version only if no schema migration intervened — constraint: no engine schema changes in the same window as a protocol rollout; enforce in release checklist)
-- App: feature flags per phase; import is non-destructive (legacy DB retained); worst case = old architecture reactivated per device
-- Cloud: image revert; lifecycle-worker pinned to matching engine version
+- Every repo: git/image revert — no release is one-way. No data migration, no import, no user fleet mid-transition; the old protocol's deletion is exactly git history.
+- Engine constraint: don't land an engine schema migration in the same window as a changeset-protocol rollout (epoch-ledger readability on revert) — enforce in the release checklist.
+- Keepalive cron + relay have independent kill switches (correctness never depends on either).
 
 ## Release checklist artifacts (committed)
 
-- `[ ]` per-stage checklists in this file executed
-- `[ ]` compatibility matrix tested in staging per release
-- `[ ]` telemetry dashboards (import success, protocol split, crash-free) live before each stage
+- `[ ]` per-order checklists in this file executed
+- `[ ]` device smoke per order (Android fresh install, iOS fresh install, desktop pairing, cloud chat + backup/restore)
+- `[ ]` cloud-cleanup handoff notes written
 
 ## Progress checklist
 
-- [ ] Stages executed with sign-offs recorded here
-- [ ] Matrix verified per release
-- [ ] Rollback rehearsed once in staging
+- [ ] Release order executed with sign-offs recorded here
+- [ ] Rollback rehearsed once in staging (image-revert path)
 - [ ] Cloud-cleanup plan handed off

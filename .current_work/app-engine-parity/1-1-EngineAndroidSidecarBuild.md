@@ -1,7 +1,7 @@
 # Phase 1-1 — Engine: Embeddable Android Sidecar Build
 
 > **Repo:** `harmony-link-private` (branch `feat/app-engine-parity`)
-> **Assessment basis:** §7.2 channel B (sidecar), §12.4 (localhost servers, app reuses client code unchanged)
+> **Assessment basis:** §7.2 channel B (sidecar), §12.4 (localhost servers)
 
 ## Objective
 
@@ -35,7 +35,7 @@ Produce a **single static Android executable** of the engine that runs as a side
 ## Verification gates
 
 - `go build/vet/test ./...` green
-- Sidecar binary runs on an Android emulator: `ENGINE_READY` line, management API reachable on loopback, old-protocol sync handshake answers (preparation for 1-4)
+- Sidecar binary runs on an Android emulator: `ENGINE_READY` line, management API + event WS answer on loopback
 - SIGTERM → clean exit ≤10s with WAL checkpoint (verify `-wal`/`-shm` gone or checkpointed)
 
 ## Risks & rollback

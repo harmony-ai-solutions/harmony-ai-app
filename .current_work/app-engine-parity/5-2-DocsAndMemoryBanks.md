@@ -11,8 +11,8 @@ Bring all documentation in line with the shipped architecture; per workspace rul
 
 ### harmony-ai-app
 - `memory-bank/*.toon`: systemPatterns (Sync section rewritten: changeset epochs; new EngineHost/embedding section), techContext (engine artifact dependency, loopback, API data layer), activeContext entry for this plan, progress entries per phase as executed
-- `README.md`, `docs/HARMONY-LINK-INTEGRATION.md` (connection sources: local/self-hosted/cloud; engine-in-app model), `docs/entity-interaction-model.md` (unchanged concepts; update storage references), `docs/TESTING.md` (new suites, worker note), `docs/INSTALLATION.md` (local mode setup)
-- `CHANGELOG.md` — major entry (engine embedding, data migration, TS stack removal)
+- `README.md`, `docs/HARMONY-LINK-INTEGRATION.md` (engine-in-app model: local engine primary, desktop pairing engine-side, cloud account), `docs/entity-interaction-model.md` (unchanged concepts; update storage references), `docs/TESTING.md` (new suites), `docs/INSTALLATION.md` (local mode setup)
+- `CHANGELOG.md` — major entry (engine embedding, TS stack removal)
 
 ### harmony-link-private
 - `memory-bank/*.toon`: systemPatterns (lazy temporal model, catch-up seam, changeset sync, embed facade, sidecar build), techContext (session-extension fork flags, gomobile artifacts), progress
@@ -20,8 +20,8 @@ Bring all documentation in line with the shipped architecture; per workspace rul
 - `CHANGELOG.md`
 
 ### soulbits-cloud-backend
-- `memory-bank/*.toon`: systemPatterns (dual-protocol sync window), progress
-- Ops/README version matrix (from 0-3); `CHANGELOG.md`
+- `memory-bank/*.toon`: systemPatterns (data-blind cloud: keepalive cron + relay, lifecycle-worker removal), progress
+- Ops/README (keepalive cron + push relay, lifecycle-worker removal); `CHANGELOG.md`
 
 ## Verification gates
 

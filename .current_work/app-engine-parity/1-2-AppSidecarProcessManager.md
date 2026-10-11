@@ -17,7 +17,7 @@ Native Android layer that owns the engine sidecar process: start/health/stop, po
   - Stop: `SIGTERM` via `Process.destroy()`, await exit ≤10s, else `destroyForcibly` + WAL integrity note
   - Single-instance lockfile honored (engine fails fast if double-started; manager surfaces)
 - RN bridge: Turbo Native Module `EngineSidecar` with `start(): Promise<{wsPort, adminPort}>`, `stop(): Promise<void>`, `onExit(error?)` event. JSI/TS types in `src/types/`.
-- Foreground-service policy: service runs while any entity session is open or a chat screen is focused; stops on app idle (respecting the assessment's honesty about battery — do NOT attempt 24/7; that is the cloud/lifecycle-worker's job).
+- Foreground-service policy: service runs while any entity session is open or a chat screen is focused; stops on app idle (battery honesty — no 24/7 keep-alive attempt; lifecycle state is lazy (0-1) and converges on the next start).
 
 ## Implementation steps
 
@@ -39,7 +39,7 @@ Native Android layer that owns the engine sidecar process: start/health/stop, po
 ## Verification gates
 
 - `npx tsc --noEmit` 0; new unit suites green; existing suites unaffected
-- On-device: engine starts, readiness parsed, WS connect to `127.0.0.1:<port>` succeeds (1-3 consumes), clean stop with checkpoint, crash-restart path
+- On-device: engine starts, readiness parsed, WS connect to `127.0.0.1:<port>` succeeds (smoke directly; the 3-2 management-API client consumes it later), clean stop with checkpoint, crash-restart path
 - App size delta recorded (expected +15–30 MB/ABI)
 
 ## Risks & rollback

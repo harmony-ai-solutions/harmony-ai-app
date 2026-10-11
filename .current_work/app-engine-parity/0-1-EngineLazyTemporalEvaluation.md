@@ -6,11 +6,11 @@
 
 ## Objective
 
-Refactor all tick-applied temporal state in the engine core into **pure functions of `(state₀, elapsed)`** evaluated on read. No behavior change on desktop/cloud hosts; makes the state portable to any host (iOS reads, BG-task windows, lifecycle-worker snapshot reconciliation) and strictly more robust (no missed ticks after process restarts).
+Refactor all tick-applied temporal state in the engine core into **pure functions of `(state₀, elapsed)`** evaluated on read. No behavior change on desktop hosts; makes the state portable to any host (iOS reads, BG-task windows, any embedded wake) and strictly more robust (no missed ticks after process restarts). State advancement is pure arithmetic — the entity ages through any gap with zero API cost; how much it *narrates* over a gap is bounded separately by 0-2's long-gap re-entry policy.
 
 ## Context
 
-Today the emotion engine applies decay/dampening/crystallization when the beat runner ticks; exhaustion/sleep progression advances on beats; DreamBeats expire via TTL checks on ticks. If a host cannot tick (iOS background, worker downtime), state silently goes stale. The assessment (§8.5/§9.4) established lazy evaluation as the standard solution (idle-game/pet-sim pattern; deterministic-sim doctrine: no wall-clock branching inside state transitions).
+Today the emotion engine applies decay/dampening/crystallization when the beat runner ticks; exhaustion/sleep progression advances on beats; DreamBeats expire via TTL checks on ticks. If a host cannot tick (iOS background, process downtime), state silently goes stale. The assessment (§8.5/§9.4) established lazy evaluation as the standard solution (idle-game/pet-sim pattern; deterministic-sim doctrine: no wall-clock branching inside state transitions).
 
 ## Scope of temporal state (audit list)
 
@@ -28,7 +28,7 @@ Today the emotion engine applies decay/dampening/crystallization when the beat r
 
 1. Introduce `emotion/lazy.go` (or extend `emotion_engine.go`): pure `DecayFunction(intensities, elapsed, cfg) Ekman8` — no DB, no clock reads inside; clock injected as parameter.
 2. Change `EmotionEngine` read paths (`GetState`, prompt-building consumers in `modules/cognition/prompt_builder.go`, beat context enrichment in `lifecycle/runner.go`) to run through the lazy evaluation and persist the evaluated snapshot + `last_evaluated_at` in one short tx (READ → compute → WRITE phase separation, same pattern as the cognition compaction deadlock fix).
-3. Keep tick-driven *invocation* on hosts that have ticks (desktop, cloud session tasks, worker jobs) — they call the same `Evaluate(now)`; ticks become cache-refresh points, not correctness requirements.
+3. Keep tick-driven *invocation* on hosts that have ticks (desktop timer loop; embedded hosts via the 0-4 batch) — they call the same `Evaluate(now)`; ticks become cache-refresh points, not correctness requirements.
 4. Refactor `lifecycle` exhaustion/sleep to anchored-state reads (`runner.go`, `state.go`). Update `restorePersistedState()` to restore anchors only.
 5. Dream TTL: add `IsExpired` gating in dream-message read paths; retention sweep uses it.
 6. Tests: golden tests for decay math vs. old tick simulation (run N ticks of the old model, assert lazy `Evaluate` at the end equals ±ε); restart-mid-decay test (persist anchors, reload, evaluate).
@@ -45,7 +45,6 @@ Today the emotion engine applies decay/dampening/crystallization when the beat r
 
 - `go build ./...`, `go vet ./...`, `go test ./...` green (incl. emotion + lifecycle suites)
 - New equivalence tests green; existing beat-runner behavior tests unchanged
-- Lifecycle-worker (cloud) still green after dependency bump (0-3)
 
 ## Risks & rollback
 

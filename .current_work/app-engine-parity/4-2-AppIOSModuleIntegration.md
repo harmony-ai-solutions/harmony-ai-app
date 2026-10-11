@@ -5,13 +5,13 @@
 
 ## Objective
 
-Wire the `HarmonyEngine.xcframework` into the iOS app behind the same `local engine` connection source (1-3): Turbo Native Module wrapping the facade; engine lives and dies with the app process.
+Wire the `HarmonyEngine.xcframework` into the iOS app as the platform's `EngineHost` (unified with 1-2's Android sidecar host): Turbo Native Module wrapping the facade; engine lives and dies with the app process.
 
 ## Design
 
 - `ios/` integration: Podfile/framework embedding; `EngineModule` (Swift/ObjC) exposing `start/stop/call/setCallback` to RN via Turbo Module spec mirroring the Android `EngineSidecar` module interface **exactly** (same TS types — the app's engine-service layer becomes platform-agnostic).
-- `src/services/engine/`: unified `EngineHost` interface with two impls — `SidecarEngineHost` (Android) and `EmbeddedEngineHost` (iOS) — selected by platform; both yield `{wsPort, adminPort}` after readiness so everything downstream (1-3 connection mode, 3-2 API client) is shared.
-- Lifecycle: start on first engine-dependent interaction (app foreground), stop on `AppState` background with a short grace (in-flight tx), restart on foreground; **no** background execution attempts (assessment §8 — documented product behavior: iOS local mode is a foreground tier; cloud/lifecycle-service covers continuity).
+- `src/services/engine/`: unified `EngineHost` interface with two impls — `SidecarEngineHost` (Android) and `EmbeddedEngineHost` (iOS) — selected by platform; both yield `{wsPort, adminPort}` after readiness so everything downstream (3-2 API client) is shared.
+- Lifecycle: start on first engine-dependent interaction (app foreground), stop on `AppState` background with a short grace (in-flight tx), restart on foreground; **no** background execution attempts in this phase (assessment §8 — documented product behavior: the iOS engine is a foreground tier; background continuity is the 4-3 blind-tick wake model).
 - Memory/battery telemetry hooks (dev builds): RSS before/after chat sessions.
 
 ## Implementation steps

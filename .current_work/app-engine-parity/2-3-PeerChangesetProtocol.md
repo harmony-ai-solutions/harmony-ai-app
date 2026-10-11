@@ -6,7 +6,7 @@
 
 ## Objective
 
-The wire protocol by which two engines exchange epoch/changeset state over the existing event-server WS transport — desktop ↔ embedded, and later cloud ↔ embedded (2-5).
+The wire protocol by which two engines exchange epoch/changeset state over the existing event-server WS transport — desktop ↔ embedded (the only engine-peer pairing; the cloud has no engine peer per the 2026-10-11 ruling).
 
 ## Design
 
@@ -17,17 +17,17 @@ The wire protocol by which two engines exchange epoch/changeset state over the e
   - `CHANGESET_ACK` — ack up to `(epoch_id, seq)` (drives retention)
   - `BASELINE_OFFER` / `BASELINE_ACCEPT` — snapshot transfer (chunked; reuses compression conventions; flow-control windowed)
   - `EPOCH_HANDOVER` — authority transfer (graceful): old authority flushes, sends final batch + handover marker, client promotes its pending epoch
-  - `SYNC_REJECT` (typed) — incompatible protocol/schema → existing sticky `serverUpdateRequired` UX on the *app* side still applies when an old app meets a new engine; a new *engine peer* gets a typed reject + min versions
+  - `SYNC_REJECT` (typed) — incompatible protocol/schema → a peer that cannot negotiate changeset-v1 (e.g. the app's current rows-v1 client until 3-4 deletes it) falls back to legacy rows-v1 serving; a genuinely incompatible peer gets a typed reject + min-version hint
 - Application: incoming batches → 2-2 store → `sessionext.Apply` under the per-class policy → applied inside one savepoint per batch; on ABORT (unexpected) → typed error, batch quarantined, connection stays for diagnostics (never half-applied).
-- Back-compat: engine keeps serving `rows-v1` to old apps during the transition window (dual-protocol server; removal tracked in the future cloud-cleanup plan + app 3-4 deletes the client).
-- Security: unchanged TLS/security modes for desktop peers; loopback exempt (1-3).
+- rows-v1 server support: unchanged existing behavior — no transition-window policy (unlaunched product; no old versions in the wild). The app's rows-v1 client is deleted in 3-4 and no other rows-v1 clients exist; engine-side rows-v1 removal is dead-code cleanup for the deferred cleanup plan.
+- Security: unchanged TLS/security modes for desktop peers; loopback exempt (app↔engine local connections).
 
 ## Implementation steps
 
 1. `eventserver/synchronization.go`: protocol negotiation + new event handlers; keep legacy path isolated behind an interface (`SyncProtocol` implementations: `rowsV1`, `changesetV1`).
 2. Batch pipeline: receive → validate continuity (epoch/seq) → apply → ack; send side driven by 2-2 store flushes.
 3. Handover choreography + crash-safety (handover marker persisted before promote; on reconnect, ambiguity resolved by epoch ledger compare).
-4. Tests: full-matrix integration — two in-process engines, scenarios: fresh pairing, delta exchange both directions, rejoin (gap beyond retention), handover during in-flight write, protocol mismatch reject, legacy client served rows-v1 while peer uses changeset-v1.
+4. Tests: full-matrix integration — two in-process engines, scenarios: fresh pairing, delta exchange both directions, rejoin (gap beyond retention), handover during in-flight write, protocol mismatch reject, rows-v1 fallback negotiation alongside an active changeset-v1 peer.
 5. Load test: large history baseline transfer + steady-state deltas; record numbers.
 
 ## Files to create/modify
@@ -45,7 +45,7 @@ The wire protocol by which two engines exchange epoch/changeset state over the e
 ## Risks & rollback
 
 - Handover is the dangerous window → crash-injection tests mandatory; conservative default: handover only at clean boundaries (no in-flight writes), forced-flush first
-- Dual protocol doubles server surface temporarily — isolated behind interface + explicit removal tracking
+- Dual protocol doubles server surface until 3-4 deletes the app's rows-v1 client (dead code after that) — isolated behind interface + removal tracked for the cleanup plan
 
 ## Progress checklist
 

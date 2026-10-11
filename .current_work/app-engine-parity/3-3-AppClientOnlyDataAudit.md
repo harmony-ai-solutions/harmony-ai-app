@@ -5,7 +5,7 @@
 
 ## Objective
 
-Decide and execute the destination of every piece of app-local data that is NOT engine-managed, before the TS database is deleted in 3-4. Nothing may be silently dropped.
+Decide the destination **schema** for every piece of app-local data that is NOT engine-managed, before the TS database is deleted in 3-4. Nothing may be silently dropped from the schema — but there is no data carry: fresh installs start empty on the new homes (pre-launch ruling; existing dev-device data is discarded).
 
 ## Audit scope (enumerate exhaustively at execution time)
 
@@ -27,25 +27,24 @@ Known candidates from memory bank history — verify current state on the branch
 1. Every table in the app's migration chain gets an explicit verdict: `engine` (stays via engine schema), `app-local` (AsyncStorage or a minimal app-side store), or `deleted` (dead feature).
 2. Data that follows the user across devices → engine. Data that is device/UI-specific → app-local.
 3. Anything moved to the engine needs an engine migration + endpoint/facade access (coordinate with 3-1 if reads are needed).
-4. One-time relocation migration for existing installs (read old TS table → write new home) executed during the 3-4 bridge window, not before.
+4. No data carry: fresh installs start empty on the new homes. Verdicts fix schema destinations only; anything engine-ward gets its engine migration so new installs create the tables (rule 3).
 
 ## Implementation steps
 
 1. Enumerate actual tables/migrations on the branch → fill/extend the verdict table (commit as `3-3-data-verdicts.md`).
 2. Engine-side migrations for anything moving engine-ward (+ endpoints if listed).
-3. App-side relocation code (runs once during bridge).
-4. Tests: relocation idempotency (run twice → no dupes); verdict table completeness check in CI (every TS migration's tables have a verdict).
+3. Verdict table completeness check in CI (every TS migration's tables have a verdict).
 
 ## Files to create/modify
 
 - `.current_work/app-engine-parity/3-3-data-verdicts.md` (committed audit)
-- Engine migrations if any; app relocation module
+- Engine migrations if any
 - CHANGELOG.md (both repos if engine changes)
 
 ## Verification gates
 
 - Verdict table covers 100% of app TS tables (CI check green)
-- Relocation test green; device spot-check post-bridge
+- Fresh-install smoke: every verdict destination exists and is readable on a new install
 
 ## Risks & rollback
 
