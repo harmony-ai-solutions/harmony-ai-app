@@ -10,7 +10,7 @@ Delete the TS SQLite replica, mirrored migrations, and the app-side sync stack o
 
 ## Release design
 
-1. **Precondition:** 3-2's relink is complete and default-on — every call site that used to fetch/modify content in the local DB uses the engine's management API, and 3-1 has extended the API wherever the app genuinely needed more than the contract offered. Cloud mode runs the 2-5 path (on-device engine + injected configs + backup/restore).
+1. **Precondition:** 3-2's relink is complete and default-on — every call site that used to fetch/modify content in the local DB uses the engine's management API, and 3-1 has extended the API wherever the app genuinely needed more than the contract offered. Cloud mode runs the 2-5 path (on-device engine + injected configs; continuity = 2-6 user-owned-storage backup/restore).
 2. **Deletion (single atomic PR):**
    - `src/database/` TS SQLite layer: repositories for synced tables, mirrored migrations, models duplicating engine schema
    - `src/services/SyncService.ts` + `syncNameClash.ts` + all `sync*.test.ts` integration suites for the old protocol; `WebSocketConnectionFactory` legacy rows-v1 branches (the app no longer speaks rows-v1 anywhere — engine↔engine sync is Phase 2, engine-side)
@@ -34,7 +34,7 @@ Delete the TS SQLite replica, mirrored migrations, and the app-side sync stack o
 ## Verification gates
 
 - `npx tsc --noEmit` 0; jest green (reduced suite reflects deletions — intentional, documented)
-- Device smoke green: fresh install (empty start + backup-restore), cloud chat on-device, local mode
+- Device smoke green: fresh install (empty start + 2-6 backup-restore), cloud chat on-device, local mode
 - Bundle size delta recorded (expect meaningful reduction)
 
 ## Risks & rollback

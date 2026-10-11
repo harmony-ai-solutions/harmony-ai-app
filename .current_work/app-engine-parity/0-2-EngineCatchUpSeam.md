@@ -50,7 +50,7 @@ Rules:
 
 1. Add `lifecycle/catchup.go` with `PlanCatchUp` (pure, table-driven tests) + `FireCatchUp` orchestration reusing existing one-shot fire paths.
 2. Wire deterministic seed handling (existing rand usage in runner → seeded per catch-up for reproducibility).
-3. Integrate: desktop `EnsureBeatRunnerStarted` timer loop calls `FireCatchUp` when it wakes behind schedule (replaces naive next-tick). (The cloud lifecycle-worker is deliberately NOT wired — it is deleted outright in 4-4; cloud session tasks keep the old engine until the infra-cleanup plan.)
+3. Integrate: desktop `EnsureBeatRunnerStarted` timer loop calls `FireCatchUp` when it wakes behind schedule (replaces naive next-tick). (The cloud lifecycle-worker is deliberately NOT wired — it is deleted outright in 4-4; cloud session tasks keep the old engine until Phase 6 retires the session plane.)
 4. Tests: plan generation across boundary cases (elapsed < interval → 0 beats; short gap → K capped; long gap ≥ threshold → exactly 1 re-entry beat with hiatus framing; threshold boundary); double-advance regression (emotion after catch-up == lazy-evaluated + beat deltas exactly once); determinism test.
 5. Docs: extend `docs/Entity-Lifecycle.md` catch-up section (consumers: desktop timer loop + 0-4 batch orchestrator).
 

@@ -24,7 +24,7 @@ The bookkeeping layer around changesets: authority epochs, changeset retention +
 
 - Local table `sync_changesets` (`id` UUIDv7, `epoch_id`, `seq` monotonic per epoch, `created_at`, `payload` BLOB (gzipped), `size_bytes`, `table_count`). Sessions flush changesets on: tx-commit batches (debounced), session end, authority handover.
 - Retention: changesets retained **R days** (propose 14; decision 2) after being acknowledged by all known peers; baseline snapshot (full DB copy — reuse existing backup/snapshot tooling) every **B days** (propose 7) or when unacked backlog > size cap.
-- Rejoin rule (replaces purge-floor/rebuild): a peer whose `(epoch, seq)` continuity is broken (gap beyond retention) → **baseline snapshot transfer + fresh epoch** (simpler than today's wipe/rebuild: one DB file + WAL checkpoint, already proven by cloud S3 snapshot flow).
+- Rejoin rule (replaces purge-floor/rebuild): a peer whose `(epoch, seq)` continuity is broken (gap beyond retention) → **baseline snapshot transfer + fresh epoch** (simpler than today's wipe/rebuild: one compact standalone DB file — the same artifact mechanics 2-6's backup pipeline produces via `VACUUM INTO`; the cloud S3 snapshot flow it previously resembled is retired in 6-2).
 
 ### Conflict policy (per table class — the whole policy, no protocol)
 

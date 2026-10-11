@@ -39,15 +39,15 @@ The lifecycle-worker today downloads each user's encrypted snapshot, opens it wi
 ### 4. Lifecycle-worker deletion (outright — no sunset staging)
 
 - Delete `cmd/lifecycle-worker` (job scheduling members, quota keys, worker deploy config) in this phase, once 4-3 is live on our devices — the only consumers it ever had were our own builds.
-- Seed path: the engine seeds lifecycle state for entities it creates (already true today); the session-broker seed producer stays untouched as frozen infra (cleanup plan).
-- Result: **zero lifecycle engine imports in the backend.** Remaining engine imports (session-engine/warm-pool images, broker) are frozen infrastructure the cloud-cleanup plan retires; full engine-dependency removal — and with it the option to relicense source-available (e.g. SSPL-family) — completes with that cleanup plan, which this phase only *enables*.
+- Seed path: the engine seeds lifecycle state for entities it creates (already true today); the session-broker seed producer stays untouched as frozen infra until Phase 6 (6-1).
+- Result: **zero lifecycle engine imports in the backend.** Remaining engine imports (push-service, session-engine/warm-pool images, broker) are frozen infrastructure until Phase 6: 6-1 retires the session plane, 6-3 switches push-service to the Firebase Admin SDK and removes the last import — making the source-available relicense option (e.g. SSPL-family) executable; 6-4 then deletes the engine-side dead code (rows-v1 server + cloud-mode machinery).
 
 ## Implementation steps
 
 1. Keepalive cron + policy knobs + metrics; E2E: iOS token receives push.
 2. Relay endpoint: auth, payload-size validation, per-user rate caps, push-service dispatch; tests incl. abuse-limit case.
 3. Tier API extension: add autonomy beat budget to the authenticated policy response; app consumption wired in 4-3.
-4. Lifecycle-worker deletion PR: remove worker + deploy config + valkey quota plumbing; ops-docs + licensing-enabling note in repo README (source-available option completes with the cleanup plan).
+4. Lifecycle-worker deletion PR: remove worker + deploy config + valkey quota plumbing; ops-docs + licensing-enabling note in repo README (source-available option completes with Phase 6 — 6-3).
 
 ## Files to create/modify
 

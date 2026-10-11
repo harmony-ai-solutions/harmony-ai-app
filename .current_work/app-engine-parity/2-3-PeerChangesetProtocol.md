@@ -19,7 +19,7 @@ The wire protocol by which two engines exchange epoch/changeset state over the e
   - `EPOCH_HANDOVER` — authority transfer (graceful): old authority flushes, sends final batch + handover marker, client promotes its pending epoch
   - `SYNC_REJECT` (typed) — incompatible protocol/schema → a peer that cannot negotiate changeset-v1 (e.g. the app's current rows-v1 client until 3-4 deletes it) falls back to legacy rows-v1 serving; a genuinely incompatible peer gets a typed reject + min-version hint
 - Application: incoming batches → 2-2 store → `sessionext.Apply` under the per-class policy → applied inside one savepoint per batch; on ABORT (unexpected) → typed error, batch quarantined, connection stays for diagnostics (never half-applied).
-- rows-v1 server support: unchanged existing behavior — no transition-window policy (unlaunched product; no old versions in the wild). The app's rows-v1 client is deleted in 3-4 and no other rows-v1 clients exist; engine-side rows-v1 removal is dead-code cleanup for the deferred cleanup plan.
+- rows-v1 server support: unchanged existing behavior — no transition-window policy (unlaunched product; no old versions in the wild). The app's rows-v1 client is deleted in 3-4 and no other rows-v1 clients exist; engine-side rows-v1 removal is dead-code cleanup for Phase 6 (6-4, this plan).
 - Security: unchanged TLS/security modes for desktop peers; loopback exempt (app↔engine local connections).
 
 ## Implementation steps
@@ -45,7 +45,7 @@ The wire protocol by which two engines exchange epoch/changeset state over the e
 ## Risks & rollback
 
 - Handover is the dangerous window → crash-injection tests mandatory; conservative default: handover only at clean boundaries (no in-flight writes), forced-flush first
-- Dual protocol doubles server surface until 3-4 deletes the app's rows-v1 client (dead code after that) — isolated behind interface + removal tracked for the cleanup plan
+- Dual protocol doubles server surface until 3-4 deletes the app's rows-v1 client (dead code after that) — isolated behind interface + removal executed in 6-4
 
 ## Progress checklist
 
