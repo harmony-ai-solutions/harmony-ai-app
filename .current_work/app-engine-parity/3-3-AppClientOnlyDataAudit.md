@@ -56,7 +56,7 @@ Known candidates from memory bank history — verify current state on the branch
 
 ## Progress checklist
 
-- [ ] Exhaustive enumeration + verdicts committed
-- [ ] Engine migrations landed (if any)
-- [ ] Relocation module + tests
-- [ ] CI completeness check green
+- [x] Exhaustive enumeration + verdicts committed — 36 TS-chain tables, all verdicts in `3-3-data-verdicts.md` (35 `engine`, 1 `deleted`; RN-only 0)
+- [x] Engine migrations landed (if any) — **none required**: no app table moves engine-ward (every `engine` verdict already exists engine-side; parity 55/55 matching). Rule 3 is a no-op here.
+- [ ] Relocation module + tests — **not needed**: zero app-local tables remain in SQLite (all app-local data is AsyncStorage / in-memory stubs), so there is nothing to relocate. Left unchecked deliberately.
+- [x] CI completeness check green — `src/database/__tests__/dataVerdictsCoverage.test.ts` (8 tests) parses the verdict table and asserts 100% coverage of the chain.

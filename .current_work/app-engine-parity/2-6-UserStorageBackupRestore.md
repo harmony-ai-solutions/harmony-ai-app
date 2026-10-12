@@ -83,12 +83,70 @@ Fresh install → sign in → probe targets (iCloud container metadata / integra
 
 ## Progress checklist
 
-- [ ] Engine artifact pipeline + manifest + integrity tests
-- [ ] Engine targets (Local/WebDAV/Dropbox/OneDrive + Drive stub) + facade/management routes
-- [ ] App orchestrator + Android native modules + WorkManager scheduling
+- [x] Engine artifact pipeline + manifest + integrity tests
+- [x] Engine targets (Local/WebDAV/Dropbox/OneDrive + Drive stub) + facade/management routes
+- [x] App orchestrator + Android native modules + WorkManager scheduling
 - [ ] iOS HarmonyBackup module (with 4-2) + BGTask scheduling
-- [ ] Settings UI + recovery-code/passphrase flows
-- [ ] Restore onboarding + per-target failure UX
-- [ ] Android dataExtractionRules (cloud-backup exclusion / device-transfer inclusion)
+- [x] Settings UI + recovery-code/passphrase flows
+- [x] Restore onboarding + per-target failure UX
+- [x] Android dataExtractionRules (cloud-backup exclusion / device-transfer inclusion)
 - [ ] Desktop parity (Wails export/restore)
 - [ ] E2E round-trips green per target
+
+## Implementation notes (2026-10-12, `feat/app-engine-parity`)
+
+### Engine (`harmony-link-private`) — DONE
+
+- **`modules/backup/`** — `crypto.go` (DEK, AEAD, W3/W4 wraps), `manifest.go`
+  (single commit point, 2-generation keys), `audit.go` (data-dir audit — RAG
+  `.gob` side objects; media is in-DB so it rides the baseline), `pipeline.go`
+  (VACUUM INTO → zstd-3 → AEAD; integrity/validate helpers), `target.go`
+  (`BackupTarget` + Local/WebDAV/Dropbox/OneDrive/Drive-stub/iCloud-shape),
+  `service.go` (`CreateBackupArtifact`/`RestoreArtifact`/`DataVersion`/key mgmt,
+  `DryRun` staging estimate).
+- **Tests** (all green): round-trip, corrupted-object rejection (AEAD), tampered
+  manifest, cross-key/wrong-code rejection, crash-at-each-upload-step leaves the
+  old generation authoritative, GC 2-generation retention, Argon2id params,
+  skip-if-unchanged, dry-run uploads nothing, side-object round-trip, target
+  CRUD against a fake WebDAV + Dropbox/OneDrive REST fake.
+- **Routes** `management/routes_backup.go` + registration in `server.go`
+  (loopback-authed `/api` group); **facade** `embed/backup.go` + `EngineCall`
+  methods. `klauspost/compress` promoted to a direct dep; `zstd` + `argon2`
+  vendored.
+- `docs/Backup.md`.
+
+### App (`harmony-ai-app`) — DONE (Android path)
+
+- `src/services/backup/` — `BackupOrchestrator`, `BackupKeyEscrow` (W1),
+  `backupCredentials` (keychain), `backupNative` (Android module wrapper),
+  `backupHeadlessTask` (WorkManager → `HarmonyBackupTask`), `backupTypes`.
+- `EngineApiClient` `/api/backup/*` methods; i18n `backup` namespace.
+- `BackupSettingsScreen` (target/cadence/Wi-Fi/charging/size/"back up now" with
+  the exact-size estimate-confirm dialog/recovery-code display+reset/passphrase
+  opt-in/per-target status/honest-limits card) + `RestoreOnboardingScreen`;
+  registered in the navigator with a Settings link row.
+- Android: `ai.soulbits.chat.backup` (`BackupModule` SAF picker + WorkManager
+  control + share + OAuth PKCE, `BackupScheduler`, `BackupWorker`,
+  `BackupHeadlessTaskService`, `OAuthPkce`, `BackupPackage`), registered in
+  `MainApplication`; manifest `dataExtractionRules` split + FileProvider +
+  OAuth deep link.
+- Tests: `BackupOrchestrator`/`BackupKeyEscrow`/native-constraint unit suite +
+  `BackupSettingsScreen` UI suite.
+
+### Deviations / open items
+
+- **iOS (4-2):** `ICloudContainerTarget` is the engine-side shape only (a local
+  inbox); the `HarmonyBackup` Swift module (ubiquity container + NSFileCoordinator
+  + W2 synchronizable keychain) lands with 4-2, as does the `BGProcessingTask`
+  ride-along. `Probe()` reports unavailable until then.
+- **OAuth PKCE client ids** are placeholders in `BackupModule` (`""`); they must
+  be injected per build flavour (see `scripts/oauth-secrets.cjs`) — the Custom
+  Tabs authorize leg + deep-link redirect + token exchange are implemented.
+- **Dropbox/OneDrive >150 MB chunked upload** is a follow-up (v1 single upload).
+- **Desktop parity (step 5)** is deferred to 5-2: the engine targets make it
+  nearly free, but a Wails settings surface is not a trivially-cheap hook.
+- **Google Drive** stays a stub (research §1.3: no written-consent route).
+- **On-device E2E** (backup → wipe → restore per target; D2D verification) is an
+  owner gate; the in-process local-folder round-trip is covered by
+  `TestCreateRestoreRoundTrip`.
+

@@ -16,52 +16,10 @@ on:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────
-  # NEW: Schema parity gate — checks RN schema matches Go schema
-  # ───────────────────────────────────────────────────────────────────
-  schema-parity:
-    name: Schema parity (RN ↔ Harmony Link)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/checkout@v5
-        with:
-          repository: harmony-ai-solutions/harmony-link-private
-          token: ${{ secrets.HARMONY_LINK_REPO_PAT }}
-          path: harmony-link
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: npm
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-      - run: npm ci
-      - name: Install Go dependencies
-        working-directory: harmony-link
-        run: go mod download
-      - name: Dump RN schema
-        run: npm run schema:dump -- --output rn-schema.current.json
-      - name: Dump Go schema
-        working-directory: harmony-link
-        run: go run . dump-schema | tail -n +4 > ../go-schema.current.json
-      - name: Compare schemas
-        run: python3 scripts/compare-schemas.py rn-schema.current.json go-schema.current.json
-      - name: Upload schemas on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: schema-diff
-          path: |
-            rn-schema.current.json
-            go-schema.current.json
-
-  # ───────────────────────────────────────────────────────────────────
-  # NEW: Test gate — must pass before any artifact is built
+  # Test gate — must pass before any artifact is built
   # ───────────────────────────────────────────────────────────────────
   test:
     name: Tests (pre-release gate)
-    needs: schema-parity
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -83,15 +41,6 @@ jobs:
         env:
           JEST_JUNIT_OUTPUT_DIR: ./reports
           JEST_JUNIT_OUTPUT_NAME: unit-tests.xml
-
-      - name: Integration tests
-        run: npx jest --selectProjects integration --reporters=default --reporters=jest-junit
-        env:
-          JEST_JUNIT_OUTPUT_DIR: ./reports
-          JEST_JUNIT_OUTPUT_NAME: integration-tests.xml
-
-      - name: Migration tests
-        run: npx jest --selectProjects unit --testPathPatterns migrations
 
       - name: Upload test results
         if: always()

@@ -31,7 +31,46 @@ Bring all documentation in line with the shipped architecture; per workspace rul
 
 ## Progress checklist
 
-- [ ] App memory bank + docs + changelog
-- [ ] Engine memory bank + docs + changelog
-- [ ] Cloud memory bank + docs + changelog
-- [ ] Plan status finalized
+- [x] App memory bank + docs + changelog
+- [x] Engine memory bank + docs + changelog
+- [x] Cloud memory bank + docs + changelog
+- [x] Plan status finalized
+
+## Status (2026-10-12 — task 5-2 complete)
+
+All three repos' docs, memory banks (`.toon` first) and changelogs are in line
+with the shipped architecture. No doc anywhere still describes the TS replica /
+rows-v1 / cloud session-hosting as current (the app integration diagrams were
+archived to `docs/history/harmony-link-diagrams/` with a retirement note; the
+cloud lifecycle-ops doc was rewritten data-blind).
+
+**Remnants landed (all 5):**
+
+1. **Engine-side gate halves** — canonical shared wire fixtures hosted engine-side
+   (`docs/api/management/fixtures/management-contract.fixtures.json`); the app CI
+   `contract-drift` job's pinned-path fetch now points at them
+   (`--engine-fixtures engine/docs/api/management/fixtures/management-contract.fixtures.json`);
+   changeset-protocol conformance golden fixtures added
+   (`eventserver/sync_changeset_conformance_test.go`, table-driven, reusing 2-3's
+   harness); openapi `info.version` bump procedure documented
+   (`docs/Management-API-Versioning.md`, the doc `docs/engine-contract-gates.md`
+   points to).
+2. **`dump-schema` retirement** — verified zero live consumers (only the command,
+   its own tests, and the README); retired `cmd/dump_schema.go`,
+   `cmd/dump_schema_test.go`, `schema/go-schema.json`, and the orphaned
+   `database.DumpSchemaRows` (+ its tests). `CheckpointWAL` retained (live).
+3. **`sync_gc_state` cleanup migration** — migration **000049** drops the now-unread
+   table (down recreates); `database/migrations_test.go` updated.
+4. **Desktop Wails backup hook** — new `frontend/src/services/management/backupService.js`
+   + a "Backup & Restore" section in `GeneralSettingsView.jsx` (target picker,
+   "Back up now", probe, "Restore from backup", recovery code, status line) driving
+   the existing `/api/backup/*` routes; frontend build green.
+5. **App backup OAuth TODO (report-only)** — `docs/INSTALLATION.md` now documents
+   that Dropbox/OneDrive client ids in `BackupModule.kt` are empty placeholders
+   requiring owner-created credentials wired via `scripts/oauth-secrets.cjs`; no
+   ids invented.
+
+**Gates:** engine `go build`/`go vet`/`go test ./...` exit 0 (with the mandatory
+`CGO_CFLAGS` session-extension defines); frontend `npm run build` exit 0; app
+`npx tsc --noEmit` 0 + `npm test` green; cloud `go build`/`go vet`/`go test`
+green. See the task's final report for exact numbers.

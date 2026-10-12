@@ -42,8 +42,81 @@ Close the read-API gap between what the Wails frontend consumes and what the mob
 
 ## Progress checklist
 
-- [ ] Audit table complete (all TS repo reads mapped)
-- [ ] Missing endpoints implemented + tested
-- [ ] Loopback auth wired
-- [ ] Blob byte endpoints + pagination/projection tests
-- [ ] Benchmarks recorded
+- [x] Audit table complete (all TS repo reads mapped) — `3-1-endpoint-audit.md` (EXISTS/NEW/DERIVED/INTERNAL/WRITE; **0 MISSING**)
+- [x] Missing endpoints implemented + tested — 8 `/api/mobile/*` read routes + `management/routes_mobile_test.go`
+- [x] Loopback auth wired — per-process token in the sidecar readiness line (`token`), accepted via `X-Loopback-Token` for loopback peers only
+- [x] Blob byte endpoints + pagination/projection tests — audio/image `Range` endpoints; chat-list/messages/interactions/memories pagination tests
+- [x] Benchmarks recorded — `BenchmarkMobileChatListEndpoint_500Conversations` ≈ 7.4 ms/op on the host; the app-local JOIN half is deferred to 3-2's on-device verification (recorded in audit §4)
+
+### 3-1b additions (owner-signed scope; see implementation notes below)
+
+- [x] `/api/mobile` group **dissolved** — reads re-homed under `/api/entities/*`, blob bytes + message writes under `/api/messages/*`; old registrations removed (`routes_mobile.go` deleted)
+- [x] Message writes — `PATCH /api/messages/:id` (edit/pin/react), `DELETE /api/messages/:id`
+- [x] Conversation writes — `DELETE /api/entities/:id/conversations/:participantKey/messages` (clear), `POST .../read` (read/unread), `PUT /api/entities/:id/chat-settings/:participantKey` (pin/archive)
+- [x] Emoji action CRUD — POST/PUT/DELETE + delete-all / `?scope=default` delete-defaults
+- [x] Entity read additive fields — `created_at`/`updated_at`/`deleted_at`/`rag_reindex_required`/top-level `character_profile_id`
+- [x] Character profile additive fields — `is_favorite` + timestamps; dedicated `PUT /api/character-profiles/:id/favorite`
+- [x] `GET /api/providers` + `GET /api/providers/:id` — standalone provider-config list/read
+- [x] Memories audit — no user-facing manual-memory-add exists (`insertMemory` is test-only, `upsertMemory` has no caller; the 3-2 adapter already throws `EngineApiUnsupportedError`) → **`POST /api/entities/:id/memories` deliberately NOT added**
+- [x] Tests migrated — `routes_mobile_test.go` split into `routes_messages_test.go` + `routes_entities_conversations_test.go`; bench re-homed (`routes_entities_bench_test.go`); all prior coverage kept + new write coverage
+- [x] Docs updated — `docs/api/management/openapi.yaml` (Mobile paths replaced; Messages/Configuration paths added), `docs/Sidecar-Deployment.md` (app-facing API table), CHANGELOG
+- [x] Gates green — `go build/vet/test ./...` with the canonical CGO_CFLAGS
+
+## Implementation notes — 3-1b consolidation ruling (2026-10-11)
+
+**Ruling: the `/api/mobile` group DISSOLVES.** The separate group existed only to
+keep the Wails contract untouched while giving the app a read surface. 3-1b
+re-homes its routes into the existing `/api/entities` (+ new `/api/messages`)
+surface and adds the write path 3-2 needs, so there is one app-facing contract
+instead of two.
+
+**Auth.** `management/mobile_auth.go` (`mobileAuthMiddleware`) is unchanged and is
+now applied to the whole `/api` group and the `entities` / `character-profiles`
+sub-groups (previously `apiKeyAuthMiddleware`). It accepts EITHER the admin API
+key (Wails/desktop parity — unchanged) OR, for **loopback peers only**, the
+sidecar's per-process `X-Loopback-Token`. Rationale: the app's `EngineApiClient`
+sends only `X-Loopback-Token` in sidecar mode (it never embeds the fixed admin
+key), so every app-facing route — including the existing `/api/entities`,
+`/api/character-profiles`, `/api/module-configs/*` reads and the new
+`/api/providers` — must accept it. The token is empty on desktop/cloud, so the
+Wails contract is unchanged. CORS gained `PATCH` + `X-Loopback-Token`.
+
+**Endpoint map (old → new).**
+
+| Old (`/api/mobile/*`) | New |
+|---|---|
+| `GET /entities/:id/chat-list` | `GET /api/entities/:id/chat-list` |
+| `GET /entities/:id/messages?participant_key=` | `GET /api/entities/:id/conversations/:participantKey/messages` |
+| `GET /entities/:id/interactions` | `GET /api/entities/:id/interactions` |
+| `GET /entities/:id/emoji-actions` | `GET /api/entities/:id/emoji-actions` |
+| `GET /entities/:id/emotion` | `GET /api/entities/:id/emotion` |
+| `GET /entities/:id/memories` | `GET /api/entities/:id/memories` |
+| `GET /messages/:messageId/audio` | `GET /api/messages/:id/audio` |
+| `GET /messages/:messageId/image` | `GET /api/messages/:id/image` |
+
+Response shapes for the moved reads are **byte-identical** (same DTOs, same
+snake_case). The message window's participant key moved from a query param to a
+path segment (URL-encode `+` as `%2B`).
+
+**Writes added (app parity).** Message PATCH/DELETE; conversation clear
+(`deleteConversationByParticipantKey`), read/unread
+(`markConversationMessagesRead`/`Unread`), chat-settings upsert (`upsertSettings`,
+`reply_mode` excluded — flows via WS `SET_REPLY_MODE`); emoji CRUD incl.
+delete-all / delete-defaults; character favorite toggle. Repository functions
+mirror the app's TS SQL exactly (`database/repository/conversation/writes.go`,
+`entities.DeleteAll/DeleteDefaultEmojiActionsByEntity`,
+`characters.SetCharacterProfileFavorite`).
+
+**Memories audit (scope D).** Searched the app repo for callers of
+`insertMemory`/`upsertMemory`: `insertMemory` appears only in tests;
+`upsertMemory` has no caller at all (only a definition + barrel export), and the
+3-2 engine adapter already stubs both with `EngineApiUnsupportedError`. There is
+**no user-facing manual-memory-add feature**, so `POST /api/entities/:id/memories`
+was deliberately NOT added.
+
+**Notes for 5-1 (parity gates).** Management-route enumerations must now include
+the `/api/entities/*`, `/api/messages/*`, `/api/providers*` and
+`/api/character-profiles/:id/favorite` paths instead of the 8 `/api/mobile/*`
+paths; `management/routes_mobile_test.go` / `_bench_test.go` no longer exist
+(replaced by `routes_messages_test.go`, `routes_entities_conversations_test.go`,
+`routes_entities_bench_test.go`).

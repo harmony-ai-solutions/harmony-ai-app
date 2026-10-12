@@ -51,9 +51,23 @@ Native Android layer that owns the engine sidecar process: start/health/stop, po
 
 ## Progress checklist
 
-- [ ] Gradle artifact vendoring + pin
-- [ ] Process manager + readiness parsing + tests
-- [ ] Foreground service + manifest + notification
-- [ ] Turbo module bridge + TS types + events
-- [ ] Restart/backoff + error contract
+- [x] Gradle artifact vendoring + pin
+- [x] Process manager + readiness parsing + tests
+- [x] Foreground service + manifest + notification
+- [x] Turbo module bridge + TS types + events
+- [x] Restart/backoff + error contract
 - [ ] Device smoke checklist executed
+
+### Progress notes (task 1-2 implementation)
+
+- **Gradle artifact vendoring** — `:app:vendorEngineSidecar` (in `android/app/build.gradle`) fetches `libengine.so` per ABI into `src/main/jniLibs/{arm64-v8a,x86_64}/`, wired to run before `preBuild`. Pin via `-PENGINE_SIDECAR_VERSION` (default `0.1.0`); sources: `-PENGINE_SIDECAR_ARTIFACTS_DIR` (local CI drop from the engine's `build-android-sidecar` job → `build/android/<abi>/libengine.so`) or `-PENGINE_SIDECAR_BASE_URL` (download). Missing artifacts WARN and skip (armeabi-v7a/x86 have no engine → `isAvailable()` false). Binaries are gitignored. `packaging.jniLibs.useLegacyPackaging = true` = `extractNativeLibs=true`. **Owner gate:** the real artifact URL/CI drop is not wired here (no release URL is published yet).
+- **Process manager** (`EngineProcessManager.kt`) — resolves `nativeLibraryDir/libengine.so` (API 24–28 `code_cache` extraction fallback), execs with `--data-dir/--bind/--ws-port/--wss-port/--admin-port/--log-level`, scans stdout line-by-line for `ENGINE_READY` (stdout is not pure JSON), pumps stderr, detects exits, restarts with exponential backoff (max 3), stops with SIGTERM→10s→SIGKILL. Periodic process-alive health watch (15s) + the wait-thread as the authoritative death detector.
+- **⚠ Port conflict (doc↔reality), resolved:** the plan's Design said `--ws-port 0 --admin-port 0` (ephemeral). The landed engine's `validatePort` rejects ports <1024 and the readiness payload reports the *configured* ports (not the listener's), so `0` is not supported. Resolution: the manager allocates concrete free loopback ports up front and passes them explicitly; the readiness line confirms them. `ENGINE_READY` remains the handshake.
+- **DB key** — forwarded via the `SE_DB_KEY` environment variable (the engine's real var; the plan's `ENGINE_DB_KEY` was a typo). Env (not `--db-key`) keeps the secret out of `ps` argv; same-uid-only environ visibility is the accepted, documented tradeoff. Never logged.
+- **Foreground service** (`EngineSidecarService.kt`) — type `dataSync` on API 34+ (manifest `foregroundServiceType="dataSync"`), persistent "Soulbits engine running" notification, `FOREGROUND_SERVICE_DATA_SYNC` + `POST_NOTIFICATIONS` permissions. Lifecycle tied to the app usage window (started by JS; `START_NOT_STICKY`).
+- **Bridge (deviation):** implemented as a legacy `ReactContextBaseJavaModule` + `EngineSidecarPackage` (registered in `MainApplication`), mirroring the existing `ChatBubble` module. The plan said "Turbo Native Module", but the repo has no `codegenConfig`/spec infrastructure and the sibling module is legacy; legacy modules are interop-supported under the new architecture, and the JS API surface is unchanged if a TurboModule spec is layered on later.
+- **JS layer** — `src/types/engineSidecar.ts` (types) + `src/services/engine/EngineSidecarModule.ts` (wrapper). The TS side owns the wire→domain readiness parse (`parseReadyLine`/`scanStdoutForReady`), the canonical backoff schedule (`computeBackoffDelayMs`), and the status reducer (`nextEngineStatus`); the native side only detects the prefix and forwards the raw line + parsed fields. Events: `engine:ready|restarting|crashed|stopped|state|exit`. Feature flag `ENGINE_SIDECAR_ENABLED` (+ `setEngineSidecarEnabled`) for whole-module rollback.
+- **Tests** — `src/services/engine/__tests__/EngineSidecarModule.test.ts` (25 tests): parsing (noise/partial lines/malformed), backoff schedule, status reducer, native-backed start/stop/state/availability with the native seam mocked, and event fan-out. Gates green: `tsc --noEmit` 0; `npm test` unit 153 suites/1422 tests + integration 13 suites/55 passed.
+- **API surface for 3-2:** `isEngineSidecarAvailable()`, `startEngineSidecar(options) → EngineReadyPayload{wsPort,wssPort,adminPort,bind,pid,dataDir}`, `stopEngineSidecar()`, `getEngineSidecarState() → EngineStatus`, `onEngineSidecarEvent(listener)`, `onEngineExit(listener)`. The management-API client (3-2) dials `http://127.0.0.1:<adminPort>` from the readiness payload; 4-2 reuses this surface for iOS.
+- **Owner device gates (not run here):** build variants + jniLibs placement + first-run smoke — exact steps in the final report.
+

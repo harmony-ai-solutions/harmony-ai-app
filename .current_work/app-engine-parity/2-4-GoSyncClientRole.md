@@ -41,7 +41,50 @@ Give the engine a **client** half: dial a peer engine (desktop over LAN/TLS — 
 
 ## Progress checklist
 
-- [ ] Client core + security modes
-- [ ] Handshake + device approval from dialing side
-- [ ] Pending-epoch buffering + flush
-- [ ] Integration tests green
+- [x] Client core + security modes
+- [x] Handshake + device approval from dialing side
+- [x] Pending-epoch buffering + flush
+- [x] Integration tests green
+
+## Implementation notes (2-4)
+
+- **Reuse, not re-implementation.** The client reuses 2-3's
+  `eventserver.ChangesetSyncHandler` with `Authority=false`; the `syncclient/`
+  package owns only the transport, the device-approval handshake, the reconnect
+  loop and the store/epoch lifecycle.
+- **Yield/buffer semantics (v1) = buffer-and-forward.** Entering client mode
+  yields any active epoch and buffers local writes into a pending epoch
+  (`changesetstore.StartPending`), connected or not. On (re)connect the client
+  forwards its pending changesets to the authority; an `EPOCH_HANDOVER`
+  promotes the pending epoch to active.
+- **Security modes** mirror the app's three (`secure`/`insecure-ssl`/
+  `unencrypted`). TLS modes pair over the peer's plaintext WS (the only
+  unauthenticated path) to obtain the device JWT + cert, then dial WSS
+  presenting the JWT as `Authorization: Bearer` (no PASETO, no `Bearer.`
+  subprotocol — that died with the cloud path).
+- **Baseline re-pull is staged, not hot-applied.** The client receives and
+  stages the rejoin baseline (`Client.BaselinePath()`); v1 does not swap/merge
+  the live SQLite handle mid-session (adoption is a host-boundary operation, and
+  the baseline is served before the client's pending is forwarded, so an
+  in-session merge could drop offline writes). The full two-device rejoin stays
+  a lab test handed to 2-5/3-x.
+- **dataset_id** is derived deterministically (UUIDv5 over the engine instance
+  id) rather than persisted: no generic meta table exists and the plan adds no
+  migration; the derivation is stable, and `dataset_id` is informational in
+  single-dataset v1.
+- **Known limitation (for 2-5 / 5-1):** the client's per-connection handler
+  starts with no peer position, so its first `EPOCH_STATE` sets `need_rejoin`
+  and the authority serves a **baseline on every connect** (the delta path needs
+  a persisted `(epoch, seq)` tracked across connections). v1 accepts a baseline
+  re-pull per connect; seeding the announce with a persisted tracking position
+  is a follow-up.
+- **Config surface:** `config.SyncClientConfig` (`syncclient` block); desktop
+  `cmd/run.go` starts it when enabled (and attaches the store as non-authority);
+  sidecar gains `--sync-*` flags / `SE_SYNC_*` env. This is the surface 4-1
+  consumes.
+- **Runtime controller (3-5):** the live handle for this role is now
+  `syncclient.Manager` (`syncclient/manager.go`) — mutex-guarded recreate,
+  enable/disable authority transitions, and the config.json persistence the
+  management REST surface (`/api/sync/client*`) drives; both `cmd/run.go` and
+  `enginehost` own a Manager, and the 4-1 facade's `DialSync`/`YieldSync` route
+  through it.

@@ -27,6 +27,10 @@ Delete the TS SQLite replica, mirrored migrations, and the app-side sync stack o
 1. Deletion PR (single, atomic, reviewable): file list generated from the audit tables (3-1/3-3), CI green without deleted suites.
 2. Post-deletion verification: clean-install + cloud-mode + local-mode smoke on device; bundle size delta recorded.
 
+> **Engine follow-up (2026-10-11):** the two engine gaps named in the §0 blocker are now CLOSED on engine branch `feat/app-engine-parity` — provider-config write routes (`POST /api/providers`, `PUT /api/providers/:id`, `DELETE /api/providers/:id`; see engine `docs/api/management/openapi.yaml`) and the cross-entity `GET /api/stats/characters` endpoint serving `getCharacterStats`; the 3-4 checklist items below remain the app task's to tick.
+>
+> **Engine follow-up (2026-10-12):** `PUT /api/entities/:id` now also accepts optional `is_muted` (boolean) alongside `is_disabled` — present → updates `entities.is_muted`, absent → untouched, mirroring `is_disabled` exactly; note the update handler's unknown-id path returns **500** (there is no 404 branch on this route).
+
 ## Files to create/modify
 
 - Deletion: per audit lists (tracked as a generated manifest in this phase folder)
@@ -45,8 +49,25 @@ Delete the TS SQLite replica, mirrored migrations, and the app-side sync stack o
 
 ## Progress checklist
 
-- [ ] Preconditions verified (3-2 default-on, 2-5 path live)
-- [ ] Deletion manifest generated + reviewed
-- [ ] Deletion PR merged; CI retooled
-- [ ] Device smoke green (fresh install, cloud, local)
-- [ ] Bundle size delta recorded
+> **Status (2026-10-12, deletion pass): the RELINK AND THE DELETION are
+> LANDED.** The engine is the sole data layer (the seam is a pure re-export of
+> the engine adapters), the five create seams are create-then-use-response,
+> module configs are composite↔flat mapped, and character images upload as
+> multipart. D-35 (send/ingest redesign) renders outgoing messages as optimistic
+> in-memory pending rows reconciled against engine reads; mute is
+> engine-authoritative; `SyncConnectionContext` is an engine-connection status
+> context. The TS SQLite/sync/cloud stack, its 43 test suites and the
+> schema-parity tooling are DELETED; the dropped deps are removed and the jest
+> config is a single `unit` project. `npx tsc --noEmit` = 0; `npm test` green
+> (104 suites / 823 tests). Full evidence:
+> `3-4-deletion-manifest.md` §0.4/§0.5 + `3-4-resume-findings.md`. Remaining:
+> device smoke + bundle-size delta (owner gates).
+
+- [x] Preconditions verified — relink landed (owner rulings 1–3), flag ON, gates green
+- [x] Provider write adapters + stats adapter landed + unit-tested (`services/engine/repositories/providers.ts`, `characters.ts`; seam-delegated)
+- [x] Create-then-use-response relink (5 seams) + module composite/flat mapper + multipart images
+- [x] Deletion manifest generated + reviewed — `3-4-deletion-manifest.md`
+- [x] D-35 send/ingest redesign — **DONE** (`3-4-deletion-manifest.md` §0.4.1)
+- [x] Deletion executed; jest retooled — **DONE** (`3-4-deletion-manifest.md` §0.4.3)
+- [ ] Device smoke green (fresh install, cloud, local) — owner gate
+- [ ] Bundle size delta recorded — owner gate

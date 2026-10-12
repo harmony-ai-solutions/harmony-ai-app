@@ -71,8 +71,54 @@ The lifecycle-worker today downloads each user's encrypted snapshot, opens it wi
 
 ## Progress checklist
 
-- [ ] Keepalive cron + knobs + metrics
-- [ ] Visible-push relay + rate caps
-- [ ] Tier policy extension (beat budget)
-- [ ] Lifecycle-worker deleted (+ quota/deploy plumbing)
-- [ ] Licensing-enabling note in ops docs
+- [x] Keepalive cron + knobs + metrics
+- [x] Visible-push relay + rate caps
+- [x] Tier policy extension (beat budget)
+- [x] Lifecycle-worker deleted (+ quota/deploy plumbing)
+- [x] Licensing-enabling note in ops docs
+
+## Implementation notes (2026-10-11, soulbits-cloud-backend `feat/app-engine-parity`)
+
+Implemented in `soulbits-cloud-backend`. `go build ./...`, `go vet ./...`,
+`go test ./...` all green; `cmd/lifecycle-worker` package gone.
+
+- **Keepalive cron** — `cmd/push-service/keepalive.go`. Hourly (default 3600s,
+  `KEEPALIVE_INTERVAL_SEC`), kill switch `KEEPALIVE_ENABLED` (default true,
+  documented droppable). Data-blind: sends an iOS `content-available: 1` silent
+  push (`apns-push-type: background`, `content-available:1`, constant
+  `data.kind="keepalive"`) to every authorized iOS token from Postgres
+  `user_devices` (`platform='ios'`). Fire-and-forget; UNREGISTERED tokens are
+  auto-disabled (token hygiene). Metrics: `push_keepalive_sent_total{status}`,
+  `push_keepalive_devices_total`, `push_keepalive_errors_total`.
+- **Relay** — `cmd/push-service/relay.go`: `POST /v1/lifecycle/notify`,
+  user-PASETO-authenticated, body `{target_device_id?, payload (≤4096B),
+  alert?{title,body}}`; opaque payload + optional pre-rendered alert; per-user
+  hourly cap (`RELAY_MAX_PER_HOUR`, default 30, fail-closed). Env gate
+  `RELAY_ENABLED`, PASETO key via `PASETO_KEY_SECRET_NAME`. Metrics:
+  `push_relay_deliveries_total{status}`, `push_relay_rejected_total{reason}`.
+  Served on push-service's existing HTTP port (`/health`+`/metrics`+relay) — no
+  new listener; **operational step:** the ALB needs a `/v1/lifecycle/*` route to
+  push-service (see report). Uses a self-contained FCM v1 sender
+  (`sender.go`, no engine import) selected by the same `FCM_ENDPOINT` /
+  FCM-creds policy as the outreach path.
+- **Tier policy extension** — `cmd/subscription-service/handlers/handlers.go`
+  adds `autonomy_beats_per_day` to `limits` for `/v1/subscription/me` and
+  `/v1/subscription/tiers` (from the existing `TierDefinition.AutonomyBeatsPerDay`).
+- **Worker deletion** — `cmd/lifecycle-worker/` + `Dockerfile.lifecycle-worker`
+  removed; docker-compose service, deploy-workflow matrix/lists, Prometheus
+  scrape job, Grafana regex, ECR repo list, IAM role for_each + worker S3 policy,
+  ECS task-def/service/autoscaling (standalone + combined), restart-schedule
+  entry, and the EC2 observability scrape list all updated. Worker-only Valkey
+  plumbing removed: `CheckAndDecrementAutonomyQuota` + `ZRemIfScore` (+ tests).
+  `pkg/session` snapshot-lease wrappers and `ZRange/ZAdd/ZPopMin/ZRem` primitives
+  are KEPT (still used by the session-broker / dispatcher).
+- **Docs** — lifecycle-plane-operations.md (4-4 banner + metrics + env knobs),
+  cloud-data-deletion.md, README licensing-enabling note, CHANGELOG.md, tofu
+  README; worker E2E suites removed from `tests/e2e`.
+- **Deliberately left for later phases:** the `lifecycle.push` queue + consumer,
+  the `lifecycle-dispatcher`, the broker seed producer, the `lifecycle_jobs`
+  table, and the inference-gateway `lifecycle-worker` service-account row all
+  remain as frozen infra → **6-1** (session-plane retirement). The engine
+  `push` import in push-service remains → **6-3** (Firebase Admin SDK). Residual
+  unused tofu variables (worker cpu/memory/capacity + service-account secret)
+  left declared (valid Terraform) rather than cascaded.

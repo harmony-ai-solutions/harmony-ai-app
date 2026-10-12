@@ -23,6 +23,12 @@ Anchor the engine's remaining tick-coupled temporal state into **pure functions 
 | Sleep state / transitions | `lifecycle/runner.go` `onTick` (wake check + dream gate), persisted via `lifecycle/state.go` | transition check becomes `SleepStateAt(now)`; persisted state stores the *anchor* (sleep start), not the derived flag |
 | Dream TTL | beat-path sweep: `CleanupExpiredDreams` runs when the *next* dream fires (`lifecycle/runner.go` → `database/repository/conversation/messages.go`) — not read-path expiry | `IsExpired(now)` on read (message visibility + purge); retention sweep uses it |
 | Outreach cooldown | runner's outreach gate (`lifecycle/runner.go`, OUT-03 — `time.Since(lastOutreachTime)` compare on anchored, persisted timestamp) | already lazy — verify + test only |
+| Dream probability | `lifecycle/runner.go` `onTick` → `dreamProbabilityForDuration(time.Since(sleepStartTime))` | already lazy — pure of the `sleepStartTime` anchor; invocation-only (evaluated when a tick runs) — document |
+| Beat in-flight guard | `lifecycle/runner.go` `inFlight` (skip-tick safety) | no change — concurrency guard, not temporal (no time coupling, nothing to decay) |
+| Beat scheduler tick | `lifecycle/runner.go` `loop()` `time.NewTicker(BeatInterval)` | no change — invocation scheduling, not state; ticks are cache-refresh points (0-2/0-4 call the same evaluation entry points) |
+| Host-scheduled sweeps (out of scope) | eventserver suspended-session expiry (`session.go` cleanup ticker), cloud-reload watcher, management WS keepalive, vision capture, integration health, sync handshake polling | out of scope — host-scheduling loops, not entity temporal state that goes stale |
+
+**onTick re-audit (2026-10-11, step 4):** the tick body was re-read line by line. The only tick-coupled *state* was exhaustion decay + the sleep/wake transition (both refactored). Everything else the tick touches is either an anchor read (`sleepStartTime` for dream probability), a concurrency guard (`inFlight`), scheduling (`selectBeatType` randomness, the ticker), or an autonomy gate (`ShouldAutomateForEntity`) — none decays with time. No hidden tick-coupled state beyond the table was found.
 
 ## Implementation steps
 
@@ -53,9 +59,20 @@ Anchor the engine's remaining tick-coupled temporal state into **pure functions 
 
 ## Progress checklist
 
-- [ ] Audit complete: all temporal state sites enumerated (add any missed to the table above)
-- [ ] Emotion pure decay function extracted + equivalence/restart tests green (was already lazy — pinned, not changed)
-- [ ] Exhaustion/sleep anchored-state refactor (incl. `onTick` re-audit for hidden tick-coupled state)
-- [ ] Dream TTL lazy expiry on read paths
-- [ ] Outreach cooldown verify + boundary tests
-- [ ] Docs updated
+- [x] Audit complete: all temporal state sites enumerated (add any missed to the table above) — onTick re-audit added 4 rows (dream probability, in-flight guard, scheduler tick, out-of-scope host sweeps); no hidden tick-coupled state found
+- [x] Emotion pure decay function extracted + equivalence/restart tests green (was already lazy — pinned, not changed)
+- [x] Exhaustion/sleep anchored-state refactor (incl. `onTick` re-audit for hidden tick-coupled state)
+- [x] Dream TTL lazy expiry on read paths
+- [x] Outreach cooldown verify + boundary tests
+- [x] Docs updated
+
+## Implementation notes (2026-10-11)
+
+Deviations from the letter of the spec (all mechanical/no-behavior-change):
+
+- **`DecayFunction` signature.** Implemented as `DecayFunction(intensities, baselines map[EkmanEmotion]float64, elapsed time.Duration, decayTau float64) map[EkmanEmotion]float64` (`emotion/lazy.go`). The doc sketched `DecayFunction(intensities, elapsed, cfg)`; the closed form decays *toward each emotion's own baseline*, so `baselines` is required to be equivalent, and `decayTau` (float) keeps it decoupled from the engine's field layout. Same arithmetic as the old inline loop → bit-for-bit equivalence.
+- **Step 2 (emotion read/write persist).** No locking restructure was needed: `SetEmotion` already computes then persists the evaluated snapshot + `lastUpdate` in exactly one short tx (`persistLocked`); READ → compute → WRITE was already the shape. The only change on that path is routing the decay closed form through `DecayFunction`.
+- **`SleepStateAt` signature.** Implemented as `SleepStateAt(sleeping bool, exhaustedAtNow float64, cfg *LifecycleConfig) bool` (composed with `ExhaustionAt`) rather than `SleepStateAt(now)`, so it stays consistent with the runner's materialized cache and remains a pure predicate. Hosts holding only an anchor call `ExhaustionAt(anchor, now, cfg)` first.
+- **Persisted `Sleeping` flag retained.** The doc's target "persisted state stores the anchor (sleep start), not the derived flag" would drop the `Sleeping` column, but `lifecycle/state_test.go` pins `Sleeping` round-tripping and `sleepStartTime` is not cleared on wake, so the flag is genuinely needed. Kept as a persisted materialized value; anchors (`Exhaustion`+`LastBeatAt`, `SleepStartTime`, `LastOutreachAt`) are restored and the state is materialized on read. No schema change.
+- **Legacy-tick fallback.** To keep the existing beat-runner behavior tests *unchanged* (doc gate), the runner keeps `exhaustion`/`sleeping` as materialized caches and `materializeExhaustionLocked` falls back to exactly one tick when there is no anchor instant yet (or `BeatInterval <= 0`, which the white-box unit tests exercise). Real host paths always carry an anchor, so the anchored continuous decay applies there.
+- **Risk resolved — no `last_evaluated_at` column.** `lifecycle_state.last_beat_at` has identical semantics to an exhaustion "evaluated at" instant (persist materializes exhaustion *at* `LastBeatAt`), and `emotion_state.last_update` already anchors emotion decay. Both existing columns are reused; no additive migration is required.

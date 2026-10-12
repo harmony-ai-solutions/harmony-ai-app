@@ -50,8 +50,19 @@ The sessions bucket is **versioned**: `tofu destroy` of the S3 module does not p
 
 ## Progress checklist
 
-- [ ] Account-deletion rework (server + app + tests) merged
-- [ ] Plane code + keystore + column drop merged
-- [ ] IaC graph updated; workflows green
-- [ ] Bucket purge executed + resources destroyed (dev, prod)
-- [ ] Docs/memory banks updated
+- [x] Account-deletion rework (server + app + tests) — server reworked DB-only; app purge
+      remnants already gone (3-4); unit + e2e updated. (Implemented on `feat/app-engine-parity`,
+      uncommitted per the task's no-commit rule.)
+- [x] Plane code + keystore + column drop — `pkg/session` + `pkg/keystore` deleted,
+      migration `000034` added; build/vet/test green.
+- [x] IaC graph updated; workflows green — `modules/s3` deleted + all wiring removed;
+      `tofu validate` green on alb/iam/ecs-services/kms/environment/dev/prod.
+      ⚠️ DEVIATION: `modules/kms` is RETAINED (not deleted) — the surviving 2-5 W1
+      escrow reuses its CMK (see report; needs orchestrator confirmation).
+- [ ] Bucket purge executed + resources destroyed (dev, prod) — **owner-ops gate**
+      (irreversible; `tofu apply` + the all-versions runbook in
+      `infrastructure/tofu/README.md` + `scripts/purge-sessions-bucket.sh`).
+- [x] Docs updated — `docs/cloud-data-deletion.md` rewritten, `docs/api-usage.md`,
+      `first-rollout.md`, `README.md`, tofu README, e2e README, CHANGELOG. (Memory
+      banks intentionally untouched per the task's "no memory-bank edits" rule.)
+

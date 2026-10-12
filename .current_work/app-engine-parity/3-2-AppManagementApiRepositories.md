@@ -44,9 +44,11 @@ Replace the app's TS SQLite repositories with management-API-backed implementati
 
 ## Progress checklist
 
-- [ ] Client + mappers + token plumbing
-- [ ] Swap ① read-only lists verified
-- [ ] Swap ② chat list + windows verified
-- [ ] Swap ③ interactions/emotion/memory verified
-- [ ] Swap ④ writes verified
-- [ ] Flag default decision recorded (recommend: on for local mode only at first)
+> **Status (3-2, 2026-10-11 — resumed after 3-1b):** the engine write path landed (3-1b consolidated the read group under `/api/entities/:id/*` + `/api/messages/*`, added the message/emoji/chat-settings writes, provider reads, favorites, and the entity/profile additive read fields). The client is re-pointed at the consolidated surface, the adapters are extended to the full read surface plus the write endpoints, and the repository seam dispatches them. Unit-tested against the mock management server. Device verification remains an owner gate.
+
+- [x] Client + mappers + token plumbing — re-pointed to the consolidated 3-1b paths (`/api/entities/:id/*`, `/api/messages/*`), participant key as an encoded path segment, plus all new write methods + provider reads + favorite toggle. Mappers consume the 3-1b additive entity/profile fields.
+- [x] Swap ① read-only lists — ADAPTERS LANDED + unit-tested: characters (profiles + favorites + images), entities, user-entities, module-configs, providers (all 16 types), plus emoji reads. Device verification = owner gate
+- [x] Swap ② chat list + windows — ADAPTERS LANDED + unit-tested (opaque `next_cursor`); device verification = owner gate
+- [x] Swap ③ interactions/emotion/memory — ADAPTERS LANDED + unit-tested; device verification = owner gate
+- [x] Swap ④ writes — LANDED for the endpoints 3-1b added: message update (PATCH) / delete / clear / mark-read-unread, emoji create/upsert/delete-all/delete-defaults, chat-settings pin/archive, character favorites. STILL SQLITE-ONLY (documented, engine has no route or the app signature cannot address it): entity/profile/module/provider CRUD writes, interaction/emotion/memory writes, message create, `getConversationMessage`/`messageExists`, `deleteEmojiAction` (id-only), `getEntityModuleMapping`, derived stats/picker reads. Device verification = owner gate
+- [x] Flag default decision recorded — `ENGINE_API_DATA_LAYER_DEFAULT = false` (SQLite stays authoritative until the full read surface is verified on device; flip on for local mode first)

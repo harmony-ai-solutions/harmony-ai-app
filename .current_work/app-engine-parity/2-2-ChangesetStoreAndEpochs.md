@@ -67,9 +67,9 @@ Encoded as a Go table-driven `ConflictPolicy` consumed by 2-1's `Apply`.
 
 ## Progress checklist
 
-- [ ] Migrations landed
-- [ ] Epoch lifecycle + single-writer invariant tests
-- [ ] Changeset store + retention + baseline
-- [ ] Conflict policy table + tests
-- [ ] Rejoin path implemented
-- [ ] Docs written
+- [x] Migrations landed
+- [x] Epoch lifecycle + single-writer invariant tests
+- [x] Changeset store + retention + baseline
+- [x] Conflict policy table + tests
+- [x] Rejoin path implemented
+- [x] Docs written

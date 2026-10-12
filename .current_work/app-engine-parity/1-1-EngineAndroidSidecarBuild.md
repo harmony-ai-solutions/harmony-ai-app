@@ -46,9 +46,18 @@ Produce a **single static Android executable** of the engine that runs as a side
 
 ## Progress checklist
 
-- [ ] Sidecar main composes engine headlessly
-- [ ] Loopback bind + readiness protocol
-- [ ] SIGTERM graceful shutdown + checkpoint
-- [ ] Android build target (arm64 + x86_64) in CI with artifacts
+- [x] Sidecar main composes engine headlessly
+- [x] Loopback bind + readiness protocol
+- [x] SIGTERM graceful shutdown + checkpoint
+- [x] Android build target (arm64 + x86_64) in CI with artifacts
 - [ ] Emulator smoke test green
-- [ ] Contract documented
+- [x] Contract documented
+
+### Progress notes (task 1-1 implementation)
+
+- **Sidecar main** — `cmd/engine-sidecar/main.go` (thin main; no Wails, no Docker integration init via `general.sidecarmode`). Composes `config/db` init+migrations+seed, `eventserver`, `management`, module registry, and the run-path push notifier. `hasGUI=true` is passed to both servers so the sidecar owns the lifecycle (servers install no signal handlers).
+- **Loopback + readiness** — new `general.bindaddress` (default empty = all interfaces; sidecar defaults `127.0.0.1`) applied via `utils.ListenAddress` in both servers. Readiness is one `ENGINE_READY {json}` line on stdout; logs go to stderr.
+- **SIGTERM + checkpoint** — sidecar handles SIGTERM/SIGINT, stops both servers, waits (bounded) on the new `eventserver.WaitForShutdown` for async WS/session teardown, then `database.CheckpointWAL`. Verified by `build_sidecar_smoke_test.sh` on a Linux (WSL) host: exit 0 in ~5s, no non-empty `-wal`/`-shm`.
+- **Android target** — both ABIs cross-compiled successfully on the Windows host with NDK 27.1.12297006 (`arm64` → AArch64 PIE, `x86_64`→`amd64` x86-64 PIE; interpreter `/system/bin/linker64`). Scripts `build_sidecar_android.sh` / `.ps1`, `make sidecar-android`, and the `build-android-sidecar` CI job (NDK pinned `27.1.12297006` / `r27`) added. **First CI run pending** (cannot execute GitHub Actions locally).
+- **Emulator smoke test** — **NOT run**: no Android emulator/device on this machine. Device/owner gate; exact commands in `docs/Sidecar-Deployment.md` ("Verifying a build").
+

@@ -78,9 +78,124 @@ Rules:
 
 ## Progress checklist
 
-- [ ] Batch orchestrator + priority policy implemented
-- [ ] Per-entity isolation + rollback tests green
-- [ ] Degraded (non-LLM) path verified
-- [ ] Deadline/budget truncation tests green
-- [ ] Determinism test green
-- [ ] Docs updated
+- [x] Batch orchestrator + priority policy implemented
+- [x] Per-entity isolation + rollback tests green
+- [x] Degraded (non-LLM) path verified
+- [x] Deadline/budget truncation tests green
+- [x] Determinism test green
+- [x] Docs updated
+- [x] Real `CompactDue` + overnight maintenance entry point (`RunOvernightMaintenance`) landed (ruling A+, 2026-10-11)
+
+## Implementation notes (2026-10-11)
+
+Landed on top of the uncommitted 0-1/0-2 changes. Files: NEW `lifecycle/batch.go`
++ `lifecycle/batch_test.go`; `lifecycle/runner.go` (added `DueAt`); engine
+`docs/Entity-Lifecycle.md` (batch model + host matrix), `CHANGELOG.md`. No schema
+changes; no timer-loop behavior change.
+
+Deviations / decisions:
+
+- **Host handle shape.** Implemented as `lifecycle.BatchHost` with
+  `NewBatchHost(db *sql.DB, newRunner func(entityID string) *EntityBeatRunner) *BatchHost`
+  and `func (h *BatchHost) ProcessLifecycleBatch(ctx, opts) BatchResult`. The
+  per-entity runner construction is the injectable `NewRunner` seam; the default
+  due-entity enumeration reads the engine DB (`entities` ×
+  `lifecycle_state.last_beat_at`, plus per-entity interaction recency), and a host
+  may override it via `BatchHost.DueEntities` (also the test injection point). The
+  doc's `EntityBeatRunnerHost` name was adapted to the existing service/handle
+  reality as permitted.
+- **`BatchOptions` gained two fields** beyond the sketched four:
+  `Degraded bool` (the host-injected credential state the doc's step 2 explicitly
+  asks to pass via options) and `PriorityPolicy` (the "pluggable policy" seam).
+  `Priority` is a string enum (`PriorityMostOverdue`) resolved through a
+  table (`batchPriorityRegistry`); the default policy is `orderMostOverdue`.
+- **Budget semantics.** Implemented exactly as the doc's rule — start entity *i*
+  while `beatsUsed < MaxBeats`, decrement by the sampled beats actually fired
+  (K). Consequence: an entity may overrun the budget by its own K (a sampled
+  catch-up cannot be split mid-plan), and `MaxBeats <= 0` is treated as
+  *unlimited* (otherwise the literal `beatsUsed < MaxBeats` check would truncate
+  everything on a zero budget). Both are documented in `BatchOptions`.
+- **Deadline clock.** The deadline is enforced against an injectable scheduler
+  clock (`BatchHost.clock`, default `time.Now`) so truncation is deterministic
+  under test; `Now` supplies the *planning* instant. In-flight entities may
+  overrun the deadline (doc-acknowledged).
+- **Degradation classification.** A runner is degraded when the host declares
+  `opts.Degraded` or when it lacks usable clients
+  (`backendClient.AllowsCustomPrompting() && cognitionClient != nil`). The
+  degraded plan zeroes the LLM portions (`BeatsToFire`/`DreamDue`/`OutreachDue`)
+  but keeps the temporal plan, so `FireCatchUp` advances non-LLM state exactly
+  and persists with no LLM call attempted. `BatchResult.Degraded` is `[]string`
+  as sketched; a degraded entity is not also listed in `Completed`.
+- **Construction failures are per-entity.** A nil runner (or nil config) is
+  recorded in `EntityOutcome.Err` under `Completed` rather than aborting or being
+  silently truncated; the batch always continues. `Truncated` is reserved for the
+  doc's deadline/budget meaning.
+- **Due-check helper.** Added pure `IsEntityDue(cfg, lastBeat, now)` +
+  `(*EntityBeatRunner).DueAt(now)` (doc step: "expose due-check helper for
+  selection"). Shared by the DB enumeration and the runner; no timer-path change.
+- **Compaction — RESOLVED (ruling A+, owner 2026-10-11; supersedes the earlier
+  halt-flag — see the follow-up implementation note below).** `CatchUpPlan.CompactDue`
+  is now a **real** flag. When `BatchOptions.ContextWindowSize > 0` the batch
+  estimates the entity's conversation-history + memory tokens
+  (`lifecycle.EstimateConversationAndMemoryTokens` — a DB read + `common.TokenCounter`
+  count reusing the public `cognition.PrefetchPromptData` seam; no prompt build, no
+  LLM) and applies `cognition.MemoryConsolidator.ShouldCompact` (80%, strictly
+  greater), surfacing the result on the executed `EntityOutcome.Plan`. The sweep
+  itself is a *separate* engine entry point — `BatchHost.RunOvernightMaintenance`
+  (sibling to `ProcessLifecycleBatch`) — which 4-3's `BGProcessingTask` calls once
+  per overnight window after consuming the flag. Compaction never runs in the 30 s
+  push window.
+
+Device gates flagged: the iOS 30 s push window and overnight `BGProcessingTask`
+integration are host-side (4-1/4-3) and cannot be exercised here; the deadline
+and degradation paths are covered by deterministic unit tests with injected
+clocks/clients.
+
+## Follow-up: overnight memory-compaction maintenance API (2026-10-11, ruling A+)
+
+Owner ruling (2026-10-11): architecture **A+** — one engine entry point for
+overnight deep maintenance, a sibling to the batch orchestrator; the batch
+computes a *real* `CompactDue`; 4-3's iOS `BGProcessingTask` consumes the flag and
+calls the entry point. Compaction never runs in the 30 s push window. This
+resolves the halt-flag that stood in the implementation notes above.
+
+Engine changes (`harmony-link-private`, on top of the uncommitted 0-1/0-2/0-4
+tree):
+
+- NEW `lifecycle/estimate.go` — `EstimateConversationAndMemoryTokens(ctx, db, entityID, modelName, tc) int`:
+  the conversation-history + memory token estimate the consolidator's
+  `ShouldCompact` threshold is defined over. Reuses the public
+  `cognition.PrefetchPromptData` seam (the DB → `PromptContext` pre-fetch the beat
+  runner already uses) for the interaction-scoped history and reads persisted
+  memories from the DB; counts with `common.TokenCounter`. No prompt build, no
+  LLM, no cognition refactor.
+- NEW `lifecycle/maintenance.go` — `BatchHost.RunOvernightMaintenance(ctx, MaintenanceOptions) MaintenanceResult`:
+  per target, builds a `cognition.MemoryConsolidator` via the injectable
+  `BatchHost.NewConsolidator` factory and runs `RunCompactionLoop` with the
+  estimator as tokenFn. Per-entity isolation, graceful degradation (no usable
+  client → `Degraded`, never failed), deadline/ctx truncation. Auxiliary seams:
+  `BatchHost.MaintenanceTargets` (default = live automatable AI entities, autonomy
+  ≥ 1), and exported `InitCognitionClient` (extracted
+  `initCognitionClientForLifecycle` pattern) + `NewEntityConsolidator` /
+  `NewCognitionConsolidator`.
+- `lifecycle/batch.go` — `BatchOptions` gained `ModelName` + `ContextWindowSize`;
+  `ProcessLifecycleBatch` sets `plan.CompactDue` from the estimator +
+  `ShouldCompact` (80%, strictly greater) for non-degraded entities when the
+  window is configured.
+- Tests: `lifecycle/estimate_test.go` (known fixture, empty→0, growth) +
+  `lifecycle/maintenance_test.go` (Level-1 memory from a closed-interaction
+  fixture, per-entity isolation, degraded no-client + host-declared, ctx
+  cancellation, deadline truncation, real `CompactDue` at the 80% boundary).
+- Docs: engine `docs/Entity-Lifecycle.md` (real `CompactDue` + new overnight
+  section + host matrix row), `CHANGELOG.md`.
+
+Gates: `go build ./...`, `go vet ./...`, `go test ./...` all exit 0.
+
+Consumer contracts for the follow-ups (see final report of the follow-up task):
+4-1 exposes the entry point over gomobile; 4-3 drives the overnight host
+(flag consumption + invocation + deadline semantics).
+
+Device gates flagged (unchanged): the overnight `BGProcessingTask` window is
+host-side (4-1/4-3) and cannot be exercised here; deadline/degradation/cancellation
+paths are covered by deterministic unit tests with injected clocks/clients.
+

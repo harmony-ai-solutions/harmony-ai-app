@@ -50,9 +50,9 @@ The wire protocol by which two engines exchange epoch/changeset state over the e
 
 ## Progress checklist
 
-- [ ] Negotiation + version bump
-- [ ] Batch exchange + ack + retention hook
-- [ ] Baseline transfer + rejoin
-- [ ] Handover + crash-safety tests
-- [ ] Scenario matrix green
-- [ ] Wire spec documented
+- [x] Negotiation + version bump
+- [x] Batch exchange + ack + retention hook
+- [x] Baseline transfer + rejoin
+- [x] Handover + crash-safety tests
+- [x] Scenario matrix green
+- [x] Wire spec documented

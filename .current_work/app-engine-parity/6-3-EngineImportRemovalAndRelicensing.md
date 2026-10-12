@@ -45,8 +45,44 @@ What the backend actually pulls from the engine package (verified in `cmd/push-s
 
 ## Progress checklist
 
-- [ ] push-service on Admin SDK (cron fan-out, relay, token pruning, backoff)
-- [ ] Engine import + replaces/vendor/Dockerfile/workflow removal
-- [ ] CI grep gate added
-- [ ] Staging push round-trip green (keepalive + relay + pruning)
-- [ ] Relicensing-enabling README note updated
+- [x] push-service on Admin SDK (cron fan-out, relay, token pruning, backoff)
+      — done: `cmd/push-service` uses `firebase.google.com/go/v4/messaging`
+      (`Send` for relay, `SendEachForMulticast` ≤500 for the keepalive cron and
+      per-user outreach fan-out); per-token `IsUnregistered` → `user_devices`
+      prune; `IsQuotaExceeded`/`IsUnavailable` → metric counters (transient
+      backoff is provided by the SDK's built-in retry). Local/E2E keeps a
+      mock-endpoint transport (`FCM_ENDPOINT`) so the existing mock-fcm-server
+      contract still holds.
+- [x] Engine import + replaces/vendor/Dockerfile/workflow removal — done:
+      `require harmony-link-private` + all three `replace` directives gone;
+      `vendor/` deleted; `Dockerfile` drops `-mod=vendor`; deploy-dev removes the
+      private-module-auth / engine-clone / vendor-generation steps; the stale
+      `harmony_link_version` deploy-prod input + sed removed; dead
+      `pkg/config.InferenceBaseURL` swept.
+- [x] CI grep gate added — `.github/workflows/dependency-guard.yml`
+      (zero `harmony-link-private` / `hl_database` / engine-fork references on
+      the dependency surfaces: Go source, go.mod/go.sum, Dockerfiles,
+      docker-compose, workflows).
+- [ ] Staging push round-trip green (keepalive + relay + pruning) — OWNER GATE:
+      requires real Firebase credentials in the `soulbits/{env}/fcm` secret and a
+      staging deploy; not executable from the dev workstation.
+- [x] Relicensing-enabling README note updated — done (README §"Licensing /
+      source-availability note").
+
+### Owner ops gates (not executable in the dev workspace)
+
+1. `tofu apply` for the touched modules (dev/prod) — picks up the new
+   `KMS_CMK_ARN` auth-service env and the `backup_key_kms` IAM policy (see the
+   6-3 add-on below).
+2. Firebase project provisioning + FCM service-account JSON written into the
+   `soulbits/{env}/fcm` Secrets Manager secret (owned by the firebase tofu root).
+3. Staging push round-trip on the new SDK (keepalive chunking, relay delivery,
+   unregistered-token pruning, quota-error path).
+
+### Add-on (owner-approved, flagged by 6-2): W1 backup-key escrow wiring
+
+- `KMS_CMK_ARN` (plain env — an ARN is not a secret) added to the auth-service
+  container in both the standalone task def and the backend-combined-api task def.
+- New scoped IAM policy `backup_key_kms` (`kms:Encrypt`/`Decrypt`/`GenerateDataKey`
+  on the retained escrow CMK ARN only), attached to the auth-service task role
+  and the backend-combined union role. `tofu validate` green; apply = owner gate.
