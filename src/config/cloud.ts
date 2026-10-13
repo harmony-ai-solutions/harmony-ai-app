@@ -53,6 +53,7 @@ const LOCAL_PORTS = {
   sessionBroker: 8080,
   conductProxy: 8085,
   inference: 8082,
+  syncRelay: 8093,
 };
 
 // ── Flavour detection ──────────────────────────────────────────────────
@@ -104,6 +105,14 @@ const INFERENCE_HOST = useLocal
   ? `http://${LOCAL_HOST}:${LOCAL_PORTS.inference}`
   : `https://${SUFFIX}api.soulbits.app`;
 
+// The SoulbitsCloud sync-relay WS endpoint (plan 7-1/7-3). The app normally
+// learns `relay_url` from the portal QR payload (7-4); this is only the
+// build-flavour default for the manual-entry fallback. The relay service is
+// distinct from the retired conduct proxy, hence its own host.
+const SYNC_RELAY_HOST = useLocal
+  ? `ws://${LOCAL_HOST}:${LOCAL_PORTS.syncRelay}`
+  : `wss://${SUFFIX}sync.soulbits.app`;
+
 // ── External hosts (backward-compatible export) ────────────────────────
 // `session` is the session-broker host — used as the Soulbits client's
 // `cloudURL` base for the `session.*` sub-API (POST /v1/session/connect &
@@ -123,10 +132,37 @@ export const WS_PATHS = {
   worker: '/ws/worker',
 };
 
+// ── Sync relay (SoulbitsCloud, plan 7-1/7-3) ───────────────────────────
+// The relay WS path is fixed; the URL normally arrives in the portal QR payload.
+export const SYNC_RELAY = {
+  wsPath: '/v1/sync/ws',
+  /** Build-flavour default for the manual-entry fallback. */
+  defaultRelayUrl: `${SYNC_RELAY_HOST}/v1/sync/ws`,
+  /**
+   * The hosted-backup REST base (plan 7-5): the same sync-relay service that
+   * serves `/v1/sync/ws` also serves the backup blob routes
+   * (`/v1/backup/objects/{sha256}`, `/v1/backup/manifest/{device}`) and
+   * `/v1/sync/status`. Derived from the relay host (wss→https).
+   */
+  backupBaseUrl: SYNC_RELAY_HOST.replace(/^ws/, 'http'),
+};
+
 // ── OAuth identifiers ──────────────────────────────────────────────────
 export const OAUTH = {
   googleWebClientId: GOOGLE_WEB_CLIENT_ID,
   appleServicesId: APPLE_SERVICES_ID,
+};
+
+// ── Release manifests (plan 7-10 §1) ───────────────────────────────────
+// Static JSON on the existing CloudFront download hosts (no new service). The
+// engine workflow writes `engine/latest.json`; the app's `create-release` job
+// writes `app/latest.json`. Absolute URLs become a de-facto public contract
+// (owner sign-off). Same host for both flavours; dev-channel builds read the
+// SAME files and surface only their `dev` entries (env-aware like CLOUD_HOSTS).
+export const RELEASES = {
+  baseUrl: 'https://download.soulbits.app',
+  engineManifestUrl: 'https://download.soulbits.app/engine/latest.json',
+  appManifestUrl: 'https://download.soulbits.app/app/latest.json',
 };
 
 // ── Environment metadata ───────────────────────────────────────────────

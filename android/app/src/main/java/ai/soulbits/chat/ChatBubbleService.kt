@@ -299,7 +299,7 @@ class ChatBubbleService : Service() {
   // ---------------------------------------------------------------------------
 
   private fun startForegroundCompat() {
-    val channelId = "harmony_chat_bubble"
+    val channelId = "soulbits_chat_bubble"
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
       val channel = NotificationChannel(
@@ -326,7 +326,7 @@ class ChatBubbleService : Service() {
     )
 
     val notification = Notification.Builder(this, channelId)
-      .setContentTitle("Harmony AI Chat")
+      .setContentTitle("Soulbits")
       .setContentText("Tap the bubble to chat")
       .setSmallIcon(android.R.drawable.ic_dialog_email)
       .setContentIntent(pendingIntent)

@@ -2,11 +2,11 @@
 
 ## Overview
 
-Harmony AI App offers flexible security options when connecting to Harmony Link, allowing you to choose the best connection method for your setup.
+Harmony AI App offers flexible security options when connecting to Soulbits Engine, allowing you to choose the best connection method for your setup.
 
 ## Security Modes
 
-When you connect to Harmony Link, the app may present you with security options. Understanding these modes will help you make the right choice for your situation.
+When you connect to Soulbits Engine, the app may present you with security options. Understanding these modes will help you make the right choice for your situation.
 
 ### 🔒 Secure (Verified SSL)
 
@@ -14,7 +14,7 @@ When you connect to Harmony Link, the app may present you with security options.
 
 **When to use**:
 - Connecting over the internet
-- When Harmony Link has a properly signed SSL certificate
+- When Soulbits Engine has a properly signed SSL certificate
 - Production environments
 - When maximum security is required
 
@@ -31,17 +31,17 @@ When you connect to Harmony Link, the app may present you with security options.
 
 ### 🔓 Trust This Certificate (Self-Signed SSL)
 
-**What it is**: Encrypted connection that trusts self-signed certificates created by Harmony Link.
+**What it is**: Encrypted connection that trusts self-signed certificates created by Soulbits Engine.
 
 **When to use**:
-- Home networks with Harmony Link
+- Home networks with Soulbits Engine
 - Development and testing
 - When you see a certificate error and trust the server
 - Private networks where you control both devices
 
 **Pros**:
 - Still provides encryption
-- Works with Harmony Link's auto-generated certificates
+- Works with Soulbits Engine's auto-generated certificates
 - Free - no certificate purchase needed
 
 **Cons**:
@@ -49,7 +49,7 @@ When you connect to Harmony Link, the app may present you with security options.
 - You must manually trust the certificate
 - Vulnerable if someone intercepts your network
 
-**Security Note**: Only use this mode when connecting to your own Harmony Link server on a network you trust.
+**Security Note**: Only use this mode when connecting to your own Soulbits Engine server on a network you trust.
 
 ---
 
@@ -78,14 +78,14 @@ When you connect to Harmony Link, the app may present you with security options.
 
 ## First-Time Connection
 
-When you first connect to Harmony Link:
+When you first connect to Soulbits Engine:
 
 1. **Enter Connection Details**
-   - IP address of your Harmony Link server
+   - IP address of your Soulbits Engine server
    - Port number (usually 8080)
 
-2. **Approve on Harmony Link**
-   - Go to your Harmony Link computer
+2. **Approve on Soulbits Engine**
+   - Go to your Soulbits Engine computer
    - Approve the pairing request
 
 3. **Choose Security Mode** (if prompted)
@@ -102,17 +102,17 @@ When you first connect to Harmony Link:
 
 If you see this message, it means:
 
-- Harmony Link is using a self-signed certificate (common for home use)
+- Soulbits Engine is using a self-signed certificate (common for home use)
 - Your Android device doesn't automatically trust it
 - You need to choose how to proceed
 
-**This is normal** for personal Harmony Link installations!
+**This is normal** for personal Soulbits Engine installations!
 
 ## Viewing Certificate Details
 
 When the security prompt appears, you can tap "View Certificate Details" to see:
 
-- Who issued the certificate (usually "Harmony Link")
+- Who issued the certificate (usually "Soulbits Engine")
 - Certificate fingerprint
 - Validity period
 
@@ -145,7 +145,7 @@ If you want to change your security settings:
 
 ✅ **Recommended**: Trust This Certificate (Self-Signed SSL)
 - Provides encryption
-- Works with Harmony Link's built-in certificates
+- Works with Soulbits Engine's built-in certificates
 - Good balance of security and convenience
 
 ### For Public/Cloud Deployment
@@ -158,7 +158,7 @@ If you want to change your security settings:
 ### For Local Testing
 
 ⚠️ **Acceptable**: Unencrypted
-- Only when Harmony Link is on the same computer
+- Only when Soulbits Engine is on the same computer
 - Never over a network
 - Temporary use only
 
@@ -175,12 +175,12 @@ If you want to change your security settings:
 
 **Possible causes**:
 - Wrong IP address or port
-- Harmony Link not running
+- Soulbits Engine not running
 - Firewall blocking connection
 - Different network (phone not on WiFi)
 
 **Solution**:
-1. Verify Harmony Link is running
+1. Verify Soulbits Engine is running
 2. Check IP address is correct
 3. Ensure both devices on same network
 4. Check firewall settings
@@ -188,7 +188,7 @@ If you want to change your security settings:
 ### "Want to Switch to Secure Mode Later"
 
 **Solution**:
-1. Get a proper SSL certificate for Harmony Link
+1. Get a proper SSL certificate for Soulbits Engine
 2. In app: Settings → Sync → Reset Security Mode
 3. Reconnect - should work with Secure mode now
 
@@ -217,15 +217,15 @@ No security credentials are shared with third parties.
 ## FAQ
 
 **Q: Why am I seeing a certificate error?**  
-A: Harmony Link generates its own certificates for convenience. They're not signed by a public authority, so devices need to be told to trust them.
+A: Soulbits Engine generates its own certificates for convenience. They're not signed by a public authority, so devices need to be told to trust them.
 
 **Q: Is "Trust This Certificate" safe?**  
-A: Yes, if you're connecting to your own Harmony Link on a network you control. The connection is still encrypted.
+A: Yes, if you're connecting to your own Soulbits Engine on a network you control. The connection is still encrypted.
 
 **Q: How do I get rid of the warning?**  
 A: Either:
 1. Use "Trust This Certificate" mode (connection is still encrypted)
-2. Get a proper SSL certificate for Harmony Link (more complex)
+2. Get a proper SSL certificate for Soulbits Engine (more complex)
 
 **Q: What if someone steals my certificate?**  
 A: With a self-signed certificate, they'd need access to your network. Use strong WiFi security and trusted networks only.
@@ -236,7 +236,7 @@ A: Currently, the setting is per device. To change modes, use the Reset button i
 ## Need Help?
 
 If you're still having issues:
-1. Check the Harmony Link documentation
+1. Check the Soulbits Engine documentation
 2. Visit our community forums
 3. Report issues on GitHub
 

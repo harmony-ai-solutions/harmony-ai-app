@@ -6,9 +6,9 @@ Before a pull request can be merged into `main`, ALL of the following must pass:
 
 1. **Type-check** — `npx tsc --noEmit` (no TypeScript errors)
 2. **Lint** — `npm run lint` (no ESLint errors)
-3. **Unit tests** — `npx jest --selectProjects unit` (all passing)
-4. **Integration tests** — `npx jest --selectProjects integration` (all passing)
-5. **Migration tests** — `npx jest --selectProjects unit --testPathPatterns migrations` (all passing)
+3. **Unit tests** — `npx jest --selectProjects unit` (all passing; includes the
+   engine-contract conformance + loopback-smoke gates — see
+   [`docs/engine-contract-gates.md`](docs/engine-contract-gates.md))
 
 These checks run automatically as part of the **Tests** workflow (`.github/workflows/test.yml`) on every pull request. They are required status checks in branch protection for `main`.
 
@@ -17,7 +17,10 @@ These checks run automatically as part of the **Tests** workflow (`.github/workf
 To create a release (tag push `v*`), ALL of the following must pass:
 
 1. All PR checks (see above)
-2. **Schema parity check** — ensures RN migrations match Go migrations in `harmony-link-private`
+2. **Engine-contract check** — the app's `ENGINE_CONTRACT_VERSION` matches the
+   engine's `docs/api/management/openapi.yaml` (the `contract-drift` CI job, when
+   `HARMONY_LINK_REPO_PAT` is configured — see
+   [`docs/engine-contract-gates.md`](docs/engine-contract-gates.md))
 3. **Nightly E2E** (recommended) — Android + iOS E2E suites should be green
 
 The release pipeline is defined in `.github/workflows/build-release.yml`.

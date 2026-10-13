@@ -14,7 +14,7 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
   }
 
   async connect(url: string): Promise<void> {
-    const jwt = await AsyncStorage.getItem('harmony_jwt');
+    const jwt = await AsyncStorage.getItem('soulbits_jwt');
     
     if (!jwt) {
       const error = new Error('No JWT credentials available');

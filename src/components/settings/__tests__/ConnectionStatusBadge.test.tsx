@@ -1,13 +1,13 @@
 /**
- * ConnectionStatusBadge — 3-3/D57 `serverUpdateRequired` state tests.
+ * ConnectionStatusBadge — engine connection state tests (task 3-4).
  *
- * Verifies the sticky server-update-required gate surfaces in the badge:
- *  - a dedicated error-style dot with testID
- *    `connection-status-dot-server-update-required` + matching a11y label
- *  - the gate takes PRECEDENCE over every other connection state (it is
- *    active even while the WebSocket is up — syncs are suppressed by the
- *    SyncService choke point, not by the connection)
- *  - with the gate off, the badge renders exactly as before
+ * Verifies the badge reflects the engine connection state:
+ *  - connected (green, `connection-status-dot-connected`)
+ *  - reconnecting (amber, `connection-status-dot-reconnecting`)
+ *  - paired-but-disconnected (amber, `connection-status-dot-disconnected`)
+ *  - not paired (red, `connection-status-dot-not-paired`)
+ *
+ * The legacy sticky server-update-required gate is gone with the sync stack.
  */
 import React from 'react';
 import { cleanup, render } from '@testing-library/react-native';
@@ -32,42 +32,33 @@ jest.mock('../../../contexts/ThemeContext', () => ({
 }));
 
 const connectedState = { isConnected: true, isPaired: true, isReconnecting: false };
+const reconnectingState = { isConnected: false, isPaired: true, isReconnecting: true };
+const pairedDisconnectedState = { isConnected: false, isPaired: true, isReconnecting: false };
 const notPairedState = { isConnected: false, isPaired: false, isReconnecting: false };
 
-describe('ConnectionStatusBadge — serverUpdateRequired gate', () => {
-  it('renders the error dot + a11y label when the gate is active, even while connected', async () => {
-    // Key regression: the gate can be active while the WS is up (the ~10-min
-    // re-probe keeps the connection alive while syncs are suppressed) — the
-    // badge must NOT show "connected" in that state.
+describe('ConnectionStatusBadge — engine connection states', () => {
+  it('renders the connected dot when the engine WS is up', async () => {
     mockUseSyncConnection.mockReturnValue(connectedState);
-
-    const utils = await render(<ConnectionStatusBadge serverUpdateRequired />);
-
-    const dot = utils.getByTestId('connection-status-dot-server-update-required');
-    expect(dot.props.accessibilityLabel).toBe('Harmony Link update required');
-    expect(dot.props.style).toEqual(
-      expect.arrayContaining([expect.objectContaining({ backgroundColor: '#f44336' })]),
-    );
-    // The connected testID must NOT be shown while the gate is active.
-    expect(utils.queryByTestId('connection-status-dot-connected')).toBeNull();
-  });
-
-  it('does not render the serverUpdateRequired dot when the gate is off', async () => {
-    mockUseSyncConnection.mockReturnValue(connectedState);
-
-    const utils = await render(<ConnectionStatusBadge serverUpdateRequired={false} />);
-
-    expect(utils.queryByTestId('connection-status-dot-server-update-required')).toBeNull();
+    const utils = await render(<ConnectionStatusBadge />);
     const dot = utils.getByTestId('connection-status-dot-connected');
     expect(dot.props.accessibilityLabel).toBe('Connected');
   });
 
-  it('gate takes precedence over the notPaired state', async () => {
+  it('renders the reconnecting dot while a reconnect is in flight', async () => {
+    mockUseSyncConnection.mockReturnValue(reconnectingState);
+    const utils = await render(<ConnectionStatusBadge />);
+    expect(utils.getByTestId('connection-status-dot-reconnecting')).toBeTruthy();
+  });
+
+  it('renders the disconnected dot when paired but not connected', async () => {
+    mockUseSyncConnection.mockReturnValue(pairedDisconnectedState);
+    const utils = await render(<ConnectionStatusBadge />);
+    expect(utils.getByTestId('connection-status-dot-disconnected')).toBeTruthy();
+  });
+
+  it('renders the not-paired dot when the engine connection is unavailable', async () => {
     mockUseSyncConnection.mockReturnValue(notPairedState);
-
-    const utils = await render(<ConnectionStatusBadge serverUpdateRequired />);
-
-    expect(utils.queryByTestId('connection-status-dot-not-paired')).toBeNull();
-    expect(utils.getByTestId('connection-status-dot-server-update-required')).toBeTruthy();
+    const utils = await render(<ConnectionStatusBadge />);
+    expect(utils.getByTestId('connection-status-dot-not-paired')).toBeTruthy();
   });
 });

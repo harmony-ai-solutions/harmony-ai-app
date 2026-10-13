@@ -141,12 +141,12 @@ jest.mock('../../components/config/SttTestPanel', () => {
   return { __esModule: true, SttTestPanel: () => React.createElement(View, { testID: 'stt-test-panel' }) };
 });
 
-jest.mock('../../database/repositories/entities', () => ({
+jest.mock('../../services/engine/repositories/entities', () => ({
   getEntity: jest.fn(),
   getEntityModuleMapping: jest.fn(),
   createOrUpdateEntityModuleMapping: jest.fn(),
 }));
-jest.mock('../../database/repositories/modules', () => ({
+jest.mock('../../services/engine/repositories/modules', () => ({
   getSTTConfig: jest.fn(),
   getAllSTTConfigs: jest.fn(),
   updateSTTConfig: jest.fn(),
@@ -156,12 +156,12 @@ import {
   getEntity,
   getEntityModuleMapping,
   createOrUpdateEntityModuleMapping,
-} from '../../database/repositories/entities';
+} from '../../services/engine/repositories/entities';
 import {
   getSTTConfig,
   getAllSTTConfigs,
   updateSTTConfig,
-} from '../../database/repositories/modules';
+} from '../../services/engine/repositories/modules';
 
 const mockGetEntity = getEntity as jest.Mock;
 const mockGetMapping = getEntityModuleMapping as jest.Mock;
@@ -292,7 +292,7 @@ describe('VoiceInputSettingsScreen — LWW-safe read/write contract', () => {
     const utils = await render(<VoiceInputSettingsScreen />);
     await flush();
 
-    // Fresh-install empty state — "Connect to Harmony Link" guidance, no ensure-create.
+    // Fresh-install empty state — "Connect to Soulbits Engine" guidance, no ensure-create.
     expect(utils.getByText('preSyncTitle')).toBeTruthy();
     expect(utils.getByText('preSyncHint')).toBeTruthy();
     // Never creates the user mapping row.

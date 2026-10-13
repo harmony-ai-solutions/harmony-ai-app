@@ -1,3 +1,5 @@
+import { CLOUD_HOSTS } from '../config/cloud';
+
 export interface FieldDefinition {
   key: string;
   label: string;
@@ -25,7 +27,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', placeholder: 'gpt-4o' },
-      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Harmony Link server. Preset values are applied server-side.' },
+      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server. Preset values are applied server-side.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: '-1 for unlimited', disabledValue: -1 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1 },
@@ -53,7 +55,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: 'http://localhost:8080/v1' },
       { key: 'api_key', label: 'API Key', type: 'password' },
       { key: 'model', label: 'Model', type: 'text', required: true },
-      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Harmony Link server.' },
+      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1 },
@@ -75,7 +77,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', required: true, placeholder: 'google/gemini-flash-2.5' },
-      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Harmony Link server.' },
+      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1 },
@@ -109,12 +111,12 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'speaker_boost', label: 'Speaker Boost', type: 'number', step: 1, min: 0, max: 1 },
     ],
   },
-  harmonyspeech: {
+  soulvoice: {
     hasModelFetch: false,
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'endpoint', label: 'Endpoint URL', type: 'text', required: true, placeholder: 'http://localhost:5000' },
-      { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'Optional for self-hosted HSE' },
+      { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'Optional for self-hosted Soulvoice Engine' },
       { key: 'model', label: 'Model', type: 'text' },
       { key: 'voice_config_file', label: 'Voice Config File', type: 'text' },
       { key: 'format', label: 'Format', type: 'text', placeholder: 'wav' },
@@ -184,7 +186,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', placeholder: 'gemini-2.5-flash' },
-      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Harmony Link server.' },
+      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_output_tokens', label: 'Max Output Tokens', type: 'number', disabledValue: 0 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1 },
@@ -208,7 +210,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', placeholder: 'grok-3' },
-      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Harmony Link server.' },
+      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1 },
@@ -239,7 +241,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', placeholder: 'claude-sonnet-4-20250514' },
-      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Harmony Link server.' },
+      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', required: true, placeholder: '4096' },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 1 },
       { key: 'top_p', label: 'Top P', type: 'number', step: 0.01, min: 0, max: 1 },
@@ -251,10 +253,10 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     hasModelFetch: false,
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: 'https://api.soulbits.app' },
+      { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: CLOUD_HOSTS.inference },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', placeholder: 'qwen-35-9b' },
-      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Harmony Link server.' },
+      { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
       { key: 'max_completion_tokens', label: 'Max Completion Tokens', type: 'number', disabledValue: 0 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },

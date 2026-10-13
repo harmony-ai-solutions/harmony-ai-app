@@ -15,12 +15,24 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- Engine sidecar foreground service (task 1-2): type dataSync on API 34+;
+         POST_NOTIFICATIONS for the persistent "Soulbits engine running"
+         notification on API 33+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Optional in-app APK self-update (plan 7-10 §8; sideload channel only).
+         Play-review-sensitive — the flow is hidden on the Play channel. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
       android:name=".MainApplication"
       android:label="@string/app_name"
       android:icon="@mipmap/ic_launcher"
       android:roundIcon="@mipmap/ic_launcher_round"
-      android:allowBackup="false"
+      android:allowBackup="true"
+      android:dataExtractionRules="@xml/data_extraction_rules"
+      android:fullBackupContent="@xml/backup_rules"
       android:theme="@style/AppTheme"
       android:usesCleartextTraffic="true"
       android:supportsRtl="true">
@@ -46,6 +58,13 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="soulbits" android:host="device-auth" />
         </intent-filter>
+        <!-- Backup OAuth redirect (plan 2-6): Dropbox/OneDrive PKCE callback. -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="soulbits" android:host="oauth" />
+        </intent-filter>
       </activity>
 
       <!-- Floating chat bubble foreground service -->
@@ -57,5 +76,31 @@
             android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
             android:value="Floating AI chat bubble overlay" />
       </service>
+
+      <!-- Engine sidecar foreground service (task 1-2) — keeps the embedded
+           Soulbits Engine process alive while the app session is active.
+           The binary is shipped as jniLibs/<abi>/libengine.so and exec'd from
+           nativeLibraryDir (extractNativeLibs=true, set in build.gradle). -->
+      <service
+        android:name=".engine.EngineSidecarService"
+        android:exported="false"
+        android:foregroundServiceType="dataSync" />
+
+      <!-- Backup headless JS task (plan 2-6): runs SoulbitsBackupTask while the
+           app is backgrounded (WorkManager → worker → this service). -->
+      <service
+        android:name=".backup.BackupHeadlessTaskService"
+        android:exported="false" />
+
+      <!-- FileProvider for the backup share-sheet export. -->
+      <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.backupfiles"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+          android:name="android.support.FILE_PROVIDER_PATHS"
+          android:resource="@xml/backup_file_paths" />
+      </provider>
     </application>
 </manifest>

@@ -9,7 +9,7 @@
 import React from 'react';
 import { act, cleanup, fireEvent, render } from '@testing-library/react-native';
 import { MyProfileScreen } from '../MyProfileScreen';
-import type { Persona } from '../../database/repositories/userEntities';
+import type { Persona } from '../../services/engine/repositories/userEntities';
 
 afterEach(cleanup);
 beforeEach(cleanup);
@@ -157,10 +157,10 @@ jest.mock('../../components/social/PostCard', () => {
 });
 
 // Repos + services.
-jest.mock('../../database/repositories/characters', () => ({
+jest.mock('../../services/engine/repositories/characters', () => ({
   getUserCharacterProfiles: jest.fn().mockResolvedValue([]),
 }));
-jest.mock('../../database/repositories/userEntities', () => ({
+jest.mock('../../services/engine/repositories/userEntities', () => ({
   getUserEntities: jest.fn(),
 }));
 jest.mock('../../services/ChatPreferencesService', () => ({
@@ -186,7 +186,7 @@ jest.mock('../../services/social/SocialService', () => ({
   getPostComments: jest.fn().mockResolvedValue([]),
 }));
 
-import { getUserEntities } from '../../database/repositories/userEntities';
+import { getUserEntities } from '../../services/engine/repositories/userEntities';
 import { useAuth } from '../../contexts/AuthContext';
 
 const mockGetUserEntities = getUserEntities as jest.Mock;

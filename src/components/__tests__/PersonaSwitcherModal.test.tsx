@@ -11,7 +11,7 @@
 import React from 'react';
 import { act, cleanup, render } from '@testing-library/react-native';
 import { PersonaSwitcherModal } from '../modals/PersonaSwitcherModal';
-import type { Persona } from '../../database/repositories/userEntities';
+import type { Persona } from '../../services/engine/repositories/userEntities';
 
 afterEach(cleanup);
 beforeEach(cleanup);
@@ -91,11 +91,11 @@ jest.mock('../profile/ProfileAvatar', () => {
   };
 });
 
-jest.mock('../../database/repositories/userEntities', () => ({
+jest.mock('../../services/engine/repositories/userEntities', () => ({
   getUserEntities: jest.fn(),
 }));
 
-import { getUserEntities } from '../../database/repositories/userEntities';
+import { getUserEntities } from '../../services/engine/repositories/userEntities';
 
 const mockGetUserEntities = getUserEntities as jest.Mock;
 

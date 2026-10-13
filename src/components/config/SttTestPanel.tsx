@@ -21,7 +21,7 @@
  *
  * Props: optional `enabled` (defaults true) and optional `entityId` (threaded by
  * edit-mode CreateAI, 5-1) — an explicit entity overrides persona resolution.
- * When offline it renders an informative "Connect to Harmony Link to test"
+ * When offline it renders an informative "Connect to Soulbits Engine to test"
  * state — it never fabricates a result.
  */
 
@@ -39,7 +39,7 @@ import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
 import AudioRecorder from '../../services/AudioRecorder';
 import ChatPreferencesService from '../../services/ChatPreferencesService';
-import { resolvePersonaId } from '../../database/repositories/userEntities';
+import { resolvePersonaId } from '../../database/repositories';
 import { runTest, ModuleTestSessionError } from '../../services/voiceInput/moduleTestSessionService';
 import { startAudioStream } from '../../services/streaming/streamingService';
 import type { AudioStreamHandle } from '../../services/streaming/types';

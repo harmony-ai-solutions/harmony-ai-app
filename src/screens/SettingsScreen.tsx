@@ -1,15 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
+import { StyleSheet, ScrollView, RefreshControl, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import ConnectionStateManager from './../services/ConnectionStateManager';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../contexts/ThemeContext';
-import { useSyncConnection } from '../contexts/SyncConnectionContext';
+import { useToast } from '../contexts/AppToastContext';
+import {
+  isNotificationAuthorized,
+  requestNotificationPermission,
+} from '../services/notifications/NotificationPermission';
+import {
+  getHideContentOnLockScreen,
+  setHideContentOnLockScreen,
+} from '../services/notifications/NotificationSettings';
 import { ThemedView } from '../components/themed/ThemedView';
-import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
@@ -18,66 +23,39 @@ import { setHapticFeedbackEnabled } from '../utils/haptics';
 import {
   SettingsLinkRow,
   SettingsToggleRow,
-  SettingsDetailRow,
 } from '../components/settings/SettingsRows';
-import { IS_DEV } from '../config/cloud';
-
-type ConnectionType = 'Harmony Link' | 'Cloud' | 'Not configured';
 
 // AsyncStorage keys for toggle settings
 const STORAGE_KEYS = {
-  PUSH_NOTIFICATIONS: '@harmony_setting_push_notifications',
-  SOUND_EFFECTS: '@harmony_setting_sound_effects',
-  HAPTIC_FEEDBACK: '@harmony_setting_haptic_feedback',
+  PUSH_NOTIFICATIONS: '@soulbits_setting_push_notifications',
+  SOUND_EFFECTS: '@soulbits_setting_sound_effects',
+  HAPTIC_FEEDBACK: '@soulbits_setting_haptic_feedback',
 } as const;
 
 export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
-  const { isConnected, connectionStatus } = useSyncConnection();
   const { t } = useTranslation('settings');
-
-  const [connectionType, setConnectionType] =
-    useState<ConnectionType>(t('common:notConfigured') as ConnectionType);
-  const [lastSyncTime, setLastSyncTime] = useState<string>(t('never'));
+  const { t: tLifecycle } = useTranslation('lifecycle');
+  const { showToast } = useToast();
 
   // Toggle states
   const [pushNotifications, setPushNotifications] = useState(false);
   const [soundEffects, setSoundEffects] = useState(true);
   const [hapticFeedback, setHapticFeedback] = useState(true);
+  const [hideContentOnLockScreen, setHideContentOnLockScreenState] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadData = useCallback(async () => {
-    // Connection type
-    const wsUrl = await AsyncStorage.getItem('harmony_ws_url');
-    const wssUrl = await AsyncStorage.getItem('harmony_wss_url');
-    if (wsUrl || wssUrl) {
-      setConnectionType('Harmony Link' as ConnectionType);
-    } else {
-      setConnectionType(t('common:notConfigured') as ConnectionType);
-    }
-
-    // Last sync time — read the per-source watermark (legacy global key removed)
-    const source = await ConnectionStateManager.getCurrentSource();
-    const ts = await ConnectionStateManager.getLastSync(source);
-    if (ts) {
-      const date = new Date(ts * 1000);
-      setLastSyncTime(date.toLocaleString());
-    }
-  }, [t]);
-
   useEffect(() => {
-    loadData();
     loadToggleStates();
-  }, [loadData]);
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadData();
     await loadToggleStates();
     setRefreshing(false);
-  }, [loadData]);
+  }, []);
 
   const loadToggleStates = async () => {
     try {
@@ -89,6 +67,9 @@ export const SettingsScreen: React.FC = () => {
       if (push !== null) setPushNotifications(push === 'true');
       if (sound !== null) setSoundEffects(sound === 'true');
       if (haptic !== null) setHapticFeedback(haptic === 'true');
+      // Lock-screen hide-content lives in the notification-settings service
+      // (single source of truth, plan 7-12 §4d) — read it through that seam.
+      setHideContentOnLockScreenState(await getHideContentOnLockScreen());
     } catch {
       // ignore — defaults are fine
     }
@@ -107,9 +88,32 @@ export const SettingsScreen: React.FC = () => {
     }
   };
 
-  const connectionStatusColor = connectionStatus.color;
+  /**
+   * Push-notifications toggle. Persists the preference and requests display
+   * authorization at this natural point (the first push-relevant setting) —
+   * without it visible banners are dropped. iOS: `UNUserNotificationCenter`
+   * authorization; Android: the `POST_NOTIFICATIONS` runtime grant (API 33+,
+   * implicit below). When the user denies it we keep the preference and surface
+   * an i18n hint so they can re-enable it in system settings later.
+   */
+  const handlePushToggle = async (value: boolean) => {
+    await toggleAndStore(STORAGE_KEYS.PUSH_NOTIFICATIONS, value, setPushNotifications);
+    if (!value) return;
+    const status = await requestNotificationPermission();
+    if (!isNotificationAuthorized(status)) {
+      showToast(t('notificationsPermissionDenied'));
+    }
+  };
 
-  const syncStatusText = isConnected ? t('upToDate') : t('offline');
+  /**
+   * Lock-screen "hide content" toggle (plan 7-12 §4d). Persisted through the
+   * notification-settings service so the events-WS client and the later
+   * wake-relay composer read the SAME preference.
+   */
+  const handleHideContentToggle = async (value: boolean) => {
+    setHideContentOnLockScreenState(value);
+    await setHideContentOnLockScreen(value);
+  };
 
   if (!theme) return null;
 
@@ -131,71 +135,6 @@ export const SettingsScreen: React.FC = () => {
           />
         }
       >
-        {/* ── Connection Card ── */}
-        <TouchableOpacity
-          onPress={() => navigation.navigate('ConnectionSetup')}
-          activeOpacity={0.7}
-          testID="settings-connection-card"
-          accessibilityLabel="Connection settings"
-        >
-          <ThemedCard elevated accentStripe style={styles.card}>
-            <SectionHeader title={t('connection')} style={styles.sectionHeader} />
-
-            <SettingsDetailRow
-              icon="lan-connect"
-              label={t('type')}
-              value={connectionType}
-              theme={theme}
-            />
-            <SettingsDetailRow
-              icon="pulse"
-              label={t('status')}
-              theme={theme}
-              valueComponent={
-                <View style={styles.statusRow}>
-                  <View style={[styles.statusDot, { backgroundColor: connectionStatusColor }]} />
-                  <ThemedText weight="medium" size={14}>{t(connectionStatus.textKey)}</ThemedText>
-                </View>
-              }
-            />
-
-            <View style={styles.tapHintRow}>
-              <Icon name="chevron-right" size={16} color={theme.colors.text.muted} />
-              <ThemedText variant="muted" size={11}>{t('configureConnection')}</ThemedText>
-            </View>
-          </ThemedCard>
-        </TouchableOpacity>
-
-        {/* ── Sync Card ── */}
-        <TouchableOpacity
-          onPress={() => navigation.navigate('SyncSettings')}
-          activeOpacity={0.7}
-          testID="settings-sync-card"
-          accessibilityLabel="Sync settings"
-        >
-          <ThemedCard elevated accentStripe style={styles.card}>
-            <SectionHeader title={t('sync')} style={styles.sectionHeader} />
-
-            <SettingsDetailRow
-              icon="clock-outline"
-              label={t('lastSync')}
-              value={lastSyncTime}
-              theme={theme}
-            />
-            <SettingsDetailRow
-              icon="cloud-check-outline"
-              label={t('status')}
-              value={syncStatusText}
-              theme={theme}
-            />
-
-            <View style={styles.tapHintRow}>
-              <Icon name="chevron-right" size={16} color={theme.colors.text.muted} />
-              <ThemedText variant="muted" size={11}>{t('syncSettings')}</ThemedText>
-            </View>
-          </ThemedCard>
-        </TouchableOpacity>
-
         {/* ── Account (submenu) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('account')} style={styles.sectionHeader} />
@@ -229,6 +168,41 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
+        {/* ── Desktop sync (changeset-v1 LAN sync config + status, 3-5) ── */}
+        <ThemedCard elevated accentStripe style={styles.card}>
+          <SectionHeader title={t('desktopSyncGroup')} style={styles.sectionHeader} />
+          <SettingsLinkRow
+            icon="sync"
+            label={t('desktopSync')}
+            onPress={() => navigation.navigate('DesktopSync')}
+            theme={theme}
+          />
+        </ThemedCard>
+
+        {/* ── Backup & restore (user-owned-storage continuity, 2-6) ── */}
+        <ThemedCard elevated accentStripe style={styles.card}>
+          <SectionHeader title={t('backupGroup')} style={styles.sectionHeader} />
+          <SettingsLinkRow
+            icon="cloud-upload-outline"
+            label={t('backup')}
+            onPress={() => navigation.navigate('BackupSettings')}
+            theme={theme}
+          />
+        </ThemedCard>
+
+        {/* ── Background presence (iOS blind-tick honest limits, 4-3) ── */}
+        {Platform.OS === 'ios' && (
+          <ThemedCard elevated accentStripe style={styles.card}>
+            <SectionHeader title={tLifecycle('settingsGroup')} style={styles.sectionHeader} />
+            <SettingsLinkRow
+              icon="weather-night"
+              label={tLifecycle('settingsRow')}
+              onPress={() => navigation.navigate('IOSLifecycleInfo')}
+              theme={theme}
+            />
+          </ThemedCard>
+        )}
+
         {/* ── Notifications & Feedback (inline toggles) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('notifications')} style={styles.sectionHeader} />
@@ -236,7 +210,7 @@ export const SettingsScreen: React.FC = () => {
             icon="bell"
             label={t('pushNotifications')}
             value={pushNotifications}
-            onValueChange={(v) => toggleAndStore(STORAGE_KEYS.PUSH_NOTIFICATIONS, v, setPushNotifications)}
+            onValueChange={handlePushToggle}
             theme={theme}
           />
           <SettingsToggleRow
@@ -258,6 +232,23 @@ export const SettingsScreen: React.FC = () => {
             theme={theme}
             showSeparator
           />
+          {/* Lock-screen preview vs generic body (plan 7-12 §4d, ruled preview question). */}
+          <SettingsToggleRow
+            icon="message-off-outline"
+            label={t('hideContentOnLockScreen')}
+            value={hideContentOnLockScreen}
+            onValueChange={handleHideContentToggle}
+            theme={theme}
+            showSeparator
+          />
+          {/* Outreach delivery transport (plan 7-12 §4d/§5) — dedicated picker. */}
+          <SettingsLinkRow
+            icon="send-outline"
+            label={t('notificationDelivery')}
+            onPress={() => navigation.navigate('NotificationSettings')}
+            theme={theme}
+            showSeparator
+          />
         </ThemedCard>
 
         {/* ── Help & Support (submenu) ── */}
@@ -270,20 +261,6 @@ export const SettingsScreen: React.FC = () => {
             theme={theme}
           />
         </ThemedCard>
-
-        {/* ── Development Card (Metro dev + dev-flavor builds) ── */}
-        {IS_DEV && (
-          <ThemedCard elevated accentStripe style={styles.card}>
-            <SectionHeader title={t('development')} style={styles.sectionHeader} />
-            <SettingsLinkRow
-              icon="database-eye"
-              label={t('databaseTableViewer')}
-              badge="DEV"
-              onPress={() => navigation.navigate('DatabaseTableViewer')}
-              theme={theme}
-            />
-          </ThemedCard>
-        )}
       </ScrollView>
 
     </ThemedView>

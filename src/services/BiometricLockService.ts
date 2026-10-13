@@ -22,8 +22,8 @@ import { createLogger } from '../utils/logger';
 
 const log = createLogger('[BiometricLockService]');
 
-const STORAGE_KEY_ENABLED = '@harmony_setting_biometric_lock';
-const STORAGE_KEY_PIN = '@harmony_setting_lock_pin';
+const STORAGE_KEY_ENABLED = '@soulbits_setting_biometric_lock';
+const STORAGE_KEY_PIN = '@soulbits_setting_lock_pin';
 
 /** Fallback prompt message when none is supplied by the caller. */
 const DEFAULT_PROMPT_MESSAGE = 'Confirm your identity to unlock';

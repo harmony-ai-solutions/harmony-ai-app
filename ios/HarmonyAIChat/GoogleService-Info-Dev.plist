@@ -2,13 +2,44 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CLIENT_ID</key>
-	<string>128352209891-3lm1pgood2a4h97kpasjmjlaer0oighu.apps.googleusercontent.com</string>
-	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.128352209891-3lm1pgood2a4h97kpasjmjlaer0oighu</string>
+	<!--
+	  PLACEHOLDER Firebase iOS config — DEV variant (plan 7-12 §3, step 7).
+
+	  Same role as GoogleService-Info.plist (Google Sign-In OAuth client +
+	  Firebase Cloud Messaging); this file carries the DEV bundle's client
+	  values. The prod file is the one RNFB looks up by its canonical name
+	  ("GoogleService-Info.plist") in the app bundle, so a build that needs the
+	  DEV Firebase project must swap this in as GoogleService-Info.plist (owner
+	  gate, alongside `pod install`) — mirroring the Android dev/prod flavor
+	  split. See GoogleService-Info.plist for the full D4 self-builder contract.
+	-->
+	<key>API_KEY</key>
+	<string>AIzaSy0000000000000000000000000000000000001</string>
+	<key>GCM_SENDER_ID</key>
+	<string>000000000000</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
 	<string>ai.soulbits.chat.dev</string>
+	<key>PROJECT_ID</key>
+	<string>soulbits-placeholder</string>
+	<key>STORAGE_BUCKET</key>
+	<string>soulbits-placeholder.appspot.com</string>
+	<key>IS_ADS_ENABLED</key>
+	<false/>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false/>
+	<key>IS_APPINVITE_ENABLED</key>
+	<false/>
+	<key>IS_GCM_ENABLED</key>
+	<true/>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true/>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:000000000000:ios:0000000000000000000001</string>
+	<key>CLIENT_ID</key>
+	<string>128352209891-3lm1pgood2a4h97kpasjmjlaer0oighu.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.128352209891-3lm1pgood2a4h97kpasjmjlaer0oighu</string>
 </dict>
 </plist>

@@ -3,7 +3,7 @@
  *
  * The reply-mode toggle controls instant vs realistic reply pacing per
  * participant key. Storage is AsyncStorage keyed
- * `@harmony_chat_reply_mode_<participantKey>` (interim client-side storage —
+ * `@soulbits_chat_reply_mode_<participantKey>` (interim client-side storage —
  * becomes a synced `chat_conversation_settings` column in engine Phase 2/B2).
  *
  * Follows the repo's AsyncStorage test convention (jest async-storage-mock),
@@ -55,7 +55,7 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-const REPLY_MODE_PREFIX = '@harmony_chat_reply_mode_';
+const REPLY_MODE_PREFIX = '@soulbits_chat_reply_mode_';
 
 describe('ChatPreferencesService reply mode', () => {
   it('defaults to realistic when nothing is stored', async () => {
@@ -81,7 +81,7 @@ describe('ChatPreferencesService reply mode', () => {
     expect(await ChatPreferencesService.getReplyMode('max2+user')).toBe('realistic');
   });
 
-  it('stores under the @harmony_chat_reply_mode_<participantKey> key', async () => {
+  it('stores under the @soulbits_chat_reply_mode_<participantKey> key', async () => {
     const spy = jest.spyOn(AsyncStorage, 'setItem');
     await ChatPreferencesService.setReplyMode('max+user', 'instant');
     expect(spy).toHaveBeenCalledWith(
@@ -113,7 +113,7 @@ describe('ChatPreferencesService legacy-entity-pref sweep (Q14)', () => {
       'chat_entity_pref_char1',
       'chat_entity_pref_char2',
       'chat_global_impersonated_entity',
-      '@harmony_chat_reply_mode_pk',
+      '@soulbits_chat_reply_mode_pk',
     ];
     const getAllKeys = jest.spyOn(AsyncStorage, 'getAllKeys').mockResolvedValue(keys);
     const multiRemove = jest.spyOn(AsyncStorage, 'multiRemove').mockResolvedValue(undefined);
@@ -132,7 +132,7 @@ describe('ChatPreferencesService legacy-entity-pref sweep (Q14)', () => {
   it('does nothing when there are no legacy keys', async () => {
     jest.spyOn(AsyncStorage, 'getAllKeys').mockResolvedValue([
       'chat_global_impersonated_entity',
-      '@harmony_chat_reply_mode_pk',
+      '@soulbits_chat_reply_mode_pk',
     ]);
     const multiRemove = jest.spyOn(AsyncStorage, 'multiRemove').mockResolvedValue(undefined);
 
@@ -151,12 +151,12 @@ describe('ChatPreferencesService wipe-rebuild sweep (D19, phase 3-2)', () => {
   it('clears all three id-keyed preference families in one sweep', async () => {
     const keys = [
       'chat_global_impersonated_entity',
-      '@harmony_chat_reply_mode_max+user',
-      '@harmony_chat_reply_mode_claire+user',
+      '@soulbits_chat_reply_mode_max+user',
+      '@soulbits_chat_reply_mode_claire+user',
       'chat_entity_pref_char1',
       'chat_entity_pref_char2',
       'unrelated_key',
-      '@harmony_some_other_thing',
+      '@soulbits_some_other_thing',
     ];
     const getAllKeys = jest.spyOn(AsyncStorage, 'getAllKeys').mockResolvedValue(keys);
     const multiRemove = jest.spyOn(AsyncStorage, 'multiRemove').mockResolvedValue(undefined);
@@ -165,11 +165,11 @@ describe('ChatPreferencesService wipe-rebuild sweep (D19, phase 3-2)', () => {
 
     expect(getAllKeys).toHaveBeenCalled();
     // Global key + every reply-mode key + every legacy key — unrelated keys
-    // (including other @harmony_ keys) survive.
+    // (including other @soulbits_ keys) survive.
     expect(multiRemove).toHaveBeenCalledWith([
       'chat_global_impersonated_entity',
-      '@harmony_chat_reply_mode_max+user',
-      '@harmony_chat_reply_mode_claire+user',
+      '@soulbits_chat_reply_mode_max+user',
+      '@soulbits_chat_reply_mode_claire+user',
       'chat_entity_pref_char1',
       'chat_entity_pref_char2',
     ]);

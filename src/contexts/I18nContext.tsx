@@ -23,8 +23,6 @@ import chatDetail from '../i18n/locales/en/chatDetail.json';
 import characters from '../i18n/locales/en/characters.json';
 import createAI from '../i18n/locales/en/createAI.json';
 import settings from '../i18n/locales/en/settings.json';
-import connection from '../i18n/locales/en/connection.json';
-import theme from '../i18n/locales/en/theme.json';
 import profile from '../i18n/locales/en/profile.json';
 import modals from '../i18n/locales/en/modals.json';
 import database from '../i18n/locales/en/database.json';
@@ -33,6 +31,7 @@ import development from '../i18n/locales/en/development.json';
 import auth from '../i18n/locales/en/auth.json';
 import themeSettings from '../i18n/locales/en/themeSettings.json';
 import syncSettings from '../i18n/locales/en/syncSettings.json';
+import desktopSync from '../i18n/locales/en/desktopSync.json';
 import discover from '../i18n/locales/en/discover.json';
 import moduleConfig from '../i18n/locales/en/moduleConfig.json';
 import syncConnection from '../i18n/locales/en/syncConnection.json';
@@ -40,10 +39,14 @@ import scenario from '../i18n/locales/en/scenario.json';
 import market from '../i18n/locales/en/market.json';
 import persona from '../i18n/locales/en/persona.json';
 import voiceInput from '../i18n/locales/en/voiceInput.json';
+import backup from '../i18n/locales/en/backup.json';
+import lifecycle from '../i18n/locales/en/lifecycle.json';
+import updates from '../i18n/locales/en/updates.json';
+import engineLogs from '../i18n/locales/en/engineLogs.json';
 
 // ── Storage key ─────────────────────────────────────────────────────────────
 
-const STORAGE_KEY_LANGUAGE = '@harmony_language';
+const STORAGE_KEY_LANGUAGE = '@soulbits_language';
 
 // ── Available languages ─────────────────────────────────────────────────────
 
@@ -78,8 +81,6 @@ const resources = {
     characters,
     createAI,
     settings,
-    connection,
-    theme,
     profile,
     modals,
     database,
@@ -88,6 +89,7 @@ const resources = {
     auth,
     themeSettings,
     syncSettings,
+    desktopSync,
     discover,
     moduleConfig,
     syncConnection,
@@ -95,6 +97,10 @@ const resources = {
     market,
     persona,
     voiceInput,
+    backup,
+    lifecycle,
+    updates,
+    engineLogs,
   },
 };
 
@@ -113,8 +119,6 @@ const i18nConfig: InitOptions = {
     'characters',
     'createAI',
     'settings',
-    'connection',
-    'theme',
     'profile',
     'modals',
     'database',
@@ -123,6 +127,7 @@ const i18nConfig: InitOptions = {
     'auth',
     'themeSettings',
     'syncSettings',
+    'desktopSync',
     'discover',
     'moduleConfig',
     'syncConnection',
@@ -130,6 +135,10 @@ const i18nConfig: InitOptions = {
     'market',
     'persona',
     'voiceInput',
+    'backup',
+    'lifecycle',
+    'updates',
+    'engineLogs',
   ],
   interpolation: {
     escapeValue: false, // React already escapes

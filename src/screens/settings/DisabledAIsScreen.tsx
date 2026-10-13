@@ -23,8 +23,8 @@ import { ProfileAvatar } from '../../components/profile/ProfileAvatar';
 import {
   getAllEntities,
   setEntityDisabled,
-} from '../../database/repositories/entities';
-import { getCharacterProfile, getPrimaryImage, imageToDataURL } from '../../database/repositories/characters';
+} from '../../database/repositories';
+import { getCharacterProfile, getPrimaryImage, imageToDataURL } from '../../database/repositories';
 import { hexToRgba } from '../../utils/colorUtils';
 
 interface DisabledEntry {

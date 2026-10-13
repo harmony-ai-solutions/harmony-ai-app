@@ -55,7 +55,7 @@ import {
   hasChatPickerLibrary,
   resolveChatPickerRowLabel,
   ChatPickerRow,
-} from '../../database/repositories/characters';
+} from '../../database/repositories';
 import { createDataURL } from '../../database/base64';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
 import { createLogger } from '../../utils/logger';

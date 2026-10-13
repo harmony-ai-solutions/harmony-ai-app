@@ -2,8 +2,8 @@
  * Cloud-credential token storage (Keychain)
  *
  * The cloud PASETO + refresh token pair is stored in a dedicated Keychain
- * service (`com.harmonyai.cloud.auth`) and is COMPLETELY independent from
- * the self-hosted HL path that uses AsyncStorage (`harmony_jwt`).
+ * service (`com.soulbits.cloud.auth`) and is COMPLETELY independent from
+ * the self-hosted HL path that uses AsyncStorage (`soulbits_jwt`).
  *
  * Pattern mirror: `src/database/connection.ts:59-90`
  */
@@ -12,8 +12,8 @@ import * as Keychain from 'react-native-keychain';
 
 // ── Constants ───────────────────────────────────────────────────────────
 
-/** Dedicated Keychain service — never overlap with `com.harmonyai.database`. */
-const SERVICE = 'com.harmonyai.cloud.auth';
+/** Dedicated Keychain service — never overlap with `com.soulbits.database`. */
+const SERVICE = 'com.soulbits.cloud.auth';
 
 /**
  * Single credential username.  The password field holds a JSON blob

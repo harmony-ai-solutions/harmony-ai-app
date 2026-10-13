@@ -156,6 +156,17 @@ describe('DeviceAuthService.registerDevice', () => {
       status: 400,
     });
   });
+
+  it('attaches the push token when supplied (task 4-3) and omits it otherwise', async () => {
+    mockRegisterDevice.mockResolvedValue({ deviceId: 'dev-1', authorized: false });
+
+    await DeviceAuthService.registerDevice({ pushToken: 'apns-hex' });
+    expect(mockRegisterDevice.mock.calls[0][0]).toMatchObject({ pushToken: 'apns-hex' });
+
+    mockRegisterDevice.mockClear();
+    await DeviceAuthService.registerDevice();
+    expect(mockRegisterDevice.mock.calls[0][0]).not.toHaveProperty('pushToken');
+  });
 });
 
 describe('DeviceAuthService.requestCode', () => {

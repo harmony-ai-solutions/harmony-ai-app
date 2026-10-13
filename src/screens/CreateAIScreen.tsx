@@ -104,7 +104,7 @@ import {
   getAllCharacterProfiles,
   updateCharacterImage,
   updateCharacterProfile,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 import { setCharacterCreator } from '../services/social/SocialService';
 import {
   createEntity,
@@ -114,12 +114,11 @@ import {
   getEntityByCharacterProfileId,
   getEntityModuleMapping,
   isProfilePersonaOwned,
-  mintEntityId,
   ReservedEntityNameError,
   updateEntityFields,
-} from '../database/repositories/entities';
-import { getUserPersona } from '../database/repositories/userEntities';
-import { getActiveInteractionsByEntity } from '../database/repositories/interactions';
+} from '../database/repositories';
+import { getUserPersona } from '../database/repositories';
+import { getActiveInteractionsByEntity } from '../database/repositories';
 import { createDataURL } from '../database/base64';
 import {
   getAllCognitionConfigs,
@@ -130,8 +129,7 @@ import {
   getAllImaginationConfigs,
   getAllMovementConfigs,
   getAllBackendConfigs,
-} from '../database/repositories/modules';
-import syncService from '../services/SyncService';
+} from '../database/repositories';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
 
@@ -1088,49 +1086,26 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           });
         }
 
-        // Fire-and-forget sync so the engine picks up the edits.
-        syncService.initiateSync().catch(syncErr => {
-          log.warn('Auto-sync after edit failed (non-critical):', syncErr);
-        });
-
         navigation.goBack();
         return;
       }
 
-      // One mint seam (D68): derive the D2 timestamped id from the name
-      // (spaces never survive — D3), throw a TYPED reserved-name error for
-      // `user`/`deleted` (D33 — surfaced by the inline field error), and
-      // ghost-probe the same-second backstop.
-      let entityId: string;
-      try {
-        entityId = await mintEntityId(trimmedName);
-      } catch (mintErr) {
-        if (mintErr instanceof ReservedEntityNameError) {
-          // D33 belt-and-braces: the pre-check above catches the common case;
-          // this typed catch keeps the rejection on the inline field error
-          // (never the generic createFailed alert) even if the predicates
-          // ever drift.
-          setReservedNameBlocked(true);
-          return;
-        }
-        throw mintErr;
-      }
-
       // 1. Either link an existing character profile (from the "From an
-      //    Existing One" flow) or create a brand-new one.
+      //    Existing One" flow) or create a brand-new one. The ENGINE mints the
+      //    profile id (`POST /api/character-profiles` ignores a client id), so
+      //    the returned id drives entity linkage + image uploads below
+      //    (create-then-use-response — owner ruling 1).
       let profileId: string;
       if (prefillProfileId) {
         // Reuse the pre-existing profile — do NOT create a new persona.
         profileId = prefillProfileId;
       } else {
-        profileId = uuidv4();
-
         // The NOT NULL text fields use empty string fallbacks, never null.
         const typingWpm = parseInt(typingSpeedWpm, 10);
         const audioChance = parseInt(audioResponseChance, 10);
 
-        await createCharacterProfile({
-          id: profileId,
+        const createdProfile = await createCharacterProfile({
+          id: '', // ignored by the engine (server-assigned)
           name: trimmedName,
           description: description.trim() || '',
           personality: personality.trim() || '',
@@ -1145,6 +1120,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           scenario: scenario.trim() || '',
           mes_example: exampleDialogues.trim() || '',
         });
+        // Engine-minted profile id — reuse it for entity linkage + images.
+        profileId = createdProfile.id;
 
         // Record the cloud user who created this AI (creator badge + the
         // creator-only Edit Profile / Edit AI Settings buttons depend on it).
@@ -1195,26 +1172,38 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       }
 
-      // 3. Create entity with alias = name (unique among non-deleted entities)
+      // 3. Create the entity. The ENGINE mints the id from the name
+      //    (`POST /api/entities` rejects a client id) — create-then-use-response:
+      //    the returned id drives the module mapping below.
+      let entityId: string;
       try {
-        await createEntity({
-          id: entityId,
-          alias: trimmedName,
+        const entity = await createEntity({
+          name: trimmedName,
           character_profile_id: profileId,
           lifecycle_config: '{}',
-          rag_reindex_required: 1,
         });
+        entityId = entity.id;
       } catch (err: any) {
-        // Alias-unique violation ONLY (idx_entities_alias_unique is a live-only
-        // partial index): another AI partner already uses this name. Ghost-id
-        // collisions already auto-resolved above via mintEntityId,
-        // so any remaining UNIQUE failure on the id itself (or any non-unique
-        // error) must NOT be mislabeled — it falls through to the generic
-        // createFailed alert below.
-        if (
-          err?.message?.includes('UNIQUE') &&
-          err?.message?.includes('alias')
-        ) {
+        if (err instanceof ReservedEntityNameError) {
+          // Belt-and-braces (the pre-check catches the common case): the profile
+          // was created before the entity rejection — roll it back so no orphan
+          // lingers, then keep the rejection on the inline field error.
+          if (!prefillProfileId) {
+            try {
+              await deleteCharacterProfileCascade(profileId);
+            } catch (rollbackErr) {
+              log.warn('Failed to roll back orphaned profile after reserved-name rejection:', rollbackErr);
+            }
+          }
+          setReservedNameBlocked(true);
+          setIsSaving(false);
+          return;
+        }
+        // A live-alias collision is a 400 from the engine
+        // (`{error:"entity alias is already in use"}`) — surface the same
+        // alias-conflict alert. Ghost-id collisions auto-resolve engine-side
+        // (dedupe_id_if_taken), so no id-collision branch is needed.
+        if (err?.message?.includes('alias')) {
           // Roll back ONLY the brand-new profile created in step 1 so a failed
           // attempt cannot leave an orphaned "Name 2" duplicate in the
           // Characters list — the reported bug showed a "name already in use"
@@ -1266,19 +1255,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         deleted_at: null,
       });
 
-      // 6. Push the new entity (and its profile/mapping) to the engine.
-      //    Fire-and-forget — a full syncAndWait here can block the save for
-      //    up to 45s (e.g. the engine waiting on a size-estimate confirmation),
-      //    which made saving feel like it "takes forever". The entity is
-      //    persisted locally either way; any leftover engine state is picked
-      //    up by the next opportunistic sync.
-      try {
-        syncService.initiateSync().catch(syncErr => {
-          log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
-        });
-      } catch (syncErr) {
-        log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
-      }
+      // 6. The entity (and its profile/mapping) is authored directly on the
+      //    engine at create time (task 3-4) — no separate sync push is needed.
 
       // 7. Go back to the screen we came from (Characters list).
       navigation.goBack();

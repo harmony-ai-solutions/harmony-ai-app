@@ -143,8 +143,39 @@ flagged to the owner at sign-off. No code change: values stay DB-configurable.
    devices, `transport=relay` on the desktop (authority) + phone, through the
    deployed staging relay (after 7-1 deploy), confirm desktop↔phone sync with no
    LAN.
-4. **Bucket provisioning + purge runbook sign-off** — `tofu apply` the
-   `s3-sync-backup` module; sign off the quota defaults and the per-user purge
-   runbook.
+4. **Bucket provisioning + purge wiring sign-off** — `tofu apply` the
+   `s3-sync-backup` module + the `auth_backup_purge_s3` IAM policy and the
+   `SYNC_BACKUP_S3_BUCKET` task-def env; sign off the quota defaults and the
+   purge runbook.
+
+### Addendum (2026-10-13, owner ruling — the purge is now automatic)
+
+**Ruling:** a deleted user's hosted-backup blobs must not wait on a manual ops
+step — the account-deletion commit purges them itself. The prior design (DB-only
+cascade + a manual `scripts/purge-backup-user.sh` step) left a dead-end: a
+forgotten runbook run meant orphaned blobs forever.
+
+**What changed:**
+
+- **Async purge in auth-service** — `cmd/auth-service/backuppurge` (S3
+  all-versions + delete-marker prefix delete, verify-empty). Wired in
+  `cmd/auth-service/main.go` on `SYNC_BACKUP_S3_BUCKET`. After the
+  `ConfirmAccountDeletion` transaction commits, a detached goroutine (5-min
+  budget) runs it; a failure never rolls back the deletion — it logs the user id
+  and bumps the `auth_backup_purge_backlog` gauge on `/metrics`.
+- **`POST /v1/auth/account/confirm` now returns `202`** (was `200`) — the DB
+  deletion is final, residual S3 cleanup may still be running. openapi, portal
+  (2xx-tolerant), the e2e flow, and the unit tests were updated.
+- **`scripts/purge-backup-user.sh` is retained as the fallback** (owner,
+  2026-10-13) — its role is now remediation of failed automated purges, not the
+  happy-path step. Its header and the docs were reframed accordingly.
+- **Infra:** compose gained the MinIO `AWS_ENDPOINT_URL_S3` (S3-only, so SES is
+  unaffected) + `SYNC_BACKUP_S3_BUCKET`; both auth-service task defs (standalone
+  + backend-combined) gained `SYNC_BACKUP_S3_BUCKET`; a new
+  `auth_backup_purge_s3` IAM policy (version-list + version-delete only — no
+  content read/write) attaches to the auth-service and backend-combined roles.
+- **Docs:** `docs/cloud-data-deletion.md` §2/§2a/§4/§5, `docs/sync-relay-threat-model.md`
+  §4a/§6. CHANGELOG already promised "every stored version" — no user-facing
+  change.
 
 

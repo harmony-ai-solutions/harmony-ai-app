@@ -10,9 +10,8 @@
  */
 
 import AuthService from '../../auth/AuthService';
-import SyncService from '../../SyncService';
 import { startSoulbitsTokenSync, syncCurrentToken, injectSoulbitsToken } from '../soulbitsTokenSync';
-import * as repo from '../../../database/repositories/providers/SoulbitsCloudProviderConfigRepository';
+import * as repo from '../../../services/engine/repositories/providers';
 
 jest.mock('../../auth/AuthService', () => ({
   __esModule: true,
@@ -23,28 +22,20 @@ jest.mock('../../auth/AuthService', () => ({
   },
 }));
 
-jest.mock('../../../database/repositories/providers/SoulbitsCloudProviderConfigRepository', () => ({
+jest.mock('../../../services/engine/repositories/providers', () => ({
   __esModule: true,
   updateAllSoulbitsCloudApiKeys: jest.fn(() => Promise.resolve()),
 }));
 
-jest.mock('../../SyncService', () => ({
-  __esModule: true,
-  default: {
-    initiateSync: jest.fn(() => Promise.resolve()),
-  },
-}));
-
 const mockedAuth = AuthService as jest.Mocked<typeof AuthService>;
 const mockedRepo = repo as jest.Mocked<typeof repo>;
-const mockedSync = SyncService as jest.Mocked<typeof SyncService>;
 
 beforeEach(() => {
   jest.clearAllMocks();
 });
 
 describe('startSoulbitsTokenSync', () => {
-  it('subscribes to auth:changed, updates all rows and triggers an engine sync', async () => {
+  it('subscribes to auth:changed and updates all rows', async () => {
     const stop = startSoulbitsTokenSync();
 
     expect(mockedAuth.on).toHaveBeenCalledWith('auth:changed', expect.any(Function));
@@ -56,9 +47,6 @@ describe('startSoulbitsTokenSync', () => {
     expect(mockedRepo.updateAllSoulbitsCloudApiKeys).toHaveBeenCalledWith(
       'paseto-v4.local.refreshed',
     );
-    // The updated rows must be pushed to the engine so the fresh token takes
-    // effect immediately (updated_at bump is only picked up by a sync).
-    expect(mockedSync.initiateSync).toHaveBeenCalledTimes(1);
 
     stop();
     expect(mockedAuth.off).toHaveBeenCalledWith('auth:changed', handler);
@@ -73,7 +61,7 @@ describe('startSoulbitsTokenSync', () => {
 });
 
 describe('syncCurrentToken', () => {
-  it('updates all rows and triggers an engine sync with the cached paseto', async () => {
+  it('updates all rows with the cached paseto', async () => {
     mockedAuth.getToken.mockResolvedValue('paseto-v4.local.cached');
 
     await syncCurrentToken();
@@ -81,7 +69,6 @@ describe('syncCurrentToken', () => {
     expect(mockedRepo.updateAllSoulbitsCloudApiKeys).toHaveBeenCalledWith(
       'paseto-v4.local.cached',
     );
-    expect(mockedSync.initiateSync).toHaveBeenCalledTimes(1);
   });
 
   it('is a no-op when no token is cached', async () => {
@@ -89,7 +76,6 @@ describe('syncCurrentToken', () => {
 
     await expect(syncCurrentToken()).resolves.toBeUndefined();
     expect(mockedRepo.updateAllSoulbitsCloudApiKeys).not.toHaveBeenCalled();
-    expect(mockedSync.initiateSync).not.toHaveBeenCalled();
   });
 });
 

@@ -4,7 +4,7 @@
  * Verifies:
  *  - the pure parseWavAudioParams helper (WAV header → channels/bit_depth/sample_rate)
  *  - the pure computeVadBars helper (clamping / empty / duration bounds)
- *  - offline state renders "Connect to Harmony Link to test" and never records
+ *  - offline state renders "Connect to Soulbits Engine to test" and never records
  *  - the record → stop → transcribe state machine drives AudioRecorder + the
  *    ModuleTestSessionService (both mocked): resolves the active persona, sends
  *    STT_INPUT_AUDIO with the pinned event contract, renders the transcript
@@ -82,7 +82,7 @@ jest.mock('../../../services/ChatPreferencesService', () => ({
   default: { getGlobalImpersonatedEntity: jest.fn().mockResolvedValue('claire') },
 }));
 
-jest.mock('../../../database/repositories/userEntities', () => ({
+jest.mock('../../../services/engine/repositories/userEntities', () => ({
   resolvePersonaId: jest.fn().mockResolvedValue('claire'),
 }));
 
@@ -110,7 +110,7 @@ jest.mock('../../../services/streaming/streamingService', () => ({
 
 import AudioRecorder from '../../../services/AudioRecorder';
 import ChatPreferencesService from '../../../services/ChatPreferencesService';
-import { resolvePersonaId } from '../../../database/repositories/userEntities';
+import { resolvePersonaId } from '../../../services/engine/repositories/userEntities';
 import { runTest, ModuleTestSessionError } from '../../../services/voiceInput/moduleTestSessionService';
 import { startAudioStream } from '../../../services/streaming/streamingService';
 

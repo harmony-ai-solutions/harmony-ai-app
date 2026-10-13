@@ -48,28 +48,27 @@ import { ScenarioGeneratorSheet, ScenarioGuidedInputs } from '../components/chat
 import { DayDivider } from '../components/chat/DayDivider';
 import EntityEmojiActionService from '../services/EntityEmojiActionService';
 import { useEntitySession } from '../contexts/EntitySessionContext';
-import EntitySessionService, { InteractionSession, isIngestionSessionError } from '../services/EntitySessionService'; // Still needed for event listeners
-import { SyncService } from '../services/SyncService';
+import EntitySessionService, { InteractionSession, PendingMessage, isIngestionSessionError } from '../services/EntitySessionService'; // Still needed for event listeners
 import {
   getConversationMessagesByParticipantKey,
   getRecentConversationMessages,
   updateConversationMessage,
   getConversationMessage,
   deleteConversationMessage,
-} from '../database/repositories/conversation_messages';
+} from '../database/repositories';
 import {
   getPrimaryImage,
   getCharacterProfile,
   imageToDataURL,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 import {
   getAllEntities,
   deleteEntity,
   getEntity,
   setEntityDisabled,
-} from '../database/repositories/entities';
-import { getReplyMode } from '../database/repositories/chatConversationSettings';
-import { getUserPersona } from '../database/repositories/userEntities';
+} from '../database/repositories';
+import { getReplyMode } from '../database/repositories';
+import { getUserPersona } from '../database/repositories';
 import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
@@ -78,7 +77,7 @@ import { ConversationMessage, CharacterProfile } from '../database/models';
 import {
   deriveParticipantKey,
   deriveScopeFromParticipants,
-} from '../database/repositories/interactions';
+} from '../database/repositories';
 import {
   MessageActionSheet,
   MessageAction,
@@ -88,7 +87,7 @@ import {
   ForwardPickerModal,
   ForwardTarget,
 } from '../components/chat/ForwardPickerModal';
-import { markConversationMessagesRead } from '../database/repositories/conversation_messages';
+import { markConversationMessagesRead } from '../database/repositories';
 import {
   showBubble,
   hasBubblePermission,
@@ -99,9 +98,11 @@ import { isChatLocked } from '../services/marketplace/MarketplaceService';
 const log = createLogger('[ChatDetailScreen]');
 
 // TODO: Automatic scrollback pagination — when the user scrolls near the top of the
-// message list, older messages should be loaded via getConversationMessagesByParticipantKey
-// with a beforeTimestamp cursor (the created_at of the oldest currently loaded message).
-// The initial load and refresh calls should use the same page size, but refreshes (new message,
+// message list, older messages should be loaded via getConversationMessagesByParticipantKey.
+// The `before` cursor is OPAQUE: pass the engine's `next_cursor` from the previous page
+// VERBATIM (3-1/3-2 — the engine stores timestamps in mixed formats, so a synthesized
+// `created_at` cursor is wrong). The initial load and refresh calls should use the same
+// page size, but refreshes (new message,
 // edit, delete) currently replace the entire list — they need to be changed to smart-merge
 // (append new, keep older pages) so the user doesn't lose already-loaded history.
 // For now, this constant controls the fixed window size shown on open and refresh.
@@ -301,6 +302,40 @@ function isSameCalendarDay(a: Date, b: Date): boolean {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
+/**
+ * D-35 — project an optimistic pending row into the ConversationMessage shape
+ * the chat renders. Pending rows are read-only projections (never persisted);
+ * `is_read` is true so they never enter the unread/divider math.
+ */
+function pendingToConversationMessage(p: PendingMessage): ConversationMessage {
+  return {
+    id: p.id,
+    entity_id: p.entity_id,
+    sender_entity_id: p.sender_entity_id,
+    interaction_id: p.interactionId,
+    content: p.content,
+    audio_duration: p.audio_duration,
+    message_type: p.message_type,
+    audio_data: p.audio_data,
+    audio_mime_type: p.audio_mime_type,
+    image_data: p.image_data,
+    image_mime_type: p.image_mime_type,
+    vl_model: null,
+    vl_model_interpretation: null,
+    emotional_state_bits: 0,
+    is_recon_followup: false,
+    is_edited: false,
+    edit_of_message_id: null,
+    reactions_json: null,
+    reply_to_message_id: p.reply_to_message_id,
+    is_pinned: false,
+    is_read: true,
+    created_at: p.created_at,
+    updated_at: p.created_at,
+    deleted_at: null,
+  };
+}
+
 export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { t } = useTranslation('chatDetail');
   const { bottom: safeBottom } = useSafeAreaInsets();
@@ -323,6 +358,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   } = useEntitySession();
 
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  /**
+   * D-35 — optimistic, IN-MEMORY outgoing rows for this interaction, fed by
+   * EntitySessionService's `message:pending` event. The engine authors the
+   * authoritative rows; pending rows are reconciled away once the engine read
+   * returns them (see the reconcile effect below).
+   */
+  const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -955,6 +997,46 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [routeInteractionId, ownEntityId, participantKey]);
 
+  // D-35 — optimistic pending rows for this interaction. Seed from the service
+  // (covers a session started before this screen mounted) and track updates.
+  useEffect(() => {
+    setPendingMessages(
+      EntitySessionService.getPendingMessages(currentInteractionIdRef.current),
+    );
+    const handlePending = (
+      receivedInteractionId: string,
+      pending: PendingMessage[],
+    ) => {
+      if (receivedInteractionId === currentInteractionIdRef.current) {
+        setPendingMessages(pending);
+      }
+    };
+    EntitySessionService.on('message:pending', handlePending);
+    return () => {
+      EntitySessionService.off('message:pending', handlePending);
+    };
+  }, [routeInteractionId]);
+
+  // D-35 reconciliation — whenever the engine-authored list refreshes, drop
+  // pending rows the engine has now authored (matched by type+content+sender+
+  // timing, since the engine mints its own id). The service emits
+  // `message:pending` with the reduced set, which updates the state above.
+  useEffect(() => {
+    if (messages.length === 0) return;
+    EntitySessionService.reconcilePendingMessages(
+      currentInteractionIdRef.current,
+      messages,
+    );
+  }, [messages]);
+
+  // Drop any un-reconciled pending rows when the chat closes (the engine
+  // authors the authoritative rows; they reappear on the next open).
+  useEffect(() => {
+    return () => {
+      EntitySessionService.clearPendingMessages(currentInteractionIdRef.current);
+    };
+  }, []);
+
   // Listen for session errors
   useEffect(() => {
     const sortedScreenParticipants = [...participantIds].sort().join('+');
@@ -1038,17 +1120,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [participantKey, ownEntityId, participantIds, startInteractionSession, showToast, t]);
 
-  // 4-3 (D35): ingestion-class failures ("the AI couldn't be found on Harmony
-  // Link") — run a blocking re-sync so the engine ingests the entity, then
-  // retry the session. 4-2 (D13/D34): the wait is CRITICAL so a failed sync
-  // surfaces as a rejection (logged here) instead of resolving best-effort.
+  // 4-3 (D35): ingestion-class failures ("the AI couldn't be found on the
+  // engine") — retry the session. Task 3-4: the entity is authored directly on
+  // the engine (management API), so there is no sync step to run first.
   const handleSyncAndRetry = useCallback(async () => {
     hapticLightPress();
-    try {
-      await SyncService.getInstance().syncAndWait({ critical: true });
-    } catch (error) {
-      log.warn('Sync-and-retry sync failed (critical):', error);
-    }
     await handleSessionRetry();
   }, [handleSessionRetry]);
 
@@ -1070,12 +1146,14 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       try {
-        const message = await getConversationMessage(messageId);
-        if (!message || !message.audio_data) {
+        // D-35: the audio lives on the in-memory pending row (the engine has no
+        // app-facing message read).
+        const pending = EntitySessionService.getPendingMessage(messageId);
+        if (!pending || !pending.audio_data) {
           throw new Error('Message not found or has no audio');
         }
 
-        const base64Audio = message.audio_data;
+        const base64Audio = pending.audio_data;
 
         // Resolve emoji actions in the text
         let sendText = finalText;
@@ -1091,12 +1169,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           additionalEffects = resolved.effects;
         }
 
-        // Update message with final text and change type to 'combined'
-        const updates: any = { message_type: 'combined' };
-        if (sendText !== message.content) {
-          updates.content = sendText;
-        }
-        await updateConversationMessage(messageId, updates);
+        // D-35: patch the pending row to the combined shape the engine will
+        // author (message_type is engine-authored and NOT patchable via the
+        // message PATCH route), so reconciliation matches it on the next read.
+        EntitySessionService.patchPendingMessage(messageId, {
+          message_type: 'combined',
+          content: sendText,
+        });
 
         // Build the combined utterance (audio + text)
         const session = EntitySessionService.getInteractionSession(currentInteractionIdRef.current);
@@ -1106,8 +1185,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             content: sendText,
             type: 'UTTERANCE_COMBINED',
             audio: base64Audio,
-            audio_type: message.audio_mime_type || 'audio/wav',
-            audio_duration: message.audio_duration || 0,
+            audio_type: pending.audio_mime_type || 'audio/wav',
+            audio_duration: pending.audio_duration || 0,
             message_id: messageId,
           };
 
@@ -1156,7 +1235,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleReactToMessage = useCallback(
     async (messageId: string, emoji: string) => {
       try {
-        const msg = await getConversationMessage(messageId);
+        // D-35: look the message up from the loaded list — the engine has no
+        // id-only message GET route.
+        const msg = loadedMessagesRef.current.find(m => m.id === messageId) ?? null;
         if (!msg) return;
 
         // Parse existing reactions
@@ -1868,10 +1949,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     return map;
   }, [messages]);
 
+  // D-35: engine-authored messages plus the optimistic pending rows, rendered
+  // immediately; pending rows are reconciled away once the engine read returns
+  // their authoritative counterparts.
+  const displayMessages = useMemo(
+    () => [...messages, ...pendingMessages.map(pendingToConversationMessage)],
+    [messages, pendingMessages],
+  );
+
   // Calculate messages with divider AND compute the initial scroll target
   const { messagesWithDivider, initialScrollTarget } = useMemo(() => {
-    if (messages.length === 0) {
-      return { messagesWithDivider: messages, initialScrollTarget: 'bottom' as const };
+    const msgs = displayMessages;
+    if (msgs.length === 0) {
+      return { messagesWithDivider: msgs, initialScrollTarget: 'bottom' as const };
     }
 
     // Insert a calendar-day divider before the first message of each new day.
@@ -1880,25 +1970,25 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // message (i === 0) so a freshly opened conversation shows its start date
     // ("Today"/"Yesterday"/date) like mainstream chat apps.
     let withDivider: any[] = [];
-    for (let i = 0; i < messages.length; i++) {
+    for (let i = 0; i < msgs.length; i++) {
       if (
         i === 0 ||
-        !isSameCalendarDay(messages[i - 1].created_at, messages[i].created_at)
+        !isSameCalendarDay(msgs[i - 1].created_at, msgs[i].created_at)
       ) {
         withDivider.push({
-          id: `day-divider-${messages[i].id}`,
+          id: `day-divider-${msgs[i].id}`,
           type: 'day',
-          date: messages[i].created_at,
+          date: msgs[i].created_at,
         });
       }
-      withDivider.push(messages[i]);
+      withDivider.push(msgs[i]);
     }
 
     if (showDivider) {
       // "New messages" divider = the FIRST partner-sent UNREAD message at open,
       // derived from the loaded page's `is_read` flags (3-1 — no AsyncStorage;
       // the legacy last-read-timestamp divider-key derivation is gone A5/A2).
-      const firstUnreadIndex = messages.findIndex(
+      const firstUnreadIndex = msgs.findIndex(
         m =>
           m.sender_entity_id !== ownEntityId &&
           m.is_read === false,
@@ -1908,10 +1998,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         // Map the raw-message index to the corresponding index in the
         // day-augmented array (each message has one preceding day-divider).
         const insertionIndex = withDivider.findIndex(
-          (m: any) => m.id === messages[firstUnreadIndex].id,
+          (m: any) => m.id === msgs[firstUnreadIndex].id,
         );
         if (insertionIndex !== -1) {
-          const newMessageCount = messages.length - firstUnreadIndex;
+          const newMessageCount = msgs.length - firstUnreadIndex;
           withDivider.splice(insertionIndex, 0, {
             id: 'new-messages-divider',
             type: 'divider',
@@ -1928,7 +2018,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // reported bug, so the scroll target is never a divider index.
     return { messagesWithDivider: withDivider, initialScrollTarget: 'bottom' as const };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, showDivider, ownEntityId]);
+  }, [displayMessages, showDivider, ownEntityId]);
 
   useEffect(() => {
     if (!isInitialScrollDone.current) {
@@ -2147,14 +2237,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           currentInteractionIdRef.current = result.interactionId;
         }
         setHasFirstMes(true);
-
-        // 4-2 (D34): critical — a failed sync rejects instead of resolving
-        // best-effort (logged here; the restart keeps the honest failure path).
-        await SyncService.getInstance()
-          .syncAndWait({ critical: true })
-          .catch(err => {
-            log.warn('Scenario restart sync failed (critical):', err);
-          });
 
         if (participantKey) {
           const updatedMessages = await getRecentConversationMessages(

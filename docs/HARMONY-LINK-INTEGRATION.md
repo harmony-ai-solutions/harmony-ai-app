@@ -1,245 +1,161 @@
-# Harmony Link Integration - Overview
+# Soulbits Engine Integration — Overview
 
-This document provides a comprehensive overview of how the Harmony AI App integrates with Harmony Link's Events API to enable real-time AI character interactions on mobile devices.
+This document describes how the Harmony AI App integrates with **Soulbits Engine**.
+As of the app-engine-parity work, the app does **not** talk to a remote engine
+as a client of a rows-v1 sync protocol. Instead it runs the Soulbits Engine
+embedded on the device and is a thin client of that engine.
 
-## Table of Contents
+> Superseded model: the older "mobile Events-API client with an app-side TS
+> SQLite replica + rows-v1 sync + cloud-hosted sessions" architecture was deleted
+> (app 3-4; cloud 6-1/6-2). Its diagrams are archived under
+> [`docs/history/harmony-link-diagrams/`](history/harmony-link-diagrams/RETIRED.md).
 
-- [Architecture Overview](#architecture-overview)
-- [Core Components](#core-components)
-- [Detailed Diagrams](#detailed-diagrams)
-- [Implementation Status](#implementation-status)
+## The model at a glance
 
-## Architecture Overview
+| Relationship | Mechanism |
+|---|---|
+| App (JS) ↔ embedded engine | Management REST + event WebSocket over `127.0.0.1` |
+| Embedded engine ↔ desktop engine | changeset-v1 sync over WS (engine-side; desktop is the write authority) |
+| Embedded engine ↔ cloud | inference API (injected provider configs) + account/W1 key escrow + user-owned-storage backup — **no cloud engine peer, no readable user data** |
+| Cloud ↔ lifecycle | **data-blind**: hourly iOS keepalive cron + device-initiated visible-push relay |
 
-The Harmony AI App acts as a **mobile Events API client** for Harmony Link, implementing full bidirectional communication over WebSocket connections. The integration enables:
+There is **one database** — the engine's, on the device. The app keeps no schema,
+runs no migrations, and no longer ships a SQLite replica.
 
-- **Device Pairing & Authentication**: JWT-based secure device registration
-- **Data Synchronization**: Bidirectional sync of characters, configurations, and chat history
-- **Real-time Chat**: Dual entity sessions for user-AI conversations
-- **Voice Messages**: Audio recording, transcription, and playback
-- **Multi-modal Communication**: Text, voice, and image messages
+## 1. The embedded engine
 
-### Connection Architecture
+The engine runs on the device in one of two placements, unified behind a single
+`EngineHost` abstraction (`src/services/engine/EngineHost.ts`):
 
-The App supports two connection branches:
+- **Android — sidecar process** (`SidecarEngineHost`): the app ships the engine
+  as `libengine.so` in `jniLibs` and execs it from `nativeLibraryDir` as a typed
+  foreground service (task 1-2). It prints a machine-readable `ENGINE_READY`
+  handshake with the loopback ports + a per-process loopback token.
+- **iOS — in-process** (`EmbeddedEngineHost`): the app links the gomobile facade
+  `SoulbitsEngine.xcframework` and runs the engine inside the app process (task
+  4-1/4-2). iOS is a **foreground tier**: `EngineLifecycle` starts the engine on
+  foreground and stops it on background after a short grace window.
 
-| Branch | Transport | Authentication | Use Case |
-|--------|-----------|---------------|----------|
-| **Self-hosted** | `ws://`/`wss://` to user-configured HL address | Device JWT from handshake | User runs their own Harmony Link |
-| **Cloud** | `wss://connect.soulbits.app` via conduct proxy | Soulbits Cloud PASETO (`Sec-WebSocket-Protocol: Bearer.<paseto>`) | Soulbits Cloud-hosted HL |
+Both placements yield the same `{wsPort, wssPort, adminPort, token}` readiness,
+so everything downstream is platform-agnostic. `EngineService` routes through the
+selected host.
 
-In cloud mode, the App uses a 4th connection mode (`cloud`) that authenticates via the `Sec-WebSocket-Protocol` header instead of the `Authorization` header. The existing N+1 connection model is preserved: 1 sync WebSocket at `/ws/sync` and N per-entity WebSockets at `/ws/worker`.
+**Data access.** Every read and write goes over the engine's **management REST
+API** on loopback (the same API the desktop Wails frontend uses) — see
+[engine-contract-gates.md](engine-contract-gates.md) for the endpoint manifest
+and contract-version pin. Real-time updates arrive over the engine's **event
+WebSocket**. Auth to the app-facing `/api` surface is the per-process loopback
+token (`X-Loopback-Token`) — the app never embeds the fixed admin key.
 
-Key differences from self-hosted:
-- **No device pairing handshake** — the cloud PASETO serves as both authentication and session identity
-- **No security mode prompt** — the conduct proxy uses a publicly trusted ACM certificate (standard TLS)
-- **Session lifecycle managed by CloudSessionService** — spawn via broker, suspend on background, reconnect on foreground
+**DB-key custody.** The engine's database is encrypted at rest. Android passes
+the key to the sidecar via the `SE_DB_KEY` environment variable; iOS provisions a
+256-bit key into the device Keychain (`EngineDbKey`) and hands it to the facade.
 
-**See also:** [Cloud Connection Guide](CLOUD-CONNECTION.md) for detailed cloud setup and login instructions.
+## 2. Engine ↔ desktop pairing (changeset sync)
 
-## Core Components
+Multi-device sync is **engine↔engine**, not app↔remote. The on-device engine
+speaks **changeset-v1** to a desktop Soulbits Engine over the LAN:
 
-### 1. Connection Management Layer
+- SQLite's **session extension** records logical changesets; the desktop is the
+  single write authority and the phone **yields** and buffers its writes into a
+  pending epoch, forwarding them on (re)connect (buffer-and-forward).
+- Authority is arbitrated by **epochs**; a peer whose continuity is broken is
+  served a **baseline snapshot + fresh epoch** (rejoin).
+- Pairing reuses the engine's device-approval **handshake** and its three TLS
+  security modes (`secure` / `insecure-ssl` / `unencrypted`).
 
-#### **ConnectionStateManager**
-- **Purpose**: Manages device pairing state and JWT token lifecycle
-- **Responsibilities**:
-  - Store/retrieve connection credentials (JWT, URLs, certificates)
-  - Track token expiration and pairing status
-  - Provide connection state to UI components
-- **Key Functions**:
-  - `initialize()`: Load saved credentials on app startup
-  - `saveConnectionCredentials()`: Store JWT after successful handshake
-  - `getIsConnected()`, `getIsPaired()`: State checks
-  - `getSecurityMode()`: Get user's security preference (secure/insecure-ssl/unencrypted)
+The app **does not implement the protocol**. It drives the engine's sync-client
+REST surface through the **`DesktopSyncScreen`**
+(`src/screens/settings/DesktopSyncScreen.tsx`): live reconfigure, status, and
+authority hand-over. The full wire spec lives in the engine repo's
+`docs/Changeset-Sync.md`; the client role is the engine's `syncclient` package.
 
-#### **ConnectionManager**
-- **Purpose**: Orchestrates multiple WebSocket connections
-- **Responsibilities**:
-  - Create and manage sync + multiple entity connections
-  - Route events to appropriate services
-  - Handle connection lifecycle (connect, disconnect, reconnect)
-- **Key Functions**:
-  - `createConnection(id, type, url, mode)`: Establish WebSocket
-  - `sendEvent(connectionId, event)`: Send event to specific connection
-  - `isConnected(id)`: Check connection status
-  - Event routing: `event:sync`, `event:entity`
+## 3. Cloud account
 
-#### **WebSocket Implementation**
-Three security modes via factory pattern:
-- **SecureWebSocketConnection**: TLS with certificate validation
-- **InsecureSSLWebSocketConnection**: TLS without validation (self-signed certs)
-- **UnencryptedWebSocketConnection**: Plain WebSocket (ws://)
+Signing in with a **SoulbitsCloud** account does **not** provision a cloud
+Soulbits Engine. Instead:
 
-**BaseWebSocketConnection** implements:
-- Application-level heartbeat (CONNECTION_PING/PONG every 30s)
-- Event parsing and routing
-- Connection lifecycle management
+- **Inference** — the account's PASETO is injected as the credential on the
+  `soulbitscloud` provider configs; the engine calls the inference API directly.
+- **Backup** — **user-owned storage**: the engine produces an encrypted snapshot
+  (DB + RAG + media) and uploads it to the user's own iCloud / WebDAV / Dropbox /
+  OneDrive / local folder. The account holds only a **W1 escrow** of the wrapped
+  backup key. The operator stores **no readable user database data**.
+- **Lifecycle** — the cloud is **data-blind**. On iOS the engine advances via
+  Apple's wake rules: a best-effort hourly keepalive silent ping plus an overnight
+  `BGProcessingTask`, both processing batches **on-device**
+  (`IOSLifecycleWakeHandler` / `IOSMaintenanceScheduler`). The cloud only nudges
+  the device and relays device-authored visible notifications
+  (`PushRelayClient` → `POST /v1/lifecycle/notify`).
 
-### 2. Protocol Services
+The retired cloud engine peer (broker, conduct proxy, per-user containers, S3
+snapshot plane) is gone — see the cloud repo's memory bank / CHANGELOG.
 
-#### **SyncService**
-- **Purpose**: Bidirectional data synchronization with Harmony Link
-- **Protocol**: Sequential master-slave with per-record confirmation
-- **Key Functions**:
-  - `requestHandshake()`: Device registration
-  - `initiateSync()`: Start sync session
-  - `handleIncomingSyncData()`: Buffer incoming changes
-  - `applyBufferedSyncData()`: Atomic transaction application
-  - `sendLocalChangesSequentially()`: Send local changes with confirmation
-- **Events Handled**:
-  - HANDSHAKE_REQUEST/ACCEPT/REJECT
-  - SYNC_REQUEST/ACCEPT/REJECT
-  - SYNC_DATA/SYNC_DATA_CONFIRM
-  - SYNC_COMPLETE/SYNC_FINALIZE
+## 4. Real-time chat
 
-#### **EntitySessionService**
-- **Purpose**: Manage real-time chat sessions with AI characters
-- **Architecture**: Dual entity sessions (user entity + partner entity)
-- **Key Functions**:
-  - `startDualSession(partnerEntityId, impersonatedEntityId)`: Init chat
-  - `sendTextMessage()`: Send text to AI
-  - `newAudioMessage()`: Record and transcribe voice message
-  - `sendImageMessage()`: Send image with optional caption
-  - `sendUtterance()`: Low-level ENTITY_UTTERANCE event
-- **Events Handled**:
-  - INIT_ENTITY (session initialization)
-  - ENTITY_UTTERANCE (incoming messages)
-  - STT_OUTPUT_TEXT (transcription results)
-  - TYPING_INDICATOR, RECORDING_INDICATOR
+Chat runs against the **embedded engine's** event WebSocket (and, for iOS, the
+facade's event callback). The app's `EntitySessionService` manages interaction
+sessions and sends/receives the same event vocabulary:
 
-### 3. Media Services
+- **Sessions**: `INIT_ENTITY`, `ENTITY_SESSION_END`
+- **Messages**: `ENTITY_UTTERANCE`
+- **Speech**: `STT_INPUT_AUDIO`, `STT_OUTPUT_TEXT`
+- **Indicators**: `TYPING_INDICATOR`, `RECORDING_INDICATOR`
+- **Heartbeat**: `CONNECTION_PING` / `CONNECTION_PONG`
 
-#### **AudioRecorder**
-- Records user voice messages
-- WAV format, 16kHz, 16-bit, mono
-- Permission management (Android)
+The engine authors the data; the app renders **optimistic pending rows** for its
+own outgoing messages (no app-authored ids, no SQLite mirror) and reconciles
+against engine reads.
 
-#### **AudioPlayer**
-- Plays AI voice responses
-- Supports binary audio from Harmony Link
-- Message-specific playback tracking
-- State management (playing, paused, stopped)
+## 5. Connection security modes
 
-### 4. State Management (React Contexts)
+The engine↔engine (LAN) transport supports three modes, selected per pairing:
 
-#### **SyncConnectionContext**
-- Manages sync connection lifecycle
-- Provides `isConnected`, `isPaired` state to UI
-- Automatic reconnection with exponential backoff
-- Handles connection errors and token expiration
+- **secure** — TLS with certificate validation
+- **insecure-ssl** — TLS without validation (self-signed peer certs)
+- **unencrypted** — plain WebSocket (LAN only; sensitive data does not cross it
+  during pairing)
 
-#### **EntitySessionContext**
-- Manages entity session lifecycle
-- Provides `startSession()`, `stopSession()` to UI
-- Tracks session state per character
-- Automatic cleanup on app background
+The app↔engine leg is always **loopback** (`127.0.0.1`), authenticated by the
+per-process loopback token. See [CONNECTION-SECURITY.md](CONNECTION-SECURITY.md).
 
-## Detailed Diagrams
+## Implementation status
 
-The following detailed diagrams provide in-depth views of specific integration aspects:
+**Fully implemented:** embedded engine host (Android sidecar + iOS in-process),
+loopback management-API data layer (repository seam fully API-backed),
+engine-required sequencing, DB-key custody, changeset-sync desktop configuration
+screen, cloud-account inference injection + W1 escrow, user-owned-storage backup
+& restore, iOS blind-tick lifecycle + push relay, notification authorization.
 
-1. **[Connection Architecture](./harmony-link-diagrams/01-connection-architecture.md)** - Service layer and WebSocket connection flow
-2. **[Device Pairing Flow](./harmony-link-diagrams/02-device-pairing.md)** - Handshake and authentication sequence
-3. **[Sync Protocol](./harmony-link-diagrams/03-sync-protocol.md)** - Bidirectional data synchronization
-4. **[Entity Sessions](./harmony-link-diagrams/04-entity-sessions.md)** - Dual entity chat sessions
-5. **[Message Flows](./harmony-link-diagrams/05-message-flows.md)** - Text, voice, and image message handling
+**Owner gates (device/build):** XCFramework/AAR builds, on-device smoke, LAN
+pairing smoke, iOS wake/overnight observation.
 
-## Implementation Status
-
-### ✅ Fully Implemented
-
-- **Connection Management**: All 3 security modes, heartbeat protocol
-- **Device Pairing**: Handshake, JWT storage, certificate handling
-- **Data Synchronization**: Full bidirectional sync with atomic transactions
-- **Text Chat**: Send/receive text messages with optimistic UI
-- **Voice Messages**: Recording, transcription, playback
-- **Chat Indicators**: Typing and recording indicators
-- **State Persistence**: Connection credentials, sync history
-- **Error Handling**: Reconnection, timeout handling, user notifications
-
-### 🚧 Partial / In Progress
-
-- **Image Messages**: Send images with captions
-- **On-Device AI**: React Native Executorch integration (planned)
-
-### Event Types Implemented
-
-The app implements the following Harmony Link Events API events:
-
-**Connection Events:**
-- CONNECTION_PING
-- CONNECTION_PONG
-
-**Handshake & Sync:**
-- HANDSHAKE_REQUEST
-- HANDSHAKE_ACCEPT
-- HANDSHAKE_REJECT
-- SYNC_REQUEST
-- SYNC_ACCEPT
-- SYNC_REJECT
-- SYNC_DATA
-- SYNC_DATA_CONFIRM
-- SYNC_COMPLETE
-- SYNC_FINALIZE
-
-**Entity Sessions:**
-- INIT_ENTITY
-- ENTITY_SESSION_END
-- ENTITY_UTTERANCE
-
-**Speech-to-Text:**
-- STT_INPUT_AUDIO
-- STT_OUTPUT_TEXT
-
-**Chat Indicators:**
-- TYPING_INDICATOR
-- RECORDING_INDICATOR
-
-## Key Design Patterns
-
-1. **Singleton Services**: ConnectionManager, SyncService, EntitySessionService
-2. **Factory Pattern**: WebSocketConnectionFactory for security modes
-3. **Observer Pattern**: EventEmitter for service communication
-4. **Optimistic UI**: Immediate local updates, sync in background
-5. **Atomic Transactions**: Buffered sync data applied in single transaction
-6. **Dual Entity Sessions**: Separate connections for user and AI character
-7. **Sequential Sync**: Per-record confirmation before next record
-
-## File Structure
+## File map
 
 ```
-src/
-├── services/
-│   ├── ConnectionStateManager.ts       # JWT & pairing state
-│   ├── SyncService.ts                  # Data synchronization
-│   ├── EntitySessionService.ts         # Chat sessions
-│   ├── AudioRecorder.ts                # Voice recording
-│   ├── AudioPlayer.ts                  # Audio playback
-│   ├── connection/
-│   │   └── ConnectionManager.ts        # WebSocket orchestration
-│   └── websocket/
-│       ├── WebSocketConnection.ts      # Interface
-│       ├── BaseWebSocketConnection.ts  # Base implementation
-│       ├── SecureWebSocketConnection.ts
-│       ├── InsecureSSLWebSocketConnection.ts
-│       └── UnencryptedWebSocketConnection.ts
-├── contexts/
-│   ├── SyncConnectionContext.tsx       # Sync connection state
-│   └── EntitySessionContext.tsx        # Entity session state
-└── screens/
-    ├── setup/
-    │   └── ConnectionSetupScreen.tsx   # Device pairing
-    ├── settings/
-    │   └── SyncSettingsScreen.tsx      # Manual sync
-    └── ChatDetailScreen.tsx            # Real-time chat
+src/services/engine/
+├── EngineHost.ts            # EngineHost interface (+ readiness shape)
+├── SidecarEngineHost.ts     # Android: exec libengine.so child process
+├── EmbeddedEngineHost.ts    # iOS: in-process gomobile facade
+├── EngineService.ts         # host selection + lifecycle orchestration
+├── EngineLifecycle.ts       # AppState foreground-tier start/stop
+├── EngineDbKey.ts           # at-rest key custody (Keychain)
+├── EngineApiClient.ts       # loopback management REST client
+├── engineContract.ts        # ENGINE_CONTRACT_VERSION + endpoint manifest
+├── IOSLifecycleWakeHandler.ts / IOSMaintenanceScheduler.ts / PushRelayClient.ts
+src/services/backup/         # BackupOrchestrator + targets
+src/screens/settings/DesktopSyncScreen.tsx   # engine sync-client control
 ```
 
 ## References
 
-- [Harmony Link Events API Documentation](https://github.com/harmony-ai-solutions/harmony-link/blob/main/docs/Events-API.md)
-- [Connection Security Modes](./CONNECTION-SECURITY.md)
+- [Engine-contract gates](engine-contract-gates.md) — the app↔engine coupling
+  contract (version pin, wire fixtures, endpoint manifest, loopback smoke)
+- [Entity interaction model](entity-interaction-model.md)
+- Engine repo: `docs/Changeset-Sync.md`, `docs/Sidecar-Deployment.md`,
+  `docs/Embed-Facade.md`, `docs/Backup.md`
+- [Connection security modes](CONNECTION-SECURITY.md)
 
 ---
 
-**Last Updated**: February 2026  
+**Last Updated**: October 2026

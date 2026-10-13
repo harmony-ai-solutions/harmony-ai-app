@@ -1,7 +1,7 @@
 import { Theme } from '../types';
 import { hauteGoth } from './hauteGoth';
 import { midnightRose } from './midnightRose';
-import { classicHarmony } from './classicHarmony';
+import { classicSoulbits } from './classicSoulbits';
 import { oceanBreeze } from './oceanBreeze';
 import { forestNight } from './forestNight';
 import { sunsetGlow } from './sunsetGlow';
@@ -22,7 +22,7 @@ export const soulBitsThemes: Theme[] = [
  */
 export const otherThemes: Theme[] = [
     midnightRose,
-    classicHarmony,
+    classicSoulbits,
     oceanBreeze,
     forestNight,
     sunsetGlow,
@@ -60,7 +60,7 @@ export function getDefaultTheme(): Theme {
 export {
     hauteGoth,
     midnightRose,
-    classicHarmony,
+    classicSoulbits,
     oceanBreeze,
     forestNight,
     sunsetGlow,

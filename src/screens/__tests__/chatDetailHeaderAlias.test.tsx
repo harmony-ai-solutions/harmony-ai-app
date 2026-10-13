@@ -129,6 +129,11 @@ jest.mock('../../services/EntitySessionService', () => {
   svc.isTranscriptionFailed = jest.fn().mockReturnValue(false);
   svc.registerOpenConversation = jest.fn();
   svc.unregisterOpenConversation = jest.fn();
+  // D-35 pending-message surface (optimistic in-memory outgoing rows).
+  svc.getPendingMessages = jest.fn().mockReturnValue([]);
+  svc.reconcilePendingMessages = jest.fn();
+  svc.clearPendingMessages = jest.fn();
+  svc.patchPendingMessage = jest.fn();
   return {
     __esModule: true,
     EntitySessionService: svc,
@@ -137,17 +142,6 @@ jest.mock('../../services/EntitySessionService', () => {
   };
 });
 
-jest.mock('../../services/SyncService', () => {
-  const instance = {
-    syncAndWait: jest.fn().mockResolvedValue(undefined),
-    initiateSync: jest.fn().mockResolvedValue(undefined),
-  };
-  return {
-    __esModule: true,
-    SyncService: { getInstance: () => instance },
-    __mockSyncServiceInstance: instance,
-  };
-});
 
 jest.mock('../../services/EntityEmojiActionService', () => ({
   __esModule: true,
@@ -177,7 +171,7 @@ jest.mock('../../services/marketplace/MarketplaceService', () => ({
   isChatLocked: jest.fn().mockResolvedValue(false),
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   getConversationMessagesByParticipantKey: jest.fn().mockResolvedValue([]),
   getRecentConversationMessages: jest.fn().mockResolvedValue([]),
   updateConversationMessage: jest.fn().mockResolvedValue(undefined),
@@ -188,23 +182,23 @@ jest.mock('../../database/repositories/conversation_messages', () => ({
   getUnreadCountByParticipantKeys: jest.fn().mockResolvedValue(new Map()),
 }));
 
-jest.mock('../../database/repositories/characters', () => ({
+jest.mock('../../services/engine/repositories/characters', () => ({
   getPrimaryImage: jest.fn().mockResolvedValue(null),
   getCharacterProfile: jest.fn().mockResolvedValue(null),
   imageToDataURL: jest.fn().mockReturnValue(null),
 }));
 
-jest.mock('../../database/repositories/entities', () => ({
+jest.mock('../../services/engine/repositories/entities', () => ({
   getAllEntities: jest.fn().mockResolvedValue([]),
   deleteEntity: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   deriveParticipantKey: jest.fn().mockReturnValue('pk'),
   deriveScopeFromParticipants: jest.fn().mockReturnValue('one_on_one'),
 }));
 
-jest.mock('../../database/repositories/chatConversationSettings', () => ({
+jest.mock('../../services/engine/repositories/chatConversationSettings', () => ({
   getReplyMode: jest.fn().mockResolvedValue('realistic'),
 }));
 
@@ -296,9 +290,9 @@ jest.mock('../../components/chat/ScenarioGeneratorSheet', () => {
   };
 });
 
-const { getRecentConversationMessages } = require('../../database/repositories/conversation_messages');
-const { getAllEntities } = require('../../database/repositories/entities');
-const { getCharacterProfile } = require('../../database/repositories/characters');
+const { getRecentConversationMessages } = require('../../services/engine/repositories/conversation_messages');
+const { getAllEntities } = require('../../services/engine/repositories/entities');
+const { getCharacterProfile } = require('../../services/engine/repositories/characters');
 
 const ownEntityId = 'user-entity';
 const partnerEntityId = 'char-entity';

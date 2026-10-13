@@ -30,7 +30,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
     return new Promise((resolve, reject) => {
       try {
         // Get JWT from AsyncStorage
-        AsyncStorage.getItem('harmony_jwt').then(async (jwt) => {
+        AsyncStorage.getItem('soulbits_jwt').then(async (jwt) => {
           if (!jwt) {
             const error = new Error('No JWT credentials available');
             log.error(error.message);

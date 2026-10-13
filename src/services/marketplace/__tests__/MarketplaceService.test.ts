@@ -48,7 +48,7 @@ jest.mock('../../stub/stubBackendUtils', () => {
 // repos. If a repo module is ever imported, these factories throw on load and
 // the suite fails loudly. (The marketplace/social/wallet repos were deleted in
 // the schema-surgery phase — the surviving characters repo keeps its guard.)
-jest.mock('../../../database/repositories/characters', () => {
+jest.mock('../../../services/engine/repositories/characters', () => {
   throw new Error('MarketplaceService must not import database/repositories/characters');
 });
 

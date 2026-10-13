@@ -9,8 +9,15 @@ on:
       version:
         description: 'Version number for the build'
         default: 'v0.0.0-dev'
+      engine_version:
+        description: 'Soulbits Engine version to provision (e.g. v0.3.2). Falls back to the ENGINE_SIDECAR_VERSION repo variable.'
+        default: ''
       skip_build:
         description: 'Run tests only, skip APK/IPA builds (dry-run)'
+        type: boolean
+        default: false
+      build_ios:
+        description: 'Also build the iOS IPA matrix (macOS runners bill at 10× the Linux minute rate). Release tags always build iOS.'
         type: boolean
         default: false
 
@@ -106,6 +113,19 @@ jobs:
         run: |
           echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
 
+      - name: Resolve engine version
+        run: |
+          ENGINE_VERSION='${{ github.event.inputs.engine_version }}'
+          if [ -z "${ENGINE_VERSION}" ]; then
+            ENGINE_VERSION='${{ vars.ENGINE_SIDECAR_VERSION }}'
+          fi
+          if [ -z "${ENGINE_VERSION}" ]; then
+            echo "::error::No engine version: set the 'engine_version' workflow input or the ENGINE_SIDECAR_VERSION repo variable."
+            exit 1
+          fi
+          echo "ENGINE_VERSION=${ENGINE_VERSION}" >> $GITHUB_ENV
+          echo "::notice::Provisioning Soulbits Engine ${ENGINE_VERSION}"
+
       - name: Build ${{ matrix.environment }} release APK
         working-directory: android
         run: |
@@ -119,9 +139,22 @@ jobs:
             -PRELEASE_KEY_ALIAS="${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}" \
             -PRELEASE_KEY_PASSWORD="${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}" \
             -PGOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID" \
-            -PAPPLE_SERVICES_ID="${{ vars.APPLE_SERVICES_ID }}"
+            -PAPPLE_SERVICES_ID="${{ vars.APPLE_SERVICES_ID }}" \
+            -PENGINE_SIDECAR_VERSION="${ENGINE_VERSION}" \
+            -PENGINE_SIDECAR_BASE_URL="https://download.soulbits.app/engine" \
+            -PENGINE_SIDECAR_STRICT=true
         env:
           GOOGLE_WEB_CLIENT_ID: ${{ matrix.environment == 'dev' && vars.GOOGLE_WEB_CLIENT_ID_DEV || vars.GOOGLE_WEB_CLIENT_ID_PROD }}
+
+      - name: Assert APK contains the engine sidecar
+        working-directory: android
+        run: |
+          APK_PATH="app/build/outputs/apk/${{ matrix.environment }}/release/app-${{ matrix.environment }}-release.apk"
+          echo "── libengine.so entries in ${APK_PATH} ──"
+          unzip -l "${APK_PATH}" | grep -E 'libengine\.so' || {
+            echo "::error::APK is missing libengine.so — engine provisioning failed (plan 7-10 §2)."
+            exit 1
+          }
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -156,7 +189,12 @@ jobs:
   build-ios:
     name: Build iOS IPA (${{ matrix.environment }})
     needs: test
-    if: ${{ !inputs.skip_build }}
+    # macOS runners bill at 10× the Linux minute rate — run only when
+    # explicitly required (owner ruling 2026-10-13): on release tags
+    # (refs/tags/v*, where create-release + app/latest.json need the IPAs;
+    # skipping would publish dead links) or when a manual dispatch opts in
+    # via the `build_ios` input. Plain dispatch runs are Android-only.
+    if: ${{ !inputs.skip_build && (inputs.build_ios == true || github.event_name == 'push') }}
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -175,6 +213,30 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Resolve engine version
+        run: |
+          ENGINE_VERSION='${{ github.event.inputs.engine_version }}'
+          if [ -z "${ENGINE_VERSION}" ]; then
+            ENGINE_VERSION='${{ vars.ENGINE_SIDECAR_VERSION }}'
+          fi
+          if [ -z "${ENGINE_VERSION}" ]; then
+            echo "::error::No engine version: set the 'engine_version' workflow input or the ENGINE_SIDECAR_VERSION repo variable."
+            exit 1
+          fi
+          echo "ENGINE_VERSION=${ENGINE_VERSION}" >> $GITHUB_ENV
+          echo "::notice::Provisioning Soulbits Engine ${ENGINE_VERSION}"
+
+      - name: Fetch Soulbits Engine xcframework
+        run: |
+          set -euo pipefail
+          mkdir -p ios/Frameworks
+          URL="https://download.soulbits.app/engine/${ENGINE_VERSION}/SoulbitsEngine.xcframework.zip"
+          echo "Downloading ${URL}"
+          curl -fSL "${URL}" -o /tmp/SoulbitsEngine.xcframework.zip
+          unzip -q -o /tmp/SoulbitsEngine.xcframework.zip -d ios/Frameworks
+          echo "── ios/Frameworks ──"
+          ls -la ios/Frameworks
 
       - name: Install CocoaPods
         run: |
@@ -288,3 +350,40 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # app/latest.json — the app release manifest (plan 7-10 §1). SINGLE WRITER:
+      # this job only runs on `refs/tags/v*`, so `workflow_dispatch` dry-runs
+      # never write it. Absolute URLs become a de-facto public contract (owner
+      # sign-off is an explicit gate). The runtime cache-busts with `?t=<now>`.
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_S3_UPLOAD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_S3_UPLOAD_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Write app/latest.json manifest
+        env:
+          RELEASES_BASE_URL: https://download.soulbits.app
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          cat > app-latest.json <<JSON
+          {
+            "version": "${VERSION}",
+            "releasedAt": "${RELEASED_AT}",
+            "notesUrl": "https://github.com/harmony-ai-solutions/harmony-ai-app/releases/tag/${VERSION}",
+            "android": {
+              "dev":  "${RELEASES_BASE_URL}/app/${VERSION}/dev/harmony-ai-app-${VERSION}-android.apk",
+              "prod": "${RELEASES_BASE_URL}/app/${VERSION}/prod/harmony-ai-app-${VERSION}-android.apk"
+            },
+            "ios": {
+              "dev":  "${RELEASES_BASE_URL}/app/${VERSION}/dev/harmony-ai-app-${VERSION}-ios.ipa",
+              "prod": "${RELEASES_BASE_URL}/app/${VERSION}/prod/harmony-ai-app-${VERSION}-ios.ipa"
+            }
+          }
+          JSON
+          cat app-latest.json
+          aws s3 cp app-latest.json "s3://soulbits-releases/app/latest.json"
+          echo "✅ app/latest.json published (https://download.soulbits.app/app/latest.json)"

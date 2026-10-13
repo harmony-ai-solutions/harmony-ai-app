@@ -1,6 +1,6 @@
 /**
- * Database Models for Harmony AI App
- * These interfaces exactly match the Go structs in Harmony Link's database/models.go
+ * Database Models for Soulbits App
+ * These interfaces exactly match the Go structs in Soulbits Engine's database/models.go
  * to ensure schema compatibility for data synchronization.
  */
 
@@ -173,7 +173,7 @@ export interface OpenAICompatibleProviderConfig {
   deleted_at: Date | null;
 }
 
-export interface HarmonySpeechProviderConfig {
+export interface SoulvoiceProviderConfig {
   id: string;
   name: string;
   endpoint: string;
@@ -521,7 +521,7 @@ export type ProviderConfig =
   | OpenAIProviderConfig
   | OpenRouterProviderConfig
   | OpenAICompatibleProviderConfig
-  | HarmonySpeechProviderConfig
+  | SoulvoiceProviderConfig
   | ElevenLabsProviderConfig
   | KindroidProviderConfig
   | KajiwotoProviderConfig

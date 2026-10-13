@@ -1,10 +1,10 @@
 {
-  "welcomeTitle": "Welcome to Harmony AI",
-  "welcomeDescription": "Would you like to connect to Harmony Link to sync your characters, messages, and settings across devices?",
+  "welcomeTitle": "Welcome to Soulbits",
+  "welcomeDescription": "Your characters, messages, and settings live on this device. Pair with a desktop engine to sync them across your devices.",
   "featureSync": "✓ Sync characters across devices",
   "featureBackup": "✓ Backup your data",
   "featureMultiDevice": "✓ Access from multiple devices",
-  "connectButton": "Connect to Harmony Link",
+  "connectButton": "Connect to a desktop engine",
   "maybeLater": "Maybe Later",
   "connectLater": "You can always connect later from Settings",
   "infoTitle": "Information",

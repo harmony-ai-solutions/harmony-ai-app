@@ -63,7 +63,7 @@ export class AudioPlayer {
         id: `audio_${Date.now()}`,
         url: uri,
         title: 'Voice Message',
-        artist: 'Harmony AI',
+        artist: 'Soulbits',
       };
 
       await TrackPlayer.reset();
@@ -96,7 +96,7 @@ export class AudioPlayer {
       id: `audio_${Date.now()}`,
       url: uri,
       title: 'Voice Message',
-      artist: 'Harmony AI',
+      artist: 'Soulbits',
     };
 
     await TrackPlayer.reset();

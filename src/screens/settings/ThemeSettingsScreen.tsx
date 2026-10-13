@@ -45,7 +45,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
         setDarkMode,
         importTheme,
         deleteCustomTheme,
-        syncWithHarmonyLink,
+        syncWithEngine,
         syncStatus,
     } = useAppTheme();
 
@@ -181,7 +181,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
     const handleSyncThemes = async () => {
         try {
-            await syncWithHarmonyLink();
+            await syncWithEngine();
             showAlert(t('success'), t('syncSuccess'));
         } catch (err) {
             showAlert(t('error'), t('syncFailed'));
@@ -342,7 +342,7 @@ export const ThemeSettingsScreen: React.FC<Props> = ({ navigation }) => {
 
                             {syncStatus.syncEnabled && (
                                 <ThemedButton
-                                    label={t('syncWithHarmonyLink')}
+                                    label={t('syncWithEngine')}
                                     icon="cloud-sync"
                                     variant="outline"
                                     onPress={handleSyncThemes}

@@ -1,5 +1,13 @@
 # Harmony AI App — Architecture Report
 
+> **SUPERSEDED (2026-10-12, app-engine-parity).** This report is a dated snapshot
+> (2026-07-30) of the **pre-parity** architecture — it describes the app-side TS
+> SQLite replica, `SyncService`/rows-v1, and the cloud-session path
+> (`CloudSessionService` / conduct proxy), all of which were **deleted** (app 3-4;
+> cloud 6-1/6-2). The app now runs the engine embedded on-device. Current docs:
+> [`docs/HARMONY-LINK-INTEGRATION.md`](../docs/HARMONY-LINK-INTEGRATION.md) and
+> [`docs/engine-contract-gates.md`](../docs/engine-contract-gates.md).
+
 **Version:** 0.0.1
 **Date:** 2026-07-30
 **Framework:** React Native 0.86.0

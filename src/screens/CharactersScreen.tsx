@@ -54,7 +54,7 @@ import {
   updateCharacterProfile,
   getFavoriteCharacterProfileIds,
   toggleCharacterFavorite,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 import CategoryPreferencesService, {
   CharacterCategory,
 } from '../services/CategoryPreferencesService';
@@ -77,23 +77,22 @@ import {
   createEntityModuleMapping,
   getEntityByCharacterProfileId,
   ReservedEntityNameError,
-} from '../database/repositories/entities';
+} from '../database/repositories';
 import {
   deriveParticipantKey,
   deriveScopeFromParticipants,
-} from '../database/repositories/interactions';
+} from '../database/repositories';
 import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import {
   resolvePersonaId,
   createUserPersonaFromCard,
-} from '../database/repositories/userEntities';
+} from '../database/repositories';
 import { filterBlockedCharacterProfiles } from '../utils/blockedContentFilters';
 import * as SocialService from '../services/social/SocialService';
 import { CharacterProfile } from '../database/models';
 import { CharacterCardImportError } from '../services/CharacterCardImportService';
 import { openCharacterChat } from '../services/CharacterChatService';
-import syncService from '../services/SyncService';
 
 function importMessageKey(code?: string): string {
   switch (code) {
@@ -335,32 +334,10 @@ export const CharactersScreen: React.FC = () => {
     }
   }, []);
 
-  // 4-1 / 000044: live favorites refresh. SyncService emits `sync:data-applied`
-  // after an inbound apply commits; when it touched `character_profiles`, reload
-  // the favorite ids so the favorites filter reflects engine-side changes even if
-  // this screen stays focused (the focus reload above only fires on re-focus).
-  // Favorites now ride inside the profile row as `is_favorite`, so the profile
-  // table filter covers them (the old favorites sidecar table is gone).
-  // 3-4: persona-cascade tombstones (`entities`) and avatar churn
-  // (`character_image`) can also go stale while focused — reload the profile
-  // list so freed persona-owned cards and changed avatars surface immediately.
-  useEffect(() => {
-    const handleSyncApplied = (payload: { tables: string[] }) => {
-      if (payload.tables.includes('character_profiles')) {
-        loadFavoritesAndCategories();
-      }
-      if (
-        payload.tables.includes('entities') ||
-        payload.tables.includes('character_image')
-      ) {
-        loadProfiles();
-      }
-    };
-    syncService.on('sync:data-applied', handleSyncApplied);
-    return () => {
-      syncService.off('sync:data-applied', handleSyncApplied);
-    };
-  }, [loadFavoritesAndCategories, loadProfiles]);
+  // 3-4: live refresh of engine-authored profile changes is driven by re-reads
+  // on focus (the legacy `sync:data-applied` listener is gone with the sync
+  // stack). Favorites ride inside the profile row as `is_favorite`.
+
 
   // Reload on focus (handles return from edit screen)
   useFocusEffect(
@@ -717,13 +694,6 @@ export const CharactersScreen: React.FC = () => {
   const closeReviewAndRefresh = async () => {
     setPendingImport(null);
     await loadProfiles();
-
-    // Push the imported profile (+ image) to the engine so it can be used in
-    // chat sessions. Without an explicit sync, the engine never learns about
-    // the imported profile until some unrelated sync happens.
-    syncService.initiateSync().catch(syncErr => {
-      log.warn('Auto-sync after character import failed (non-critical):', syncErr);
-    });
   };
 
   const handleImportError = (err: unknown) => {

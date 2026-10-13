@@ -43,7 +43,7 @@ export interface StubServiceErrorOptions {
  * UI's existing "Buy/Sell Souls" coming-soon placeholder remains the honest
  * surface — this constant only pre-matches the wire shape.
  */
-const CREDITS_UPGRADE_URL = 'https://harmony.ai/souls';
+const CREDITS_UPGRADE_URL = 'https://soulbits.app/souls';
 
 export class StubServiceError extends Error {
   /** HTTP-like status of the stub operation. */

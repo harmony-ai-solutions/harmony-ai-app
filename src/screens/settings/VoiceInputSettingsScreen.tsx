@@ -54,12 +54,12 @@ import {
   getEntity,
   getEntityModuleMapping,
   createOrUpdateEntityModuleMapping,
-} from '../../database/repositories/entities';
+} from '../../database/repositories';
 import {
   getSTTConfig,
   getAllSTTConfigs,
   updateSTTConfig,
-} from '../../database/repositories/modules';
+} from '../../database/repositories';
 import { resolveVoiceInputState } from '../../services/voiceInput/resolveVoiceInputState';
 import { SttTestPanel } from '../../components/config/SttTestPanel';
 import type { Entity, EntityModuleMapping, STTConfig } from '../../database/models';

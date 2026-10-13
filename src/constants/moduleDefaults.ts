@@ -1,3 +1,5 @@
+import { CLOUD_HOSTS } from '../config/cloud';
+
 export const PROVIDER_DEFAULTS: Record<string, Record<string, any>> = {
   openai: {
     name: '',
@@ -79,7 +81,7 @@ export const PROVIDER_DEFAULTS: Record<string, Record<string, any>> = {
     style: 0,
     speaker_boost: 0,
   },
-  harmonyspeech: {
+  soulvoice: {
     name: '',
     endpoint: '',
     api_key: '',
@@ -173,7 +175,9 @@ export const PROVIDER_DEFAULTS: Record<string, Record<string, any>> = {
   },
   soulbitscloud: {
     name: '',
-    base_url: 'https://api.soulbits.app',
+    // Flavor-aware: beta/dev builds resolve to https://beta.api.soulbits.app so
+    // provider rows written on module creation hit the matching environment.
+    base_url: CLOUD_HOSTS.inference,
     api_key: '',
     model: 'qwen-35-9b',
     sampling_preset_name: '',

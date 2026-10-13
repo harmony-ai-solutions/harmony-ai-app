@@ -54,55 +54,55 @@ import {
   createTTSConfig, updateTTSConfig, getTTSConfig, deleteTTSConfig,
   createVisionConfig, updateVisionConfig, getVisionConfig, deleteVisionConfig,
   createImaginationConfig, updateImaginationConfig, getImaginationConfig, deleteImaginationConfig,
-} from '../../database/repositories/modules';
+} from '../../database/repositories';
 import {
   createOpenAIProviderConfig, updateOpenAIProviderConfig, getOpenAIProviderConfig, deleteOpenAIProviderConfig,
-} from '../../database/repositories/providers/OpenAIProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createOpenAICompatibleProviderConfig, updateOpenAICompatibleProviderConfig, getOpenAICompatibleProviderConfig, deleteOpenAICompatibleProviderConfig,
-} from '../../database/repositories/providers/OpenAICompatibleProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createOpenRouterProviderConfig, updateOpenRouterProviderConfig, getOpenRouterProviderConfig, deleteOpenRouterProviderConfig,
-} from '../../database/repositories/providers/OpenRouterProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createElevenLabsProviderConfig, updateElevenLabsProviderConfig, getElevenLabsProviderConfig, deleteElevenLabsProviderConfig,
-} from '../../database/repositories/providers/ElevenLabsProviderConfigRepository';
+} from '../../database/repositories';
 import {
-  createHarmonySpeechProviderConfig, updateHarmonySpeechProviderConfig, getHarmonySpeechProviderConfig, deleteHarmonySpeechProviderConfig,
-} from '../../database/repositories/providers/HarmonySpeechProviderConfigRepository';
+  createSoulvoiceProviderConfig, updateSoulvoiceProviderConfig, getSoulvoiceProviderConfig, deleteSoulvoiceProviderConfig,
+} from '../../database/repositories';
 import {
   createKindroidProviderConfig, updateKindroidProviderConfig, getKindroidProviderConfig, deleteKindroidProviderConfig,
-} from '../../database/repositories/providers/KindroidProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createKajiwotoProviderConfig, updateKajiwotoProviderConfig, getKajiwotoProviderConfig, deleteKajiwotoProviderConfig,
-} from '../../database/repositories/providers/KajiwotoProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createCharacterAIProviderConfig, updateCharacterAIProviderConfig, getCharacterAIProviderConfig, deleteCharacterAIProviderConfig,
-} from '../../database/repositories/providers/CharacterAIProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createLocalAIProviderConfig, updateLocalAIProviderConfig, getLocalAIProviderConfig, deleteLocalAIProviderConfig,
-} from '../../database/repositories/providers/LocalAIProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createMistralProviderConfig, updateMistralProviderConfig, getMistralProviderConfig, deleteMistralProviderConfig,
-} from '../../database/repositories/providers/MistralProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createOllamaProviderConfig, updateOllamaProviderConfig, getOllamaProviderConfig, deleteOllamaProviderConfig,
-} from '../../database/repositories/providers/OllamaProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createComfyUIProviderConfig, updateComfyUIProviderConfig, getComfyUIProviderConfig, deleteComfyUIProviderConfig,
-} from '../../database/repositories/providers/ComfyUIProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createGoogleProviderConfig, updateGoogleProviderConfig, getGoogleProviderConfig, deleteGoogleProviderConfig,
-} from '../../database/repositories/providers/GoogleProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createXAIProviderConfig, updateXAIProviderConfig, getXAIProviderConfig, deleteXAIProviderConfig,
-} from '../../database/repositories/providers/XAIProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createAnthropicProviderConfig, updateAnthropicProviderConfig, getAnthropicProviderConfig, deleteAnthropicProviderConfig,
-} from '../../database/repositories/providers/AnthropicProviderConfigRepository';
+} from '../../database/repositories';
 import {
   createSoulbitsCloudProviderConfig, updateSoulbitsCloudProviderConfig, getSoulbitsCloudProviderConfig, deleteSoulbitsCloudProviderConfig,
-} from '../../database/repositories/providers/SoulbitsCloudProviderConfigRepository';
+} from '../../database/repositories';
 
 type RootStackParamList = {
   ModuleConfigEdit: {
@@ -167,7 +167,7 @@ const PROVIDER_REPOSITORIES: Record<string, {
   openaicompatible: { create: createOpenAICompatibleProviderConfig, update: updateOpenAICompatibleProviderConfig, get: getOpenAICompatibleProviderConfig, delete: deleteOpenAICompatibleProviderConfig },
   openrouter: { create: createOpenRouterProviderConfig, update: updateOpenRouterProviderConfig, get: getOpenRouterProviderConfig, delete: deleteOpenRouterProviderConfig },
   elevenlabs: { create: createElevenLabsProviderConfig, update: updateElevenLabsProviderConfig, get: getElevenLabsProviderConfig, delete: deleteElevenLabsProviderConfig },
-  harmonyspeech: { create: createHarmonySpeechProviderConfig, update: updateHarmonySpeechProviderConfig, get: getHarmonySpeechProviderConfig, delete: deleteHarmonySpeechProviderConfig },
+  soulvoice: { create: createSoulvoiceProviderConfig, update: updateSoulvoiceProviderConfig, get: getSoulvoiceProviderConfig, delete: deleteSoulvoiceProviderConfig },
   kindroid: { create: createKindroidProviderConfig, update: updateKindroidProviderConfig, get: getKindroidProviderConfig, delete: deleteKindroidProviderConfig },
   kajiwoto: { create: createKajiwotoProviderConfig, update: updateKajiwotoProviderConfig, get: getKajiwotoProviderConfig, delete: deleteKajiwotoProviderConfig },
   characterai: { create: createCharacterAIProviderConfig, update: updateCharacterAIProviderConfig, get: getCharacterAIProviderConfig, delete: deleteCharacterAIProviderConfig },

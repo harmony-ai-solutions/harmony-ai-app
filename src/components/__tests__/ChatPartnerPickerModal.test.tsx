@@ -12,7 +12,7 @@
 import React from 'react';
 import {act, cleanup, fireEvent, render, waitFor} from '@testing-library/react-native';
 import {ChatPartnerPickerModal} from '../chat/ChatPartnerPickerModal';
-import type {ChatPickerRow} from '../../database/repositories/characters';
+import type {ChatPickerRow} from '../../services/engine/repositories/characters';
 
 afterEach(cleanup);
 beforeEach(cleanup);
@@ -107,8 +107,8 @@ jest.mock('../../database/base64', () => ({
 
 // Real label helper, mocked async queries — the modal must resolve labels via
 // the SHARED helper (repo ruling: modal and tests use one implementation).
-jest.mock('../../database/repositories/characters', () => {
-  const actual = jest.requireActual('../../database/repositories/characters');
+jest.mock('../../services/engine/repositories/characters', () => {
+  const actual = jest.requireActual('../../services/engine/repositories/characters');
   return {
     ...actual,
     getChatPickerRows: jest.fn(() => Promise.resolve([])),
@@ -121,7 +121,7 @@ import {
   getChatPickerRows,
   hasChatPickerLibrary,
   getCharacterImages,
-} from '../../database/repositories/characters';
+} from '../../services/engine/repositories/characters';
 
 const mockGetChatPickerRows = getChatPickerRows as jest.Mock;
 const mockHasChatPickerLibrary = hasChatPickerLibrary as jest.Mock;

@@ -24,31 +24,31 @@ import {
   getAllEntities,
   setEntityMuted,
   setEntityDisabled,
-} from '../../database/repositories/entities';
-import { resolvePersonaId } from '../../database/repositories/userEntities';
+} from '../../database/repositories';
+import { resolvePersonaId } from '../../database/repositories';
 import {
   getPhoneConversationsPage,
   PhoneConversationPageRow,
   getLastInteractionMessage,
-} from '../../database/repositories/interactions';
+} from '../../database/repositories';
 import {
   getPrimaryImage,
   getCharacterProfile,
   imageToDataURL,
-} from '../../database/repositories/characters';
+} from '../../database/repositories';
 import {
   getChatConversationSettingsBatch,
   setConversationPinned,
   setConversationArchived,
   getReplyMode,
   setReplyMode,
-} from '../../database/repositories/chatConversationSettings';
+} from '../../database/repositories';
 import {
   deleteConversationByParticipantKey,
   markConversationMessagesRead,
   markConversationMessagesUnread,
   getUnreadCountByParticipantKeys,
-} from '../../database/repositories/conversation_messages';
+} from '../../database/repositories';
 import { ProfileAvatar } from '../../components/profile/ProfileAvatar';
 import { ChatConversationMenuModal } from '../../components/chat/ChatConversationMenuModal';
 import { useAppAlert } from '../../contexts/AppAlertContext';

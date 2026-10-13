@@ -2,7 +2,7 @@
  * TtsTestPanel — TTS playback test block (persona-modules 2-3, reworked).
  *
  * Verifies:
- *  - offline state renders "Connect to Harmony Link to test" and never plays
+ *  - offline state renders "Connect to Soulbits Engine to test" and never plays
  *  - no-entity state renders the disabled hint (ModuleConfigEditScreen has no
  *    entity binding) and never synthesizes
  *  - Play INITs a debug session, sends TTS_GENERATE_SPEECH 'binary', awaits

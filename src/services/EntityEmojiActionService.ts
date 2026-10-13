@@ -13,7 +13,7 @@ import {
   ResolvedMessageActions,
   Ekman8Emotion,
 } from '../types/emoji';
-import * as emojiActionRepo from '../database/repositories/emoji_actions';
+import * as emojiActionRepo from '../database/repositories';
 
 const log = createLogger('[EntityEmojiActionService]');
 

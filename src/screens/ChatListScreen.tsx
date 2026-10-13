@@ -27,24 +27,23 @@ import {
   setEntityDisabled,
   getDisabledEntityIds,
   ReservedEntityNameError,
-} from '../database/repositories/entities';
-import { resolvePersonaId } from '../database/repositories/userEntities';
+} from '../database/repositories';
+import { resolvePersonaId } from '../database/repositories';
 import {
   getPhoneConversationsPage,
   PhoneConversationPageRow,
   getLastInteractionMessage,
   deriveScopeFromParticipants,
   deriveParticipantKey,
-} from '../database/repositories/interactions';
+} from '../database/repositories';
 import {
   getPrimaryImage,
   getCharacterProfile,
   imageToDataURL,
   ChatPickerRow,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
-import SyncService from '../services/SyncService';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ChatPreferencesService, { ChatReplyMode } from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
@@ -63,13 +62,13 @@ import {
   setConversationArchived,
   getReplyMode,
   setReplyMode,
-} from '../database/repositories/chatConversationSettings';
+} from '../database/repositories';
 import {
   deleteConversationByParticipantKey,
   markConversationMessagesRead,
   markConversationMessagesUnread,
   getUnreadCountByParticipantKeys,
-} from '../database/repositories/conversation_messages';
+} from '../database/repositories';
 import {
   ChatConversationMenuModal,
   ChatConversationMenuState,
@@ -667,27 +666,14 @@ export const ChatListScreen: React.FC = () => {
         scheduleChatListReload();
       };
 
-      // Sync-apply refresh (3-1 → 4-1): synced-in partner messages never bump
-      // the badge because the increment only lived in the live-WS path;
-      // synced-in `chat_conversation_settings` rows change pin/archive sort.
-      // SyncService emits `sync:data-applied` after an inbound apply; this
-      // handler triggers the same debounced reload (recounts derived unread via
-      // getUnreadCountByParticipantKeys, re-sorts by pin/recency).
-      const handleSyncApplied = (payload: { tables: string[] }) => {
-        if (!shouldReloadAfterSync(payload.tables)) return;
-        scheduleChatListReload();
-      };
-
       EntitySessionService.on('message:received', handleMessageReceived);
       EntitySessionService.on('session:started', handleSessionLifecycle);
       EntitySessionService.on('session:stopped', handleSessionLifecycle);
-      SyncService.on('sync:data-applied', handleSyncApplied);
 
       return () => {
         EntitySessionService.off('message:received', handleMessageReceived);
         EntitySessionService.off('session:started', handleSessionLifecycle);
         EntitySessionService.off('session:stopped', handleSessionLifecycle);
-        SyncService.off('sync:data-applied', handleSyncApplied);
         if (reloadTimerRef.current) {
           clearTimeout(reloadTimerRef.current);
           reloadTimerRef.current = null;
@@ -1060,7 +1046,7 @@ export const ChatListScreen: React.FC = () => {
           <View
             style={styles.notPairedContainer}
             testID="chat-list-not-paired"
-            accessibilityLabel="Not paired with Harmony Link"
+            accessibilityLabel="Not paired with Soulbits Engine"
           >
             <ThemedEmptyState
               icon="connection"

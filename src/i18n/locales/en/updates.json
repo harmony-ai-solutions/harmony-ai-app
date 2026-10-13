@@ -1,0 +1,38 @@
+{
+  "engineBannerTitle": "Soulbits Engine v{{version}} is out",
+  "engineBannerBody": "It arrives with the next app update.",
+  "appBannerTitle": "App v{{version}} available",
+  "appBannerBody": "Update to get the latest features and fixes.",
+  "updateButton": "Update",
+  "dismiss": "Dismiss",
+  "about": {
+    "title": "About",
+    "appVersion": "App version",
+    "engineVersion": "Soulbits Engine",
+    "contractVersion": "Management contract",
+    "unknown": "unknown"
+  },
+  "tooOld": {
+    "title": "Engine update required",
+    "body": "This app needs a newer Soulbits Engine. Update the app to continue.",
+    "sideloadAction": "Download the latest app",
+    "storeAction": "Open the store",
+    "iosPortalAction": "Installation instructions"
+  },
+  "desktopEngine": {
+    "heading": "Download the latest desktop engine",
+    "windows": "Windows",
+    "linux": "Linux"
+  },
+  "selfUpdate": {
+    "title": "Update available",
+    "body": "Download and install app v{{version}} now?",
+    "confirm": "Download & install",
+    "cancel": "Cancel",
+    "downloading": "Downloading…",
+    "installFailed": "Could not install the update: {{message}}",
+    "permissionNeeded": "Allow installing apps from this source, then try again.",
+    "openSettings": "Open settings",
+    "notSupported": "In-app updates are not available on this build."
+  }
+}

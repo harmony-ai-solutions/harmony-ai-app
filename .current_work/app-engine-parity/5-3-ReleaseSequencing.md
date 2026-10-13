@@ -116,6 +116,10 @@ lifecycle-worker deletion lands here **only after 4-3 is verified on devices
       `libengine.so` into `src/main/jniLibs/{arm64-v8a,x86_64}/`, pin
       `-PENGINE_SIDECAR_VERSION`); confirm `extractNativeLibs=true`. (1-2; the real
       artifact URL/CI drop is an owner gate — no release URL published yet.)
+- [ ] **Engine provisioned into the APK (7-10):** bump `ENGINE_SIDECAR_VERSION`
+      (workflow input or repo variable) and verify `aapt`-level engine presence
+      (`unzip -l app-<env>-release.apk | grep libengine.so`) — the release workflow now
+      passes `-PENGINE_SIDECAR_STRICT=true`, so an engine-less APK fails the build.
 - [ ] **Emulator/device smoke** for the sidecar (`adb` commands in
       `docs/Sidecar-Deployment.md` "Verifying a build"): `ENGINE_READY` handshake,
       health watch, SIGTERM shutdown. (1-1)
@@ -167,6 +171,30 @@ worker deletion if it has not run yet.** **[code-side ✓]**
       `POST /v1/lifecycle/notify` returns `{delivered:1}` and the banner is
       received (notification authorization is now requested app-wide — 5-1 add-on).
       (4-3 / 4-4)
+- [ ] **7-12 prerequisites (owner config):** APNs auth key uploaded to the Firebase
+      project (FCM→APNs for iOS) + FCM-v1 service-account secret in
+      `soulbits/{env}/fcm`; real `google-services.json` + `GoogleService-Info.plist`
+      swapped in (and the plist added to Copy Bundle Resources); `pod install` on
+      macOS (RNFB pods). Recipe: `docs/SELF-BUILDER-NOTIFICATIONS.md` covers the
+      same steps for self-builders. (7-12)
+- [ ] **7-12 staging push round-trip (D1=b/D2):** real-device iOS wake → relay →
+      FCM → visible banner; AND Android killed-app → relay push auto-displayed
+      (grant POST_NOTIFICATIONS when prompted via Settings toggle). Verify one
+      banner per message across transports (message_id dedupe). (7-12)
+- [ ] **7-12 Android background drill:** app backgrounded w/ engine service alive →
+      local notification on outreach; mute suppression holds (muted entity → no
+      banner); lock-screen toggle flips preview ↔ generic text. (7-12)
+- [ ] **7-12 desktop drill (D3):** desktop engine + unfocused/minimized Wails
+      window → OS notification on outreach (focused → in-app only, no toast);
+      verify on Windows WebView2 at minimum. (7-12)
+- [ ] **7-12 iOS killed-app drill:** authority desktop authors outreach while the
+      phone is killed → next keepalive wake relays it (sync-applied path) →
+      banner; batch-flag path unchanged. (7-12)
+- [ ] **7-12 topology-A direct drill (custom FCM):** sideload self-build w/ own
+      Firebase project + desktop engine `SE_FCM_*` (same project) → phone w/o
+      session receives engine push; dedupe holds when both engine-push and local
+      surface fire; `notification_transport` pinned `direct` skips wake relay,
+      `off` silences everything. (7-12 §5)
 - [ ] **Low-power / Background App Refresh off:** confirm convergence on the next
       app-open; honest-limits copy matches observed cadence. (4-3)
 - [ ] **Observation week:** sample the honored-keepalive rate over ≥7 days;

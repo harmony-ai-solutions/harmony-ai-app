@@ -109,8 +109,8 @@ function parseCertificateInfo(pem: string): CertificateInfo {
   // This is a simplified version - in production, use a proper X.509 library
   const lines = pem.split('\n');
   
-  let issuer = 'Self-Signed (Harmony Link)';
-  let subject = 'Harmony Link Server';
+  let issuer = 'Self-Signed (Soulbits Engine)';
+  let subject = 'Soulbits Engine Server';
   let validFrom = 'Not parsed';
   let validTo = 'Not parsed';
   let fingerprint = 'Not calculated';

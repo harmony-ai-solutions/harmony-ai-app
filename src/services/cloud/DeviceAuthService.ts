@@ -139,16 +139,19 @@ class DeviceAuthServiceClass {
    *
    * Idempotent — the backend upserts on (user_id, platform, device_id) and
    * keeps the existing authorization state for a known device.
+   *
+   * `opts.pushToken` (task 4-3) attaches the APNs/FCM token so the cloud's
+   * keepalive cron (4-4) and the visible-push relay can reach this device.
    */
-  async registerDevice(): Promise<void> {
+  async registerDevice(opts: { pushToken?: string } = {}): Promise<void> {
     const deviceId = await getDeviceId();
     try {
       const paseto = await AuthService.getToken();
       await buildSoulbitsClient({ paseto }).devices.registerDevice({
         deviceId,
         platform: devicePlatform(),
-        // pushToken is added when the FCM token resolves (future); the
-        // backend accepts an absent token.
+        // Omit when absent — the backend leaves any existing token unchanged.
+        ...(opts.pushToken ? { pushToken: opts.pushToken } : {}),
       });
       log.info('Device registered:', deviceId);
     } catch (e) {

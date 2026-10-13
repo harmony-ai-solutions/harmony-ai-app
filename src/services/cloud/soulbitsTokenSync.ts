@@ -19,8 +19,7 @@
  */
 
 import AuthService from '../auth/AuthService';
-import SyncService from '../SyncService';
-import { updateAllSoulbitsCloudApiKeys } from '../../database/repositories/providers/SoulbitsCloudProviderConfigRepository';
+import { updateAllSoulbitsCloudApiKeys } from '../../database/repositories';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[SoulbitsTokenSync]');
@@ -77,16 +76,13 @@ export async function syncCurrentToken(): Promise<void> {
 }
 
 /**
- * Shared refresh path: bulk-update all soulbitscloud rows with the new token,
- * then push the change to the engine via a background sync.
+ * Shared refresh path: bulk-update all soulbitscloud rows with the new token.
+ * The update is a DIRECT LOCAL WRITE through the management-API client (task
+ * 2-5) — there is no separate engine-sync step (the legacy
+ * `SyncService.initiateSync()` push is gone with the sync stack).
  */
 async function refreshAllAndSync(paseto: string): Promise<void> {
   await updateAllSoulbitsCloudApiKeys(paseto);
-  await SyncService.initiateSync().catch((error: unknown) => {
-    // Sync failure is non-critical — the connect-time auto-sync will pick up
-    // the updated rows on the next connection. Log and move on.
-    log.warn('Failed to sync soulbitscloud token refresh to engine:', error);
-  });
 }
 
 // ── Create-time injection ───────────────────────────────────────────────

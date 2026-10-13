@@ -136,6 +136,11 @@ jest.mock('../../services/EntitySessionService', () => {
   svc.isTranscriptionFailed = jest.fn().mockReturnValue(false);
   svc.registerOpenConversation = jest.fn();
   svc.unregisterOpenConversation = jest.fn();
+  // D-35 pending-message surface (optimistic in-memory outgoing rows).
+  svc.getPendingMessages = jest.fn().mockReturnValue([]);
+  svc.reconcilePendingMessages = jest.fn();
+  svc.clearPendingMessages = jest.fn();
+  svc.patchPendingMessage = jest.fn();
   return {
     __esModule: true,
     EntitySessionService: svc,
@@ -144,17 +149,6 @@ jest.mock('../../services/EntitySessionService', () => {
   };
 });
 
-jest.mock('../../services/SyncService', () => {
-  const instance = {
-    syncAndWait: jest.fn().mockResolvedValue(undefined),
-    initiateSync: jest.fn().mockResolvedValue(undefined),
-  };
-  return {
-    __esModule: true,
-    SyncService: { getInstance: () => instance },
-    __mockSyncServiceInstance: instance,
-  };
-});
 
 jest.mock('../../services/EntityEmojiActionService', () => ({
   __esModule: true,
@@ -178,7 +172,7 @@ jest.mock('../../services/ChatPreferencesService', () => ({
   },
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   getConversationMessagesByParticipantKey: jest.fn().mockResolvedValue([]),
   getRecentConversationMessages: jest.fn().mockResolvedValue([]),
   updateConversationMessage: jest.fn().mockResolvedValue(undefined),
@@ -189,23 +183,23 @@ jest.mock('../../database/repositories/conversation_messages', () => ({
   getUnreadCountByParticipantKeys: jest.fn().mockResolvedValue(new Map()),
 }));
 
-jest.mock('../../database/repositories/characters', () => ({
+jest.mock('../../services/engine/repositories/characters', () => ({
   getPrimaryImage: jest.fn().mockResolvedValue(null),
   getCharacterProfile: jest.fn().mockResolvedValue(null),
   imageToDataURL: jest.fn().mockReturnValue(null),
 }));
 
-jest.mock('../../database/repositories/entities', () => ({
+jest.mock('../../services/engine/repositories/entities', () => ({
   getAllEntities: jest.fn().mockResolvedValue([]),
   deleteEntity: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   deriveParticipantKey: jest.fn().mockReturnValue('pk'),
   deriveScopeFromParticipants: jest.fn().mockReturnValue('one_on_one'),
 }));
 
-jest.mock('../../database/repositories/chatConversationSettings', () => ({
+jest.mock('../../services/engine/repositories/chatConversationSettings', () => ({
   getReplyMode: jest.fn().mockResolvedValue('realistic'),
 }));
 
@@ -284,8 +278,7 @@ jest.mock('../../components/chat/ScenarioGeneratorSheet', () => {
   };
 });
 
-const { getRecentConversationMessages } = require('../../database/repositories/conversation_messages');
-const { syncAndWait } = require('../../services/SyncService').__mockSyncServiceInstance;
+const { getRecentConversationMessages } = require('../../services/engine/repositories/conversation_messages');
 
 const ownEntityId = 'user-entity';
 const partnerEntityId = 'char-entity';
@@ -427,7 +420,7 @@ describe('ChatDetailScreen — terminal session-failure surface (4-3)', () => {
     expect(screen.getByTestId('chat-input-mock')).toBeTruthy();
   });
 
-  it('"Sync now" runs syncAndWait then retries (D35 hint action)', async () => {
+  it('"Sync now" retries the session (D35 hint action)', async () => {
     const screen = await renderScreen();
 
     (EntitySessionService as any).getInteractionSession.mockReturnValue(
@@ -438,13 +431,12 @@ describe('ChatDetailScreen — terminal session-failure surface (4-3)', () => {
 
     await act(async () => {
       fireEvent.press(screen.getByTestId('session-error-sync'));
-      // Drain the press → syncAndWait → handleSessionRetry (whose best-effort
-      // reply-mode read rejects without a DB here) → start chain.
-      await new Promise(res => setTimeout(res, 25));
+      // Drain the press → handleSessionRetry (whose best-effort reply-mode read
+      // rejects without a DB here) → start chain.
+      await new Promise<void>(res => setTimeout(() => res(), 25));
     });
 
-    expect(syncAndWait).toHaveBeenCalledTimes(1);
-    // Mount init (1) + the retry after the sync (2).
+    // Mount init (1) + the retry (2).
     expect(mockStartInteractionSession).toHaveBeenCalledTimes(2);
   });
 

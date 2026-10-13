@@ -204,8 +204,9 @@ jest.mock('../../components/character-card/editor-sections', () => {
 });
 
 // ── Repos / services ───────────────────────────────────────────────────────
-jest.mock('../../database/repositories/characters', () => ({
-  createCharacterProfile: jest.fn().mockResolvedValue(undefined),
+jest.mock('../../services/engine/repositories/characters', () => ({
+  // The engine mints the profile id — the mock returns a profile carrying one.
+  createCharacterProfile: jest.fn().mockResolvedValue({ id: 'profile-1', name: 'Mystery' }),
   createCharacterImage: jest.fn().mockResolvedValue(undefined),
   deleteCharacterImage: jest.fn().mockResolvedValue(undefined),
   deleteCharacterProfileCascade: jest.fn().mockResolvedValue(undefined),
@@ -216,15 +217,20 @@ jest.mock('../../database/repositories/characters', () => ({
   updateCharacterProfile: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../../database/repositories/entities', () => ({
-  createEntity: jest.fn().mockResolvedValue(undefined),
+jest.mock('../../services/engine/repositories/entities', () => ({
+  // Create-then-use-response: the engine mints the id + alias and echoes them.
+  createEntity: jest.fn().mockResolvedValue({
+    id: 'Mystery-20260905123514',
+    alias: 'Mystery',
+    entity_type: 'ai',
+    character_profile_id: 'profile-1',
+  }),
   createEntityModuleMapping: jest.fn().mockResolvedValue(undefined),
   createOrUpdateEntityModuleMapping: jest.fn().mockResolvedValue(undefined),
   getAllEntities: jest.fn().mockResolvedValue([]),
   getEntityByCharacterProfileId: jest.fn().mockResolvedValue(null),
   getEntityModuleMapping: jest.fn().mockResolvedValue(null),
   isProfilePersonaOwned: jest.fn().mockResolvedValue(false),
-  mintEntityId: jest.fn().mockResolvedValue('Mystery-20260905123514'),
   updateEntityFields: jest.fn().mockResolvedValue(undefined),
   // Typed error class mirrored from the real repo module (D33 instanceof).
   ReservedEntityNameError: class ReservedEntityNameError extends Error {
@@ -235,15 +241,15 @@ jest.mock('../../database/repositories/entities', () => ({
   },
 }));
 
-jest.mock('../../database/repositories/userEntities', () => ({
+jest.mock('../../services/engine/repositories/userEntities', () => ({
   getUserPersona: jest.fn().mockResolvedValue(null),
 }));
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   getActiveInteractionsByEntity: jest.fn().mockResolvedValue([]),
 }));
 
-jest.mock('../../database/repositories/modules', () => ({
+jest.mock('../../services/engine/repositories/modules', () => ({
   getAllCognitionConfigs: jest.fn().mockResolvedValue([]),
   getAllTTSConfigs: jest.fn().mockResolvedValue([]),
   getAllSTTConfigs: jest.fn().mockResolvedValue([]),
@@ -254,10 +260,6 @@ jest.mock('../../database/repositories/modules', () => ({
   getAllBackendConfigs: jest.fn().mockResolvedValue([]),
 }));
 
-jest.mock('../../services/SyncService', () => ({
-  __esModule: true,
-  default: { initiateSync: jest.fn().mockResolvedValue(undefined), syncAndWait: jest.fn().mockResolvedValue(undefined) },
-}));
 
 jest.mock('../../services/ChatPreferencesService', () => ({
   __esModule: true,
@@ -276,10 +278,10 @@ jest.mock('../../services/social/SocialService', () => ({
   setCharacterCreator: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { mintEntityId } from '../../database/repositories/entities';
-import { createCharacterProfile } from '../../database/repositories/characters';
+import { createEntity } from '../../services/engine/repositories/entities';
+import { createCharacterProfile } from '../../services/engine/repositories/characters';
 
-const mockMint = mintEntityId as jest.Mock;
+const mockCreateEntity = createEntity as jest.Mock;
 const mockCreateProfile = createCharacterProfile as jest.Mock;
 
 let mockRouteParams: any = {};
@@ -308,7 +310,12 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRouteParams = {};
-    mockMint.mockResolvedValue('Mystery-20260905123514');
+    mockCreateEntity.mockResolvedValue({
+      id: 'Mystery-20260905123514',
+      alias: 'Mystery',
+      entity_type: 'ai',
+      character_profile_id: 'profile-1',
+    });
   });
 
   it('shows the inline error and blocks submit for "deleted" (mint seam never reached)', async () => {
@@ -322,7 +329,7 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
     // D33: inline field error under the partner-name field — never an alert.
     expect(utils.getByTestId('create-ai-name-error')).toBeTruthy();
     expect(utils.getByText('nameReserved')).toBeTruthy();
-    expect(mockMint).not.toHaveBeenCalled();
+    expect(mockCreateEntity).not.toHaveBeenCalled();
     expect(mockCreateProfile).not.toHaveBeenCalled();
     expect(mockGoBack).not.toHaveBeenCalled();
     expect(mockShowAlert).not.toHaveBeenCalled();
@@ -337,7 +344,7 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
     await flush();
 
     expect(utils.getByTestId('create-ai-name-error')).toBeTruthy();
-    expect(mockMint).not.toHaveBeenCalled();
+    expect(mockCreateEntity).not.toHaveBeenCalled();
     expect(mockGoBack).not.toHaveBeenCalled();
     expect(mockShowAlert).not.toHaveBeenCalled();
   });
@@ -345,8 +352,8 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
   it('typed ReservedEntityNameError from the mint seam maps to the SAME inline error (belt-and-braces, never createFailed)', async () => {
     // The live pre-check passes (non-reserved name) but the seam rejects —
     // the residual-race / predicate-drift path.
-    mockMint.mockRejectedValue(
-      new (require('../../database/repositories/entities').ReservedEntityNameError)('Mystery'),
+    mockCreateEntity.mockRejectedValue(
+      new (require('../../services/engine/repositories/entities').ReservedEntityNameError)('Mystery'),
     );
 
     const utils = await renderScreen();
@@ -356,10 +363,12 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
     await fireEvent.press(utils.getByText('save'));
     await flush();
 
-    expect(mockMint).toHaveBeenCalledTimes(1);
+    expect(mockCreateEntity).toHaveBeenCalledTimes(1);
     expect(utils.getByTestId('create-ai-name-error')).toBeTruthy();
     expect(utils.getByText('nameReserved')).toBeTruthy();
-    expect(mockCreateProfile).not.toHaveBeenCalled();
+    // Create-then-use-response: the profile is created first; the entity
+    // rejection rolls it back so no orphan lingers.
+    expect(mockCreateProfile).toHaveBeenCalled();
     expect(mockGoBack).not.toHaveBeenCalled();
     expect(mockShowAlert).not.toHaveBeenCalled();
   });
@@ -372,7 +381,7 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
     await fireEvent.press(utils.getByText('save'));
     await flush();
 
-    expect(mockMint).toHaveBeenCalledWith('Mystery');
+    expect(mockCreateEntity).toHaveBeenCalledWith(expect.objectContaining({ name: 'Mystery' }));
     expect(mockCreateProfile).toHaveBeenCalled();
     expect(utils.queryByTestId('create-ai-name-error')).toBeNull();
     expect(mockGoBack).toHaveBeenCalledTimes(1);

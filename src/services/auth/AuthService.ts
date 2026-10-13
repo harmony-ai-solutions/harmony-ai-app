@@ -5,8 +5,8 @@
  * backend.  Emits `auth:changed` on login/refresh and `auth:expired` when
  * re-authentication is required.
  *
- * CRITICAL: Cloud credentials live in Keychain (service `com.harmonyai.cloud.auth`)
- * and are COMPLETELY independent from the self-hosted HL `harmony_jwt` path
+ * CRITICAL: Cloud credentials live in Keychain (service `com.soulbits.cloud.auth`)
+ * and are COMPLETELY independent from the self-hosted HL `soulbits_jwt` path
  * (AsyncStorage).  This file never touches AsyncStorage or the HL connection path.
  */
 

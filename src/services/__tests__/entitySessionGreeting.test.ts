@@ -13,7 +13,6 @@ import type { InteractionSession } from '../EntitySessionService';
 import { EventEmitter } from 'eventemitter3';
 
 let mockConnectionManager: EventEmitter;
-let mockInitiateSync: jest.Mock;
 
 jest.mock('react-native-device-info', () => ({
   getUniqueId: jest.fn().mockResolvedValue('test-device'),
@@ -58,43 +57,25 @@ jest.mock('../connection/ConnectionManager', () => {
   return { __esModule: true, default: cm };
 });
 
-jest.mock('../SyncService', () => {
-  mockInitiateSync = jest.fn().mockResolvedValue(undefined);
-  return {
-    __esModule: true,
-    SyncService: {
-      getInstance: () => ({ initiateSync: mockInitiateSync }),
-    },
-  };
-});
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   createInteraction: jest.fn().mockResolvedValue(undefined),
   deriveScopeFromParticipants: jest.fn().mockReturnValue('one_on_one'),
   deriveParticipantKey: jest.fn().mockReturnValue('pk'),
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   messageExists: jest.fn(),
   createConversationMessage: jest.fn(),
   updateConversationMessage: jest.fn(),
   getConversationMessage: jest.fn(),
 }));
 
-jest.mock('../../database/connection', () => ({
-  getDatabase: jest.fn(),
-  getSyncDatabase: jest.fn().mockResolvedValue(undefined),
+jest.mock('../../services/engine/repositories/entities', () => ({
+  getEntity: jest.fn().mockResolvedValue(null),
 }));
 
-jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    getStatus: jest.fn().mockReturnValue('idle'),
-    isPurging: jest.fn().mockReturnValue(false),
-  },
-  default: {},
-}));
+
 
 function resetSingleton(): void {
   (EntitySessionService as any).instance = null;
@@ -125,8 +106,6 @@ const initEntitySuccess = (payload: Record<string, unknown>) => ({
 describe('EntitySessionService — has_first_mes surfacing (§1-10)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockInitiateSync.mockClear();
-    mockInitiateSync.mockResolvedValue(undefined);
     resetSingleton();
   });
 
@@ -181,7 +160,7 @@ describe('EntitySessionService — has_first_mes surfacing (§1-10)', () => {
     // ChatDetail splash forever (no message can ever arrive for them).
     expect(session.hasFirstMes).toBe(false);
     // Still no greeting fabrication — no message row was created.
-    const { createConversationMessage } = require('../../database/repositories/conversation_messages');
+    const { createConversationMessage } = require('../../services/engine/repositories/conversation_messages');
     expect(createConversationMessage).not.toHaveBeenCalled();
   });
 
@@ -202,69 +181,47 @@ describe('EntitySessionService — has_first_mes surfacing (§1-10)', () => {
   });
 });
 
-describe('EntitySessionService — live greeting delivery keeps message_type (§1-10)', () => {
+describe('EntitySessionService — D-35 incoming utterance no longer persists', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockInitiateSync.mockClear();
-    mockInitiateSync.mockResolvedValue(undefined);
     resetSingleton();
   });
 
-  it('persists a greeting-flagged ENTITY_UTTERANCE with message_type=greeting — the swiper gate depends on it', async () => {
+  it('emits message:received for an incoming ENTITY_UTTERANCE without writing a message row (engine authors it)', async () => {
     const svc = EntitySessionService.getInstance();
     const session = makeSession();
     (svc as any).sessions.set(session.interactionId, session);
 
+    const received: any[] = [];
+    svc.on('message:received', (interactionId: string, payload: any) => {
+      received.push({ interactionId, payload });
+    });
+
     // Engine DeliverGreeting emits the authored first_mes as a plain
-    // ENTITY_UTTERANCE flagged with message_type="greeting" on the wire.
-    await (svc as any).handleIncomingUtterance(
-      session,
-      session.interactionId,
-      {
+    // ENTITY_UTTERANCE flagged with message_type="greeting" on the wire; the
+    // app no longer mirrors it — the event drives a UI refresh that re-reads
+    // the engine-authored row (which carries message_type=greeting).
+    await (svc as any).handleIncomingMessage(session, session.interactionId, {
+      event_type: 'ENTITY_UTTERANCE',
+      entity_id: 'char-entity',
+      event_id: 'evt-greeting-live',
+      payload: {
         entity_id: 'char-entity',
         message_id: 'msg-engine-greeting',
         type: 'verbal',
         message_type: 'greeting',
         content: 'Hi {{user}}!',
       },
-      'evt-greeting-live',
-    );
+    });
 
     const {
       createConversationMessage,
-    } = require('../../database/repositories/conversation_messages');
-    expect(createConversationMessage).toHaveBeenCalledTimes(1);
-    expect(createConversationMessage.mock.calls[0][0]).toMatchObject({
+    } = require('../../services/engine/repositories/conversation_messages');
+    expect(createConversationMessage).not.toHaveBeenCalled();
+    expect(received).toHaveLength(1);
+    expect(received[0].payload).toMatchObject({
       message_type: 'greeting',
       content: 'Hi {{user}}!',
-      sender_entity_id: 'char-entity',
-    });
-  });
-
-  it('persists a plain ENTITY_UTTERANCE as message_type=text (no greeting flag)', async () => {
-    const svc = EntitySessionService.getInstance();
-    const session = makeSession();
-    (svc as any).sessions.set(session.interactionId, session);
-
-    await (svc as any).handleIncomingUtterance(
-      session,
-      session.interactionId,
-      {
-        entity_id: 'char-entity',
-        message_id: 'msg-engine-text',
-        type: 'verbal',
-        content: 'regular reply',
-      },
-      'evt-text-live',
-    );
-
-    const {
-      createConversationMessage,
-    } = require('../../database/repositories/conversation_messages');
-    expect(createConversationMessage).toHaveBeenCalledTimes(1);
-    expect(createConversationMessage.mock.calls[0][0]).toMatchObject({
-      message_type: 'text',
-      content: 'regular reply',
     });
   });
 });

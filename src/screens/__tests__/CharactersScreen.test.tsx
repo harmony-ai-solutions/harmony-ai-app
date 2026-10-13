@@ -116,7 +116,7 @@ jest.mock('../../utils/colorUtils', () => ({
   hexToRgba: (hex: string, alpha: number) => hex,
 }));
 
-jest.mock('../../database/repositories/characters', () => ({
+jest.mock('../../services/engine/repositories/characters', () => ({
   getAllCharacterProfiles: jest.fn(),
   getCharacterImages: jest.fn(),
   getDistinctTags: jest.fn(),
@@ -149,7 +149,7 @@ jest.mock('../../services/social/SocialService', () => ({
   getBlockedUserIds: jest.fn().mockResolvedValue(new Set()),
 }));
 
-jest.mock('../../database/repositories/entities', () => ({
+jest.mock('../../services/engine/repositories/entities', () => ({
   getAllEntities: jest.fn().mockResolvedValue([]),
   createEntity: jest.fn(),
   createEntityModuleMapping: jest.fn(),
@@ -170,12 +170,12 @@ jest.mock('../../services/CharacterChatService', () => ({
   openCharacterChat: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   deriveParticipantKey: jest.fn().mockReturnValue('pk'),
   deriveScopeFromParticipants: jest.fn().mockReturnValue('one_on_one'),
 }));
 
-jest.mock('../../database/repositories/userEntities', () => ({
+jest.mock('../../services/engine/repositories/userEntities', () => ({
   resolvePersonaId: jest.fn().mockResolvedValue('user'),
   createUserPersonaFromCard: jest.fn(),
 }));
@@ -191,19 +191,6 @@ jest.mock('../../services/ChatPreferencesService', () => ({
 // (4-1 / 3-4) from the mocked SyncService.
 let syncDataAppliedHandler: ((payload: { tables: string[] }) => void) | null = null;
 
-jest.mock('../../services/SyncService', () => ({
-  __esModule: true,
-  default: {
-    syncAndWait: jest.fn().mockResolvedValue(undefined),
-    initiateSync: jest.fn().mockResolvedValue(undefined),
-    // 4-1: CharactersScreen subscribes to sync:data-applied for live favorites.
-    // 3-4: entity / character_image applies also reload the profile list.
-    on: (event: string, handler: any) => {
-      if (event === 'sync:data-applied') syncDataAppliedHandler = handler;
-    },
-    off: jest.fn(),
-  },
-}));
 
 jest.mock('../../services/CharacterCardImportService', () => ({
   CharacterCardImportError: class CharacterCardImportError extends Error {
@@ -343,7 +330,7 @@ jest.mock('../../components/characters/AICardPickerModal', () => {
       React.useEffect(() => {
         if (!visible) return;
         let cancelled = false;
-        require('../../database/repositories/characters')
+        require('../../services/engine/repositories/characters')
           .getAllCharacterProfiles()
           .then((rows: any[]) => {
             if (!cancelled) setProfiles(rows);
@@ -439,7 +426,7 @@ import {
   getAllCharacterProfiles,
   getCharacterImages,
   getDistinctTags,
-} from '../../database/repositories/characters';
+} from '../../services/engine/repositories/characters';
 
 const mockGetAll = getAllCharacterProfiles as jest.Mock;
 const mockGetImages = getCharacterImages as jest.Mock;
@@ -610,7 +597,7 @@ describe('CharactersScreen — create persona from card (decision 4/7/12)', () =
   beforeEach(() => {
     mockNavigate.mockClear();
     const { createUserPersonaFromCard } =
-      require('../../database/repositories/userEntities');
+      require('../../services/engine/repositories/userEntities');
     (createUserPersonaFromCard as jest.Mock).mockResolvedValue({
       id: 'Aria 2',
       name: 'Aria 2',
@@ -622,7 +609,7 @@ describe('CharactersScreen — create persona from card (decision 4/7/12)', () =
 
   it('immediately full-copies the card and opens the persona editor on the new persona', async () => {
     const { createUserPersonaFromCard } =
-      require('../../database/repositories/userEntities');
+      require('../../services/engine/repositories/userEntities');
     const utils = await renderScreen();
 
     // Long-press a card → context menu.
@@ -691,7 +678,7 @@ describe('CharactersScreen — new-partner picker routing (live link)', () => {
 describe('CharactersScreen — reserved-name card flow (D33 / review-5 UX pin)', () => {
   it('a card whose name is reserved shows the dedicated alert — never the generic chatOpenFailed', async () => {
     const { openCharacterChat } = require('../../services/CharacterChatService');
-    const { ReservedEntityNameError } = require('../../database/repositories/entities');
+    const { ReservedEntityNameError } = require('../../services/engine/repositories/entities');
     (openCharacterChat as jest.Mock).mockRejectedValue(
       new ReservedEntityNameError('user'),
     );
@@ -708,71 +695,6 @@ describe('CharactersScreen — reserved-name card flow (D33 / review-5 UX pin)',
   });
 });
 
-describe('CharactersScreen — sync:data-applied reload triggers (4-1 / 3-4)', () => {
-  const { getFavoriteCharacterProfileIds } =
-    require('../../database/repositories/characters');
-
-  beforeEach(() => {
-    syncDataAppliedHandler = null;
-    mockGetAll.mockClear();
-    (getFavoriteCharacterProfileIds as jest.Mock).mockClear();
-  });
-
-  it('reloads the profile list when entities was applied (persona-cascade tombstones)', async () => {
-    await renderScreen();
-    expect(mockGetAll).toHaveBeenCalled(); // initial load
-
-    mockGetAll.mockClear();
-    await act(async () => {
-      syncDataAppliedHandler?.({ tables: ['entities'] });
-    });
-    await flush();
-    // Persona delete over sync touches `entities` — the list must re-read so
-    // freed persona-owned cards and avatar state refresh while focused (3-4).
-    expect(mockGetAll).toHaveBeenCalled();
-  });
-
-  it('reloads the profile list when character_image was applied (avatar churn)', async () => {
-    await renderScreen();
-    mockGetAll.mockClear();
-    await act(async () => {
-      syncDataAppliedHandler?.({ tables: ['character_image'] });
-    });
-    await flush();
-    expect(mockGetAll).toHaveBeenCalled();
-  });
-
-  it('does NOT reload the profile list when only unrelated tables were applied', async () => {
-    await renderScreen();
-    mockGetAll.mockClear();
-    await act(async () => {
-      syncDataAppliedHandler?.({ tables: ['conversation_messages', 'interactions'] });
-    });
-    await flush();
-    expect(mockGetAll).not.toHaveBeenCalled();
-  });
-
-  it('still reloads favorites/categories when character_profiles was applied (4-1)', async () => {
-    await renderScreen();
-    (getFavoriteCharacterProfileIds as jest.Mock).mockClear();
-    await act(async () => {
-      syncDataAppliedHandler?.({ tables: ['character_profiles'] });
-    });
-    await flush();
-    expect(getFavoriteCharacterProfileIds).toHaveBeenCalled();
-  });
-
-  it('fires BOTH reloads when a persona-cascade batch applied (entity + profile + images)', async () => {
-    await renderScreen();
-    mockGetAll.mockClear();
-    (getFavoriteCharacterProfileIds as jest.Mock).mockClear();
-    await act(async () => {
-      syncDataAppliedHandler?.({
-        tables: ['entities', 'character_profiles', 'character_image'],
-      });
-    });
-    await flush();
-    expect(mockGetAll).toHaveBeenCalled();
-    expect(getFavoriteCharacterProfileIds).toHaveBeenCalled();
-  });
-});
+// Task 3-4: the `sync:data-applied` reload triggers are gone with the sync
+// stack (the engine management API is the data layer; the screen re-reads on
+// focus).

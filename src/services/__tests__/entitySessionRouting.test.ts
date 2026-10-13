@@ -20,7 +20,7 @@
  * own-entity + participant set instead of stacking a parallel one.
  */
 import { EntitySessionService } from '../EntitySessionService';
-import { createConversationMessage, messageExists } from '../../database/repositories/conversation_messages';
+import { createConversationMessage, messageExists } from '../../services/engine/repositories/conversation_messages';
 
 import { EventEmitter } from 'eventemitter3';
 
@@ -75,12 +75,8 @@ jest.mock('../ConnectionStateManager', () => ({
   },
 }));
 
-jest.mock('../SyncService', () => ({
-  __esModule: true,
-  SyncService: { getInstance: () => ({ initiateSync: jest.fn().mockResolvedValue(undefined) }) },
-}));
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   createInteraction: jest.fn().mockResolvedValue(undefined),
   getSyncedReplyMode: jest.fn().mockResolvedValue('realistic'),
   deriveScopeFromParticipants: jest.fn()
@@ -94,26 +90,18 @@ jest.mock('../../database/repositories/interactions', () => ({
     }),
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   messageExists: jest.fn(),
   createConversationMessage: jest.fn(),
   updateConversationMessage: jest.fn(),
   getConversationMessage: jest.fn(),
 }));
 
-jest.mock('../../database/repositories/entities', () => ({
+jest.mock('../../services/engine/repositories/entities', () => ({
   getEntity: jest.fn().mockResolvedValue(null),
 }));
 
-jest.mock('../../database/connection', () => ({
-  getDatabase: jest.fn(),
-  getSyncDatabase: jest.fn().mockResolvedValue(undefined),
-}));
 
-jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: { connect: jest.fn(), disconnect: jest.fn(), getStatus: jest.fn().mockReturnValue('idle'), isPurging: jest.fn().mockReturnValue(false) },
-  default: {},
-}));
 
 function resetSingleton(): void {
   (EntitySessionService as any).instance = null;
@@ -159,7 +147,7 @@ describe('EntitySessionService — connection-exact routing (recreation hijack)'
     expect(stale.interactionId).not.toBe('canonical-fresh');
   });
 
-  it('persists the live greeting under the CURRENT canonical interaction id — not the abandoned temp id', async () => {
+  it('emits message:received under the CURRENT canonical interaction id — not the abandoned temp id', async () => {
     const svc = EntitySessionService.getInstance();
 
     const stale = await svc.startInteractionSession('user', ['Isabella', 'user']);
@@ -177,6 +165,9 @@ describe('EntitySessionService — connection-exact routing (recreation hijack)'
       fresh.connections.get('user')!.connectionId,
     );
     expect(fresh.interactionId).toBe('canonical-fresh');
+
+    const received = jest.fn();
+    svc.on('message:received', received);
 
     // Live authored greeting arrives on the fresh chat's PARTNER socket.
     await (svc as any).handleEntityEvent(
@@ -196,18 +187,23 @@ describe('EntitySessionService — connection-exact routing (recreation hijack)'
       fresh.connections.get('Isabella 2')!.connectionId,
     );
 
-    expect(createConversationMessage).toHaveBeenCalledTimes(1);
-    const stored = (createConversationMessage as jest.Mock).mock.calls[0][0];
-    // The row the user-perspective view reads must be under the canonical id.
-    expect(stored.interaction_id).toBe('canonical-fresh');
-    expect(stored.message_type).toBe('greeting');
-    expect(stored.sender_entity_id).toBe('Isabella 2');
+    // D-35: no local persist — the event drives a UI refresh; it must be
+    // routed under the CURRENT canonical interaction id.
+    expect(received).toHaveBeenCalledTimes(1);
+    expect(received.mock.calls[0][0]).toBe('canonical-fresh');
+    expect(received.mock.calls[0][1]).toMatchObject({
+      message_type: 'greeting',
+      content: 'Welcome home hon~',
+    });
   });
 
   it('keeps the legacy first-match fallback for events without a connection id', async () => {
     const svc = EntitySessionService.getInstance();
 
     const only = await svc.startInteractionSession('user', ['Marcella', 'user']);
+
+    const received = jest.fn();
+    svc.on('message:received', received);
 
     await (svc as any).handleEntityEvent('Marcella', {
       event_type: 'ENTITY_UTTERANCE',
@@ -221,14 +217,17 @@ describe('EntitySessionService — connection-exact routing (recreation hijack)'
       },
     });
 
-    expect(createConversationMessage).toHaveBeenCalledTimes(1);
-    expect((createConversationMessage as jest.Mock).mock.calls[0][0].interaction_id).toBe(only.interactionId);
+    expect(received).toHaveBeenCalledTimes(1);
+    expect(received.mock.calls[0][0]).toBe(only.interactionId);
   });
 
   it('drops events whose delivering connection belongs to no live session (stale socket)', async () => {
     const svc = EntitySessionService.getInstance();
 
     await svc.startInteractionSession('user', ['Iris', 'user']);
+
+    const received = jest.fn();
+    svc.on('message:received', received);
 
     await (svc as any).handleEntityEvent(
       'user',
@@ -241,7 +240,7 @@ describe('EntitySessionService — connection-exact routing (recreation hijack)'
       'entity-user-ghost-key',
     );
 
-    expect(createConversationMessage).not.toHaveBeenCalled();
+    expect(received).not.toHaveBeenCalled();
   });
 });
 

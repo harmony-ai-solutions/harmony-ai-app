@@ -27,26 +27,15 @@ declare module 'react-native-config' {
     GOOGLE_WEB_CLIENT_ID?: string;
     APPLE_SERVICES_ID?: string;
     /**
-     * Optional WSS URL for E2E testing (build-time env var).
-     *
-     * When set via .env.e2e (see e2e/.env.e2e), ConnectionStateManager
-     * pre-seeds AsyncStorage so the app boots already paired against the
-     * harmony-link Docker container. Unset in production builds.
-     *
-     * Example: HARMONY_LINK_WSS_URL=wss://10.0.2.2:28443
-     * (10.0.2.2 is the Android emulator's alias for the host loopback.)
+     * E2E-only engine-peer override (plan 7-13): the container engine's LAN
+     * endpoints (`host:port`), declared as BuildConfig fields ONLY for E2E
+     * builds (`gradle -PE2E_DEBUG_SIGNING=true -PE2E_ENGINE_PEER_WS_URL=...
+     * -PE2E_ENGINE_PEER_WSS_URL=...`; see `android/app/build.gradle`). They are
+     * `undefined` in every normal dev/prod build, which leaves the override in
+     * `src/services/engine/e2eEngineOverride.ts` inert.
      */
-    HARMONY_LINK_WSS_URL?: string;
-    /**
-     * Optional plain-WS URL for E2E testing (build-time env var).
-     *
-     * The harmony-link handshake protocol runs over plain WS first
-     * (different port from WSS), then upgrades. This URL points at the
-     * plain-WS port. Required when HARMONY_LINK_WSS_URL is set.
-     *
-     * Example: HARMONY_LINK_WS_URL=ws://10.0.2.2:28080
-     */
-    HARMONY_LINK_WS_URL?: string;
+    E2E_ENGINE_PEER_WS_URL?: string;
+    E2E_ENGINE_PEER_WSS_URL?: string;
   }
 
   const Config: NativeConfig;

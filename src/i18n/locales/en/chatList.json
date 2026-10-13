@@ -4,10 +4,10 @@
   "editMyIdentity": "Edit my identity settings",
   "editIdentityAction": "Edit Identity Settings",
   "notConnected": "Not connected",
-  "notConnectedHint": "Connect to Harmony Link or cloud to load your entities.",
+  "notConnectedHint": "Connect to Soulbits Engine or cloud to load your entities.",
   "connectNow": "Connect Now",
   "noConversations": "No conversations yet",
-  "noConversationsHint": "Sync with Harmony Link to load your entities",
+  "noConversationsHint": "Sync with Soulbits Engine to load your entities",
   "noMessagesYet": "No messages yet",
   "you": "You",
   "aboutTitle": "About Chats & Roleplay",
@@ -68,7 +68,7 @@
   "deleteConversationBody": "Delete your chat history with {{name}}? Only this persona's conversation is removed — {{name}} is not deleted and will not forget you. To delete the complete entity, open the chat and use the entity menu → Delete entity.",
   "disableConversationBody": "Disable {{name}}? You will no longer send or receive messages with this AI. You can enable it anytime.",
   "bubblePermissionTitle": "Display over other apps",
-  "bubblePermissionBody": "Allow Harmony AI Chat to display over other apps so the chat bubble can float above them.",
+  "bubblePermissionBody": "Allow Soulbits to display over other apps so the chat bubble can float above them.",
   "bubblePermissionDenied": "Overlay permission is required to show the chat bubble.",
   "disabledConversations": "Disabled AIs"
 }

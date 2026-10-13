@@ -1,0 +1,34 @@
+{
+  "title": "Engine logs",
+  "searchPlaceholder": "Search messages…",
+  "levelAll": "All levels",
+  "componentAll": "All components",
+  "entityAll": "All entities",
+  "promptsOnly": "Prompts only",
+  "filterLevel": "level",
+  "filterComponent": "component",
+  "filterEntity": "entity",
+  "filterSearch": "search",
+  "filterPromptType": "prompt type",
+  "filterPromptsOnly": "prompts only",
+  "filterNone": "no filter",
+  "follow": "Follow",
+  "pause": "Pause",
+  "share": "Share diagnostics",
+  "entryCount": "{{count}} entries",
+  "loadOlder": "Load older",
+  "loadFailed": "Could not load logs: {{message}}",
+  "empty": "No log entries yet.",
+  "status": {
+    "idle": "Idle",
+    "connecting": "Connecting…",
+    "open": "Live",
+    "reconnecting": "Reconnecting…",
+    "stopped": "Stopped"
+  },
+  "advanced": {
+    "title": "Verbosity",
+    "current": "Current: {{level}} · prompts: {{verbosity}}",
+    "warning": "Verbose levels increase log volume and battery use, and can capture conversation text (prompt entries)."
+  }
+}

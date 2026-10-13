@@ -70,20 +70,20 @@ jest.mock('../../profile/ProfileAvatar', () => {
     React.createElement(View, null, React.createElement(Text, null, `avatar:${name}`)) };
 });
 
-jest.mock('../../../database/repositories/entities', () => ({
+jest.mock('../../../services/engine/repositories/entities', () => ({
   getAllEntities: jest.fn(),
 }));
-jest.mock('../../../database/repositories/interactions', () => ({
+jest.mock('../../../services/engine/repositories/interactions', () => ({
   getRecentPhoneInteractions: jest.fn(),
 }));
-jest.mock('../../../database/repositories/characters', () => ({
+jest.mock('../../../services/engine/repositories/characters', () => ({
   getCharacterProfile: jest.fn(),
   getPrimaryImage: jest.fn().mockResolvedValue(null),
   imageToDataURL: jest.fn().mockReturnValue(null),
 }));
 
-import { getAllEntities } from '../../../database/repositories/entities';
-import { getRecentPhoneInteractions } from '../../../database/repositories/interactions';
+import { getAllEntities } from '../../../services/engine/repositories/entities';
+import { getRecentPhoneInteractions } from '../../../services/engine/repositories/interactions';
 
 const mockGetAllEntities = getAllEntities as jest.Mock;
 const mockGetInteractions = getRecentPhoneInteractions as jest.Mock;

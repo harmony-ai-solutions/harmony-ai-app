@@ -6,6 +6,10 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
+import ai.soulbits.chat.engine.EngineSidecarPackage
+import ai.soulbits.chat.backup.BackupPackage
+import ai.soulbits.chat.updates.ApkInstallPackage
+import ai.soulbits.chat.notifications.NotificationsPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -18,6 +22,14 @@ class MainApplication : Application(), ReactApplication {
           // add(MyReactNativePackage())
           // Floating chat bubble (display over other apps)
           add(ChatBubblePackage())
+          // Engine sidecar process manager (task 1-2)
+          add(EngineSidecarPackage())
+          // Backup & restore (plan 2-6): SAF picker, WorkManager, share, OAuth.
+          add(BackupPackage())
+          // Android in-app APK self-update (plan 7-10 §8; sideload channel).
+          add(ApkInstallPackage())
+          // Local outreach notifications (plan 7-12 §4b): channel + posting.
+          add(NotificationsPackage())
         },
       // Explicitly gate dev support on OUR variant's BuildConfig. The RN 0.86
       // overload defaults this to ReactBuildConfig.DEBUG (the react-android

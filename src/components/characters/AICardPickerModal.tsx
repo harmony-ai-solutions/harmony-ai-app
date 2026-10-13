@@ -44,7 +44,7 @@ import { ThemedText } from '../themed/ThemedText';
 import { ThemedEmptyState } from '../themed/ThemedEmptyState';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
-import { getAllCharacterProfiles, getCharacterImages } from '../../database/repositories/characters';
+import { getAllCharacterProfiles, getCharacterImages } from '../../database/repositories';
 import { createDataURL } from '../../database/base64';
 import type { CharacterProfile } from '../../database/models';
 import { createLogger } from '../../utils/logger';

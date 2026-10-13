@@ -55,15 +55,15 @@ import {
   getSiblingCharacterProfiles,
   getCharacterStats,
   CharacterStats,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 import {
   duplicateAIPartner,
   getEntityByCharacterProfileId,
   setEntityDisabled,
   setEntityMuted,
   ReservedEntityNameError,
-} from '../database/repositories/entities';
-import { createUserPersonaFromCard } from '../database/repositories/userEntities';
+} from '../database/repositories';
+import { createUserPersonaFromCard } from '../database/repositories';
 import * as SocialService from '../services/social/SocialService';
 import type { StubCharacterCreator } from '../services/social/SocialService';
 import { openCharacterChat } from '../services/CharacterChatService';

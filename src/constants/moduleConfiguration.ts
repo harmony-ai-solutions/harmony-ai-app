@@ -74,7 +74,7 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     { id: 'openrouter', name: 'OpenRouter', icon: 'router-wireless' },
     { id: 'soulbitscloud', name: 'Soulbits Cloud', icon: 'cloud' },
     { id: 'elevenlabs', name: 'ElevenLabs', icon: 'microphone' },
-    { id: 'harmonyspeech', name: 'HarmonySpeech', icon: 'volume-high' },
+    { id: 'soulvoice', name: 'Soulvoice', icon: 'volume-high' },
   ], hasGeneralSettings: false, moduleSpecificFields: [
     { key: 'output_type', label: 'Output Type', type: 'text', placeholder: 'e.g. mp3, wav' },
     { key: 'words_to_replace', label: 'Words to Replace', type: 'text', placeholder: 'Comma-separated words' },

@@ -6,7 +6,7 @@
  * (`{start_byte, bytes_count}`) → the client answers each with
  * `STT_FETCH_MICROPHONE_RESULT` (`AudioChunk` = base64 PCM + format) → results
  * stream back as `STT_OUTPUT_TEXT`. This module is track-generic (audio v1,
- * video later via Harmony Link) and session-source agnostic (debug for the
+ * video later via Soulbits Engine) and session-source agnostic (debug for the
  * module test panel, a regular call session for future voice/video calls).
  */
 

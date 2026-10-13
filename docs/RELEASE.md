@@ -5,10 +5,10 @@
 Releases are managed via GitHub Actions. When a tag matching `v*` is pushed, the
 `Build Release` workflow runs a multi-stage pipeline:
 
-1. **Schema parity check** — ensures the RN schema matches the Harmony Link Go schema
-2. **Test gate** — runs all tests (type-check, lint, unit, integration, migration)
-3. **Build artifacts** — Android APK (dev + prod) and iOS IPA (dev + prod)
-4. **Create GitHub Release** — with download links for all artifacts
+1. **Test gate** — runs type-check, lint and unit tests (including the
+   engine-contract conformance + loopback-smoke gates)
+2. **Build artifacts** — Android APK (dev + prod) and iOS IPA (dev + prod)
+3. **Create GitHub Release** — with download links for all artifacts
 
 If any stage fails, the pipeline halts and no artifacts are produced.
 
@@ -20,7 +20,9 @@ Ensure `main` is green:
 
 - All CI checks pass on the latest `main` commit
 - Nightly E2E runs have been green for the past 3+ days (recommended)
-- Schema parity check passes (run manually or wait for PR merge)
+- The engine-contract check is green (the `contract-drift` job, when
+  `HARMONY_LINK_REPO_PAT` is configured — see
+  [`engine-contract-gates.md`](engine-contract-gates.md))
 
 ### 2. Tag the release
 
@@ -35,8 +37,7 @@ git push origin v1.2.3
 
 1. Go to [Actions → Build Release](https://github.com/harmony-ai-solutions/harmony-ai-app/actions/workflows/build-release.yml)
 2. Watch the pipeline progress:
-   - ✅ `schema-parity` — runs first (fast, ~2 min)
-   - ✅ `test` — runs second (unit + integration + migration, ~10-15 min)
+   - ✅ `test` — runs first (type-check + lint + unit, ~10-15 min)
    - ✅ `build-android` — runs in parallel for dev and prod (~10 min each)
    - ✅ `build-ios` — runs in parallel for dev and prod (~15 min each)
    - ✅ `create-release` — creates the GitHub Release with download links
@@ -57,8 +58,7 @@ To verify the release workflow without building artifacts:
 4. Click **Run workflow**
 
 The pipeline will:
-- ✅ Run schema parity check
-- ✅ Run all tests (type-check, lint, unit, integration, migration)
+- ✅ Run all tests (type-check, lint, unit — incl. engine-contract gates)
 - ❌ Skip APK and IPA builds
 - ❌ Skip GitHub Release creation
 
@@ -70,13 +70,12 @@ This is useful for:
 ## Dependency Chain
 
 ```
-schema-parity (schema diff check)
-  └── test (type-check + lint + unit + integration + migration)
-       ├── build-android (dev)
-       ├── build-android (prod)
-       ├── build-ios (dev)
-       ├── build-ios (prod)
-       └── create-release (GitHub Release)
+test (type-check + lint + unit, incl. engine-contract gates)
+  ├── build-android (dev)
+  ├── build-android (prod)
+  ├── build-ios (dev)
+  ├── build-ios (prod)
+  └── create-release (GitHub Release)
 ```
 
 All build jobs run in parallel after `test` passes. The release is created after
@@ -100,7 +99,7 @@ The following secrets must be configured in the repository settings:
 
 | Secret | Purpose |
 |--------|---------|
-| `HARMONY_LINK_REPO_PAT` | Access to `harmony-link-private` for schema parity |
+| `HARMONY_LINK_REPO_PAT` | Access to `harmony-link-private` for the engine-contract drift check |
 | `ANDROID_RELEASE_KEYSTORE_BASE64` | Release keystore (base64-encoded) |
 | `ANDROID_RELEASE_KEYSTORE_PASSWORD` | Keystore password |
 | `ANDROID_RELEASE_KEY_ALIAS` | Key alias |

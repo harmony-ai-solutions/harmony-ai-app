@@ -69,13 +69,13 @@ describe('ProfileExtrasService', () => {
   });
 
   it('tolerates malformed stored JSON (defensive read → defaults)', async () => {
-    await AsyncStorage.setItem('@harmony_profile/user-1', 'not-json{');
+    await AsyncStorage.setItem('@soulbits_profile/user-1', 'not-json{');
     expect(await ProfileExtrasService.getExtras('user-1')).toEqual(EMPTY);
   });
 
   it('defaults missing/malformed fields on a partial stored object', async () => {
     await AsyncStorage.setItem(
-      '@harmony_profile/user-1',
+      '@soulbits_profile/user-1',
       JSON.stringify({ username: 'kept', bio: 42, avatarDataUrl: null }),
     );
     expect(await ProfileExtrasService.getExtras('user-1')).toEqual({

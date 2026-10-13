@@ -3,21 +3,20 @@ import DeviceInfo from 'react-native-device-info';
 import { Platform, AppState } from 'react-native';
 import ConnectionManager from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
+import { getEngineConnection } from './engine/EngineService';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
-import { messageExists, createConversationMessage, updateConversationMessage, getConversationMessage } from '../database/repositories/conversation_messages';
+import { updateConversationMessage } from '../database/repositories';
 import {
-  createInteraction,
   deriveScopeFromParticipants,
   deriveParticipantKey,
-} from '../database/repositories/interactions';
-import { getEntity } from '../database/repositories/entities';
-import { getReplyMode as getSyncedReplyMode } from '../database/repositories/chatConversationSettings';
+} from '../database/repositories';
+import { getEntity } from '../database/repositories';
+import { getReplyMode as getSyncedReplyMode } from '../database/repositories';
 import { Interaction } from '../database/models';
-import { SyncService } from './SyncService';
-import AudioPlayer, { AudioPlayer as AudioPlayerClass } from './AudioPlayer';
-import { cloudSessionService } from './cloud/CloudSessionService';
+import AudioPlayer from './AudioPlayer';
 import { v7 as uuidv7 } from 'uuid';
+import { pushTokenStore } from './notifications/PushTokenStore';
 
 const log = createLogger('[EntitySessionService]');
 
@@ -30,9 +29,15 @@ const log = createLogger('[EntitySessionService]');
  */
 const MAX_INIT_ENTITY_RETRIES = 2;
 
+/**
+ * D-35 reconciliation timing window: a pending row is only reconciled against
+ * an engine row authored at/after (pending.created_at - this skew). Absorbs
+ * client/engine clock differences without matching stale identical texts.
+ */
+const RECONCILE_SKEW_MS = 10_000;
+
 /** Engine ingestion-rejection code for an entity the engine hasn't ingested yet. */
 const INIT_ENTITY_INGESTION_ERROR = 'entity_not_defined';
-
 /**
  * Engine rejection code for a DISABLED AI entity (Q8). The engine refuses to
  * INIT_ENTITY for `is_disabled && entity_type='ai'` entities (A3 — user
@@ -97,13 +102,36 @@ export function classifyInitEntityError(
 
 /**
  * 4-3 (D35): true when a surfaced `session:error` string denotes the
- * engine ingestion-rejection class ("the AI couldn't be found on Harmony
- * Link"). Consumers (ChatDetailScreen) use this to offer the sync-now hint.
+ * engine ingestion-rejection class ("the AI couldn't be found on Soulbits
+ * Engine"). Consumers (ChatDetailScreen) use this to offer the sync-now hint.
  * The service surfaces the structured code as the error string when available
  * (see handleInitEntityResponse), so no free-text matching happens downstream.
  */
 export function isIngestionSessionError(error: string): boolean {
   return error === INIT_ENTITY_INGESTION_ERROR;
+}
+
+/**
+ * 7-12 (§5) — true when a session's WS targets a DIRECT engine (the embedded
+ * loopback engine or a LAN-paired engine), as opposed to the cloud conduct
+ * proxy. Only these sessions may carry `push_token` in INIT_ENTITY: the token
+ * goes ONLY to the engine the app holds a direct session with (fence).
+ *
+ * The discriminator is the connection's `mode` (`'cloud'` for the conduct-proxy
+ * path, set by this file) with a URL-prefix belt against
+ * `CLOUD_HOSTS.conductProxyWs` for defence in depth.
+ */
+export function isEngineTargetedSession(
+  connection: { mode?: string | null; url?: string | null } | null | undefined,
+): boolean {
+  if (!connection) return false;
+  if (connection.mode === 'cloud') return false;
+  const url = connection.url ?? '';
+  if (url) {
+    const proxy = CLOUD_HOSTS.conductProxyWs.replace(/\/+$/, '');
+    if (url.startsWith(proxy)) return false;
+  }
+  return true;
 }
 
 // ============================================================================
@@ -208,18 +236,63 @@ export interface EntitySession {
   connectedAt: number;
   lastActivity: number;
   status: 'connecting' | 'active' | 'disconnected';
-  resumed?: boolean;              // true if this session was resumed from a suspended state on Harmony Link
+  resumed?: boolean;              // true if this session was resumed from a suspended state on Soulbits Engine
 }
 
 // ============================================================================
 // EntitySessionEvents — keyed by interactionId ONLY (no partnerEntityId)
 // ============================================================================
 
+/**
+ * D-35 — an OPTIMISTIC, IN-MEMORY outgoing message row.
+ *
+ * The engine authors `conversation_messages` (there is no app-facing create
+ * route); the app no longer mirrors messages into SQLite. When the user sends,
+ * the app (a) fires the WS ENTITY_UTTERANCE and (b) registers one of these in
+ * memory so the bubble renders immediately. The engine does NOT echo the user's
+ * own utterance back over the WS (verified against the engine's cognition
+ * handler: it persists the message under the interaction and only emits the
+ * AI's response). The authoritative row therefore arrives on the next engine
+ * read (`getRecentConversationMessages`); {@link EntitySessionService.reconcilePendingMessages}
+ * drops a pending row once its engine-authored counterpart appears (matched by
+ * message type + content + sender + a timing window, since the engine mints its
+ * own id and ignores the app's).
+ *
+ * `id` is an app-local `pending-…` key — NEVER an engine-shaped id and never
+ * persisted (the "no app-authored ids" ruling).
+ */
+export interface PendingMessage {
+  /** App-local optimistic key (`pending-…`); not an engine id. */
+  id: string;
+  interactionId: string;
+  /** Own-entity perspective (matches the engine row's entity_id). */
+  entity_id: string;
+  /** Who sent it — ownEntityId (the app is single-perspective). */
+  sender_entity_id: string;
+  content: string;
+  message_type: 'text' | 'audio' | 'image' | 'combined';
+  audio_data: string | null;
+  audio_mime_type: string | null;
+  audio_duration: number | null;
+  image_data: string | null;
+  image_mime_type: string | null;
+  reply_to_message_id: string | null;
+  created_at: Date;
+  /** STT state for audio rows (the app drives the STT round-trip). */
+  transcriptionState?: 'pending' | 'failed';
+}
+
 interface EntitySessionEvents {
   'session:started': (interactionId: string, session: InteractionSession) => void;
   'session:stopped': (interactionId: string) => void;
   'session:error': (interactionId: string, error: string) => void;
   'message:received': (interactionId: string, message: any) => void;
+  /**
+   * D-35 — the in-memory pending set for an interaction changed (a row was
+   * added, patched, reconciled away, or cleared). Carries the FULL current set
+   * so consumers can replace their merged view wholesale.
+   */
+  'message:pending': (interactionId: string, pending: PendingMessage[]) => void;
   'message:edited': (interactionId: string, payload: { message_id: string; content: string; is_edited: boolean; edit_of_message_id?: string }) => void;
   'typing:indicator': (interactionId: string, entityId: string, isTyping: boolean) => void;
   'recording:indicator': (interactionId: string, entityId: string, isRecording: boolean) => void;
@@ -254,6 +327,15 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   // messages for these do NOT bump the unread counter.
   private openConversationKeys: Set<string> = new Set();
 
+  /**
+   * D-35 — OPTIMISTIC in-memory outgoing rows, keyed by interactionId. The
+   * engine authors conversation_messages; these fill the latency gap between a
+   * send and the next engine read and are reconciled away by
+   * {@link reconcilePendingMessages}. Never persisted.
+   */
+  private pendingMessages: Map<string, PendingMessage[]> = new Map();
+  private pendingCounter = 0;
+
   private constructor() {
     super();
     this.connectionManager = ConnectionManager;
@@ -268,6 +350,26 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   /** Returns participant IDs excluding the own entity — the "chat partners" */
   private getOtherParticipantIds(session: InteractionSession): string[] {
     return session.participantIds.filter(id => id !== session.ownEntityId);
+  }
+
+  /**
+   * Resolve the WS endpoint for a self-hosted (local) session. Prefers the
+   * embedded engine's loopback endpoint (task 3-4 — the engine is the peer) and
+   * falls back to the persisted ConnectionStateManager URL (E2E / legacy).
+   */
+  private async resolveLocalWs(): Promise<{ url: string; mode: string }> {
+    const engine = getEngineConnection();
+    if (engine) {
+      return {
+        url: engine.wssBaseUrl || engine.wsBaseUrl,
+        mode: engine.wssBaseUrl ? 'insecure-ssl' : 'unencrypted',
+      };
+    }
+    const mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
+    const url = mode === 'unencrypted'
+      ? (await ConnectionStateManager.getWSUrl()) ?? ''
+      : (await ConnectionStateManager.getWSSUrl()) ?? '';
+    return { url, mode };
   }
 
   /** Returns connection IDs for all OTHER participants with 'active' status (excluding own entity) */
@@ -331,11 +433,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     // normal state afterwards.
     this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'background') {
-        if (cloudSessionService.isPurging()) {
-          log.info('App going to background during cloud data purge — keeping entity sessions connected (purge owns the WS lifecycle)');
-          return;
-        }
-        log.info('App going to background, closing entity sessions (cloud session stays ready)');
+        log.info('App going to background, closing entity sessions');
         this.closeAllSessions();
       }
     });
@@ -421,10 +519,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         wsUrl = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`;
         mode = 'cloud';
       } else {
-        mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
-        wsUrl = mode === 'unencrypted'
-          ? (await ConnectionStateManager.getWSUrl()) ?? ''
-          : (await ConnectionStateManager.getWSSUrl()) ?? '';
+        const local = await this.resolveLocalWs();
+        mode = local.mode;
+        wsUrl = local.url;
       }
 
       if (!wsUrl) {
@@ -469,6 +566,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
 
     const deviceId = await DeviceInfo.getUniqueId();
+    // 7-12 (§5): the push token rides INIT_ENTITY for DIRECT engine sessions
+    // only (the engine registers it in device_push_tokens). A cloud-proxy
+    // session must never receive it.
+    const pushToken = this.pushTokenForConnection(connection.connectionId);
 
     const event = {
       event_id: this.generateEventId(),
@@ -483,10 +584,22 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         capabilities: ['chat'],
         tts_output_type: 'binary',
         reply_mode: session.replyMode, // A6: honor the per-conversation preference on reconnect too (was hardcoded 'realistic')
+        ...(pushToken ? { push_token: pushToken } : {}),
       }
     };
 
     await this.connectionManager.sendEvent(connection.connectionId, event);
+  }
+
+  /**
+   * 7-12 (§5) — the push token to include in INIT_ENTITY for a connection, or
+   * null when the connection targets the cloud conduct proxy (the token goes only
+   * to a directly-connected engine). Reads the shared {@link pushTokenStore}.
+   */
+  private pushTokenForConnection(connectionId: string): string | null {
+    const info = this.connectionManager.getConnection?.(connectionId) ?? null;
+    if (!isEngineTargetedSession(info)) return null;
+    return pushTokenStore.getPushToken();
   }
 
   // ---------------------------------------------------------------------------
@@ -631,15 +744,19 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       url = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`;
       mode = 'cloud';
     } else {
-      mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
-      url = mode === 'unencrypted'
-        ? (await ConnectionStateManager.getWSUrl()) ?? ''
-        : (await ConnectionStateManager.getWSSUrl()) ?? '';
+      const local = await this.resolveLocalWs();
+      mode = local.mode;
+      url = local.url;
     }
 
     if (!url) {
       throw new Error('No connection URL available');
     }
+
+    // 7-12 (§5): the push token rides INIT_ENTITY for DIRECT engine sessions
+    // only (the engine registers it in device_push_tokens). A cloud-proxy
+    // session must never receive it — computed once for the whole session.
+    const pushToken = isEngineTargetedSession({ mode, url }) ? pushTokenStore.getPushToken() : null;
 
     // Build connections map
     const connections = new Map<string, { connectionId: string; status: 'connecting' | 'active' | 'disconnected' }>();
@@ -749,6 +866,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
             capabilities: ['chat'],
             tts_output_type: 'binary', // Request binary audio output for mobile app
             reply_mode: effectiveReplyMode,
+            ...(pushToken ? { push_token: pushToken } : {}),
           }
         };
 
@@ -785,6 +903,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   // ---------------------------------------------------------------------------
 
   private async sendInitEntity(session: EntitySession): Promise<void> {
+    // 7-12 (§5): include the push token for DIRECT engine sessions only.
+    const pushToken = this.pushTokenForConnection(session.connectionId);
     const event = {
       event_id: this.generateEventId(),
       event_type: 'INIT_ENTITY',
@@ -797,7 +917,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
         device_platform: Platform.OS,
         capabilities: session.capabilities,
         tts_output_type: 'binary', // Request binary audio output for mobile app
-        reply_mode: session.replyMode
+        reply_mode: session.replyMode,
+        ...(pushToken ? { push_token: pushToken } : {}),
       }
     };
 
@@ -1117,33 +1238,29 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active partner connections for interaction ${interactionId}`);
     }
 
-    // Generate UUID v7 for message ID (domain layer)
-    const messageId = uuidv7();
+    // D-35: no SQLite mirror, no app-authored engine id. Mint an app-local
+    // optimistic key, register the in-memory pending row so the bubble renders
+    // immediately, then fire the WS utterance. The engine discards the id and
+    // authors the authoritative row, which the next engine read returns and
+    // reconcilePendingMessages drops the pending row against.
+    const messageId = this.generatePendingId();
 
-    // Store message locally with interaction_id and entity_id = ownEntityId per D-02/D-35
-    const message = {
+    this.addPendingMessage({
       id: messageId,
+      interactionId: session.interactionId,
       entity_id: session.ownEntityId, // Own-entity perspective per D-02/D-35
       sender_entity_id: session.ownEntityId,
-      interaction_id: session.interactionId,
       content: text,
-      audio_duration: null,
-      message_type: 'text' as 'text',
+      message_type: 'text',
       audio_data: null,
       audio_mime_type: null,
+      audio_duration: null,
       image_data: null,
       image_mime_type: null,
-      vl_model: null,
-      vl_model_interpretation: null,
-      emotional_state_bits: 0,
-      is_recon_followup: false,
-      is_edited: false,
-      edit_of_message_id: null,
       reply_to_message_id: replyToMessageId ?? null,
-    };
-
-    await createConversationMessage(message);
-    log.info(`Stored text message ${messageId} locally for interaction ${interactionId}`);
+      created_at: new Date(),
+    });
+    log.info(`Registered optimistic text message ${messageId} for interaction ${interactionId}`);
 
     // Send to ALL partner connections (participant-agnostic broadcast)
     const utterance: any = {
@@ -1265,31 +1382,29 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
     const base64Audio = audioData;
 
-    // Generate UUID v7 for message ID (domain layer)
-    const messageId = uuidv7();
+    // D-35: optimistic in-memory audio row (no SQLite mirror). The engine
+    // authors the authoritative row only once the combined utterance is sent
+    // (handleConfirmAndSendMessage); until then this pending row carries the
+    // recorded audio + transcription state.
+    const messageId = this.generatePendingId();
 
-    const message = {
+    this.addPendingMessage({
       id: messageId,
+      interactionId: session.interactionId,
       entity_id: session.ownEntityId, // Own-entity perspective per D-02/D-35
       sender_entity_id: session.ownEntityId,
-      interaction_id: session.interactionId,
       content: '',
-      audio_duration: duration,
-      message_type: 'audio' as 'audio',
+      message_type: 'audio',
       audio_data: base64Audio,
       audio_mime_type: mimeType,
+      audio_duration: duration,
       image_data: null,
       image_mime_type: null,
-      vl_model: null,
-      vl_model_interpretation: null,
-      emotional_state_bits: 0,
-      is_recon_followup: false,
-      is_edited: false,
-      edit_of_message_id: null,
-    };
-
-    await createConversationMessage(message);
-    log.info(`Stored message ${messageId} in database (awaiting transcription)`);
+      reply_to_message_id: null,
+      created_at: new Date(),
+      transcriptionState: 'pending',
+    });
+    log.info(`Registered optimistic audio message ${messageId} (awaiting transcription)`);
 
     try {
       await this.requestTranscription(messageId, interactionId, base64Audio);
@@ -1380,32 +1495,25 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       throw new Error(`No active partner connections for interaction ${interactionId}`);
     }
 
-    // Generate UUID v7 for message ID
-    const messageId = uuidv7();
+    // D-35: optimistic in-memory image row (no SQLite mirror).
+    const messageId = this.generatePendingId();
 
-    // Store message locally with interaction_id and entity_id = ownEntityId per D-02/D-35
-    const message = {
+    this.addPendingMessage({
       id: messageId,
+      interactionId: session.interactionId,
       entity_id: session.ownEntityId,
       sender_entity_id: session.ownEntityId,
-      interaction_id: session.interactionId,
       content: caption || '',
-      audio_duration: null,
-      message_type: 'image' as 'image',
+      message_type: 'image',
       audio_data: null,
       audio_mime_type: null,
+      audio_duration: null,
       image_data: imageBase64,
       image_mime_type: mimeType,
-      vl_model: null,
-      vl_model_interpretation: null,
-      emotional_state_bits: 0,
-      is_recon_followup: false,
-      is_edited: false,
-      edit_of_message_id: null,
-    };
-
-    await createConversationMessage(message);
-    log.info(`Stored image message ${messageId} locally for interaction ${interactionId}`);
+      reply_to_message_id: null,
+      created_at: new Date(),
+    });
+    log.info(`Registered optimistic image message ${messageId} for interaction ${interactionId}`);
 
     const utterance = {
       message_id: messageId,
@@ -1483,6 +1591,129 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
   isConversationOpen(participantKey: string): boolean {
     return this.openConversationKeys.has(participantKey);
+  }
+
+  // ---------------------------------------------------------------------------
+  // D-35 — optimistic pending-message store
+  // ---------------------------------------------------------------------------
+
+  /** The current in-memory pending rows for an interaction (empty if none). */
+  getPendingMessages(interactionId: string): PendingMessage[] {
+    return this.pendingMessages.get(interactionId) ?? [];
+  }
+
+  /** Look up one pending row by its app-local id (across all interactions). */
+  getPendingMessage(id: string): PendingMessage | null {
+    for (const list of this.pendingMessages.values()) {
+      const hit = list.find(m => m.id === id);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /** Register an optimistic outgoing row and notify listeners. */
+  private addPendingMessage(pending: PendingMessage): void {
+    const list = this.pendingMessages.get(pending.interactionId) ?? [];
+    list.push(pending);
+    this.pendingMessages.set(pending.interactionId, list);
+    this.emit('message:pending', pending.interactionId, [...list]);
+  }
+
+  /** Patch a pending row in place (content/type/transcription state). */
+  private updatePendingMessage(id: string, patch: Partial<PendingMessage>): void {
+    for (const [interactionId, list] of this.pendingMessages.entries()) {
+      const idx = list.findIndex(m => m.id === id);
+      if (idx === -1) continue;
+      list[idx] = { ...list[idx], ...patch };
+      this.emit('message:pending', interactionId, [...list]);
+      return;
+    }
+  }
+
+  /**
+   * Public patch of a pending row — used by ChatDetailScreen's audio-confirm
+   * flow to flip an optimistic audio row to the `combined` shape the engine
+   * will author (so reconciliation matches it on the next read).
+   */
+  patchPendingMessage(id: string, patch: Partial<PendingMessage>): void {
+    this.updatePendingMessage(id, patch);
+  }
+
+  /** Drop a pending row (after its engine-authored counterpart appears). */
+  private dropPendingMessage(id: string): void {
+    for (const [interactionId, list] of this.pendingMessages.entries()) {
+      const next = list.filter(m => m.id !== id);
+      if (next.length === list.length) continue;
+      if (next.length === 0) this.pendingMessages.delete(interactionId);
+      else this.pendingMessages.set(interactionId, next);
+      this.emit('message:pending', interactionId, [...next]);
+      return;
+    }
+  }
+
+  /** Remove every pending row for an interaction (chat teardown / clear). */
+  clearPendingMessages(interactionId: string): void {
+    if (!this.pendingMessages.has(interactionId)) return;
+    this.pendingMessages.delete(interactionId);
+    this.emit('message:pending', interactionId, []);
+  }
+
+  /**
+   * D-35 reconciliation. Given the engine-authoritative message list for an
+   * interaction, drop every pending row that the engine has authored. Matching
+   * is by message type + content + sender + a timing window, because the engine
+   * mints its own id and discards the app's `message_id` (see the engine's
+   * cognition ENTITY_UTTERANCE handler: `utterance.MessageID =
+   * utils.GenerateMessageID()`), and it does NOT echo the user's own utterance
+   * back over the WS — so the only authoritative signal is the read.
+   *
+   * Greedy: each engine row can consume at most one pending row, so two
+   * identical pending texts reconcile against two engine rows, not one.
+   *
+   * @param engineMessages rows from `getRecentConversationMessages`
+   */
+  reconcilePendingMessages(
+    interactionId: string,
+    engineMessages: Array<{
+      message_type?: string;
+      content?: string | null;
+      sender_entity_id?: string;
+      created_at?: Date | string | null;
+    }>,
+  ): void {
+    const list = this.pendingMessages.get(interactionId);
+    if (!list || list.length === 0) return;
+
+    const consumed = new Set<number>();
+    const remaining: PendingMessage[] = [];
+
+    for (const pending of list) {
+      const matchIdx = engineMessages.findIndex((m, i) => {
+        if (consumed.has(i)) return false;
+        if ((m.message_type ?? '') !== pending.message_type) return false;
+        if ((m.sender_entity_id ?? '') !== pending.sender_entity_id) return false;
+        // Content match: exact for non-empty content; media rows compare ''.
+        const engineContent = m.content ?? '';
+        if (engineContent !== (pending.content ?? '')) return false;
+        // Timing: the engine row must be authored at/after the send (allowing a
+        // small clock-skew window). created_at may be a Date or ISO string.
+        const engineAt = m.created_at ? new Date(m.created_at).getTime() : NaN;
+        if (Number.isFinite(engineAt) && engineAt < pending.created_at.getTime() - RECONCILE_SKEW_MS) {
+          return false;
+        }
+        return true;
+      });
+      if (matchIdx === -1) {
+        remaining.push(pending);
+      } else {
+        consumed.add(matchIdx);
+      }
+    }
+
+    if (remaining.length === list.length) return; // nothing reconciled
+    if (remaining.length === 0) this.pendingMessages.delete(interactionId);
+    else this.pendingMessages.set(interactionId, remaining);
+    this.emit('message:pending', interactionId, [...remaining]);
   }
 
   /**
@@ -1626,9 +1857,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
             const text = event.payload?.content || '';
             log.info(`Received STT transcription for message ${msgId}: "${text}"`);
 
-            await updateConversationMessage(msgId, {
-              content: text
-            });
+            // D-35: patch the in-memory pending row. The engine authors the
+            // authoritative row only when the combined utterance is sent.
+            this.updatePendingMessage(msgId, { content: text, transcriptionState: undefined });
 
             this.emit('transcription:completed',
               transcriptionRequest.interactionId,
@@ -1705,7 +1936,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
         // Log if session was resumed from a suspended state
         if (event.payload.resumed) {
-          log.info(`Session ${entityId} was RESUMED from suspended state on Harmony Link`);
+          log.info(`Session ${entityId} was RESUMED from suspended state on Soulbits Engine`);
           targetSession.resumed = true;
         }
       }
@@ -1745,99 +1976,28 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
           log.info(`Connection status updated to 'active' for ${entityId} in interaction ${interactionId}`);
         }
 
-        // If THIS is the own entity's response, handle interaction_id replacement per D-03/D-35
+        // If THIS is the own entity's response, swap the temp interactionId for
+        // the engine's canonical one (D-03/D-35). The ENGINE authors the
+        // interaction row — the app no longer creates a local Interaction.
         if (entityId === interactionSession.ownEntityId) {
           const canonicalInteractionId = event.payload.interaction_id;
           if (canonicalInteractionId && canonicalInteractionId !== interactionSession.interactionId) {
             log.info(`Replacing temp interactionId ${interactionSession.interactionId} with canonical ${canonicalInteractionId}`);
 
-            // Get the old interactionId
             const oldInteractionId = interactionSession.interactionId;
 
-            // Update the session's interactionId
             interactionSession.interactionId = canonicalInteractionId;
 
-            // Re-key the sessions map
+            // Re-key the sessions map.
             this.sessions.delete(oldInteractionId);
             this.sessions.set(canonicalInteractionId, interactionSession);
 
-            // Create local Interaction record per D-03/D-35
-            const scope = deriveScopeFromParticipants(interactionSession.participantIds);
-            const participantKey = deriveParticipantKey(
-              interactionSession.participantIds,
-              interactionSession.ownEntityId,
-              scope
-            );
-            const now = new Date().toISOString();
-
-            const interactionRecord: Interaction = {
-              id: canonicalInteractionId,
-              entity_id: interactionSession.ownEntityId, // Per D-35: app is single-perspective
-              interaction_scope: scope,
-              participant_key: participantKey,
-              participant_ids: JSON.stringify(interactionSession.participantIds),
-              status: 'active',
-              started_at: now,
-              last_activity_at: now,
-              ended_at: null,
-              memory_id: null,
-              continued_interaction_id: null,
-              metadata: null,
-              summary: null,
-              presence_type: 'phone', // Per D-16: app creates phone interactions
-              created_at: now,
-              updated_at: now,
-              deleted_at: null,
-            };
-
-            try {
-              await createInteraction(interactionRecord);
-              interactionSession.interaction = interactionRecord;
-              log.info(`Created local Interaction record ${canonicalInteractionId} for entity ${interactionSession.ownEntityId}`);
-            } catch (err) {
-              log.error(`Failed to create local Interaction record:`, err);
-              // Non-fatal: the interaction will be created from sync data later
-            }
-          }
-
-          // Re-check: if the canonical ID matches the temp ID (same value),
-          // we still need to create the interaction record
-          if (!interactionSession.interaction) {
-            const canonicalId = event.payload.interaction_id || interactionSession.interactionId;
-            const scope = deriveScopeFromParticipants(interactionSession.participantIds);
-            const participantKey = deriveParticipantKey(
-              interactionSession.participantIds,
-              interactionSession.ownEntityId,
-              scope
-            );
-            const now = new Date().toISOString();
-
-            const interactionRecord: Interaction = {
-              id: canonicalId,
-              entity_id: interactionSession.ownEntityId,
-              interaction_scope: scope,
-              participant_key: participantKey,
-              participant_ids: JSON.stringify(interactionSession.participantIds),
-              status: 'active',
-              started_at: now,
-              last_activity_at: now,
-              ended_at: null,
-              memory_id: null,
-              continued_interaction_id: null,
-              metadata: null,
-              summary: null,
-              presence_type: 'phone',
-              created_at: now,
-              updated_at: now,
-              deleted_at: null,
-            };
-
-            try {
-              await createInteraction(interactionRecord);
-              interactionSession.interaction = interactionRecord;
-              log.info(`Created local Interaction record ${canonicalId} for entity ${interactionSession.ownEntityId}`);
-            } catch (err) {
-              log.error(`Failed to create local Interaction record:`, err);
+            // D-35: carry over any optimistic pending rows registered under the
+            // temp id so a message sent during the init window is not orphaned.
+            const carriedPending = this.pendingMessages.get(oldInteractionId);
+            if (carriedPending) {
+              this.pendingMessages.delete(oldInteractionId);
+              this.pendingMessages.set(canonicalInteractionId, carriedPending);
             }
           }
         }
@@ -1862,10 +2022,8 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
           this.emit('session:started', interactionSession.interactionId, interactionSession);
 
-          // Trigger sync to pick up any pending messages from Harmony Link
-          SyncService.getInstance().initiateSync().catch(err => {
-            log.warn('Auto-sync on session start failed (non-critical):', err);
-          });
+          // Task 3-4: no sync trigger — the engine management API is the data
+          // layer; ChatDetailScreen reads the engine directly on open.
         } else {
           const statuses = Array.from(interactionSession.connections.entries())
             .map(([eid, conn]) => `${eid}=${conn.status}`)
@@ -1984,47 +2142,23 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   }
 
   /**
-   * Track E — INIT_ENTITY engine-rejection recovery. Best-effort BLOCKING
-   * re-sync (SyncService.syncAndWait) so the engine ingests the freshly-created
-   * entity → create a fresh entity connection for that entity → re-send
-   * INIT_ENTITY. Fire-and-forget from the ERROR branch; any throw here is
-   * caught there and falls through to the normal teardown.
+   * Track E — INIT_ENTITY engine-rejection recovery. Best-effort: create a
+   * fresh entity connection for that entity → re-send INIT_ENTITY. Fire-and-
+   * forget from the ERROR branch; any throw here is caught there and falls
+   * through to the normal teardown.
    *
-   * Post-purge escalation (cloud-data-deletion.md §7 follow-up): after a
-   * cloud purge deleted ALL engine-side data, an INCREMENTAL re-sync cannot
-   * recover the entity — the engine keeps its own per-device watermark and
-   * ignores the client's `last_sync_timestamp` for re-sends, so incremental
-   * syncs return zero records and the engine stays empty. When the sync
-   * watermark is 0 (the purge's markFullResyncRequired observer cleared it,
-   * or never synced / post-wipe), the recovery re-marks the full re-sync and
-   * the waited sync self-escalates to `force_full_sync` via the cleared
-   * watermark (SyncService.initiateSync). Otherwise it stays incremental.
+   * Task 3-4: the entity is authored directly on the engine at create time (the
+   * management API is the data layer), so there is no sync re-push to perform —
+   * only the connection re-dial + re-send remain.
    */
   private async recoverInitEntity(
     entityId: string,
     session: InteractionSession,
     interactionId: string
   ): Promise<void> {
-    // Purge interplay: the cloud data purge owns the WS lifecycle — never
-    // re-sync / re-dial entity sockets mid-purge (fail fast → teardown path).
-    if (cloudSessionService.isPurging?.()) {
-      throw new Error('Cloud data purge in progress — skipping INIT_ENTITY recovery');
-    }
+    log.info(`INIT_ENTITY recovery for ${entityId} (interaction ${interactionId}): re-sending INIT_ENTITY (attempt ${session.initRetryCount}/${MAX_INIT_ENTITY_RETRIES})`);
 
-    log.info(`INIT_ENTITY recovery for ${entityId} (interaction ${interactionId}): re-syncing entity state (attempt ${session.initRetryCount}/${MAX_INIT_ENTITY_RETRIES})`);
-
-    // 1) Blocking re-sync (best-effort): ensure the engine has ingested the
-    // entity. When the sync watermark is 0 (the post-purge markFullResyncRequired
-    // observer cleared it — or never synced / post-wipe), an incremental sync
-    // CANNOT re-upload already-synced records: re-mark the full re-sync so the
-    // waited sync escalates to force_full_sync via the cleared watermark.
-    if ((await SyncService.getInstance().getLastSyncTimestamp()) === 0) {
-      log.info(`INIT_ENTITY recovery for ${entityId}: sync watermark is 0 — escalating to a full re-sync`);
-      await SyncService.getInstance().markFullResyncRequired();
-    }
-    await SyncService.getInstance().syncAndWait();
-
-    // 2) Create a fresh entity connection for this entity.
+    // Create a fresh entity connection for this entity.
     const connection = session.connections.get(entityId);
     if (!connection) {
       throw new Error(`No connection found for ${entityId} during INIT_ENTITY recovery`);
@@ -2037,10 +2171,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       wsUrl = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.worker}`;
       mode = 'cloud';
     } else {
-      mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
-      wsUrl = mode === 'unencrypted'
-        ? (await ConnectionStateManager.getWSUrl()) ?? ''
-        : (await ConnectionStateManager.getWSSUrl()) ?? '';
+      const local = await this.resolveLocalWs();
+      mode = local.mode;
+      wsUrl = local.url;
     }
     if (!wsUrl) {
       throw new Error('No connection URL available for INIT_ENTITY recovery');
@@ -2062,7 +2195,7 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
   /**
    * Transport-error path (ConnectionManager 'error:entity'). Guard: when the
-   * incoming error carries an app-level harmony event (BaseWebSocketConnection
+   * incoming error carries an app-level engine event (BaseWebSocketConnection
    * emits BOTH 'event' and 'error' for an ERROR-status message), defer to the
    * event-path recovery (handleEntityEvent → handleInitEntityResponse) instead
    * of tearing the session down — the bug that defeated recovery. Genuine
@@ -2121,10 +2254,10 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
       // derived count. The open-conversation guard lives at the badge seam in
       // ChatListScreen, not here.
 
-      // Save to database
-      await this.handleIncomingUtterance(interactionSession, interactionId, event.payload, event.event_id);
-
-      // Emit event so UI can reload if this chat is open
+      // D-35: the engine authors conversation_messages — the app no longer
+      // mirrors incoming utterances into SQLite. The event simply drives a UI
+      // refresh; ChatDetailScreen re-reads the authoritative rows from the
+      // engine and reconciles any pending outgoing rows against them.
       this.emit('message:received', interactionId, event.payload);
 
     } catch (error) {
@@ -2167,90 +2300,6 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     }
   }
 
-  /**
-   * Handle incoming utterance from a partner entity.
-   * Stores message with interaction_id and entity_id = ownEntityId per D-35.
-   */
-  private async handleIncomingUtterance(
-    interactionSession: InteractionSession,
-    interactionId: string,
-    utterance: any,
-    eventId: string
-  ): Promise<void> {
-    // Get message_id from utterance (protocol field)
-    log.warn(`Received utterance with message id ${utterance.message_id} from entity ${utterance.entity_id} (event_id: ${eventId})`);
-
-    // Generate our own UUID for this message — each entity perspective must have
-    // unique message IDs to prevent sync LWW collisions (the sender's message ID
-    // belongs to the sender's interaction, not ours).
-    const messageId = uuidv7();
-    if (!messageId) {
-      log.warn(`Received utterance without message_id (event_id: ${eventId}), skipping`);
-      return;
-    }
-
-    // Check for duplicate
-    if (await messageExists(messageId)) {
-      log.debug(`Message ${messageId} already exists, skipping`);
-      return;
-    }
-
-    // Determine message type. The engine flags the authored first_mes
-    // (DeliverGreeting) with `message_type: "greeting"` on the wire — persist
-    // it verbatim so the chat renders the greeting through the
-    // AlternateGreetingSwiper (alternate-greeting cycling + regenerate slot)
-    // instead of a plain bubble. Media fields decide the remaining types.
-    let messageType: 'text' | 'audio' | 'combined' | 'image' | 'greeting' =
-      'text';
-    if (utterance.message_type === 'greeting') {
-      messageType = 'greeting';
-    } else if (utterance.image_data) {
-      messageType = 'image';
-    } else if (utterance.audio && utterance.content) {
-      messageType = 'combined';
-    } else if (utterance.audio) {
-      messageType = 'audio';
-    }
-
-    // Store with entity_id = ownEntityId per D-35 (app is single-perspective)
-    const message = {
-      id: messageId,
-      entity_id: interactionSession.ownEntityId, // From user's perspective per D-35
-      sender_entity_id: utterance.entity_id,      // Who sent it
-      interaction_id: interactionSession.interactionId, // Own entity's interaction ID
-      content: utterance.content || '',
-      audio_duration: utterance.audio_duration || null,
-      message_type: messageType,
-      audio_data: utterance.audio || null,          // Already base64 from backend
-      audio_mime_type: utterance.audio_type || null,
-      image_data: utterance.image_data || null,     // Already base64 from backend
-      image_mime_type: utterance.image_mime_type || null,
-      vl_model: null, // Will be populated by Harmony Link
-      vl_model_interpretation: null,
-      emotional_state_bits: 0,
-      is_recon_followup: utterance.is_recon_followup || false,
-      is_edited: utterance.is_edited || false,
-      edit_of_message_id: utterance.edit_of_message_id || null,
-    };
-
-    await createConversationMessage(message);
-
-    // Parse and persist audio duration if the backend did not provide it
-    if (message.audio_data && !message.audio_duration) {
-      const duration = await AudioPlayerClass.getDurationFromBase64(
-        message.audio_data,
-        message.audio_mime_type || 'audio/wav'
-      );
-      if (duration) {
-        await updateConversationMessage(messageId, { audio_duration: duration });
-        log.info(`Stored audio duration for message ${messageId}: ${duration.toFixed(2)}s`);
-      }
-    }
-
-    // Trigger sync
-    SyncService.getInstance().initiateSync();
-  }
-
   // ---------------------------------------------------------------------------
   // Retry transcription
   // ---------------------------------------------------------------------------
@@ -2271,8 +2320,9 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     // Clear failed state
     this.transcriptionStates.delete(messageId);
 
-    // Get message from database
-    const message = await getConversationMessage(messageId);
+    // D-35: the audio lives on the in-memory pending row (the engine has no
+    // app-facing message read, and the app no longer mirrors messages).
+    const message = this.getPendingMessage(messageId);
 
     if (!message || !message.audio_data) {
       throw new Error('Message not found or has no audio data');
@@ -2299,6 +2349,12 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
 
   private generateEventId(): string {
     return `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /** App-local optimistic message key (never an engine-shaped id). */
+  private generatePendingId(): string {
+    this.pendingCounter += 1;
+    return `pending-${Date.now()}-${this.pendingCounter}`;
   }
 
 }

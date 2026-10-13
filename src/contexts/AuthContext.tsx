@@ -26,23 +26,12 @@ import AuthService, {
   AuthExpiredError,
   type UserProfile,
 } from '../services/auth/AuthService';
-import { cloudSessionService } from '../services/cloud/CloudSessionService';
 import DeviceAuthService from '../services/cloud/DeviceAuthService';
 import { startSoulbitsTokenSync } from '../services/cloud/soulbitsTokenSync';
+import { pushTokenStore } from '../services/notifications/PushTokenStore';
 import { createLogger } from '../utils/logger';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const log = createLogger('[AuthContext]');
-
-/** Read the `connection_mode` flag — 'cloud' → true, anything else → false. */
-async function isCloudMode(): Promise<boolean> {
-  try {
-    const m = await AsyncStorage.getItem('connection_mode');
-    return m === 'cloud';
-  } catch {
-    return false;
-  }
-}
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -118,9 +107,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (!cancelled) {
           setUser(profile);
           setStatus('authenticated');
-          if (await isCloudMode()) {
-            cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on bootstrap:', e));
-          }
         }
       } catch (error: unknown) {
         if (!cancelled) {
@@ -177,25 +163,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // D-DEV-01 first-run registration: upsert the per-install device row
       // (authorized=false) so the broker's connect gate can find it. Best-
       // effort — a registration failure must not block login.
-      DeviceAuthService.registerDevice().catch(e =>
+      //
+      // Plan 7-12 §3: carry the effective push token (the Firebase FCM token
+      // when the SDK supplied one, else the native raw-APNs fallback). A token
+      // acquired at boot BEFORE sign-in could not be registered (signed out),
+      // and Android's FCM token is only ever registered through this flow.
+      const pushToken = pushTokenStore.getPushToken();
+      DeviceAuthService.registerDevice(pushToken ? { pushToken } : {}).catch(e =>
         log.warn('Device registration failed (non-fatal):', e instanceof Error ? e.message : String(e)),
       );
       try {
         const profile = await AuthService.getProfile();
         setUser(profile);
         setStatus('authenticated');
-        if (await isCloudMode()) {
-          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e)));
-        }
       } catch {
         // Profile fetch failed, but the token pair is valid (just stored /
         // refreshed). Stay authenticated — `user` populates on retry or next
         // launch. Only `auth:expired` (token rejection) downgrades to
         // unauthenticated, never a transient profile-read failure.
         setStatus('authenticated');
-        if (await isCloudMode()) {
-          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e)));
-        }
       }
     };
 
@@ -237,7 +223,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [bumpSignInVersion]);
 
   const logout = useCallback(async () => {
-    await cloudSessionService.disconnect().catch(() => {});
     await AuthService.logout();
     setUser(null);
     setStatus('unauthenticated');

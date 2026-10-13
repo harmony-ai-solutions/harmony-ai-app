@@ -27,8 +27,8 @@
   "play": "Play",
   "stop": "Stop",
   "synthesizing": "Synthesizing…",
-  "ttsOfflineTitle": "Connect to Harmony Link to test",
-  "ttsOfflineHint": "The test panel runs the engine's configured TTS provider. Connect to Harmony Link to try it.",
+  "ttsOfflineTitle": "Connect to Soulbits Engine to test",
+  "ttsOfflineHint": "The test panel runs the engine's configured TTS provider. Connect to Soulbits Engine to try it.",
   "usesSavedConfig": "Tests your saved configuration (unsaved draft changes aren't applied).",
   "ttsNeedsEntityHint": "Available once the AI has been created.",
   "ttsError": "The test failed: {{message}}"

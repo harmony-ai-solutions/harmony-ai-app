@@ -1,6 +1,7 @@
 {
-  "_README": "!!! PLACEHOLDER — Must be replaced by the owner with the real google-services.json from GCP !!!",
+  "_README": "!!! PLACEHOLDER — Must be replaced by the owner with the real google-services.json from the Firebase console !!!",
   "_README_MORE": "See Phase 9-1 §2.3 in the backend repo for instructions. Both package names (ai.soulbits.chat + ai.soulbits.chat.dev) must each have a client entry with their debug + release SHA-1 certificate fingerprints registered.",
+  "_README_FCM": "Plan 7-12 §3 (step 7, D1=b/D2/D4): this config also feeds Firebase Cloud Messaging via @react-native-firebase/app + messaging. The values above are dummy-but-well-formed so the google-services gradle plugin resolves and dev/CI builds stay green. With the placeholder in force the app's FirebaseMessaging integration degrades gracefully (FCM token acquisition fails → the native raw-APNs token seam remains the fallback). SELF-BUILDER CONTRACT (D4): official/Play + signed-sideload builds ship OUR Firebase project; self-builders replace this file with THEIR OWN config — and for topology A (direct desktop-engine pairing) that Firebase project MUST be the same project as the desktop engine's SE_FCM_* credentials (plan 7-12 §3/§5).",
   "project_info": {
     "project_number": "000000000000",
     "project_id": "soulbits-placeholder",

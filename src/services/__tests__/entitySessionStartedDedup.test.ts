@@ -16,7 +16,6 @@ import { EntitySessionService } from '../EntitySessionService';
 import { EventEmitter } from 'eventemitter3';
 
 let mockConnectionManager: EventEmitter;
-let mockInitiateSync: jest.Mock;
 
 jest.mock('react-native-device-info', () => ({
   getUniqueId: jest.fn().mockResolvedValue('test-device'),
@@ -62,45 +61,23 @@ jest.mock('../connection/ConnectionManager', () => {
 });
 
 // SyncService is a NAMED export; mock the on-start initiateSync so we can count it.
-jest.mock('../SyncService', () => {
-  mockInitiateSync = jest.fn().mockResolvedValue(undefined);
-  return {
-    __esModule: true,
-    SyncService: {
-      getInstance: () => ({ initiateSync: mockInitiateSync }),
-    },
-  };
-});
 
 // interactions repo — only createInteraction would run (own-entity path); mocked
 // so the test never touches the DB. derive* are no-ops here (non-own test path).
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   createInteraction: jest.fn().mockResolvedValue(undefined),
   deriveScopeFromParticipants: jest.fn().mockReturnValue('one_on_one'),
   deriveParticipantKey: jest.fn().mockReturnValue('pk'),
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   messageExists: jest.fn(),
   createConversationMessage: jest.fn(),
   updateConversationMessage: jest.fn(),
   getConversationMessage: jest.fn(),
 }));
 
-jest.mock('../../database/connection', () => ({
-  getDatabase: jest.fn(),
-  getSyncDatabase: jest.fn().mockResolvedValue(undefined),
-}));
 
-jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    getStatus: jest.fn().mockReturnValue('idle'),
-    isPurging: jest.fn().mockReturnValue(false),
-  },
-  default: {},
-}));
 
 function resetSingleton(): void {
   (EntitySessionService as any).instance = null;
@@ -129,8 +106,6 @@ const initEntitySuccess = (sessionId: string) => ({
 describe('EntitySessionService session:started de-duplication', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockInitiateSync.mockClear();
-    mockInitiateSync.mockResolvedValue(undefined);
     resetSingleton();
   });
 
@@ -152,7 +127,6 @@ describe('EntitySessionService session:started de-duplication', () => {
     );
 
     expect(startedEvents).toEqual([session.interactionId]);
-    expect(mockInitiateSync).toHaveBeenCalledTimes(1);
   });
 
   it('still emits session:started once for normal sequential activation (guard does not block the legitimate first emit)', async () => {
@@ -175,6 +149,5 @@ describe('EntitySessionService session:started de-duplication', () => {
     );
 
     expect(startedEvents).toEqual([session.interactionId]);
-    expect(mockInitiateSync).toHaveBeenCalledTimes(1);
   });
 });
