@@ -232,6 +232,42 @@ describe('OutreachNotificationService — defensive suppression + dedupe', () =>
       expect(posted).toHaveLength(1);
     }
   });
+
+  it('suppresses outreach for a store-locked entity (7-14 V3)', async () => {
+    // A locked entity (provider not offered by this build) can't be interacted
+    // with, so neither a local banner nor a foreground in-app event may imply
+    // an actionable unread.
+    const posted: unknown[] = [];
+    const events: OutreachNotificationEvent[] = [];
+    const service = new OutreachNotificationService({
+      getConnection: () => CONNECTION,
+      wsFactory: (url: string) => new MockWebSocket(url) as unknown as WebSocketLike,
+      appState: {
+        currentState: 'background',
+        addEventListener: jest.fn(() => ({ remove: jest.fn() })),
+      } as any,
+      dedupe: new OutreachDedupe(),
+      getTransport: () => Promise.resolve('auto' as any),
+      getHideContent: () => Promise.resolve(false),
+      isEntityLocked: (id: string) => Promise.resolve(id === 'locked-entity'),
+      postLocal: payload => {
+        posted.push(payload);
+        return Promise.resolve(true);
+      },
+      onInApp: event => events.push(event),
+    });
+
+    await service.handleEvent(makeEvent({ entity_id: 'locked-entity', message_id: 'm-lock-1' }));
+    expect(posted).toHaveLength(0);
+
+    (service as any).appState.currentState = 'active';
+    await service.handleEvent(makeEvent({ entity_id: 'locked-entity', message_id: 'm-lock-2' }));
+    expect(events).toHaveLength(0);
+
+    // An unlocked entity still notifies normally.
+    await service.handleEvent(makeEvent({ entity_id: 'ok-entity', message_id: 'm-ok' }));
+    expect(events).toHaveLength(1);
+  });
 });
 
 describe('OutreachNotificationService — reconnect + teardown', () => {

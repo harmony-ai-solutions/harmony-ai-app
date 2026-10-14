@@ -54,6 +54,7 @@ import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
 import { ChatPartnerPickerModal } from '../components/chat/ChatPartnerPickerModal';
 import { openCharacterChat } from '../services/CharacterChatService';
+import { getLockedEntityIds } from '../services/variant/entityAccess';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { createLogger } from '../utils/logger';
 import {
@@ -129,8 +130,11 @@ function sortListItems(items: ChatListItem[]): ChatListItem[] {
 export function resolveDisplayUnreadCount(
   derivedCount: number,
   muted: boolean,
+  locked = false,
 ): number {
-  return muted ? 0 : derivedCount;
+  // A store-locked entity is not interactable, so its unread badge must never
+  // imply an actionable unread (plan 7-14 V3) — treated like mute for display.
+  return muted || locked ? 0 : derivedCount;
 }
 
 /**
@@ -163,6 +167,9 @@ interface ChatListItem {
   archived: boolean;
   muted: boolean;
   disabled: boolean;
+  // Store-variant runtime lock (plan 7-14 V3): the entity remains VISIBLE but
+  // is not interactable (greyed + lock affordance, distinct from `disabled`).
+  locked: boolean;
   unreadCount: number;
 }
 
@@ -243,6 +250,7 @@ export const ChatListScreen: React.FC = () => {
       activeEntityId: string,
       rows: PhoneConversationPageRow[],
       filteredIds: Set<string>,
+      lockedIds: Set<string>,
     ): Promise<ChatListItem[]> => {
       // Get all entities for display info lookups
       const entities = await getAllEntities();
@@ -341,6 +349,7 @@ export const ChatListScreen: React.FC = () => {
             archived: false,
             muted: entity?.is_muted === 1,
             disabled: entity?.is_disabled === 1,
+            locked: lockedIds.has(partnerEntityId),
             unreadCount: 0,
           });
         } else if (scope === 'group') {
@@ -393,12 +402,13 @@ export const ChatListScreen: React.FC = () => {
             participantKey,
             participantIds,
             isGroup: true,
-            // Groups have no single partner entity — mute/disable flags are
-            // not applicable. pin/archived/unread filled in below.
+            // Groups have no single partner entity — mute/disable/lock flags
+            // are not applicable. pin/archived/unread filled in below.
             pinned: false,
             archived: false,
             muted: false,
             disabled: false,
+            locked: false,
             unreadCount: 0,
           });
         }
@@ -419,6 +429,7 @@ export const ChatListScreen: React.FC = () => {
         item.unreadCount = resolveDisplayUnreadCount(
           unreadMap.get(item.participantKey) ?? 0,
           item.muted,
+          item.locked,
         );
       }
 
@@ -458,6 +469,10 @@ export const ChatListScreen: React.FC = () => {
     async (activeEntityId: string) => {
       try {
         const filteredIds = await loadFilteredEntityIds();
+        // Store-variant runtime lock (7-14 V3): locked entities stay VISIBLE,
+        // so they are NOT added to the filtered (hidden) set — the flag rides
+        // the row for greying / badge suppression / detail gating.
+        const lockedIds = await getLockedEntityIds();
 
         listPageRef.current = 0;
         listHasMoreRef.current = true;
@@ -467,7 +482,7 @@ export const ChatListScreen: React.FC = () => {
           offset: 0,
         });
 
-        const items = await buildListItems(activeEntityId, rows, filteredIds);
+        const items = await buildListItems(activeEntityId, rows, filteredIds, lockedIds);
         const sorted = sortListItems(items);
         chatListRef.current = sorted;
 
@@ -503,6 +518,7 @@ export const ChatListScreen: React.FC = () => {
     setLoadingMore(true);
     try {
       const filteredIds = await loadFilteredEntityIds();
+      const lockedIds = await getLockedEntityIds();
       const rows = await getPhoneConversationsPage(activeEntityId, {
         limit: CHAT_LIST_PAGE_SIZE,
         offset: listPageRef.current * CHAT_LIST_PAGE_SIZE,
@@ -513,7 +529,7 @@ export const ChatListScreen: React.FC = () => {
         return;
       }
 
-      const items = await buildListItems(activeEntityId, rows, filteredIds);
+      const items = await buildListItems(activeEntityId, rows, filteredIds, lockedIds);
       listPageRef.current += 1;
       listHasMoreRef.current = rows.length === CHAT_LIST_PAGE_SIZE;
 
@@ -969,9 +985,15 @@ export const ChatListScreen: React.FC = () => {
       item={item}
       onPress={() => {
         hapticLightPress();
+        // Locked rows still open their detail (which shows the neutral lock
+        // state and refuses new sessions) — visible-but-locked, not hidden.
         handleChatPress(item);
       }}
-      onLongPress={() => handleLongPress(item)}
+      // Locked rows offer no conversation actions (nothing is interactable).
+      onLongPress={() => {
+        if (item.locked) return;
+        handleLongPress(item);
+      }}
     />
   );
 
@@ -1205,6 +1227,7 @@ const ChatRowCard: React.FC<{
   onLongPress: () => void;
 }> = ({ item, onPress, onLongPress }) => {
   const { theme } = useAppTheme();
+  const { t } = useTranslation('chatList');
   const scale = useRef(new Animated.Value(1)).current;
 
   if (!theme) return null;
@@ -1231,17 +1254,25 @@ const ChatRowCard: React.FC<{
   const borderEnd = hexToRgba(theme.colors.accent.secondary, 0.10);
   const glassFill = hexToRgba(theme.colors.background.surface, 0.45);
 
+  const locked = item.locked;
+
   return (
-    <Animated.View style={{ transform: [{ scale }] }}>
+    <Animated.View
+      style={{ transform: [{ scale }], opacity: locked ? 0.55 : 1 }}
+    >
       <TouchableOpacity
         onPress={onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
-        onLongPress={onLongPress}
+        onLongPress={locked ? undefined : onLongPress}
         delayLongPress={400}
         activeOpacity={0.85}
         testID="chat-list-item"
-        accessibilityLabel={`Chat with ${item.characterName}`}
+        accessibilityLabel={
+          locked
+            ? `${item.characterName} — ${t('lockedChat')}`
+            : `Chat with ${item.characterName}`
+        }
       >
         {/* ── 1dp hairline gradient border ── */}
         <LinearGradient
@@ -1307,6 +1338,16 @@ const ChatRowCard: React.FC<{
                 )}
                 {item.muted && (
                   <Icon name="volume-off" size={13} color={theme.colors.text.muted} />
+                )}
+                {/* Store lock affordance — distinct from the disabled shield so
+                    users don't think THEY disabled it (plan 7-14 V3). */}
+                {locked && (
+                  <Icon
+                    name="lock-outline"
+                    size={13}
+                    color={theme.colors.accent.primary}
+                    testID="chat-locked-icon"
+                  />
                 )}
                 {item.disabled && (
                   <Icon name="shield-off-outline" size={13} color={theme.colors.status.error} />

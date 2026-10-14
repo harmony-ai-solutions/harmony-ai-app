@@ -41,6 +41,7 @@ import {
 import AuthService from '../../services/auth/AuthService';
 import { getDeviceId } from '../../services/cloud/DeviceIdProvider';
 import { SYNC_RELAY } from '../../config/cloud';
+import { isStoreVariant } from '../../config/appVariant';
 import { createLogger } from '../../utils/logger';
 import { formatBytes } from '../../utils/formatBytes';
 import { hexToRgba } from '../../utils/colorUtils';
@@ -179,15 +180,22 @@ const Field: React.FC<{
   </View>
 );
 
-/** A two-option transport chip row (LAN ↔ Cloud relay). */
+/**
+ * Transport chip row (LAN ↔ Cloud relay). In the store variant the direct-LAN
+ * option is HIDDEN (plan 7-14 V3 / 7-12 topology map: Play is restricted to
+ * B/C — cloud relay only) so the row collapses to the cloud-relay chip alone.
+ */
 const TransportPicker: React.FC<{
   value: SyncClientTransport;
   onChange: (v: SyncClientTransport) => void;
   theme: any;
   t: (k: string) => string;
-}> = ({ value, onChange, theme, t }) => {
+  cloudOnly?: boolean;
+}> = ({ value, onChange, theme, t, cloudOnly = false }) => {
   const options: { id: SyncClientTransport; label: string; icon: string }[] = [
-    { id: 'lan', label: t('transportLan'), icon: 'lan' },
+    ...(cloudOnly
+      ? []
+      : [{ id: 'lan' as SyncClientTransport, label: t('transportLan'), icon: 'lan' }]),
     { id: 'relay', label: t('transportCloud'), icon: 'cloud-outline' },
   ];
   return (
@@ -259,10 +267,16 @@ export const DesktopSyncScreen: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [rotationFlag, setRotationFlag] = useState(false);
 
+  // Store variant: direct-LAN pairing (7-12 topology A) is hidden — the
+  // transport is pinned to the cloud relay (B/C). Full variant unchanged.
+  const storeVariant = isStoreVariant();
+
   // Form state (populated once from the first status read; polling never
   // clobbers in-progress edits).
   const [enabled, setEnabled] = useState(false);
-  const [transport, setTransport] = useState<SyncClientTransport>('lan');
+  const [transport, setTransport] = useState<SyncClientTransport>(
+    () => (isStoreVariant() ? 'relay' : 'lan'),
+  );
   const [peerAddress, setPeerAddress] = useState('');
   const [peerWssAddress, setPeerWssAddress] = useState('');
   const [securityMode, setSecurityMode] = useState('secure');
@@ -324,7 +338,9 @@ export const DesktopSyncScreen: React.FC = () => {
       if (!formLoadedRef.current) {
         formLoadedRef.current = true;
         setEnabled(next.config.enabled);
-        setTransport(next.config.transport || 'lan');
+        // Store: never surface the (hidden) LAN transport even if the engine's
+        // stored config says 'lan' — pin to relay.
+        setTransport(storeVariant ? 'relay' : (next.config.transport || 'lan'));
         setPeerAddress(next.config.peer_address ?? '');
         setPeerWssAddress(next.config.peer_wss_address ?? '');
         setSecurityMode(next.config.security_mode || 'secure');
@@ -341,7 +357,7 @@ export const DesktopSyncScreen: React.FC = () => {
         recoveringRef.current = false;
       }
     },
-    [recoverRelayAuth],
+    [recoverRelayAuth, storeVariant],
   );
 
   const refreshStatus = useCallback(async () => {
@@ -436,7 +452,7 @@ export const DesktopSyncScreen: React.FC = () => {
         const next = await engineApiClient.updateSyncClientConfig(patch);
         setStatus(next);
         setEnabled(next.config.enabled);
-        setTransport(next.config.transport || transport);
+        setTransport(storeVariant ? 'relay' : (next.config.transport || transport));
         formLoadedRef.current = true;
         return next;
       } catch (e: any) {
@@ -448,11 +464,12 @@ export const DesktopSyncScreen: React.FC = () => {
         setBusy(false);
       }
     },
-    [showToast, t, transport],
+    [showToast, t, transport, storeVariant],
   );
 
   const formPatch = useCallback(() => {
-    if (transport === 'relay') {
+    // Store: the LAN transport is hidden, so always build the cloud-relay patch.
+    if (transport === 'relay' || storeVariant) {
       return {
         transport: 'relay' as const,
         relay_url: relayUrl.trim(),
@@ -468,7 +485,7 @@ export const DesktopSyncScreen: React.FC = () => {
       security_mode: securityMode,
       device_name: deviceName.trim(),
     };
-  }, [transport, relayUrl, deviceId, datasetId, deviceName, peerAddress, peerWssAddress, securityMode]);
+  }, [transport, relayUrl, deviceId, datasetId, deviceName, peerAddress, peerWssAddress, securityMode, storeVariant]);
 
   const handleConnect = useCallback(async () => {
     hapticLightPress();
@@ -1041,7 +1058,7 @@ export const DesktopSyncScreen: React.FC = () => {
             <ThemedText weight="medium" size={13} style={styles.fieldLabel}>
               {t('transportSection')}
             </ThemedText>
-            <TransportPicker value={transport} onChange={setTransport} theme={theme} t={t} />
+            <TransportPicker value={transport} onChange={setTransport} theme={theme} t={t} cloudOnly={storeVariant} />
             <ThemedText variant="muted" size={11} style={styles.fieldHint}>
               {isCloud ? t('transportCloudHint') : t('transportLanHint')}
             </ThemedText>

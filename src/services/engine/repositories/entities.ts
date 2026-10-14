@@ -118,6 +118,26 @@ function normalizeConfigId(id: string | null | undefined): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
+/** Build the mapping row from an engine entity config's resolved `modules` map. */
+function mappingFromModules(
+  entityId: string,
+  modules: Record<string, { id?: string } | undefined>,
+): EntityModuleMapping {
+  const idOf = (key: string): string | null => normalizeConfigId(modules[key]?.id);
+  return {
+    entity_id: entityId,
+    backend_config_id: idOf('backend'),
+    cognition_config_id: idOf('cognition'),
+    imagination_config_id: idOf('imagination'),
+    movement_config_id: idOf('movement'),
+    rag_config_id: idOf('rag'),
+    stt_config_id: idOf('stt'),
+    tts_config_id: idOf('tts'),
+    vision_config_id: idOf('vision'),
+    deleted_at: null,
+  };
+}
+
 /** Derive the mapping row from the engine entity config's resolved modules. */
 export async function getEntityModuleMapping(
   entityId: string,
@@ -126,23 +146,30 @@ export async function getEntityModuleMapping(
   try {
     const cfg = await engineApiClient.getEntityConfig(entityId);
     const modules = (cfg.modules ?? {}) as Record<string, { id?: string } | undefined>;
-    const idOf = (key: string): string | null => normalizeConfigId(modules[key]?.id);
-    return {
-      entity_id: entityId,
-      backend_config_id: idOf('backend'),
-      cognition_config_id: idOf('cognition'),
-      imagination_config_id: idOf('imagination'),
-      movement_config_id: idOf('movement'),
-      rag_config_id: idOf('rag'),
-      stt_config_id: idOf('stt'),
-      tts_config_id: idOf('tts'),
-      vision_config_id: idOf('vision'),
-      deleted_at: null,
-    };
+    return mappingFromModules(entityId, modules);
   } catch (e) {
     if (e instanceof EngineApiError && e.isNotFound) return null;
     throw e;
   }
+}
+
+/**
+ * Batch variant of {@link getEntityModuleMapping}: ONE `GET /api/entities` read
+ * → a map of entity id → its 8-slot module mapping. Backs the store-variant
+ * entity-lock predicate (plan 7-14 V3), which needs every entity's wiring
+ * without an N-call fan-out. Deleted entities are already excluded by the map
+ * read's domain semantics (the engine lists live entities).
+ */
+export async function getAllEntityModuleMappings(
+  _includeDeleted = false,
+): Promise<Record<string, EntityModuleMapping>> {
+  const map = await engineApiClient.listEntities();
+  const out: Record<string, EntityModuleMapping> = {};
+  for (const [id, cfg] of Object.entries(map)) {
+    const modules = (cfg.modules ?? {}) as Record<string, { id?: string } | undefined>;
+    out[id] = mappingFromModules(id, modules);
+  }
+  return out;
 }
 
 /** PUT the full mapping set (the engine route is a full-row upsert). */

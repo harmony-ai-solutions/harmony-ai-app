@@ -59,6 +59,7 @@ import {
 } from '../../services/ChatBubbleService';
 import ChatPreferencesService, { ChatReplyMode } from '../../services/ChatPreferencesService';
 import EntitySessionService from '../../services/EntitySessionService';
+import { getLockedEntityIds } from '../../services/variant/entityAccess';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { hexToRgba } from '../../utils/colorUtils';
 
@@ -77,6 +78,8 @@ interface ArchivedItem {
   pinned: boolean;
   muted: boolean;
   disabled: boolean;
+  // Store-variant runtime lock (plan 7-14 V3): visible but not interactable.
+  locked: boolean;
   unreadCount: number;
 }
 
@@ -140,6 +143,8 @@ export const ArchivedChatsScreen: React.FC = () => {
 
       const entities = await getAllEntities();
       const entityMap = new Map(entities.map(e => [e.id, e]));
+      // Store-variant lock (7-14 V3): no-op / empty in the full variant.
+      const lockedIds = await getLockedEntityIds();
 
       // F6: same conversation-level query the chat list uses — deduped by
       // participant_key and ordered by last-message created_at.
@@ -186,10 +191,12 @@ export const ArchivedChatsScreen: React.FC = () => {
           participantKey,
           participantIds,
           isGroup: false,
-          // mute/disabled are ENTITY flags (Q8); unread derived below.
+          // mute/disabled are ENTITY flags (Q8); lock is variant-computed;
+          // unread derived below.
           pinned: false,
           muted: entity?.is_muted === 1,
           disabled: entity?.is_disabled === 1,
+          locked: lockedIds.has(partnerEntityId),
           unreadCount: 0,
         });
       }
@@ -206,9 +213,10 @@ export const ArchivedChatsScreen: React.FC = () => {
         if (s) {
           item.pinned = s.pinned;
         }
-        item.unreadCount = item.muted
-          ? 0
-          : (unreadMap.get(item.participantKey) ?? 0);
+        item.unreadCount =
+          item.muted || item.locked
+            ? 0
+            : (unreadMap.get(item.participantKey) ?? 0);
       }
       archived.sort((a, b) => {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -501,6 +509,9 @@ const ArchivedRow: React.FC<{
               {item.characterName}
             </ThemedText>
             {item.muted && <Icon name="volume-off" size={13} color={theme.colors.text.muted} />}
+            {item.locked && (
+              <Icon name="lock-outline" size={13} color={theme.colors.accent.primary} />
+            )}
           </View>
           <ThemedText variant="muted" size={13} numberOfLines={1}>
             {item.lastMessage}

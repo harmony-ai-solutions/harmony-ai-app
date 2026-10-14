@@ -88,6 +88,7 @@
   "disableTitle": "Disable {{name}}",
   "disableBody": "Disable {{name}}? You will no longer send or receive messages with this AI. You can enable anytime.",
   "disabledBanner": "You disabled this AI. You can't send or receive messages until you enable it.",
+  "lockedBanner": "This entity uses a provider not available in this build.",
   "enable": "Enable",
   "openBubble": "Open chat bubble",
   "toastDisabled": "AI disabled",

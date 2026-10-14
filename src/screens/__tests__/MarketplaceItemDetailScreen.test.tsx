@@ -16,9 +16,14 @@ import type {
   MarketplaceListingDetail,
   OwnedLibraryEntry,
 } from '../../services/marketplace/MarketplaceService';
+import { setAppVariantForTests } from '../../config/appVariant';
 
 // Explicit cleanup — RNTL auto-cleanup plus multiple renders per file.
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // Restore the build-time (native) variant after every test.
+  setAppVariantForTests(null);
+});
 beforeEach(() => {
   jest.clearAllMocks();
 });
@@ -237,5 +242,48 @@ describe('MarketplaceItemDetailScreen — restored preview region', () => {
     expect(mockNavigate).toHaveBeenCalledWith('MyLibrary');
     // Owned state flips — the sticky bar now shows the owned label.
     expect(await screen.findByText('ownLabel')).toBeTruthy();
+  });
+});
+
+// ── Distribution variant gating (plan 7-14 V4) ─────────────────────────────
+
+describe('MarketplaceItemDetailScreen — store variant purchase gating', () => {
+  it('hides the paid acquire button and unlock hint in store (purchases disabled)', async () => {
+    setAppVariantForTests('store');
+    (getListing as jest.Mock).mockResolvedValue(paidListing);
+    (getLibrary as jest.Mock).mockResolvedValue([]);
+    (getMyListings as jest.Mock).mockResolvedValue([]);
+
+    await renderScreen();
+
+    // Still browsable — preview + sales count remain.
+    expect(screen.getByText(/field-tested teaser for Luna/)).toBeTruthy();
+    expect(screen.getByText('salesCountLabel')).toBeTruthy();
+    // No purchase action, no purchase-steering hint.
+    expect(screen.queryByText('acquireConfirm')).toBeNull();
+    expect(screen.queryByText('unlockHint')).toBeNull();
+  });
+
+  it('keeps the free claim action in store (a free claim is not a purchase)', async () => {
+    setAppVariantForTests('store');
+    (getListing as jest.Mock).mockResolvedValue(freeListing);
+    (getLibrary as jest.Mock).mockResolvedValue([]);
+    (getMyListings as jest.Mock).mockResolvedValue([]);
+
+    await renderScreen();
+
+    expect(screen.getByText('acquireFreeConfirm')).toBeTruthy();
+  });
+
+  it('keeps the paid acquire button in full (byte-for-byte unchanged)', async () => {
+    setAppVariantForTests('full');
+    (getListing as jest.Mock).mockResolvedValue(paidListing);
+    (getLibrary as jest.Mock).mockResolvedValue([]);
+    (getMyListings as jest.Mock).mockResolvedValue([]);
+
+    await renderScreen();
+
+    expect(screen.getByText('acquireConfirm')).toBeTruthy();
+    expect(screen.getByText('unlockHint')).toBeTruthy();
   });
 });

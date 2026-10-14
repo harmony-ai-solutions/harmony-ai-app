@@ -17,7 +17,8 @@
     "body": "This app needs a newer Soulbits Engine. Update the app to continue.",
     "sideloadAction": "Download the latest app",
     "storeAction": "Open the store",
-    "iosPortalAction": "Installation instructions"
+    "iosPortalAction": "Installation instructions",
+    "storeHint": "Update the app from your app store to continue."
   },
   "desktopEngine": {
     "heading": "Download the latest desktop engine",

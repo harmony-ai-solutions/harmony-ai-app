@@ -30,6 +30,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import DeviceInfo from 'react-native-device-info';
 import { createLogger } from '../../utils/logger';
 import { RELEASES, APP_ENVIRONMENT } from '../../config/cloud';
+import { isStoreVariant } from '../../config/appVariant';
 import { getEngineVersionState } from '../engine/EngineService';
 import { isNewerVersion, normalizeVersion } from '../../utils/semver';
 
@@ -271,6 +272,12 @@ function computeState(): UpdateState {
  * — it bypasses the 6h TTL. Never throws.
  */
 export async function refreshUpdates(opts: { force?: boolean } = {}): Promise<UpdateState> {
+  // Store variant (plan 7-14): the store listing owns updates — NEVER check.
+  // `app/latest.json` has no store destination and an update-without-action is
+  // noise (ruling: "no update checks at all in store builds"). Return the
+  // current (empty) state without touching the network.
+  if (isStoreVariant()) return state;
+
   if (inFlight) return inFlight;
 
   inFlight = (async () => {

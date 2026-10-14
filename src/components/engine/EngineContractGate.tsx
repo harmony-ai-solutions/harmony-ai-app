@@ -10,6 +10,11 @@
  *     updates WITH the app);
  *   - store channel / iOS → the portal INSTALLATION instructions.
  *
+ * Store variant (plan 7-14): the store listing owns updates, and steering a
+ * store user to the portal/sideload install instructions is a store-policy
+ * violation — so in store builds the card renders a NEUTRAL, non-linked caption
+ * ("update the app from your app store") instead of any external link.
+ *
  * Mounted once at the app root (App.tsx), above the navigator. `contract` is
  * `'unknown'` on a probe failure — that never blocks (a canary that could not
  * run must not brick the app).
@@ -30,6 +35,7 @@ import {
 import type { EngineVersionState } from '../../services/engine/EngineService';
 import { getUpdateState } from '../../services/updates/UpdateAvailableService';
 import { isApkSelfUpdateAvailable } from '../../config/appChannel';
+import { isStoreVariant } from '../../config/appVariant';
 import { RELEASES } from '../../config/cloud';
 import { hexToRgba } from '../../utils/colorUtils';
 
@@ -73,19 +79,27 @@ export const EngineContractGate: React.FC = () => {
         <ThemedText variant="secondary" size={14} style={styles.body}>
           {t('tooOld.body')}
         </ThemedText>
-        <ThemedButton
-          label={
-            Platform.OS === 'ios'
-              ? t('tooOld.iosPortalAction')
-              : isApkSelfUpdateAvailable()
-                ? t('tooOld.sideloadAction')
-                : t('tooOld.storeAction')
-          }
-          icon="download"
-          onPress={handleAction}
-          style={styles.button}
-          testID="engine-contract-gate-action"
-        />
+        {isStoreVariant() ? (
+          // Store variant (plan 7-14): NO external link at all — the store
+          // listing owns updates. Neutral, non-linked caption only.
+          <ThemedText variant="secondary" size={13} style={styles.body}>
+            {t('tooOld.storeHint')}
+          </ThemedText>
+        ) : (
+          <ThemedButton
+            label={
+              Platform.OS === 'ios'
+                ? t('tooOld.iosPortalAction')
+                : isApkSelfUpdateAvailable()
+                  ? t('tooOld.sideloadAction')
+                  : t('tooOld.storeAction')
+            }
+            icon="download"
+            onPress={handleAction}
+            style={styles.button}
+            testID="engine-contract-gate-action"
+          />
+        )}
       </ThemedCard>
     </View>
   );

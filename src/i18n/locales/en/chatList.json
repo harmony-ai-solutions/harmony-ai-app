@@ -31,6 +31,7 @@
   "unread": "unread",
   "mutedChat": "Muted",
   "pinnedChat": "Pinned",
+  "lockedChat": "Locked — provider not available in this build",
   "menuActionsFor": "Conversation options",
   "menuPin": "Pin",
   "menuUnpin": "Unpin",

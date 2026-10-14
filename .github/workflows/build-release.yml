@@ -258,7 +258,10 @@ jobs:
       - name: Generate .env for ${{ matrix.environment }}
         run: |
           if [ -z "$GOOGLE_WEB_CLIENT_ID" ]; then echo "::error::GOOGLE_WEB_CLIENT_ID_DEV/_PROD variable not set"; exit 1; fi
-          printf 'APP_ENV=%s\nIS_BETA=%s\nGOOGLE_WEB_CLIENT_ID=%s\nAPPLE_SERVICES_ID=%s\n' \
+          # APP_VARIANT (plan 7-14): 'full' for every current matrix entry. A
+          # future store iOS matrix entry would set this to 'store' (same bundle
+          # id — no suffix; the store listing owns updates).
+          printf 'APP_ENV=%s\nAPP_VARIANT=full\nIS_BETA=%s\nGOOGLE_WEB_CLIENT_ID=%s\nAPPLE_SERVICES_ID=%s\n' \
             "${{ matrix.environment }}" \
             "${{ matrix.environment == 'dev' && 'true' || 'false' }}" \
             "$GOOGLE_WEB_CLIENT_ID" \

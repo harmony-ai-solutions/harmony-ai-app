@@ -135,6 +135,7 @@ jest.mock('react-native-config', () => ({
   __esModule: true,
   default: {
     APP_ENV: 'dev',
+    APP_VARIANT: 'full',
     IS_BETA: true,
     GOOGLE_WEB_CLIENT_ID: 'test-client.apps.googleusercontent.com',
     APPLE_SERVICES_ID: '',

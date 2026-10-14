@@ -180,6 +180,7 @@ import { DesktopSyncScreen } from '../settings/DesktopSyncScreen';
 import { engineApiClient } from '../../services/engine/EngineApiClient';
 import AuthService from '../../services/auth/AuthService';
 import { getDeviceId } from '../../services/cloud/DeviceIdProvider';
+import { setAppVariantForTests } from '../../config/appVariant';
 
 const mockStatus = engineApiClient.getSyncClientStatus as jest.Mock;
 const mockUpdate = engineApiClient.updateSyncClientConfig as jest.Mock;
@@ -317,6 +318,21 @@ describe('DesktopSyncScreen', () => {
   });
 
   // ── 7-3: transport picker + cloud surface ──────────────────────────────
+
+  it('hides the direct-LAN transport in store builds (7-14 V3 — cloud relay only)', async () => {
+    setAppVariantForTests('store');
+    try {
+      const utils = await renderScreen();
+      // The direct-LAN pairing entry (topology A) is gone; only the cloud-relay
+      // chip remains and the transport is pinned to relay.
+      expect(utils.queryByTestId('desktop-sync-transport-lan')).toBeNull();
+      expect(utils.getByTestId('desktop-sync-transport-relay')).toBeTruthy();
+      expect(utils.getByTestId('desktop-sync-relay-url')).toBeTruthy();
+      expect(utils.getByTestId('desktop-sync-pair-button')).toBeTruthy();
+    } finally {
+      setAppVariantForTests(null);
+    }
+  });
 
   it('switches to the cloud transport and surfaces the relay + pairing UI', async () => {
     const utils = await renderScreen();

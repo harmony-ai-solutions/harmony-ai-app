@@ -36,6 +36,12 @@ import { AdvancedSamplingParams } from '../../components/config/AdvancedSampling
 import { SoulbitsModelSelect } from '../../components/config/SoulbitsModelSelect';
 import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
 import { MODULE_DEFAULTS, PROVIDER_DEFAULTS } from '../../constants/moduleDefaults';
+import {
+  getAvailableProviders,
+  STORE_PROVIDER_ID,
+} from '../../services/variant/providerAvailability';
+import { invalidateEntityAccessCache } from '../../services/variant/entityAccess';
+import { isStoreVariant } from '../../config/appVariant';
 import { PROVIDER_SCHEMAS } from '../../constants/providerFieldSchemas';
 import { isSimpleFieldKey, isManagedCloudField } from '../../constants/moduleConfigVisibility';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -261,19 +267,32 @@ export const ModuleConfigEditScreen: React.FC = () => {
     if (!configId) {
       // Create mode — prefill with module defaults
       const defaults = MODULE_DEFAULTS[moduleType] || {};
+      // Store variant: auto-resolve to the single available provider
+      // (soulbitscloud) so NO provider choice/step is surfaced (plan 7-14 V3,
+      // ruling 7). The provider values seed from PROVIDER_DEFAULTS; the save
+      // path injects the cloud token via injectSoulbitsToken. Full = unchanged.
+      const storeVariant = isStoreVariant();
+      const storeProviderValues = storeVariant
+        ? { ...(PROVIDER_DEFAULTS[STORE_PROVIDER_ID] || {}) }
+        : {};
       setFormValues(prev => ({
         ...prev,
         ...defaults,
+        ...(storeVariant
+          ? isSTT
+            ? { transcription_provider: STORE_PROVIDER_ID, vad_provider: STORE_PROVIDER_ID }
+            : { provider: STORE_PROVIDER_ID }
+          : {}),
       }));
       
       if (isSTT) {
         setProviderForms({
-          transcription: { providerConfigId: null, values: {} },
-          vad: { providerConfigId: null, values: {} },
+          transcription: { providerConfigId: null, values: { ...storeProviderValues } },
+          vad: { providerConfigId: null, values: { ...storeProviderValues } },
         });
       } else {
         setProviderForms({
-          provider: { providerConfigId: null, values: {} },
+          provider: { providerConfigId: null, values: { ...storeProviderValues } },
         });
       }
       
@@ -566,6 +585,8 @@ export const ModuleConfigEditScreen: React.FC = () => {
         }
       }
       
+      // Provider/module wiring changed → the computed lock set is stale (7-14).
+      invalidateEntityAccessCache();
       navigation.goBack();
     } catch (error) {
       log.error('Failed to save:', error);
@@ -589,6 +610,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             await repo.delete(configId);
+            invalidateEntityAccessCache();
             navigation.goBack();
           },
         },
@@ -762,7 +784,9 @@ export const ModuleConfigEditScreen: React.FC = () => {
     label: string,
     providerType: string,
   ) => {
-    const providerOptions = moduleConfig?.providerOptions || [];
+    // Variant-aware provider list (plan 7-14 V3, filter-only ruling 7): store
+    // builds collapse to soulbitscloud; full builds show the raw table list.
+    const providerOptions = getAvailableProviders(moduleType);
 
     return (
       <ThemedCard elevated accentStripe style={styles.section}>

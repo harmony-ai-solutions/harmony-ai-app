@@ -23,6 +23,14 @@ declare module 'react-native-config' {
      * (Android). Falls back to 'dev' when absent (__DEV__).
      */
     APP_ENV?: string;
+    /**
+     * Distribution variant: 'store' | 'full' (plan 7-14). Injected per build
+     * by the Android flavour `buildConfigField` (`android/app/build.gradle`)
+     * and written into the generated iOS/Metro `.env` by
+     * `scripts/oauth-secrets.cjs`. Absent / any non-'store' value → 'full'
+     * (see `src/config/appVariant.ts`).
+     */
+    APP_VARIANT?: string;
     IS_BETA?: string | boolean;
     GOOGLE_WEB_CLIENT_ID?: string;
     APPLE_SERVICES_ID?: string;

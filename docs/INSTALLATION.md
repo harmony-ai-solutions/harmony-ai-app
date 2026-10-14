@@ -27,6 +27,66 @@ iOS uses a **single Xcode scheme** — dev/prod is distinguished by the CI build
 
 > Apple Sign-In (SIWA) requires a **signed build** with the SIWA entitlement. It does not apply to the current unsigned sideload IPAs — email/password and Google Sign-In are available on sideload builds instead.
 
+## Distribution Variants (store vs full)
+
+Beyond dev/prod — which select the *cloud environment* — a second, orthogonal
+axis selects the **distribution variant**: the product surface a build ships.
+It is the single functional axis `APP_VARIANT` (`store` | `full`) and is derived
+into `APP_CHANNEL` (`play` | `sideload`):
+
+| Variant | Ships as | Product model |
+|---------|----------|---------------|
+| **full** (default) | Self-built / sideload APK & IPA | Everything: every provider, direct-LAN QR pairing, purchases, and the in-app APK self-updater. Cloud is optional. |
+| **store** | Play Store / App Store listing | Soulbits Cloud only: forced sign-in wall, `soulbitscloud`-only provider pickers (non-cloud configs visible-but-locked), cloud-relay pairing only, purchases disabled at launch, and the self-updater OFF (the listing owns updates). |
+
+Both variants share the **same application ids** (`ai.soulbits.chat` /
+`ai.soulbits.chat.dev`) — the variant is a build-time flag, not a package
+suffix, so a store build and a full build are **not co-installable** side by
+side on one device. A self-built build with no variant configured is **full**.
+`APP_VARIANT` is orthogonal to `APP_ENV`, so the four Android flavours are
+`dev`, `prod`, `devStore` and `prodStore`.
+
+> Store builds ship the **embedded engine** too — the phone's engine is the sync
+> endpoint for paired desktop devices. The lock applies to provider configs, not
+> to engine presence.
+
+### Android
+
+The variant is expressed as extra flavours in the existing `environment`
+dimension (`android/app/build.gradle`), so the historical task names are
+unchanged:
+
+| Flavour | `APP_VARIANT` | Application ID | Task |
+|---------|---------------|----------------|------|
+| `dev` | full | `ai.soulbits.chat.dev` | `assembleDevDebug` / `assembleDevRelease` |
+| `devStore` | store | `ai.soulbits.chat.dev` | `assembleDevStoreDebug` / `assembleDevStoreRelease` |
+| `prod` | full | `ai.soulbits.chat` | `assembleProdDebug` / `assembleProdRelease` |
+| `prodStore` | store | `ai.soulbits.chat` | `assembleProdStoreDebug` / `assembleProdStoreRelease` |
+
+```bash
+cd android
+./gradlew assembleDevStoreDebug      # dev environment + store variant
+./gradlew assembleProdStoreRelease   # the Store listing build
+```
+
+`assembleDevDebug`, `assembleDevRelease` and `assembleProdRelease` (the existing
+tasks) still build the **full** variant.
+
+### iOS
+
+iOS keeps a **single Xcode scheme**; the variant is written into the generated
+`.env` (read by `react-native-config`) by the OAuth-secrets loader, mirroring
+the existing `APP_ENV` mechanism:
+
+```bash
+npm run oauth:dev                       # full (default)
+npm run oauth:dev -- --variant=store    # or: APP_VARIANT=store npm run oauth:dev
+npm run ios
+```
+
+`APP_VARIANT` lands in the generated `.env`; CI regenerates it per release
+entry.
+
 ## Android
 
 ### Requirements

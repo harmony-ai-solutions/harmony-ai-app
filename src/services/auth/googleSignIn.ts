@@ -271,3 +271,63 @@ export async function signInWithGoogle(): Promise<string> {
     throw new GoogleSignInError(GoogleSignInErrorType.UNKNOWN, rawMessage);
   }
 }
+
+/**
+ * Attempt a SILENT Google sign-in (plan 7-14 V2).
+ *
+ * Restores a previously-granted Google credential WITHOUT presenting any UI
+ * (`GoogleSignin.signInSilently()` — the v16 SDK's `restorePreviousSignIn`
+ * equivalent). Returns the `idToken` on success, or `null` when there is no
+ * saved credential (first install / after a full sign-out) so the caller falls
+ * back to the wall.
+ *
+ * Differences from {@link signInWithGoogle}:
+ * - NEVER presents a picker/consent dialog — it is intentionally headless.
+ * - Does NOT `signOut()` first (that would erase the very credential we are
+ *   trying to restore) and does NOT run the Play-Services update dialog.
+ * - A saved credential is required (`hasPreviousSignIn`); absent → `null`.
+ *
+ * Throws a typed {@link GoogleSignInError} only on an unexpected SDK failure.
+ * The store launch-gate wrapper (`attemptSilentSignIn`) swallows that into a
+ * `null` fallback — the wall is the reliable floor.
+ */
+export async function signInSilentlyWithGoogle(): Promise<string | null> {
+  const params = getConfigureParams();
+
+  try {
+    GoogleSignin.configure(params);
+  } catch (configErr: unknown) {
+    log.warn('GoogleSignin.configure() failed during silent sign-in:', configErr);
+    throw new GoogleSignInError(
+      GoogleSignInErrorType.UNKNOWN,
+      `Google silent sign-in configuration failed: ${
+        configErr instanceof Error ? configErr.message : String(configErr)
+      }`,
+    );
+  }
+
+  try {
+    const response = await GoogleSignin.signInSilently();
+
+    if (response.type !== 'success') {
+      log.info('Silent Google sign-in found no saved credential');
+      return null;
+    }
+
+    const { idToken } = response.data;
+    if (!idToken) {
+      log.warn('Silent Google sign-in returned no idToken — falling back to the wall');
+      return null;
+    }
+
+    log.info('Silent Google sign-in restored a saved credential');
+    return idToken;
+  } catch (err: unknown) {
+    if (err instanceof GoogleSignInError) {
+      throw err;
+    }
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    log.warn('GoogleSignin.signInSilently() failed:', rawMessage);
+    throw new GoogleSignInError(GoogleSignInErrorType.UNKNOWN, rawMessage);
+  }
+}

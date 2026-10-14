@@ -94,6 +94,7 @@ import {
   requestBubblePermission,
 } from '../services/ChatBubbleService';
 import { isChatLocked } from '../services/marketplace/MarketplaceService';
+import { isEntityLocked } from '../services/variant/entityAccess';
 
 const log = createLogger('[ChatDetailScreen]');
 
@@ -184,8 +185,15 @@ export function shouldInitializeEntitySession(params: {
   participantKey: string | null;
   disabledLoaded: boolean;
   isDisabled: boolean;
+  /**
+   * Store-variant runtime lock (plan 7-14 V3): a locked entity (a provider this
+   * build doesn't offer) must never send INIT. Optional so existing callers /
+   * tests are unaffected (absent ⇒ unlocked).
+   */
+  locked?: boolean;
 }): boolean {
   if (params.chatLocked) return false;
+  if (params.locked) return false;
   if (!params.isConnected || !params.participantKey) return false;
   if (!params.disabledLoaded) return false;
   if (params.isDisabled) return false;
@@ -212,7 +220,14 @@ export function resolveChatConnectionState(params: {
   isConnected: boolean;
   isSessionActive: boolean;
   sessionFailed: boolean;
+  /**
+   * Store-variant lock (7-14 V3): a locked entity never starts a session, so it
+   * must NOT show the eternal amber "connecting" pulse — a calm grey (offline)
+   * dot is the clean presentation. Optional ⇒ full-variant callers unchanged.
+   */
+  locked?: boolean;
 }): ChatConnectionState {
+  if (params.locked) return 'offline';
   if (!params.isConnected) return 'offline';
   if (params.sessionFailed) return 'error';
   return params.isSessionActive ? 'connected' : 'connecting';
@@ -420,6 +435,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // The init effect gates on this so it never sends INIT while the flag is
   // still loading (see shouldInitializeEntitySession — Q8).
   const [disabledLoaded, setDisabledLoaded] = useState(false);
+  // Store-variant runtime lock (plan 7-14 V3): true when the partner entity is
+  // wired to a provider this build doesn't offer. The chat shows a neutral
+  // banner and refuses new sessions; it is COMPUTED, never persisted. Full
+  // variant → always false (isEntityLocked short-circuits, zero fetches).
+  const [isLocked, setIsLocked] = useState(false);
 
   // 4-3 (D36): terminal session-failure state. Set by the session:error
   // listener (matched by interactionId OR participant set — a terminal failure
@@ -717,6 +737,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           if (partnerEntityId) {
             const partner = await getEntity(partnerEntityId);
             if (mounted) setIsDisabled(partner?.is_disabled === 1);
+            // Store-variant lock (no-op / false in the full variant).
+            const locked = await isEntityLocked(partnerEntityId);
+            if (mounted) setIsLocked(locked);
           }
         }
       } catch (error) {
@@ -825,10 +848,14 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         participantKey,
         disabledLoaded,
         isDisabled,
+        locked: isLocked,
       })
     ) {
       if (isDisabled) {
         log.debug('Skipping session INIT: partner entity is disabled');
+      }
+      if (isLocked) {
+        log.debug('Skipping session INIT: partner entity is locked (store variant)');
       }
       return;
     }
@@ -866,6 +893,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     participantKey,
     isDisabled,
     disabledLoaded,
+    isLocked,
   ]);
 
   // Listen for new messages and typing indicator
@@ -2062,9 +2090,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       !isInitialScrollDone.current &&
       ((initialScrollTarget === 'bottom' && hasRealContent) ||
         isKnownEmpty ||
-        sessionFailed !== null)
+        sessionFailed !== null ||
+        // Store-variant lock (7-14 V3): a locked entity never INITs, so
+        // has_first_mes stays unknown — reveal immediately so the lock banner
+        // (and any existing history) is not stranded behind the splash.
+        isLocked)
     ) {
-      if (isKnownEmpty || sessionFailed !== null) {
+      if (isKnownEmpty || sessionFailed !== null || isLocked) {
         // Nothing to scroll or pin — reveal immediately.
         isInitialScrollDone.current = true;
         isReadyToShowRef.current = true;
@@ -2094,7 +2126,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }, 60);
       }
     }
-  }, [messages, messagesWithDivider, initialScrollTarget, loading, hasFirstMes, sessionFailed]);
+  }, [messages, messagesWithDivider, initialScrollTarget, loading, hasFirstMes, sessionFailed, isLocked]);
 
   const persistMarkAsRead = useCallback(() => {
     // Derived unread (A5/A2): mark partner-sent messages in THIS conversation
@@ -2429,6 +2461,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
     isConnected,
     isSessionActive: isSessionActive(currentInteractionIdRef.current),
     sessionFailed: sessionFailed !== null,
+    locked: isLocked,
   });
 
   // Pulsing affordance for the "connecting" state.
@@ -2965,7 +2998,20 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
 
 </View>
 
-{isDisabled ? (
+{isLocked ? (
+        // Store-variant lock (plan 7-14 V3): neutral copy, NO CTA/link/steering.
+        // Reuses the composer-slot container (same trade as the disabled banner):
+        // nothing can be sent while locked, so the composer is replaced.
+        <View
+          style={[styles.disabledBanner, styles.lockedBanner, { paddingBottom: safeBottom + 14 }]}
+          testID="locked-entity-banner"
+        >
+          <Icon name="lock-outline" size={18} color={theme?.colors.text.muted} />
+          <ThemedText variant="muted" size={13} style={styles.disabledBannerText}>
+            {t('lockedBanner')}
+          </ThemedText>
+        </View>
+      ) : isDisabled ? (
         <View style={[styles.disabledBanner, { paddingBottom: safeBottom + 14 }]}>
           <Icon name="shield-off-outline" size={18} color={theme?.colors.status.error} />
           <ThemedText variant="muted" size={13} style={styles.disabledBannerText}>
@@ -3249,6 +3295,13 @@ const styles = StyleSheet.create({
   },
   disabledBannerText: {
     flex: 1,
+  },
+  // Store-variant lock banner (7-14 V3): NEUTRAL tint (not the red disabled
+  // treatment) — the user did NOT disable this entity; its provider simply
+  // isn't offered by this build. No CTA/link/steering.
+  lockedBanner: {
+    backgroundColor: 'rgba(124, 58, 237, 0.10)',
+    borderTopColor: 'rgba(124, 58, 237, 0.28)',
   },
   // 4-3 (D36): terminal session-failure card — applied ON TOP of
   // disabledBanner (same container tokens); only switches the row layout to a

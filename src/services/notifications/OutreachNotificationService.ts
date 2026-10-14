@@ -63,6 +63,7 @@ import {
 import type { NotificationTransport } from './NotificationSettings';
 import { postLocalNotification } from './LocalNotifications';
 import type { LocalNotificationPayload } from './LocalNotifications';
+import { isEntityLocked as defaultIsEntityLocked } from '../variant/entityAccess';
 
 const log = createLogger('[OutreachNotifications]');
 
@@ -120,6 +121,14 @@ export interface OutreachNotificationDeps {
   getTransport?: () => Promise<NotificationTransport>;
   /** Read the lock-screen hide-content preference (defaults to NotificationSettings). */
   getHideContent?: () => Promise<boolean>;
+  /**
+   * Store-variant lock predicate (plan 7-14 V3). When an entity is locked (its
+   * provider isn't offered by this build) its outreach is suppressed — a locked
+   * entity can't be interacted with, so a banner/unread would imply an
+   * action that isn't possible. Defaults to the real entityAccess predicate
+   * (short-circuits to false in the full variant).
+   */
+  isEntityLocked?: (entityId: string) => Promise<boolean>;
   /** Post a local OS notification (defaults to LocalNotifications). */
   postLocal?: (payload: LocalNotificationPayload) => Promise<boolean> | void;
   /** In-app surfacing seam for foreground events. */
@@ -166,6 +175,7 @@ export class OutreachNotificationService {
   private readonly dedupe: OutreachDedupe;
   private readonly getTransport: () => Promise<NotificationTransport>;
   private readonly getHideContent: () => Promise<boolean>;
+  private readonly isEntityLocked: (entityId: string) => Promise<boolean>;
   private readonly postLocal: (payload: LocalNotificationPayload) => Promise<boolean> | void;
   private onInApp?: (event: OutreachNotificationEvent) => void;
   private onStatusChange?: (status: OutreachStreamStatus) => void;
@@ -192,6 +202,7 @@ export class OutreachNotificationService {
     this.dedupe = deps.dedupe ?? outreachDedupe;
     this.getTransport = deps.getTransport ?? getNotificationTransport;
     this.getHideContent = deps.getHideContent ?? getHideContentOnLockScreen;
+    this.isEntityLocked = deps.isEntityLocked ?? defaultIsEntityLocked;
     this.postLocal = deps.postLocal ?? (payload => postLocalNotification(payload));
     this.onInApp = deps.onInApp;
     this.onStatusChange = deps.onStatusChange;
@@ -285,6 +296,11 @@ export class OutreachNotificationService {
 
       const transport = await this.getTransport();
       if (transport === 'off') return; // silenced everywhere
+
+      // Store-variant lock eligibility (7-14 V3): a locked entity's outreach is
+      // suppressed (no local/in-app banner, no unread implied). Full variant →
+      // the predicate short-circuits to false (no fetch).
+      if (await this.isEntityLocked(event.entity_id)) return;
 
       // Dedupe BEFORE surfacing: a live event + a later re-emission (or a push
       // carrying the same id) must not double-notify.

@@ -36,6 +36,7 @@ import {
 } from '../services/marketplace/MarketplaceService';
 import { InsufficientCreditsError } from '../services/stub/StubServiceError';
 import { itemTypeIcon, formatSoulPrice } from '../utils/marketTypes';
+import { purchasesEnabled } from '../services/variant/purchaseAccess';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type RouteParams = RouteProp<RootStackParamList, 'MarketplaceItemDetail'>;
@@ -49,6 +50,10 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
   const { showToast } = useToast();
   const { showAlert } = useAppAlert();
   const { bottom: safeBottom } = useSafeAreaInsets();
+
+  // Store variant (plan 7-14): purchases are disabled at launch — every PAID
+  // acquire action is hidden (free claims stay; the listing remains browsable).
+  const canPurchase = purchasesEnabled();
 
   const [listing, setListing] = useState<MarketplaceListingDetail | null>(null);
   const [owned, setOwned] = useState(false);
@@ -246,7 +251,7 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
               {listing.previewText}
               {!owned && listing.priceSouls > 0 ? '…' : ''}
             </Text>
-            {!owned && listing.priceSouls > 0 ? (
+            {!owned && listing.priceSouls > 0 && canPurchase ? (
               <Text style={[styles.unlockHint, { color: theme.colors.text.disabled }]}>
                 {t('unlockHint')}
               </Text>
@@ -259,31 +264,34 @@ export const MarketplaceItemDetailScreen: React.FC = () => {
         </Text>
       </ScrollView>
 
-      {/* Sticky acquire bar */}
-      <View style={[styles.acquireBar, { paddingBottom: safeBottom + 12 }]}>
-        {owned ? (
-          <ThemedButton
-            label={isSeller ? t('sellerLabel') : t('ownLabel')}
-            variant="secondary"
-            icon="check"
-            onPress={() => navigation.goBack()}
-          />
-        ) : (
-          <ThemedButton
-            label={
-              acquiring
-                ? '...'
-                : isFree
-                  ? t('acquireFreeConfirm')
-                  : t('acquireConfirm').replace('{{price}}', formatSoulPrice(listing.priceSouls))
-            }
-            variant={isFree ? 'secondary' : 'primary'}
-            icon={isFree ? 'gift-outline' : 'cart-outline'}
-            disabled={acquiring}
-            onPress={handleAcquire}
-          />
-        )}
-      </View>
+      {/* Sticky acquire bar — hidden in store builds for a PAID, unowned item
+          (purchases are disabled at launch); owned and free items keep it. */}
+      {owned || isFree || canPurchase ? (
+        <View style={[styles.acquireBar, { paddingBottom: safeBottom + 12 }]}>
+          {owned ? (
+            <ThemedButton
+              label={isSeller ? t('sellerLabel') : t('ownLabel')}
+              variant="secondary"
+              icon="check"
+              onPress={() => navigation.goBack()}
+            />
+          ) : (
+            <ThemedButton
+              label={
+                acquiring
+                  ? '...'
+                  : isFree
+                    ? t('acquireFreeConfirm')
+                    : t('acquireConfirm').replace('{{price}}', formatSoulPrice(listing.priceSouls))
+              }
+              variant={isFree ? 'secondary' : 'primary'}
+              icon={isFree ? 'gift-outline' : 'cart-outline'}
+              disabled={acquiring}
+              onPress={handleAcquire}
+            />
+          )}
+        </View>
+      ) : null}
     </ThemedView>
   );
 };

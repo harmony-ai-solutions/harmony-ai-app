@@ -21,7 +21,10 @@ react {
     //   The list of variants to that are debuggable. For those we're going to
     //   skip the bundling of the JS bundle and the assets. By default is just 'debug'.
     //   If you add flavors like lite, prod, etc. you'll have to list your debuggableVariants.
-    debuggableVariants = ["devDebug"]
+    // Add every dev-variant debug build here (7-14: devStoreDebug joins devDebug
+    // so a dev-store build on device also loads JS from Metro rather than baking
+    // a bundle). See the "Distribution variant axis" note below.
+    debuggableVariants = ["devDebug", "devStoreDebug"]
 
     /* Bundling */
     //   A list containing the node command and its flags. Default is just 'node'.
@@ -144,12 +147,34 @@ android {
 
         resValue "string", "build_config_package", "ai.soulbits.chat"
     }
+    // ── Distribution variant axis (plan 7-14) ─────────────────────────────
+    // APP_VARIANT ('store' | 'full') is the single functional distribution
+    // axis. 'full' = today's behavior (self-built / sideload; the in-app APK
+    // self-update is available); 'store' = Play / App Store listing (the store
+    // listing owns updates; the APK self-updater is OFF). Consumers:
+    // src/config/appVariant.ts + src/config/appChannel.ts.
+    //
+    // IMPLEMENTATION NOTE: the variant is expressed as ADDITIONAL FLAVORS in the
+    // EXISTING "environment" dimension rather than a second flavorDimension.
+    // A second dimension would rename EVERY variant (`devFullDebug` instead of
+    // `devDebug`) and break the existing build names, and
+    // `missingDimensionStrategy` cannot supply a default for the app module's
+    // OWN dimension (it resolves dimensions missing from a *consumed* library
+    // module only). So:
+    //   dev / prod           → APP_VARIANT=full  (task names UNCHANGED)
+    //   devStore / prodStore → APP_VARIANT=store (new names)
+    // Existing `assembleDevDebug`, `assembleDevRelease`, `assembleProdRelease`,
+    // and the E2E `assembleDevRelease -PE2E_DEBUG_SIGNING=true` all keep working.
+    // applicationId is NEVER suffixed differently per variant (design rule 5 —
+    // OAuth clients are per-package; existing installs must not be orphaned).
     flavorDimensions "environment"
     productFlavors {
         dev {
+            dimension "environment"
             applicationIdSuffix ".dev"
             versionNameSuffix "-dev"
             buildConfigField "boolean", "IS_BETA", "true"
+            buildConfigField "String", "APP_VARIANT", "\"full\""
             buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('dev', 'GOOGLE_WEB_CLIENT_ID')}\""
             buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('dev', 'APPLE_SERVICES_ID')}\""
 
@@ -172,8 +197,30 @@ android {
                 buildConfigField "String", "E2E_ENGINE_PEER_WSS_URL", "\"${e2ePeerWss}\""
             }
         }
+        // devStore — dev environment + store variant. Same application id as
+        // `dev` (no store suffix; design rule 5). No E2E peer injection: the
+        // E2E app-under-test is the `full` dev build (assembleDevRelease).
+        devStore {
+            dimension "environment"
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
+            buildConfigField "boolean", "IS_BETA", "true"
+            buildConfigField "String", "APP_VARIANT", "\"store\""
+            buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('dev', 'GOOGLE_WEB_CLIENT_ID')}\""
+            buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('dev', 'APPLE_SERVICES_ID')}\""
+        }
         prod {
+            dimension "environment"
             buildConfigField "boolean", "IS_BETA", "false"
+            buildConfigField "String", "APP_VARIANT", "\"full\""
+            buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('prod', 'GOOGLE_WEB_CLIENT_ID')}\""
+            buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('prod', 'APPLE_SERVICES_ID')}\""
+        }
+        // prodStore — prod environment + store variant (the Store listing build).
+        prodStore {
+            dimension "environment"
+            buildConfigField "boolean", "IS_BETA", "false"
+            buildConfigField "String", "APP_VARIANT", "\"store\""
             buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('prod', 'GOOGLE_WEB_CLIENT_ID')}\""
             buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('prod', 'APPLE_SERVICES_ID')}\""
         }

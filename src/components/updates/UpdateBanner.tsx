@@ -31,6 +31,7 @@ import {
 } from '../../services/updates/UpdateAvailableService';
 import type { UpdateState } from '../../services/updates/UpdateAvailableService';
 import { isApkSelfUpdateAvailable } from '../../config/appChannel';
+import { isStoreVariant } from '../../config/appVariant';
 import {
   INSTALL_PERMISSION_REQUIRED,
   openInstallPermissionSettings,
@@ -89,6 +90,10 @@ export const UpdateBanner: React.FC = () => {
     },
     [runSelfUpdate, showAlert, t],
   );
+
+  // Store variant (plan 7-14): the store listing owns updates — the banner
+  // never renders (the service also never checks, so `state` stays empty).
+  if (isStoreVariant()) return null;
 
   if (!theme) return null;
 

@@ -65,6 +65,8 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
 import { EntityModuleSelectorWithActions } from '../components/entities/EntityModuleSelectorWithActions';
+import { filterModuleConfigsForVariant } from '../services/variant/providerAvailability';
+import { invalidateEntityAccessCache } from '../services/variant/entityAccess';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
@@ -330,26 +332,42 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         getAllMovementConfigs(),
         getAllBackendConfigs(),
       ]);
+      // Variant-aware picker options (plan 7-14 V3): a store build only offers
+      // configs wired exclusively to the available provider (soulbitscloud), so
+      // the entity editor can never wire a locked provider. Full = unchanged.
       const toOptions = (
+        moduleType: string,
         configs: Array<{ id: string; name: string }>,
-      ): ModuleConfigOption[] => configs.map(c => ({ id: String(c.id), name: c.name }));
-      setCognitionConfigs(toOptions(cognition));
-      setTtsConfigs(toOptions(tts));
-      setSttConfigs(toOptions(stt));
-      setVisionConfigs(toOptions(vision));
-      setRagConfigs(toOptions(rag));
-      setImaginationConfigs(toOptions(imagination));
-      setMovementConfigs(toOptions(movement));
-      setBackendConfigs(toOptions(backend));
+      ): ModuleConfigOption[] =>
+        filterModuleConfigsForVariant(
+          moduleType,
+          configs as unknown as Array<Record<string, unknown>>,
+        ).map(c => ({ id: String(c.id), name: c.name as string }));
+      const cognitionOptions = toOptions('cognition', cognition);
+      const ttsOptions = toOptions('tts', tts);
+      const sttOptions = toOptions('stt', stt);
+      const visionOptions = toOptions('vision', vision);
+      const ragOptions = toOptions('rag', rag);
+      const imaginationOptions = toOptions('imagination', imagination);
+      const movementOptions = toOptions('movement', movement);
+      const backendOptions = toOptions('backend', backend);
+      setCognitionConfigs(cognitionOptions);
+      setTtsConfigs(ttsOptions);
+      setSttConfigs(sttOptions);
+      setVisionConfigs(visionOptions);
+      setRagConfigs(ragOptions);
+      setImaginationConfigs(imaginationOptions);
+      setMovementConfigs(movementOptions);
+      setBackendConfigs(backendOptions);
       setHasAnyConfigs(
-        cognition.length > 0 ||
-          tts.length > 0 ||
-          stt.length > 0 ||
-          vision.length > 0 ||
-          rag.length > 0 ||
-          imagination.length > 0 ||
-          movement.length > 0 ||
-          backend.length > 0,
+        cognitionOptions.length > 0 ||
+          ttsOptions.length > 0 ||
+          sttOptions.length > 0 ||
+          visionOptions.length > 0 ||
+          ragOptions.length > 0 ||
+          imaginationOptions.length > 0 ||
+          movementOptions.length > 0 ||
+          backendOptions.length > 0,
       );
     } catch (err) {
       log.error('Failed to load module configs:', err);
@@ -1084,6 +1102,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
             imagination_config_id: imaginationConfigId || null,
             movement_config_id: movementConfigId || null,
           });
+          // Entity wiring changed → the computed lock set is stale (7-14).
+          invalidateEntityAccessCache();
         }
 
         navigation.goBack();
@@ -1254,6 +1274,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         movement_config_id: resolvedMovement,
         deleted_at: null,
       });
+      // New entity wiring → the computed lock set is stale (7-14).
+      invalidateEntityAccessCache();
 
       // 6. The entity (and its profile/mapping) is authored directly on the
       //    engine at create time (task 3-4) — no separate sync push is needed.

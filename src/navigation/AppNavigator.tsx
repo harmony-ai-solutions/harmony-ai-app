@@ -45,6 +45,7 @@ import { MarketplaceItemDetailScreen } from '../screens/MarketplaceItemDetailScr
 import { MyLibraryScreen } from '../screens/MyLibraryScreen';
 import { MyListingsScreen } from '../screens/MyListingsScreen';
 import { ContentAssetScreen } from '../screens/ContentAssetScreen';
+import { AuthGate } from '../components/auth/AuthGate';
 
 export type RootStackParamList = {
   /** Tab container — the primary navigation surface (5-tab layout) */
@@ -181,77 +182,79 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
   navigationRef,
 }) => {
   return (
-    <NavigationContainer ref={navigationRef} theme={transparentNavTheme}>
-      <Stack.Navigator
-        initialRouteName="MainTabs"
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: 'transparent' },
-          animation: 'fade',
-        }}
-      >
-        {/* ── Primary tab container (5-tab layout: Characters | Chat | Discover | Market | My Profile) ── */}
-        <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+    <AuthGate>
+      <NavigationContainer ref={navigationRef} theme={transparentNavTheme}>
+        <Stack.Navigator
+          initialRouteName="MainTabs"
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: 'transparent' },
+            animation: 'fade',
+          }}
+        >
+          {/* ── Primary tab container (5-tab layout: Characters | Chat | Discover | Market | My Profile) ── */}
+          <Stack.Screen name="MainTabs" component={MainTabNavigator} />
 
-        {/* ── Legacy landing (kept for backward-compatible deep links) ── */}
-        <Stack.Screen name="Landing" component={LandingScreen} />
+          {/* ── Legacy landing (kept for backward-compatible deep links) ── */}
+          <Stack.Screen name="Landing" component={LandingScreen} />
 
-        {/* ── Full-screen detail routes pushed over the tabs ─────────── */}
-        <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
-        <Stack.Screen name="AIProfile" component={AIProfileScreen} />
-        <Stack.Screen name="UserProfile" component={UserProfileScreen} />
-        <Stack.Screen name="CreateAI" component={CreateAIScreen} />
+          {/* ── Full-screen detail routes pushed over the tabs ─────────── */}
+          <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
+          <Stack.Screen name="AIProfile" component={AIProfileScreen} />
+          <Stack.Screen name="UserProfile" component={UserProfileScreen} />
+          <Stack.Screen name="CreateAI" component={CreateAIScreen} />
 
-        {/* ── Notifications feed (pushed over tabs from the header bell) ── */}
-        <Stack.Screen name="Notifications" component={NotificationsScreen} />
+          {/* ── Notifications feed (pushed over tabs from the header bell) ── */}
+          <Stack.Screen name="Notifications" component={NotificationsScreen} />
 
-        {/* ── Settings (pushed over tabs from the header hamburger menu) ── */}
-        <Stack.Screen name="Settings" component={SettingsScreen} />
+          {/* ── Settings (pushed over tabs from the header hamburger menu) ── */}
+          <Stack.Screen name="Settings" component={SettingsScreen} />
 
-        {/* ── Settings sub-pages (pushed over tabs from Settings) ── */}
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Register" component={RegisterScreen} />
-        <Stack.Screen name="BackgroundSettings" component={BackgroundSettingsScreen} />
-        <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
-        <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />
-        <Stack.Screen
-          name="BiometricLockSettings"
-          component={BiometricLockSettingsScreen}
-        />
-        <Stack.Screen
-          name="ProfileSettings"
-          component={ProfileSettingsScreen}
-        />
-        <Stack.Screen name="EditProfile" component={EditProfileScreen} />
-        <Stack.Screen name="PersonaEdit" component={PersonaEditScreen} />
-        <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
-        <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
-        <Stack.Screen name="VoiceInputSettings" component={VoiceInputSettingsScreen} />
-        <Stack.Screen name="DesktopSync" component={DesktopSyncScreen} />
-        <Stack.Screen name="BackupSettings" component={BackupSettingsScreen} />
-        <Stack.Screen name="RestoreOnboarding" component={RestoreOnboardingScreen} />
-        <Stack.Screen name="RestoreOffer" component={RestoreOfferScreen} />
-        <Stack.Screen name="IOSLifecycleInfo" component={IOSLifecycleInfoScreen} />
-        <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />
-        <Stack.Screen name="EngineLog" component={EngineLogScreen} />
-        <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
-        <Stack.Screen name="DisabledAIs" component={DisabledAIsScreen} />
-        <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
-        <Stack.Screen name="ArchivedChats" component={ArchivedChatsScreen} />
-        <Stack.Screen name="MarketplacePublish" component={MarketplacePublishScreen} />
-        <Stack.Screen name="MarketplaceItemDetail" component={MarketplaceItemDetailScreen} />
-        <Stack.Screen name="MyLibrary" component={MyLibraryScreen} />
-        <Stack.Screen name="MyListings" component={MyListingsScreen} />
-        <Stack.Screen name="ContentAsset" component={ContentAssetScreen} />
-        <Stack.Screen
-          name="ComingSoon"
-          component={ComingSoonScreen}
-        />
-        <Stack.Screen
-          name="ModuleConfigEdit"
-          component={ModuleConfigEditScreen}
-        />
-      </Stack.Navigator>
-    </NavigationContainer>
+          {/* ── Settings sub-pages (pushed over tabs from Settings) ── */}
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Register" component={RegisterScreen} />
+          <Stack.Screen name="BackgroundSettings" component={BackgroundSettingsScreen} />
+          <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
+          <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />
+          <Stack.Screen
+            name="BiometricLockSettings"
+            component={BiometricLockSettingsScreen}
+          />
+          <Stack.Screen
+            name="ProfileSettings"
+            component={ProfileSettingsScreen}
+          />
+          <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+          <Stack.Screen name="PersonaEdit" component={PersonaEditScreen} />
+          <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
+          <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
+          <Stack.Screen name="VoiceInputSettings" component={VoiceInputSettingsScreen} />
+          <Stack.Screen name="DesktopSync" component={DesktopSyncScreen} />
+          <Stack.Screen name="BackupSettings" component={BackupSettingsScreen} />
+          <Stack.Screen name="RestoreOnboarding" component={RestoreOnboardingScreen} />
+          <Stack.Screen name="RestoreOffer" component={RestoreOfferScreen} />
+          <Stack.Screen name="IOSLifecycleInfo" component={IOSLifecycleInfoScreen} />
+          <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />
+          <Stack.Screen name="EngineLog" component={EngineLogScreen} />
+          <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
+          <Stack.Screen name="DisabledAIs" component={DisabledAIsScreen} />
+          <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
+          <Stack.Screen name="ArchivedChats" component={ArchivedChatsScreen} />
+          <Stack.Screen name="MarketplacePublish" component={MarketplacePublishScreen} />
+          <Stack.Screen name="MarketplaceItemDetail" component={MarketplaceItemDetailScreen} />
+          <Stack.Screen name="MyLibrary" component={MyLibraryScreen} />
+          <Stack.Screen name="MyListings" component={MyListingsScreen} />
+          <Stack.Screen name="ContentAsset" component={ContentAssetScreen} />
+          <Stack.Screen
+            name="ComingSoon"
+            component={ComingSoonScreen}
+          />
+          <Stack.Screen
+            name="ModuleConfigEdit"
+            component={ModuleConfigEditScreen}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </AuthGate>
   );
 };

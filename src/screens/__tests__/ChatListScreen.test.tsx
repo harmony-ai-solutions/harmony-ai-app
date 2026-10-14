@@ -33,6 +33,14 @@ describe('ChatListScreen derived-unread badge seam (3-1)', () => {
   it('is a no-op for a non-muted partner with zero unread', () => {
     expect(resolveDisplayUnreadCount(0, false)).toBe(0);
   });
+
+  it('zeroes the badge for a store-locked entity (7-14 V3 — not actionable)', () => {
+    // A locked entity stays listed in search, but an unread badge would imply
+    // an interaction that is impossible — suppressed like mute.
+    expect(resolveDisplayUnreadCount(3, false, true)).toBe(0);
+    expect(resolveDisplayUnreadCount(3, false, false)).toBe(3);
+    expect(resolveDisplayUnreadCount(3, true, true)).toBe(0);
+  });
 });
 
 describe('ChatListScreen sync-apply reload gate (3-1 → 4-1)', () => {

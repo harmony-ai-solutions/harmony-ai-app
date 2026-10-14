@@ -4,6 +4,9 @@
  * Consolidates the rows that previously lived on the main Settings screen
  * (Account & Security + Billing & Purchases) into a single dedicated screen,
  * keeping the top-level Settings tab compact.
+ *
+ * Store variant (plan 7-14): purchases are disabled at launch, so the whole
+ * "Billing & Purchases" card is hidden (Account & Security stays).
  */
 import React from 'react';
 import { StyleSheet, ScrollView } from 'react-native';
@@ -15,6 +18,7 @@ import { ThemedCard } from '../../components/themed/ThemedCard';
 import { SectionHeader } from '../../components/themed/SectionHeader';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
 import { SettingsLinkRow } from '../../components/settings/SettingsRows';
+import { isStoreVariant } from '../../config/appVariant';
 
 export const AccountSettingsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -88,16 +92,19 @@ export const AccountSettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
-        {/* ── Billing & Purchases ── */}
-        <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('billing')} style={styles.sectionHeader} />
-          <SettingsLinkRow
-            icon="credit-card"
-            label={t('manageSubscription')}
-            onPress={() => navigateToComingSoon('manageSubscription', 'credit-card', 'comingSoonManageSubscription')}
-            theme={theme}
-          />
-        </ThemedCard>
+        {/* ── Billing & Purchases ── (store variant: purchases disabled at
+            launch — the whole billing surface is hidden) */}
+        {!isStoreVariant() ? (
+          <ThemedCard elevated accentStripe style={styles.card}>
+            <SectionHeader title={t('billing')} style={styles.sectionHeader} />
+            <SettingsLinkRow
+              icon="credit-card"
+              label={t('manageSubscription')}
+              onPress={() => navigateToComingSoon('manageSubscription', 'credit-card', 'comingSoonManageSubscription')}
+              theme={theme}
+            />
+          </ThemedCard>
+        ) : null}
       </ScrollView>
     </ThemedView>
   );

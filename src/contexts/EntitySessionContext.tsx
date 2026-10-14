@@ -1,9 +1,19 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
 import EntitySessionService, { InteractionSession } from '../services/EntitySessionService';
 import { useSyncConnection } from './SyncConnectionContext';
+import { isEntityLocked } from '../services/variant/entityAccess';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[EntitySessionContext]');
+
+/**
+ * App-side terminal sentinel for a store-variant locked entity (plan 7-14 V3).
+ * A locked entity's provider is not offered by this build, so INIT is refused
+ * BEFORE it reaches the engine; the message must be classified as non-retryable
+ * so the bounded retry loop gives up immediately (no "Scheduling retry 1/3"
+ * spin) and the screen shows its neutral lock state.
+ */
+const ENTITY_PROVIDER_LOCKED = 'entity_provider_locked';
 
 interface RetryState {
   attempts: number;
@@ -185,6 +195,22 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
   ): Promise<void> => {
     if (!canStartSession) {
       throw new Error('Sync connection required for entity sessions');
+    }
+
+    // Store-variant entity lock (plan 7-14 V3): a locked partner (a provider
+    // this build doesn't offer) must never INIT. Refuse here as defense in
+    // depth for any start path that bypasses ChatDetail's gate. No-op / false
+    // in the full variant (isEntityLocked short-circuits, zero fetches).
+    const lockedPartner = (
+      await Promise.all(
+        participantIds
+          .filter(id => id !== ownEntityId)
+          .map(async id => ((await isEntityLocked(id)) ? id : null)),
+      )
+    ).find((id): id is string => id !== null);
+    if (lockedPartner) {
+      log.warn(`Refusing session INIT: partner ${lockedPartner} is locked in this build (7-14).`);
+      throw new Error(ENTITY_PROVIDER_LOCKED);
     }
 
     // Derive a participant-based key for pre-session retry deduplication.
@@ -451,6 +477,12 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     // flag arrives wrapped in the timer-fix error message too
     // ("Session initialization failed: entity_disabled").
     if (message.includes('entity_disabled')) {
+      return false;
+    }
+
+    // 7-14 V3: a store-variant locked entity is terminal — the provider is not
+    // offered by this build, so retrying INIT can never succeed.
+    if (message.includes(ENTITY_PROVIDER_LOCKED)) {
       return false;
     }
 
