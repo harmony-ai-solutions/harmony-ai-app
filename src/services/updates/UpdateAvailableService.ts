@@ -9,20 +9,19 @@
  *   - fetches both manifests cache-busted (`?t=<now>`);
  *   - caches the result in AsyncStorage with a 6h TTL and serves the cache on a
  *     network failure (so an offline launch still knows what it knew before);
- *   - compares `engine/latest.version` against the RUNNING engine version
- *     (`EngineService.getEngineVersionState()`) and `app/latest.version` against
- *     `DeviceInfo.getVersion()`, using semver-with-prerelease precedence
- *     (`utils/semver`);
+ *   - compares `app/latest.version` against `DeviceInfo.getVersion()`, using
+ *     semver-with-prerelease precedence (`utils/semver`);
  *   - is env/flavor-aware: the app download link is picked from the manifest's
  *     `dev`/`prod` entry for the active {@link APP_ENVIRONMENT} and platform
  *     (dev-channel builds read the SAME files but surface only their entries).
  *
- * The "notify + update the app" framing is structural: the embedded engine only
- * updates WITH the app (Android 10+ SELinux blocks exec from writable storage;
- * iOS forbids downloaded native code), so an engine update surfaces as a banner
- * that says it arrives with the next app update — never an on-device engine
- * download. The one place an engine download IS actionable is the desktop peer
- * (DesktopSyncScreen), which reads {@link getEngineManifest}.
+ * The embedded engine only updates WITH the app (Android 10+ SELinux blocks
+ * exec from writable storage; iOS forbids downloaded native code), so there is
+ * no runtime engine update to surface. The engine manifest is still fetched for
+ * the ONE place an engine download IS actionable — the desktop peer
+ * (DesktopSyncScreen), which reads {@link getEngineManifest}. The app↔engine
+ * contract match is a BUILD-time gate (`scripts/check-engine-contract-build.cjs`),
+ * never a runtime card.
  */
 
 import { Platform } from 'react-native';
@@ -31,7 +30,6 @@ import DeviceInfo from 'react-native-device-info';
 import { createLogger } from '../../utils/logger';
 import { RELEASES, APP_ENVIRONMENT } from '../../config/cloud';
 import { isStoreVariant } from '../../config/appVariant';
-import { getEngineVersionState } from '../engine/EngineService';
 import { isNewerVersion, normalizeVersion } from '../../utils/semver';
 
 const log = createLogger('[Updates]');
@@ -65,13 +63,6 @@ export interface AppReleaseManifest {
   ios: { dev: string; prod: string };
 }
 
-/** A newer engine than the one running. */
-export interface EngineUpdateInfo {
-  version: string;
-  notesUrl: string;
-  desktop: { windows_amd64: string; linux_amd64: string };
-}
-
 /** A newer app than the one installed. */
 export interface AppUpdateInfo {
   version: string;
@@ -82,7 +73,6 @@ export interface AppUpdateInfo {
 
 /** The observable update state. */
 export interface UpdateState {
-  engineUpdate: EngineUpdateInfo | null;
   appUpdate: AppUpdateInfo | null;
   /** epoch ms of the last successful check (cached or live), or null. */
   checkedAt: number | null;
@@ -92,7 +82,7 @@ export interface UpdateState {
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
-const EMPTY_STATE: UpdateState = { engineUpdate: null, appUpdate: null, checkedAt: null, dismissed: [] };
+const EMPTY_STATE: UpdateState = { appUpdate: null, checkedAt: null, dismissed: [] };
 
 interface CachedManifests {
   engine: EngineReleaseManifest | null;
@@ -233,18 +223,8 @@ async function persistCache(next: CachedManifests): Promise<void> {
 
 /** Recompute the observable state from the cached manifests + live versions. */
 function computeState(): UpdateState {
-  const runningEngine = getEngineVersionState().engineVersion;
   const appVersion = normalizeVersion(appVersionProvider());
   const env = APP_ENVIRONMENT.env; // 'dev' | 'prod'
-
-  let engineUpdate: EngineUpdateInfo | null = null;
-  if (cached?.engine && runningEngine && isNewerVersion(cached.engine.version, runningEngine)) {
-    engineUpdate = {
-      version: normalizeVersion(cached.engine.version),
-      notesUrl: cached.engine.notesUrl,
-      desktop: cached.engine.artifacts.desktop,
-    };
-  }
 
   let appUpdate: AppUpdateInfo | null = null;
   if (cached?.app && appVersion && isNewerVersion(cached.app.version, appVersion)) {
@@ -257,7 +237,6 @@ function computeState(): UpdateState {
   }
 
   return {
-    engineUpdate,
     appUpdate,
     checkedAt: cached?.checkedAt ?? null,
     dismissed: [...dismissed],

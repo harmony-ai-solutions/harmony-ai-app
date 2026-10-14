@@ -17,7 +17,7 @@ jest.mock('../../engine/EngineApiClient', () => ({
 }));
 
 jest.mock('../../engine/EngineService', () => ({
-  getEngineVersionState: jest.fn(() => ({ engineVersion: 'cached-1.0.0', contract: 'ok' })),
+  getEngineVersionState: jest.fn(() => ({ engineVersion: 'cached-1.0.0' })),
 }));
 
 import RNFS from 'react-native-fs';
@@ -45,7 +45,7 @@ describe('shareDiagnostics', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (engineApiClient.engineAppVersion as jest.Mock).mockResolvedValue({ appVersion: 'v0.3.0-dev' });
-    (getEngineVersionState as jest.Mock).mockReturnValue({ engineVersion: 'cached-1.0.0', contract: 'ok' });
+    (getEngineVersionState as jest.Mock).mockReturnValue({ engineVersion: 'cached-1.0.0' });
   });
 
   it('resolves the live engine version and normalizes it', async () => {

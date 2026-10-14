@@ -1120,8 +1120,9 @@ export class EngineApiClient {
   /**
    * The running engine's advertised version (`GET /public/appversion` →
    * `{"appVersion":"v0.3.0-dev"}`). A loopback-PUBLIC route (no auth change);
-   * the client still attaches the token header. Backs the runtime contract
-   * canary (`EngineService.refreshEngineVersion`).
+   * the client still attaches the token header. Backs the About block via
+   * `EngineService.refreshEngineVersion` (informational; the contract match is
+   * a build-time gate).
    */
   engineAppVersion(): Promise<AppVersionDto> {
     return this.getJson<AppVersionDto>('/public/appversion');

@@ -46,8 +46,8 @@ export const HelpSupportSettingsScreen: React.FC = () => {
     getEngineVersionState(),
   );
 
-  // Track the runtime canary so the Engine row fills in once host readiness
-  // resolves (and clears when the engine stops).
+  // Track the live engine version so the Engine row fills in once host
+  // readiness resolves (and clears when the engine stops).
   useEffect(() => onEngineVersionStateChange(setEngineState), []);
 
   if (!theme) return null;

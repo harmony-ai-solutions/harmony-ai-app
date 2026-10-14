@@ -23,7 +23,6 @@ import { createLogger } from '../../utils/logger';
 import type { EngineReadyPayload } from '../../types/engineSidecar';
 import { selectEngineHost } from './EngineHost';
 import type { EngineStartOptions } from '../../types/engineSidecar';
-import { checkContractVersion, ENGINE_CONTRACT_VERSION } from './engineContract';
 import { normalizeVersion } from '../../utils/semver';
 
 const log = createLogger('[EngineService]');
@@ -82,7 +81,7 @@ export function setEngineConnection(payload: EngineReadyPayload): EngineConnecti
   connection = connectionFromReady(payload);
   log.info(`Engine connection set (admin ${connection.adminBaseUrl})`);
   emit();
-  // Host readiness → re-evaluate the contract canary (plan 7-10 §3).
+  // Host readiness → refresh the running-engine version (About row; plan 7-10 §3).
   void refreshEngineVersion();
   return connection;
 }
@@ -164,29 +163,24 @@ export async function syncEngineConnectionState(): Promise<void> {
   }
 }
 
-// ── Engine version / contract canary (plan 7-10 §3) ──────────────────────
-// The app knows which engine it shipped but nothing verified the RUNNING
-// engine at startup (the 5-1 gate existed but had zero runtime consumers).
+// ── Engine version (plan 7-10 §3) ────────────────────────────────────────
 // On host readiness we probe the engine's advertised version
-// (`GET /public/appversion`), normalize it, and evaluate the contract gate
-// against ENGINE_CONTRACT_VERSION. The HTTP probe is INJECTED
+// (`GET /public/appversion`) and normalize it for the About block. This is
+// INFORMATIONAL only: the embedded engine ships WITH the app, so there is no
+// runtime contract gate — the app↔engine contract match is enforced at BUILD
+// time (`scripts/check-engine-contract-build.cjs`). The HTTP probe is INJECTED
 // (`setEngineVersionProbe`) so this module stays free of the EngineApiClient
 // import cycle and unit tests never hit the network.
-
-/** The contract-gate outcome surfaced to the UI. */
-export type EngineContractState = 'ok' | 'too_old' | 'unknown';
 
 /** The observable engine-version state. */
 export interface EngineVersionState {
   /** Normalized (leading `v` stripped) running-engine version, or null. */
   engineVersion: string | null;
-  /** Contract gate vs {@link ENGINE_CONTRACT_VERSION}. */
-  contract: EngineContractState;
-  /** Why `too_old`/`unknown` (diagnostics). */
+  /** Why the version is unknown (diagnostics only). */
   reason?: string;
 }
 
-const UNKNOWN_VERSION_STATE: EngineVersionState = { engineVersion: null, contract: 'unknown' };
+const UNKNOWN_VERSION_STATE: EngineVersionState = { engineVersion: null };
 
 let versionState: EngineVersionState = UNKNOWN_VERSION_STATE;
 const versionListeners = new Set<(state: EngineVersionState) => void>();
@@ -230,10 +224,9 @@ function emitVersionState(next: EngineVersionState): void {
 }
 
 /**
- * Probe the running engine's version and evaluate the contract gate. Called on
- * host readiness (and on demand by the UI). NEVER throws: a missing connection
- * or probe, or a probe failure, yields `contract: 'unknown'` (the app must not
- * block on a canary that could not run).
+ * Probe the running engine's version (About row). Called on host readiness
+ * (and on demand by the UI). NEVER throws: a missing connection or probe, or a
+ * probe failure, yields `engineVersion: null`.
  */
 export async function refreshEngineVersion(): Promise<EngineVersionState> {
   if (!connection || !versionProbe) {
@@ -242,17 +235,10 @@ export async function refreshEngineVersion(): Promise<EngineVersionState> {
   }
   try {
     const raw = await versionProbe();
-    const engineVersion = normalizeVersion(raw);
-    const check = checkContractVersion(engineVersion, ENGINE_CONTRACT_VERSION);
-    emitVersionState({
-      engineVersion,
-      contract: check.ok ? 'ok' : 'too_old',
-      reason: check.reason,
-    });
+    emitVersionState({ engineVersion: normalizeVersion(raw) });
   } catch (e) {
     emitVersionState({
       engineVersion: null,
-      contract: 'unknown',
       reason: e instanceof Error ? e.message : String(e),
     });
   }

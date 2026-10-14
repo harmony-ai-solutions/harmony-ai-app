@@ -2,9 +2,10 @@
  * UpdateAvailableService — manifest compare + cache + dismissal (plan 7-10 §4).
  *
  * The global jest setup mocks Platform.OS='ios', APP_ENV='dev' and
- * DeviceInfo.getVersion()='1.0.0'; this suite pins the env/platform-aware
- * download pick (ios.dev), the semver compare against the running engine, the
- * 6h cache TTL and per-version dismissal persistence.
+ * DeviceInfo.getVersion()='1.0.0'; this suite pins the env/platform-aware APP
+ * download pick (ios.dev), the semver compare against the running app, the
+ * engine-manifest passthrough for the desktop deep-link, the 6h cache TTL and
+ * per-version dismissal persistence.
  */
 
 jest.mock('../../../utils/logger', () => ({
@@ -28,11 +29,6 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 
-jest.mock('../../engine/EngineService', () => ({
-  getEngineVersionState: jest.fn(() => ({ engineVersion: '0.3.0', contract: 'ok' })),
-}));
-
-import * as engineService from '../../engine/EngineService';
 import {
   dismissUpdate,
   getEngineManifest,
@@ -44,8 +40,6 @@ import {
   UPDATE_CACHE_KEY,
   UPDATE_DISMISS_KEY,
 } from '../UpdateAvailableService';
-
-const getEngineVersionState = engineService.getEngineVersionState as jest.Mock;
 
 const engineManifest = {
   version: 'v0.3.2',
@@ -88,7 +82,6 @@ let fetchMock: jest.Mock;
 beforeEach(() => {
   for (const k of Object.keys(store)) delete store[k];
   resetUpdatesForTests();
-  getEngineVersionState.mockReturnValue({ engineVersion: '0.3.0', contract: 'ok' });
   fetchMock = jest.fn(async (url: string) =>
     jsonResponse(url.includes('/engine/') ? engineManifest : appManifest),
   );
@@ -96,9 +89,8 @@ beforeEach(() => {
 });
 
 describe('refreshUpdates — manifest compare', () => {
-  it('surfaces a newer engine and app, cache-busted', async () => {
+  it('surfaces a newer app, cache-busted', async () => {
     const state = await refreshUpdates();
-    expect(state.engineUpdate?.version).toBe('0.3.2');
     expect(state.appUpdate?.version).toBe('1.4.0');
     expect(state.checkedAt).not.toBeNull();
     // Cache-busting `?t=` on both manifest fetches.
@@ -111,24 +103,6 @@ describe('refreshUpdates — manifest compare', () => {
   it('picks the env/platform-aware download URL (ios + dev channel)', async () => {
     const state = await refreshUpdates();
     expect(state.appUpdate?.downloadUrl).toBe(appManifest.ios.dev);
-  });
-
-  it('reports no engine update when the running engine is current', async () => {
-    getEngineVersionState.mockReturnValue({ engineVersion: '0.3.2', contract: 'ok' });
-    const state = await refreshUpdates();
-    expect(state.engineUpdate).toBeNull();
-  });
-
-  it('treats v0.3.0-dev as OLDER than v0.3.0 (prerelease precedence)', async () => {
-    getEngineVersionState.mockReturnValue({ engineVersion: '0.3.0-dev', contract: 'ok' });
-    setUpdatesFetchImpl(
-      (async (url: string) =>
-        jsonResponse(
-          url.includes('/engine/') ? { ...engineManifest, version: 'v0.3.0' } : appManifest,
-        )) as unknown as (u: string) => Promise<Response>,
-    );
-    const state = await refreshUpdates();
-    expect(state.engineUpdate?.version).toBe('0.3.0');
   });
 
   it('exposes the engine manifest for the desktop deep-link', async () => {
@@ -155,18 +129,18 @@ describe('refreshUpdates — manifest compare', () => {
       }) as unknown as (u: string) => Promise<Response>,
     );
     const state = await refreshUpdates({ force: true });
-    expect(state.engineUpdate?.version).toBe('0.3.2');
+    expect(state.appUpdate?.version).toBe('1.4.0');
   });
 });
 
 describe('dismissal persistence', () => {
   it('persists a per-version dismissal and reports it', async () => {
     await refreshUpdates();
-    expect(isUpdateDismissed('engine', '0.3.2')).toBe(false);
-    await dismissUpdate('engine', '0.3.2');
-    expect(isUpdateDismissed('engine', '0.3.2')).toBe(true);
-    expect(getUpdateState().dismissed).toContain('engine:0.3.2');
-    expect(JSON.parse(store[UPDATE_DISMISS_KEY])).toEqual(['engine:0.3.2']);
+    expect(isUpdateDismissed('app', '1.4.0')).toBe(false);
+    await dismissUpdate('app', '1.4.0');
+    expect(isUpdateDismissed('app', '1.4.0')).toBe(true);
+    expect(getUpdateState().dismissed).toContain('app:1.4.0');
+    expect(JSON.parse(store[UPDATE_DISMISS_KEY])).toEqual(['app:1.4.0']);
   });
 
   it('scopes dismissal to the exact version', async () => {

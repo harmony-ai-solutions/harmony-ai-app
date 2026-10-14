@@ -16,7 +16,7 @@
 @Performance: Lazy loading, image optimization, FlatList virtualization, memoization, code splitting, JOIN-based queries for chat list previews.
 @Security: EncryptedStorage, HTTPS, token auth, SSL pinning (consideration), no plaintext credentials.
 @Platforms: Android 7.0+ (API 24), target API 33.
-@Workflow: Local dev with Metro → emulator/ADB testing → release builds → Play Store (future).
+@Workflow: Local dev → emulator/ADB testing → release builds → Play Store (future). `npm run android` now auto-provisions the embedded engine (`preandroid` → `scripts/build-engine-sidecar.cjs`) and starts Metro (no separate `npm start`); engine repo via `SOULBITS_ENGINE_REPO` (default sibling `../harmony-link-private`), `ENGINE_SIDECAR_REBUILD=1` forces a rebuild.
 @Key Deps: react 19.2.7, react-native 0.86.0, @react-navigation/*  ^7.x, react-native-paper ^5.x, @react-native-async-storage/async-storage ^2.x, eventemitter3 ^5.x, uuid ^13.x, music-metadata v11, react-native-device-info, @harmony-ai-solutions/soulbits-api-client (GitHub git dep). **Dropped in 3-4:** react-native-sqlite-storage, react-native-restart, better-sqlite3 (+ @types). **Embedded engine (not npm):** `libengine.so` (Android, vendored per ABI) / `SoulbitsEngine.xcframework` (iOS). **Firebase (7-12):** `@react-native-firebase/app` + `@react-native-firebase/messaging` ^26.4.0 (modular API; runtime-guarded, placeholder `google-services.json` / `GoogleService-Info.plist` shipped — SDK token takes precedence over the native raw-APNs seam via `PushTokenStore`).
 @ModularConfig:
 - App mirrors Soulbits Engine frontend's schema-driven provider configuration approach

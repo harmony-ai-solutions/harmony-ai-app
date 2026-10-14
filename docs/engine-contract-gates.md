@@ -24,10 +24,23 @@
 
 `src/services/engine/engineContract.ts` exports `ENGINE_CONTRACT_VERSION`,
 mirroring `info.version` in the engine repo's
-`docs/api/management/openapi.yaml` (today `1.0.0`). `checkContractVersion(artifact)`
-fails the build when the engine artifact advertises a contract **older** than the
-one the TS layer is written against. `checkContractVersionExact` backs the
-fixture drift canary.
+`docs/api/management/openapi.yaml` (today `1.4.0`). `checkContractVersion(artifact)`
+rejects an engine artifact that advertises a contract **older** than the one the
+TS layer is written against. `checkContractVersionExact` backs the fixture drift
+canary.
+
+**Build-time gate (`scripts/check-engine-contract-build.cjs`).** Because the
+embedded engine ships WITH the app, a contract mismatch is a build defect, not a
+runtime condition. `npm run android` / `android-prod` / `ios` /
+`build:e2e:android` run this gate (also `npm run check:engine-contract`): it
+resolves the engine checkout (same resolution as `build-engine-sidecar.cjs`) and
+delegates to `scripts/check-engine-contract.mjs --engine-repo <path>`, **failing
+the build** when `ENGINE_CONTRACT_VERSION` ≠ the engine `openapi.yaml`
+`info.version`. When the engine checkout is absent the check is **skipped with a
+warning** (app-only CI without the private engine — matches the opt-in
+`contract-drift` CI job below). There is no runtime contract card: the engine
+ships with the app, so the version probe (`/public/appversion`) is informational
+only (the Settings About row).
 
 **Drift canary:** the vendored fixtures advertise the version they were captured
 against (`FIXTURE_CONTRACT_VERSION`); `engineContractConformance.test.ts` asserts

@@ -104,17 +104,25 @@ only surface `dev` entries (flavor-aware like `CLOUD_HOSTS`).
 - **Pin hygiene**: remove the fictional `0.1.0` default in favor of CI-required explicitness; add one line to
   the 5-3 release checklist: "bump `ENGINE_SIDECAR_VERSION`, verify `aapt`-level engine presence".
 
-### 3. Runtime contract-canary wiring (close the 5-1 loop)
+### 3. Contract match as a BUILD-time gate (amended 2026-10-14)
 
-- `EngineApiClient.engineAppVersion()` → `GET /public/appversion` (loopback public route; no auth change).
-  Add a normalization helper: strip leading `v`, parse semver **with prerelease** (`v0.3.0-dev` →
-  `0.3.0-dev` < `0.3.0` per semver).
-- `EngineService`: on host readiness, fetch + normalize + `checkContractVersion()`; expose an engine-state
-  field `contract: 'ok' | 'too_old' | 'unknown'`. `too_old` renders a **blocking card** (not a crash):
-  "This app needs a newer Soulbits Engine. Update the app to continue." with a channel-aware action
-  (sideload builds → `app/latest` download; store builds → store listing). Reuse the DesktopSync rejected
-  card's design language.
-- iOS facade parity: `EngineVersion` via `EngineCall` when the host is `EmbeddedEngineHost`.
+> **Amendment (owner ruling 2026-10-14):** the original design wired a runtime `too_old` blocking card.
+> That is wrong for an EMBEDDED engine: it ships WITH the app, so a contract mismatch is a build defect —
+> not a user-remediable condition — and a card that can never resolve by user action is pure noise (it
+> also compared the engine's PRODUCT version to the app's CONTRACT version, so it fired unconditionally).
+> The runtime card was **removed**; the contract match moved to the **build step**.
+
+- New gate script `scripts/check-engine-contract-build.cjs` — resolves the engine checkout (same logic as
+  `build-engine-sidecar.cjs`: `--engine-repo` / `SOULBITS_ENGINE_REPO` / sibling `../harmony-link-private`),
+  then delegates to `scripts/check-engine-contract.mjs --engine-repo <path>`. App `ENGINE_CONTRACT_VERSION`
+  MUST equal the engine `docs/api/management/openapi.yaml` `info.version`; a mismatch **fails the build**
+  (`npm run android` / `android-prod` / `ios` / `build:e2e:android` all gate on it; `npm run
+  check:engine-contract` runs it standalone). When the engine checkout is ABSENT the check is SKIPPED with
+  a warning (app-only CI without the private engine — matches the optional `contract-drift` CI job).
+- The runtime probe stays **INFORMATIONAL only**: `EngineApiClient.engineAppVersion()` →
+  `GET /public/appversion` → `EngineService.refreshEngineVersion()` (normalized) feeds the Settings
+  **About** row. No `contract` verdict, no blocking UI. iOS facade parity: `EngineVersion` via `EngineCall`
+  when the host is `EmbeddedEngineHost`.
 
 ### 4. Update-surfacing UX
 
@@ -122,11 +130,13 @@ only surface `dev` entries (flavor-aware like `CLOUD_HOSTS`).
   version (`DeviceInfo.getVersion()`), Soulbits Engine version (from §3 state), management-contract version
   (`ENGINE_CONTRACT_VERSION`).
 - **`UpdateAvailableService`**: fetch both manifests (cache-busted; AsyncStorage cache, 6h TTL; refreshed on
-  app start after engine-ready, on settings pull-to-refresh). Compare `engine/latest.version` vs shipped
-  engine version and `app/latest.version` vs `DeviceInfo.getVersion()` — semver, env-aware.
-- **Banner** (non-blocking, dismissible per version, persisted): "Soulbits Engine vX is out — it arrives with
-  the next app update." and "App vY available" (+ Update button on Android sideload channel). New i18n
-  namespace `updates.json` (en).
+  app start after engine-ready, on settings pull-to-refresh). Compare `app/latest.version` vs
+  `DeviceInfo.getVersion()` — semver, env-aware. **Amended 2026-10-14:** the engine manifest is still
+  fetched (for the desktop deep-link below) but there is no engine-update comparison — the embedded engine
+  updates only with the app.
+- **Banner** (non-blocking, dismissible per version, persisted): "App vY available" (+ Update button on
+  Android sideload channel). **Amended 2026-10-14:** the engine banner line is gone (no engine update to
+  announce). New i18n namespace `updates.json` (en).
 - **Desktop-peer deep-link**: `DesktopSyncScreen` rejected state gains "Download the latest desktop engine"
   → `engine/latest.artifacts.desktop.{windows_amd64,linux_amd64}` (platform-pick or both links). This is the
   one place an engine download is directly actionable for the user today.
@@ -190,7 +200,7 @@ only surface `dev` entries (flavor-aware like `CLOUD_HOSTS`).
 - [x] 2. App release workflow engine provisioning + app/latest.json
 - [x] 3. Gradle strict flag + pin hygiene
 - [x] 4. engineAppVersion + normalization
-- [x] 5. Runtime canary + too-old card
+- [x] 5. Contract match as a build-time gate (was: runtime canary + too-old card; amended 2026-10-14)
 - [x] 6. UpdateAvailableService + banners + copy
 - [x] 7. About block + desktop deep-link
 - [x] 8. Optional Android self-update (channel-flagged)
@@ -203,10 +213,13 @@ only surface `dev` entries (flavor-aware like `CLOUD_HOSTS`).
 > assembleDevDebug` now passes (was failing pre-existing) — first agent-verified Android build on
 > this host. See the 7-10 final report.
 >
-> **Landing notes:** steps 1-9 landed code-side; the runtime canary lives in `EngineService` with
+> **Landing notes:** steps 1-9 landed code-side; the version probe lives in `EngineService` with
 > an INJECTED probe (`engineVersionProbe.ts`) to avoid the `EngineApiClient`↔`EngineService` import
-> cycle (EngineService still owns the observable `contract` field). `aws`-CLI steps are documented
-> for the owner's first run — no live S3 publish was attempted (no CI credentials locally).
+> cycle. **Amended 2026-10-14:** the runtime `contract` verdict + `EngineContractGate` blocking card were
+> removed (embedded-engine ruling — see §3); the probe now only feeds the About engine-version row, and
+> the app↔engine contract match is enforced by the build-time `scripts/check-engine-contract-build.cjs`
+> gate. `aws`-CLI steps are documented for the owner's first run — no live S3 publish was attempted
+> (no CI credentials locally).
 >
 > **macOS gating (owner ruling 2026-10-13, landed same day):** app `build_ios` input + engine `ios`
 > input (both default `false`) make manual dispatches opt-in for macOS; tags unchanged. Engine

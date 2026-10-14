@@ -217,6 +217,8 @@ Before you begin, ensure you have the following installed:
    npx react-native run-android
    ```
 
+   > `npm run android` also builds + vendors the embedded engine when missing/stale (`preandroid` → `scripts/build-engine-sidecar.cjs`) and starts Metro, so `npm start` is optional. Engine repo override: `SOULBITS_ENGINE_REPO`; force rebuild: `ENGINE_SIDECAR_REBUILD=1`.
+
 ### Development Workflow
 
 - **Hot Reload**: Shake the device or press `Ctrl+M` (Windows) / `Cmd+M` (Mac) → Enable Hot Reloading

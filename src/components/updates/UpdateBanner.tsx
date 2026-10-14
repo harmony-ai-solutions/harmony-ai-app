@@ -1,13 +1,11 @@
 /**
- * UpdateBanner — the non-blocking, dismissible update banner (plan 7-10 §4).
+ * UpdateBanner — the non-blocking, dismissible APP update banner (plan 7-10 §4).
  *
- * Reads {@link getUpdateState} and renders up to two banners:
- *   - an ENGINE update ("Soulbits Engine vX is out — it arrives with the next
- *     app update.") — informational only (the embedded engine only updates WITH
- *     the app); and
- *   - an APP update ("App vY available") with an Update button. On the Android
- *     sideload channel the button runs the in-app APK self-update; on the store
- *     channel / iOS it opens the download (or notes) URL.
+ * The embedded engine only updates WITH the app, so there is no runtime engine
+ * update to announce — this banner surfaces the APP update only ("App vY
+ * available") with an Update button. On the Android sideload channel the button
+ * runs the in-app APK self-update; on the store channel / iOS it opens the
+ * download (or notes) URL.
  *
  * Dismissal is per version and persisted (the service owns the storage).
  * Mounted once at the app root (App.tsx), above the navigator.
@@ -97,43 +95,18 @@ export const UpdateBanner: React.FC = () => {
 
   if (!theme) return null;
 
-  const engineUpdate =
-    state.engineUpdate && !isUpdateDismissed('engine', state.engineUpdate.version)
-      ? state.engineUpdate
-      : null;
   const appUpdate =
     state.appUpdate && !isUpdateDismissed('app', state.appUpdate.version)
       ? state.appUpdate
       : null;
 
-  if (!engineUpdate && !appUpdate) return null;
+  if (!appUpdate) return null;
 
   const accent = theme.colors.accent.primary;
   const border = hexToRgba(accent, 0.4);
 
   return (
     <View style={styles.container} pointerEvents="box-none">
-      {engineUpdate ? (
-        <ThemedCard style={[styles.card, { borderColor: border }]} testID="update-banner-engine">
-          <View style={styles.row}>
-            <Icon name="engine-outline" size={18} color={accent} />
-            <ThemedText weight="medium" size={14} style={styles.title}>
-              {t('engineBannerTitle', { version: engineUpdate.version })}
-            </ThemedText>
-            <TouchableOpacity
-              onPress={() => void dismissUpdate('engine', engineUpdate.version)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              testID="update-banner-dismiss-engine"
-            >
-              <Icon name="close" size={16} color={theme.colors.text.muted} />
-            </TouchableOpacity>
-          </View>
-          <ThemedText variant="secondary" size={13} style={styles.body}>
-            {t('engineBannerBody')}
-          </ThemedText>
-        </ThemedCard>
-      ) : null}
-
       {appUpdate ? (
         <ThemedCard style={[styles.card, { borderColor: border }]} testID="update-banner-app">
           <View style={styles.row}>

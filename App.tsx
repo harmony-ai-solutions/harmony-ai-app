@@ -26,7 +26,6 @@ import { LockScreen } from './src/components/lock/LockScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { DynamicBackground } from './src/components/background/DynamicBackground';
 import { UpdateBanner } from './src/components/updates/UpdateBanner';
-import { EngineContractGate } from './src/components/engine/EngineContractGate';
 import { loadHapticPreference } from './src/utils/haptics';
 import { probeRestoreOfferOnce } from './src/services/backup/restoreOnboarding';
 import { onBubbleOpen } from './src/services/ChatBubbleService';
@@ -132,9 +131,8 @@ function AppShell() {
       </View>
       <View style={styles.foregroundLayer}>
         <AppNavigator navigationRef={navigationRef} />
-        {/* Non-blocking update banner + blocking too-old gate (plan 7-10 §3/§4). */}
+        {/* Non-blocking app-update banner (plan 7-10 §4; engine ships with the app). */}
         <UpdateBanner />
-        <EngineContractGate />
         {isLocked && <LockScreen />}
       </View>
     </PaperProvider>
