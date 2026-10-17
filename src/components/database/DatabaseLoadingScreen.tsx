@@ -1,9 +1,12 @@
 /**
- * Database Loading Screen
+ * Boot Gate Screen
  *
- * Glassmorphism-themed loading / error screen displayed during database
- * initialization. Matches the app's design language used in ComingSoonScreen,
- * ProfileSettingsScreen, and other full-screen placeholders.
+ * Full-screen gate shown while the app boots — the theme is resolving and the
+ * engine feature flags are being hydrated from storage (see DatabaseContext).
+ * Despite the component/file name this is NOT a database screen: there is no
+ * app-local database, the embedded engine owns all data, and the gate never
+ * waits on the engine. Matches the app's design language used in
+ * ComingSoonScreen, ProfileSettingsScreen, and other full-screen placeholders.
  */
 import React from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
@@ -33,7 +36,7 @@ export function DatabaseLoadingScreen() {
           <View style={styles.iconWrapper}>
             <ThemedGradient gradient="primary" style={styles.iconRing}>
               <ThemedView variant="elevated" style={styles.iconInner}>
-                <Icon name="database-off" size={48} color={theme.colors.status?.error ?? '#ff5252'} />
+                <Icon name="alert-circle-outline" size={48} color={theme.colors.status?.error ?? '#ff5252'} />
               </ThemedView>
             </ThemedGradient>
           </View>
@@ -58,14 +61,6 @@ export function DatabaseLoadingScreen() {
           </ThemedText>
 
           <ThemedCard elevated accentStripe accentTint style={styles.errorCard}>
-            <View style={styles.errorList}>
-              {[t('errorStorage'), t('errorCorruption'), t('errorPermissions')].map((item, i) => (
-                <View key={i} style={styles.errorItem}>
-                  <Icon name="alert-circle-outline" size={14} color={theme.colors.status?.error ?? '#ff5252'} />
-                  <ThemedText variant="secondary" size={13}>{item}</ThemedText>
-                </View>
-              ))}
-            </View>
             <ThemedText
               variant="muted"
               size={11}
@@ -114,7 +109,7 @@ export function DatabaseLoadingScreen() {
           hierarchy="header"
           style={styles.headline}
         >
-          {t('initializing')}
+          {t('startingTitle')}
         </ThemedText>
 
         <ThemedText
@@ -123,7 +118,7 @@ export function DatabaseLoadingScreen() {
           hierarchy="subtext"
           style={styles.description}
         >
-          {t('settingUp')}
+          {t('startingDescription')}
         </ThemedText>
 
         {/* Decorative bottom accent bar */}
@@ -184,14 +179,6 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
     marginBottom: 24,
-  },
-  errorList: {
-    gap: 8,
-  },
-  errorItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   errorDetails: {
     fontFamily: 'monospace',

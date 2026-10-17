@@ -1,20 +1,8 @@
 {
-  "initializing": "Initializing Database",
-  "settingUp": "Setting up encrypted storage...",
-  "rebuilding": "Rebuilding from Soulbits Engine...",
-  "rebuildingDescription": "A one-time rebuild is running. Your data will re-sync automatically.",
-  "errorTitle": "Database Error",
-  "errorDescription": "Failed to initialize the database. This may be due to:",
-  "errorStorage": "• Insufficient storage space",
-  "errorCorruption": "• Database file corruption",
-  "errorPermissions": "• Permission issues",
+  "startingTitle": "Starting Soulbits…",
+  "startingDescription": "Getting everything ready…",
+  "errorTitle": "Startup Error",
+  "errorDescription": "Soulbits failed to start. This is unexpected — you can try again.",
   "errorPrefix": "Error: ",
-  "retryInit": "Retry Initialization",
-  "wipeReinit": "Wipe & Reinitialize",
-  "wiping": "Wiping Database...",
-  "wipeConfirmTitle": "⚠️ Wipe Database",
-  "wipeConfirmMessage": "This will permanently delete all data and reinitialize the database with a fresh schema. This action cannot be undone.\n\nAre you sure you want to continue?",
-  "wipeSuccess": "Success",
-  "wipeSuccessMessage": "Database has been wiped and reinitialized successfully!",
-  "wipeFailed": "Failed to wipe database: {{message}}"
+  "retryInit": "Try Again"
 }
