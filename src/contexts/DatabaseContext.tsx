@@ -15,7 +15,7 @@ import {attachEngineLifecycle} from '../services/engine/EngineLifecycle';
 import {attachE2EEngineOverride} from '../services/engine/e2eEngineOverride';
 import {attachOutreachNotifications} from '../services/notifications/OutreachNotificationService';
 import {wireEngineVersionProbe} from '../services/engine/engineVersionProbe';
-import {refreshUpdates} from '../services/updates/UpdateAvailableService';
+import {refreshUpdates, attachUpdateForegroundChecks} from '../services/updates/UpdateAvailableService';
 import {createLogger} from '../utils/logger';
 
 const log = createLogger('[DatabaseContext]');
@@ -81,6 +81,9 @@ export function DatabaseProvider({children}: DatabaseProviderProps) {
       // best-effort — a probe/manifest failure must never block boot.
       wireEngineVersionProbe();
       void refreshUpdates().catch(() => {});
+      // Owner ruling 2026-10-17: no TTL + foreground checks for the fast
+      // dev-release loop — re-check on every cold start and app foreground.
+      attachUpdateForegroundChecks();
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       log.error('App data layer initialization failed:', errorMessage);

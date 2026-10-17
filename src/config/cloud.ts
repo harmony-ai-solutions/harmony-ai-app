@@ -153,16 +153,20 @@ export const OAUTH = {
   appleServicesId: APPLE_SERVICES_ID,
 };
 
-// ── Release manifests (plan 7-10 §1) ───────────────────────────────────
+// ── Release manifests (plan 7-10 §1; per-channel since 2026-10-17) ─────
 // Static JSON on the existing CloudFront download hosts (no new service). The
-// engine workflow writes `engine/latest.json`; the app's `create-release` job
-// writes `app/latest.json`. Absolute URLs become a de-facto public contract
-// (owner sign-off). Same host for both flavours; dev-channel builds read the
-// SAME files and surface only their `dev` entries (env-aware like CLOUD_HOSTS).
+// engine workflow writes `engine/latest.json`; the app's `publish-manifest` job
+// writes one manifest PER CHANNEL — `app/dev/latest.json` and
+// `app/prod/latest.json` — so a dev dispatch is never visible to prod installs.
+// A build reads ONLY its own channel's file, derived from APP_ENV (identical to
+// {@link APP_ENVIRONMENT.env}); absolute URLs become a de-facto public contract
+// (owner sign-off).
 export const RELEASES = {
   baseUrl: 'https://download.soulbits.app',
   engineManifestUrl: 'https://download.soulbits.app/engine/latest.json',
-  appManifestUrl: 'https://download.soulbits.app/app/latest.json',
+  appManifestUrl: `https://download.soulbits.app/app/${
+    APP_ENV === 'dev' ? 'dev' : 'prod'
+  }/latest.json`,
 };
 
 // ── Environment metadata ───────────────────────────────────────────────

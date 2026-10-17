@@ -20,6 +20,10 @@ on:
         description: 'Also build the iOS IPA matrix (macOS runners bill at 10× the Linux minute rate). Release tags always build iOS.'
         type: boolean
         default: false
+      publish_latest:
+        description: 'Also publish the channel manifest (app/dev/latest.json) so installed dev builds see this release. Tag runs always publish both channel manifests.'
+        type: boolean
+        default: false
 
 jobs:
   # ───────────────────────────────────────────────────────────────────
@@ -191,7 +195,7 @@ jobs:
     needs: test
     # macOS runners bill at 10× the Linux minute rate — run only when
     # explicitly required (owner ruling 2026-10-13): on release tags
-    # (refs/tags/v*, where create-release + app/latest.json need the IPAs;
+    # (refs/tags/v*, where create-release's GitHub Release body links the IPAs;
     # skipping would publish dead links) or when a manual dispatch opts in
     # via the `build_ios` input. Plain dispatch runs are Android-only.
     if: ${{ !inputs.skip_build && (inputs.build_ios == true || github.event_name == 'push') }}
@@ -321,7 +325,89 @@ jobs:
           echo "📥 Latest:    https://download.soulbits.app/app/latest/${{ matrix.environment }}/harmony-ai-app-ios.ipa"
 
   # ──────────────────────────────────────────────
-  # Job 3: Create GitHub Release with download links
+  # Job 3: Publish the channel release manifests (app/<env>/latest.json)
+  # ──────────────────────────────────────────────
+  # Per-channel manifests (owner ruling 2026-10-17): each channel reads ONLY
+  # its own file, so dev dispatches are invisible to prod installs.
+  #   - dispatch with publish_latest=true → writes app/dev/latest.json ONLY
+  #   - tag v*                              → writes BOTH dev and prod files
+  # SINGLE WRITER: only this job writes these files. It needs build-android
+  # only (URLs are deterministic, not artifact-derived), so a dispatch that
+  # skips the iOS matrix can still publish. The manifest shape is a de-facto
+  # public contract — owner sign-off is an explicit gate; do not change field
+  # names/URLs without it. The dev file's version carries the flavor's exact
+  # "-dev" suffix (android versionNameSuffix) so an up-to-date dev install
+  # compares EQUAL and the update banner stays silent.
+  publish-manifest:
+    name: Publish channel manifests
+    needs: [build-android]
+    if: ${{ inputs.publish_latest == true || startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set VERSION variable
+        run: |
+          INPUTS_VERSION='${{ github.event.inputs.version }}'
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' && -n "${INPUTS_VERSION}" ]]; then
+            VERSION="${INPUTS_VERSION}"
+          else
+            VERSION="v0.0.0-dev"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_S3_UPLOAD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_S3_UPLOAD_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Write channel manifests (app/<env>/latest.json)
+        env:
+          RELEASES_BASE_URL: https://download.soulbits.app
+        run: |
+          set -euo pipefail
+          RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          NOTES_URL="https://github.com/harmony-ai-solutions/harmony-ai-app/releases/tag/${VERSION}"
+          # NOTE: heredoc terminators must stay at column 0 of the shell
+          # script — do not indent the JSON lines further in YAML.
+          cat > app-dev-latest.json <<JSON
+          {
+            "version": "${VERSION}-dev",
+            "releasedAt": "${RELEASED_AT}",
+            "notesUrl": "${NOTES_URL}",
+            "android": { "url": "${RELEASES_BASE_URL}/app/${VERSION}/dev/harmony-ai-app-${VERSION}-android.apk" },
+            "ios":     { "url": "${RELEASES_BASE_URL}/app/${VERSION}/dev/harmony-ai-app-${VERSION}-ios.ipa" }
+          }
+          JSON
+          cat > app-prod-latest.json <<JSON
+          {
+            "version": "${VERSION}",
+            "releasedAt": "${RELEASED_AT}",
+            "notesUrl": "${NOTES_URL}",
+            "android": { "url": "${RELEASES_BASE_URL}/app/${VERSION}/prod/harmony-ai-app-${VERSION}-android.apk" },
+            "ios":     { "url": "${RELEASES_BASE_URL}/app/${VERSION}/prod/harmony-ai-app-${VERSION}-ios.ipa" }
+          }
+          JSON
+          cat app-dev-latest.json
+          aws s3 cp app-dev-latest.json "s3://soulbits-releases/app/dev/latest.json"
+          echo "✅ dev manifest: https://download.soulbits.app/app/dev/latest.json"
+          # Prod manifest: tag releases ONLY — a dev dispatch must never
+          # advertise versions to prod-channel installs.
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            cat app-prod-latest.json
+            aws s3 cp app-prod-latest.json "s3://soulbits-releases/app/prod/latest.json"
+            echo "✅ prod manifest: https://download.soulbits.app/app/prod/latest.json"
+          else
+            echo "Dispatch run: app/prod/latest.json intentionally NOT published"
+          fi
+
+  # ──────────────────────────────────────────────
+  # Job 4: Create GitHub Release with download links
   # ──────────────────────────────────────────────
   create-release:
     name: Create GitHub Release
@@ -354,39 +440,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # app/latest.json — the app release manifest (plan 7-10 §1). SINGLE WRITER:
-      # this job only runs on `refs/tags/v*`, so `workflow_dispatch` dry-runs
-      # never write it. Absolute URLs become a de-facto public contract (owner
-      # sign-off is an explicit gate). The runtime cache-busts with `?t=<now>`.
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_S3_UPLOAD_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_S3_UPLOAD_SECRET_ACCESS_KEY }}
-          aws-region: eu-central-1
-
-      - name: Write app/latest.json manifest
-        env:
-          RELEASES_BASE_URL: https://download.soulbits.app
-        run: |
-          set -euo pipefail
-          VERSION="${{ github.ref_name }}"
-          RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          cat > app-latest.json <<JSON
-          {
-            "version": "${VERSION}",
-            "releasedAt": "${RELEASED_AT}",
-            "notesUrl": "https://github.com/harmony-ai-solutions/harmony-ai-app/releases/tag/${VERSION}",
-            "android": {
-              "dev":  "${RELEASES_BASE_URL}/app/${VERSION}/dev/harmony-ai-app-${VERSION}-android.apk",
-              "prod": "${RELEASES_BASE_URL}/app/${VERSION}/prod/harmony-ai-app-${VERSION}-android.apk"
-            },
-            "ios": {
-              "dev":  "${RELEASES_BASE_URL}/app/${VERSION}/dev/harmony-ai-app-${VERSION}-ios.ipa",
-              "prod": "${RELEASES_BASE_URL}/app/${VERSION}/prod/harmony-ai-app-${VERSION}-ios.ipa"
-            }
-          }
-          JSON
-          cat app-latest.json
-          aws s3 cp app-latest.json "s3://soulbits-releases/app/latest.json"
-          echo "✅ app/latest.json published (https://download.soulbits.app/app/latest.json)"
+      # The channel release manifests (app/<env>/latest.json) are written by the
+      # `publish-manifest` job (Job 3) — this job no longer writes a manifest.
