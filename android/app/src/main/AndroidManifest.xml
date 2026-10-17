@@ -58,6 +58,18 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="soulbits" android:host="device-auth" />
         </intent-filter>
+        <!-- Option B portal sign-in return: fired from the portal /connect
+             success page's "Open the app" button on mobile
+             (soulbits://connect-return — no params; the app still redeems its
+             own token pair via the authenticated poll). Declared in the shared
+             main manifest so BOTH flavors' (dev/prod) merged manifests carry
+             it. -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="soulbits" android:host="connect-return" />
+        </intent-filter>
         <!-- Backup OAuth redirect (plan 2-6): Dropbox/OneDrive PKCE callback. -->
         <intent-filter>
             <action android:name="android.intent.action.VIEW" />

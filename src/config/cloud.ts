@@ -196,4 +196,10 @@ export const AUTH_ENDPOINTS = {
   apple: `${AUTH_HOST}/v1/auth/apple`,
   me: `${AUTH_HOST}/v1/auth/me`,
   resendVerification: `${AUTH_HOST}/v1/auth/resend-verification`,
+  /**
+   * Delegated device enrollment (plan 7-15 E2): exchange a single-use desktop-
+   * issued grant for this device's OWN cloud session. Returns exactly the login
+   * `TokenResponse` shape (401 `enrollment_grant_invalid` on replay/expiry).
+   */
+  deviceEnroll: `${AUTH_HOST}/v1/auth/device/enroll`,
 };

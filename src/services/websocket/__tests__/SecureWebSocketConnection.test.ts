@@ -121,4 +121,23 @@ describe('SecureWebSocketConnection', () => {
     await p2;
     expect(conn.isConnected()).toBe(true);
   });
+
+  // ── Loopback-token credential (7-11 pattern) ───────────────────────────
+  it('connects with no JWT subprotocol when the URL carries a loopback token param', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    const conn = new SecureWebSocketConnection();
+    const connected: string[] = [];
+    conn.on('connected', () => connected.push('connected'));
+
+    const p = conn.connect('wss://127.0.0.1:28443?token=loopback-tok');
+    await flushMicrotasks();
+    const ws = MockWebSocket.last!;
+    // No subprotocol — the loopback token in the URL is the credential.
+    expect(ws.protocols).toBeUndefined();
+
+    ws.fireOpen();
+    await p;
+    expect(connected).toEqual(['connected']);
+    expect(conn.isConnected()).toBe(true);
+  });
 });

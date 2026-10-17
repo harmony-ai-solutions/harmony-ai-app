@@ -25,6 +25,8 @@ import type {
   CharacterImageInfoDto,
   CharacterProfileDto,
   CharacterStatsResponseDto,
+  CloudAccountStatusDto,
+  CloudSignInStartDto,
   ConversationMessageDto,
   EmojiActionDto,
   EmojiActionsResponseDto,
@@ -42,6 +44,7 @@ import type {
   SyncClientStatusDto,
   SyncGroupKeyStatusDto,
 } from '../EngineApiClient';
+import type { LanSyncPairingPayload, SyncPairingPayload } from '../../sync/syncCloudTypes';
 
 /**
  * The engine contract version these fixtures were captured against. MUST equal
@@ -49,7 +52,7 @@ import type {
  * otherwise (bumping one side without the other is the deliberate-drift canary
  * the plan asks for).
  */
-export const FIXTURE_CONTRACT_VERSION = '1.4.0';
+export const FIXTURE_CONTRACT_VERSION = '1.5.0';
 
 const CREATED = '2026-10-12T09:00:00Z';
 const UPDATED = '2026-10-12T10:00:00Z';
@@ -279,6 +282,8 @@ export const syncClientStatusFixture: SyncClientStatusDto = {
     device_name: 'Phone',
     device_type: 'phone',
     device_platform: 'ios',
+    peer_fingerprint:
+      'sha256:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89',
   },
 };
 
@@ -291,6 +296,71 @@ export const syncGroupKeyStatusFixture: SyncGroupKeyStatusDto = {
   has_key: true,
   fingerprint: '9f2c1e0d7a4b6c8e5f3a1b2c4d6e8f0a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e',
   rotation_required: false,
+};
+
+// ── QR pairing mint + desktop cloud identity (plan 7-15, contract 1.5.0) ────
+// Mirrors the engine-side canonical `lanPairingPayload` / `lanPairingPayloadEnrolled`
+// / `cloudPairingPayload` / `cloudAccountStatus` / `cloudSignInStart` fixtures.
+
+const LAN_FINGERPRINT =
+  'sha256:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89';
+const LAN_SECRET = '9f2c1e0d7a4b6c8e5f3a1b2c4d6e8f0a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e';
+const ENROLL_GRANT = 'kQ9f2c1e0d7a4b6c8e5f3a1b2c4d6e8f0a1b3c5d7e9f0a2b4c6d8e';
+
+export const lanPairingPayloadFixture: LanSyncPairingPayload = {
+  v: 1,
+  kind: 'soulbits-lan',
+  ws: '192.168.1.10:28080',
+  wss: '192.168.1.10:28443',
+  mode: 'secure',
+  fingerprint: LAN_FINGERPRINT,
+  dataset_id: 'engine-8f0a1b3c5d7e9f02',
+  name: 'Studio-PC',
+  secret: LAN_SECRET,
+  ttl: 300,
+};
+
+/**
+ * Signed-in variant of {@link lanPairingPayloadFixture} (plan 7-15 E2): the
+ * `enrollment` block is present only when the desktop is signed in and the grant
+ * was freshly minted. `account_hint` is MASKED here (the phone shows it on the
+ * signed-out confirmation sheet).
+ */
+export const lanPairingPayloadEnrolledFixture: LanSyncPairingPayload = {
+  ...lanPairingPayloadFixture,
+  enrollment: {
+    relay_url: 'wss://sync.soulbits.app/v1/sync/ws',
+    grant: ENROLL_GRANT,
+    account_hint: 'u***@example.com',
+  },
+};
+
+/** The cloud QR payload — IDENTICAL to the portal shape the phone already parses. */
+export const cloudPairingPayloadFixture: SyncPairingPayload = {
+  relay_url: 'wss://sync.soulbits.app/v1/sync/ws',
+  pairing_token: ENROLL_GRANT,
+  account_hint: 'user@example.com',
+};
+
+/** `GET /api/cloud/account` (plan 7-15 E2). Never carries a token. */
+export const cloudAccountStatusFixture: CloudAccountStatusDto = {
+  signed_in: true,
+  account_hint: 'u***@example.com',
+  email: 'user@example.com',
+  device_id: 'b1f0c5d9-8a7e-4c3b-9f21-2d6e8a0b4c7d',
+  device_authorized: true,
+  device_authorization_pending: false,
+};
+
+/**
+ * `POST /api/cloud/signin/start` (plan 7-15 E2): the portal connect URL the
+ * frontend opens. Mirrors the engine-side canonical `cloudSignInStart` fixture —
+ * the engine mints a connect session (`POST /v1/devices/connect-session`) and
+ * returns the portal `/connect` page URL; the `connect_id` + session secret stay
+ * in engine memory only and are never returned.
+ */
+export const cloudSignInStartFixture: CloudSignInStartDto = {
+  url: 'https://cloud.soulbits.app/connect?request=3f2c1e0d-7a4b-4c8e-9f3a-1b2c4d6e8f0a',
 };
 
 // ── Engine logs (plan 7-11) ────────────────────────────────────────────────
@@ -447,6 +517,11 @@ export const CONTRACT_FIXTURES: Record<string, unknown> = {
   providerWrite: providerWriteFixture,
   syncClientStatus: syncClientStatusFixture,
   syncGroupKeyStatus: syncGroupKeyStatusFixture,
+  lanPairingPayload: lanPairingPayloadFixture,
+  lanPairingPayloadEnrolled: lanPairingPayloadEnrolledFixture,
+  cloudPairingPayload: cloudPairingPayloadFixture,
+  cloudAccountStatus: cloudAccountStatusFixture,
+  cloudSignInStart: cloudSignInStartFixture,
   characterStats: characterStatsFixture,
   backupTargets: backupTargetsFixture,
   dataVersion: dataVersionFixture,

@@ -20,7 +20,7 @@ import { PersonaEditScreen } from '../screens/PersonaEditScreen';
 import { BiometricLockSettingsScreen } from '../screens/settings/BiometricLockSettingsScreen';
 import { ComingSoonScreen } from '../screens/settings/ComingSoonScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
-import { RegisterScreen } from '../screens/auth/RegisterScreen';
+import { PendingApprovalScreen } from '../screens/auth/PendingApprovalScreen';
 import { BackgroundSettingsScreen } from '../screens/settings/BackgroundSettingsScreen';
 import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen';
 import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen';
@@ -34,6 +34,7 @@ import type { RestoreOffer } from '../services/backup/restoreOnboarding';
 import { IOSLifecycleInfoScreen } from '../screens/settings/IOSLifecycleInfoScreen';
 import { HelpSupportSettingsScreen } from '../screens/settings/HelpSupportSettingsScreen';
 import { EngineLogScreen } from '../screens/settings/EngineLogScreen';
+import { EngineStatusScreen } from '../screens/settings/EngineStatusScreen';
 import { NotificationSettingsScreen } from '../screens/settings/NotificationSettingsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
@@ -93,7 +94,8 @@ export type RootStackParamList = {
     editProfileId?: string;
   };
   Login: undefined;
-  Register: undefined;
+  /** Portal sign-in waiting screen (Option B) — pushed by LoginScreen. */
+  PendingApproval: undefined;
   BackgroundSettings: undefined;
   ThemeSettings: undefined;
   ThemeEditor: { themeId?: string } | undefined;
@@ -133,6 +135,8 @@ export type RootStackParamList = {
   HelpSupportSettings: undefined;
   /** Engine logs — the embedded engine's log viewer + diagnostics export (7-11). */
   EngineLog: undefined;
+  /** Engine status — the embedded engine's live status, ports + diagnostics. */
+  EngineStatus: undefined;
   /** Notification feed — pushed over the tabs from the header bell */
   Notifications: undefined;
   /** Notification delivery — outreach transport + lock-screen (plan 7-12 §4d) */
@@ -212,7 +216,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
 
           {/* ── Settings sub-pages (pushed over tabs from Settings) ── */}
           <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Register" component={RegisterScreen} />
+          <Stack.Screen name="PendingApproval" component={PendingApprovalScreen} />
           <Stack.Screen name="BackgroundSettings" component={BackgroundSettingsScreen} />
           <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
           <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />
@@ -236,6 +240,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           <Stack.Screen name="IOSLifecycleInfo" component={IOSLifecycleInfoScreen} />
           <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />
           <Stack.Screen name="EngineLog" component={EngineLogScreen} />
+          <Stack.Screen name="EngineStatus" component={EngineStatusScreen} />
           <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
           <Stack.Screen name="DisabledAIs" component={DisabledAIsScreen} />
           <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />

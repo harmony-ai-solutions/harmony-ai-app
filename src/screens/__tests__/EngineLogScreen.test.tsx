@@ -234,12 +234,11 @@ describe('engine log view logic', () => {
 });
 
 describe('EngineLogScreen render', () => {
-  it('renders the toolbar + advanced section and loads the empty state', async () => {
+  it('renders the toolbar and loads the empty state', async () => {
     const { getByTestId } = await render(<EngineLogScreen />);
     expect(getByTestId('log-search')).toBeTruthy();
     expect(getByTestId('log-follow-toggle')).toBeTruthy();
     expect(getByTestId('log-share')).toBeTruthy();
-    expect(getByTestId('log-advanced-toggle')).toBeTruthy();
     await waitFor(() => expect(getByTestId('log-empty')).toBeTruthy());
   });
 });

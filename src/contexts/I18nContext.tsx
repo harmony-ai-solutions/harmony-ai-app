@@ -43,6 +43,7 @@ import backup from '../i18n/locales/en/backup.json';
 import lifecycle from '../i18n/locales/en/lifecycle.json';
 import updates from '../i18n/locales/en/updates.json';
 import engineLogs from '../i18n/locales/en/engineLogs.json';
+import engineStatus from '../i18n/locales/en/engineStatus.json';
 
 // ── Storage key ─────────────────────────────────────────────────────────────
 
@@ -101,6 +102,7 @@ const resources = {
     lifecycle,
     updates,
     engineLogs,
+    engineStatus,
   },
 };
 
@@ -139,6 +141,7 @@ const i18nConfig: InitOptions = {
     'lifecycle',
     'updates',
     'engineLogs',
+    'engineStatus',
   ],
   interpolation: {
     escapeValue: false, // React already escapes

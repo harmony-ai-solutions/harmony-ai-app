@@ -14,12 +14,13 @@ import { ThemedButton } from '../../components/themed/ThemedButton';
 import { ThemedCard } from '../../components/themed/ThemedCard';
 import { SettingsToggleRow } from '../../components/settings/SettingsRows';
 import { SelectPicker } from '../../components/config/SelectPicker';
+import { BackupConflictModal } from '../../components/modals/BackupConflictModal';
 import {
   backupOrchestrator,
   BACKUP_TARGET_OPTIONS,
 } from '../../services/backup/BackupOrchestrator';
 import { BACKUP_CADENCES } from '../../services/backup/backupTypes';
-import type { BackupSettings, BackupTargetType } from '../../services/backup/backupTypes';
+import type { BackupSettings, BackupTargetType, PendingConflict } from '../../services/backup/backupTypes';
 import { pickBackupFolder, isBackupNativeAvailable } from '../../services/backup/backupNative';
 import { createLogger } from '../../utils/logger';
 import { formatBytes } from '../../utils/formatBytes';
@@ -59,11 +60,19 @@ export const BackupSettingsScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [cloudQuota, setCloudQuota] = useState<{ usedBytes: number; quotaMb: number } | null>(null);
+  // Generation-guard conflict (owner ruling 2026-10-17): the persisted pending
+  // conflict drives the modal; it stays pending until the user resolves it.
+  const [pendingConflict, setPendingConflict] = useState<PendingConflict | null>(null);
+  const [conflictVisible, setConflictVisible] = useState(false);
+  const [conflictBusy, setConflictBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const s = await backupOrchestrator.getSettings();
       setSettings(s);
+      const conflict = s.pendingConflict ?? null;
+      setPendingConflict(conflict);
+      if (conflict) setConflictVisible(true);
       const signed = await backupOrchestrator.isSignedIn();
       setSignedIn(signed);
       const status = await backupOrchestrator.probeTarget(s);
@@ -124,7 +133,14 @@ export const BackupSettingsScreen: React.FC = () => {
             onPress: async () => {
               try {
                 const res = await backupOrchestrator.backUpNow();
-                showToast(res.skipped ? t('backupSkipped') : t('backupDone', { size: formatBytes(res.totalBytes) }));
+                if (res.held) {
+                  // A held run means another device wrote the cloud manifest —
+                  // surface the conflict modal instead of a success toast.
+                  setPendingConflict(res.held);
+                  setConflictVisible(true);
+                } else {
+                  showToast(res.skipped ? t('backupSkipped') : t('backupDone', { size: formatBytes(res.totalBytes) }));
+                }
                 await load();
               } catch (e: any) {
                 showToast(t('backupFailed', { message: e?.message ?? String(e) }));
@@ -176,6 +192,67 @@ export const BackupSettingsScreen: React.FC = () => {
     },
     [passphrase, showToast, t],
   );
+
+  // ── Cloud-backup conflict (generation guard, owner ruling 2026-10-17) ──
+
+  /** "Push mine": re-run the backup with the overwrite policy. */
+  const handleConflictPushMine = useCallback(async () => {
+    hapticLightPress();
+    setConflictBusy(true);
+    try {
+      const res = await backupOrchestrator.backUpNow({ onConflict: 'overwrite' });
+      if (res.held) {
+        // Still held (another device raced us) — keep the conflict pending.
+        setPendingConflict(res.held);
+        setConflictVisible(true);
+      } else {
+        setPendingConflict(null);
+        setConflictVisible(false);
+        showToast(res.skipped ? t('backupSkipped') : t('backupDone', { size: formatBytes(res.totalBytes) }));
+      }
+      await load();
+    } catch (e: any) {
+      showToast(t('backupFailed', { message: e?.message ?? String(e) }));
+    } finally {
+      setConflictBusy(false);
+    }
+  }, [showToast, load, t]);
+
+  /**
+   * "Pull theirs": run the existing restore flow (the same warning the restore
+   * screen surfaces) against the configured target, then clear the conflict.
+   */
+  const handleConflictPullTheirs = useCallback(() => {
+    hapticLightPress();
+    if (!settings) return;
+    showAlert(t('restoreTitle'), t('restoreFooter'), [
+      { text: t('common:cancel'), style: 'cancel' },
+      {
+        text: t('conflictPullConfirm'),
+        style: 'destructive',
+        onPress: async () => {
+          setConflictBusy(true);
+          try {
+            await backupOrchestrator.restore(settings);
+            await backupOrchestrator.clearPendingConflict();
+            setPendingConflict(null);
+            setConflictVisible(false);
+            showToast(t('restoreDone'));
+            await load();
+          } catch (e: any) {
+            showToast(t('restoreFailed', { message: e?.message ?? String(e) }));
+          } finally {
+            setConflictBusy(false);
+          }
+        },
+      },
+    ]);
+  }, [settings, showAlert, showToast, load, t]);
+
+  /** Cancel: dismiss but keep the conflict pending so it re-surfaces. */
+  const handleConflictCancel = useCallback(() => {
+    setConflictVisible(false);
+  }, []);
 
   if (!theme || !settings) return null;
 
@@ -247,6 +324,27 @@ export const BackupSettingsScreen: React.FC = () => {
           ) : null}
           {settings.lastError ? (
             <ThemedText variant="muted" size={12} style={styles.errorText}>{settings.lastError}</ThemedText>
+          ) : null}
+          {pendingConflict ? (
+            <>
+              <View style={styles.detailDivider} />
+              <View style={styles.conflictNotice} testID="backup-conflict-notice">
+                <Icon name="cloud-alert" size={16} color={accentPrimary} />
+                <ThemedText size={12} style={styles.conflictNoticeText}>
+                  {t('conflictNotice')}
+                </ThemedText>
+                <ThemedButton
+                  label={t('conflictReview')}
+                  variant="outline"
+                  onPress={() => {
+                    hapticLightPress();
+                    setConflictVisible(true);
+                  }}
+                  style={styles.conflictReviewButton}
+                  testID="backup-conflict-review"
+                />
+              </View>
+            </>
           ) : null}
         </ThemedCard>
 
@@ -398,6 +496,15 @@ export const BackupSettingsScreen: React.FC = () => {
 
         <ThemedText variant="muted" size={12} style={styles.footerText}>{t('footer')}</ThemedText>
       </ScrollView>
+
+      <BackupConflictModal
+        visible={conflictVisible}
+        conflict={pendingConflict}
+        busy={conflictBusy}
+        onPushMine={handleConflictPushMine}
+        onPullTheirs={handleConflictPullTheirs}
+        onCancel={handleConflictCancel}
+      />
     </ThemedView>
   );
 };
@@ -419,6 +526,9 @@ const styles = StyleSheet.create({
   mono: { fontFamily: 'monospace', letterSpacing: 1, lineHeight: 20 },
   helpText: { lineHeight: 18 },
   errorText: { marginTop: 6 },
+  conflictNotice: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+  conflictNoticeText: { flex: 1, lineHeight: 16 },
+  conflictReviewButton: { marginTop: 0 },
   actionButton: { marginTop: 4 },
   footerText: { textAlign: 'center', paddingHorizontal: 16 },
 });

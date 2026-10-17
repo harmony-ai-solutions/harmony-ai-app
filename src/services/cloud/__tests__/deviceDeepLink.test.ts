@@ -9,7 +9,10 @@
  *   - uppercase scheme tolerated (Android lowercases; iOS may not)
  */
 
-import { parseDeviceDeepLink } from '../deviceDeepLink';
+import {
+  parseDeviceDeepLink,
+  parseConnectReturnDeepLink,
+} from '../deviceDeepLink';
 
 describe('parseDeviceDeepLink', () => {
   it('parses a valid device-auth deep link', () => {
@@ -55,5 +58,36 @@ describe('parseDeviceDeepLink', () => {
   it('returns null for empty / non-URL input', () => {
     expect(parseDeviceDeepLink('')).toBeNull();
     expect(parseDeviceDeepLink('not a url')).toBeNull();
+  });
+});
+
+describe('parseConnectReturnDeepLink (Option B portal sign-in)', () => {
+  it('parses the bare connect-return link (no required params)', () => {
+    expect(parseConnectReturnDeepLink('soulbits://connect-return')).toEqual({
+      host: 'connect-return',
+    });
+  });
+
+  it('tolerates a trailing slash and extra query params', () => {
+    expect(parseConnectReturnDeepLink('soulbits://connect-return/')).toEqual({
+      host: 'connect-return',
+    });
+    expect(
+      parseConnectReturnDeepLink('soulbits://connect-return?utm_source=portal'),
+    ).toEqual({ host: 'connect-return' });
+  });
+
+  it('tolerates an uppercase scheme', () => {
+    expect(parseConnectReturnDeepLink('SOULBITS://connect-return')).toEqual({
+      host: 'connect-return',
+    });
+  });
+
+  it('rejects wrong scheme / wrong host / non-URL input', () => {
+    expect(parseConnectReturnDeepLink('https://connect-return')).toBeNull();
+    expect(parseConnectReturnDeepLink('soulbits://device-auth?code=123456')).toBeNull();
+    expect(parseConnectReturnDeepLink('soulbits://connect-return.evil.com')).toBeNull();
+    expect(parseConnectReturnDeepLink('')).toBeNull();
+    expect(parseConnectReturnDeepLink('not a url')).toBeNull();
   });
 });

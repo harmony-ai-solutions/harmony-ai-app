@@ -12,201 +12,45 @@
  *     gate" decision.
  *   - **store variant** →
  *       `status === 'loading'`            → branded splash (no flash of wall)
- *       silent attempt in flight          → branded splash
  *       `status === 'authenticated'`      → children (normal post-auth flow)
  *       `status === 'unauthenticated'`    → the sign-in wall
  *
- * Silent attempt (ruling 1: silent → forced wall): at the FIRST auth state in
- * which bootstrap has settled, if it is `unauthenticated` (a cold start without
- * a session) we make ONE silent sign-in attempt via
- * {@link attemptSilentSignIn} (Android Google `signInSilently`; iOS wall-only —
- * see that module). The credential is handed to the EXISTING
- * `AuthContext.loginWithGoogle`, so the post-auth flow is reused untouched —
- * the gate forks nothing.
+ * ── PORTAL IS THE SIGN-IN (Option B, owner-ruled 2026-10-17) ──────────────
+ * The wall's CTA starts the portal connect-session flow (`signInViaPortal`),
+ * which opens the portal in the system browser. Because the wall lives OUTSIDE
+ * the navigator it cannot push {@link PendingApprovalScreen}, so it renders its
+ * own inline waiting state (spinner + TTL countdown + cancel) driven by the
+ * shared `pendingSignIn` state. The retired silent Google attempt and the
+ * native Google/Apple buttons are gone: portal sign-in covers both.
  *
  * Sign-out: the gate is driven purely by `status`, so `AuthService.invalidate`
  * / `AuthContext.logout` flipping `status` back to `unauthenticated` lands the
- * user straight back on the wall. The silent attempt is a COLD-START-ONLY
- * decision (guarded by a ref): a session present at launch means no attempt
- * ever this session, so a later sign-out can never be silently undone.
- *
- * The wall is the reliable floor: it works on both platforms regardless of the
- * silent path's outcome.
+ * user straight back on the wall.
  */
 
-import React, { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import React from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
-import { AppleButton } from '@invertase/react-native-apple-authentication';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { isStoreVariant } from '../../config/appVariant';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
-import { createLogger } from '../../utils/logger';
-import {
-  signInWithGoogle,
-  GoogleSignInError,
-  GoogleSignInErrorType,
-} from '../../services/auth/googleSignIn';
-import {
-  signInWithApple,
-  AppleSignInError,
-  AppleSignInErrorType,
-} from '../../services/auth/appleSignIn';
-import { attemptSilentSignIn } from '../../services/auth/silentSignIn';
-import { AuthError } from '../../services/auth/AuthService';
-
-const log = createLogger('[AuthGate]');
-
-// ── Error → wall copy ─────────────────────────────────────────────────────
-
-/**
- * Map a Google sign-in failure to wall copy. Returns `null` when the flow was
- * cancelled — cancellation is not an error and must not surface any message
- * (the buttons simply stay tappable = retryable).
- */
-function googleErrorMessage(err: unknown, t: TFunction): string | null {
-  if (err instanceof GoogleSignInError) {
-    switch (err.type) {
-      case GoogleSignInErrorType.CANCELLED:
-        return null;
-      case GoogleSignInErrorType.PLAY_SERVICES:
-        return t('googleErrorPlayServices');
-      case GoogleSignInErrorType.DEVELOPER_ERROR:
-        return t('googleErrorDeveloperError');
-      case GoogleSignInErrorType.UNKNOWN:
-      default:
-        return t('googleErrorGeneric');
-    }
-  }
-
-  if (err instanceof AuthError) {
-    if (err.status === 403) return t('loginErrorEmailNotVerified');
-    if (err.status === 409) return t('googleErrorEmailConflict');
-    if (err.status === 401) return t('loginErrorInvalidCredentials');
-    return t('googleErrorGeneric');
-  }
-
-  return t('googleErrorGeneric');
-}
-
-/**
- * Map an Apple sign-in failure to wall copy. Returns `null` when the user
- * cancelled (retryable, no message).
- */
-function appleErrorMessage(err: unknown, t: TFunction): string | null {
-  if (err instanceof AppleSignInError) {
-    switch (err.type) {
-      case AppleSignInErrorType.CANCELLED:
-        return null;
-      case AppleSignInErrorType.NOT_CONFIGURED:
-        return t('appleErrorNotConfigured');
-      case AppleSignInErrorType.UNKNOWN:
-      default:
-        return t('appleErrorGeneric');
-    }
-  }
-
-  if (err instanceof AuthError) {
-    if (err.status === 409) return t('appleErrorEmailConflict');
-    if (err.status === 403) return t('loginErrorEmailNotVerified');
-    return t('appleErrorGeneric');
-  }
-
-  return t('appleErrorGeneric');
-}
 
 // ── Component ─────────────────────────────────────────────────────────────
 
 interface AuthGateProps {
-  children: ReactNode;
+  children: React.ReactNode;
 }
 
 export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
-  const { status, loginWithGoogle, loginWithApple } = useAuth();
+  const { status, signInViaPortal, cancelSignIn, pendingSignIn } = useAuth();
   const { theme } = useAppTheme();
   const { t } = useTranslation('auth');
 
   // Variant is a build-time value; read it per render (test seam friendly).
   const store = isStoreVariant();
-
-  const [launchPhase, setLaunchPhase] = useState<'pending' | 'checking' | 'settled'>('pending');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // The launch decision is made ONCE per app session, at the first render in
-  // which auth bootstrap has settled. This is what prevents a deliberate
-  // sign-out from being silently undone by a later silent attempt.
-  const launchDecidedRef = useRef(false);
-
-  // ── Silent attempt (store only, cold start without a session) ─────────
-  useEffect(() => {
-    if (!store) return;
-    if (status === 'loading') return; // wait for auth bootstrap to settle
-    if (launchDecidedRef.current) return; // launch decision already made
-    launchDecidedRef.current = true;
-
-    // A session was restored at cold start → no silent attempt, ever this
-    // session (a later sign-out must land on the wall, not re-auth).
-    if (status !== 'unauthenticated') {
-      setLaunchPhase('settled');
-      return;
-    }
-
-    // Cold start with no session → ONE silent restore attempt. Stay on the
-    // splash until it settles so the wall never flashes before a restore that
-    // is about to succeed.
-    setLaunchPhase('checking');
-    (async () => {
-      let idToken: string | null = null;
-      try {
-        idToken = await attemptSilentSignIn();
-      } catch {
-        idToken = null; // defensive — attemptSilentSignIn already never throws
-      }
-      if (idToken) {
-        try {
-          // EXISTING auth path — no parallel token handling.
-          await loginWithGoogle(idToken);
-        } catch (err) {
-          log.warn(
-            'Silent sign-in credential was rejected — showing the wall:',
-            err instanceof Error ? err.message : String(err),
-          );
-        }
-      }
-      setLaunchPhase('settled');
-    })();
-  }, [store, status, loginWithGoogle]);
-
-  // ── Wall action handlers ──────────────────────────────────────────────
-  const handleGoogle = useCallback(async () => {
-    setError(null);
-    setSubmitting(true);
-    try {
-      const idToken = await signInWithGoogle();
-      await loginWithGoogle(idToken);
-    } catch (err) {
-      setError(googleErrorMessage(err, t));
-    } finally {
-      setSubmitting(false);
-    }
-  }, [loginWithGoogle, t]);
-
-  const handleApple = useCallback(async () => {
-    setError(null);
-    setSubmitting(true);
-    try {
-      const identityToken = await signInWithApple();
-      await loginWithApple(identityToken);
-    } catch (err) {
-      setError(appleErrorMessage(err, t));
-    } finally {
-      setSubmitting(false);
-    }
-  }, [loginWithApple, t]);
 
   // ── Gating ────────────────────────────────────────────────────────────
   // Full variant: byte-for-byte today's behavior (the gate is a no-op).
@@ -218,12 +62,12 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
     return <>{children}</>;
   }
 
-  // 'loading' (bootstrap) and a not-yet-settled launch decision (pending or a
-  // silent attempt in flight) both show the branded splash — never a
-  // premature flash of the wall.
-  if (status === 'loading' || launchPhase !== 'settled') {
+  if (status === 'loading') {
     return <GateSplash theme={theme} label={t('storeGate_checking')} />;
   }
+
+  const waiting = pendingSignIn !== null && pendingSignIn.status === 'pending';
+  const terminal = pendingSignIn !== null && pendingSignIn.status !== 'pending';
 
   return (
     <ThemedView style={styles.wall} testID="auth-gate-wall">
@@ -240,30 +84,40 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
       </View>
 
       <View style={styles.actions}>
-        {error ? (
+        {terminal ? (
           <ThemedText variant="accent" size={13} style={styles.error} testID="auth-gate-error">
-            {error}
+            {t('pending_error')}
           </ThemedText>
         ) : null}
 
-        <ThemedButton
-          label={submitting ? t('storeGate_signingIn') : t('googleButtonLabel')}
-          onPress={handleGoogle}
-          disabled={submitting}
-          testID="auth-gate-google"
-        />
-
-        {/* Apple Sign-In — iOS only, matching AuthService availability. */}
-        {Platform.OS === 'ios' && !submitting ? (
-          <View testID="auth-gate-apple" style={styles.appleWrap}>
-            <AppleButton
-              buttonType={AppleButton.Type.SIGN_IN}
-              buttonStyle={AppleButton.Style.BLACK}
-              style={styles.appleButton}
-              onPress={handleApple}
+        {waiting ? (
+          <>
+            <ActivityIndicator
+              color={theme?.colors.accent.primary ?? '#8f3ba7'}
+              testID="auth-gate-waiting-spinner"
             />
-          </View>
-        ) : null}
+            <ThemedText variant="secondary" size={14} style={styles.waitingText} testID="auth-gate-waiting">
+              {t('pending_subtitle')}
+            </ThemedText>
+            {pendingSignIn!.remainingSeconds > 0 ? (
+              <ThemedText variant="muted" size={13} style={styles.waitingText}>
+                {t('pending_timeLeft', { seconds: pendingSignIn!.remainingSeconds })}
+              </ThemedText>
+            ) : null}
+            <ThemedButton
+              label={t('pending_cancel')}
+              onPress={cancelSignIn}
+              variant="ghost"
+              testID="auth-gate-cancel"
+            />
+          </>
+        ) : (
+          <ThemedButton
+            label={t('signIn_withSoulbits')}
+            onPress={() => void signInViaPortal()}
+            testID="auth-gate-sign-in"
+          />
+        )}
       </View>
     </ThemedView>
   );
@@ -319,17 +173,14 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 420,
     gap: 12,
+    alignItems: 'center',
   },
   error: {
     textAlign: 'center',
     marginBottom: 4,
   },
-  appleWrap: {
-    width: '100%',
-  },
-  appleButton: {
-    width: '100%',
-    height: 44,
+  waitingText: {
+    textAlign: 'center',
   },
   splash: {
     flex: 1,

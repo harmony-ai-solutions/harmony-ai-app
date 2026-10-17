@@ -53,7 +53,11 @@ import {
   connectionFromReady,
   disconnectEngine,
   getEngineConnection,
+  getEngineStatus,
+  getLastEngineExit,
   onEngineConnectionChange,
+  onEngineExitChange,
+  onEngineStatusChange,
   requireEngineConnection,
   resetEngineServiceForTests,
   setEngineConnection,
@@ -164,5 +168,59 @@ describe('EngineService', () => {
     mockHost.getState.mockResolvedValueOnce('failed');
     await syncEngineConnectionState();
     expect(getEngineConnection()).toBeNull();
+  });
+});
+
+describe('EngineService — lifecycle status + last exit', () => {
+  it('tracks starting/ready/failed status from host events', () => {
+    emit({ type: 'state', status: 'starting' });
+    expect(getEngineStatus()).toBe('starting');
+
+    emit({ type: 'ready', payload, rawLine: 'x' });
+    expect(getEngineStatus()).toBe('ready');
+
+    emit({ type: 'crashed', attempt: 3, maxAttempts: 3, code: 1, signal: null });
+    expect(getEngineStatus()).toBe('failed');
+  });
+
+  it('reports ready when a connection is published directly', () => {
+    setEngineConnection(payload);
+    expect(getEngineStatus()).toBe('ready');
+  });
+
+  it('reports stopped after an explicit disconnect', async () => {
+    setEngineConnection(payload);
+    await disconnectEngine();
+    expect(getEngineStatus()).toBe('stopped');
+  });
+
+  it('notifies status listeners on change only', () => {
+    const seen: Array<string | null> = [];
+    const unsub = onEngineStatusChange(s => seen.push(s));
+    emit({ type: 'state', status: 'starting' });
+    emit({ type: 'ready', payload, rawLine: 'x' });
+    expect(seen).toEqual(['starting', 'ready']);
+    unsub();
+    emit({ type: 'state', status: 'stopped' });
+    expect(seen).toHaveLength(2);
+  });
+
+  it('records the last exit and notifies exit listeners', () => {
+    const seen: unknown[] = [];
+    const unsub = onEngineExitChange(e => seen.push(e));
+    const exit = { code: 1, signal: null, expected: false, restartAttempt: 3, willRestart: false };
+    emit({ type: 'exit', exit });
+    expect(getLastEngineExit()).toEqual(exit);
+    expect(seen).toEqual([exit]);
+    expect(getEngineStatus()).toBe('failed'); // unexpected, non-restarting exit
+    unsub();
+  });
+
+  it('maps expected exits to stopped and restarting exits to restarting', () => {
+    emit({ type: 'exit', exit: { code: 0, signal: null, expected: true, restartAttempt: 0, willRestart: false } });
+    expect(getEngineStatus()).toBe('stopped');
+
+    emit({ type: 'exit', exit: { code: 1, signal: null, expected: false, restartAttempt: 1, willRestart: true } });
+    expect(getEngineStatus()).toBe('restarting');
   });
 });

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useRef,
 import ConnectionStateManager, { type SyncSource } from '../services/ConnectionStateManager';
 import ConnectionManager from '../services/connection/ConnectionManager';
 import { getEngineConnection, onEngineConnectionChange } from '../services/engine/EngineService';
+import { appendLoopbackToken } from '../services/websocket/loopbackToken';
 import { createLogger } from '../utils/logger';
 import i18n from './I18nContext';
 import { useToast } from './AppToastContext';
@@ -295,9 +296,19 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       let mode: string;
       const engine = getEngineConnection();
       if (engine) {
-        // Prefer the embedded engine's loopback endpoint.
-        mode = engine.wssBaseUrl ? 'insecure-ssl' : 'unencrypted';
-        url = engine.wssBaseUrl || engine.wsBaseUrl;
+        // Embedded engine: prefer the PLAIN loopback WS (ws://) and authenticate
+        // with the per-process loopback token the sidecar publishes in its
+        // readiness payload (the same 7-11 posture the management API and the
+        // log-stream WS use). Loopback plaintext + loopback token keeps the
+        // self-signed-TLS native library off the chat-critical path; fall back
+        // to wss:// only when the sidecar advertises no plain WS port.
+        if (engine.wsBaseUrl) {
+          mode = 'unencrypted';
+          url = appendLoopbackToken(engine.wsBaseUrl, engine.token);
+        } else {
+          mode = 'insecure-ssl';
+          url = appendLoopbackToken(engine.wssBaseUrl, engine.token);
+        }
       } else {
         mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
         url = mode === 'unencrypted'
@@ -319,9 +330,16 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       log.info('Engine connection established');
     } catch (error: any) {
       log.error('Connect failed:', error);
+      // Re-arm error toasts. An insecure-ssl attempt sets this flag to suppress
+      // expected TLS/cert errors, but nothing ever cleared it: after a single
+      // insecure-ssl attempt it lingered forever and handleSyncError (which
+      // checks the flag) suppressed ALL connection-error UI from then on — the
+      // "no error visible" symptom. A failed attempt must clear it so subsequent
+      // errors surface again.
+      isCertFlowActiveRef.current = false;
       setIsConnectingSync(false);
       setIsConnectedSync(false);
-      if (!isReconnectingRef.current && !isCertFlowActiveRef.current) {
+      if (!isReconnectingRef.current) {
         showToast(i18n.t('syncConnection:failedToConnect'));
       }
       throw error;

@@ -70,8 +70,23 @@
  * `outreachNotificationEvent` / `outreachNotificationLiveEvent` shared payload
  * fixtures. The WS is exercised by the app's outreach-notification client tests
  * (like the log stream, it is not a REST manifest entry).
+ *
+ * 1.4.0 → 1.5.0 (plan 7-15): desktop-first QR pairing + desktop cloud identity.
+ * `SyncClientConfig` gained the persisted `peer_fingerprint` (TOFU pin) and the
+ * write-only `lan_pairing_secret` (never echoed on reads); `SyncClientConfigPatch`
+ * gained both. New routes: `POST /api/sync/pairing/lan` (LAN QR mint),
+ * `POST /api/sync/pairing/cloud` (cloud QR mint), `GET /api/cloud/account`,
+ * `POST /api/cloud/signin/start` and `POST /api/cloud/signin/signout`. (E2 added
+ * a device-code verify route `POST /api/cloud/signin/device/verify`; the E2b
+ * sign-in rework dropped it — desktop sign-in is now a pure portal-connect +
+ * loopback flow — so the manifest shrank 39 → 38 endpoints within 1.5.0, and the
+ * `cloudSignInStart` fixture value became the portal connect URL.) New shared
+ * payload fixtures: `lanPairingPayload` / `lanPairingPayloadEnrolled` /
+ * `cloudPairingPayload` / `cloudAccountStatus` / `cloudSignInStart`. The phone
+ * consumes the LAN payload via parser v2 and the enrollment intake (the cloud QR
+ * path is unchanged).
  */
-export const ENGINE_CONTRACT_VERSION = '1.4.0';
+export const ENGINE_CONTRACT_VERSION = '1.5.0';
 
 /** Outcome of a contract-version comparison. */
 export interface ContractVersionCheck {
@@ -342,6 +357,47 @@ export const REQUIRED_ENGINE_ENDPOINTS: ContractEndpoint[] = [
     path: '/api/sync/group/rotation-required',
     fixture: 'syncGroupKeyStatus',
     note: 'relay the portal rotation-required flag',
+  },
+
+  // ── QR pairing mint + desktop cloud identity (plan 7-15, contract 1.5.0) ──
+  // Desktop-first surfaces on the same management API (admin-key authed). The
+  // phone consumes the LAN payload + the enrollment block; the cloud QR keeps
+  // the portal shape. Declared here so the 1.5.0 endpoint manifest stays in
+  // lockstep with the engine's canonical fixtures (drift CLI).
+  {
+    id: 'syncPairing.lan',
+    method: 'POST',
+    path: '/api/sync/pairing/lan',
+    fixture: 'lanPairingPayload',
+    note: 'mint the LAN QR pairing payload (desktop)',
+  },
+  {
+    id: 'syncPairing.cloud',
+    method: 'POST',
+    path: '/api/sync/pairing/cloud',
+    fixture: 'cloudPairingPayload',
+    note: 'mint the cloud QR pairing payload (desktop)',
+  },
+  {
+    id: 'cloud.account',
+    method: 'GET',
+    path: '/api/cloud/account',
+    fixture: 'cloudAccountStatus',
+    note: 'desktop cloud-account status (never a token)',
+  },
+  {
+    id: 'cloud.signInStart',
+    method: 'POST',
+    path: '/api/cloud/signin/start',
+    fixture: 'cloudSignInStart',
+    note: 'start the loopback browser-OAuth sign-in (desktop)',
+  },
+  {
+    id: 'cloud.signOut',
+    method: 'POST',
+    path: '/api/cloud/signin/signout',
+    fixture: 'statusOk',
+    note: 'clear the persisted desktop cloud session',
   },
 
   // ── Cross-entity stats (3-4 follow-up) ──────────────────────────────────

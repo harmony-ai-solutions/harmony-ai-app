@@ -6,9 +6,8 @@
  * the engine's WS log stream with follow/pause, a REST ring-buffer history
  * backfill on load, level/component/entity/search/prompt filters, "load older"
  * pagination, dedup-count badges driven by stream remove events, an in-memory
- * row cap, a collapsed "advanced" runtime-verbosity control, and a share-sheet
- * diagnostics export. Live frames are coalesced into ~250 ms render batches
- * (the Wails buffered-batch pattern).
+ * row cap, and a share-sheet diagnostics export. Live frames are coalesced
+ * into ~250 ms render batches (the Wails buffered-batch pattern).
  *
  * Entry point: Settings → Help & Support → "Engine logs".
  */
@@ -36,7 +35,6 @@ import { hexToRgba } from '../../utils/colorUtils';
 import { engineApiClient } from '../../services/engine/EngineApiClient';
 import type {
   EngineLogEntryDto,
-  EngineLogLevelConfigDto,
   EngineLogQuery,
 } from '../../services/engine/EngineApiClient';
 import {
@@ -250,8 +248,7 @@ export const EngineLogScreen: React.FC = () => {
   const [components, setComponents] = useState<string[]>([]);
   const [entities, setEntities] = useState<string[]>([]);
   const [promptTypes, setPromptTypes] = useState<string[]>([]);
-  const [levelConfig, setLevelConfig] = useState<EngineLogLevelConfigDto | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+
   const [sharing, setSharing] = useState(false);
 
   const streamRef = useRef<EngineLogStream | null>(null);
@@ -274,14 +271,6 @@ export const EngineLogScreen: React.FC = () => {
     }
   }, []);
 
-  const loadLevels = useCallback(async () => {
-    try {
-      setLevelConfig(await engineApiClient.engineLogLevels());
-    } catch (err) {
-      log.warn('Failed to load log level config:', err);
-    }
-  }, []);
-
   /** REST backfill for the current filter (page 0) — the Wails load pattern. */
   const backfill = useCallback(async (nextFilter: LogFilterState) => {
     setLoading(true);
@@ -301,10 +290,9 @@ export const EngineLogScreen: React.FC = () => {
     }
   }, []);
 
-  // Initial load: options + levels + backfill, then start the live stream.
+  // Initial load: options + backfill, then start the live stream.
   useEffect(() => {
     void refreshOptions();
-    void loadLevels();
     void backfill(EMPTY_LOG_FILTER);
 
     const stream = new EngineLogStream({
@@ -329,7 +317,7 @@ export const EngineLogScreen: React.FC = () => {
       stream.stop();
       streamRef.current = null;
     };
-  }, [refreshOptions, loadLevels, backfill]);
+  }, [refreshOptions, backfill]);
 
   // Push filter changes to the live stream + re-backfill the REST window.
   const applyFilter = useCallback(
@@ -369,18 +357,6 @@ export const EngineLogScreen: React.FC = () => {
       setLoadingOlder(false);
     }
   }, [hasMore, loadingOlder, rows.length]);
-
-  const changeDefaultLevel = useCallback(
-    async (level: string) => {
-      try {
-        await engineApiClient.setEngineLogLevels({ defaultLevel: level });
-        await loadLevels();
-      } catch (err) {
-        log.warn('Failed to set log level:', err);
-      }
-    },
-    [loadLevels],
-  );
 
   const share = useCallback(async () => {
     if (sharing) return;
@@ -616,46 +592,6 @@ export const EngineLogScreen: React.FC = () => {
         </ThemedText>
       </View>
 
-      {/* ── Advanced verbosity (collapsed by default) ── */}
-      <ThemedCard style={styles.advancedCard}>
-        <TouchableOpacity
-          style={styles.advancedHeader}
-          onPress={() => setAdvancedOpen(open => !open)}
-          testID="log-advanced-toggle"
-        >
-          <Icon name="tune-variant" size={16} color={theme.colors.accent.primary} />
-          <ThemedText weight="medium" size={14} style={styles.advancedTitle}>
-            {t('advanced.title')}
-          </ThemedText>
-          <Icon name={advancedOpen ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.muted} />
-        </TouchableOpacity>
-        {advancedOpen && (
-          <View style={styles.advancedBody} testID="log-advanced-body">
-            <ThemedText variant="secondary" size={12}>
-              {t('advanced.current', {
-                level: levelConfig?.defaultLevel ?? '—',
-                verbosity: levelConfig?.promptVerbosity ?? '—',
-              })}
-            </ThemedText>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-              {LOG_LEVELS.map(level => (
-                <Chip
-                  key={`adv-${level}`}
-                  label={level}
-                  active={levelConfig?.defaultLevel === level}
-                  onPress={() => void changeDefaultLevel(level)}
-                  theme={theme}
-                  testID={`adv-level-${level}`}
-                />
-              ))}
-            </ScrollView>
-            <ThemedText variant="muted" size={11}>
-              {t('advanced.warning')}
-            </ThemedText>
-          </View>
-        )}
-      </ThemedCard>
-
       {/* ── List ── */}
       {loading ? (
         <View style={styles.center}>
@@ -759,16 +695,6 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
-  advancedCard: { marginHorizontal: 16, marginBottom: 8, padding: 0 },
-  advancedHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  advancedTitle: { flex: 1 },
-  advancedBody: { paddingHorizontal: 14, paddingBottom: 12, gap: 8 },
   list: { flex: 1 },
   listContent: { paddingHorizontal: 12, paddingBottom: 24 },
   row: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 4, gap: 6 },

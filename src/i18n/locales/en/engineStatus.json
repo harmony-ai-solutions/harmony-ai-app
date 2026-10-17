@@ -1,0 +1,51 @@
+{
+  "title": "Engine status",
+  "statusSection": "Engine status",
+  "state": {
+    "ready": "Running",
+    "starting": "Starting…",
+    "restarting": "Restarting…",
+    "stopped": "Stopped",
+    "failed": "Failed",
+    "unsupported": "Not available on this device",
+    "unknown": "Not started"
+  },
+  "hint": {
+    "notStarted": "The embedded engine isn't running. It starts automatically when you use chat, sync, or open your library.",
+    "starting": "The embedded engine is starting up. This usually takes a few seconds.",
+    "failed": "The embedded engine stopped unexpectedly. Restart the app; if it keeps failing, share the diagnostics below."
+  },
+  "detail": {
+    "bind": "Bind address",
+    "wsPort": "Event port (ws)",
+    "wssPort": "Event port (wss)",
+    "adminPort": "Management port",
+    "pid": "Process ID",
+    "dataDir": "Data directory",
+    "loopbackToken": "Loopback token",
+    "tokenPresent": "Present",
+    "tokenAbsent": "Not present"
+  },
+  "valueUnknown": "—",
+  "lastExitSection": "Last exit",
+  "lastExit": {
+    "reason": "Reason",
+    "expected": "Stopped by app",
+    "unexpected": "Unexpected exit",
+    "code": "Exit code",
+    "signal": "Signal",
+    "restartAttempt": "Restart attempt",
+    "willRestart": "Will restart",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "versionsSection": "Versions",
+  "versions": {
+    "app": "App version",
+    "engine": "Engine version",
+    "contract": "Management contract"
+  },
+  "actionsSection": "Diagnostics",
+  "viewLogs": "View engine logs",
+  "share": "Share diagnostics"
+}

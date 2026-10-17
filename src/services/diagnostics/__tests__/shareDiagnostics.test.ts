@@ -29,6 +29,7 @@ import {
   resolveEngineVersion,
   shareDiagnosticsReport,
 } from '../shareDiagnostics';
+import { ENGINE_CONTRACT_VERSION } from '../../engine/engineContract';
 import type { EngineLogEntryDto } from '../../engine/EngineApiClient';
 
 const entry: EngineLogEntryDto = {
@@ -60,7 +61,7 @@ describe('shareDiagnostics', () => {
   it('collects a header from the device + engine', async () => {
     const header = await collectDiagnosticsHeader('2026-10-13T12:00:00.000Z');
     expect(header.engineVersion).toBe('0.3.0-dev');
-    expect(header.contractVersion).toBe('1.4.0');
+    expect(header.contractVersion).toBe(ENGINE_CONTRACT_VERSION);
     expect(header.generatedAt).toBe('2026-10-13T12:00:00.000Z');
     expect(typeof header.platform).toBe('string');
   });

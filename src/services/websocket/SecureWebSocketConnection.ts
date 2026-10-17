@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WebSocketConnection } from './WebSocketConnection';
 import { BaseWebSocketConnection } from './BaseWebSocketConnection';
+import { hasLoopbackTokenQueryParam } from './loopbackToken';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[SecureWebSocketConnection]');
@@ -29,9 +30,15 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
     
     return new Promise((resolve, reject) => {
       try {
+        // A loopback `token` query param is a self-contained credential (see
+        // loopbackToken.ts). When present the JWT is optional: legacy
+        // self-hosted pairing still sends a JWT subprotocol if one exists, but
+        // the embedded loopback path must not be blocked on `soulbits_jwt`.
+        const hasLoopbackToken = hasLoopbackTokenQueryParam(url);
+
         // Get JWT from AsyncStorage
         AsyncStorage.getItem('soulbits_jwt').then(async (jwt) => {
-          if (!jwt) {
+          if (!jwt && !hasLoopbackToken) {
             const error = new Error('No JWT credentials available');
             log.error(error.message);
             reject(error);
@@ -40,7 +47,7 @@ export class SecureWebSocketConnection extends BaseWebSocketConnection implement
           
           // React Native WebSocket: Pass JWT as protocol parameter
           // The backend will need to extract it from the Sec-WebSocket-Protocol header
-          const protocols = [`Bearer.${jwt}`];
+          const protocols = jwt ? [`Bearer.${jwt}`] : undefined;
           const wss = new WebSocket(url, protocols);
           
           // Set a timeout for the connection attempt

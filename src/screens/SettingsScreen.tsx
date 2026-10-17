@@ -179,6 +179,24 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
+        {/* ── Engine (embedded Soulbits Engine status + log viewer) ── */}
+        <ThemedCard elevated accentStripe style={styles.card}>
+          <SectionHeader title={t('engineGroup')} style={styles.sectionHeader} />
+          <SettingsLinkRow
+            icon="engine-outline"
+            label={t('engineStatus')}
+            onPress={() => navigation.navigate('EngineStatus')}
+            theme={theme}
+          />
+          <SettingsLinkRow
+            icon="text-box-search-outline"
+            label={t('engineLogs')}
+            onPress={() => navigation.navigate('EngineLog')}
+            theme={theme}
+            showSeparator
+          />
+        </ThemedCard>
+
         {/* ── Backup & restore (user-owned-storage continuity, 2-6) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('backupGroup')} style={styles.sectionHeader} />

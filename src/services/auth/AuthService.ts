@@ -247,6 +247,65 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
     await this.handleTokenResponse(data);
   }
 
+  // ──── Delegated device enrollment (plan 7-15 E2) ────────────────────
+
+  /**
+   * Exchange a single-use desktop-issued enrollment grant for this device's OWN
+   * cloud session (`POST /v1/auth/device/enroll`).
+   *
+   * The backend returns EXACTLY the `TokenResponse` shape every login/OAuth path
+   * returns, so this funnels through {@link handleTokenResponse} — the same
+   * Keychain persistence + `auth:changed` emit as `login()` (NO parallel token
+   * path). Throws {@link AuthError} on a rejected grant (401
+   * `enrollment_grant_invalid` on replay/expiry) or a transport error.
+   */
+  async enrollDevice(params: {
+    grant: string;
+    deviceId: string;
+    deviceName: string;
+    platform: string;
+  }): Promise<void> {
+    const res = await fetch(AUTH_ENDPOINTS.deviceEnroll, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant: params.grant,
+        device_id: params.deviceId,
+        device_name: params.deviceName,
+        platform: params.platform,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await parseErrorBody(res);
+      throw new AuthError('enrollDevice', body?.error ?? `HTTP ${res.status}`, res.status);
+    }
+
+    const data = (await res.json()) as TokenResponse;
+    await this.handleTokenResponse(data);
+  }
+
+  // ──── Portal connect-session redeem (Option B sign-in) ──────────────
+
+  /**
+   * Persist a token pair redeemed from the portal connect-session poll
+   * (`GET /v1/devices/connect-session/{id}` on the `approved` transition).
+   *
+   * The redeem response is EXACTLY the login `TokenResponse` shape
+   * (`{token, refresh_token, expires_at}`), so this funnels through
+   * {@link handleTokenResponse} — the IDENTICAL Keychain persistence +
+   * `auth:changed` emit as `login()`. There is NO parallel token path: the
+   * AuthContext `auth:changed` listener fetches the profile and flips to
+   * `authenticated`, exactly as it did for email/password.
+   */
+  async applyConnectSessionTokens(tokens: {
+    token: string;
+    refresh_token: string;
+    expires_at: string;
+  }): Promise<void> {
+    await this.handleTokenResponse(tokens);
+  }
+
   // ──── Refresh ───────────────────────────────────────────────────────
 
   /**
@@ -298,7 +357,6 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
   }
 
   // ──── Logout ────────────────────────────────────────────────────────
-
   /**
    * Best-effort logout: notify the backend, then clear local credentials
    * regardless of the server response.

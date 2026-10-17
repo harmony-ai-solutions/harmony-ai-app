@@ -1,65 +1,34 @@
 /**
- * AuthGate — store launch-gate tests (plan 7-14 V2).
+ * AuthGate — store launch-gate tests (plan 7-14 V2, Option B portal sign-in).
  *
- * Covers the gate's rendering logic per variant × auth state, the
- * silent-attempt-then-fallback state machine (silent service mocked), the
- * sign-out → wall regression, wall error handling, and the full-variant no-op.
+ * Covers the gate's rendering logic per variant × auth state and the portal
+ * wall: the "Sign in with Soulbits" CTA starts the portal flow, the inline
+ * waiting state renders while pending, and a terminal state surfaces a retry.
  * The variant is driven through the V1 test seam (`setAppVariantForTests`).
  */
 
 import React from 'react';
-import { Platform, Text } from 'react-native';
+import { Text } from 'react-native';
 import { act, cleanup, fireEvent, render } from '@testing-library/react-native';
 import { AuthGate } from '../AuthGate';
 import { setAppVariantForTests } from '../../../config/appVariant';
 
-// ── Hoisted module mocks (factories cannot close over outer variables) ──
+// ── Hoisted module mocks ────────────────────────────────────────────────
 
 jest.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}));
-
-jest.mock('../../../utils/logger', () => ({
-  createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
+  useTranslation: () => ({
+    t: (key: string, opts?: { seconds?: number }) =>
+      opts && opts.seconds != null ? `${key}:${opts.seconds}` : key,
+  }),
 }));
 
 jest.mock('../../../contexts/ThemeContext', () => ({
   useAppTheme: () => ({
-    theme: {
-      colors: {
-        accent: { primary: '#7c3aed', secondary: '#a78bfa' },
-        background: { base: '#0f0f1a', surface: '#151d30', elevated: '#1e1e2e' },
-        border: { default: '#333333' },
-        text: { primary: '#ffffff', secondary: '#cccccc', muted: '#aaaaaa', disabled: '#555555' },
-        status: { success: '#22c55e', warning: '#f59e0b', error: '#ef4444' },
-      },
-    },
+    theme: { colors: { accent: { primary: '#7c3aed' } } },
   }),
 }));
 
 jest.mock('../../../contexts/AuthContext', () => ({ useAuth: jest.fn() }));
-
-jest.mock('../../../services/auth/silentSignIn', () => ({ attemptSilentSignIn: jest.fn() }));
-
-jest.mock('../../../services/auth/googleSignIn', () => ({
-  ...jest.requireActual('../../../services/auth/googleSignIn'),
-  signInWithGoogle: jest.fn(),
-}));
-
-jest.mock('../../../services/auth/appleSignIn', () => ({
-  ...jest.requireActual('../../../services/auth/appleSignIn'),
-  signInWithApple: jest.fn(),
-}));
-
-jest.mock('@invertase/react-native-apple-authentication', () => {
-  const React = require('react');
-  const { View } = require('react-native');
-  const AppleButton = ({ onPress, ...props }: any) =>
-    React.createElement(View, { ...props, onPress, testID: 'auth-gate-apple-button' });
-  AppleButton.Type = { SIGN_IN: 'SignIn', CONTINUE: 'Continue', SIGN_UP: 'SignUp' };
-  AppleButton.Style = { BLACK: 'Black', WHITE: 'White', WHITE_OUTLINE: 'WhiteOutline' };
-  return { AppleButton, appleAuth: { performRequest: jest.fn(), isSupported: true } };
-});
 
 jest.mock('../../themed/ThemedView', () => {
   const React = require('react');
@@ -70,7 +39,6 @@ jest.mock('../../themed/ThemedView', () => {
       React.createElement(View, { style, ...props }, children),
   };
 });
-
 jest.mock('../../themed/ThemedText', () => {
   const React = require('react');
   const { Text } = require('react-native');
@@ -80,7 +48,6 @@ jest.mock('../../themed/ThemedText', () => {
       React.createElement(Text, { style, ...props }, children),
   };
 });
-
 jest.mock('../../themed/ThemedButton', () => {
   const React = require('react');
   const { TouchableOpacity, Text } = require('react-native');
@@ -98,37 +65,29 @@ jest.mock('../../themed/ThemedButton', () => {
 // ── Imports (after mocks) ───────────────────────────────────────────────
 
 import { useAuth } from '../../../contexts/AuthContext';
-import { attemptSilentSignIn } from '../../../services/auth/silentSignIn';
-import {
-  signInWithGoogle,
-  GoogleSignInError,
-  GoogleSignInErrorType,
-} from '../../../services/auth/googleSignIn';
-import {
-  signInWithApple,
-  AppleSignInError,
-  AppleSignInErrorType,
-} from '../../../services/auth/appleSignIn';
 
 const mockUseAuth = useAuth as jest.Mock;
-const mockSilent = attemptSilentSignIn as jest.Mock;
-const mockGoogle = signInWithGoogle as jest.Mock;
-const mockApple = signInWithApple as jest.Mock;
+const mockSignInViaPortal = jest.fn(async () => {});
+const mockCancelSignIn = jest.fn();
 
 let authStatus: 'loading' | 'authenticated' | 'unauthenticated';
-const mockLoginWithGoogle = jest.fn(async () => {
-  authStatus = 'authenticated';
-});
-const mockLoginWithApple = jest.fn(async () => {
-  authStatus = 'authenticated';
-});
+let pending: any;
 
-// ── Helpers ─────────────────────────────────────────────────────────────
+function setAuth() {
+  mockUseAuth.mockImplementation(() => ({
+    status: authStatus,
+    user: null,
+    signInVersion: 0,
+    signInViaPortal: mockSignInViaPortal,
+    cancelSignIn: mockCancelSignIn,
+    pendingSignIn: pending,
+  }));
+}
 
 const Child = () => <Text testID="child">CHILD</Text>;
 
 async function flush() {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 6; i++) {
     await act(async () => {
       await Promise.resolve();
     });
@@ -147,14 +106,8 @@ beforeEach(() => {
   cleanup();
   jest.clearAllMocks();
   authStatus = 'unauthenticated';
-  mockUseAuth.mockImplementation(() => ({
-    status: authStatus,
-    user: null,
-    signInVersion: 0,
-    loginWithGoogle: mockLoginWithGoogle,
-    loginWithApple: mockLoginWithApple,
-  }));
-  mockSilent.mockResolvedValue(null);
+  pending = null;
+  setAuth();
 });
 
 afterEach(() => {
@@ -165,7 +118,7 @@ afterEach(() => {
 // ── Tests ───────────────────────────────────────────────────────────────
 
 describe('AuthGate — full variant is a no-op', () => {
-  it('renders children unchanged when unauthenticated and never attempts silent', async () => {
+  it('renders children unchanged when unauthenticated', async () => {
     setAppVariantForTests('full');
     const utils = await renderGate();
     await flush();
@@ -173,12 +126,12 @@ describe('AuthGate — full variant is a no-op', () => {
     expect(utils.getByTestId('child')).toBeTruthy();
     expect(utils.queryByTestId('auth-gate-wall')).toBeNull();
     expect(utils.queryByTestId('auth-gate-splash')).toBeNull();
-    expect(mockSilent).not.toHaveBeenCalled();
   });
 
   it('renders children when authenticated', async () => {
     setAppVariantForTests('full');
     authStatus = 'authenticated';
+    setAuth();
     const utils = await renderGate();
     await flush();
 
@@ -191,6 +144,7 @@ describe('AuthGate — store variant rendering', () => {
   it('renders children when authenticated', async () => {
     setAppVariantForTests('store');
     authStatus = 'authenticated';
+    setAuth();
     const utils = await renderGate();
     await flush();
 
@@ -201,6 +155,7 @@ describe('AuthGate — store variant rendering', () => {
   it('shows the branded splash while auth is loading', async () => {
     setAppVariantForTests('store');
     authStatus = 'loading';
+    setAuth();
     const utils = await renderGate();
 
     expect(utils.getByTestId('auth-gate-splash')).toBeTruthy();
@@ -208,95 +163,91 @@ describe('AuthGate — store variant rendering', () => {
     expect(utils.queryByTestId('child')).toBeNull();
   });
 
-  it('shows the splash until the silent attempt settles, then the wall', async () => {
-    setAppVariantForTests('store');
-    // A deferred silent attempt lets us observe the in-flight splash.
-    let resolveSilent: (value: string | null) => void = () => {};
-    mockSilent.mockImplementation(
-      () =>
-        new Promise<string | null>((resolve) => {
-          resolveSilent = resolve;
-        }),
-    );
-    const utils = await renderGate();
-
-    // Silent attempt in flight → splash, never a flash of the wall.
-    expect(utils.getByTestId('auth-gate-splash')).toBeTruthy();
-    expect(utils.queryByTestId('auth-gate-wall')).toBeNull();
-
-    await act(async () => {
-      resolveSilent(null);
-    });
-    await flush();
-
-    expect(utils.getByTestId('auth-gate-wall')).toBeTruthy();
-    expect(utils.queryByTestId('auth-gate-splash')).toBeNull();
-    expect(utils.queryByTestId('child')).toBeNull();
-    expect(mockSilent).toHaveBeenCalledTimes(1);
-  });
-
-  it('hides the Apple button on Android and keeps Google', async () => {
-    setAppVariantForTests('store');
-    const original = Platform.OS;
-    // The jest.setup Platform mock is a plain, mutable object.
-    (Platform as { OS: string }).OS = 'android';
-    try {
-      const utils = await renderGate();
-      await flush();
-
-      expect(utils.getByTestId('auth-gate-google')).toBeTruthy();
-      expect(utils.queryByTestId('auth-gate-apple')).toBeNull();
-    } finally {
-      (Platform as { OS: string }).OS = original;
-    }
-  });
-
-  it('shows the Apple button on iOS', async () => {
+  it('shows the wall with the portal CTA when unauthenticated', async () => {
     setAppVariantForTests('store');
     const utils = await renderGate();
     await flush();
 
-    expect(utils.getByTestId('auth-gate-apple')).toBeTruthy();
+    expect(utils.getByTestId('auth-gate-wall')).toBeTruthy();
+    expect(utils.getByTestId('auth-gate-sign-in')).toBeTruthy();
+    expect(utils.queryByTestId('child')).toBeNull();
   });
 });
 
-describe('AuthGate — silent attempt state machine', () => {
-  it('signs in via the existing loginWithGoogle path on silent success', async () => {
+describe('AuthGate — wall action handlers', () => {
+  it('starts the portal sign-in from the wall', async () => {
     setAppVariantForTests('store');
-    mockSilent.mockResolvedValue('silent-id-token');
-
     const utils = await renderGate();
     await flush();
 
-    expect(mockSilent).toHaveBeenCalledTimes(1);
-    expect(mockLoginWithGoogle).toHaveBeenCalledWith('silent-id-token');
-    // loginWithGoogle flipped status → authenticated → children (post-auth reuse).
-    expect(utils.getByTestId('child')).toBeTruthy();
-    expect(utils.queryByTestId('auth-gate-wall')).toBeNull();
+    await act(async () => {
+      await fireEvent.press(utils.getByTestId('auth-gate-sign-in'));
+    });
+
+    expect(mockSignInViaPortal).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to the wall when the silent attempt throws', async () => {
+  it('renders the inline waiting state while the portal sign-in is pending', async () => {
     setAppVariantForTests('store');
-    mockSilent.mockRejectedValue(new Error('native boom'));
+    pending = {
+      connectUrl: 'https://portal/connect?request=1',
+      status: 'pending',
+      remainingSeconds: 30,
+      message: null,
+    };
+    setAuth();
+    const utils = await renderGate();
+    await flush();
 
+    expect(utils.getByTestId('auth-gate-waiting-spinner')).toBeTruthy();
+    expect(utils.getByTestId('auth-gate-cancel')).toBeTruthy();
+    expect(utils.queryByTestId('auth-gate-sign-in')).toBeNull();
+    expect(utils.getByText('pending_timeLeft:30')).toBeTruthy();
+  });
+
+  it('cancels a pending sign-in from the wall', async () => {
+    setAppVariantForTests('store');
+    pending = {
+      connectUrl: 'https://portal/connect?request=1',
+      status: 'pending',
+      remainingSeconds: 30,
+      message: null,
+    };
+    setAuth();
+    const utils = await renderGate();
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('auth-gate-cancel'));
+    expect(mockCancelSignIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces a retryable terminal error and keeps the wall', async () => {
+    setAppVariantForTests('store');
+    pending = { connectUrl: null, status: 'errored', remainingSeconds: 0, message: 'start_failed' };
+    setAuth();
     const utils = await renderGate();
     await flush();
 
     expect(utils.getByTestId('auth-gate-wall')).toBeTruthy();
-    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+    expect(utils.getByTestId('auth-gate-error')).toBeTruthy();
+    expect(utils.getByText('pending_error')).toBeTruthy();
+
+    await act(async () => {
+      await fireEvent.press(utils.getByTestId('auth-gate-sign-in'));
+    });
+    expect(mockSignInViaPortal).toHaveBeenCalledTimes(1);
   });
 
-  it('sign-out after a cold-start-authenticated session lands on the wall without a silent retry', async () => {
+  it('lands back on the wall after a sign-out', async () => {
     setAppVariantForTests('store');
     authStatus = 'authenticated';
-
+    setAuth();
     const utils = await renderGate();
     await flush();
     expect(utils.getByTestId('child')).toBeTruthy();
-    expect(mockSilent).not.toHaveBeenCalled();
 
-    // Simulate a sign-out: status flips to unauthenticated.
     authStatus = 'unauthenticated';
+    setAuth();
     await utils.rerender(
       <AuthGate>
         <Child />
@@ -306,87 +257,6 @@ describe('AuthGate — silent attempt state machine', () => {
 
     expect(utils.getByTestId('auth-gate-wall')).toBeTruthy();
     expect(utils.queryByTestId('child')).toBeNull();
-    // The cold-start decision was consumed → no silent re-auth after sign-out.
-    expect(mockSilent).not.toHaveBeenCalled();
   });
 });
 
-describe('AuthGate — wall action handlers', () => {
-  it('signs in with Google from the wall', async () => {
-    setAppVariantForTests('store');
-    const utils = await renderGate();
-    await flush();
-
-    mockGoogle.mockResolvedValueOnce('wall-google-token');
-    await act(async () => {
-      await fireEvent.press(utils.getByTestId('auth-gate-google'));
-    });
-    await flush();
-
-    expect(mockGoogle).toHaveBeenCalledTimes(1);
-    expect(mockLoginWithGoogle).toHaveBeenCalledWith('wall-google-token');
-  });
-
-  it('surfaces a retryable Google error and keeps the wall', async () => {
-    setAppVariantForTests('store');
-    const utils = await renderGate();
-    await flush();
-
-    mockGoogle.mockRejectedValueOnce(
-      new GoogleSignInError(GoogleSignInErrorType.DEVELOPER_ERROR, 'bad config'),
-    );
-    await act(async () => {
-      await fireEvent.press(utils.getByTestId('auth-gate-google'));
-    });
-
-    expect(utils.getByTestId('auth-gate-wall')).toBeTruthy();
-    expect(utils.getByTestId('auth-gate-error')).toBeTruthy();
-    expect(utils.getByText('googleErrorDeveloperError')).toBeTruthy();
-  });
-
-  it('shows no error copy when the Google flow is cancelled', async () => {
-    setAppVariantForTests('store');
-    const utils = await renderGate();
-    await flush();
-
-    mockGoogle.mockRejectedValueOnce(
-      new GoogleSignInError(GoogleSignInErrorType.CANCELLED, 'cancelled'),
-    );
-    await act(async () => {
-      await fireEvent.press(utils.getByTestId('auth-gate-google'));
-    });
-
-    expect(utils.queryByTestId('auth-gate-error')).toBeNull();
-  });
-
-  it('signs in with Apple from the wall (iOS)', async () => {
-    setAppVariantForTests('store');
-    const utils = await renderGate();
-    await flush();
-
-    mockApple.mockResolvedValueOnce('wall-apple-token');
-    await act(async () => {
-      await fireEvent.press(utils.getByTestId('auth-gate-apple-button'));
-    });
-    await flush();
-
-    expect(mockApple).toHaveBeenCalledTimes(1);
-    expect(mockLoginWithApple).toHaveBeenCalledWith('wall-apple-token');
-  });
-
-  it('surfaces a retryable Apple error and keeps the wall', async () => {
-    setAppVariantForTests('store');
-    const utils = await renderGate();
-    await flush();
-
-    mockApple.mockRejectedValueOnce(
-      new AppleSignInError(AppleSignInErrorType.NOT_CONFIGURED, 'nope'),
-    );
-    await act(async () => {
-      await fireEvent.press(utils.getByTestId('auth-gate-apple-button'));
-    });
-
-    expect(utils.getByTestId('auth-gate-wall')).toBeTruthy();
-    expect(utils.getByText('appleErrorNotConfigured')).toBeTruthy();
-  });
-});

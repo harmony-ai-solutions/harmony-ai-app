@@ -25,10 +25,5 @@
     "open": "Live",
     "reconnecting": "Reconnecting…",
     "stopped": "Stopped"
-  },
-  "advanced": {
-    "title": "Verbosity",
-    "current": "Current: {{level}} · prompts: {{verbosity}}",
-    "warning": "Verbose levels increase log volume and battery use, and can capture conversation text (prompt entries)."
   }
 }

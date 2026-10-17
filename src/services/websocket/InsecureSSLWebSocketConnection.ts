@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import WebSocketWithSelfSignedCert from 'react-native-websocket-self-signed';
 import { WebSocketConnection } from './WebSocketConnection'
 import { BaseWebSocketConnection } from './BaseWebSocketConnection';
+import { hasLoopbackTokenQueryParam } from './loopbackToken';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[InsecureSSLWebSocketConnection]');
@@ -14,9 +15,15 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
   }
 
   async connect(url: string): Promise<void> {
+    // A loopback `token` query param is a self-contained credential (the
+    // per-process loopback token the embedded sidecar publishes). When present
+    // the JWT is optional: legacy self-hosted pairing still sends a JWT if one
+    // exists, but the embedded loopback path must not be blocked on the
+    // (now producerless) `soulbits_jwt` key.
+    const hasLoopbackToken = hasLoopbackTokenQueryParam(url);
     const jwt = await AsyncStorage.getItem('soulbits_jwt');
-    
-    if (!jwt) {
+
+    if (!jwt && !hasLoopbackToken) {
       const error = new Error('No JWT credentials available');
       log.error(error.message);
       throw error;
@@ -162,8 +169,10 @@ export class InsecureSSLWebSocketConnection extends BaseWebSocketConnection impl
           reject(error);
         });
         
-        // Connect with JWT authorization header
-        ws.connect({ Authorization: `Bearer ${jwt}` })
+        // Connect with JWT authorization header when one is available; the
+        // loopback token rides in the URL query string, so a token-only dial
+        // sends no Authorization header.
+        ws.connect(jwt ? { Authorization: `Bearer ${jwt}` } : {})
           .then(() => {
             log.info('Self-signed connection established');
             this.wssSelfSigned = ws;

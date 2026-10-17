@@ -22,6 +22,7 @@ import type {
 } from '../engine/EngineApiClient';
 import { BackupKeyEscrow } from './BackupKeyEscrow';
 import type { EscrowFetch } from './BackupKeyEscrow';
+import { decodeAccountKeyPayload, encodeAccountKeyPayload } from './accountKeyPayload';
 import {
   BACKUP_CRED_SERVICES,
   keychainCredentialStore,
@@ -41,8 +42,10 @@ import type {
   BackupRunResult,
   BackupSettings,
   BackupTargetType,
+  PendingConflict,
   RestoreRunResult,
 } from './backupTypes';
+import type { BackupConflictPolicy } from './backupTypes';
 
 const log = createLogger('[BackupOrchestrator]');
 
@@ -69,6 +72,17 @@ export interface CloudQuota {
   usedBytes: number;
   quotaMb: number;
 }
+
+/**
+ * Outcome of the pre-backup shared-account key adopt (owner ruling 2026-10-17).
+ * Gates the post-backup escrow so a failed adopt can never clobber the account's
+ * existing lineage with a fresh local DEK:
+ *   - `adopted`    — the account's escrowed key was fetched + installed.
+ *   - `no-blob`    — the account holds no escrow (founder); escrow is allowed.
+ *   - `failed`     — fetch/adopt errored; escrow MUST be skipped.
+ *   - `signed-out` — no PASETO; adopt + escrow are both no-ops.
+ */
+export type AdoptAccountKeyStatus = 'adopted' | 'no-blob' | 'failed' | 'signed-out';
 
 export interface BackupOrchestratorDeps {
   client?: EngineApiClient;
@@ -141,8 +155,23 @@ export class BackupOrchestrator {
     return next;
   }
 
-  // ── Target descriptor ─────────────────────────────────────────────────
+  // ── Conflict (generation guard, owner ruling 2026-10-17) ──────────────
 
+  /** The pending cloud-backup conflict awaiting the user's decision, or null. */
+  async getPendingConflict(): Promise<PendingConflict | null> {
+    return (await this.getSettings()).pendingConflict ?? null;
+  }
+
+  /**
+   * Clear the pending cloud-backup conflict. Called after the user resolves it
+   * via the conflict modal ("pull theirs") — a successful non-held backup run
+   * clears it automatically.
+   */
+  async clearPendingConflict(): Promise<void> {
+    await this.updateSettings({ pendingConflict: undefined });
+  }
+
+  // ── Target descriptor ─────────────────────────────────────────────────
   /**
    * Build the engine target descriptor for the settings' target type, resolving
    * secrets from the keychain. Returns null when required secrets are missing.
@@ -295,12 +324,32 @@ export class BackupOrchestrator {
   /**
    * Run a backup now. Resolves skip-if-unchanged; escrows the DEK via W1 when
    * signed in; records the result in settings; (re)schedules the native job.
+   *
+   * `opts.onConflict` selects the generation-guard policy for the hosted target
+   * (owner ruling 2026-10-17): `hold` (default) refuses to overwrite a cloud
+   * manifest another device wrote and returns a `held` result; `overwrite` is
+   * the explicit "push mine" decision.
    */
-  async backUpNow(opts: { passphrase?: string; force?: boolean } = {}): Promise<BackupRunResult> {
+  async backUpNow(
+    opts: { passphrase?: string; force?: boolean; onConflict?: BackupConflictPolicy } = {},
+  ): Promise<BackupRunResult> {
     const settings = await this.getSettings();
     const target = await this.buildTargetDescriptor(settings);
     if (!target) {
       throw new Error('Backup target is not configured');
+    }
+
+    // Shared-account DEK (owner ruling 2026-10-17): before backing up to the
+    // hosted target, adopt the account's escrowed lineage key so every device
+    // continues ONE lineage. The engine applies the policy; the app just
+    // forwards the blob it fetched. Best-effort — never blocks the backup, but
+    // the STATUS gates the post-backup escrow (see the escrow-clobber guard).
+    let adoptStatus: AdoptAccountKeyStatus | undefined;
+    if (target.type === 'soulbits-cloud') {
+      adoptStatus = await this.adoptAccountKeyBeforeBackup().catch((e) => {
+        log.warn('account-key adopt failed (non-fatal):', e);
+        return 'failed' as AdoptAccountKeyStatus;
+      });
     }
 
     const passphrase = opts.passphrase ?? (await this.resolvePassphrase(settings));
@@ -310,9 +359,37 @@ export class BackupOrchestrator {
           deviceLabel: settings.localFolderLabel,
           passphrase,
           force: opts.force ?? false,
+          onConflict: opts.onConflict,
         }),
       settings,
     );
+
+    // Generation guard (owner ruling 2026-10-17): a HELD result means the cloud
+    // manifest belongs to another device's lineage and NOTHING was uploaded.
+    // Persist the conflict for the modal; do NOT record a successful run, touch
+    // escrow, or overwrite the last-known-good summary.
+    if (res.held) {
+      const pending: PendingConflict = {
+        remoteGeneration: res.held.remoteGeneration,
+        remoteDataVersion: res.held.remoteDataVersion,
+        remoteDeviceLabel: res.held.remoteDeviceLabel,
+        remoteSyncedAt: res.held.remoteSyncedAt,
+        remoteSyncGroupFingerprint: res.held.remoteSyncGroupFingerprint,
+        detectedAt: new Date().toISOString(),
+      };
+      await this.updateSettings({ pendingConflict: pending });
+      await this.scheduleIfEnabled();
+      return {
+        skipped: false,
+        recoveryCode: res.recoveryCode,
+        recoveryCodeIsNew: res.recoveryCodeIsNew,
+        dataVersion: res.dataVersion,
+        totalBytes: res.totalBytes,
+        uploadedObjects: res.uploadedObjects,
+        dedupedObjects: res.dedupedObjects,
+        held: pending,
+      };
+    }
 
     // iOS iCloud: move the engine's staged inbox objects into the ubiquity
     // container; the system `bird` daemon uploads them (task 2-6 iOS half).
@@ -322,8 +399,15 @@ export class BackupOrchestrator {
         .catch((e) => log.warn('iCloud inbox → container sync failed (non-fatal):', e));
     }
 
-    // W1: escrow the DEK under the account when signed in (best-effort).
-    await this.escrowDek().catch((e) => log.warn('W1 escrow failed (non-fatal):', e));
+    // W1: escrow the DEK under the account when signed in (best-effort). The
+    // escrow-clobber guard (owner ruling 2026-10-17): only re-escrow when the
+    // adopt step did NOT fail — a failed adopt (no PASETO, fetch error, adopt
+    // error) while the account already holds a foreign escrow must never
+    // replace the account's lineage with a fresh local DEK. `no-blob`
+    // (founder) may still escrow; `signed-out` skips it inside escrowDek.
+    if (adoptStatus !== 'failed') {
+      await this.escrowDek().catch((e) => log.warn('W1 escrow failed (non-fatal):', e));
+    }
     // W2: wrap the DEK under the synchronizable iCloud Keychain key (best-effort).
     await this.storeICloudWrap().catch((e) => log.warn('W2 wrap failed (non-fatal):', e));
 
@@ -332,6 +416,8 @@ export class BackupOrchestrator {
       lastDataVersion: res.dataVersion,
       lastTotalBytes: res.totalBytes,
       lastError: undefined,
+      // A successful (non-held) run resolves any prior conflict.
+      pendingConflict: undefined,
     });
     await this.scheduleIfEnabled();
 
@@ -402,8 +488,11 @@ export class BackupOrchestrator {
     const paseto = await this.getPaseto().catch(() => null);
     if (paseto) {
       try {
-        const dek = await this.escrowFactory(paseto).get();
-        if (dek) out.dekBase64 = dek;
+        const blob = await this.escrowFactory(paseto).get();
+        // The blob is either the v1 {v,dek,code} payload or the legacy raw DEK
+        // (owner ruling 2026-10-17); both decode to the DEK the engine needs.
+        const decoded = blob ? decodeAccountKeyPayload(blob) : null;
+        if (decoded?.dekBase64) out.dekBase64 = decoded.dekBase64;
       } catch (e) {
         log.warn('W1 escrow fetch failed (non-fatal):', e);
       }
@@ -463,12 +552,17 @@ export class BackupOrchestrator {
 
   /** Reset the backup key (explicit user action) and cache the new code. */
   async resetRecoveryCode(): Promise<string> {
-    const { recoveryCode, dekBase64 } = await this.client.resetBackupKey();
+    const key = await this.client.resetBackupKey();
+    const recoveryCode = key.recoveryCode ?? key.code ?? '';
+    const dek = key.dekBase64 ?? key.dek ?? '';
     await this.credentials.set(BACKUP_CRED_SERVICES.recoveryCode, recoveryCode);
-    // Re-escrow the new DEK so W1 stays valid for the new lineage.
+    // Re-escrow the new DEK + code (v1 payload) so W1 stays valid for the new
+    // lineage (owner ruling 2026-10-17).
     const paseto = await this.getPaseto().catch(() => null);
-    if (paseto) {
-      await this.escrowFactory(paseto).put(dekBase64).catch((e) => log.warn('re-escrow failed:', e));
+    if (paseto && dek) {
+      await this.escrowFactory(paseto)
+        .put(encodeAccountKeyPayload(dek, recoveryCode))
+        .catch((e) => log.warn('re-escrow failed:', e));
     }
     return recoveryCode;
   }
@@ -495,8 +589,41 @@ export class BackupOrchestrator {
   private async escrowDek(): Promise<void> {
     const paseto = await this.getPaseto().catch(() => null);
     if (!paseto) return;
-    const { dekBase64 } = await this.client.backupKey();
-    await this.escrowFactory(paseto).put(dekBase64);
+    const key = await this.client.backupKey();
+    const dek = key.dek ?? key.dekBase64;
+    const code = key.code ?? key.recoveryCode;
+    if (!dek) return;
+    // v1 shared-account payload (owner ruling 2026-10-17): DEK + recovery code
+    // together, so every device that adopts the blob also gets the code.
+    await this.escrowFactory(paseto).put(encodeAccountKeyPayload(dek, code ?? ''));
+  }
+
+  /**
+   * Fetch the account's W1 escrow blob and forward it to the engine to adopt
+   * (shared-account DEK, owner ruling 2026-10-17). Best-effort — a failure is
+   * logged by the caller and never blocks the backup. Returns a status so the
+   * caller can gate the post-backup escrow (escrow-clobber guard): `failed`
+   * suppresses the re-escrow, `no-blob` (founder) permits it.
+   */
+  private async adoptAccountKeyBeforeBackup(): Promise<AdoptAccountKeyStatus> {
+    const paseto = await this.getPaseto().catch(() => null);
+    if (!paseto) return 'signed-out';
+    let blob: string | null;
+    try {
+      blob = await this.escrowFactory(paseto).get();
+    } catch (e) {
+      log.warn('W1 escrow fetch failed during adopt:', e);
+      return 'failed';
+    }
+    if (!blob) return 'no-blob';
+    // The engine decodes BOTH payload shapes; the app forwards the blob as-is.
+    try {
+      await this.client.adoptBackupKey(blob);
+    } catch (e) {
+      log.warn('adoptBackupKey call failed:', e);
+      return 'failed';
+    }
+    return 'adopted';
   }
 
   /**
@@ -504,8 +631,9 @@ export class BackupOrchestrator {
    * native module is a no-op off iOS / when iCloud is unavailable.
    */
   private async storeICloudWrap(): Promise<void> {
-    const { dekBase64 } = await this.client.backupKey();
-    await this.icloud.putWrap(dekBase64);
+    const key = await this.client.backupKey();
+    const dek = key.dekBase64 ?? key.dek;
+    if (dek) await this.icloud.putWrap(dek);
   }
 }
 

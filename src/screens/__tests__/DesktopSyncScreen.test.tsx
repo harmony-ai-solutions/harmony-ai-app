@@ -24,6 +24,7 @@ beforeEach(() => {
     display_name: 'User',
   });
   (AuthService.refresh as jest.Mock).mockResolvedValue(true);
+  (AuthService.enrollDevice as jest.Mock).mockResolvedValue(undefined);
   (getDeviceId as jest.Mock).mockResolvedValue('device-abc');
   mockCheckAndRequestPermission.mockResolvedValue(true);
 });
@@ -162,6 +163,7 @@ jest.mock('../../services/auth/AuthService', () => ({
     getToken: jest.fn(async () => 'PASETO'),
     getProfile: jest.fn(async () => ({ id: 'uid-1', email: 'user@example.com', display_name: 'User' })),
     refresh: jest.fn(async () => true),
+    enrollDevice: jest.fn(async () => undefined),
   },
 }));
 
@@ -228,6 +230,46 @@ async function renderScreen(initial = status()) {
   const utils = await render(<DesktopSyncScreen />);
   await waitFor(() => expect(utils.getByTestId('desktop-sync-state')).toBeTruthy());
   return utils;
+}
+
+/** A v2 LAN pairing QR payload (plan 7-15), JSON-encoded for the scanner. */
+function lanCode(over: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    v: 1,
+    kind: 'soulbits-lan',
+    ws: '192.168.1.10:28080',
+    wss: '192.168.1.10:28443',
+    mode: 'secure',
+    fingerprint: 'sha256:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89',
+    dataset_id: 'ds-1',
+    name: 'Studio-PC',
+    secret: 's3cr3t-single-use',
+    ttl: 300,
+    ...over,
+  });
+}
+
+const ENROLLMENT = {
+  relay_url: 'wss://sync.soulbits.app/v1/sync/ws',
+  grant: 'grant-1',
+  account_hint: 'u***@example.com',
+};
+
+/** Render, scan a code, and (optionally) confirm the LAN sheet. */
+async function scanAndMaybeConfirm(utils: any, code: string, confirm = true) {
+  await act(async () => {
+    fireEvent.press(utils.getByTestId('desktop-sync-scan-button'));
+  });
+  await act(async () => {
+    fireEvent(utils.getByTestId('mock-camera'), 'readCode', {
+      nativeEvent: { codeStringValue: code },
+    });
+  });
+  if (confirm) {
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('lan-confirm-button'));
+    });
+  }
 }
 
 describe('DesktopSyncScreen', () => {
@@ -650,5 +692,156 @@ describe('DesktopSyncScreen', () => {
   it('shows the quota-exceeded banner', async () => {
     const utils = await renderScreen(status({ state: 'quota_exceeded' }));
     expect(utils.getByTestId('desktop-sync-quota')).toBeTruthy();
+  });
+
+  // ── 7-15: QR-first LAN pairing + enrollment intake ─────────────────────
+
+  it('shows the QR-first pairing card with a scan CTA by default', async () => {
+    const utils = await renderScreen();
+    expect(utils.getByTestId('desktop-sync-pairing-card')).toBeTruthy();
+    expect(utils.getByTestId('desktop-sync-scan-button')).toBeTruthy();
+    // The manual LAN form (peer address) is collapsed under Advanced.
+    expect(utils.queryByTestId('desktop-sync-advanced-toggle')).toBeTruthy();
+    expect(utils.queryByDisplayValue('192.168.1.10:28080')).toBeNull();
+  });
+
+  it('reveals the manual LAN form under the Advanced disclosure', async () => {
+    const utils = await renderScreen();
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-advanced-toggle'));
+    });
+    expect(utils.queryByDisplayValue('192.168.1.10:28080')).toBeTruthy();
+    expect(utils.getByTestId('desktop-sync-security-picker')).toBeTruthy();
+  });
+
+  it('routes a scanned LAN QR to the confirmation sheet (no config written yet)', async () => {
+    const utils = await renderScreen();
+    await scanAndMaybeConfirm(utils, lanCode(), false);
+    expect(utils.getByTestId('lan-confirm-sheet')).toBeTruthy();
+    expect(utils.getByTestId('lan-confirm-name').props.children).toBe(
+      'lanConfirmTitle:{"name":"Studio-PC"}',
+    );
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a LAN QR payload in store builds with clear copy (no LAN in store)', async () => {
+    setAppVariantForTests('store');
+    try {
+      const utils = await renderScreen();
+      await scanAndMaybeConfirm(utils, lanCode(), false);
+      expect(mockShowToast).toHaveBeenCalledWith('lanUnavailableStore');
+      expect(utils.queryByTestId('lan-confirm-sheet')).toBeNull();
+      expect(mockUpdate).not.toHaveBeenCalled();
+    } finally {
+      setAppVariantForTests(null);
+    }
+  });
+
+  it('applies ONE LAN config patch on confirm (addresses + mode + fingerprint + secret)', async () => {
+    mockUpdate.mockResolvedValue(status());
+    const utils = await renderScreen();
+    await scanAndMaybeConfirm(utils, lanCode());
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: 'lan',
+        peer_address: '192.168.1.10:28080',
+        peer_wss_address: '192.168.1.10:28443',
+        security_mode: 'secure',
+        peer_fingerprint: 'sha256:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89',
+        lan_pairing_secret: 's3cr3t-single-use',
+        device_name: expect.any(String),
+        enabled: true,
+      }),
+    );
+    // The sheet closes once applied.
+    expect(utils.queryByTestId('lan-confirm-sheet')).toBeNull();
+  });
+
+  it('omits peer_wss_address / peer_fingerprint for an unencrypted LAN payload', async () => {
+    mockUpdate.mockResolvedValue(status());
+    const utils = await renderScreen();
+    const { wss, fingerprint, ...rest } = JSON.parse(lanCode());
+    await scanAndMaybeConfirm(utils, JSON.stringify({ ...rest, mode: 'unencrypted' }));
+    const patch = mockUpdate.mock.calls[0][0];
+    expect(patch.peer_address).toBe('192.168.1.10:28080');
+    expect(patch.security_mode).toBe('unencrypted');
+    expect(patch.peer_wss_address).toBeUndefined();
+    expect(patch.peer_fingerprint).toBeUndefined();
+    expect(patch.lan_pairing_secret).toBe('s3cr3t-single-use');
+  });
+
+  it('enrolls a signed-out phone via the desktop grant on confirm', async () => {
+    (AuthService.getToken as jest.Mock).mockRejectedValue(new Error('signed out'));
+    mockUpdate.mockResolvedValue(status());
+    const utils = await renderScreen();
+    await scanAndMaybeConfirm(utils, lanCode({ enrollment: ENROLLMENT }), false);
+    // Offer line shown while signed out.
+    expect(utils.getByTestId('lan-confirm-enroll-offer')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('lan-confirm-button'));
+    });
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ transport: 'lan' }));
+    expect(AuthService.enrollDevice).toHaveBeenCalledWith({
+      grant: 'grant-1',
+      deviceId: 'device-abc',
+      deviceName: expect.any(String),
+      platform: 'ios',
+    });
+    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('enrollSuccess'));
+  });
+
+  it('skips enrollment when signed in with the matching account (pair only)', async () => {
+    mockUpdate.mockResolvedValue(status());
+    const utils = await renderScreen();
+    // Confirm the phone is signed in (relay shows the account row); profile is
+    // user@example.com — matches the masked hint u***@example.com.
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
+    });
+    await waitFor(() =>
+      expect(utils.getByTestId('desktop-sync-account').props.children).toBe('accountSignedIn'),
+    );
+    await scanAndMaybeConfirm(utils, lanCode({ enrollment: ENROLLMENT }));
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ transport: 'lan' }));
+    expect(AuthService.enrollDevice).not.toHaveBeenCalled();
+    expect(mockShowAlert).not.toHaveBeenCalled();
+  });
+
+  it('warns but still pairs when signed in with a different account', async () => {
+    (AuthService.getProfile as jest.Mock).mockResolvedValue({
+      id: 'uid-1',
+      email: 'other@example.com',
+      display_name: 'Other',
+    });
+    mockUpdate.mockResolvedValue(status());
+    const utils = await renderScreen();
+    // Confirm the phone is signed in (relay shows the account row).
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
+    });
+    await waitFor(() =>
+      expect(utils.getByTestId('desktop-sync-account').props.children).toBe('accountSignedIn'),
+    );
+    await scanAndMaybeConfirm(utils, lanCode({ enrollment: ENROLLMENT }));
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ transport: 'lan' }));
+    expect(AuthService.enrollDevice).not.toHaveBeenCalled();
+    expect(mockShowAlert).toHaveBeenCalledWith(
+      'enrollMismatchTitle',
+      expect.stringContaining('enrollMismatchMessage'),
+      expect.any(Array),
+    );
+  });
+
+  it('keeps the pairing when the enrollment exchange fails (toast only)', async () => {
+    (AuthService.getToken as jest.Mock).mockRejectedValue(new Error('signed out'));
+    (AuthService.enrollDevice as jest.Mock).mockRejectedValueOnce(new Error('grant expired'));
+    mockUpdate.mockResolvedValue(status());
+    const utils = await renderScreen();
+    await scanAndMaybeConfirm(utils, lanCode({ enrollment: ENROLLMENT }));
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ transport: 'lan' }));
+    await waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('enrollFailed')),
+    );
   });
 });

@@ -28,6 +28,7 @@
  */
 
 import { uint8ArrayToBase64 } from '../../database/base64';
+import type { LanSyncPairingPayload, SyncPairingPayload } from '../sync/syncCloudTypes';
 import { requireEngineConnection } from './EngineService';
 import type { EngineConnection } from './EngineService';
 
@@ -475,6 +476,12 @@ export interface SyncClientConfigDto {
   device_name: string;
   device_type: string;
   device_platform: string;
+  /**
+   * The persisted TOFU pin for the peer's WSS certificate (plan 7-15),
+   * canonical `sha256:AB:CD:…`. Echoed on reads; enforced fail-closed on WSS
+   * dials when set. The write-only `lan_pairing_secret` is never echoed.
+   */
+  peer_fingerprint?: string;
 }
 
 /** `GET /api/sync/client/status` response. */
@@ -520,6 +527,17 @@ export interface SyncClientConfigPatchDto {
   device_name?: string;
   device_type?: string;
   device_platform?: string;
+  /**
+   * TOFU pin for the peer WSS certificate (`sha256:AB:CD:…`); when set, WSS
+   * dials verify the fingerprint and fail closed on mismatch (plan 7-15).
+   */
+  peer_fingerprint?: string;
+  /**
+   * Single-use LAN pairing secret presented in the device-approval handshake
+   * (plan 7-15). WRITE-ONLY + transient: never persisted and never echoed in
+   * the status config.
+   */
+  lan_pairing_secret?: string;
   /** One-time relay pairing credential presented on the next connect (transient). */
   pairing_token?: string;
 }
@@ -545,9 +563,45 @@ export interface SyncGroupKeyStatusDto {
   rotated?: boolean;
 }
 
+// ── QR pairing mint + desktop cloud identity (plan 7-15, contract 1.5.0) ─
+// Desktop-first surfaces on the same management API. The phone consumes the LAN
+// pairing payload (parser v2) and the enrollment block; the cloud pairing payload
+// keeps the portal shape. All admin-key authed like the rest of `/api/sync/*`.
+
+/** `GET /api/cloud/account` (plan 7-15 E2). NEVER carries a token. */
+export interface CloudAccountStatusDto {
+  signed_in: boolean;
+  /** Masked signed-in identifier (`u***@example.com`); empty when signed out. */
+  account_hint: string;
+  /** The full signed-in email; omitted when signed out. */
+  email?: string;
+  /** The stable desktop device id. */
+  device_id?: string;
+  device_authorized: boolean;
+  device_authorization_pending: boolean;
+}
+
+/**
+ * `POST /api/cloud/signin/start` → the portal connect URL the frontend opens
+ * (plan 7-15 E2; E2b reworked desktop sign-in to a portal-connect + loopback flow,
+ * so `url` is the Soulbits portal `/connect` page rather than a provider consent
+ * URL).
+ */
+export interface CloudSignInStartDto {
+  url: string;
+}
+
 // ── Backup & restore (plan 2-6) ──────────────────────────────────────────
 // The engine stages/snapshots and moves bytes to the caller-supplied target;
 // W1 account escrow is the app's own call (see services/backup).
+
+/**
+ * The backup conflict policy for `POST /api/backup/artifact` (owner ruling
+ * 2026-10-17, generation guard). `hold` (the default) refuses to overwrite a
+ * cloud manifest another device wrote and returns a `held` result instead;
+ * `overwrite` is the explicit user "push mine" decision.
+ */
+export type BackupConflictPolicy = 'hold' | 'overwrite';
 
 /** A target descriptor (engine BackupTarget selection + auth material). */
 export interface BackupTargetDescriptor {
@@ -596,6 +650,26 @@ export interface BackupManifestDto {
   wraps: BackupWrapEntryDto[] | null;
 }
 
+/**
+ * The engine's generation-guard "held" result (owner ruling 2026-10-17): the
+ * cloud manifest belongs to a different generation, so the engine uploaded
+ * NOTHING. Present on `BackupCreateResponseDto.held` on a held run (HTTP 200,
+ * `skipped: false`). The app persists this as a pending conflict and surfaces
+ * the modal.
+ */
+export interface BackupHeldDto {
+  /** The generation the cloud manifest currently holds (the other device's). */
+  remoteGeneration: number;
+  /** The data version the cloud manifest currently holds. */
+  remoteDataVersion: string;
+  /** A human label for the device that wrote the cloud manifest. */
+  remoteDeviceLabel?: string;
+  /** When that device synced (RFC3339). */
+  remoteSyncedAt?: string;
+  /** The sync-group fingerprint of the cloud manifest (empty when none). */
+  remoteSyncGroupFingerprint?: string;
+}
+
 export interface BackupCreateResponseDto {
   skipped: boolean;
   recoveryCode: string;
@@ -605,6 +679,11 @@ export interface BackupCreateResponseDto {
   dedupedObjects: number;
   totalBytes: number;
   manifest: BackupManifestDto;
+  /**
+   * Present when the generation guard HELD the backup: another device wrote the
+   * cloud manifest, nothing was uploaded, and the user must resolve it.
+   */
+  held?: BackupHeldDto;
 }
 
 export interface BackupRestoreResponseDto {
@@ -621,6 +700,23 @@ export interface BackupRestoreResponseDto {
 export interface BackupKeyResponseDto {
   recoveryCode: string;
   dekBase64: string;
+  /**
+   * Canonical aliases (owner ruling 2026-10-17): the shared-account escrow
+   * payload is built from both the DEK and the recovery code. `dekBase64` /
+   * `recoveryCode` are kept for backward compatibility.
+   */
+  dek?: string;
+  code?: string;
+}
+
+/** Result of `POST /api/backup/key/adopt` (shared-account DEK adoption). */
+export interface BackupAdoptResponseDto {
+  /** True when a (different) account key replaced the local lineage key. */
+  adopted: boolean;
+  /** True when the engine minted a fresh code and the caller must re-escrow. */
+  reEscrowNeeded: boolean;
+  /** Mirrors reEscrowNeeded: a fresh code was generated. */
+  codeGenerated: boolean;
 }
 
 export interface BackupTargetStatusDto {
@@ -1306,6 +1402,36 @@ export class EngineApiClient {
     });
   }
 
+  // ── QR pairing mint + desktop cloud identity (plan 7-15, contract 1.5.0) ─
+
+  /**
+   * Mint the LAN QR pairing payload (`POST /api/sync/pairing/lan`) — the
+   * desktop management surface. Returns the v2 LAN payload the phone parses.
+   */
+  mintLanPairing(): Promise<LanSyncPairingPayload> {
+    return this.sendJson<LanSyncPairingPayload>('POST', '/api/sync/pairing/lan');
+  }
+
+  /** Mint the cloud QR pairing payload (`POST /api/sync/pairing/cloud`). */
+  mintCloudPairing(): Promise<SyncPairingPayload> {
+    return this.sendJson<SyncPairingPayload>('POST', '/api/sync/pairing/cloud');
+  }
+
+  /** Desktop cloud-account status (`GET /api/cloud/account`; never a token). */
+  cloudAccount(): Promise<CloudAccountStatusDto> {
+    return this.getJson<CloudAccountStatusDto>('/api/cloud/account');
+  }
+
+  /** Start the loopback browser-OAuth sign-in (`POST /api/cloud/signin/start`). */
+  startCloudSignIn(): Promise<CloudSignInStartDto> {
+    return this.sendJson<CloudSignInStartDto>('POST', '/api/cloud/signin/start');
+  }
+
+  /** Sign out of Soulbits Cloud (`POST /api/cloud/signin/signout`). */
+  cloudSignOut(): Promise<{ status: string }> {
+    return this.sendJson<{ status: string }>('POST', '/api/cloud/signin/signout');
+  }
+
   // ── Cross-entity stats (task 3-4 engine follow-up) ─────────────────────
 
   /**
@@ -1449,6 +1575,11 @@ export class EngineApiClient {
       force?: boolean;
       dryRun?: boolean;
       includeSideObjects?: boolean;
+      /**
+       * Generation-guard conflict policy (owner ruling 2026-10-17). Defaults to
+       * `hold` engine-side; `overwrite` is the explicit "push mine" decision.
+       */
+      onConflict?: BackupConflictPolicy;
     } = {},
   ): Promise<BackupCreateResponseDto> {
     return this.sendJson<BackupCreateResponseDto>('POST', '/api/backup/artifact', {
@@ -1459,6 +1590,7 @@ export class EngineApiClient {
       force: opts.force,
       dryRun: opts.dryRun,
       includeSideObjects: opts.includeSideObjects,
+      onConflict: opts.onConflict,
     });
   }
 
@@ -1500,6 +1632,16 @@ export class EngineApiClient {
   /** Reset the backup key (`POST /api/backup/key/reset`). */
   resetBackupKey(): Promise<BackupKeyResponseDto> {
     return this.sendJson<BackupKeyResponseDto>('POST', '/api/backup/key/reset');
+  }
+
+  /**
+   * Adopt the account's shared lineage key (`POST /api/backup/key/adopt`). The
+   * app forwards the W1 escrow blob it fetched from the cloud; the engine
+   * decodes it (both payload shapes) and reconciles the local DEK + recovery
+   * code — all policy lives engine-side (owner ruling 2026-10-17).
+   */
+  adoptBackupKey(payload: string): Promise<BackupAdoptResponseDto> {
+    return this.sendJson<BackupAdoptResponseDto>('POST', '/api/backup/key/adopt', { payload });
   }
 
   /** List selectable target types (`GET /api/backup/targets`). */

@@ -20,8 +20,39 @@ jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
-jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }),
+jest.mock('@react-navigation/native', () => {
+  const React = require('react');
+  return {
+    useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn(), replace: jest.fn() }),
+    // The screen now fetches device-auth status on focus; run it as a plain
+    // effect (no NavigationContainer is mounted in this suite).
+    useFocusEffect: (cb: () => void | (() => void)) => React.useEffect(cb, [cb]),
+  };
+});
+
+// The screen is state-aware now — the billing card renders only when signed in.
+jest.mock('../../../contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: {
+      id: 'u1',
+      email: 'ada@example.com',
+      display_name: 'Ada Lovelace',
+      email_verified: true,
+      created_at: '2026-01-01T00:00:00Z',
+    },
+    status: 'authenticated',
+    signInVersion: 0,
+    signInViaPortal: jest.fn(async () => {}),
+    cancelSignIn: jest.fn(),
+    logout: jest.fn(async () => {}),
+    refreshUser: jest.fn(),
+    pendingSignIn: null,
+  }),
+}));
+
+jest.mock('../../../services/cloud/DeviceAuthService', () => ({
+  __esModule: true,
+  default: { getStatus: jest.fn(async () => ({ authorized: true, authorizationPending: false })) },
 }));
 
 jest.mock('react-native-safe-area-context', () => ({

@@ -4,6 +4,7 @@ import { Platform, AppState } from 'react-native';
 import ConnectionManager from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
 import { getEngineConnection } from './engine/EngineService';
+import { appendLoopbackToken } from './websocket/loopbackToken';
 import { createLogger } from '../utils/logger';
 import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
 import { updateConversationMessage } from '../database/repositories';
@@ -360,9 +361,22 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
   private async resolveLocalWs(): Promise<{ url: string; mode: string }> {
     const engine = getEngineConnection();
     if (engine) {
+      // Embedded engine: prefer the PLAIN loopback WS (ws://) and authenticate
+      // with the per-process loopback token the sidecar publishes in its
+      // readiness payload (the same 7-11 posture SyncConnectionContext uses).
+      // Loopback plaintext + loopback token keeps the self-signed-TLS native
+      // library off the chat-critical socket and avoids the (producerless)
+      // soulbits_jwt demand. Fall back to wss:// only when the sidecar
+      // advertises no plain WS port.
+      if (engine.wsBaseUrl) {
+        return {
+          url: appendLoopbackToken(engine.wsBaseUrl, engine.token),
+          mode: 'unencrypted',
+        };
+      }
       return {
-        url: engine.wssBaseUrl || engine.wsBaseUrl,
-        mode: engine.wssBaseUrl ? 'insecure-ssl' : 'unencrypted',
+        url: appendLoopbackToken(engine.wssBaseUrl, engine.token),
+        mode: 'insecure-ssl',
       };
     }
     const mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';

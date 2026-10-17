@@ -4,6 +4,10 @@
  * credentials, scheduling and the unlock-path UX.
  */
 
+import type { BackupConflictPolicy } from '../engine/EngineApiClient';
+
+export type { BackupConflictPolicy };
+
 /** The selectable target types (mirrors the engine's GET /api/backup/targets). */
 export type BackupTargetType =
   | 'local-folder'
@@ -21,6 +25,27 @@ export type BackupCadence = 'daily' | 'weekly' | 'monthly' | 'off';
 export interface WebDAVConfig {
   baseUrl: string;
   username: string;
+}
+
+/**
+ * A detected cloud-backup conflict (generation guard, owner ruling 2026-10-17):
+ * another device wrote the cloud manifest with a different generation, so this
+ * device's backup was HELD rather than silently overwriting it. Persisted in
+ * settings so the conflict re-surfaces until the user resolves it.
+ */
+export interface PendingConflict {
+  /** The generation the cloud manifest holds (the other device's). */
+  remoteGeneration: number;
+  /** The data version the cloud manifest holds. */
+  remoteDataVersion: string;
+  /** A human label for the device that wrote the cloud manifest. */
+  remoteDeviceLabel?: string;
+  /** When that device synced (RFC3339). */
+  remoteSyncedAt?: string;
+  /** The sync-group fingerprint of the cloud manifest (empty when none). */
+  remoteSyncGroupFingerprint?: string;
+  /** When this device detected the conflict (RFC3339). */
+  detectedAt: string;
 }
 
 /** Persisted backup settings (AsyncStorage). */
@@ -47,6 +72,12 @@ export interface BackupSettings {
   lastTotalBytes?: number;
   /** Last error surfaced to the user (cleared on success). */
   lastError?: string;
+  /**
+   * A held cloud-backup conflict awaiting the user's decision (generation
+   * guard, owner ruling 2026-10-17). Cleared on the next successful run or when
+   * the user resolves it via the conflict modal.
+   */
+  pendingConflict?: PendingConflict;
 }
 
 /** The default settings (backups off until the user opts in). */
@@ -76,6 +107,11 @@ export interface BackupRunResult {
   totalBytes: number;
   uploadedObjects: number;
   dedupedObjects: number;
+  /**
+   * Present when the run was HELD by the generation guard (a cloud conflict).
+   * Nothing was uploaded; the app surfaces the conflict modal.
+   */
+  held?: PendingConflict;
 }
 
 /** Result of a restore run (app-facing view). */

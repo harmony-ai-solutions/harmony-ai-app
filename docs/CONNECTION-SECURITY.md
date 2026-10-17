@@ -4,6 +4,51 @@
 
 Harmony AI App offers flexible security options when connecting to Soulbits Engine, allowing you to choose the best connection method for your setup.
 
+## QR pairing (plan 7-15)
+
+The primary way to pair now is to **scan a QR code** the desktop engine shows.
+The scanner (on the Desktop Sync screen's top **Pair device** card) accepts two
+kinds of payload and routes them automatically:
+
+- **Cloud code** — `{relay_url, pairing_token, account_hint}` (the portal and
+  the desktop's **Soulbits Cloud** tab mint the same shape). The phone verifies
+  `account_hint` against the signed-in account, then applies the relay config
+  with the short-lived, single-use `pairing_token`.
+- **LAN code** — `{v, kind:"soulbits-lan", ws, wss?, mode, fingerprint?,
+  dataset_id, name, secret, ttl, enrollment?}`. The phone shows a confirmation
+  sheet (desktop name, security mode, short certificate fingerprint, dataset)
+  and, on confirm, applies the addresses + mode + fingerprint + the single-use
+  `secret` in one settings write.
+
+### Certificate pinning (trust-on-first-use)
+
+When the LAN code carries a certificate fingerprint (`sha256:AB:CD:…`), the app
+pins it: the engine persists it as `peer_fingerprint` and **fails closed** on any
+WSS dial whose presented certificate fingerprint differs. The confirmation sheet
+shows the **first 8 hex characters** so you can eyeball that the code and the
+target match. A pinned fingerprint is the recommended default whenever the
+desktop advertises a TLS endpoint (`mode` = `secure` or `insecure-ssl`).
+
+### The single-use pairing secret
+
+The LAN code also carries a **short-lived (5-minute), single-use** pairing
+`secret` (≥128-bit). Presenting it in the device-approval handshake lets the
+desktop **auto-approve** the device that scanned the code — displaying the QR is
+the authorization gesture. The secret is written to the engine exactly once (the
+engine clears it after the first successful dial) and the app never persists or
+logs it. If the secret is expired, replayed, or invalid, pairing falls back to
+the desktop's manual **approve this device** prompt.
+
+### Delegated enrollment (full variant)
+
+A desktop that is signed in may include an `enrollment` block in the LAN code.
+A **signed-out** full-variant phone can then adopt the desktop's account: it
+exchanges the short-lived, single-use grant for its **own** device-scoped
+session (no shared credentials; each device is revocable). The confirmation
+sheet offers this as "Use «account» from this desktop". A phone already signed
+in to the **same** account simply pairs; a phone signed in to a **different**
+account is warned and skips enrollment. Store builds never offer this.
+
 ## Security Modes
 
 When you connect to Soulbits Engine, the app may present you with security options. Understanding these modes will help you make the right choice for your situation.
@@ -73,6 +118,13 @@ When you connect to Soulbits Engine, the app may present you with security optio
 - Only suitable for testing
 
 **⚠️ Warning**: Never use this mode over public WiFi or the internet. Your data will be visible to anyone monitoring the network.
+
+**QR pairing over unencrypted LAN:** in unencrypted mode both the single-use
+pairing `secret` and all synced data travel in cleartext. The accepted
+mitigation is the same-LAN threat model plus the secret's **single-use,
+5-minute TTL** — pair only on a network you trust, and prefer `secure` /
+`insecure-ssl` (with a pinned fingerprint) whenever the desktop advertises a TLS
+endpoint.
 
 ---
 

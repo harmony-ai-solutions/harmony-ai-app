@@ -24,7 +24,7 @@
 
 `src/services/engine/engineContract.ts` exports `ENGINE_CONTRACT_VERSION`,
 mirroring `info.version` in the engine repo's
-`docs/api/management/openapi.yaml` (today `1.4.0`). `checkContractVersion(artifact)`
+`docs/api/management/openapi.yaml` (today `1.5.0`). `checkContractVersion(artifact)`
 rejects an engine artifact that advertises a contract **older** than the one the
 TS layer is written against. `checkContractVersionExact` backs the fixture drift
 canary.

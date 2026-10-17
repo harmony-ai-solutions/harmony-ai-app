@@ -7,6 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   Linking,
+  Platform,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -25,9 +26,11 @@ import { ThemedCard } from '../../components/themed/ThemedCard';
 import { SettingsToggleRow } from '../../components/settings/SettingsRows';
 import { SelectPicker } from '../../components/config/SelectPicker';
 import { QrScannerModal } from '../../components/modals/QrScannerModal';
+import { LanPairingConfirmSheet } from '../../components/modals/LanPairingConfirmSheet';
 import { engineApiClient } from '../../services/engine/EngineApiClient';
 import { getEngineManifest, refreshUpdates } from '../../services/updates/UpdateAvailableService';
 import type {
+  SyncClientConfigPatchDto,
   SyncClientState,
   SyncClientStatusDto,
   SyncClientTransport,
@@ -36,7 +39,14 @@ import type {
 import { syncGroupOrchestrator } from '../../services/sync/SyncGroupOrchestrator';
 import {
   parseSyncPairingPayload,
+  parseSyncPairingPayloadV2,
   accountHintMatches,
+  maskedAccountHintMatches,
+} from '../../services/sync/syncCloudTypes';
+import type {
+  LanEnrollment,
+  LanSyncPairingPayload,
+  SyncPairingPayload,
 } from '../../services/sync/syncCloudTypes';
 import AuthService from '../../services/auth/AuthService';
 import { getDeviceId } from '../../services/cloud/DeviceIdProvider';
@@ -288,6 +298,11 @@ export const DesktopSyncScreen: React.FC = () => {
   const [joinExisting, setJoinExisting] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [scannerVisible, setScannerVisible] = useState(false);
+  // LAN QR flow (plan 7-15): the scanned payload awaiting confirmation, and the
+  // manual-LAN form disclosure (QR-first UX — the form collapses under Advanced).
+  const [pendingLan, setPendingLan] = useState<LanSyncPairingPayload | null>(null);
+  const [lanSheetVisible, setLanSheetVisible] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [desktopArtifacts, setDesktopArtifacts] = useState<{
     windows_amd64: string;
     linux_amd64: string;
@@ -555,18 +570,9 @@ export const DesktopSyncScreen: React.FC = () => {
     ]);
   }, [refreshStatus, showAlert, showToast, t]);
 
-  /** Pair from a scanned/pasted code: verify the account, then PUT the relay config. */
-  const handlePairFromCode = useCallback(
-    async (rawCode: string) => {
-      hapticLightPress();
-      let payload;
-      try {
-        payload = parseSyncPairingPayload(rawCode);
-      } catch (e: any) {
-        showToast(t('pairingFailed', { message: e?.message ?? String(e) }));
-        return;
-      }
-
+  /** Verify the cloud code's account hint, then PUT the relay config. */
+  const applyCloudPairing = useCallback(
+    async (payload: SyncPairingPayload) => {
       let token: string;
       try {
         token = await AuthService.getToken();
@@ -615,6 +621,103 @@ export const DesktopSyncScreen: React.FC = () => {
   );
 
   /**
+   * Delegated enrollment intake (plan 7-15 §A4). Runs AFTER the LAN pairing
+   * succeeded, so a failure never blocks pairing (surfaced as a toast):
+   *   - signed out  → exchange the grant for this device's OWN session;
+   *   - signed in, matching account (masked hint) → skip (just pair);
+   *   - signed in, different account → warn (pairing proceeds, enrollment skipped).
+   */
+  const handleEnrollment = useCallback(
+    async (enrollment: LanEnrollment) => {
+      if (signedIn) {
+        const profile = await AuthService.getProfile().catch(() => null);
+        const identifiers = profile
+          ? [profile.email, profile.username, profile.id].filter((v): v is string => !!v)
+          : [];
+        if (maskedAccountHintMatches(enrollment.account_hint, identifiers)) return;
+        showAlert(
+          t('enrollMismatchTitle'),
+          t('enrollMismatchMessage', { account: enrollment.account_hint }),
+          [{ text: t('common:ok') }],
+        );
+        return;
+      }
+
+      try {
+        const id = await getDeviceId();
+        await AuthService.enrollDevice({
+          grant: enrollment.grant,
+          deviceId: id,
+          deviceName: deviceName.trim(),
+          platform: Platform.OS,
+        });
+        setSignedIn(true);
+        showToast(t('enrollSuccess', { account: enrollment.account_hint }));
+      } catch (e: any) {
+        showToast(t('enrollFailed', { message: e?.message ?? String(e) }));
+      }
+    },
+    [deviceName, showAlert, showToast, signedIn, t],
+  );
+
+  /**
+   * Confirm the scanned LAN payload: apply ONE `PUT /api/sync/client` patch
+   * (addresses + security mode + TOFU fingerprint + the single-use pairing
+   * secret) that makes the engine dial and auto-approve, then run the optional
+   * enrollment intake. The secret never leaves this write.
+   */
+  const confirmLanPairing = useCallback(async () => {
+    const payload = pendingLan;
+    if (!payload) return;
+    hapticLightPress();
+
+    const patch: SyncClientConfigPatchDto = {
+      transport: 'lan',
+      peer_address: payload.ws,
+      security_mode: payload.mode,
+      lan_pairing_secret: payload.secret,
+      device_name: deviceName.trim(),
+      enabled: true,
+    };
+    if (payload.wss) patch.peer_wss_address = payload.wss;
+    if (payload.fingerprint) patch.peer_fingerprint = payload.fingerprint;
+
+    const next = await apply(patch);
+    if (!next) return;
+
+    // Reflect the scanned config in the (collapsed) manual form.
+    formLoadedRef.current = true;
+    setTransport('lan');
+    setEnabled(true);
+    setPeerAddress(payload.ws);
+    setPeerWssAddress(payload.wss ?? '');
+    setSecurityMode(payload.mode);
+    setLanSheetVisible(false);
+    setPendingLan(null);
+    showToast(t('lanPairingSuccess', { name: payload.name }));
+
+    if (payload.enrollment) {
+      await handleEnrollment(payload.enrollment);
+    }
+  }, [apply, deviceName, handleEnrollment, pendingLan, showToast, t]);
+
+  /** Pair from a manually pasted **cloud** code: verify the account, then PUT. */
+  const handlePairFromCode = useCallback(
+    async (rawCode: string) => {
+      hapticLightPress();
+      let payload: SyncPairingPayload;
+      try {
+        payload = parseSyncPairingPayload(rawCode);
+      } catch (e: any) {
+        showToast(t('pairingFailed', { message: e?.message ?? String(e) }));
+        return;
+      }
+      await applyCloudPairing(payload);
+    },
+    [applyCloudPairing, showToast, t],
+  );
+
+  /**
    * QR-scan entry (owner ruling 2026-10-12: `react-native-camera-kit`). Request
    * camera permission first so the preview is never blank, then open the scanner
    * modal; a denied request falls back to the manual paste path. The scanned
@@ -639,17 +742,40 @@ export const DesktopSyncScreen: React.FC = () => {
     setScannerVisible(true);
   }, [showAlert, t]);
 
-  /** A code was read: close the scanner and run the shared pairing path (once). */
+  /**
+   * A QR code was read: close the scanner and route by payload kind (plan 7-15
+   * §A2). Cloud → the existing account-verified relay pairing; `soulbits-lan` →
+   * the confirmation sheet. The store variant REJECTS LAN payloads with clear
+   * copy (defense in depth — no LAN in store, ruling 7-14).
+   */
   const handleScanned = useCallback(
     (code: string) => {
       if (scanProcessingRef.current) return;
       scanProcessingRef.current = true;
       setScannerVisible(false);
-      void handlePairFromCode(code).finally(() => {
+      void (async () => {
+        let parsed;
+        try {
+          parsed = parseSyncPairingPayloadV2(code);
+        } catch (e: any) {
+          showToast(t('pairingFailed', { message: e?.message ?? String(e) }));
+          return;
+        }
+        if (parsed.kind === 'lan') {
+          if (storeVariant) {
+            showToast(t('lanUnavailableStore'));
+            return;
+          }
+          setPendingLan(parsed.payload);
+          setLanSheetVisible(true);
+          return;
+        }
+        await applyCloudPairing(parsed.payload);
+      })().finally(() => {
         scanProcessingRef.current = false;
       });
     },
-    [handlePairFromCode],
+    [applyCloudPairing, showToast, storeVariant, t],
   );
 
   const runGroupAction = useCallback(
@@ -756,6 +882,70 @@ export const DesktopSyncScreen: React.FC = () => {
             {t(stateSubtextKey(state))}
           </ThemedText>
         </View>
+
+        {/* ── Pairing card (QR-first, plan 7-15 §A5) ──────────────────────
+            Promoted to the top card with a big "Scan desktop QR" CTA that
+            accepts BOTH payload kinds. The cloud manual-paste surface stays
+            inline (unchanged) when the relay transport is selected. */}
+        <ThemedCard accentStripe style={styles.card} testID="desktop-sync-pairing-card">
+          <View style={styles.cardHeader}>
+            <Icon name="qrcode-scan" size={18} color={accentPrimary} />
+            <ThemedText weight="medium" size={15} style={styles.cardTitle}>
+              {t('pairingSection')}
+            </ThemedText>
+          </View>
+
+          <ThemedText variant="muted" size={12} style={styles.fieldHint}>
+            {t('scanCtaHint')}
+          </ThemedText>
+
+          <ThemedButton
+            label={t('scanCta')}
+            icon="qrcode-scan"
+            onPress={() => void handleScanQr()}
+            style={styles.actionButton}
+            testID="desktop-sync-scan-button"
+          />
+
+          {isCloud ? (
+            <>
+              <ThemedText variant="muted" size={12} style={styles.fieldHint}>
+                {t('pairingHint')}
+              </ThemedText>
+
+              <Field
+                label={t('pairingCodeLabel')}
+                value={pairingCode}
+                onChangeText={setPairingCode}
+                placeholder={t('pairingCodePlaceholder')}
+                hint={t('pairingCodeHint')}
+                multiline
+                backgroundColor={inputBg}
+                inputTextColor={textPrimary}
+                inputPlaceholderColor={textMuted}
+                testID="desktop-sync-pairing-code"
+              />
+
+              <SettingsToggleRow
+                icon="account-multiple-plus-outline"
+                label={t('joinExistingLabel')}
+                value={joinExisting}
+                onValueChange={setJoinExisting}
+                theme={theme}
+              />
+
+              <ThemedButton
+                label={busy ? t('pairing') : t('pairButton')}
+                icon="link-variant"
+                variant="outline"
+                onPress={() => void handlePairFromCode(pairingCode)}
+                disabled={busy || !pairingCode.trim()}
+                style={styles.actionButton}
+                testID="desktop-sync-pair-button"
+              />
+            </>
+          ) : null}
+        </ThemedCard>
 
         {/* ── Status card ─────────────────────────────────────────────── */}
         <ThemedCard accentStripe style={styles.card}>
@@ -1066,49 +1256,77 @@ export const DesktopSyncScreen: React.FC = () => {
 
           {!isCloud ? (
             <>
-              <Field
-                label={t('peerAddressLabel')}
-                value={peerAddress}
-                onChangeText={setPeerAddress}
-                placeholder="192.168.1.10:28080"
-                hint={t('peerAddressHint')}
-                backgroundColor={inputBg}
-                inputTextColor={textPrimary}
-                inputPlaceholderColor={textMuted}
-              />
-
-              <Field
-                label={t('peerWssAddressLabel')}
-                value={peerWssAddress}
-                onChangeText={setPeerWssAddress}
-                placeholder={t('optionalPlaceholder')}
-                hint={t('peerWssAddressHint')}
-                backgroundColor={inputBg}
-                inputTextColor={textPrimary}
-                inputPlaceholderColor={textMuted}
-              />
-
-              <View style={styles.fieldWrapper}>
-                <ThemedText weight="medium" size={13} style={styles.fieldLabel}>
-                  {t('securityModeLabel')}
-                </ThemedText>
-                <SelectPicker
-                  label={t('securityModeLabel')}
-                  value={securityMode}
-                  options={SECURITY_MODES}
-                  onChange={setSecurityMode}
+              <TouchableOpacity
+                style={styles.advancedToggle}
+                onPress={() => {
+                  hapticLightPress();
+                  setShowAdvanced(v => !v);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: showAdvanced }}
+                testID="desktop-sync-advanced-toggle"
+              >
+                <Icon
+                  name={showAdvanced ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={textMuted}
                 />
-                {/* Security shield badge (recycled from ConnectionSetupScreen). */}
-                <View style={styles.securityBadge}>
-                  <Icon name={secBadge.icon} size={14} color={secBadge.color} />
-                  <ThemedText size={12} variant="secondary" style={styles.securityBadgeText}>
-                    {secBadge.label}
-                  </ThemedText>
-                </View>
-                <ThemedText variant="muted" size={11} style={styles.fieldHint}>
-                  {securityModeHint(securityMode, t)}
+                <ThemedText size={13} variant="secondary" style={styles.advancedToggleText}>
+                  {t('advancedToggle')}
                 </ThemedText>
-              </View>
+              </TouchableOpacity>
+
+              {showAdvanced ? (
+                <>
+                  <ThemedText variant="muted" size={11} style={styles.fieldHint}>
+                    {t('advancedHint')}
+                  </ThemedText>
+
+                  <Field
+                    label={t('peerAddressLabel')}
+                    value={peerAddress}
+                    onChangeText={setPeerAddress}
+                    placeholder="192.168.1.10:28080"
+                    hint={t('peerAddressHint')}
+                    backgroundColor={inputBg}
+                    inputTextColor={textPrimary}
+                    inputPlaceholderColor={textMuted}
+                  />
+
+                  <Field
+                    label={t('peerWssAddressLabel')}
+                    value={peerWssAddress}
+                    onChangeText={setPeerWssAddress}
+                    placeholder={t('optionalPlaceholder')}
+                    hint={t('peerWssAddressHint')}
+                    backgroundColor={inputBg}
+                    inputTextColor={textPrimary}
+                    inputPlaceholderColor={textMuted}
+                  />
+
+                  <View style={styles.fieldWrapper}>
+                    <ThemedText weight="medium" size={13} style={styles.fieldLabel}>
+                      {t('securityModeLabel')}
+                    </ThemedText>
+                    <SelectPicker
+                      label={t('securityModeLabel')}
+                      value={securityMode}
+                      options={SECURITY_MODES}
+                      onChange={setSecurityMode}
+                    />
+                    {/* Security shield badge (recycled from ConnectionSetupScreen). */}
+                    <View style={styles.securityBadge}>
+                      <Icon name={secBadge.icon} size={14} color={secBadge.color} />
+                      <ThemedText size={12} variant="secondary" style={styles.securityBadgeText}>
+                        {secBadge.label}
+                      </ThemedText>
+                    </View>
+                    <ThemedText variant="muted" size={11} style={styles.fieldHint}>
+                      {securityModeHint(securityMode, t)}
+                    </ThemedText>
+                  </View>
+                </>
+              ) : null}
             </>
           ) : (
             <>
@@ -1182,61 +1400,6 @@ export const DesktopSyncScreen: React.FC = () => {
             testID="desktop-sync-connect"
           />
         </ThemedCard>
-
-        {/* ── Cloud pairing card (7-3) ────────────────────────────────── */}
-        {isCloud ? (
-          <ThemedCard accentStripe style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Icon name="qrcode-scan" size={18} color={accentPrimary} />
-              <ThemedText weight="medium" size={15} style={styles.cardTitle}>
-                {t('pairingSection')}
-              </ThemedText>
-            </View>
-
-            <ThemedText variant="muted" size={12} style={styles.fieldHint}>
-              {t('pairingHint')}
-            </ThemedText>
-
-            <Field
-              label={t('pairingCodeLabel')}
-              value={pairingCode}
-              onChangeText={setPairingCode}
-              placeholder={t('pairingCodePlaceholder')}
-              hint={t('pairingCodeHint')}
-              multiline
-              backgroundColor={inputBg}
-              inputTextColor={textPrimary}
-              inputPlaceholderColor={textMuted}
-              testID="desktop-sync-pairing-code"
-            />
-
-            <SettingsToggleRow
-              icon="account-multiple-plus-outline"
-              label={t('joinExistingLabel')}
-              value={joinExisting}
-              onValueChange={setJoinExisting}
-              theme={theme}
-            />
-
-            <ThemedButton
-              label={busy ? t('pairing') : t('pairButton')}
-              icon="link-variant"
-              onPress={() => void handlePairFromCode(pairingCode)}
-              disabled={busy || !pairingCode.trim()}
-              style={styles.actionButton}
-              testID="desktop-sync-pair-button"
-            />
-
-            <ThemedButton
-              label={t('scanButton')}
-              icon="qrcode-scan"
-              variant="outline"
-              onPress={() => void handleScanQr()}
-              style={styles.actionButton}
-              testID="desktop-sync-scan-button"
-            />
-          </ThemedCard>
-        ) : null}
 
         {/* ── Sync-group key card (7-3) ───────────────────────────────── */}
         {isCloud ? (
@@ -1338,6 +1501,19 @@ export const DesktopSyncScreen: React.FC = () => {
         visible={scannerVisible}
         onClose={() => setScannerVisible(false)}
         onScanned={handleScanned}
+      />
+
+      {/* Post-scan LAN confirmation sheet (plan 7-15 §A3). */}
+      <LanPairingConfirmSheet
+        visible={lanSheetVisible}
+        payload={pendingLan}
+        signedIn={signedIn}
+        busy={busy}
+        onConfirm={() => void confirmLanPairing()}
+        onCancel={() => {
+          setLanSheetVisible(false);
+          setPendingLan(null);
+        }}
       />
     </ThemedView>
   );
@@ -1465,6 +1641,15 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   securityBadgeText: {},
+
+  // ── Advanced disclosure (plan 7-15 §A5) ────────────────────────────────────
+  advancedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  advancedToggleText: { flex: 1 },
 
   // ── Buttons ────────────────────────────────────────────────────────────────
   actionButton: { marginTop: 4 },

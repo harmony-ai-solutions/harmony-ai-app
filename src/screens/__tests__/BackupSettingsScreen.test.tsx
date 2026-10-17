@@ -121,6 +121,8 @@ jest.mock('../../services/backup/BackupOrchestrator', () => ({
     scheduleIfEnabled: jest.fn(),
     setPassphrase: jest.fn(),
     clearPassphrase: jest.fn(),
+    restore: jest.fn(),
+    clearPendingConflict: jest.fn(),
     isSignedIn: jest.fn(async () => true),
     getCloudQuota: jest.fn(async () => ({ usedBytes: 2 * 1024 * 1024, quotaMb: 10240 })),
   },
@@ -143,6 +145,8 @@ const mockOrch = backupOrchestrator as unknown as {
   backUpNow: jest.Mock;
   resetRecoveryCode: jest.Mock;
   scheduleIfEnabled: jest.Mock;
+  restore: jest.Mock;
+  clearPendingConflict: jest.Mock;
 };
 
 function settings(over: Record<string, unknown> = {}) {
@@ -223,6 +227,67 @@ describe('BackupSettingsScreen', () => {
     const quota = utils.getByTestId('backup-cloud-quota');
     expect(String(quota.props.children)).toContain('2 MB');
     expect(String(quota.props.children)).toContain('10240 MB');
+  });
+
+  it('surfaces the conflict modal from pendingConflict settings', async () => {
+    const utils = await renderScreen(
+      settings({
+        pendingConflict: {
+          remoteGeneration: 7,
+          remoteDataVersion: 'rdv',
+          remoteDeviceLabel: 'Other Phone',
+          detectedAt: 'now',
+        },
+      }),
+    );
+    await waitFor(() => expect(utils.getByTestId('backup-conflict-body')).toBeTruthy());
+    expect(String(utils.getByTestId('backup-conflict-body').props.children)).toContain('Other Phone');
+  });
+
+  it('pushes mine with the overwrite policy from the conflict modal', async () => {
+    mockOrch.backUpNow.mockResolvedValue({
+      skipped: false,
+      recoveryCode: '',
+      recoveryCodeIsNew: false,
+      dataVersion: 'dv',
+      totalBytes: 100,
+      uploadedObjects: 1,
+      dedupedObjects: 0,
+    });
+    const utils = await renderScreen(
+      settings({ pendingConflict: { remoteGeneration: 7, remoteDataVersion: 'rdv', detectedAt: 'now' } }),
+    );
+    await waitFor(() => expect(utils.getByTestId('backup-conflict-push')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('backup-conflict-push'));
+    });
+    expect(mockOrch.backUpNow).toHaveBeenCalledWith({ onConflict: 'overwrite' });
+  });
+
+  it('runs the restore flow from the pull-theirs action', async () => {
+    mockOrch.restore.mockResolvedValue({
+      unwrapKind: 'w1',
+      dataVersion: 'dv',
+      schemaVersion: 1,
+      sideObjects: 0,
+      dbRows: 0,
+      dataDir: '/restored',
+    });
+    mockOrch.clearPendingConflict.mockResolvedValue(undefined);
+    mockShowAlert.mockImplementation((_t: string, _m: string, buttons: any[]) => {
+      const confirm = buttons?.find((b) => b.text === 'conflictPullConfirm');
+      confirm?.onPress?.();
+    });
+    const utils = await renderScreen(
+      settings({ pendingConflict: { remoteGeneration: 7, remoteDataVersion: 'rdv', detectedAt: 'now' } }),
+    );
+    await waitFor(() => expect(utils.getByTestId('backup-conflict-pull')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('backup-conflict-pull'));
+    });
+    expect(mockShowAlert).toHaveBeenCalled();
+    await waitFor(() => expect(mockOrch.restore).toHaveBeenCalled());
+    expect(mockOrch.clearPendingConflict).toHaveBeenCalled();
   });
 });
 

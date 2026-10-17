@@ -20,9 +20,14 @@
  */
 
 import { createLogger } from '../../utils/logger';
-import type { EngineReadyPayload } from '../../types/engineSidecar';
+import type {
+  EngineExitInfo,
+  EngineReadyPayload,
+  EngineSidecarEvent,
+  EngineStartOptions,
+  EngineStatus,
+} from '../../types/engineSidecar';
 import { selectEngineHost } from './EngineHost';
-import type { EngineStartOptions } from '../../types/engineSidecar';
 import { normalizeVersion } from '../../utils/semver';
 
 const log = createLogger('[EngineService]');
@@ -48,6 +53,98 @@ export interface EngineConnection {
 
 let connection: EngineConnection | null = null;
 const listeners = new Set<(connection: EngineConnection | null) => void>();
+
+// ── Engine lifecycle status + last exit (Settings → Engine status) ─────────
+// EngineService already receives every host lifecycle event (the subscription
+// at the bottom of this file), so it is the single source of truth for the
+// observable status the Settings screen renders. Nothing here opens a socket.
+
+/** Observable lifecycle status; null until the host reports one. */
+let status: EngineStatus | null = null;
+/** The most recent process exit the host reported, or null. */
+let lastExit: EngineExitInfo | null = null;
+const statusListeners = new Set<(status: EngineStatus | null) => void>();
+const exitListeners = new Set<(exit: EngineExitInfo) => void>();
+
+/**
+ * Map a host lifecycle event to the status it implies. Mirrors the native
+ * status reducer (`nextEngineStatus` in `EngineSidecarModule`) so the JS-side
+ * status is deterministic regardless of event ordering.
+ */
+function statusFromEvent(event: EngineSidecarEvent): EngineStatus | null {
+  switch (event.type) {
+    case 'state':
+      return event.status;
+    case 'ready':
+      return 'ready';
+    case 'restarting':
+      return 'restarting';
+    case 'crashed':
+      return 'failed';
+    case 'stopped':
+      return 'stopped';
+    case 'exit':
+      if (event.exit.expected) return 'stopped';
+      return event.exit.willRestart ? 'restarting' : 'failed';
+    default:
+      return null;
+  }
+}
+
+/** Record a new lifecycle status and notify listeners (only on change). */
+function setStatus(next: EngineStatus | null): void {
+  if (next === status) return;
+  status = next;
+  for (const listener of statusListeners) {
+    try {
+      listener(status);
+    } catch (e) {
+      log.warn('Engine status listener threw:', e);
+    }
+  }
+}
+
+/** Record a process exit and notify listeners. */
+function setLastExit(exit: EngineExitInfo): void {
+  lastExit = exit;
+  for (const listener of exitListeners) {
+    try {
+      listener(exit);
+    } catch (e) {
+      log.warn('Engine exit listener threw:', e);
+    }
+  }
+}
+
+/** The last lifecycle status the host reported, or null when unknown. */
+export function getEngineStatus(): EngineStatus | null {
+  return status;
+}
+
+/** Subscribe to lifecycle-status changes. Returns an unsubscribe function. */
+export function onEngineStatusChange(
+  listener: (status: EngineStatus | null) => void,
+): () => void {
+  statusListeners.add(listener);
+  return () => {
+    statusListeners.delete(listener);
+  };
+}
+
+/** The most recent process exit the host reported (null when none/unknown). */
+export function getLastEngineExit(): EngineExitInfo | null {
+  return lastExit;
+}
+
+/** Subscribe to process-exit events. Returns an unsubscribe function. */
+export function onEngineExitChange(
+  listener: (exit: EngineExitInfo) => void,
+): () => void {
+  exitListeners.add(listener);
+  return () => {
+    exitListeners.delete(listener);
+  };
+}
 
 /** Build the connection descriptor from a readiness payload. */
 export function connectionFromReady(payload: EngineReadyPayload): EngineConnection {
@@ -81,6 +178,7 @@ export function setEngineConnection(payload: EngineReadyPayload): EngineConnecti
   connection = connectionFromReady(payload);
   log.info(`Engine connection set (admin ${connection.adminBaseUrl})`);
   emit();
+  setStatus('ready');
   // Host readiness → refresh the running-engine version (About row; plan 7-10 §3).
   void refreshEngineVersion();
   return connection;
@@ -148,6 +246,7 @@ export async function disconnectEngine(): Promise<void> {
     await selectEngineHost().stop();
   } finally {
     clearEngineConnection();
+    setStatus('stopped');
   }
 }
 
@@ -157,10 +256,15 @@ export async function disconnectEngine(): Promise<void> {
  * rebuild the token, so it only clears on a non-ready status.
  */
 export async function syncEngineConnectionState(): Promise<void> {
-  const status = await selectEngineHost().getState();
-  if (status !== 'ready') {
+  const hostStatus = await selectEngineHost().getState();
+  if (hostStatus !== 'ready') {
+    setStatus(hostStatus);
     clearEngineConnection();
+  } else if (connection !== null) {
+    setStatus('ready');
   }
+  // else: the host reports `ready` but we have no readiness payload to rebuild
+  // the token — leave the observed status as-is (the connection stays null).
 }
 
 // ── Engine version (plan 7-10 §3) ────────────────────────────────────────
@@ -268,12 +372,24 @@ selectEngineHost().onEvent(event => {
     default:
       break;
   }
+  // Settings → Engine status: record the last exit + the implied lifecycle
+  // status from every host event (the connection above is only the readiness
+  // signal; this carries `starting`/`failed`/`restarting` nuance).
+  if (event.type === 'exit') {
+    setLastExit(event.exit);
+  }
+  const nextStatus = statusFromEvent(event);
+  if (nextStatus !== null) setStatus(nextStatus);
 });
 
 /** Test-only: drop all state + listeners. */
 export function resetEngineServiceForTests(): void {
   connection = null;
   listeners.clear();
+  status = null;
+  lastExit = null;
+  statusListeners.clear();
+  exitListeners.clear();
   versionState = UNKNOWN_VERSION_STATE;
   versionListeners.clear();
   versionProbe = null;
