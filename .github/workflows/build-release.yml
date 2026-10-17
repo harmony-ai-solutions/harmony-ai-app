@@ -44,8 +44,12 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit
 
-      - name: Lint
+      # Non-blocking (owner ruling 2026-10-17): the repo carries ~270
+      # pre-existing lint errors in unrelated files; lint must not gate
+      # releases. Re-block once the lint debt is paid down.
+      - name: Lint (non-blocking)
         run: npm run lint
+        continue-on-error: true
 
       - name: Unit tests
         run: npx jest --selectProjects unit --reporters=default --reporters=jest-junit
