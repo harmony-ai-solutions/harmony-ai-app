@@ -251,6 +251,41 @@ export async function disconnectEngine(): Promise<void> {
 }
 
 /**
+ * In-flight restart, so concurrent callers share ONE stop→start cycle. Cleared
+ * as soon as the cycle settles (success or failure).
+ */
+let restartInFlight: Promise<EngineReadyPayload> | null = null;
+
+/**
+ * Restart the engine: `disconnectEngine()` then `connectEngine(options)`.
+ *
+ * Used by the backup-restore flows to activate a staged restore deterministically
+ * (owner ruling 2026-10-18): the engine adopts `<dataDir>/restore-staging/` at
+ * boot, so the app must cycle the engine after a successful restore. Clearing the
+ * connection then publishing a fresh one re-runs every `onEngineConnectionChange`
+ * consumer (the same cold-start re-init path — e.g. `SyncConnectionContext`'s
+ * auto-connect), so contexts/repositories re-init against the restored engine.
+ *
+ * Concurrent calls share a single in-flight restart (the first caller's options
+ * win). Rejects if the start leg fails; the stop leg is best-effort (see
+ * {@link disconnectEngine}).
+ */
+export function restartEngine(
+  options: EngineStartOptions = {},
+): Promise<EngineReadyPayload> {
+  if (restartInFlight) return restartInFlight;
+  restartInFlight = (async () => {
+    try {
+      await disconnectEngine();
+      return await connectEngine(options);
+    } finally {
+      restartInFlight = null;
+    }
+  })();
+  return restartInFlight;
+}
+
+/**
  * Best-effort reconciliation of the in-memory connection with the host's
  * lifecycle state — used on app foreground. `ready` without a payload cannot
  * rebuild the token, so it only clears on a non-ready status.
@@ -385,6 +420,7 @@ selectEngineHost().onEvent(event => {
 /** Test-only: drop all state + listeners. */
 export function resetEngineServiceForTests(): void {
   connection = null;
+  restartInFlight = null;
   listeners.clear();
   status = null;
   lastExit = null;

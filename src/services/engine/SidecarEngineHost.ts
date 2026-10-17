@@ -27,6 +27,7 @@ import {
   startEngineSidecar,
   stopEngineSidecar,
 } from './EngineSidecarModule';
+import { getOrCreateEngineDbKey } from './EngineDbKey';
 import type { EngineHost } from './EngineHost';
 
 export class SidecarEngineHost implements EngineHost {
@@ -37,8 +38,20 @@ export class SidecarEngineHost implements EngineHost {
     return isEngineSidecarAvailable();
   }
 
-  start(options: EngineStartOptions = {}): Promise<EngineReadyPayload> {
-    return startEngineSidecar(options);
+  /**
+   * Start the sidecar process, resolving the app-owned DB key from the Keychain
+   * when the caller did not supply one (mirrors `EmbeddedEngineHost`; task 4-2
+   * DB key custody). The Kotlin side forwards it to the engine as the
+   * `SE_DB_KEY` environment variable, enabling SQLCipher-class encryption. A
+   * null key (Keychain unavailable) leaves the engine on its unencrypted
+   * default so startup is never blocked.
+   */
+  async start(options: EngineStartOptions = {}): Promise<EngineReadyPayload> {
+    let dbKey = options.dbKey;
+    if (dbKey === undefined) {
+      dbKey = (await getOrCreateEngineDbKey()) ?? undefined;
+    }
+    return startEngineSidecar({ ...options, dbKey });
   }
 
   stop(): Promise<void> {

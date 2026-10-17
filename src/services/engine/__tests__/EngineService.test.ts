@@ -60,6 +60,7 @@ import {
   onEngineStatusChange,
   requireEngineConnection,
   resetEngineServiceForTests,
+  restartEngine,
   setEngineConnection,
   syncEngineConnectionState,
 } from '../EngineService';
@@ -168,6 +169,57 @@ describe('EngineService', () => {
     mockHost.getState.mockResolvedValueOnce('failed');
     await syncEngineConnectionState();
     expect(getEngineConnection()).toBeNull();
+  });
+});
+
+describe('EngineService — restartEngine (post-restore activation)', () => {
+  it('stops then starts the host and re-publishes the connection', async () => {
+    setEngineConnection(payload);
+    const seen: Array<string | null> = [];
+    const unsub = onEngineConnectionChange(c => seen.push(c?.adminBaseUrl ?? null));
+
+    const ready = await restartEngine();
+
+    expect(ready.adminPort).toBe(28081);
+    expect(mockHost.stop).toHaveBeenCalledTimes(1);
+    expect(mockHost.start).toHaveBeenCalledTimes(1);
+    expect(getEngineConnection()?.token).toBe('tok');
+    // The connection is cleared (disconnect) then re-published (connect), which
+    // is the signal connection-change consumers re-init on.
+    expect(seen).toEqual([null, 'http://127.0.0.1:28081']);
+    unsub();
+  });
+
+  it('forwards start options through to the host', async () => {
+    await restartEngine({ dataDir: '/custom' });
+    expect(mockHost.start).toHaveBeenCalledWith(expect.objectContaining({ dataDir: '/custom' }));
+  });
+
+  it('shares a single in-flight restart across concurrent callers', async () => {
+    let releaseStop!: () => void;
+    const stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    mockHost.stop.mockImplementationOnce(() => stopGate);
+
+    const first = restartEngine();
+    const second = restartEngine();
+    releaseStop();
+
+    const [a, b] = await Promise.all([first, second]);
+    expect(a).toBe(b); // the same shared result
+    expect(mockHost.stop).toHaveBeenCalledTimes(1);
+    expect(mockHost.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the in-flight guard after a failure so a later restart can run', async () => {
+    mockHost.start.mockRejectedValueOnce(new Error('boot failed'));
+    await expect(restartEngine()).rejects.toThrow('boot failed');
+
+    // Guard cleared → the next call starts a fresh cycle.
+    const ready = await restartEngine();
+    expect(ready.adminPort).toBe(28081);
+    expect(mockHost.start).toHaveBeenCalledTimes(2);
   });
 });
 

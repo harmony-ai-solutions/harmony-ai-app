@@ -22,6 +22,7 @@ import {
 import { BACKUP_CADENCES } from '../../services/backup/backupTypes';
 import type { BackupSettings, BackupTargetType, PendingConflict } from '../../services/backup/backupTypes';
 import { pickBackupFolder, isBackupNativeAvailable } from '../../services/backup/backupNative';
+import { restartEngine } from '../../services/engine/EngineService';
 import { createLogger } from '../../utils/logger';
 import { formatBytes } from '../../utils/formatBytes';
 import { hapticLightPress } from '../../utils/haptics';
@@ -237,7 +238,18 @@ export const BackupSettingsScreen: React.FC = () => {
             await backupOrchestrator.clearPendingConflict();
             setPendingConflict(null);
             setConflictVisible(false);
-            showToast(t('restoreDone'));
+            // Owner ruling 2026-10-18: cycle the engine to activate the staged
+            // restore immediately (it adopts `restore-staging/` at boot). A
+            // restart failure does not undo the staged restore — the engine
+            // still adopts it on its next boot.
+            showToast(t('restoreRestarting'));
+            try {
+              await restartEngine();
+              showToast(t('restoreApplied'));
+            } catch (restartErr: any) {
+              log.warn('engine restart after restore failed:', restartErr?.message ?? restartErr);
+              showToast(t('restoreRestartFailed', { message: restartErr?.message ?? String(restartErr) }));
+            }
             await load();
           } catch (e: any) {
             showToast(t('restoreFailed', { message: e?.message ?? String(e) }));

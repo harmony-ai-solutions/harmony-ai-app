@@ -18,6 +18,7 @@ import {
 } from '../../services/backup/BackupOrchestrator';
 import type { BackupSettings, BackupTargetType } from '../../services/backup/backupTypes';
 import { pickBackupFolder } from '../../services/backup/backupNative';
+import { restartEngine } from '../../services/engine/EngineService';
 import { createLogger } from '../../utils/logger';
 import { hapticLightPress } from '../../utils/haptics';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
@@ -43,7 +44,12 @@ export const RestoreOnboardingScreen: React.FC = () => {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [passphrase, setPassphrase] = useState('');
   const [busy, setBusy] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [restored, setRestored] = useState<string | null>(null);
+  // Whether the post-restore engine cycle applied the staged backup: null until
+  // the restart settles, true on success, false when the restart failed (the
+  // staged restore is still valid — adopted on the next engine boot).
+  const [applied, setApplied] = useState<boolean | null>(null);
 
   const handlePickFolder = useCallback(async () => {
     hapticLightPress();
@@ -56,6 +62,7 @@ export const RestoreOnboardingScreen: React.FC = () => {
   const handleRestore = useCallback(async () => {
     hapticLightPress();
     setBusy(true);
+    setApplied(null);
     try {
       const base = await backupOrchestrator.getSettings();
       const settings: BackupSettings = {
@@ -68,7 +75,22 @@ export const RestoreOnboardingScreen: React.FC = () => {
         passphrase: passphrase || undefined,
       });
       setRestored(res.dataDir);
-      showToast(t('restoreDone'));
+      // Owner ruling 2026-10-18: activate the staged restore NOW by cycling the
+      // engine (it adopts `restore-staging/` at boot). A restart failure never
+      // undoes the staged restore — the engine still adopts it on its next boot.
+      setRestarting(true);
+      showToast(t('restoreRestarting'));
+      try {
+        await restartEngine();
+        setApplied(true);
+        showToast(t('restoreApplied'));
+      } catch (restartErr: any) {
+        log.warn('engine restart after restore failed:', restartErr?.message ?? restartErr);
+        setApplied(false);
+        showToast(t('restoreRestartFailed', { message: restartErr?.message ?? String(restartErr) }));
+      } finally {
+        setRestarting(false);
+      }
     } catch (e: any) {
       log.warn('restore failed:', e?.message ?? e);
       showToast(t('restoreFailed', { message: e?.message ?? String(e) }));
@@ -159,7 +181,7 @@ export const RestoreOnboardingScreen: React.FC = () => {
         </ThemedCard>
 
         <ThemedButton
-          label={busy ? t('restoring') : t('restoreButton')}
+          label={busy ? (restarting ? t('restoreRestarting') : t('restoring')) : t('restoreButton')}
           icon="cloud-download"
           onPress={handleRestore}
           disabled={!canRestore}
@@ -167,13 +189,15 @@ export const RestoreOnboardingScreen: React.FC = () => {
           testID="restore-run"
         />
 
-        {restored ? (
+        {restored && applied !== null ? (
           <ThemedCard style={styles.card} testID="restore-success">
             <View style={styles.cardHeader}>
               <Icon name="check-circle-outline" size={18} color="#4caf82" />
               <ThemedText weight="medium" size={15} style={styles.cardTitle}>{t('restoreDoneTitle')}</ThemedText>
             </View>
-            <ThemedText variant="secondary" size={12} style={styles.helpText}>{t('restoreDoneHelp')}</ThemedText>
+            <ThemedText variant="secondary" size={12} style={styles.helpText}>
+              {applied ? t('restoreDoneHelp') : t('restoreDoneHelpStaged')}
+            </ThemedText>
             <ThemedText variant="muted" size={11} style={styles.mono}>{restored}</ThemedText>
           </ThemedCard>
         ) : null}

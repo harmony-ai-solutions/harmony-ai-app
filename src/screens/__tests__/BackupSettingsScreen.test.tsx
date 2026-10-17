@@ -109,6 +109,10 @@ jest.mock('../../services/backup/backupNative', () => ({
   isBackupNativeAvailable: jest.fn(() => true),
 }));
 
+jest.mock('../../services/engine/EngineService', () => ({
+  restartEngine: jest.fn(async () => ({})),
+}));
+
 jest.mock('../../services/backup/BackupOrchestrator', () => ({
   backupOrchestrator: {
     getSettings: jest.fn(),
@@ -135,6 +139,7 @@ jest.mock('../../services/backup/BackupOrchestrator', () => ({
 
 import { BackupSettingsScreen, formatBytes, groupRecoveryCode } from '../settings/BackupSettingsScreen';
 import { backupOrchestrator } from '../../services/backup/BackupOrchestrator';
+import { restartEngine } from '../../services/engine/EngineService';
 
 const mockOrch = backupOrchestrator as unknown as {
   getSettings: jest.Mock;
@@ -148,6 +153,8 @@ const mockOrch = backupOrchestrator as unknown as {
   restore: jest.Mock;
   clearPendingConflict: jest.Mock;
 };
+
+const mockRestartEngine = restartEngine as jest.Mock;
 
 function settings(over: Record<string, unknown> = {}) {
   return {
@@ -287,6 +294,59 @@ describe('BackupSettingsScreen', () => {
     });
     expect(mockShowAlert).toHaveBeenCalled();
     await waitFor(() => expect(mockOrch.restore).toHaveBeenCalled());
+    expect(mockOrch.clearPendingConflict).toHaveBeenCalled();
+  });
+
+  it('restarts the engine after a pull-theirs restore and reports it applied', async () => {
+    mockOrch.restore.mockResolvedValue({
+      unwrapKind: 'w1',
+      dataVersion: 'dv',
+      schemaVersion: 1,
+      sideObjects: 0,
+      dbRows: 0,
+      dataDir: '/restored',
+    });
+    mockOrch.clearPendingConflict.mockResolvedValue(undefined);
+    mockShowAlert.mockImplementation((_t: string, _m: string, buttons: any[]) => {
+      const confirm = buttons?.find((b) => b.text === 'conflictPullConfirm');
+      confirm?.onPress?.();
+    });
+    const utils = await renderScreen(
+      settings({ pendingConflict: { remoteGeneration: 7, remoteDataVersion: 'rdv', detectedAt: 'now' } }),
+    );
+    await waitFor(() => expect(utils.getByTestId('backup-conflict-pull')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('backup-conflict-pull'));
+    });
+    await waitFor(() => expect(mockRestartEngine).toHaveBeenCalledTimes(1));
+    expect(mockShowToast).toHaveBeenCalledWith('restoreApplied');
+  });
+
+  it('reports a restart failure honestly without undoing the restore', async () => {
+    mockRestartEngine.mockRejectedValueOnce(new Error('boot failed'));
+    mockOrch.restore.mockResolvedValue({
+      unwrapKind: 'w1',
+      dataVersion: 'dv',
+      schemaVersion: 1,
+      sideObjects: 0,
+      dbRows: 0,
+      dataDir: '/restored',
+    });
+    mockOrch.clearPendingConflict.mockResolvedValue(undefined);
+    mockShowAlert.mockImplementation((_t: string, _m: string, buttons: any[]) => {
+      const confirm = buttons?.find((b) => b.text === 'conflictPullConfirm');
+      confirm?.onPress?.();
+    });
+    const utils = await renderScreen(
+      settings({ pendingConflict: { remoteGeneration: 7, remoteDataVersion: 'rdv', detectedAt: 'now' } }),
+    );
+    await waitFor(() => expect(utils.getByTestId('backup-conflict-pull')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('backup-conflict-pull'));
+    });
+    await waitFor(() => expect(mockRestartEngine).toHaveBeenCalledTimes(1));
+    expect(mockShowToast).toHaveBeenCalledWith('restoreRestartFailed:{"message":"boot failed"}');
+    // The staged restore is not undone — the conflict is still cleared.
     expect(mockOrch.clearPendingConflict).toHaveBeenCalled();
   });
 });
