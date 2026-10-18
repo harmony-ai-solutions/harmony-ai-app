@@ -42,7 +42,11 @@ jobs:
             echo "::error::CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID repo variable is not set (tofu shared output cloudfront_download_distribution_id)"
             exit 1
           fi
-          INVALIDATION=$(aws cloudfront create-invalidation \
-            --distribution-id "${DISTRIBUTION_ID}" \
-            --paths "${INVALIDATION_PATHS}")
+          # AWS CLI v2 treats a quoted space-separated string as ONE path —
+          # split into repeated --paths flags instead.
+          ARGS=(--distribution-id "${DISTRIBUTION_ID}")
+          for p in ${INVALIDATION_PATHS}; do
+            ARGS+=(--paths "$p")
+          done
+          INVALIDATION=$(aws cloudfront create-invalidation "${ARGS[@]}" --no-cli-pager)
           echo "Invalidation created: ${INVALIDATION}"
