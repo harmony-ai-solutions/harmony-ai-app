@@ -36,6 +36,7 @@ import AuthService, {
 import DeviceAuthService from '../services/cloud/DeviceAuthService';
 import { getConnectSessionService } from '../services/cloud/ConnectSessionService';
 import { startSoulbitsTokenSync } from '../services/cloud/soulbitsTokenSync';
+import { startSeedingEnsure } from '../services/providers/seeding';
 import { pushTokenStore } from '../services/notifications/PushTokenStore';
 import { createLogger } from '../utils/logger';
 
@@ -169,8 +170,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Subscribes to `auth:changed` (login + refresh) and bulk-updates the api_key
   // of every non-deleted soulbitscloud provider config. DB is guaranteed ready:
   // AuthProvider sits BELOW DatabaseProvider in App.tsx.
+  //
+  // 6-4 adds the seeding ensure-flow alongside it: the token-first account
+  // ensure (never flag-gated) + the guard-gated gap-fill, on `auth:changed` AND
+  // on the bootstrap-authenticated path (cold start already signed in). Both
+  // converge on the single soulbitscloud account row post-3-2.
   useEffect(() => {
-    return startSoulbitsTokenSync();
+    const stopTokenSync = startSoulbitsTokenSync();
+    const stopSeedingEnsure = startSeedingEnsure();
+    return () => {
+      stopTokenSync();
+      stopSeedingEnsure();
+    };
   }, []);
 
   // ── Listen for auth:changed events (portal redeem / refresh) ──────────

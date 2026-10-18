@@ -47,6 +47,10 @@ jest.mock('../../services/cloud/soulbitsTokenSync', () => ({
   startSoulbitsTokenSync: () => () => {},
 }));
 
+jest.mock('../../services/providers/seeding', () => ({
+  startSeedingEnsure: () => () => {},
+}));
+
 jest.mock('../../services/notifications/PushTokenStore', () => ({
   pushTokenStore: { getPushToken: () => 'push-token-1' },
 }));

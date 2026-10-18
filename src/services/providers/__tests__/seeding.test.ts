@@ -1,0 +1,452 @@
+/**
+ * Seeding ensure-flow tests (provider-registry 6-4).
+ *
+ * Verifies the app-side half of seeding (plan §5 amended / §11 A8–A11):
+ *  - token first, on every trigger, NEVER flag-gated (auth AND re-auth);
+ *  - gap-fill per module type ×7 + per STT slot (transcription, VAD = silero-vad),
+ *    reading the gateway metadata and falling back to SOULBITS_FALLBACK_MODELS;
+ *  - the engine-seeded fresh-install no-op; never-overwrite semantics;
+ *  - the per-account persisted guard (`seeding_done_v1:<accountId>`) gating the
+ *    scan only, re-running when the account changed;
+ *  - `startSeedingEnsure()` subscribing to `auth:changed` + the bootstrap path.
+ */
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import AuthService from '../../auth/AuthService';
+import { engineApiClient } from '../../engine/EngineApiClient';
+import * as repo from '../../../database/repositories';
+import { ensureSeededDefaults, startSeedingEnsure } from '../seeding';
+import { CLOUD_HOSTS } from '../../../config/cloud';
+
+// ── Mocks ───────────────────────────────────────────────────────────────────
+
+jest.mock('../../../utils/logger', () => ({
+  createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
+}));
+
+jest.mock('i18next', () => ({
+  __esModule: true,
+  default: {
+    t: (key: string) =>
+      key === 'providers:defaultConfigName'
+        ? 'Soulbits Cloud (default)'
+        : key === 'providers:soulbitsAccountName'
+          ? 'Soulbits Cloud'
+          : key,
+  },
+}));
+
+jest.mock('../../auth/AuthService', () => ({
+  __esModule: true,
+  default: { on: jest.fn(), off: jest.fn(), getToken: jest.fn() },
+}));
+
+jest.mock('../../engine/EngineApiClient', () => ({
+  __esModule: true,
+  engineApiClient: { listProviderModels: jest.fn() },
+}));
+
+jest.mock('../../../database/repositories', () => ({
+  __esModule: true,
+  listAccounts: jest.fn(),
+  createAccount: jest.fn(),
+  updateAccount: jest.fn(),
+  getAllBackendConfigs: jest.fn(),
+  createBackendConfig: jest.fn(),
+  getAllCognitionConfigs: jest.fn(),
+  createCognitionConfig: jest.fn(),
+  getAllMovementConfigs: jest.fn(),
+  createMovementConfig: jest.fn(),
+  getAllRAGConfigs: jest.fn(),
+  createRAGConfig: jest.fn(),
+  getAllTTSConfigs: jest.fn(),
+  createTTSConfig: jest.fn(),
+  getAllVisionConfigs: jest.fn(),
+  createVisionConfig: jest.fn(),
+  getAllSTTConfigs: jest.fn(),
+  createSTTConfig: jest.fn(),
+}));
+
+// ── Typed mock handles ──────────────────────────────────────────────────────
+
+const auth = AuthService as unknown as { on: jest.Mock; off: jest.Mock; getToken: jest.Mock };
+const engine = engineApiClient as unknown as { listProviderModels: jest.Mock };
+const r = repo as unknown as {
+  listAccounts: jest.Mock;
+  createAccount: jest.Mock;
+  updateAccount: jest.Mock;
+  getAllBackendConfigs: jest.Mock;
+  createBackendConfig: jest.Mock;
+  getAllCognitionConfigs: jest.Mock;
+  createCognitionConfig: jest.Mock;
+  getAllMovementConfigs: jest.Mock;
+  createMovementConfig: jest.Mock;
+  getAllRAGConfigs: jest.Mock;
+  createRAGConfig: jest.Mock;
+  getAllTTSConfigs: jest.Mock;
+  createTTSConfig: jest.Mock;
+  getAllVisionConfigs: jest.Mock;
+  createVisionConfig: jest.Mock;
+  getAllSTTConfigs: jest.Mock;
+  createSTTConfig: jest.Mock;
+};
+
+const mockedGetItem = AsyncStorage.getItem as jest.Mock;
+const mockedSetItem = AsyncStorage.setItem as jest.Mock;
+
+// ── Fixtures / helpers ──────────────────────────────────────────────────────
+
+const account = (over: Record<string, unknown> = {}) => ({
+  id: 'acct-1',
+  type: 'soulbitscloud',
+  name: 'Soulbits Cloud',
+  api_key: '',
+  base_url: '',
+  extra: '{}',
+  created_at: null,
+  updated_at: null,
+  deleted_at: null,
+  ...over,
+});
+
+const liveConfig = (over: Record<string, unknown> = {}) => ({
+  id: 'cfg-1',
+  name: 'Default SoulbitsCloud',
+  provider: 'soulbitscloud',
+  provider_account_id: 'acct-1',
+  capability_json: '{}',
+  deleted_at: null,
+  ...over,
+});
+
+const sttConfig = (over: Record<string, unknown> = {}) => ({
+  id: 'stt-1',
+  name: 'Default SoulbitsCloud',
+  main_stream_time_millis: 500,
+  transition_stream_time_millis: 250,
+  max_buffer_count: 10,
+  transcription_provider: 'soulbitscloud',
+  transcription_provider_account_id: 'acct-1',
+  transcription_capability_json: '{}',
+  vad_provider: 'soulbitscloud',
+  vad_provider_account_id: 'acct-1',
+  vad_capability_json: '{}',
+  deleted_at: null,
+  ...over,
+});
+
+/** One live config for every module type + an STT config with both slots. */
+function engineSeededInstall() {
+  r.getAllBackendConfigs.mockResolvedValue([liveConfig()]);
+  r.getAllCognitionConfigs.mockResolvedValue([liveConfig()]);
+  r.getAllMovementConfigs.mockResolvedValue([liveConfig()]);
+  r.getAllRAGConfigs.mockResolvedValue([liveConfig()]);
+  r.getAllTTSConfigs.mockResolvedValue([liveConfig()]);
+  r.getAllVisionConfigs.mockResolvedValue([liveConfig()]);
+  r.getAllSTTConfigs.mockResolvedValue([sttConfig()]);
+}
+
+/** Route AsyncStorage.getItem by key. */
+function mockStorage(values: Record<string, string | null>) {
+  mockedGetItem.mockImplementation((key: string) =>
+    Promise.resolve(key in values ? values[key] : null),
+  );
+}
+
+const capModel = (json: string): string => JSON.parse(json).model;
+
+const flush = async () => {
+  for (let i = 0; i < 12; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.resolve();
+  }
+};
+
+beforeEach(() => {
+  jest.clearAllMocks();
+
+  auth.getToken.mockResolvedValue('paseto-current');
+  r.listAccounts.mockResolvedValue([account()]);
+  r.createAccount.mockResolvedValue('acct-created');
+  r.updateAccount.mockResolvedValue(undefined);
+  for (const create of [
+    r.createBackendConfig,
+    r.createCognitionConfig,
+    r.createMovementConfig,
+    r.createRAGConfig,
+    r.createTTSConfig,
+    r.createVisionConfig,
+    r.createSTTConfig,
+  ]) {
+    create.mockResolvedValue('new-cfg');
+  }
+  for (const read of [
+    r.getAllBackendConfigs,
+    r.getAllCognitionConfigs,
+    r.getAllMovementConfigs,
+    r.getAllRAGConfigs,
+    r.getAllTTSConfigs,
+    r.getAllVisionConfigs,
+    r.getAllSTTConfigs,
+  ]) {
+    read.mockResolvedValue([]);
+  }
+  engine.listProviderModels.mockResolvedValue({ models: [] });
+
+  mockStorage({});
+  mockedSetItem.mockResolvedValue(undefined);
+});
+
+// ── Token first (never flag-gated) ──────────────────────────────────────────
+
+describe('ensureSeededDefaults — token first', () => {
+  it('updates the soulbitscloud account with the current PASETO (update-if-exists)', async () => {
+    engineSeededInstall();
+
+    await ensureSeededDefaults();
+
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
+      api_key: 'paseto-current',
+      base_url: CLOUD_HOSTS.inference,
+    });
+  });
+
+  it('uses the PASETO carried by the auth:changed event', async () => {
+    engineSeededInstall();
+
+    await ensureSeededDefaults('paseto-event');
+
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
+      api_key: 'paseto-event',
+      base_url: CLOUD_HOSTS.inference,
+    });
+  });
+
+  it('updates the key even when the gap-fill guard is already set (NOT flag-gated)', async () => {
+    engineSeededInstall();
+    mockStorage({ 'seeding_done_v1:acct-1': '1' });
+
+    await ensureSeededDefaults('paseto-renewed');
+
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
+      api_key: 'paseto-renewed',
+      base_url: CLOUD_HOSTS.inference,
+    });
+    expect(r.createBackendConfig).not.toHaveBeenCalled();
+    expect(engine.listProviderModels).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op in standalone mode (no cached token)', async () => {
+    auth.getToken.mockRejectedValue(new Error('AuthExpiredError'));
+
+    await ensureSeededDefaults();
+
+    expect(r.listAccounts).not.toHaveBeenCalled();
+    expect(r.updateAccount).not.toHaveBeenCalled();
+    expect(r.createBackendConfig).not.toHaveBeenCalled();
+  });
+
+  it('creates the soulbitscloud account when none exists', async () => {
+    r.listAccounts.mockResolvedValue([]);
+    engineSeededInstall();
+
+    await ensureSeededDefaults('paseto-fresh');
+
+    expect(r.createAccount).toHaveBeenCalledWith('soulbitscloud', {
+      name: 'Soulbits Cloud',
+      api_key: 'paseto-fresh',
+      base_url: CLOUD_HOSTS.inference,
+    });
+    expect(r.updateAccount).not.toHaveBeenCalled();
+  });
+
+  it('never blocks on a token/account failure (logs only)', async () => {
+    r.listAccounts.mockRejectedValue(new Error('engine offline'));
+
+    await expect(ensureSeededDefaults('paseto-1')).resolves.toBeUndefined();
+  });
+});
+
+// ── Fresh install (engine-seeded) no-op ─────────────────────────────────────
+
+describe('ensureSeededDefaults — fresh install (engine-init configs present)', () => {
+  it('fills the token, leaves configs untouched, and no-ops gap-fill', async () => {
+    engineSeededInstall();
+
+    await ensureSeededDefaults('paseto-1');
+
+    expect(r.updateAccount).toHaveBeenCalledTimes(1);
+    expect(r.createBackendConfig).not.toHaveBeenCalled();
+    expect(r.createCognitionConfig).not.toHaveBeenCalled();
+    expect(r.createMovementConfig).not.toHaveBeenCalled();
+    expect(r.createRAGConfig).not.toHaveBeenCalled();
+    expect(r.createTTSConfig).not.toHaveBeenCalled();
+    expect(r.createVisionConfig).not.toHaveBeenCalled();
+    expect(r.createSTTConfig).not.toHaveBeenCalled();
+    // Nothing missing → no gateway discovery call.
+    expect(engine.listProviderModels).not.toHaveBeenCalled();
+    // The scan completed → guard persisted.
+    expect(mockedSetItem).toHaveBeenCalledWith('seeding_done_v1:acct-1', '1');
+  });
+});
+
+// ── Gap-fill ────────────────────────────────────────────────────────────────
+
+describe('ensureSeededDefaults — gap-fill', () => {
+  it('recreates a deleted single-provider module config', async () => {
+    engineSeededInstall();
+    r.getAllBackendConfigs.mockResolvedValue([]);
+    engine.listProviderModels.mockResolvedValue({
+      models: [
+        { id: 'pro-llm', meta: { model_type: 'llm', min_tier: 'core' } },
+        { id: 'qwen-35-9b', meta: { model_type: 'llm', min_tier: 'free' } },
+      ],
+    });
+
+    await ensureSeededDefaults('paseto-1');
+
+    expect(r.createBackendConfig).toHaveBeenCalledTimes(1);
+    const arg = r.createBackendConfig.mock.calls[0][0];
+    expect(arg.name).toBe('Soulbits Cloud (default)');
+    expect(arg.provider).toBe('soulbitscloud');
+    expect(arg.provider_account_id).toBe('acct-1');
+    expect(capModel(arg.capability_json)).toBe('qwen-35-9b');
+    expect(r.createCognitionConfig).not.toHaveBeenCalled();
+  });
+
+  it('prefers the free-tier model from meta', async () => {
+    engineSeededInstall();
+    r.getAllBackendConfigs.mockResolvedValue([]);
+    engine.listProviderModels.mockResolvedValue({
+      models: [
+        { id: 'paid-llm', meta: { model_type: 'llm', min_tier: 'core' } },
+        { id: 'free-llm', meta: { model_type: 'llm', min_tier: 'free' } },
+      ],
+    });
+
+    await ensureSeededDefaults('paseto-1');
+
+    expect(capModel(r.createBackendConfig.mock.calls[0][0].capability_json)).toBe('free-llm');
+  });
+
+  it('falls back to SOULBITS_FALLBACK_MODELS when the gateway returns nothing', async () => {
+    engineSeededInstall();
+    r.getAllBackendConfigs.mockResolvedValue([]);
+    engine.listProviderModels.mockResolvedValue({ models: [], error: 'unreachable' });
+
+    await ensureSeededDefaults('paseto-1');
+
+    expect(capModel(r.createBackendConfig.mock.calls[0][0].capability_json)).toBe('qwen-35-9b');
+  });
+
+  it('seeds VAD independently when only the VAD slot is missing', async () => {
+    engineSeededInstall();
+    r.getAllSTTConfigs.mockResolvedValue([
+      sttConfig({ vad_provider: '', vad_provider_account_id: null, vad_capability_json: '{}' }),
+    ]);
+    engine.listProviderModels.mockResolvedValue({
+      models: [
+        { id: 'faster-whisper-tiny', meta: { model_type: 'stt', min_tier: 'free' } },
+        { id: 'silero-vad', meta: { model_type: 'vad', min_tier: 'free' } },
+      ],
+    });
+
+    await ensureSeededDefaults('paseto-1');
+
+    expect(r.createSTTConfig).toHaveBeenCalledTimes(1);
+    const arg = r.createSTTConfig.mock.calls[0][0];
+    expect(arg.vad_provider).toBe('soulbitscloud');
+    expect(arg.vad_provider_account_id).toBe('acct-1');
+    expect(capModel(arg.vad_capability_json)).toBe('silero-vad');
+    // The transcription slot is filled too (a whole config is created).
+    expect(arg.transcription_provider).toBe('soulbitscloud');
+    expect(capModel(arg.transcription_capability_json)).toBe('faster-whisper-tiny');
+  });
+
+  it('seeds transcription independently when only the transcription slot is missing', async () => {
+    engineSeededInstall();
+    r.getAllSTTConfigs.mockResolvedValue([
+      sttConfig({ transcription_provider: '', transcription_provider_account_id: null }),
+    ]);
+
+    await ensureSeededDefaults('paseto-1');
+
+    expect(r.createSTTConfig).toHaveBeenCalledTimes(1);
+    expect(r.createSTTConfig.mock.calls[0][0].transcription_provider).toBe('soulbitscloud');
+  });
+
+  it('recreates a deleted STT config with both slots (VAD = silero-vad)', async () => {
+    engineSeededInstall();
+    r.getAllSTTConfigs.mockResolvedValue([]);
+
+    await ensureSeededDefaults('paseto-1');
+
+    expect(r.createSTTConfig).toHaveBeenCalledTimes(1);
+    const arg = r.createSTTConfig.mock.calls[0][0];
+    expect(capModel(arg.transcription_capability_json)).toBe('faster-whisper-tiny');
+    expect(capModel(arg.vad_capability_json)).toBe('silero-vad');
+  });
+
+  it('never overwrites an existing config (no create for a covered type)', async () => {
+    engineSeededInstall();
+
+    await ensureSeededDefaults('paseto-1');
+
+    expect(r.createBackendConfig).not.toHaveBeenCalled();
+    expect(r.createSTTConfig).not.toHaveBeenCalled();
+  });
+});
+
+// ── Guard / account change ──────────────────────────────────────────────────
+
+describe('ensureSeededDefaults — persisted guard', () => {
+  it('does not re-run the gap-fill scan when the guard is present', async () => {
+    engineSeededInstall();
+    r.getAllBackendConfigs.mockResolvedValue([]);
+    mockStorage({ 'seeding_done_v1:acct-1': '1' });
+
+    await ensureSeededDefaults('paseto-1');
+
+    expect(r.createBackendConfig).not.toHaveBeenCalled();
+    expect(engine.listProviderModels).not.toHaveBeenCalled();
+  });
+
+  it('re-runs the gap-fill for a changed account', async () => {
+    r.listAccounts.mockResolvedValue([account({ id: 'acct-new' })]);
+    engineSeededInstall();
+    r.getAllBackendConfigs.mockResolvedValue([]);
+    mockStorage({ 'seeding_done_v1:acct-old': '1' });
+
+    await ensureSeededDefaults('paseto-1');
+
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-new', expect.objectContaining({ api_key: 'paseto-1' }));
+    expect(r.createBackendConfig).toHaveBeenCalledTimes(1);
+    expect(mockedSetItem).toHaveBeenCalledWith('seeding_done_v1:acct-new', '1');
+  });
+});
+
+// ── Trigger wiring ──────────────────────────────────────────────────────────
+
+describe('startSeedingEnsure', () => {
+  it('subscribes to auth:changed, runs the bootstrap ensure, and stops', async () => {
+    engineSeededInstall();
+    auth.getToken.mockResolvedValue('paseto-boot');
+
+    const stop = startSeedingEnsure();
+
+    expect(auth.on).toHaveBeenCalledWith('auth:changed', expect.any(Function));
+
+    // Bootstrap path — a cold start already signed in (no event).
+    await flush();
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', expect.objectContaining({ api_key: 'paseto-boot' }));
+
+    // Re-auth / token renewal path.
+    const handler = auth.on.mock.calls[0][1] as (paseto: string) => void;
+    handler('paseto-refreshed');
+    await flush();
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', expect.objectContaining({ api_key: 'paseto-refreshed' }));
+
+    stop();
+    expect(auth.off).toHaveBeenCalledWith('auth:changed', handler);
+  });
+});

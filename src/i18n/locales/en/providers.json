@@ -18,6 +18,8 @@
   "ok": "OK",
   "unknownType": "Unknown provider type",
   "managedHint": "This account is system-managed — its credentials are written automatically when you sign in to Soulbits Cloud.",
+  "soulbitsAccountName": "Soulbits Cloud",
+  "defaultConfigName": "Soulbits Cloud (default)",
   "deleteTitle": "Delete account",
   "deleteConfirm": "Delete “{{name}}”? Module configs referencing it must be updated first.",
   "deletedToast": "Account deleted",
