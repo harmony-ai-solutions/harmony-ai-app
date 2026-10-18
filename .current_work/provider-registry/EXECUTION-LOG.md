@@ -11,11 +11,13 @@ Legend: ⏳ running · ✅ committed · ⏸ paused/blocked · ⬜ queued
 - ✅ R-MD → research/modelsdev-catalog.md (2026-10-18). MIT corroborated (`github.com/anomalyco/models.dev`, LICENSE (c) 2025, covers code+data; attribution header in 5-2). Schema: flat provider map, 232 providers / 9,048 models; `temperature` bool = gated-emission signal; voice/STT absent from api.json (stays hand-curated); snapshot-at-release pinning + go:embed. Gates 5-2 codegen.
 
 ## Engine chain (harmony-link-private, serial)
-- ⏳ 1-1 competitor removal · ⬜ 3-1 · ⬜ 3-2 · ⬜ 3-3 · ⬜ 4-1..4-13 · ⬜ 5-1 · ⬜ 5-2
+- ✅ 1-1 competitor removal — 34 files +4 new (migration 000051, −2417 net); sync 35→32; gates green (41 pkgs). NOTE: engine report's "app paired migration 000051" handoff is MOOT — verified no app-side engine-schema migrations exist.
+- ⏳ 3-1 provider_accounts schema migration · ⬜ 3-2 · ⬜ 3-3 · ⬜ 4-1..4-13 · ⬜ 5-1 · ⬜ 5-2
 
 ## App chain (harmony-ai-app, serial; 6-1 holds for engine 3-2+5-1)
-- ✅ 1-2 competitor removal — 12 files, −701 lines; 13-member ProviderConfig union; 10 picker types; tsc+jest green (1490/1490)
-- ⏳ 2-1 model catalog + pickers · ⬜ 2-2 · ⬜ 6-1..6-5
+- ✅ 1-2 competitor removal — `04541dd` (12 files, −412 net)
+- ✅ 2-1 model catalog + pickers — tier-2 constants + CatalogModelSelect + 27 tests; saved-value preservation; interim until 5-2
+- ⏳ 2-2 sampling presets + form structure · ⬜ 6-1..6-5
 
 ## Release
 - ⬜ 7-1 docs + dev-channel release (after both chains)

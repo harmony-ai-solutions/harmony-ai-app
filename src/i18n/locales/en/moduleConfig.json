@@ -17,6 +17,7 @@
   "modelCustom": "Custom model…",
   "modelFallbackHint": "Showing offline defaults (catalog unreachable)",
   "modelSelectPlaceholder": "Select a model",
+  "modelContextChip": "{{context}} context · catalog",
   "modeLabel": "View",
   "modeSimple": "Simple",
   "modeAdvanced": "Advanced",

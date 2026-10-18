@@ -34,6 +34,7 @@ import { useAppAlert } from '../../contexts/AppAlertContext';
 import { FormField } from '../../components/config/FormField';
 import { AdvancedSamplingParams } from '../../components/config/AdvancedSamplingParams';
 import { SoulbitsModelSelect } from '../../components/config/SoulbitsModelSelect';
+import { CatalogModelSelect } from '../../components/config/CatalogModelSelect';
 import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
 import { MODULE_DEFAULTS, PROVIDER_DEFAULTS } from '../../constants/moduleDefaults';
 import {
@@ -740,6 +741,23 @@ export const ModuleConfigEditScreen: React.FC = () => {
                   moduleType={modelModuleType}
                   value={form.values.model ?? ''}
                   onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
+                />
+              </View>
+            );
+          }
+          // Catalog-backed model picker (provider-registry 2-1): providers with
+          // entries for this (provider, module) render a picker + "Custom…"
+          // escape hatch; providers without entries keep the free-text input.
+          if (field.catalog && field.key === 'model') {
+            return (
+              <View key={field.key} style={{ marginBottom: 16 }}>
+                <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
+                <CatalogModelSelect
+                  providerType={providerType}
+                  moduleType={modelModuleType}
+                  value={form.values.model ?? ''}
+                  onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
+                  label={field.label}
                 />
               </View>
             );

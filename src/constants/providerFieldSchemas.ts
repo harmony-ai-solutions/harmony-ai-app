@@ -13,6 +13,14 @@ export interface FieldDefinition {
   options?: Array<{ id: string; name: string }>;
   required?: boolean;
   width?: 'full' | 'half';
+  /**
+   * Marks a field as catalog-backed (provider-registry 2-1). The form renderer
+   * routes such fields through the model picker (`CatalogModelSelect`) when
+   * `getModelsForModule(provider, module)` yields entries; otherwise the field
+   * falls back to its normal free-text input. Only the `model` field uses this
+   * today.
+   */
+  catalog?: boolean;
 }
 
 export interface ProviderSchema {
@@ -26,7 +34,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
-      { key: 'model', label: 'Model', type: 'text', placeholder: 'gpt-4o' },
+      { key: 'model', label: 'Model', type: 'text', placeholder: 'gpt-4o', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server. Preset values are applied server-side.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: '-1 for unlimited', disabledValue: -1 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },
@@ -54,7 +62,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: 'http://localhost:8080/v1' },
       { key: 'api_key', label: 'API Key', type: 'password' },
-      { key: 'model', label: 'Model', type: 'text', required: true },
+      { key: 'model', label: 'Model', type: 'text', required: true, catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },
@@ -76,7 +84,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
-      { key: 'model', label: 'Model', type: 'text', required: true, placeholder: 'google/gemini-flash-2.5' },
+      { key: 'model', label: 'Model', type: 'text', required: true, placeholder: 'google/gemini-flash-2.5', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },
@@ -117,7 +125,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'endpoint', label: 'Endpoint URL', type: 'text', required: true, placeholder: 'http://localhost:5000' },
       { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'Optional for self-hosted Soulvoice Engine' },
-      { key: 'model', label: 'Model', type: 'text' },
+      { key: 'model', label: 'Model', type: 'text', catalog: true },
       { key: 'voice_config_file', label: 'Voice Config File', type: 'text' },
       { key: 'format', label: 'Format', type: 'text', placeholder: 'wav' },
       { key: 'sample_rate', label: 'Sample Rate', type: 'number', placeholder: '22050' },
@@ -128,7 +136,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     hasModelFetch: false,
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'model', label: 'Model', type: 'text' },
+      { key: 'model', label: 'Model', type: 'text', catalog: true },
     ],
   },
   mistral: {
@@ -143,7 +151,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: 'http://localhost:11434' },
-      { key: 'model', label: 'Model', type: 'text' },
+      { key: 'model', label: 'Model', type: 'text', catalog: true },
     ],
   },
   comfyui: {
@@ -160,7 +168,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
-      { key: 'model', label: 'Model', type: 'text', placeholder: 'gemini-2.5-flash' },
+      { key: 'model', label: 'Model', type: 'text', placeholder: 'gemini-2.5-flash', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_output_tokens', label: 'Max Output Tokens', type: 'number', disabledValue: 0 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },
@@ -184,7 +192,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
-      { key: 'model', label: 'Model', type: 'text', placeholder: 'grok-3' },
+      { key: 'model', label: 'Model', type: 'text', placeholder: 'grok-3', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 2 },
@@ -215,7 +223,7 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
     fields: [
       { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'api_key', label: 'API Key', type: 'password', required: true },
-      { key: 'model', label: 'Model', type: 'text', placeholder: 'claude-sonnet-4-20250514' },
+      { key: 'model', label: 'Model', type: 'text', placeholder: 'claude-sonnet-4-20250514', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', required: true, placeholder: '4096' },
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.01, min: 0, max: 1 },
