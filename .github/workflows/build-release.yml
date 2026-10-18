@@ -410,6 +410,27 @@ jobs:
             echo "Dispatch run: app/prod/latest.json intentionally NOT published"
           fi
 
+      - name: Invalidate CloudFront manifest cache
+        # The download distribution uses Managed-CachingOptimized: latest.json
+        # is cached at the edge up to 24h and origin Cache-Control is IGNORED
+        # (owner ruling 2026-10-18: CI invalidates after publish). Requires the
+        # CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID repo variable and the
+        # ci-releases-uploader cloudfront:CreateInvalidation grant (tofu
+        # shared env). Skips with a warning when the variable is unset so
+        # publishes never fail on it.
+        env:
+          DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISTRIBUTION_ID}" ]; then
+            echo "::warning::CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID variable not set — skipping invalidation (manifest may serve stale up to 24h at the edge)"
+            exit 0
+          fi
+          INVALIDATION=$(aws cloudfront create-invalidation \
+            --distribution-id "${DISTRIBUTION_ID}" \
+            --paths "/app/dev/latest.json /app/prod/latest.json")
+          echo "Invalidation created: ${INVALIDATION}"
+
   # ──────────────────────────────────────────────
   # Job 4: Create GitHub Release with download links
   # ──────────────────────────────────────────────
