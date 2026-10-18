@@ -22,6 +22,7 @@ import { I18nProvider } from './src/contexts/I18nContext';
 import { AppAlertProvider } from './src/contexts/AppAlertContext';
 import { AppToastProvider } from './src/contexts/AppToastContext';
 import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoadingScreen';
+import { EngineBootGate } from './src/components/boot/EngineBootGate';
 import { LockScreen } from './src/components/lock/LockScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { DynamicBackground } from './src/components/background/DynamicBackground';
@@ -130,7 +131,14 @@ function AppShell() {
         <DynamicBackground />
       </View>
       <View style={styles.foregroundLayer}>
-        <AppNavigator navigationRef={navigationRef} />
+        {/* Owner ruling 2026-10-18: hold the branded splash until the embedded
+            engine reports ready. This gate wraps the whole navigation tree
+            (including AuthGate at the navigator root), so the boot splash is the
+            first thing visible; providers above (DatabaseContext engine
+            lifecycle, update check, backup headless task) are unaffected. */}
+        <EngineBootGate>
+          <AppNavigator navigationRef={navigationRef} />
+        </EngineBootGate>
         {/* Non-blocking app-update banner (plan 7-10 §4; engine ships with the app). */}
         <UpdateBanner />
         {isLocked && <LockScreen />}

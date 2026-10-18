@@ -1,0 +1,7 @@
+{
+  "startingEngine": "Starting engine…",
+  "engineFailed": "The engine couldn't start",
+  "engineFailedBody": "Soulbits couldn't start its engine. You can try again — if it keeps failing, share the diagnostics so we can take a look.",
+  "retry": "Try again",
+  "copyDiagnostics": "Share diagnostics"
+}

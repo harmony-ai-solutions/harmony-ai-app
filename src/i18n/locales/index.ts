@@ -17,3 +17,4 @@ export { default as lifecycle } from './en/lifecycle.json';
 export { default as updates } from './en/updates.json';
 export { default as engineLogs } from './en/engineLogs.json';
 export { default as engineStatus } from './en/engineStatus.json';
+export { default as boot } from './en/boot.json';

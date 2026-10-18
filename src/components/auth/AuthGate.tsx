@@ -37,6 +37,7 @@ import { isStoreVariant } from '../../config/appVariant';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedButton } from '../themed/ThemedButton';
+import { BootSplash } from '../boot/BootSplash';
 
 // ── Component ─────────────────────────────────────────────────────────────
 
@@ -63,7 +64,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
   }
 
   if (status === 'loading') {
-    return <GateSplash theme={theme} label={t('storeGate_checking')} />;
+    return <BootSplash label={t('storeGate_checking')} testIDPrefix="auth-gate-splash" />;
   }
 
   const waiting = pendingSignIn !== null && pendingSignIn.status === 'pending';
@@ -124,26 +125,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
 };
 
 // ── Splash ────────────────────────────────────────────────────────────────
-
-interface GateSplashProps {
-  theme: ReturnType<typeof useAppTheme>['theme'];
-  label: string;
-}
-
-const GateSplash: React.FC<GateSplashProps> = ({ theme, label }) => (
-  <ThemedView style={styles.splash} testID="auth-gate-splash">
-    <ThemedText weight="bold" size={30} hierarchy="header" style={styles.splashBrand}>
-      Soulbits
-    </ThemedText>
-    <ActivityIndicator
-      color={theme?.colors.accent.primary ?? '#8f3ba7'}
-      testID="auth-gate-splash-spinner"
-    />
-    <ThemedText variant="secondary" size={14} style={styles.splashLabel}>
-      {label}
-    </ThemedText>
-  </ThemedView>
-);
+// The branded splash visual now lives in the shared `BootSplash` component
+// (reused by `EngineBootGate`); this gate passes its own label + testID prefix.
 
 const styles = StyleSheet.create({
   wall: {
@@ -180,18 +163,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   waitingText: {
-    textAlign: 'center',
-  },
-  splash: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-  },
-  splashBrand: {
-    letterSpacing: 1,
-  },
-  splashLabel: {
     textAlign: 'center',
   },
 });
