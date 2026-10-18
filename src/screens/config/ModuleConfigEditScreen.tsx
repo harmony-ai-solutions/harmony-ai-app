@@ -35,9 +35,15 @@ import { useAppAlert } from '../../contexts/AppAlertContext';
 import { AccountForm } from '../../components/providers/AccountForm';
 import { ProviderSlotSection } from '../../components/config/ProviderSlotSection';
 import type { SlotState } from '../../components/config/ProviderSlotSection';
-import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
+import {
+  MODULE_TYPES,
+  ModuleTypeConfig,
+  ProviderOption,
+  STT_SLOT_PROVIDER_OPTIONS,
+} from '../../constants/moduleConfiguration';
 import { MODULE_DEFAULTS, PROVIDER_DEFAULTS } from '../../constants/moduleDefaults';
 import {
+  filterAvailableProviders,
   getAvailableProviders,
   STORE_PROVIDER_ID,
 } from '../../services/variant/providerAvailability';
@@ -220,6 +226,19 @@ export const ModuleConfigEditScreen: React.FC = () => {
   );
 
   const providerOptions = useMemo(() => getAvailableProviders(moduleType), [moduleType]);
+
+  // Per-slot provider lists (provider-registry 6-5 step 2): STT's transcription
+  // and VAD slots each carry their own option list (scoped to the engine clients
+  // that implement the capability); every other module uses the module list.
+  const providerOptionsForSlot = useCallback(
+    (slot: string): ProviderOption[] => {
+      if (isSTT && (slot === 'transcription' || slot === 'vad')) {
+        return filterAvailableProviders(STT_SLOT_PROVIDER_OPTIONS[slot]);
+      }
+      return providerOptions;
+    },
+    [isSTT, providerOptions],
+  );
 
   // Restore the persisted Simple/Advanced preference.
   useEffect(() => {
@@ -568,7 +587,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
           slot={def.slot}
           slotLabel={def.label}
           modelModuleType={def.modelModuleType}
-          providerOptions={providerOptions}
+          providerOptions={providerOptionsForSlot(def.slot)}
           state={slotState}
           accounts={typeAccounts}
           showAdvanced={showAdvanced}

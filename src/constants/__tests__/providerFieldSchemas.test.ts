@@ -1,0 +1,91 @@
+/**
+ * providerFieldSchemas — capability schema additions owed by the engine phases
+ * (provider-registry 6-5 step 3): full ollama option set, mistral param rules,
+ * localai native-name superset, google thinking (4-3), xai image_model (4-4),
+ * elevenlabs speed (4-6), soulvoice Silero VAD keys (4-11).
+ */
+
+import { PROVIDER_SCHEMAS } from '../providerFieldSchemas';
+
+const keys = (type: string): string[] =>
+  (PROVIDER_SCHEMAS[type]?.fields ?? []).map(f => f.key);
+const field = (type: string, key: string) =>
+  (PROVIDER_SCHEMAS[type]?.fields ?? []).find(f => f.key === key);
+
+describe('providerFieldSchemas — 6-5 capability additions', () => {
+  it('ollama carries the full native option set (not the shortened list)', () => {
+    expect(keys('ollama')).toEqual(
+      expect.arrayContaining([
+        'model',
+        'top_k',
+        'min_p',
+        'repeat_penalty',
+        'repeat_last_n',
+        'num_ctx',
+        'num_predict',
+        'stop',
+        'seed',
+        'think',
+        'format',
+        'keep_alive',
+      ]),
+    );
+  });
+
+  it('ollama and localai flip hasModelFetch on (research §8.4/§8.5)', () => {
+    expect(PROVIDER_SCHEMAS.ollama.hasModelFetch).toBe(true);
+    expect(PROVIDER_SCHEMAS.localai.hasModelFetch).toBe(true);
+  });
+
+  it('mistral uses random_seed, drops max_completion_tokens, temperature max 1.5', () => {
+    const mistralKeys = keys('mistral');
+    expect(mistralKeys).toContain('random_seed');
+    expect(mistralKeys).not.toContain('seed');
+    expect(mistralKeys).not.toContain('max_completion_tokens');
+    expect(field('mistral', 'temperature')?.max).toBe(1.5);
+  });
+
+  it('mistral exposes the reasoning_effort enum values', () => {
+    const ids = (field('mistral', 'reasoning_effort')?.options ?? []).map(o => o.id);
+    expect(ids).toEqual(
+      expect.arrayContaining(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']),
+    );
+  });
+
+  it('localai exposes the native sampling names accepted on /v1', () => {
+    expect(keys('localai')).toEqual(
+      expect.arrayContaining([
+        'top_k',
+        'min_p',
+        'repeat_penalty',
+        'repeat_last_n',
+        'reasoning_effort',
+      ]),
+    );
+  });
+
+  it('google carries the thinking_level / thinking_budget fields (4-3)', () => {
+    expect(keys('google')).toContain('thinking_level');
+    expect(keys('google')).toContain('thinking_budget');
+  });
+
+  it('xai carries the dedicated image_model field (4-4)', () => {
+    expect(keys('xai')).toContain('image_model');
+  });
+
+  it('elevenlabs carries the speed field (4-6)', () => {
+    expect(keys('elevenlabs')).toContain('speed');
+  });
+
+  it('soulvoice carries the Silero VAD params (4-11)', () => {
+    expect(keys('soulvoice')).toEqual(
+      expect.arrayContaining([
+        'threshold',
+        'min_speech_duration_ms',
+        'min_silence_duration_ms',
+        'speech_pad_ms',
+        'return_seconds',
+      ]),
+    );
+  });
+});

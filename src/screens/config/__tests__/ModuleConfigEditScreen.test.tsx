@@ -384,14 +384,25 @@ describe('ModuleConfigEditScreen — account-switch revalidation (§3.2)', () =>
 });
 
 describe('ModuleConfigEditScreen — STT dual-slot round-trip', () => {
-  it('renders two provider slots and saves both account FKs + overlays', async () => {
+  it('renders two provider slots with per-slot lists and saves both account FKs + overlays', async () => {
     mockModuleType = 'stt';
     const utils = await renderScreen();
 
-    // Two Provider sections (transcription + VAD), each offering OpenAI.
-    expect(utils.getAllByText('OpenAI').length).toBe(2);
-    await fireEvent.press(utils.getAllByText('OpenAI')[0]);
-    await fireEvent.press(utils.getAllByText('OpenAI')[1]);
+    // Two Provider sections (transcription + VAD) that do NOT share a list
+    // (provider-registry 6-5 step 2): transcription offers OpenAI + the
+    // reactivated providers (ollama experimental, localai) + soulvoice; VAD
+    // offers ONLY the two providers with real VAD clients.
+    expect(utils.getAllByText('OpenAI').length).toBe(1);
+    expect(utils.getAllByText('Ollama (experimental)').length).toBe(1);
+    expect(utils.getAllByText('LocalAI').length).toBe(1);
+    // soulbitscloud + soulvoice appear once per slot (both slots offer them).
+    expect(utils.getAllByText('Soulbits Cloud').length).toBe(2);
+    expect(utils.getAllByText('Soulvoice').length).toBe(2);
+
+    // Transcription → OpenAI; VAD → Soulbits Cloud (index 1 = the VAD slot,
+    // which renders after the transcription slot).
+    await fireEvent.press(utils.getByText('OpenAI'));
+    await fireEvent.press(utils.getAllByText('Soulbits Cloud')[1]);
 
     await waitFor(() => expect(utils.getAllByText('Transcription Capability').length).toBe(1));
     expect(utils.getAllByText('VAD Capability').length).toBe(1);
@@ -404,7 +415,7 @@ describe('ModuleConfigEditScreen — STT dual-slot round-trip', () => {
     expect(body.transcription_provider).toBe('openai');
     expect(body.transcription_provider_account_id).toBeNull();
     expect(typeof body.transcription_capability_json).toBe('string');
-    expect(body.vad_provider).toBe('openai');
+    expect(body.vad_provider).toBe('soulbitscloud');
     expect(typeof body.vad_capability_json).toBe('string');
     expect(body.name).toBe('Voice');
   });

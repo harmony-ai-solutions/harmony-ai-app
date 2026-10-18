@@ -42,6 +42,17 @@ export function isProviderAvailable(providerId: string): boolean {
 }
 
 /**
+ * Variant-filter an arbitrary provider-option list. Full: unchanged; store: the
+ * soulbitscloud option only. Shared by {@link getAvailableProviders} and the STT
+ * per-slot lists (provider-registry 6-5 — the transcription/VAD slots carry
+ * their own option lists, which still respect the store lock).
+ */
+export function filterAvailableProviders(options: ProviderOption[]): ProviderOption[] {
+  if (!isStoreVariant()) return options;
+  return options.filter(p => p.id === STORE_PROVIDER_ID);
+}
+
+/**
  * The provider options a picker should render for one module type. Store: the
  * soulbitscloud option only (or `[]` when the module has no cloud option — the
  * caller then hides the module's config surface). Full: the raw table list.
@@ -51,8 +62,7 @@ export function getAvailableProviders(moduleType: string): ProviderOption[] {
     m => m.id === moduleType,
   );
   if (!module) return [];
-  if (!isStoreVariant()) return module.providerOptions;
-  return module.providerOptions.filter(p => p.id === STORE_PROVIDER_ID);
+  return filterAvailableProviders(module.providerOptions);
 }
 
 /**

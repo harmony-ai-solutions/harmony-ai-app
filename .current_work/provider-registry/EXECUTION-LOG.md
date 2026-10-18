@@ -24,7 +24,7 @@ Legend: ⏳ running · ✅ committed · ⏸ paused/blocked · ⬜ queued
 - ✅ 1-2 competitor removal — `04541dd` (12 files, −412 net)
 - ✅ 2-1 model catalog + pickers — `c186e1e` (tier-2 constants + CatalogModelSelect + 27 tests)
 - ✅ 2-2 sampling presets + form structure — `27a80c1` (usePresets + SamplingPresetSelect + 4-section form; 1538/1538)
-- ⏳ 6-1 ✅ `4d1128e` · 6-2 ✅ `1713d94` · 6-3 ✅ `1d53efa` · 6-4 ✅ `tbd` (ensure-flow: ungated token on auth/re-auth + one-shot gap-fill incl. VAD; 17 tests) · ⏳ 6-5 running (LAST app code phase)
+- ⏳ 6-1 ✅ `4d1128e` · 6-2 ✅ `1713d94` · 6-3 ✅ `1d53efa` · 6-4 ✅ `a7068e4` (ensure-flow: ungated token on auth/re-auth + one-shot gap-fill incl. VAD; 17 tests) · ⏳ 6-5 running (LAST app code phase)
 
 ## Release
 - ⬜ 7-1 docs + dev-channel release (after both chains)
