@@ -27,7 +27,9 @@ Legend: ⏳ running · ✅ committed · ⏸ paused/blocked · ⬜ queued
 - ⏳ 6-1 ✅ `4d1128e` · 6-2 ✅ `1713d94` · 6-3 ✅ `1d53efa` · 6-4 ✅ `a7068e4` (ensure-flow: ungated token on auth/re-auth + one-shot gap-fill incl. VAD; 17 tests) · ⏳ 6-5 running (LAST app code phase)
 
 ## Release
-- ⬜ 7-1 docs + dev-channel release (after both chains)
+- ⬜ 7-1 — app docs/bump DONE (`tbd`, version 0.4.5); engine docs/bump RUNNING; then owner go for: push branches + engine android_only dispatch + app publish_latest/build_ios=false
 
 ## Event log
 - 2026-10-18: wave 1 dispatched — R-AUDIO, R-MD, engine 1-1, app 1-2.
+- 2026-10-18: engine chain complete (1-1 → 5-2, 19 commits incl. Silero client v0.1.2 regen+push).
+- 2026-10-18: app chain complete (1-2 → 6-5, gates green throughout; runInBand 1631/1631 final).

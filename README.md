@@ -20,6 +20,7 @@ Harmony AI App is a React Native mobile application for the Harmony AI ecosystem
 - **Embedded engine (primary)**: the engine runs on the device (Android: a sidecar child process shipping `libengine.so`; iOS: the in-process `SoulbitsEngine.xcframework`) and owns the one database. The app reads and writes through its loopback management REST API + event WebSocket.
 - **Desktop pairing (engine↔engine)**: the on-device engine syncs with a desktop Soulbits Engine over the LAN using the **changeset-v1** protocol (SQLite session-extension changesets; the desktop is the write authority, the phone yields and buffers).
 - **Cloud account**: sign-in with a SoulbitsCloud account injects inference provider configs; backup is **user-owned-storage** (encrypted engine snapshots to the user's own iCloud / WebDAV / Dropbox / OneDrive / local folder) with a W1 account-escrow key wrap — the operator stores no user database data.
+- **Shared provider accounts & live model lists**: enter an API key **once** as a provider account and reuse it across every module config; **test the key in-app** (valid / invalid / throttled / blocked / scope-limited / unreachable), pick models and voices from **live provider lists** with a catalog fallback and sampling **presets**, and activate **Mistral, Ollama and LocalAI** alongside Soulbits Cloud. Fresh sign-ins are seeded with ready-to-use Soulbits Cloud defaults.
 - **Privacy-First**: your data lives on your device (and in storage you own).
 - **Open Source**: completely transparent and customizable
 

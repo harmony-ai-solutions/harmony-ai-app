@@ -24,10 +24,25 @@
 
 `src/services/engine/engineContract.ts` exports `ENGINE_CONTRACT_VERSION`,
 mirroring `info.version` in the engine repo's
-`docs/api/management/openapi.yaml` (today `1.5.0`). `checkContractVersion(artifact)`
+`docs/api/management/openapi.yaml` (today `1.6.0`). `checkContractVersion(artifact)`
 rejects an engine artifact that advertises a contract **older** than the one the
 TS layer is written against. `checkContractVersionExact` backs the fixture drift
 canary.
+
+**Latest bump — 1.5.0 → 1.6.0 (provider-registry 3-2/5-1/5-2/6-1).** The
+provider surface re-targeted from the per-type `provider_config_*` tables to the
+unified `provider_accounts` model: `GET /api/providers` returns account-shaped
+rows grouped by type, `POST` takes `{type, account}`, `PUT` takes `{account}`,
+`DELETE` 409 carries `referencing_configs`, and `GET /api/providers/:id` returns
+the merged account+overlay object when referenced. The retired
+`POST /api/validate-provider` + `POST /api/models` are replaced by
+`POST /api/providers/verify` (`{state, detail?, payload?}`) and
+`POST /api/providers/models` (`{models, voices?}`), and
+`GET /api/providers/capabilities` serves the tier-2 catalog. Module-config writes
+are flat (`{provider_account_id, capability_json, …}`). New shared fixtures:
+`providerList` / `providerRefresh` / `providerVerify` / `providerModels` /
+`providerCapabilities` / `moduleConfig` / `moduleConfigCreate`. See
+[`provider-registry.md`](provider-registry.md).
 
 **Build-time gate (`scripts/check-engine-contract-build.cjs`).** Because the
 embedded engine ships WITH the app, a contract mismatch is a build defect, not a

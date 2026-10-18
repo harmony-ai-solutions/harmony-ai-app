@@ -1,5 +1,19 @@
 # Testing Strategy
 
+> **UPDATE (2026-10-19, provider-registry 7-1):** the suite grew with the
+> provider-registry workstream. New/updated suites cover the shared **provider
+> accounts** model (`ProvidersScreen`, `AccountForm`, the `providers` repository
+> adapter), the **catalog-backed pickers** (`CatalogModelSelect`,
+> `SamplingPresetSelect`, `usePresets`), the **seeding ensure-flow**
+> (`src/services/providers/__tests__/seeding.test.ts`), the account/capability
+> schema split (`accountFieldSchemas`, `providerFieldSections`) and the
+> reactivated provider pickers (`moduleConfiguration`). The **engine-contract
+> gates** moved to contract version **1.6.0** (the accounts / verify / models /
+> capabilities surface) — see [`docs/provider-registry.md`](provider-registry.md)
+> for the architecture and
+> [`docs/engine-contract-gates.md`](engine-contract-gates.md) for the gate
+> mechanics. Three competitor providers were removed (R9).
+>
 > **UPDATE (2026-10-12, task 3-4):** the **integration** project and the
 > **schema-parity / SQLite-driver** sections below are **historical**. The
 > `__tests__/integration/` sync-protocol suites, the node SQLite shim
