@@ -27,7 +27,7 @@ Legend: ⏳ running · ✅ committed · ⏸ paused/blocked · ⬜ queued
 - ⏳ 6-1 ✅ `4d1128e` · 6-2 ✅ `1713d94` · 6-3 ✅ `1d53efa` · 6-4 ✅ `a7068e4` (ensure-flow: ungated token on auth/re-auth + one-shot gap-fill incl. VAD; 17 tests) · ⏳ 6-5 running (LAST app code phase)
 
 ## Release
-- ⬜ 7-1 — app docs/bump DONE (`tbd`, version 0.4.5); engine docs/bump RUNNING; then owner go for: push branches + engine android_only dispatch + app publish_latest/build_ios=false
+- 7-1: app docs/bump ✅ `da969e9` (v0.4.5) · engine docs/bump ✅ `472ef9e` (AppVersion v0.5.0-dev, openapi 1.6.0 + fixtures 49/49) · **AWAITING OWNER GO** for: push branches → engine android_only dispatch (v0.5.0-dev) → artifact 200 check → ENGINE_SIDECAR_VARIABLE=v0.5.0-dev → app publish_latest dispatch (0.4.5, build_ios=false) → APK/manifest verify. Never a tag; never republish.
 
 ## Event log
 - 2026-10-18: wave 1 dispatched — R-AUDIO, R-MD, engine 1-1, app 1-2.
