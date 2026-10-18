@@ -14,10 +14,16 @@ import React from 'react';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { CUSTOM_MODEL_INPUT_TESTID } from '../../../components/config/CatalogModelSelect';
 
-afterEach(cleanup);
-beforeEach(() => {
-  cleanup();
+afterEach(async () => {
+  await cleanup();
+});
+beforeEach(async () => {
+  await cleanup();
   mockModuleType = 'backend';
+  resetPresetsCache();
+  (engineApiClient.listPresets as jest.Mock).mockReset();
+  (engineApiClient.getPreset as jest.Mock).mockReset();
+  (engineApiClient.listPresets as jest.Mock).mockResolvedValue({ presets: [] });
 });
 
 /** Module type the mocked `useRoute` reports; reset per test. */
@@ -95,13 +101,27 @@ jest.mock('../../../components/themed/ThemedCard', () => {
 });
 jest.mock('../../../components/themed/SectionHeader', () => {
   const React = require('react');
-  const { View } = require('react-native');
-  return { __esModule: true, SectionHeader: (p: any) => React.createElement(View, p) };
+  const { View, Text } = require('react-native');
+  return {
+    __esModule: true,
+    SectionHeader: ({ title, ...p }: any) =>
+      React.createElement(View, p, React.createElement(Text, null, title)),
+  };
 });
 jest.mock('../../../components/themed/ScreenHeader', () => {
   const React = require('react');
   const { View } = require('react-native');
   return { __esModule: true, ScreenHeader: (p: any) => React.createElement(View, p) };
+});
+
+// Engine management client (preset dropdown wiring, 2-2): keep the real module
+// surface but stub the singleton's preset methods.
+jest.mock('../../../services/engine/EngineApiClient', () => {
+  const actual = jest.requireActual('../../../services/engine/EngineApiClient');
+  return {
+    ...actual,
+    engineApiClient: { listPresets: jest.fn(), getPreset: jest.fn() },
+  };
 });
 
 // Heavy collaborators not exercised on the create-mode render path.
@@ -152,6 +172,8 @@ jest.mock('../../../database/repositories', () => {
 });
 
 import { ModuleConfigEditScreen } from '../ModuleConfigEditScreen';
+import { engineApiClient } from '../../../services/engine/EngineApiClient';
+import { resetPresetsCache } from '../../../hooks/usePresets';
 
 async function renderScreen() {
   const utils = await render(<ModuleConfigEditScreen />);
@@ -201,5 +223,108 @@ describe('ModuleConfigEditScreen — catalog-backed model field', () => {
     // VAD slot → OpenAI → no VAD catalog, so the model field stays free text.
     fireEvent.press(utils.getAllByText('OpenAI')[1]);
     await waitFor(() => expect(utils.getByTestId(CUSTOM_MODEL_INPUT_TESTID)).toBeTruthy());
+  });
+});
+
+describe('ModuleConfigEditScreen — form sections + preset dropdown (2-2)', () => {
+  it('partitions the provider body into Provider → Credentials → Capability', async () => {
+    const utils = await renderScreen();
+
+    await fireEvent.press(utils.getByText('OpenAI'));
+
+    // Section headers (Provider / Credentials / Capability) are rendered.
+    await waitFor(() => expect(utils.getByText('Credentials')).toBeTruthy());
+    expect(utils.getByText('Provider')).toBeTruthy();
+    expect(utils.getByText('Capability')).toBeTruthy();
+
+    // Credentials hold the account fields; the model lives in Capability.
+    expect(utils.getByText('API Key')).toBeTruthy();
+    expect(utils.getByText('Model')).toBeTruthy();
+
+    // Deep sampling params stay collapsed in Simple mode.
+    expect(utils.queryByText('Temperature')).toBeNull();
+
+    // …and appear once the Advanced view is selected.
+    await fireEvent.press(utils.getByText('modeAdvanced'));
+    await waitFor(() => expect(utils.getByText('Temperature')).toBeTruthy());
+  });
+
+  it('renders the STT dual-slot sections for both slots', async () => {
+    mockModuleType = 'stt';
+    const utils = await renderScreen();
+
+    // Select a provider for each slot so the sections render.
+    await fireEvent.press(utils.getAllByText('OpenAI')[0]);
+    await fireEvent.press(utils.getAllByText('OpenAI')[1]);
+
+    // Each slot gets its own Provider/Credentials/Capability headers.
+    await waitFor(() => expect(utils.getAllByText('Transcription Credentials').length).toBe(1));
+    expect(utils.getAllByText('VAD Credentials').length).toBe(1);
+    expect(utils.getAllByText('Transcription Capability').length).toBe(1);
+    expect(utils.getAllByText('VAD Capability').length).toBe(1);
+  });
+
+  it('shows the engine preset dropdown in Simple mode and clears it via Manual', async () => {
+    (engineApiClient.listPresets as jest.Mock).mockResolvedValue({
+      presets: [{ name: 'creative', source: 'bundled', param_count: 2 }],
+    });
+    (engineApiClient.getPreset as jest.Mock).mockResolvedValue({
+      name: 'creative',
+      source: 'bundled',
+      params: { temperature: 0.9 },
+    });
+
+    const utils = await renderScreen();
+    await fireEvent.press(utils.getByText('OpenAI'));
+
+    // sampling_preset_name is now a Simple-mode dropdown (not a text input).
+    const presetRow = await waitFor(() => utils.getByLabelText('Sampling Preset'));
+    await fireEvent.press(presetRow);
+    await waitFor(() => expect(utils.getByText('creative')).toBeTruthy());
+    await fireEvent.press(utils.getByText('creative'));
+
+    // Selecting the preset shows its param preview chips.
+    await waitFor(() => expect(utils.getByTestId('preset-chip-temperature')).toBeTruthy());
+    expect(utils.getByText(/temperature=0\.9/)).toBeTruthy();
+
+    // "Manual" clears the preset → chips disappear.
+    await fireEvent.press(utils.getByLabelText('Sampling Preset'));
+    await waitFor(() => expect(utils.getByText('presetManual')).toBeTruthy());
+    await fireEvent.press(utils.getByText('presetManual'));
+    await waitFor(() => expect(utils.queryByTestId('preset-chip-temperature')).toBeNull());
+  });
+
+  it('labels an explicitly edited local value as overriding the preset', async () => {
+    (engineApiClient.listPresets as jest.Mock).mockResolvedValue({
+      presets: [{ name: 'creative', source: 'bundled', param_count: 1 }],
+    });
+    (engineApiClient.getPreset as jest.Mock).mockResolvedValue({
+      name: 'creative',
+      source: 'bundled',
+      params: { temperature: 0.9 },
+    });
+
+    const utils = await renderScreen();
+    await fireEvent.press(utils.getByText('OpenAI'));
+    // Advanced view so the sampling inputs are visible.
+    await fireEvent.press(utils.getByText('modeAdvanced'));
+
+    const presetRow = await waitFor(() => utils.getByLabelText('Sampling Preset'));
+    await fireEvent.press(presetRow);
+    await waitFor(() => expect(utils.getByText('creative')).toBeTruthy());
+    await fireEvent.press(utils.getByText('creative'));
+    await waitFor(() => expect(utils.getByTestId('preset-chip-temperature')).toBeTruthy());
+
+    // No override marker until the user edits the local value …
+    expect(utils.queryByTestId('preset-chip-override-temperature')).toBeNull();
+
+    // … then the local input stays editable and is labelled as winning.
+    const temperatureInput = utils.getByDisplayValue('0.7');
+    await fireEvent.changeText(temperatureInput, '0.5');
+
+    await waitFor(() =>
+      expect(utils.getByTestId('preset-chip-override-temperature')).toBeTruthy(),
+    );
+    expect(utils.getByText(/temperature=0\.9/)).toBeTruthy();
   });
 });

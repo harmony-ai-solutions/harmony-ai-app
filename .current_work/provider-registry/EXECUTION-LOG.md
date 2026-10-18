@@ -16,8 +16,9 @@ Legend: ⏳ running · ✅ committed · ⏸ paused/blocked · ⬜ queued
 
 ## App chain (harmony-ai-app, serial; 6-1 holds for engine 3-2+5-1)
 - ✅ 1-2 competitor removal — `04541dd` (12 files, −412 net)
-- ✅ 2-1 model catalog + pickers — tier-2 constants + CatalogModelSelect + 27 tests; saved-value preservation; interim until 5-2
-- ⏳ 2-2 sampling presets + form structure · ⬜ 6-1..6-5
+- ✅ 2-1 model catalog + pickers — `c186e1e` (tier-2 constants + CatalogModelSelect + 27 tests)
+- ✅ 2-2 sampling presets + form structure — `tbd` (usePresets + SamplingPresetSelect + 4-section form; 1538/1538)
+- ⏸ **HOLD at 6-1** — resumes when engine lands 3-2 AND 5-1 (per summary.md contract)
 
 ## Release
 - ⬜ 7-1 docs + dev-channel release (after both chains)

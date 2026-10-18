@@ -338,6 +338,37 @@ export interface ProviderWriteResponseDto {
   config: unknown;
 }
 
+// ── Sampling presets (provider-registry 2-2) ─────────────────────────────
+// The engine's existing preset system (YAML presets, boot-time cache,
+// server-side application via `sampling_preset_name`). Wire shapes mirror
+// `management/routes_presets.go` EXACTLY: `PresetListItem` / `PresetListResponse`
+// and `PresetDetailResponse`. Per plan §11 A3 a preset supplies DEFAULTS; the
+// config's explicit local values override it engine-side.
+
+/** One preset summary row (`GET /api/presets` → `presets[]`). */
+export interface PresetListItemDto {
+  name: string;
+  /** Origin bucket (`bundled` / `user`, engine-defined string). */
+  source: string;
+  /** Number of parameters the preset overrides (`param_count`). */
+  param_count: number;
+  /** `omitempty` — absent when the preset carries no description. */
+  description?: string;
+}
+
+export interface PresetListResponseDto {
+  presets: PresetListItemDto[];
+}
+
+/** `GET /api/presets/:name` — the preset detail INCLUDING its override map. */
+export interface PresetDetailResponseDto {
+  name: string;
+  source: string;
+  description?: string;
+  /** The override values the preset supplies (`params`). */
+  params: Record<string, unknown>;
+}
+
 /** One entity's aggregated social stats (`GET /api/stats/characters`). */
 export interface CharacterStatDto {
   likes: number;
@@ -1209,6 +1240,30 @@ export class EngineApiClient {
   /** A single provider config by id across all provider types. */
   getProvider(id: string): Promise<ProviderGetResponseDto> {
     return this.getJson<ProviderGetResponseDto>(`/api/providers/${encodeURIComponent(id)}`);
+  }
+
+  // ── Sampling presets (provider-registry 2-2) ───────────────────────────
+
+  /**
+   * List the engine's sampling presets (`GET /api/presets`) — name + source +
+   * `param_count` (and an optional description). Backs the module-config form's
+   * preset dropdown; the engine applies a named preset server-side via
+   * `sampling_preset_name` (preset supplies defaults, locals override — §11 A3).
+   */
+  listPresets(): Promise<PresetListResponseDto> {
+    return this.getJson<PresetListResponseDto>('/api/presets');
+  }
+
+  /**
+   * A single preset's detail INCLUDING its `params` override map
+   * (`GET /api/presets/:name`). Backs the form's "which values does this preset
+   * set?" preview chips. A 404 (unknown preset) surfaces as an
+   * {@link EngineApiError}.
+   */
+  getPreset(name: string): Promise<PresetDetailResponseDto> {
+    return this.getJson<PresetDetailResponseDto>(
+      `/api/presets/${encodeURIComponent(name)}`,
+    );
   }
 
   // ── Engine identity (plan 7-10 §3) ─────────────────────────────────────

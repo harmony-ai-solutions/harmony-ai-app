@@ -419,3 +419,80 @@ describe('engine logs', () => {
     expect(put.body).toEqual({ defaultLevel: 'trace' });
   });
 });
+
+// ── Sampling presets (provider-registry 2-2) ─────────────────────────────
+describe('sampling presets', () => {
+  it('GETs the preset list (name/source/param_count, description omitempty)', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/presets',
+        json: {
+          presets: [
+            { name: 'creative', source: 'bundled', param_count: 3, description: 'High temperature' },
+            { name: 'precise', source: 'user', param_count: 2 },
+          ],
+        },
+      },
+    ]);
+
+    const res = await clientWith(server).listPresets();
+
+    expect(res.presets).toHaveLength(2);
+    expect(res.presets[0]).toEqual({
+      name: 'creative',
+      source: 'bundled',
+      param_count: 3,
+      description: 'High temperature',
+    });
+    // description is omitempty — absent on the second row.
+    expect(res.presets[1].description).toBeUndefined();
+    expect(res.presets[1].param_count).toBe(2);
+    const call = server.lastCall('GET', '/api/presets')!;
+    expect(call.path).toBe('/api/presets');
+  });
+
+  it('GETs a preset detail including the params override map', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/presets/creative',
+        json: {
+          name: 'creative',
+          source: 'bundled',
+          description: 'High temperature',
+          params: { temperature: 0.9, top_p: 0.95, max_tokens: 4096 },
+        },
+      },
+    ]);
+
+    const res = await clientWith(server).getPreset('creative');
+
+    expect(res.name).toBe('creative');
+    expect(res.params).toEqual({ temperature: 0.9, top_p: 0.95, max_tokens: 4096 });
+    expect(server.lastCall('GET', '/api/presets/creative')).toBeTruthy();
+  });
+
+  it('URL-encodes the preset name path segment', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: /\/api\/presets\//,
+        json: { name: 'a b', source: 'user', params: {} },
+      },
+    ]);
+
+    await clientWith(server).getPreset('a b');
+
+    const call = server.lastCall('GET', /\/api\/presets\//)!;
+    expect(call.path).toBe('/api/presets/a%20b');
+  });
+
+  it('surfaces a 404 for an unknown preset as EngineApiError', async () => {
+    const server = createMockManagementServer([]); // no route → 404
+    await expect(clientWith(server).getPreset('missing')).rejects.toMatchObject({
+      name: 'EngineApiError',
+      status: 404,
+    });
+  });
+});

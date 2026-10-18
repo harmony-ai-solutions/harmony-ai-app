@@ -35,6 +35,10 @@ export const SIMPLE_FIELD_KEYS: ReadonlySet<string> = new Set([
   'format',
   'workflow_profiles',
   'voice_config_file',
+  // provider-registry 2-2: the sampling preset dropdown is an essential
+  // control (it supplies defaults for the sampling params), so it is visible
+  // in Simple mode. The params it feeds stay behind the Advanced toggle.
+  'sampling_preset_name',
 ]);
 
 /** True when the field belongs to the Simple (essential) view. */

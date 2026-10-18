@@ -35,6 +35,7 @@ import { FormField } from '../../components/config/FormField';
 import { AdvancedSamplingParams } from '../../components/config/AdvancedSamplingParams';
 import { SoulbitsModelSelect } from '../../components/config/SoulbitsModelSelect';
 import { CatalogModelSelect } from '../../components/config/CatalogModelSelect';
+import { SamplingPresetSelect } from '../../components/config/SamplingPresetSelect';
 import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
 import { MODULE_DEFAULTS, PROVIDER_DEFAULTS } from '../../constants/moduleDefaults';
 import {
@@ -44,7 +45,10 @@ import {
 import { invalidateEntityAccessCache } from '../../services/variant/entityAccess';
 import { isStoreVariant } from '../../config/appVariant';
 import { PROVIDER_SCHEMAS } from '../../constants/providerFieldSchemas';
+import type { FieldDefinition } from '../../constants/providerFieldSchemas';
 import { isSimpleFieldKey, isManagedCloudField } from '../../constants/moduleConfigVisibility';
+import { classifyProviderField } from '../../constants/providerFieldSections';
+import type { ProviderFieldSection } from '../../constants/providerFieldSections';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { SttTestPanel } from '../../components/config/SttTestPanel';
@@ -139,6 +143,26 @@ function isManagedSoulbitsApiKey(
     && apiKey.startsWith('v4.local.');
 }
 
+/**
+ * Seed the per-slot "explicit field" set from a loaded provider config: a
+ * persisted value that differs from the provider's default was set explicitly
+ * by the user (used by the preset preview chips to label overrides — plan §11
+ * A3 "explicit local values override the preset").
+ */
+function explicitKeysFromPersisted(
+  providerType: string,
+  persisted: Record<string, any> | null | undefined,
+): Record<string, boolean> {
+  if (!persisted) return {};
+  const defaults = PROVIDER_DEFAULTS[providerType] || {};
+  const out: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(persisted)) {
+    if (value === undefined || value === null || value === '') continue;
+    if (String(value) !== String(defaults[key])) out[key] = true;
+  }
+  return out;
+}
+
 const MODULE_REPOSITORIES: Record<string, {
   create: (config: any) => Promise<string>;
   update: (config: any) => Promise<void>;
@@ -207,6 +231,13 @@ export const ModuleConfigEditScreen: React.FC = () => {
     providerConfigId: string | null;
     values: Record<string, any>;
   }>>({});
+
+  // Per-slot set of field keys the user has explicitly set (session edits +
+  // persisted values that differ from the provider defaults). Drives the
+  // preset preview chips' "your explicit value wins" annotation (plan §11 A3).
+  const [explicitFields, setExplicitFields] = useState<
+    Record<string, Record<string, boolean>>
+  >({});
   
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -342,6 +373,10 @@ export const ModuleConfigEditScreen: React.FC = () => {
             transcription: { providerConfigId: txProviderConfigId ?? null, values: txProviderValues },
             vad: { providerConfigId: vadProviderConfigId ?? null, values: vadProviderValues },
           });
+          setExplicitFields({
+            transcription: explicitKeysFromPersisted(txProviderType, txProviderValues),
+            vad: explicitKeysFromPersisted(vadProviderType, vadProviderValues),
+          });
         } else {
           // Standard module
           const providerType = config.provider;
@@ -375,6 +410,9 @@ export const ModuleConfigEditScreen: React.FC = () => {
           setProviderForms({
             provider: { providerConfigId: providerConfigId ?? null, values: providerValues },
           });
+          setExplicitFields({
+            provider: explicitKeysFromPersisted(providerType, providerValues),
+          });
         }
       }
     } catch (error) {
@@ -398,6 +436,11 @@ export const ModuleConfigEditScreen: React.FC = () => {
           [key]: value,
         },
       },
+    }));
+    // A user edit is an explicit local value (overrides a preset — §11 A3).
+    setExplicitFields(prev => ({
+      ...prev,
+      [slot]: { ...(prev[slot] ?? {}), [key]: true },
     }));
   };
 
@@ -439,6 +482,8 @@ export const ModuleConfigEditScreen: React.FC = () => {
         values: { ...defaults },
       },
     }));
+    // Fresh provider type → no explicit local values yet.
+    setExplicitFields(prev => ({ ...prev, [slot]: {} }));
   };
 
   const handleExtraParamsChange = (slot: string, jsonString: string) => {
@@ -691,103 +736,127 @@ export const ModuleConfigEditScreen: React.FC = () => {
     </View>
   );
 
-  // ── Render inline provider config fields for a slot ──
-  const renderInlineProviderFields = (
-    slot: string,
+  // ── Provider form sections (provider-registry 2-2) ────────────────────
+  // The provider body is split into Provider (type) → Credentials → Capability
+  // sections; the Module section follows (rendered by renderModuleSpecificFields).
+  // Fields are partitioned by providerFieldSections.ts (interim classification).
+
+  /**
+   * The provider fields visible for a section, honouring Simple/Advanced and
+   * the managed-cloud hiding rule. `name` is dropped (it lives in General).
+   */
+  const visibleProviderFields = (
     providerType: string,
-  ) => {
+    section: ProviderFieldSection,
+  ): FieldDefinition[] => {
     const schema = PROVIDER_SCHEMAS[providerType];
-    if (!schema) return null;
+    if (!schema) return [];
 
-    const form = providerForms[slot];
-    if (!form) return null;
+    // Managed Soulbits Cloud provider (cloud mode): the endpoint and the
+    // API key/token are auto-synced from the backend — hide them in Simple AND
+    // Advanced mode so the screen never suggests they are user-configurable.
+    const isManagedCloudProvider = providerType === 'soulbitscloud' && isCloudMode;
 
-    const isOpenAIFamily = OPENAI_FAMILY.includes(providerType);
-
-    // Fields used to look up the module model catalog. The STT VAD slot uses a
-    // dedicated 'vad' mapping (voice-activity models, e.g. silero-vad) instead
-    // of the STT transcription models.
-    const modelModuleType = slot === 'vad' ? 'vad' : moduleType;
-
-    // Filter out 'name' field (auto-generated from module config name) and, in
-    // Simple mode, any field not in the essential set.
-    const fields = schema.fields.filter(f => {
+    return schema.fields.filter((f) => {
       if (f.key === 'name') return false;
+      if (classifyProviderField(f.key) !== section) return false;
+      if (isManagedCloudProvider && isManagedCloudField(f.key)) return false;
       if (showAdvanced) return true;
       return isSimpleFieldKey(f.key);
     });
+  };
 
-    // Managed Soulbits Cloud provider (cloud mode): the endpoint and the
-    // API key/token are auto-synced from the backend — hide both fields in
-    // Simple AND Advanced mode so the screen never suggests they are
-    // user-configurable. The credential is still injected server-side
-    // (injectSoulbitsToken) and synced via soulbitsTokenSync.
-    const isManagedCloudProvider =
-      providerType === 'soulbitscloud' && isCloudMode;
+  /** Render one provider field (model picker / preset dropdown / FormField). */
+  const renderProviderField = (
+    field: FieldDefinition,
+    slot: string,
+    providerType: string,
+    modelModuleType: string,
+  ) => {
+    const form = providerForms[slot];
+    if (!form) return null;
 
+    if (providerType === 'soulbitscloud' && field.key === 'model') {
+      return (
+        <View key={field.key} style={{ marginBottom: 16 }}>
+          <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
+          <SoulbitsModelSelect
+            moduleType={modelModuleType}
+            value={form.values.model ?? ''}
+            onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
+          />
+        </View>
+      );
+    }
+    // Catalog-backed model picker (provider-registry 2-1): providers with
+    // entries for this (provider, module) render a picker + "Custom…"
+    // escape hatch; providers without entries keep the free-text input.
+    if (field.catalog && field.key === 'model') {
+      return (
+        <View key={field.key} style={{ marginBottom: 16 }}>
+          <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
+          <CatalogModelSelect
+            providerType={providerType}
+            moduleType={modelModuleType}
+            value={form.values.model ?? ''}
+            onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
+            label={field.label}
+          />
+        </View>
+      );
+    }
+    // Sampling preset dropdown (provider-registry 2-2): preset supplies
+    // defaults; the local sampling inputs stay enabled and override (§11 A3).
+    if (field.key === 'sampling_preset_name') {
+      return (
+        <View key={field.key} style={{ marginBottom: 16 }}>
+          <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
+          <SamplingPresetSelect
+            value={form.values.sampling_preset_name ?? ''}
+            onChange={(name) => handleProviderFieldChange(slot, 'sampling_preset_name', name)}
+            localValues={form.values}
+            explicitKeys={explicitFields[slot] ?? {}}
+            label={field.label}
+          />
+        </View>
+      );
+    }
+    return (
+      <FormField
+        key={field.key}
+        field={field}
+        value={form.values[field.key]}
+        onChange={(key, value) => handleProviderFieldChange(slot, key, value)}
+        readOnly={isManagedSoulbitsApiKey(providerType, field.key, form.values.api_key)}
+      />
+    );
+  };
+
+  const renderProviderFieldsForSection = (
+    slot: string,
+    providerType: string,
+    section: ProviderFieldSection,
+  ) => {
+    // The STT VAD slot uses a dedicated 'vad' model mapping (voice-activity
+    // models, e.g. silero-vad) instead of the STT transcription models.
+    const modelModuleType = slot === 'vad' ? 'vad' : moduleType;
     return (
       <View style={styles.providerFieldsContainer}>
-        {fields.map((field) => {
-          // Hide endpoint/credential fields for managed Soulbits Cloud providers.
-          if (isManagedCloudProvider && isManagedCloudField(field.key)) {
-            return null;
-          }
-
-          if (providerType === 'soulbitscloud' && field.key === 'model') {
-            return (
-              <View key={field.key} style={{ marginBottom: 16 }}>
-                <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
-                <SoulbitsModelSelect
-                  moduleType={modelModuleType}
-                  value={form.values.model ?? ''}
-                  onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
-                />
-              </View>
-            );
-          }
-          // Catalog-backed model picker (provider-registry 2-1): providers with
-          // entries for this (provider, module) render a picker + "Custom…"
-          // escape hatch; providers without entries keep the free-text input.
-          if (field.catalog && field.key === 'model') {
-            return (
-              <View key={field.key} style={{ marginBottom: 16 }}>
-                <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
-                <CatalogModelSelect
-                  providerType={providerType}
-                  moduleType={modelModuleType}
-                  value={form.values.model ?? ''}
-                  onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
-                  label={field.label}
-                />
-              </View>
-            );
-          }
-          return (
-            <FormField
-              key={field.key}
-              field={field}
-              value={form.values[field.key]}
-              onChange={(key, value) => handleProviderFieldChange(slot, key, value)}
-              readOnly={isManagedSoulbitsApiKey(providerType, field.key, form.values.api_key)}
-            />
-          );
-        })}
-
-        {/* Advanced Sampling Params for OpenAI family (Advanced mode only) */}
-        {showAdvanced && isOpenAIFamily && (
-          <AdvancedSamplingParams
-            extraParamsJson={form.values.extra_params || '{}'}
-            onChange={(json) => handleExtraParamsChange(slot, json)}
-          />
+        {visibleProviderFields(providerType, section).map((field) =>
+          renderProviderField(field, slot, providerType, modelModuleType),
         )}
       </View>
     );
   };
 
-  // ── Render provider section for a single slot ──
+  /** Slot-qualified section title ("VAD Credentials", or just "Credentials"). */
+  const sectionTitle = (slotLabel: string, section: string) =>
+    slotLabel ? `${slotLabel} ${section}` : section;
+
+  // Section 1 — Provider (type picker).
   const renderProviderSection = (
     slot: string,
-    label: string,
+    slotLabel: string,
     providerType: string,
   ) => {
     // Variant-aware provider list (plan 7-14 V3, filter-only ruling 7): store
@@ -796,9 +865,8 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
     return (
       <ThemedCard elevated accentStripe style={styles.section}>
-        <SectionHeader title={label} />
+        <SectionHeader title={sectionTitle(slotLabel, 'Provider')} />
         <View style={styles.sectionContent}>
-          {/* Provider type selector */}
           <View>
             <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
               Provider Type *
@@ -813,9 +881,59 @@ export const ModuleConfigEditScreen: React.FC = () => {
               )}
             </View>
           </View>
+        </View>
+      </ThemedCard>
+    );
+  };
 
-          {/* Inline provider config fields */}
-          {providerType && renderInlineProviderFields(slot, providerType)}
+  // Section 2 — Credentials (account/endpoint-ish fields).
+  const renderCredentialsSection = (
+    slot: string,
+    slotLabel: string,
+    providerType: string,
+  ) => {
+    if (!providerType) return null;
+    if (visibleProviderFields(providerType, 'credentials').length === 0) return null;
+    return (
+      <ThemedCard elevated accentStripe style={styles.section}>
+        <SectionHeader title={sectionTitle(slotLabel, 'Credentials')} />
+        <View style={styles.sectionContent}>
+          {renderProviderFieldsForSection(slot, providerType, 'credentials')}
+        </View>
+      </ThemedCard>
+    );
+  };
+
+  // Section 3 — Capability (model + sampling + provider params; advanced
+  // sampling params stay collapsed unless the Advanced view is selected).
+  const renderCapabilitySection = (
+    slot: string,
+    slotLabel: string,
+    providerType: string,
+  ) => {
+    if (!providerType) return null;
+    const isOpenAIFamily = OPENAI_FAMILY.includes(providerType);
+    const showAdvancedSampling = showAdvanced && isOpenAIFamily;
+    if (
+      visibleProviderFields(providerType, 'capability').length === 0 &&
+      !showAdvancedSampling
+    ) {
+      return null;
+    }
+    const form = providerForms[slot];
+    return (
+      <ThemedCard elevated accentStripe style={styles.section}>
+        <SectionHeader title={sectionTitle(slotLabel, 'Capability')} />
+        <View style={styles.sectionContent}>
+          {renderProviderFieldsForSection(slot, providerType, 'capability')}
+
+          {/* Advanced Sampling Params for OpenAI family (Advanced mode only) */}
+          {showAdvancedSampling && (
+            <AdvancedSamplingParams
+              extraParamsJson={form?.values.extra_params || '{}'}
+              onChange={(json) => handleExtraParamsChange(slot, json)}
+            />
+          )}
         </View>
       </ThemedCard>
     );
@@ -841,21 +959,17 @@ export const ModuleConfigEditScreen: React.FC = () => {
       // STT special case: dual provider slots
       return (
         <>
-          {/* Transcription Provider Section */}
-          {renderProviderSection(
-            'transcription',
-            'Transcription Provider',
-            formValues.transcription_provider,
-          )}
+          {/* Transcription slot: Provider → Credentials → Capability */}
+          {renderProviderSection('transcription', 'Transcription', formValues.transcription_provider)}
+          {renderCredentialsSection('transcription', 'Transcription', formValues.transcription_provider)}
+          {renderCapabilitySection('transcription', 'Transcription', formValues.transcription_provider)}
 
-          {/* VAD Provider Section */}
-          {renderProviderSection(
-            'vad',
-            'VAD Provider',
-            formValues.vad_provider,
-          )}
+          {/* VAD slot: Provider → Credentials → Capability */}
+          {renderProviderSection('vad', 'VAD', formValues.vad_provider)}
+          {renderCredentialsSection('vad', 'VAD', formValues.vad_provider)}
+          {renderCapabilitySection('vad', 'VAD', formValues.vad_provider)}
 
-          {/* STT Settings Section */}
+          {/* Section 4 — Module (STT settings) */}
           <ThemedCard elevated accentStripe style={styles.section}>
             <SectionHeader title="STT Settings" />
             <View style={styles.sectionContent}>
@@ -898,12 +1012,17 @@ export const ModuleConfigEditScreen: React.FC = () => {
       );
     }
 
-    // Standard modules: Module Settings above Provider Settings
+    // Standard modules: Provider → Credentials → Capability → Module.
     const fields = moduleConfig?.moduleSpecificFields ?? [];
-    
+
     return (
       <>
-        {/* Module-specific fields */}
+        {/* Sections 1-3 — provider body (inline) */}
+        {renderProviderSection('provider', '', formValues.provider)}
+        {renderCredentialsSection('provider', '', formValues.provider)}
+        {renderCapabilitySection('provider', '', formValues.provider)}
+
+        {/* Section 4 — Module-specific fields */}
         {fields.length > 0 && (
           <ThemedCard elevated accentStripe style={styles.section}>
             <SectionHeader title="Module Settings" />
@@ -938,13 +1057,6 @@ export const ModuleConfigEditScreen: React.FC = () => {
               ))}
             </View>
           </ThemedCard>
-        )}
-
-        {/* Provider config section (inline) */}
-        {renderProviderSection(
-          'provider',
-          'Provider Settings',
-          formValues.provider,
         )}
 
         {/* ── TTS playback test block (2-3) — eventserver debug session. The
