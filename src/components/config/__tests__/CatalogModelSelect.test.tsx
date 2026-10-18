@@ -1,12 +1,14 @@
 /**
- * CatalogModelSelect — catalog-backed model picker (provider-registry 2-1).
+ * CatalogModelSelect — engine-registry-backed model picker (provider-registry
+ * 6-3; supersedes the 2-1 interim app-side catalog).
  *
- * Covers the three behaviours the phase doc calls out for the model field:
- *  - the picker renders the catalog options (+ "Custom…");
- *  - the "Custom…" escape hatch keeps free text entry;
- *  - the value round-trips (selection updates the field; a manual value is kept).
- * Plus the context-window note chip (provenance label `catalog`) and the
- * no-catalog free-text fallback.
+ * Covers: catalog options from the capability registry + "Custom…"; the live
+ * override (a fetched list wins over the catalog); the "Fetch from provider"
+ * affordance; provenance + context chips; the stale-ref marker; and the
+ * no-entries free-text fallback.
+ *
+ * The capability registry hook is mocked so the component is exercised in
+ * isolation; the registry fetch itself is covered by its own hook tests.
  */
 
 import React, { useState } from 'react';
@@ -14,11 +16,28 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react-nati
 import {
   CatalogModelSelect,
   CUSTOM_MODEL_INPUT_TESTID,
+  MODEL_FETCH_TESTID,
+  MODEL_STALE_TESTID,
   formatContextWindow,
+  modelProvenanceChipTestId,
 } from '../CatalogModelSelect';
+import type { ModelInfoDto } from '../../../services/engine/EngineApiClient';
 
 afterEach(cleanup);
 beforeEach(cleanup);
+
+/** Mutable catalog returned by the mocked capability-registry hook. */
+let mockCatalog: Record<string, ModelInfoDto[]> = {};
+
+jest.mock('../../../hooks/useProviderCapabilityCatalog', () => ({
+  useProviderCapabilityCatalog: () => ({
+    catalog: mockCatalog,
+    paramMapping: {},
+    loading: false,
+    error: null,
+    refresh: jest.fn(),
+  }),
+}));
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -60,6 +79,15 @@ jest.mock('../../themed/ThemedText', () => {
   };
 });
 
+const CHAT_MODELS: ModelInfoDto[] = [
+  { id: 'gpt-6-astra', label: 'gpt-6-astra', capabilities: ['chat'], context: 1050000, provenance: 'known' },
+  { id: 'gpt-4o', label: 'gpt-4o', capabilities: ['chat'], context: 128000, provenance: 'known' },
+];
+
+beforeEach(() => {
+  mockCatalog = { openai: CHAT_MODELS, openrouter: [] };
+});
+
 describe('formatContextWindow', () => {
   it('formats token counts compactly', () => {
     expect(formatContextWindow(128000)).toBe('128K');
@@ -71,24 +99,14 @@ describe('formatContextWindow', () => {
   });
 });
 
-describe('CatalogModelSelect — catalog-backed picker', () => {
+describe('CatalogModelSelect — registry-backed picker', () => {
   it('renders the catalog options plus a Custom… option', async () => {
-    // STT's OpenAI catalog is short, so the trailing "Custom…" row is within
-    // the FlatList's initial render window.
     const utils = await render(
-      <CatalogModelSelect
-        providerType="openai"
-        moduleType="stt"
-        value=""
-        onChange={jest.fn()}
-        label="Model"
-      />,
+      <CatalogModelSelect providerType="openai" moduleType="backend" value="" onChange={jest.fn()} label="Model" />,
     );
 
-    // Picker row present (placeholder shown while empty)
     fireEvent.press(utils.getByLabelText('Model'));
-
-    await waitFor(() => expect(utils.getByText('gpt-transcribe')).toBeTruthy());
+    await waitFor(() => expect(utils.getByText('gpt-6-astra')).toBeTruthy());
     expect(utils.getByText('modelCustom')).toBeTruthy();
   });
 
@@ -109,10 +127,8 @@ describe('CatalogModelSelect — catalog-backed picker', () => {
     const utils = await render(<Harness />);
     fireEvent.press(utils.getByLabelText('Model'));
     await waitFor(() => expect(utils.getByText('gpt-6-astra')).toBeTruthy());
-
     fireEvent.press(utils.getByText('gpt-6-astra'));
 
-    // The picker row now displays the selected model id, and the modal closed.
     await waitFor(() => expect(utils.getByText('gpt-6-astra')).toBeTruthy());
     expect(utils.queryByText('modelCustom')).toBeNull();
   });
@@ -120,13 +136,7 @@ describe('CatalogModelSelect — catalog-backed picker', () => {
   it('keeps free text via the Custom… escape hatch', async () => {
     const onChange = jest.fn();
     const utils = await render(
-      <CatalogModelSelect
-        providerType="openai"
-        moduleType="stt"
-        value=""
-        onChange={onChange}
-        label="Model"
-      />,
+      <CatalogModelSelect providerType="openai" moduleType="backend" value="" onChange={onChange} label="Model" />,
     );
 
     fireEvent.press(utils.getByLabelText('Model'));
@@ -135,68 +145,111 @@ describe('CatalogModelSelect — catalog-backed picker', () => {
 
     const input = await waitFor(() => utils.getByTestId(CUSTOM_MODEL_INPUT_TESTID));
     fireEvent.changeText(input, 'my-private-model');
-
     expect(onChange).toHaveBeenCalledWith('my-private-model');
   });
 
   it('keeps a manual (non-catalog) value selectable in the picker', async () => {
     const utils = await render(
-      <CatalogModelSelect
-        providerType="openai"
-        moduleType="backend"
-        value="my-private-model"
-        onChange={jest.fn()}
-        label="Model"
-      />,
+      <CatalogModelSelect providerType="openai" moduleType="backend" value="my-private-model" onChange={jest.fn()} label="Model" />,
     );
-
-    // The saved value round-trips as the selected option (not a free-text box).
     expect(utils.getByText('my-private-model')).toBeTruthy();
     expect(utils.queryByTestId(CUSTOM_MODEL_INPUT_TESTID)).toBeNull();
   });
 
   it('falls back to free text when the catalog has no entries', async () => {
     const utils = await render(
-      <CatalogModelSelect
-        providerType="openrouter"
-        moduleType="backend"
-        value=""
-        onChange={jest.fn()}
-        label="Model"
-      />,
+      <CatalogModelSelect providerType="openrouter" moduleType="backend" value="" onChange={jest.fn()} label="Model" />,
     );
-
     expect(utils.getByTestId(CUSTOM_MODEL_INPUT_TESTID)).toBeTruthy();
     expect(utils.getByText('modelNoModels')).toBeTruthy();
   });
 
-  it('renders a context-window chip (provenance catalog) for a known model', async () => {
+  it('prefers a live-discovered list over the catalog', async () => {
+    const live: ModelInfoDto[] = [{ id: 'live-model', label: 'live-model', provenance: 'detected' }];
     const utils = await render(
       <CatalogModelSelect
         providerType="openai"
         moduleType="backend"
-        value="gpt-4o"
+        value=""
         onChange={jest.fn()}
         label="Model"
+        liveModels={live}
+        canFetch
+        onFetch={jest.fn()}
       />,
     );
+    fireEvent.press(utils.getByLabelText('Model'));
+    await waitFor(() => expect(utils.getByText('live-model')).toBeTruthy());
+    // The catalog model is not offered once a live list exists.
+    expect(utils.queryByText('gpt-6-astra')).toBeNull();
+  });
 
-    // gpt-4o carries a 128000-token context in the catalog.
+  it('renders a context-window chip for a known model', async () => {
+    const utils = await render(
+      <CatalogModelSelect providerType="openai" moduleType="backend" value="gpt-4o" onChange={jest.fn()} label="Model" />,
+    );
     expect(utils.getByText(/modelContextChip/)).toBeTruthy();
     expect(utils.getByText(/128K/)).toBeTruthy();
   });
 
-  it('renders no context chip when the selected model has no context', async () => {
+  it('renders a provenance chip for the selected model', async () => {
+    const utils = await render(
+      <CatalogModelSelect providerType="openai" moduleType="backend" value="gpt-4o" onChange={jest.fn()} label="Model" />,
+    );
+    expect(utils.getByTestId(modelProvenanceChipTestId('gpt-4o'))).toBeTruthy();
+  });
+
+  it('runs the live refresh via the Fetch button', async () => {
+    const onFetch = jest.fn();
     const utils = await render(
       <CatalogModelSelect
         providerType="openai"
-        moduleType="imagination"
-        value="gpt-image-2"
+        moduleType="backend"
+        value=""
         onChange={jest.fn()}
         label="Model"
+        canFetch
+        onFetch={onFetch}
       />,
     );
+    fireEvent.press(utils.getByTestId(MODEL_FETCH_TESTID));
+    expect(onFetch).toHaveBeenCalledTimes(1);
+  });
 
-    expect(utils.queryByText(/modelContextChip/)).toBeNull();
+  it('disables the Fetch button without an account', async () => {
+    const onFetch = jest.fn();
+    const utils = await render(
+      <CatalogModelSelect
+        providerType="openai"
+        moduleType="backend"
+        value=""
+        onChange={jest.fn()}
+        label="Model"
+        canFetch={false}
+        onFetch={onFetch}
+      />,
+    );
+    fireEvent.press(utils.getByTestId(MODEL_FETCH_TESTID));
+    expect(onFetch).not.toHaveBeenCalled();
+  });
+
+  it('marks a saved value stale when the live list lacks it', async () => {
+    const live: ModelInfoDto[] = [{ id: 'other-model', label: 'other-model' }];
+    const utils = await render(
+      <CatalogModelSelect
+        providerType="openai"
+        moduleType="backend"
+        value="removed-model"
+        onChange={jest.fn()}
+        label="Model"
+        liveModels={live}
+        stale
+        canFetch
+        onFetch={jest.fn()}
+      />,
+    );
+    expect(utils.getByTestId(MODEL_STALE_TESTID)).toBeTruthy();
+    // The stale value is never dropped — it stays selectable.
+    expect(utils.getByText('removed-model')).toBeTruthy();
   });
 });

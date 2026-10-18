@@ -1,6 +1,7 @@
 /**
  * Module configs — management-API-backed repository adapter (provider-registry
- * 6-1; originally task 3-2 reads, task 3-4 relink).
+ * 6-1; the 6-1 interim adapter retired in 6-3; originally task 3-2 reads, task
+ * 3-4 relink).
  *
  * The engine's module-config **read** stays COMPOSITE:
  *   `{ id, name, provider, provider_account_id, <providerType>: { …merged account
@@ -8,17 +9,16 @@
  *   merged provider object carries the account id under its top-level `id`).
  * The engine's **write** shape is FLAT (3-2): `{name, provider,
  * provider_account_id, capability_json, …module fields}` (stt carries two slots
- * under `transcription`/`vad`). The app's domain models stay flat
- * (`provider_config_id` + module scalars) with the interim account FK +
- * capability overlay alongside.
+ * under `transcription`/`vad`). The app's domain models are flat too — the
+ * account FK + the capability overlay alongside the module scalars.
  *
- *   - read  → flat (`provider_config_id`/`provider_account_id` = the nested
- *             merged object's `id`; `capability_json` = the merged object minus
- *             the account fields)
+ *   - read  → flat (`provider_account_id` = the nested merged object's `id`;
+ *             `capability_json` = the merged object minus the account fields —
+ *             see `accountFieldSchemas.capabilityOverlayOf`)
  *   - write → flat `{name, provider, provider_account_id, capability_json, …}`.
- *             The capability overlay comes from the legacy adapter's pending
- *             stash (a just-written provider config) or, failing that, from
- *             re-resolving the referenced account's merged object.
+ *             The capability overlay is taken straight from the flat row (the
+ *             module-config form edits it directly — 6-3 removed the adapter's
+ *             pending-capability stash).
  */
 
 import type {
@@ -34,7 +34,7 @@ import type {
 import { engineApiClient } from '../EngineApiClient';
 import { EngineApiError } from '../EngineApiClient';
 import type { ModuleConfigWriteDto } from '../EngineApiClient';
-import { capabilityFieldsOf, getPendingCapability } from './legacyProviderAdapter';
+import { capabilityOverlayOf } from '../../../constants/accountFieldSchemas';
 
 type Composite = Record<string, any>;
 
@@ -42,10 +42,24 @@ function coerceDeleted(cfg: Composite): Date | null {
   return typeof cfg.deleted_at === 'string' ? new Date(cfg.deleted_at) : null;
 }
 
+/** Parse a capability overlay (JSON string or object) into a plain object. */
+function parseCapability(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object') return { ...(value as Record<string, unknown>) };
+  if (typeof value === 'string' && value.trim() !== '') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 /** JSON-stringify a capability overlay (stable `'{}'` for empty). */
-function capabilityJson(nested: Composite | undefined): string {
-  const fields = capabilityFieldsOf(nested ?? {});
-  return Object.keys(fields).length > 0 ? JSON.stringify(fields) : '{}';
+function capabilityJsonString(value: unknown): string {
+  const overlay = parseCapability(value);
+  return Object.keys(overlay).length > 0 ? JSON.stringify(overlay) : '{}';
 }
 
 /** Composite engine config → the app's flat module row. */
@@ -57,9 +71,8 @@ function compositeToFlat(module: string, c: Composite): Composite {
     id: c.id ?? '',
     name: c.name ?? '',
     provider,
-    provider_config_id: accountId,
     provider_account_id: accountId,
-    capability_json: capabilityJson(nested),
+    capability_json: capabilityJsonString(capabilityOverlayOf(provider, nested ?? {})),
     deleted_at: coerceDeleted(c),
   };
   switch (module) {
@@ -94,15 +107,17 @@ function compositeToFlat(module: string, c: Composite): Composite {
       const tx = c.transcription ?? {};
       flat.transcription_provider = tx.provider ?? '';
       const txNested = tx.provider ? tx[tx.provider] : undefined;
-      flat.transcription_provider_config_id = txNested?.id ?? null;
       flat.transcription_provider_account_id = txNested?.id ?? tx.provider_account_id ?? null;
-      flat.transcription_capability_json = capabilityJson(txNested);
+      flat.transcription_capability_json = capabilityJsonString(
+        capabilityOverlayOf(tx.provider ?? '', txNested ?? {}),
+      );
       const vad = c.vad ?? {};
       flat.vad_provider = vad.provider ?? '';
       const vadNested = vad.provider ? vad[vad.provider] : undefined;
-      flat.vad_provider_config_id = vadNested?.id ?? null;
       flat.vad_provider_account_id = vadNested?.id ?? vad.provider_account_id ?? null;
-      flat.vad_capability_json = capabilityJson(vadNested);
+      flat.vad_capability_json = capabilityJsonString(
+        capabilityOverlayOf(vad.provider ?? '', vadNested ?? {}),
+      );
       break;
     }
     default:
@@ -111,41 +126,11 @@ function compositeToFlat(module: string, c: Composite): Composite {
   return flat;
 }
 
-/** Resolve the nested provider config for a flat row's account id. */
-async function resolveProviderConfig(id: string | null | undefined): Promise<Composite | null> {
-  if (!id) return null;
-  try {
-    const res = await engineApiClient.getProvider(id);
-    const cfg = res.config as Composite | null;
-    if (!cfg) return null;
-    const { deleted_at: _d, ...rest } = cfg;
-    return rest;
-  } catch (e) {
-    if (e instanceof EngineApiError && e.isNotFound) return null;
-    throw e;
-  }
-}
-
-/**
- * Resolve the capability overlay for a module write. Prefer the pending stash
- * from a just-completed provider create/update; else re-resolve the referenced
- * account's merged object and strip the account fields.
- */
-async function resolveCapability(
-  accountId: string | null | undefined,
-): Promise<Record<string, unknown>> {
-  if (!accountId) return {};
-  const pending = getPendingCapability(accountId);
-  if (pending) return pending;
-  const resolved = await resolveProviderConfig(accountId);
-  return resolved ? capabilityFieldsOf(resolved) : {};
-}
-
 /** Flat app module row → the engine's flat `{name, provider, …}` write body. */
-async function flatToWriteBody(module: string, flat: Composite): Promise<ModuleConfigWriteDto> {
+function flatToWriteBody(module: string, flat: Composite): ModuleConfigWriteDto {
   const provider: string = flat.provider ?? '';
-  const accountId: string | null = flat.provider_account_id ?? flat.provider_config_id ?? null;
-  const capability = await resolveCapability(accountId);
+  const accountId: string | null = flat.provider_account_id ?? null;
+  const capability = parseCapability(flat.capability_json);
 
   const body: ModuleConfigWriteDto = { name: flat.name ?? '', provider };
   if (accountId) body.provider_account_id = accountId;
@@ -181,17 +166,17 @@ async function flatToWriteBody(module: string, flat: Composite): Promise<ModuleC
         transitionstreamtimemillis: flat.transition_stream_time_millis ?? 0,
         maxbuffercount: flat.max_buffer_count ?? 0,
       };
-      const txAccountId = flat.transcription_provider_account_id ?? flat.transcription_provider_config_id ?? null;
+      const txAccountId: string | null = flat.transcription_provider_account_id ?? null;
       const tx: Composite = { provider: flat.transcription_provider ?? '' };
       if (txAccountId) tx.provider_account_id = txAccountId;
-      const txCap = await resolveCapability(txAccountId);
+      const txCap = parseCapability(flat.transcription_capability_json);
       if (Object.keys(txCap).length > 0) tx.capability_json = txCap;
       body.transcription = tx;
 
-      const vadAccountId = flat.vad_provider_account_id ?? flat.vad_provider_config_id ?? null;
+      const vadAccountId: string | null = flat.vad_provider_account_id ?? null;
       const vad: Composite = { provider: flat.vad_provider ?? '' };
       if (vadAccountId) vad.provider_account_id = vadAccountId;
-      const vadCap = await resolveCapability(vadAccountId);
+      const vadCap = parseCapability(flat.vad_capability_json);
       if (Object.keys(vadCap).length > 0) vad.capability_json = vadCap;
       body.vad = vad;
       break;
@@ -256,12 +241,12 @@ async function moduleInUse(module: string, id: string): Promise<boolean> {
 function makeModuleApi<T extends { id: string; name: string }>(module: string) {
   return {
     create: async (config: Omit<T, 'id' | 'deleted_at'>): Promise<string> => {
-      const body = await flatToWriteBody(module, config as Composite);
+      const body = flatToWriteBody(module, config as Composite);
       const res = await engineApiClient.createModuleConfig(module, body);
       return res.id;
     },
     update: async (config: T): Promise<void> => {
-      const body = await flatToWriteBody(module, config as Composite);
+      const body = flatToWriteBody(module, config as Composite);
       await engineApiClient.updateModuleConfig(module, config.id, body);
     },
     delete: async (id: string): Promise<void> => {

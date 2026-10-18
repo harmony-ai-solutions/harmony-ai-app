@@ -155,9 +155,7 @@ export const VoiceInputSettingsScreen: React.FC = () => {
         await updateSTTConfig({
           ...sttConfig,
           transcription_provider: 'disabled',
-          transcription_provider_config_id: null,
           vad_provider: 'disabled',
-          vad_provider_config_id: null,
         });
         await load();
       } catch (err) {

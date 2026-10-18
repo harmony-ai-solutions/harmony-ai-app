@@ -14,9 +14,8 @@
  *   - `DELETE /api/providers/:id`  → 409 `provider_in_use` (+ `referencing_configs`)
  *                                    when a live module config references it
  *
- * The legacy per-type flat API the screens still consume lives in the named
- * `legacyProviderAdapter.ts` (marked `// 6-3 removes this`), which maps onto this
- * accounts surface.
+ * The unified accounts surface is what the screens consume directly (6-3
+ * removed the interim per-type `legacyProviderAdapter.ts`).
  *
  * `isAccountInUse` is best-effort (client-side derivation from the module-config
  * list reads); the DELETE 409 remains the authoritative guard.
@@ -143,9 +142,9 @@ const MODULE_TYPES = [
 /**
  * Derive whether a provider account is referenced by any live module config by
  * scanning the module-config list reads. A reference is the flat
- * `provider_account_id` (or the legacy `provider_config_id`) equal to the id,
- * or the nested `<provider>` object's `id`. Best-effort: any read failure
- * returns false and the DELETE 409 stays the authoritative guard.
+ * `provider_account_id` equal to the id, or the nested `<provider>` object's
+ * `id`. Best-effort: any read failure returns false and the DELETE 409 stays the
+ * authoritative guard.
  */
 export async function isAccountInUse(id: string): Promise<boolean> {
   for (const module of MODULE_TYPES) {
@@ -155,7 +154,7 @@ export async function isAccountInUse(id: string): Promise<boolean> {
       >;
       for (const cfg of configs) {
         if (!cfg || typeof cfg !== 'object') continue;
-        if (cfg.provider_account_id === id || cfg.provider_config_id === id) return true;
+        if (cfg.provider_account_id === id) return true;
         if (module === 'stt') {
           if (
             cfg.transcription_provider_account_id === id ||

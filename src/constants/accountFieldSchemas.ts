@@ -270,6 +270,66 @@ export function accountToFormValues(
 }
 
 /**
+ * Every ACCOUNT-scoped key for a provider type — the account columns
+ * (`id`/`name`/`api_key`/`base_url`/timestamps/…) plus the typed extras declared
+ * in {@link ACCOUNT_SCHEMAS} (`org`, `project`, `team`, `auth`, `comfyui_mode`,
+ * `auth_mode`, …). Used to split the engine's merged provider object
+ * (`GET /api/providers/:id`, module-config reads inline `account + capability
+ * overlay` under the provider key — plan §3.4) back into its two halves.
+ */
+export function accountFieldKeys(type: string): ReadonlySet<string> {
+  const keys = new Set<string>([
+    'id',
+    'type',
+    'provider',
+    'name',
+    'api_key',
+    'api_token',
+    'base_url',
+    'endpoint',
+    'created_at',
+    'updated_at',
+    'deleted_at',
+  ]);
+  for (const field of ACCOUNT_SCHEMAS[type]?.fields ?? []) keys.add(field.key);
+  return keys;
+}
+
+/**
+ * Strip the account half out of a merged provider object → the capability
+ * overlay (the module config's `capability_json`, plan §3.2/§3.4). The exact
+ * complement of {@link accountFieldKeys}: every capability key (model, sampling
+ * params, voices, …) is kept, every account key (columns + typed extras) drops.
+ */
+export function capabilityOverlayOf(
+  type: string,
+  merged: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!merged) return {};
+  const accountKeys = accountFieldKeys(type);
+  const overlay: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(merged)) {
+    if (accountKeys.has(key)) continue;
+    overlay[key] = value;
+  }
+  return overlay;
+}
+
+/** The capability defaults for a provider type (PROVIDER_DEFAULTS minus the account keys). */
+export function capabilityDefaultsOf(
+  type: string,
+  providerDefaults: Record<string, unknown>,
+): Record<string, unknown> {
+  const accountKeys = accountFieldKeys(type);
+  const overlay: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(providerDefaults ?? {})) {
+    if (accountKeys.has(key)) continue;
+    overlay[key] = value;
+  }
+  return overlay;
+}
+
+/**
  * Mask a stored api_key for display (`sk-…1234`). Empty keys (keyless
  * self-hosted servers) render as an empty string — the screen substitutes a
  * "keyless" label.

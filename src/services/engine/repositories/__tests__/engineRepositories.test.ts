@@ -18,7 +18,6 @@ import * as chatSettingsRepo from '../chatConversationSettings';
 import * as charactersRepo from '../characters';
 import * as entitiesRepo from '../entities';
 import * as providersRepo from '../providers';
-import * as legacyProviders from '../legacyProviderAdapter';
 import * as modulesRepo from '../modules';
 import * as userEntitiesRepo from '../userEntities';
 
@@ -53,7 +52,6 @@ function install(server: ReturnType<typeof createMockManagementServer>) {
 beforeEach(() => {
   resetEngineServiceForTests();
   setEngineConnection(CONN);
-  legacyProviders.resetPendingCapabilities();
 });
 
 afterAll(() => {
@@ -710,76 +708,7 @@ describe('providers adapter (accounts API)', () => {
   });
 });
 
-describe('legacy provider adapter (per-type shim)', () => {
-  it('get returns the merged flat provider shape', async () => {
-    const server = createMockManagementServer([
-      {
-        method: 'GET',
-        path: '/api/providers/acc1',
-        json: { provider: 'openai', config: { id: 'acc1', api_key: 'sk', model: 'gpt-4o', deleted_at: null } },
-      },
-    ]);
-    install(server);
-    const cfg = await legacyProviders.getOpenAIProviderConfig('acc1');
-    expect(cfg).toMatchObject({ id: 'acc1', api_key: 'sk', model: 'gpt-4o' });
-  });
-
-  it('create splits the flat config into account + capability (capability stashed)', async () => {
-    const server = createMockManagementServer([
-      { method: 'POST', path: '/api/providers', json: { provider: 'openai', config: { id: 'acc-new' } } },
-    ]);
-    install(server);
-    const id = await legacyProviders.createOpenAIProviderConfig({
-      name: 'default',
-      api_key: 'sk',
-      model: 'gpt-4o',
-      temperature: 0.7,
-    } as never);
-    expect(id).toBe('acc-new');
-    const body = server.lastCall('POST', '/api/providers')!.body as {
-      type: string;
-      account: Record<string, unknown>;
-    };
-    expect(body.type).toBe('openai');
-    expect(body.account).toEqual({ name: 'default', api_key: 'sk' });
-    expect(legacyProviders.getPendingCapability('acc-new')).toEqual({
-      model: 'gpt-4o',
-      temperature: 0.7,
-    });
-  });
-
-  it('create routes soulvoice endpoint into the account base_url', async () => {
-    const server = createMockManagementServer([
-      { method: 'POST', path: '/api/providers', json: { provider: 'soulvoice', config: { id: 'sv1' } } },
-    ]);
-    install(server);
-    await legacyProviders.createSoulvoiceProviderConfig({
-      name: 'sv',
-      endpoint: 'http://localhost:8765',
-      model: 'silero-vad',
-    } as never);
-    const body = server.lastCall('POST', '/api/providers')!.body as { account: Record<string, unknown> };
-    expect(body.account.base_url).toBe('http://localhost:8765');
-    expect(body.account).not.toHaveProperty('endpoint');
-  });
-
-  it('delete surfaces the in-use error', async () => {
-    const server = createMockManagementServer([
-      {
-        method: 'DELETE',
-        path: '/api/providers/acc1',
-        status: 409,
-        json: { error: 'provider_in_use', referencing_configs: [] },
-      },
-    ]);
-    install(server);
-    await expect(legacyProviders.deleteOpenAIProviderConfig('acc1')).rejects.toThrow(
-      /is in use and cannot be soft deleted/,
-    );
-  });
-});
-
-describe('modules adapter (flat account FK + overlay)', () => {
+describe('modules adapter (flat account FK + capability overlay)', () => {
   it('maps a composite read to the flat row with the account FK + overlay', async () => {
     const server = createMockManagementServer([
       {
@@ -801,14 +730,13 @@ describe('modules adapter (flat account FK + overlay)', () => {
     const configs = await modulesRepo.getAllBackendConfigs();
     expect(configs[0]).toMatchObject({
       id: 'b1',
-      provider_config_id: 'acc1',
       provider_account_id: 'acc1',
     });
+    // The account half (id/api_key) is stripped; the overlay is the remainder.
     expect(JSON.parse(configs[0].capability_json)).toEqual({ model: 'gpt-4o', temperature: 0.7 });
   });
 
-  it('writes the flat provider_account_id + capability_json body (pending stash)', async () => {
-    legacyProviders.setPendingCapability('acc1', { model: 'gpt-4o' });
+  it('writes the flat provider_account_id + capability_json body straight from the row', async () => {
     const server = createMockManagementServer([
       {
         method: 'POST',
@@ -821,9 +749,8 @@ describe('modules adapter (flat account FK + overlay)', () => {
     const id = await modulesRepo.createBackendConfig({
       name: 'cfg',
       provider: 'openai',
-      provider_config_id: 'acc1',
       provider_account_id: 'acc1',
-      capability_json: '{}',
+      capability_json: JSON.stringify({ model: 'gpt-4o' }),
     });
     expect(id).toBe('mc-new');
     expect(server.lastCall('POST', '/api/module-configs/backend')!.body).toEqual({
@@ -834,13 +761,8 @@ describe('modules adapter (flat account FK + overlay)', () => {
     });
   });
 
-  it('falls back to the referenced account overlay when no stash exists', async () => {
+  it('does not read the referenced account on write (6-3 removed the stash/fallback)', async () => {
     const server = createMockManagementServer([
-      {
-        method: 'GET',
-        path: '/api/providers/acc1',
-        json: { provider: 'openai', config: { id: 'acc1', api_key: 'sk', model: 'gpt-4o' } },
-      },
       {
         method: 'PUT',
         path: '/api/module-configs/backend/mc1',
@@ -852,16 +774,16 @@ describe('modules adapter (flat account FK + overlay)', () => {
       id: 'mc1',
       name: 'cfg',
       provider: 'openai',
-      provider_config_id: 'acc1',
       provider_account_id: 'acc1',
       capability_json: '{}',
       deleted_at: null,
     });
+    // No GET /api/providers/:id was issued to resolve the overlay.
+    expect(server.lastCall('GET', /\/api\/providers\//)).toBeUndefined();
     expect(server.lastCall('PUT', '/api/module-configs/backend/mc1')!.body).toEqual({
       name: 'cfg',
       provider: 'openai',
       provider_account_id: 'acc1',
-      capability_json: { model: 'gpt-4o' },
     });
   });
 
@@ -889,17 +811,14 @@ describe('modules adapter (flat account FK + overlay)', () => {
     install(server);
     const configs = await modulesRepo.getAllSTTConfigs();
     expect(configs[0]).toMatchObject({
-      transcription_provider_config_id: 'tx1',
       transcription_provider_account_id: 'tx1',
-      vad_provider_config_id: 'vad1',
       vad_provider_account_id: 'vad1',
     });
     expect(JSON.parse(configs[0].transcription_capability_json)).toEqual({ model: 'whisper-1' });
     expect(JSON.parse(configs[0].vad_capability_json)).toEqual({ model: 'silero-vad' });
   });
 
-  it('writes the STT dual-slot flat body (stash for transcription, disabled VAD)', async () => {
-    legacyProviders.setPendingCapability('tx1', { model: 'whisper-1' });
+  it('writes the STT dual-slot flat body (overlay from the row, disabled VAD)', async () => {
     const server = createMockManagementServer([
       {
         method: 'POST',
@@ -912,11 +831,9 @@ describe('modules adapter (flat account FK + overlay)', () => {
     await modulesRepo.createSTTConfig({
       name: 'stt',
       transcription_provider: 'openai',
-      transcription_provider_config_id: 'tx1',
       transcription_provider_account_id: 'tx1',
-      transcription_capability_json: '{}',
+      transcription_capability_json: JSON.stringify({ model: 'whisper-1' }),
       vad_provider: 'disabled',
-      vad_provider_config_id: null,
       vad_provider_account_id: null,
       vad_capability_json: '{}',
       main_stream_time_millis: 500,

@@ -346,17 +346,15 @@ export interface ProviderAccount {
 // Module Configuration Models
 // ============================================================================
 //
-// Interim dual shape (provider-registry 6-1): the legacy flat `provider_config_id`
-// FK REMAINS (the legacy provider adapter still maps it) alongside the new
-// `provider_account_id` FK + `capability_json` overlay (plan §3.2). The adapter
-// maps between the two so the module-config screens keep compiling/functioning
-// until 6-3 removes the legacy consumption.
+// Flat app-side shape (provider-registry 6-1/6-3): a module config carries the
+// shared `provider_account_id` FK (plan §3.2) plus its `capability_json` overlay
+// (the provider's capability fields — model, sampling, voices, …). The legacy
+// per-type `provider_config_id` FK was removed in 6-3 with the interim adapter.
 
 export interface BackendConfig {
   id: string;
   name: string;
   provider: string;
-  provider_config_id: string | null;
   provider_account_id: string | null;
   capability_json: string; // JSON string (capability overlay)
   deleted_at: Date | null;
@@ -366,7 +364,6 @@ export interface MovementConfig {
   id: string;
   name: string;
   provider: string;
-  provider_config_id: string | null;
   provider_account_id: string | null;
   capability_json: string;
   startup_sync_timeout: number | null;
@@ -381,11 +378,9 @@ export interface STTConfig {
   transition_stream_time_millis: number | null;
   max_buffer_count: number | null;
   transcription_provider: string;
-  transcription_provider_config_id: string | null;
   transcription_provider_account_id: string | null;
   transcription_capability_json: string;
   vad_provider: string;
-  vad_provider_config_id: string | null;
   vad_provider_account_id: string | null;
   vad_capability_json: string;
   deleted_at: Date | null;
@@ -395,7 +390,6 @@ export interface CognitionConfig {
   id: string;
   name: string;
   provider: string;
-  provider_config_id: string | null;
   provider_account_id: string | null;
   capability_json: string;
   max_cognition_events: number | null;
@@ -407,7 +401,6 @@ export interface RAGConfig {
   id: string;
   name: string;
   provider: string;
-  provider_config_id: string | null;
   provider_account_id: string | null;
   capability_json: string;
   embedding_concurrency: number | null;
@@ -418,7 +411,6 @@ export interface TTSConfig {
   id: string;
   name: string;
   provider: string;
-  provider_config_id: string | null;
   provider_account_id: string | null;
   capability_json: string;
   output_type: string | null;
@@ -431,7 +423,6 @@ export interface VisionConfig {
   id: string;
   name: string;
   provider: string;
-  provider_config_id: string | null;
   provider_account_id: string | null;
   capability_json: string;
   resolution_width: number;
@@ -443,7 +434,6 @@ export interface ImaginationConfig {
   id: string;
   name: string;
   provider: string;
-  provider_config_id: string | null;
   provider_account_id: string | null;
   capability_json: string;
   deleted_at: Date | null;
@@ -545,9 +535,9 @@ export interface CharacterImageInfo {
 // ============================================================================
 
 /**
- * Any provider-config shape the app reads/writes. During the interim (6-1) this
- * spans BOTH the legacy per-type flat configs (still produced by the legacy
- * provider adapter) AND the new account-shaped row (`ProviderAccount`) the
+ * Any provider-config shape the app reads/writes. The legacy per-type flat
+ * configs (retired with the 6-1 adapter in 6-3) are retained for type
+ * completeness; the live surface is the account-shaped `ProviderAccount` the
  * accounts API returns.
  */
 export type ProviderConfig =

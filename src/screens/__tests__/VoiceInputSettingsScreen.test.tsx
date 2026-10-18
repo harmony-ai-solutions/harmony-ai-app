@@ -269,7 +269,6 @@ describe('VoiceInputSettingsScreen — LWW-safe read/write contract', () => {
     expect(updated.id).toBe('stt-1');
     expect(updated.transcription_provider).toBe('disabled');
     expect(updated.vad_provider).toBe('disabled');
-    expect(updated.transcription_provider_config_id).toBeNull();
   });
 
   it('linking a config in the selector writes the user mapping (deliberate save)', async () => {

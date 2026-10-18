@@ -36,11 +36,10 @@ export interface FieldDefinition {
    */
   readOnly?: boolean;
   /**
-   * Marks a field as catalog-backed (provider-registry 2-1). The form renderer
-   * routes such fields through the model picker (`CatalogModelSelect`) when
-   * `getModelsForModule(provider, module)` yields entries; otherwise the field
-   * falls back to its normal free-text input. Only the `model` field uses this
-   * today.
+   * Marks a field as catalog-backed. The form renderer routes such fields
+   * through the model picker (`CatalogModelSelect`) — fed by the engine's
+   * capability registry + live discovery (provider-registry 6-3). Only the
+   * `model` field uses this today.
    */
   catalog?: boolean;
 }

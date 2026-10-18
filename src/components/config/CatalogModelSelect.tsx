@@ -1,37 +1,51 @@
 /**
- * CatalogModelSelect — catalog-backed model picker with a "Custom…" escape hatch.
+ * CatalogModelSelect — engine-registry-backed model picker with live refresh.
  *
- * Provider-registry 2-1. Renders the `model` field of a provider config form as
- * a dropdown fed by the interim app-side catalog (`providerModelCatalog.ts`,
- * tier-2 until the engine registry lands in 5-2). Behaviour:
+ * Provider-registry 6-3 (supersedes the 2-1 interim app-side catalog). The
+ * picker is fed by the engine's tier-2 capability registry
+ * (`GET /api/providers/capabilities`, via {@link useProviderCapabilityCatalog})
+ * and, once the user runs **"Fetch from provider"**, by the live discovery
+ * result the parent slot passes in as `liveModels` (merge order: live > catalog,
+ * plan §6.3). Behaviour:
  *
- *  - Entries exist for (provider, module) → a `SelectPicker` of the catalog
- *    entries plus a trailing "Custom…" option. Selecting "Custom…" reveals a
- *    free-text input so an arbitrary model id can still be entered.
- *  - No entries (live-authoritative provider, unknown module, or the STT VAD
- *    slot) → a plain free-text input, i.e. today's behaviour, unchanged.
- *  - A saved value that is not in the catalog is kept selectable as an extra
- *    option (matching `SoulbitsModelSelect`), so a manual choice round-trips on
- *    reload rather than snapping to the picker's first entry.
- *  - When the selected model has a known context window, a note chip is shown
- *    next to it with the provenance label `catalog`.
- *
- * Pure helper `formatContextWindow` is exported for unit testing.
+ *  - Entries exist → a `SelectPicker` of the entries + a trailing "Custom…"
+ *    option (free text escape hatch). A saved value not in the list stays
+ *    selectable so a manual choice round-trips on reload.
+ *  - No entries (live-authoritative provider not yet fetched, unknown module, or
+ *    the STT VAD slot) → a plain free-text input.
+ *  - A provenance chip (`detected` / `known` / `assumed`) on the selected model
+ *    and a context-window chip when known.
+ *  - A stale marker when the parent reports the saved model is absent from the
+ *    new account's live list (revalidation, plan §3.2) — the value is NEVER
+ *    dropped, the user is offered a re-fetch / replacement.
  */
 
 import React, { useState } from 'react';
-import { View, TextInput, StyleSheet } from 'react-native';
+import { View, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { SelectPicker } from './SelectPicker';
-import { getModelsForModule } from '../../constants/providerModelCatalog';
+import { useProviderCapabilityCatalog } from '../../hooks/useProviderCapabilityCatalog';
+import { catalogModelsForModule, findModel } from '../../constants/modelCapabilities';
+import type { ModelInfoDto } from '../../services/engine/EngineApiClient';
 
 /** Sentinel option id for the "Custom…" row (never a real model id). */
 export const CUSTOM_MODEL_OPTION_ID = '__custom__';
 
 /** Test id for the free-text fallback input. */
 export const CUSTOM_MODEL_INPUT_TESTID = 'catalog-model-custom-input';
+
+/** Test id for the "Fetch from provider" button. */
+export const MODEL_FETCH_TESTID = 'catalog-model-fetch';
+
+/** Test id for the stale-ref marker (revalidation). */
+export const MODEL_STALE_TESTID = 'catalog-model-stale';
+
+/** Test id for a model's provenance chip. */
+export function modelProvenanceChipTestId(modelId: string): string {
+  return `model-provenance-${modelId}`;
+}
 
 /**
  * Format a context-window token count for the note chip, e.g. 128000 → "128K",
@@ -55,6 +69,16 @@ interface CatalogModelSelectProps {
   onChange: (model: string) => void;
   /** Field label (falls back to the generic "Model" translation). */
   label?: string;
+  /** Live-discovered models for the selected account (null = not fetched). */
+  liveModels?: ModelInfoDto[] | null;
+  /** Whether a live fetch can run (an account with credentials is selected). */
+  canFetch?: boolean;
+  fetching?: boolean;
+  fetchError?: string | null;
+  /** Trigger the on-demand live refresh (`POST /api/providers/models`). */
+  onFetch?: () => void;
+  /** True when the saved value is absent from the new account's live list. */
+  stale?: boolean;
 }
 
 export const CatalogModelSelect: React.FC<CatalogModelSelectProps> = ({
@@ -63,47 +87,127 @@ export const CatalogModelSelect: React.FC<CatalogModelSelectProps> = ({
   value,
   onChange,
   label,
+  liveModels,
+  canFetch = false,
+  fetching = false,
+  fetchError = null,
+  onFetch,
+  stale = false,
 }) => {
   const { theme } = useAppTheme();
   const { t } = useTranslation('moduleConfig');
+  const { catalog } = useProviderCapabilityCatalog();
 
-  const entries = getModelsForModule(providerType, moduleType);
-  const selectedEntry = entries.find(e => e.id === value);
+  // Merge order (plan §6.3): a live result wins; otherwise the offline catalog
+  // slice filtered to the module.
+  const entries: ModelInfoDto[] =
+    liveModels ?? catalogModelsForModule(catalog[providerType], moduleType);
+  const usingLive = liveModels != null;
+  const selectedEntry = findModel(entries, value);
 
   // "Custom…" tapped this session (value may still hold a catalog id).
   const [customRequested, setCustomRequested] = useState(false);
 
   if (!theme) return null;
 
-  // A picker is shown whenever the (provider, module) pair has catalog entries
-  // (phase 2-1 step 3); free text is the fallback for live-authoritative
-  // providers / unknown modules, and the "Custom…" escape hatch. A saved value
-  // that is not in the catalog is kept selectable as an extra option (matching
-  // SoulbitsModelSelect), so a manual choice survives a reload.
   const showFreeText = entries.length === 0 || customRequested;
 
-  const renderContextChip = () => {
-    if (!selectedEntry || selectedEntry.context === undefined) return null;
+  const renderFetchRow = () => {
+    if (!onFetch) return null;
+    return (
+      <View style={styles.fetchRow}>
+        <TouchableOpacity
+          onPress={onFetch}
+          disabled={!canFetch || fetching}
+          accessibilityRole="button"
+          accessibilityLabel={t('modelFetch')}
+          testID={MODEL_FETCH_TESTID}
+          style={[
+            styles.fetchButton,
+            {
+              borderColor: theme.colors.accent.primary,
+              opacity: !canFetch || fetching ? 0.5 : 1,
+            },
+          ]}
+        >
+          {fetching ? (
+            <ActivityIndicator size="small" color={theme.colors.accent.primary} />
+          ) : (
+            <ThemedText size={13} variant="accent" weight="medium">
+              {t('modelFetch')}
+            </ThemedText>
+          )}
+        </TouchableOpacity>
+        {fetching && (
+          <ThemedText variant="muted" size={11} style={styles.hint}>
+            {t('modelFetching')}
+          </ThemedText>
+        )}
+        {!fetching && fetchError && (
+          <ThemedText variant="muted" size={11} style={styles.hint}>
+            {t('modelFetchError', { message: fetchError })}
+          </ThemedText>
+        )}
+      </View>
+    );
+  };
+
+  const renderChips = () => {
+    if (!selectedEntry) return null;
+    return (
+      <View style={styles.chips}>
+        {selectedEntry.provenance ? (
+          <View
+            testID={modelProvenanceChipTestId(selectedEntry.id)}
+            style={[
+              styles.chip,
+              {
+                borderColor: theme.colors.border.default,
+                backgroundColor: theme.colors.background.surface,
+              },
+            ]}
+          >
+            <ThemedText variant="muted" size={11}>
+              {t('modelProvenance', { provenance: selectedEntry.provenance })}
+            </ThemedText>
+          </View>
+        ) : null}
+        {selectedEntry.context !== undefined ? (
+          <View
+            style={[
+              styles.chip,
+              {
+                borderColor: theme.colors.border.default,
+                backgroundColor: theme.colors.background.surface,
+              },
+            ]}
+          >
+            <ThemedText variant="muted" size={11}>
+              {t(usingLive ? 'modelContextChipLive' : 'modelContextChip', {
+                context: formatContextWindow(selectedEntry.context),
+              })}
+            </ThemedText>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
+  const renderStale = () => {
+    if (!stale) return null;
     return (
       <View
-        style={[
-          styles.chip,
-          {
-            borderColor: theme.colors.border.default,
-            backgroundColor: theme.colors.background.surface,
-          },
-        ]}
+        testID={MODEL_STALE_TESTID}
+        style={[styles.stale, { borderColor: theme.colors.status.warning }]}
       >
-        <ThemedText variant="muted" size={11}>
-          {t('modelContextChip', {
-            context: formatContextWindow(selectedEntry.context),
-          })}
+        <ThemedText size={11} style={{ color: theme.colors.status.warning }}>
+          {t('modelStale')}
         </ThemedText>
       </View>
     );
   };
 
-  // ── Free-text (no catalog, or "Custom…" chosen) ──
+  // ── Free-text (no entries, or "Custom…" chosen) ──
   if (showFreeText) {
     return (
       <View>
@@ -118,7 +222,7 @@ export const CatalogModelSelect: React.FC<CatalogModelSelectProps> = ({
           ]}
           value={value}
           onChangeText={(text) => {
-            // Clearing the field while a catalog exists returns to the picker.
+            // Clearing the field while entries exist returns to the picker.
             if (text === '' && entries.length > 0) setCustomRequested(false);
             onChange(text);
           }}
@@ -131,16 +235,17 @@ export const CatalogModelSelect: React.FC<CatalogModelSelectProps> = ({
             {t('modelNoModels')}
           </ThemedText>
         )}
-        {renderContextChip()}
+        {renderFetchRow()}
+        {renderStale()}
+        {renderChips()}
       </View>
     );
   }
 
-  // ── Catalog available → SelectPicker ──
-  const options = entries.map(e => ({ id: e.id, name: e.label }));
-  // Keep a saved-but-uncataloged value selectable ("remember manual choice per
-  // config" — the persisted value round-trips on reload).
-  if (value && !options.find(o => o.id === value)) {
+  // ── Entries available → SelectPicker ──
+  const options = entries.map((e) => ({ id: e.id, name: e.label ?? e.id }));
+  // Keep a saved-but-unlisted value selectable (manual choice round-trips).
+  if (value && !options.find((o) => o.id === value)) {
     options.push({ id: value, name: value });
   }
   options.push({ id: CUSTOM_MODEL_OPTION_ID, name: t('modelCustom') });
@@ -162,7 +267,9 @@ export const CatalogModelSelect: React.FC<CatalogModelSelectProps> = ({
         onChange={handleChange}
         placeholder={t('modelSelectPlaceholder')}
       />
-      {renderContextChip()}
+      {renderFetchRow()}
+      {renderStale()}
+      {renderChips()}
     </View>
   );
 };
@@ -179,12 +286,36 @@ const styles = StyleSheet.create({
   hint: {
     marginTop: 4,
   },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+  },
   chip: {
     alignSelf: 'flex-start',
-    marginTop: 6,
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 3,
+  },
+  fetchRow: {
+    marginTop: 8,
+  },
+  fetchButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  stale: {
+    marginTop: 6,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
 });
