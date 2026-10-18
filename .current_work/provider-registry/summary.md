@@ -64,41 +64,41 @@ engine 3-2/5-1 needed before app 6-1.
 
 ## Implementation Status
 
-- [ ] **Pre-tasks**
-  - [ ] R-AUDIO ollama audio protocol → `research/ollama-audio.md`
-  - [ ] R-MD models.dev addendum → `research/modelsdev-catalog.md`
-- [ ] **Phase 1: Competitor Removal**
-  - [ ] Engine removal + migration ([1-1](1-1-EngineCompetitorRemoval.md))
-  - [ ] App removal ([1-2](1-2-AppCompetitorRemoval.md))
-- [ ] **Phase 2: Preset & Picker UX (current API)**
-  - [ ] Model catalog + pickers ([2-1](2-1-ModelCatalogPickers.md))
-  - [ ] Sampling presets + form structure ([2-2](2-2-SamplingPresetsAndFormStructure.md))
-- [ ] **Phase 3: Engine Accounts Data Model**
-  - [ ] Schema + migration + field-split + sync surface ([3-1](3-1-ProviderAccountsSchemaMigration.md))
-  - [ ] Accounts management API ([3-2](3-2-AccountsManagementApi.md))
-  - [ ] Runtime resolution + validation + shared types ([3-3](3-3-RuntimeResolutionAndValidation.md))
-- [ ] **Phase 4: Provider Client Rework** (serial: 4-1 → 4-13)
-  - [ ] OpenAI ([4-1](4-1-OpenAIClient.md))
-  - [ ] Anthropic ([4-2](4-2-AnthropicClient.md))
-  - [ ] Google ([4-3](4-3-GoogleClient.md))
-  - [ ] xAI ([4-4](4-4-XaiClient.md))
-  - [ ] OpenRouter ([4-5](4-5-OpenRouterClient.md))
-  - [ ] ElevenLabs ([4-6](4-6-ElevenLabsClient.md))
-  - [ ] Mistral chat client, NEW ([4-7](4-7-MistralChatClient.md))
-  - [ ] Ollama chat client, NEW, R-AUDIO-gated audio ([4-8](4-8-OllamaChatClient.md))
-  - [ ] LocalAI + RAG config fix ([4-9](4-9-LocalAIAndRagConfig.md))
-  - [ ] ComfyUI native re-target ([4-10](4-10-ComfyUINativeRetarget.md))
-  - [ ] Soulvoice ([4-11](4-11-SoulvoiceClient.md))
-  - [ ] SoulbitsCloud ([4-12](4-12-SoulbitsCloudClient.md))
-  - [ ] OpenAI-compatible generic client, NEW ([4-13](4-13-OpenAICompatibleClient.md))
-- [ ] **Phase 5: Verify / Models / Capabilities**
-  - [ ] Verify + models endpoints ([5-1](5-1-VerifyAndModelsEndpoints.md))
-  - [ ] Capability catalog + gated emission, R-MD-gated ([5-2](5-2-CapabilityCatalogAndGatedEmission.md))
-- [ ] **Phase 6: App Account UX & Seeding**
-  - [ ] Provider repo re-target + contract gates 1.6.0 ([6-1](6-1-ProviderRepoRetarget.md))
-  - [ ] Providers screen + account schemas ([6-2](6-2-ProvidersScreen.md))
-  - [ ] Account picker in module configs ([6-3](6-3-AccountPickerModuleConfig.md))
-  - [ ] Seeding ensure-flow — token on auth/re-auth + gap-fill ([6-4](6-4-SeedingDriver.md))
-  - [ ] Reactivated provider pickers + schema additions ([6-5](6-5-ReactivatedProviderPickers.md))
-- [ ] **Phase 7: Release**
-  - [ ] Docs, changelog, big release — dev channel ([7-1](7-1-DocsChangelogAndRelease.md))
+- [x] **Pre-tasks**
+  - [x] R-AUDIO ollama audio protocol → `research/ollama-audio.md`
+  - [x] R-MD models.dev addendum → `research/modelsdev-catalog.md`
+- [x] **Phase 1: Competitor Removal**
+  - [x] Engine removal + migration ([1-1](1-1-EngineCompetitorRemoval.md))
+  - [x] App removal ([1-2](1-2-AppCompetitorRemoval.md))
+- [x] **Phase 2: Preset & Picker UX (current API)**
+  - [x] Model catalog + pickers ([2-1](2-1-ModelCatalogPickers.md))
+  - [x] Sampling presets + form structure ([2-2](2-2-SamplingPresetsAndFormStructure.md))
+- [x] **Phase 3: Engine Accounts Data Model**
+  - [x] Schema + migration + field-split + sync surface ([3-1](3-1-ProviderAccountsSchemaMigration.md))
+  - [x] Accounts management API ([3-2](3-2-AccountsManagementApi.md))
+  - [x] Runtime resolution + validation + shared types ([3-3](3-3-RuntimeResolutionAndValidation.md))
+- [x] **Phase 4: Provider Client Rework** (serial: 4-1 → 4-13)
+  - [x] OpenAI ([4-1](4-1-OpenAIClient.md))
+  - [x] Anthropic ([4-2](4-2-AnthropicClient.md))
+  - [x] Google ([4-3](4-3-GoogleClient.md))
+  - [x] xAI ([4-4](4-4-XaiClient.md))
+  - [x] OpenRouter ([4-5](4-5-OpenRouterClient.md))
+  - [x] ElevenLabs ([4-6](4-6-ElevenLabsClient.md))
+  - [x] Mistral chat client, NEW ([4-7](4-7-MistralChatClient.md))
+  - [x] Ollama chat client, NEW, R-AUDIO-gated audio ([4-8](4-8-OllamaChatClient.md))
+  - [x] LocalAI + RAG config fix ([4-9](4-9-LocalAIAndRagConfig.md))
+  - [x] ComfyUI native re-target ([4-10](4-10-ComfyUINativeRetarget.md))
+  - [x] Soulvoice ([4-11](4-11-SoulvoiceClient.md))
+  - [x] SoulbitsCloud ([4-12](4-12-SoulbitsCloudClient.md))
+  - [x] OpenAI-compatible generic client, NEW ([4-13](4-13-OpenAICompatibleClient.md))
+- [x] **Phase 5: Verify / Models / Capabilities**
+  - [x] Verify + models endpoints ([5-1](5-1-VerifyAndModelsEndpoints.md))
+  - [x] Capability catalog + gated emission, R-MD-gated ([5-2](5-2-CapabilityCatalogAndGatedEmission.md))
+- [x] **Phase 6: App Account UX & Seeding**
+  - [x] Provider repo re-target + contract gates 1.6.0 ([6-1](6-1-ProviderRepoRetarget.md))
+  - [x] Providers screen + account schemas ([6-2](6-2-ProvidersScreen.md))
+  - [x] Account picker in module configs ([6-3](6-3-AccountPickerModuleConfig.md))
+  - [x] Seeding ensure-flow — token on auth/re-auth + gap-fill ([6-4](6-4-SeedingDriver.md))
+  - [x] Reactivated provider pickers + schema additions ([6-5](6-5-ReactivatedProviderPickers.md))
+- [x] **Phase 7: Release**
+  - [x] Docs, changelog, big release — dev channel ([7-1](7-1-DocsChangelogAndRelease.md))

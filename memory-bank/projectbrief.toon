@@ -36,3 +36,11 @@
 - Dead module-specific schemas removed, merged into main provider schemas
 - Movement module supports Google/xAI/Anthropic providers
 - Shared isProviderConfigInUse() helper with UNION ALL
+@RecentUpdates[ProviderRegistry]:
+- Competitor providers (Kindroid, Character.AI, Kajiwoto) removed completely — clients, configs, sync tables, app pickers; existing configs hard-deleted (ruling R9/A6)
+- Shared provider accounts: one `provider_accounts` table for credentials + per-module capability overlays; the 16 per-module provider_config_* tables retired (engine sync surface 35→20); management contract 1.5.0→1.6.0
+- New Providers settings screen: accounts grouped by type, API-key "Test key" verification chips, delete protection listing referencing configs
+- Module configs reworked to a Provider → Account → Capability → Module flow with catalog-backed model pickers (live "Fetch from provider") and sampling presets (A3: presets supply defaults, explicit local values override)
+- Mistral/Ollama/LocalAI activated; per-slot STT provider lists (VAD = soulbitscloud + soulvoice only; ollama STT experimental)
+- Seeded Soulbits defaults (7 configs incl. cloud VAD silero-vad); soulbitscloud account PASETO ensured on every sign-in/re-auth (A9 division: engine seeds structure, app ensures token)
+- Shipped as v0.4.5-dev on the dev channel (release run 39174517889)

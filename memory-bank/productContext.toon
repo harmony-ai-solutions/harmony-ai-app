@@ -40,3 +40,10 @@
 - Movement module: Google/xAI/Anthropic provider options for character movement AI
 - Schema-driven UI: No module-specific schemas — one schema per provider, clean and consistent
 - Dead code eliminated: Module-specific field schemas merged, shared isProviderConfigInUse helper
+@NewCapabilities[ProviderRegistry]:
+- Enter a key once: shared provider accounts replace per-module credential forms; one account serves every module that provider supports
+- Confidence before use: instant "Test key" verification (valid/invalid/throttled/blocked/scope-limited/unreachable) with payload details, plus live model/voice listings straight from the provider
+- Guided configuration: catalog-backed model pickers with provenance chips + sampling presets (presets are defaults; explicit choices always win) reduce free-text errors; unsupported params warn, never block
+- More backends: Mistral, Ollama (local; STT experimental), LocalAI; VAD choices limited to providers that actually implement it
+- Frictionless cloud: Soulbits defaults seeded (incl. cloud VAD); the cloud account token is kept current on every sign-in/re-auth automatically
+- Removal note: Kindroid/Character.AI/Kajiwoto are gone (platform conflict); existing configs for them are hard-deleted in the v0.4.5 upgrade
