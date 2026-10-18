@@ -175,6 +175,13 @@ android {
             versionNameSuffix "-dev"
             buildConfigField "boolean", "IS_BETA", "true"
             buildConfigField "String", "APP_VARIANT", "\"full\""
+            // The flavour IS the environment (fixes the release-manifest
+            // channel: without this, Config.APP_ENV is undefined in release
+            // builds and cloud.ts falls back to 'prod' — the app then checks
+            // app/prod/latest.json, which per-channel isolation never serves,
+            // and the update banner is silently dead. Same reflection path as
+            // APP_VARIANT above: react-native-config surfaces BuildConfig).
+            buildConfigField "String", "APP_ENV", "\"dev\""
             buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('dev', 'GOOGLE_WEB_CLIENT_ID')}\""
             buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('dev', 'APPLE_SERVICES_ID')}\""
 
@@ -206,6 +213,7 @@ android {
             versionNameSuffix "-dev"
             buildConfigField "boolean", "IS_BETA", "true"
             buildConfigField "String", "APP_VARIANT", "\"store\""
+            buildConfigField "String", "APP_ENV", "\"dev\""
             buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('dev', 'GOOGLE_WEB_CLIENT_ID')}\""
             buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('dev', 'APPLE_SERVICES_ID')}\""
         }
@@ -213,6 +221,7 @@ android {
             dimension "environment"
             buildConfigField "boolean", "IS_BETA", "false"
             buildConfigField "String", "APP_VARIANT", "\"full\""
+            buildConfigField "String", "APP_ENV", "\"prod\""
             buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('prod', 'GOOGLE_WEB_CLIENT_ID')}\""
             buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('prod', 'APPLE_SERVICES_ID')}\""
         }
@@ -221,6 +230,7 @@ android {
             dimension "environment"
             buildConfigField "boolean", "IS_BETA", "false"
             buildConfigField "String", "APP_VARIANT", "\"store\""
+            buildConfigField "String", "APP_ENV", "\"prod\""
             buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('prod', 'GOOGLE_WEB_CLIENT_ID')}\""
             buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('prod', 'APPLE_SERVICES_ID')}\""
         }
