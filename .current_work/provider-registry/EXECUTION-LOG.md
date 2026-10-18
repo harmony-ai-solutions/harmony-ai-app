@@ -27,7 +27,10 @@ Legend: ⏳ running · ✅ committed · ⏸ paused/blocked · ⬜ queued
 - ⏳ 6-1 ✅ `4d1128e` · 6-2 ✅ `1713d94` · 6-3 ✅ `1d53efa` · 6-4 ✅ `a7068e4` (ensure-flow: ungated token on auth/re-auth + one-shot gap-fill incl. VAD; 17 tests) · ⏳ 6-5 running (LAST app code phase)
 
 ## Release
-- 7-1: app docs/bump ✅ `da969e9` (v0.4.5) · engine docs/bump ✅ `472ef9e` (AppVersion v0.5.0-dev, openapi 1.6.0 + fixtures 49/49) · **AWAITING OWNER GO** for: push branches → engine android_only dispatch (v0.5.0-dev) → artifact 200 check → ENGINE_SIDECAR_VARIABLE=v0.5.0-dev → app publish_latest dispatch (0.4.5, build_ios=false) → APK/manifest verify. Never a tag; never republish.
+- ✅ **SHIPPED 2026-10-19**: engine `v0.4.3-dev` ([run 39172194525](https://github.com/harmony-ai-solutions/harmony-link-private/actions/runs/39172194525), artifact 200 @ engine/v0.4.3-dev/arm64/libengine.so, 57.6MB) · app `v0.4.5-dev` ([run 39174517889](https://github.com/harmony-ai-solutions/harmony-ai-app/actions/runs/39174517889), APK 200 @ app/v0.4.5/dev/harmony-ai-app-v0.4.5-android.apk, 111.8MB, manifest serving v0.4.5-dev). ENGINE_SIDECAR_VERSION=v0.4.3-dev. No tags anywhere.
+- Post-ship: memory banks updated (app dde66ef, engine 56ef889) + pushed. summary.md 38/38 checked.
+- Release incidents (resolved): CharactersScreen 5s timeout deterministic on new Ubuntu-26 runners → jest.setTimeout(15s) (f780bee); version input must be BARE (v0.4.5) — pipeline appends channel → my -dev suffix produced a v0.4.5-dev-dev run (39173254084, superseded; orphaned immutable objects under app/v0.4.5-dev-dev/ — optional CDN cleanup).
+- Owner rollout pending: direct-install once, then quick-succession device upgrades (plan §3.3 sync-surface mitigation).
 
 ## Event log
 - 2026-10-18: wave 1 dispatched — R-AUDIO, R-MD, engine 1-1, app 1-2.
