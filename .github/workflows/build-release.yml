@@ -433,10 +433,13 @@ jobs:
             echo "::warning::CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID variable not set — skipping invalidation (manifest may serve stale up to 24h at the edge)"
             exit 0
           fi
+          # AWS CLI v2 multi-path form: separate quoted strings after ONE
+          # --paths flag. A quoted "a b" string is ONE path (v1 splitting was
+          # removed in v2 — InvalidArgument), and repeated --paths flags
+          # OVERRIDE instead of appending (verified: 1-path batch).
           INVALIDATION=$(aws cloudfront create-invalidation \
             --distribution-id "${DISTRIBUTION_ID}" \
-            --paths "/app/dev/latest.json" \
-            --paths "/app/prod/latest.json" \
+            --paths "/app/dev/latest.json" "/app/prod/latest.json" \
             --no-cli-pager)
           echo "Invalidation created: ${INVALIDATION}"
 
