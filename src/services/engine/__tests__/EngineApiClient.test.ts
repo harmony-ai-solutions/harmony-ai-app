@@ -496,3 +496,149 @@ describe('sampling presets', () => {
     });
   });
 });
+
+// ── Provider accounts + verify/models/capabilities (provider-registry 6-1) ─
+describe('provider accounts transport', () => {
+  it('POSTs {type, account} on create and returns the write envelope', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'POST',
+        path: '/api/providers',
+        status: 201,
+        json: { provider: 'openai', config: { id: 'acc1' } },
+      },
+    ]);
+    const res = await clientWith(server).createProvider('openai', { name: 'default', api_key: 'sk' });
+    expect((res.config as { id: string }).id).toBe('acc1');
+    expect(server.lastCall('POST', '/api/providers')!.body).toEqual({
+      type: 'openai',
+      account: { name: 'default', api_key: 'sk' },
+    });
+  });
+
+  it('PUTs {account} on update', async () => {
+    const server = createMockManagementServer([
+      { method: 'PUT', path: '/api/providers/acc1', json: { provider: 'openai', config: { id: 'acc1' } } },
+    ]);
+    await clientWith(server).updateProvider('acc1', { name: 'renamed' });
+    expect(server.lastCall('PUT', '/api/providers/acc1')!.body).toEqual({
+      account: { name: 'renamed' },
+    });
+  });
+
+  it('surfaces the DELETE 409 body (referencing_configs)', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'DELETE',
+        path: '/api/providers/acc1',
+        status: 409,
+        json: {
+          error: 'provider_in_use',
+          referencing_configs: [{ module: 'backend', name: 'b', id: 'mc1' }],
+        },
+      },
+    ]);
+    await expect(clientWith(server).deleteProvider('acc1')).rejects.toMatchObject({
+      status: 409,
+      body: { error: 'provider_in_use' },
+    });
+  });
+
+  it('GETs the account-shaped provider list', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/providers',
+        json: {
+          providers: {
+            openai: [
+              { id: 'acc1', type: 'openai', name: 'd', api_key: 'sk', base_url: '', extra: '{}' },
+            ],
+          },
+        },
+      },
+    ]);
+    const res = await clientWith(server).listProviders('openai');
+    expect(res.providers.openai[0].id).toBe('acc1');
+    expect(server.lastCall('GET', '/api/providers')!.query.type).toBe('openai');
+  });
+
+  it('POSTs the probe body to /verify and returns the state', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'POST',
+        path: '/api/providers/verify',
+        json: { state: 'throttled', detail: '429' },
+      },
+    ]);
+    const res = await clientWith(server).verifyProvider({ type: 'openai', api_key: 'sk' });
+    expect(res.state).toBe('throttled');
+    expect(server.lastCall('POST', '/api/providers/verify')!.body).toEqual({
+      type: 'openai',
+      api_key: 'sk',
+    });
+  });
+
+  it('POSTs the probe body to /models and returns models + voices', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'POST',
+        path: '/api/providers/models',
+        json: {
+          models: [{ id: 'gpt-4o', source: 'catalog', provenance: 'known' }],
+          voices: [{ voice_id: 'v1', name: 'Rachel' }],
+        },
+      },
+    ]);
+    const res = await clientWith(server).listProviderModels({
+      type: 'elevenlabs',
+      api_key: 'k',
+      module: 'tts',
+    });
+    expect(res.models[0].id).toBe('gpt-4o');
+    expect(res.voices?.[0].voice_id).toBe('v1');
+    expect(server.lastCall('POST', '/api/providers/models')!.body).toEqual({
+      type: 'elevenlabs',
+      api_key: 'k',
+      module: 'tts',
+    });
+  });
+
+  it('GETs the capability catalog', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/providers/capabilities',
+        json: { catalog: { openai: [{ id: 'gpt-4o' }] }, param_mapping: { mistral: { seed: 'random_seed' } } },
+      },
+    ]);
+    const res = await clientWith(server).getProviderCapabilities();
+    expect(res.param_mapping?.mistral.seed).toBe('random_seed');
+  });
+});
+
+describe('module-config writes are flat', () => {
+  it('POSTs the flat body verbatim', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'POST',
+        path: '/api/module-configs/backend',
+        status: 201,
+        json: { id: 'mc1', status: 'ok' },
+      },
+    ]);
+    const res = await clientWith(server).createModuleConfig('backend', {
+      name: 'cfg',
+      provider: 'openai',
+      provider_account_id: 'acc1',
+      capability_json: { model: 'gpt-4o' },
+    });
+    expect(res.id).toBe('mc1');
+    expect(server.lastCall('POST', '/api/module-configs/backend')!.body).toEqual({
+      name: 'cfg',
+      provider: 'openai',
+      provider_account_id: 'acc1',
+      capability_json: { model: 'gpt-4o' },
+    });
+  });
+});

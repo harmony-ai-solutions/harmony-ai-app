@@ -85,8 +85,23 @@
  * `cloudPairingPayload` / `cloudAccountStatus` / `cloudSignInStart`. The phone
  * consumes the LAN payload via parser v2 and the enrollment intake (the cloud QR
  * path is unchanged).
+ *
+ * 1.5.0 → 1.6.0 (provider-registry 3-2/5-1/5-2/6-1): the provider surface
+ * re-targeted from the per-type `provider_config_*` tables to the unified
+ * `provider_accounts` model. `GET /api/providers` returns account-shaped rows
+ * grouped by type; `POST /api/providers` takes `{type, account}`; `PUT` takes
+ * `{account}`; `DELETE` 409 carries `referencing_configs`; `GET
+ * /api/providers/:id` returns the merged account+overlay object when referenced.
+ * The retired `POST /api/validate-provider` + `POST /api/models` are replaced by
+ * `POST /api/providers/verify` (`{state, detail?, payload?}`) and `POST
+ * /api/providers/models` (`{models, voices?}`); `GET /api/providers/capabilities`
+ * serves the tier-2 catalog. Module-config writes are flat
+ * (`{provider_account_id, capability_json, …}`). New shared fixtures:
+ * `providerList` (account rows) / `providerRefresh` / `providerVerify` /
+ * `providerModels` / `providerCapabilities` / `moduleConfig` /
+ * `moduleConfigCreate`.
  */
-export const ENGINE_CONTRACT_VERSION = '1.5.0';
+export const ENGINE_CONTRACT_VERSION = '1.6.0';
 
 /** Outcome of a contract-version comparison. */
 export interface ContractVersionCheck {
@@ -299,18 +314,99 @@ export const REQUIRED_ENGINE_ENDPOINTS: ContractEndpoint[] = [
     note: 'module config list (schema-driven forms)',
   },
   {
+    id: 'moduleConfigs.get',
+    method: 'GET',
+    path: '/api/module-configs/:module/:id',
+    fixture: 'moduleConfig',
+    note: 'module config read (composite w/ merged provider)',
+  },
+  {
+    id: 'moduleConfigs.create',
+    method: 'POST',
+    path: '/api/module-configs/:module',
+    fixture: 'moduleConfigCreate',
+    note: 'module config create (flat provider_account_id + capability_json)',
+  },
+  {
+    id: 'moduleConfigs.update',
+    method: 'PUT',
+    path: '/api/module-configs/:module/:id',
+    fixture: 'statusOk',
+    note: 'module config update (overlay + module columns)',
+  },
+  {
+    id: 'moduleConfigs.delete',
+    method: 'DELETE',
+    path: '/api/module-configs/:module/:id',
+    fixture: 'statusOk',
+    note: 'module config soft-delete',
+  },
+
+  // ── Provider accounts (provider-registry 3-2/6-1) ───────────────────────
+  // Static `capabilities` route declared BEFORE the `:id` param route so the
+  // loopback mock's first-match regex resolves it correctly.
+  {
+    id: 'providers.capabilities',
+    method: 'GET',
+    path: '/api/providers/capabilities',
+    fixture: 'providerCapabilities',
+    note: 'tier-2 capability catalog + param mapping (5-2)',
+  },
+  {
     id: 'providers.list',
     method: 'GET',
     path: '/api/providers',
     fixture: 'providerList',
-    note: 'provider config list',
+    note: 'provider account list (grouped by type, account-shaped)',
+  },
+  {
+    id: 'providers.get',
+    method: 'GET',
+    path: '/api/providers/:id',
+    fixture: 'providerWrite',
+    note: 'provider account read (merged object when referenced)',
   },
   {
     id: 'providers.create',
     method: 'POST',
     path: '/api/providers',
     fixture: 'providerWrite',
-    note: 'provider config create (3-4 follow-up)',
+    note: 'provider account create ({type, account})',
+  },
+  {
+    id: 'providers.update',
+    method: 'PUT',
+    path: '/api/providers/:id',
+    fixture: 'providerWrite',
+    note: 'provider account partial update ({account})',
+  },
+  {
+    id: 'providers.delete',
+    method: 'DELETE',
+    path: '/api/providers/:id',
+    fixture: 'statusOk',
+    note: 'provider account soft-delete (409 + referencing_configs)',
+  },
+  {
+    id: 'providers.refreshToken',
+    method: 'POST',
+    path: '/api/providers/soulbitscloud/refresh-token',
+    fixture: 'providerRefresh',
+    note: 'soulbitscloud token refresh (cloud-mode seed/rotation)',
+  },
+  {
+    id: 'providers.verify',
+    method: 'POST',
+    path: '/api/providers/verify',
+    fixture: 'providerVerify',
+    note: 'stateless credential/connectivity check (R10)',
+  },
+  {
+    id: 'providers.models',
+    method: 'POST',
+    path: '/api/providers/models',
+    fixture: 'providerModels',
+    note: 'live model discovery recipe + account voices (R10)',
   },
 
   // ── Sync client runtime (3-5) ───────────────────────────────────────────

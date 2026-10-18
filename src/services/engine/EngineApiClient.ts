@@ -323,8 +323,40 @@ export interface ChatSettingsWriteDto {
   archived?: boolean;
 }
 
+// ── Provider accounts (provider-registry 3-2/5-1/6-1) ────────────────────
+// The management API re-targeted from the per-type `provider_config_*` tables to
+// the unified `provider_accounts` surface. `GET /api/providers` returns
+// account-shaped rows grouped by type; `GET /api/providers/:id` returns the
+// MERGED object (account + capability overlay, top-level `id`) when the account
+// is referenced by a live module config, else the account-shaped row. Writes use
+// `{type, account}` (create) / `{account}` (update).
+
+/** One shared provider account (`provider_accounts` *Sync row, snake_case). */
+export interface ProviderAccountDto {
+  id: string;
+  type: string;
+  name: string;
+  api_key: string;
+  base_url: string;
+  /** Typed account-level extras as a JSON string. */
+  extra: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+/** Partial account write body (`POST /api/providers` `account`, `PUT` body). */
+export interface ProviderAccountWriteDto {
+  name?: string;
+  api_key?: string;
+  base_url?: string;
+  /** Typed account-level extras (object or JSON string; engine tolerates both). */
+  extra?: unknown;
+}
+
 export interface ProviderListResponseDto {
-  providers: Record<string, unknown[]>;
+  /** Account-shaped rows grouped by provider type (types with no rows: `[]`). */
+  providers: Record<string, ProviderAccountDto[]>;
 }
 
 export interface ProviderGetResponseDto {
@@ -336,6 +368,124 @@ export interface ProviderGetResponseDto {
 export interface ProviderWriteResponseDto {
   provider: string;
   config: unknown;
+}
+
+/**
+ * One provider account reference in the `DELETE /api/providers/:id` 409 body
+ * (`referencing_configs`) — the module configs that block a soft delete.
+ */
+export interface ReferencingConfigDto {
+  module: string;
+  name: string;
+  id: string;
+}
+
+/** `DELETE /api/providers/:id` 409 body (`provider_in_use`). */
+export interface ProviderInUseBodyDto {
+  error: string;
+  referencing_configs: ReferencingConfigDto[];
+}
+
+// ── Provider verify / models / capabilities (provider-registry 5-1/5-2/6-1) ─
+// The R10 management surface. `POST /api/providers/verify` is a stateless
+// credential check; `POST /api/providers/models` executes the provider's
+// discovery recipe; `GET /api/providers/capabilities` serves the tier-2 catalog.
+
+/** The verify state taxonomy (SYNTHESIS §1 — held across all 13 providers). */
+export type ProviderVerifyState =
+  | 'valid'
+  | 'invalid'
+  | 'throttled'
+  | 'blocked'
+  | 'scope_limited'
+  | 'unreachable';
+
+/** Shared body for the verify/models probe routes. */
+export interface ProviderProbeRequestDto {
+  type: string;
+  api_key?: string;
+  base_url?: string;
+  /** Typed account-level extras (object or JSON string). */
+  extra?: unknown;
+  /** Model-filter selector for `/models` (the old POST /api/models behavior). */
+  module?: string;
+  /** Optional account id hint for the fingerprint write (`/models` only). */
+  account_id?: string;
+}
+
+/**
+ * `POST /api/providers/verify` result. HTTP 200 for every verdict (a non-valid
+ * state is a legitimate result, not an HTTP error); 400 for a malformed body /
+ * unusable config.
+ */
+export interface ProviderVerifyResultDto {
+  state: ProviderVerifyState;
+  detail?: string;
+  /** Provider-specific extras for the UI (tier/quota/version/budgets/…). */
+  payload?: Record<string, unknown>;
+}
+
+/**
+ * A discovered model descriptor (`modules/common.ModelInfo`, plan §3.4). Only
+ * `id` is mandatory; the richer fields are populated as the discovery tier
+ * provides them (live > catalog > user override).
+ */
+export interface ModelInfoDto {
+  id: string;
+  label?: string;
+  context?: number;
+  output_limit?: number;
+  modalities?: string[];
+  capabilities?: string[];
+  param_support?: string[];
+  source?: 'live' | 'catalog' | string;
+  provenance?: 'detected' | 'known' | 'assumed' | 'overridden' | string;
+  /** Provider-specific extras (openrouter pricing, xai version, …). */
+  meta?: Record<string, unknown>;
+}
+
+/** One entry of a voice's `verified_languages` array. */
+export interface VoiceLanguageInfoDto {
+  language?: string;
+  model_id?: string;
+  accent?: string;
+  locale?: string;
+  preview_url?: string;
+}
+
+/** An account-scoped voice descriptor (ElevenLabs; live-only, never catalogued). */
+export interface VoiceInfoDto {
+  voice_id: string;
+  name: string;
+  category?: string;
+  description?: string;
+  labels?: Record<string, string>;
+  preview_url?: string;
+  is_owner?: boolean;
+  settings?: Record<string, unknown>;
+  verified_languages?: VoiceLanguageInfoDto[];
+}
+
+/**
+ * `POST /api/providers/models` response. A listing failure is reported as HTTP
+ * 200 with an empty list + `error` (mirroring the retired route).
+ */
+export interface ProviderModelsResponseDto {
+  models: ModelInfoDto[];
+  /** Present only for providers exposing an account voice catalog (ElevenLabs). */
+  voices?: VoiceInfoDto[];
+  error?: string;
+}
+
+/**
+ * `GET /api/providers/capabilities` response (tier-2 catalog, phase 5-2).
+ * Interim/5-2-owned shape: the static model catalog plus the per-provider
+ * param-name mapping. Kept loose so 5-2 can refine it without a DTO break.
+ */
+export interface ProviderCapabilitiesDto {
+  catalog?: Record<string, ModelInfoDto[]>;
+  param_mapping?: Record<string, Record<string, string>>;
+  [key: string]: unknown;
 }
 
 // ── Sampling presets (provider-registry 2-2) ─────────────────────────────
@@ -379,10 +529,19 @@ export interface CharacterStatsResponseDto {
   stats: Record<string, CharacterStatDto>;
 }
 
-/** `POST /api/module-configs/:module` body (nested config, snake_case). */
+/**
+ * `POST/PUT /api/module-configs/:module` body. Canonical 3-2 shape is FLAT:
+ * `{name, provider, provider_account_id, capability_json, …module fields}` (stt
+ * carries two slots under `transcription`/`vad`). The legacy `{name, config}`
+ * envelope is still accepted engine-side until 6-3, but the app sends the flat
+ * shape. Index signature carries the per-module scalar fields.
+ */
 export interface ModuleConfigWriteDto {
   name: string;
-  config: unknown;
+  provider?: string;
+  provider_account_id?: string | null;
+  capability_json?: unknown;
+  [key: string]: unknown;
 }
 
 /** `GET /public/appversion` response (mirrors the engine's `constants.AppVersion`). */
@@ -1330,42 +1489,76 @@ export class EngineApiClient {
     return this.sendJson<{ status: string }>('PUT', '/api/development/logs/level', config);
   }
 
-  // ── Provider config writes (task 3-4 engine follow-up) ─────────────────
+  // ── Provider account writes (provider-registry 3-2/6-1) ────────────────
 
   /**
-   * Create a provider config of the named type (`POST /api/providers`). The
-   * engine mints the id; the response carries it as `config.id`.
+   * Create a provider account of the named type (`POST /api/providers`,
+   * body `{type, account}`). The engine mints the id; the response carries it
+   * as `config.id`.
    */
-  createProvider(provider: string, config: unknown): Promise<ProviderWriteResponseDto> {
+  createProvider(type: string, account: ProviderAccountWriteDto): Promise<ProviderWriteResponseDto> {
     return this.sendJson<ProviderWriteResponseDto>('POST', '/api/providers', {
-      provider,
-      config,
+      type,
+      account,
     });
   }
 
   /**
-   * Update a provider config (`PUT /api/providers/:id`, partial merge). The
-   * engine resolves the type from the id; omitted config fields keep their
+   * Partial account update (`PUT /api/providers/:id`, body `{account}`). The
+   * engine resolves the type from the id; omitted account fields keep their
    * current values.
    */
-  updateProvider(id: string, config: unknown): Promise<ProviderWriteResponseDto> {
+  updateProvider(id: string, account: ProviderAccountWriteDto): Promise<ProviderWriteResponseDto> {
     return this.sendJson<ProviderWriteResponseDto>(
       'PUT',
       `/api/providers/${encodeURIComponent(id)}`,
-      { config },
+      { account },
     );
   }
 
   /**
-   * Delete a provider config (`DELETE /api/providers/:id`). Throws an
+   * Delete a provider account (`DELETE /api/providers/:id`). Throws an
    * {@link EngineApiError} with status 409 when a live module config still
-   * references it (`{error:"provider_in_use"}`), or 404 when absent.
+   * references it — the body carries `{error:"provider_in_use",
+   * referencing_configs:[{module,name,id}]}` — or 404 when absent.
    */
   deleteProvider(id: string): Promise<{ status: string }> {
     return this.sendJson<{ status: string }>(
       'DELETE',
       `/api/providers/${encodeURIComponent(id)}`,
     );
+  }
+
+  // ── Provider verify / models / capabilities (provider-registry 5-1/5-2) ─
+
+  /**
+   * Stateless credential/connectivity check (`POST /api/providers/verify`).
+   * Returns the structured verify result — HTTP 200 for every verdict (a
+   * non-valid state is a legitimate result, not an error). Never writes the DB;
+   * never blocks a save (plan §3.4). 400 on a malformed body / unusable config.
+   */
+  verifyProvider(body: ProviderProbeRequestDto): Promise<ProviderVerifyResultDto> {
+    return this.sendJson<ProviderVerifyResultDto>('POST', '/api/providers/verify', body);
+  }
+
+  /**
+   * Execute the provider's live model-discovery recipe
+   * (`POST /api/providers/models`) → `{models, voices?}`. `module` filters the
+   * list (the retired POST /api/models behavior); providers with an
+   * account-scoped voice catalog (ElevenLabs) add `voices`. A listing failure
+   * surfaces as HTTP 200 with an empty list + `error`.
+   */
+  listProviderModels(body: ProviderProbeRequestDto): Promise<ProviderModelsResponseDto> {
+    return this.sendJson<ProviderModelsResponseDto>('POST', '/api/providers/models', body);
+  }
+
+  /**
+   * The engine's tier-2 capability catalog + param-name mapping
+   * (`GET /api/providers/capabilities`) for offline pickers / param filtering
+   * (plan §6.3). Served by engine phase 5-2.
+   */
+  getProviderCapabilities(): Promise<ProviderCapabilitiesDto> {
+    return this.getJson<ProviderCapabilitiesDto>('/api/providers/capabilities');
   }
 
   // ── Sync client runtime control (task 3-5) ─────────────────────────────

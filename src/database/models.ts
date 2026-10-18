@@ -315,14 +315,50 @@ export interface SoulbitsCloudProviderConfig {
 }
 
 // ============================================================================
+// Provider Account Model (provider-registry Option B / plan §3.1)
+// ============================================================================
+
+/**
+ * A shared provider account — one row per real credential (name, api_key,
+ * base_url, typed `extra`) that many module configs reference. Capability
+ * fields (model, sampling, …) do NOT live here; they live on the module config's
+ * `capability_json` overlay (plan §3.2). Backs the accounts API in
+ * `services/engine/repositories/providers.ts`. `created_at`/`updated_at` are
+ * coerced from the engine's RFC3339 strings to `Date` at the repo boundary.
+ */
+export interface ProviderAccount {
+  id: string;
+  /** One of the 13 surviving provider types. */
+  type: string;
+  name: string;
+  /** Empty string == keyless self-hosted. */
+  api_key: string;
+  /** Empty string == the provider's canonical default endpoint. */
+  base_url: string;
+  /** Typed account-level extras (headers, auth style, fingerprint) as JSON. */
+  extra: string;
+  created_at: Date | null;
+  updated_at: Date | null;
+  deleted_at: Date | null;
+}
+
+// ============================================================================
 // Module Configuration Models
 // ============================================================================
+//
+// Interim dual shape (provider-registry 6-1): the legacy flat `provider_config_id`
+// FK REMAINS (the legacy provider adapter still maps it) alongside the new
+// `provider_account_id` FK + `capability_json` overlay (plan §3.2). The adapter
+// maps between the two so the module-config screens keep compiling/functioning
+// until 6-3 removes the legacy consumption.
 
 export interface BackendConfig {
   id: string;
   name: string;
   provider: string;
   provider_config_id: string | null;
+  provider_account_id: string | null;
+  capability_json: string; // JSON string (capability overlay)
   deleted_at: Date | null;
 }
 
@@ -331,6 +367,8 @@ export interface MovementConfig {
   name: string;
   provider: string;
   provider_config_id: string | null;
+  provider_account_id: string | null;
+  capability_json: string;
   startup_sync_timeout: number | null;
   execution_threshold: number | null;
   deleted_at: Date | null;
@@ -344,8 +382,12 @@ export interface STTConfig {
   max_buffer_count: number | null;
   transcription_provider: string;
   transcription_provider_config_id: string | null;
+  transcription_provider_account_id: string | null;
+  transcription_capability_json: string;
   vad_provider: string;
   vad_provider_config_id: string | null;
+  vad_provider_account_id: string | null;
+  vad_capability_json: string;
   deleted_at: Date | null;
 }
 
@@ -354,6 +396,8 @@ export interface CognitionConfig {
   name: string;
   provider: string;
   provider_config_id: string | null;
+  provider_account_id: string | null;
+  capability_json: string;
   max_cognition_events: number | null;
   generate_expressions: number | null;
   deleted_at: Date | null;
@@ -364,6 +408,8 @@ export interface RAGConfig {
   name: string;
   provider: string;
   provider_config_id: string | null;
+  provider_account_id: string | null;
+  capability_json: string;
   embedding_concurrency: number | null;
   deleted_at: Date | null;
 }
@@ -373,6 +419,8 @@ export interface TTSConfig {
   name: string;
   provider: string;
   provider_config_id: string | null;
+  provider_account_id: string | null;
+  capability_json: string;
   output_type: string | null;
   words_to_replace: string | null;
   vocalize_nonverbal: number | null;
@@ -384,6 +432,8 @@ export interface VisionConfig {
   name: string;
   provider: string;
   provider_config_id: string | null;
+  provider_account_id: string | null;
+  capability_json: string;
   resolution_width: number;
   resolution_height: number;
   deleted_at: Date | null;
@@ -394,6 +444,8 @@ export interface ImaginationConfig {
   name: string;
   provider: string;
   provider_config_id: string | null;
+  provider_account_id: string | null;
+  capability_json: string;
   deleted_at: Date | null;
 }
 
@@ -492,6 +544,12 @@ export interface CharacterImageInfo {
 // Helper Types for Database Operations
 // ============================================================================
 
+/**
+ * Any provider-config shape the app reads/writes. During the interim (6-1) this
+ * spans BOTH the legacy per-type flat configs (still produced by the legacy
+ * provider adapter) AND the new account-shaped row (`ProviderAccount`) the
+ * accounts API returns.
+ */
 export type ProviderConfig =
   | OpenAIProviderConfig
   | OpenRouterProviderConfig
@@ -505,7 +563,8 @@ export type ProviderConfig =
   | XAIProviderConfig
   | GoogleProviderConfig
   | AnthropicProviderConfig
-  | SoulbitsCloudProviderConfig;
+  | SoulbitsCloudProviderConfig
+  | ProviderAccount;
 
 export type ModuleConfig =
   | BackendConfig

@@ -1,23 +1,24 @@
 /**
- * Module configs — management-API-backed repository adapter (task 3-2 reads,
- * task 3-4 relink: composite↔flat mapper + writes; owner ruling 2).
+ * Module configs — management-API-backed repository adapter (provider-registry
+ * 6-1; originally task 3-2 reads, task 3-4 relink).
  *
- * The engine's module-config read/write shape is **composite**:
- *   `{ id, name, provider, <providerType>: { …resolved provider config… }, … }`
- * (one nested field per provider family; module-level scalar fields are
- * top-level). The app's domain models are **flat** (`provider_config_id` +
- * module scalars). This adapter maps both ways:
+ * The engine's module-config **read** stays COMPOSITE:
+ *   `{ id, name, provider, provider_account_id, <providerType>: { …merged account
+ *      + overlay config… }, … }` (one nested field per provider family; the
+ *   merged provider object carries the account id under its top-level `id`).
+ * The engine's **write** shape is FLAT (3-2): `{name, provider,
+ * provider_account_id, capability_json, …module fields}` (stt carries two slots
+ * under `transcription`/`vad`). The app's domain models stay flat
+ * (`provider_config_id` + module scalars) with the interim account FK +
+ * capability overlay alongside.
  *
- *   - read  → flat (`provider_config_id` = the nested provider config's `id`)
- *   - write → `{ name, config }` where `config` is the composite, with the
- *             nested provider config resolved from `provider_config_id` via
- *             `GET /api/providers/:id`.
- *
- * NOTE (engine contract): `POST /api/module-configs/:module` creates a NEW
- * provider config from the nested config (the engine owns a 1:1
- * module→provider relationship). The app's separately-created provider config
- * is therefore superseded on create; reads thereafter report the engine-minted
- * provider_config_id.
+ *   - read  → flat (`provider_config_id`/`provider_account_id` = the nested
+ *             merged object's `id`; `capability_json` = the merged object minus
+ *             the account fields)
+ *   - write → flat `{name, provider, provider_account_id, capability_json, …}`.
+ *             The capability overlay comes from the legacy adapter's pending
+ *             stash (a just-written provider config) or, failing that, from
+ *             re-resolving the referenced account's merged object.
  */
 
 import type {
@@ -32,6 +33,8 @@ import type {
 } from '../../../database/models';
 import { engineApiClient } from '../EngineApiClient';
 import { EngineApiError } from '../EngineApiClient';
+import type { ModuleConfigWriteDto } from '../EngineApiClient';
+import { capabilityFieldsOf, getPendingCapability } from './legacyProviderAdapter';
 
 type Composite = Record<string, any>;
 
@@ -39,15 +42,24 @@ function coerceDeleted(cfg: Composite): Date | null {
   return typeof cfg.deleted_at === 'string' ? new Date(cfg.deleted_at) : null;
 }
 
+/** JSON-stringify a capability overlay (stable `'{}'` for empty). */
+function capabilityJson(nested: Composite | undefined): string {
+  const fields = capabilityFieldsOf(nested ?? {});
+  return Object.keys(fields).length > 0 ? JSON.stringify(fields) : '{}';
+}
+
 /** Composite engine config → the app's flat module row. */
 function compositeToFlat(module: string, c: Composite): Composite {
   const provider: string = c.provider ?? '';
   const nested: Composite | undefined = provider ? c[provider] : undefined;
+  const accountId = nested?.id ?? c.provider_account_id ?? null;
   const flat: Composite = {
     id: c.id ?? '',
     name: c.name ?? '',
     provider,
-    provider_config_id: nested?.id ?? null,
+    provider_config_id: accountId,
+    provider_account_id: accountId,
+    capability_json: capabilityJson(nested),
     deleted_at: coerceDeleted(c),
   };
   switch (module) {
@@ -81,10 +93,16 @@ function compositeToFlat(module: string, c: Composite): Composite {
       flat.max_buffer_count = sr.maxbuffercount ?? null;
       const tx = c.transcription ?? {};
       flat.transcription_provider = tx.provider ?? '';
-      flat.transcription_provider_config_id = tx.provider ? tx[tx.provider]?.id ?? null : null;
+      const txNested = tx.provider ? tx[tx.provider] : undefined;
+      flat.transcription_provider_config_id = txNested?.id ?? null;
+      flat.transcription_provider_account_id = txNested?.id ?? tx.provider_account_id ?? null;
+      flat.transcription_capability_json = capabilityJson(txNested);
       const vad = c.vad ?? {};
       flat.vad_provider = vad.provider ?? '';
-      flat.vad_provider_config_id = vad.provider ? vad[provider0(vad)]?.id ?? null : null;
+      const vadNested = vad.provider ? vad[vad.provider] : undefined;
+      flat.vad_provider_config_id = vadNested?.id ?? null;
+      flat.vad_provider_account_id = vadNested?.id ?? vad.provider_account_id ?? null;
+      flat.vad_capability_json = capabilityJson(vadNested);
       break;
     }
     default:
@@ -93,12 +111,7 @@ function compositeToFlat(module: string, c: Composite): Composite {
   return flat;
 }
 
-/** The VAD nested key equals its provider name (identity map). */
-function provider0(vad: Composite): string {
-  return vad.provider ?? '';
-}
-
-/** Resolve the nested provider config for a flat row's provider_config_id. */
+/** Resolve the nested provider config for a flat row's account id. */
 async function resolveProviderConfig(id: string | null | undefined): Promise<Composite | null> {
   if (!id) return null;
   try {
@@ -113,61 +126,80 @@ async function resolveProviderConfig(id: string | null | undefined): Promise<Com
   }
 }
 
-/** Flat app module row → the engine's `{name, config}` write body. */
-async function flatToWriteBody(
-  module: string,
-  flat: Composite,
-): Promise<{ name: string; config: Composite }> {
-  const provider: string = flat.provider ?? '';
-  const config: Composite = { name: flat.name ?? '', provider };
+/**
+ * Resolve the capability overlay for a module write. Prefer the pending stash
+ * from a just-completed provider create/update; else re-resolve the referenced
+ * account's merged object and strip the account fields.
+ */
+async function resolveCapability(
+  accountId: string | null | undefined,
+): Promise<Record<string, unknown>> {
+  if (!accountId) return {};
+  const pending = getPendingCapability(accountId);
+  if (pending) return pending;
+  const resolved = await resolveProviderConfig(accountId);
+  return resolved ? capabilityFieldsOf(resolved) : {};
+}
 
-  const nested = await resolveProviderConfig(flat.provider_config_id);
-  if (nested && provider) config[provider] = nested;
+/** Flat app module row → the engine's flat `{name, provider, …}` write body. */
+async function flatToWriteBody(module: string, flat: Composite): Promise<ModuleConfigWriteDto> {
+  const provider: string = flat.provider ?? '';
+  const accountId: string | null = flat.provider_account_id ?? flat.provider_config_id ?? null;
+  const capability = await resolveCapability(accountId);
+
+  const body: ModuleConfigWriteDto = { name: flat.name ?? '', provider };
+  if (accountId) body.provider_account_id = accountId;
+  if (Object.keys(capability).length > 0) body.capability_json = capability;
 
   switch (module) {
     case 'cognition':
-      config.maxcognitionevents = flat.max_cognition_events ?? 0;
-      config.generateexpressions = !!flat.generate_expressions;
+      body.maxcognitionevents = flat.max_cognition_events ?? 0;
+      body.generateexpressions = !!flat.generate_expressions;
       break;
     case 'movement':
-      config.startupsynctimeout = flat.startup_sync_timeout ?? 0;
-      config.executionthreshold = flat.execution_threshold ?? 0;
+      body.startupsynctimeout = flat.startup_sync_timeout ?? 0;
+      body.executionthreshold = flat.execution_threshold ?? 0;
       break;
     case 'rag':
-      config.chromem = { embeddingconcurrency: flat.embedding_concurrency ?? 0 };
+      body.chromem = { embeddingconcurrency: flat.embedding_concurrency ?? 0 };
       break;
     case 'tts':
-      config.outputtype = flat.output_type ?? '';
-      config.wordstoreplace =
+      body.outputtype = flat.output_type ?? '';
+      body.wordstoreplace =
         typeof flat.words_to_replace === 'string' && flat.words_to_replace
           ? safeParse(flat.words_to_replace)
           : {};
-      config.vocalizenonverbal = !!flat.vocalize_nonverbal;
+      body.vocalizenonverbal = !!flat.vocalize_nonverbal;
       break;
     case 'vision':
-      config.resolutionwidth = flat.resolution_width ?? 0;
-      config.resolutionheight = flat.resolution_height ?? 0;
+      body.resolutionwidth = flat.resolution_width ?? 0;
+      body.resolutionheight = flat.resolution_height ?? 0;
       break;
     case 'stt': {
-      config.streamrecording = {
+      body.streamrecording = {
         mainstreamtimemillis: flat.main_stream_time_millis ?? 0,
         transitionstreamtimemillis: flat.transition_stream_time_millis ?? 0,
         maxbuffercount: flat.max_buffer_count ?? 0,
       };
-      const txNested = await resolveProviderConfig(flat.transcription_provider_config_id);
+      const txAccountId = flat.transcription_provider_account_id ?? flat.transcription_provider_config_id ?? null;
       const tx: Composite = { provider: flat.transcription_provider ?? '' };
-      if (txNested && flat.transcription_provider) tx[flat.transcription_provider] = txNested;
-      config.transcription = tx;
-      const vadNested = await resolveProviderConfig(flat.vad_provider_config_id);
+      if (txAccountId) tx.provider_account_id = txAccountId;
+      const txCap = await resolveCapability(txAccountId);
+      if (Object.keys(txCap).length > 0) tx.capability_json = txCap;
+      body.transcription = tx;
+
+      const vadAccountId = flat.vad_provider_account_id ?? flat.vad_provider_config_id ?? null;
       const vad: Composite = { provider: flat.vad_provider ?? '' };
-      if (vadNested && flat.vad_provider) vad[flat.vad_provider] = vadNested;
-      config.vad = vad;
+      if (vadAccountId) vad.provider_account_id = vadAccountId;
+      const vadCap = await resolveCapability(vadAccountId);
+      if (Object.keys(vadCap).length > 0) vad.capability_json = vadCap;
+      body.vad = vad;
       break;
     }
     default:
       break;
   }
-  return { name: flat.name ?? '', config };
+  return body;
 }
 
 function safeParse(json: string): Record<string, string> {

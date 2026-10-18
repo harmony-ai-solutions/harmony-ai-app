@@ -40,8 +40,12 @@ const sttConfigWith = (provider: string): STTConfig => ({
   max_buffer_count: 5,
   transcription_provider: provider,
   transcription_provider_config_id: 'pc-1',
+  transcription_provider_account_id: 'pc-1',
+  transcription_capability_json: '{}',
   vad_provider: provider,
   vad_provider_config_id: 'pc-2',
+  vad_provider_account_id: 'pc-2',
+  vad_capability_json: '{}',
   deleted_at: null,
 });
 

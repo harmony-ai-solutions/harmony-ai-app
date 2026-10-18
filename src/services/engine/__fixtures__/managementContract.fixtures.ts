@@ -39,7 +39,10 @@ import type {
   MemoriesResponseDto,
   MemoryDto,
   MessagesResponseDto,
+  ProviderCapabilitiesDto,
   ProviderListResponseDto,
+  ProviderModelsResponseDto,
+  ProviderVerifyResultDto,
   ProviderWriteResponseDto,
   SyncClientStatusDto,
   SyncGroupKeyStatusDto,
@@ -52,7 +55,7 @@ import type { LanSyncPairingPayload, SyncPairingPayload } from '../../sync/syncC
  * otherwise (bumping one side without the other is the deliberate-drift canary
  * the plan asks for).
  */
-export const FIXTURE_CONTRACT_VERSION = '1.5.0';
+export const FIXTURE_CONTRACT_VERSION = '1.6.0';
 
 const CREATED = '2026-10-12T09:00:00Z';
 const UPDATED = '2026-10-12T10:00:00Z';
@@ -419,15 +422,84 @@ const characterImagesFixture: CharacterImageInfoDto[] = [characterImageInfoFixtu
 
 const entitiesMapFixture: Record<string, EntityConfigDto> = { 'ent-1': entityConfigFixture };
 
-const moduleConfigListFixture: unknown[] = [{ id: 'mc-1', name: 'default', config: {} }];
+// ── Module-config + provider-account fixtures (provider-registry 6-1) ──────
+// The module read is COMPOSITE (nested merged provider object with top-level
+// `id`); the module write response is `{id, status}`. Provider reads are
+// account-shaped rows; `GET /api/providers/:id` returns the merged object.
+
+const moduleConfigFixture: unknown = {
+  id: 'mc-1',
+  name: 'default',
+  provider: 'openaicompatible',
+  provider_account_id: 'prov-1',
+  openaicompatible: { id: 'prov-1', baseurl: 'http://localhost:8000', model: 'llama3' },
+};
+
+const moduleConfigListFixture: unknown[] = [moduleConfigFixture];
+
+const moduleConfigCreateFixture = { id: 'mc-1', status: 'module configuration created' };
 
 const providerListFixture: ProviderListResponseDto = {
-  providers: { soulbitscloud: [{ id: 'prov-1', api_key: 'redacted' }] },
+  providers: {
+    soulbitscloud: [
+      {
+        id: 'prov-1',
+        type: 'soulbitscloud',
+        name: 'Default',
+        api_key: 'redacted',
+        base_url: '',
+        extra: '{}',
+        created_at: CREATED,
+        updated_at: UPDATED,
+        deleted_at: null,
+      },
+    ],
+  },
 };
 
 const providerWriteFixture: ProviderWriteResponseDto = {
   provider: 'soulbitscloud',
-  config: { id: 'prov-1', api_key: 'redacted' },
+  config: { id: 'prov-1', type: 'soulbitscloud', name: 'Default', api_key: 'redacted' },
+};
+
+const providerRefreshFixture = { updated: 1 };
+
+const providerVerifyFixture: ProviderVerifyResultDto = {
+  state: 'valid',
+  detail: 'Ollama 0.12.6 · 7 models',
+};
+
+const providerModelsFixture: ProviderModelsResponseDto = {
+  models: [
+    {
+      id: 'gpt-4o',
+      label: 'GPT-4o',
+      context: 128000,
+      output_limit: 16384,
+      modalities: ['text', 'image'],
+      capabilities: ['reasoning', 'tools'],
+      param_support: ['temperature', 'max_tokens'],
+      source: 'catalog',
+      provenance: 'known',
+      meta: { top_provider: 'openai' },
+    },
+  ],
+  voices: [
+    {
+      voice_id: '21m00Tcm4TlvDq8ikWAM',
+      name: 'Rachel',
+      category: 'premade',
+      labels: { accent: 'american' },
+      preview_url: 'https://example/voice.mp3',
+    },
+  ],
+};
+
+const providerCapabilitiesFixture: ProviderCapabilitiesDto = {
+  catalog: {
+    openai: [{ id: 'gpt-4o', label: 'GPT-4o', context: 128000, source: 'catalog' }],
+  },
+  param_mapping: { mistral: { seed: 'random_seed' } },
 };
 
 const characterStatsFixture: CharacterStatsResponseDto = {
@@ -512,9 +584,15 @@ export const CONTRACT_FIXTURES: Record<string, unknown> = {
   characterImages: characterImagesFixture,
   entityConfig: entityConfigFixture,
   entitiesMap: entitiesMapFixture,
+  moduleConfig: moduleConfigFixture,
   moduleConfigList: moduleConfigListFixture,
+  moduleConfigCreate: moduleConfigCreateFixture,
   providerList: providerListFixture,
   providerWrite: providerWriteFixture,
+  providerRefresh: providerRefreshFixture,
+  providerVerify: providerVerifyFixture,
+  providerModels: providerModelsFixture,
+  providerCapabilities: providerCapabilitiesFixture,
   syncClientStatus: syncClientStatusFixture,
   syncGroupKeyStatus: syncGroupKeyStatusFixture,
   lanPairingPayload: lanPairingPayloadFixture,

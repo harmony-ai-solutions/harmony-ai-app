@@ -19,3 +19,6 @@ export * from '../../services/engine/repositories/memories';
 export * from '../../services/engine/repositories/chatConversationSettings';
 export * from '../../services/engine/repositories/modules';
 export * from '../../services/engine/repositories/providers';
+// Interim per-type provider-config shim (// 6-3 removes this) — keeps the
+// screens' flat per-type imports resolving while `providers` speaks accounts.
+export * from '../../services/engine/repositories/legacyProviderAdapter';

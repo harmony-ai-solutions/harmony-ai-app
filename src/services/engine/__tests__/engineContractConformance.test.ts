@@ -66,8 +66,10 @@ describe('engine contract — version gate', () => {
 
   it('accepts an equal or newer engine artifact and rejects an older one', () => {
     expect(checkContractVersion(ENGINE_CONTRACT_VERSION).ok).toBe(true);
-    expect(checkContractVersion('1.5.0').ok).toBe(true);
+    expect(checkContractVersion('1.6.0').ok).toBe(true);
+    expect(checkContractVersion('1.7.0').ok).toBe(true);
     expect(checkContractVersion('2.0.0').ok).toBe(true);
+    expect(checkContractVersion('1.5.0').ok).toBe(false);
     expect(checkContractVersion('1.4.0').ok).toBe(false);
     expect(checkContractVersion('1.2.0').ok).toBe(false);
     expect(checkContractVersion('1.1.0').ok).toBe(false);

@@ -63,8 +63,22 @@ const DRIVERS: Record<string, () => Promise<unknown>> = {
   'characterProfiles.images': () => engineApiClient.listCharacterImages('prof-1'),
   'characterProfiles.favorite': () => engineApiClient.setCharacterProfileFavorite('prof-1', true),
   'moduleConfigs.list': () => engineApiClient.listModuleConfigs('tts'),
+  'moduleConfigs.get': () => engineApiClient.getModuleConfig('tts', 'mc-1'),
+  'moduleConfigs.create': () =>
+    engineApiClient.createModuleConfig('tts', { name: 'default', provider: 'soulbitscloud' }),
+  'moduleConfigs.update': () =>
+    engineApiClient.updateModuleConfig('tts', 'mc-1', { name: 'default' }),
+  'moduleConfigs.delete': () => engineApiClient.deleteModuleConfig('tts', 'mc-1'),
+  'providers.capabilities': () => engineApiClient.getProviderCapabilities(),
   'providers.list': () => engineApiClient.listProviders(),
-  'providers.create': () => engineApiClient.createProvider('soulbitscloud', { id: 'prov-1' }),
+  'providers.get': () => engineApiClient.getProvider('prov-1'),
+  'providers.create': () => engineApiClient.createProvider('soulbitscloud', { name: 'Default' }),
+  'providers.update': () => engineApiClient.updateProvider('prov-1', { name: 'Default' }),
+  'providers.delete': () => engineApiClient.deleteProvider('prov-1'),
+  'providers.refreshToken': () =>
+    engineApiClient.refreshSoulbitsCloudProviderConfigs('paseto', 'https://inference.example'),
+  'providers.verify': () => engineApiClient.verifyProvider({ type: 'openai', api_key: 'sk-x' }),
+  'providers.models': () => engineApiClient.listProviderModels({ type: 'openai', api_key: 'sk-x' }),
   'syncClient.status': () => engineApiClient.getSyncClientStatus(),
   'syncGroup.keyStatus': () => engineApiClient.getSyncGroupKeyStatus(),
   'syncGroup.init': () => engineApiClient.initSyncGroup(),
@@ -130,7 +144,8 @@ describe('engine loopback transport smoke', () => {
   it('an undeclared path 404s (proving the mock only serves the contract surface)', async () => {
     const server = createMockManagementServer(routesFromManifest());
     engineApiClient.setFetchImpl(server.fetch);
-    await expect(engineApiClient.getProvider('not-in-manifest')).rejects.toMatchObject({
+    // `GET /api/presets` is not part of the required-endpoint manifest.
+    await expect(engineApiClient.listPresets()).rejects.toMatchObject({
       status: 404,
     });
   });
