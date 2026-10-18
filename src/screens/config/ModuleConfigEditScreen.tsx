@@ -46,6 +46,7 @@ import { invalidateEntityAccessCache } from '../../services/variant/entityAccess
 import { isStoreVariant } from '../../config/appVariant';
 import { PROVIDER_SCHEMAS } from '../../constants/providerFieldSchemas';
 import type { FieldDefinition } from '../../constants/providerFieldSchemas';
+import { ACCOUNT_SCHEMAS } from '../../constants/accountFieldSchemas';
 import { isSimpleFieldKey, isManagedCloudField } from '../../constants/moduleConfigVisibility';
 import { classifyProviderField } from '../../constants/providerFieldSections';
 import type { ProviderFieldSection } from '../../constants/providerFieldSections';
@@ -749,17 +750,26 @@ export const ModuleConfigEditScreen: React.FC = () => {
     providerType: string,
     section: ProviderFieldSection,
   ): FieldDefinition[] => {
-    const schema = PROVIDER_SCHEMAS[providerType];
-    if (!schema) return [];
+    // provider-registry 6-2 split: the Capability section reads the
+    // capability-only provider schema; the Credentials section reads the
+    // account schema (credential columns only — account extras such as
+    // org/project/auth are owned by the Providers screen's AccountForm, not
+    // this interim module-config form).
+    const fields: FieldDefinition[] =
+      section === 'credentials'
+        ? (ACCOUNT_SCHEMAS[providerType]?.fields ?? []).filter(
+            (f) => classifyProviderField(f.key) === 'credentials',
+          )
+        : PROVIDER_SCHEMAS[providerType]?.fields ?? [];
+    if (fields.length === 0) return [];
 
     // Managed Soulbits Cloud provider (cloud mode): the endpoint and the
     // API key/token are auto-synced from the backend — hide them in Simple AND
     // Advanced mode so the screen never suggests they are user-configurable.
     const isManagedCloudProvider = providerType === 'soulbitscloud' && isCloudMode;
 
-    return schema.fields.filter((f) => {
+    return fields.filter((f) => {
       if (f.key === 'name') return false;
-      if (classifyProviderField(f.key) !== section) return false;
       if (isManagedCloudProvider && isManagedCloudField(f.key)) return false;
       if (showAdvanced) return true;
       return isSimpleFieldKey(f.key);

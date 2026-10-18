@@ -14,8 +14,12 @@
  *    the module config's capability overlay.
  *
  * This is deliberately a small, explicit list (not derived from field names)
- * so the split is auditable now; Phase 6-2's `accountFieldSchemas.ts` becomes
- * the permanent owner of the account/capability split and retires this module.
+ * so the split is auditable. Since provider-registry 6-2 the account/capability
+ * split is OWNED by the two schema modules — `accountFieldSchemas.ts` (account
+ * fields) and `providerFieldSchemas.ts` (capability fields) — and this module is
+ * retained as the key→section classifier the interim `ModuleConfigEditScreen`
+ * uses to keep account EXTRAS (org/project/auth/…) out of its Credentials
+ * section (extras are edited on the Providers screen's AccountForm).
  *
  * The module-config `name` field is neither — it is the module config's own
  * label and lives in the screen's General section.

@@ -16,9 +16,11 @@ interface FormFieldProps {
    * reveal-eye and disables selection/copy so the value cannot be exposed.
    */
   readOnly?: boolean;
+  /** Optional testID forwarded to the field's input (text/number/comma-list). */
+  testID?: string;
 }
 
-export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, readOnly = false }) => {
+export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, readOnly = false, testID }) => {
   const { theme } = useAppTheme();
   const [showPassword, setShowPassword] = useState(false);
 
@@ -60,6 +62,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
               contextMenuHidden
               placeholder={field.placeholder}
               placeholderTextColor={theme.colors.text.muted}
+              testID={testID}
             />
           );
         }
@@ -80,6 +83,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
               placeholder={field.placeholder}
               secureTextEntry={!showPassword}
               placeholderTextColor={theme.colors.text.muted}
+              testID={testID}
             />
             <TouchableOpacity
               style={styles.eyeButton}
@@ -114,6 +118,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
             keyboardType="decimal-pad"
             editable={!readOnly}
             placeholderTextColor={theme.colors.text.muted}
+            testID={testID}
           />
         );
       
@@ -143,6 +148,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
             placeholder={field.placeholder}
             editable={!readOnly}
             placeholderTextColor={theme.colors.text.muted}
+            testID={testID}
           />
         );
       
@@ -173,6 +179,7 @@ export const FormField: React.FC<FormFieldProps> = ({ field, value, onChange, re
             placeholder={field.placeholder}
             editable={!readOnly}
             placeholderTextColor={theme.colors.text.muted}
+            testID={testID}
           />
         );
     }

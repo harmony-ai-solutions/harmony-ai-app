@@ -1,4 +1,20 @@
-import { CLOUD_HOSTS } from '../config/cloud';
+/**
+ * providerFieldSchemas — CAPABILITY-only provider form fields.
+ *
+ * provider-registry 6-2 owns the account-vs-capability schema split (plan
+ * §3.2). Account-scoped fields (`name`, `api_key`, `base_url`/`endpoint`, and
+ * the typed account extras) now live in `accountFieldSchemas.ts`; this module
+ * carries ONLY the **capability** fields (model + sampling params + provider
+ * params) that plan §3.2 moves onto a module config's capability overlay.
+ *
+ * `ModuleConfigEditScreen` composes the two: its Credentials section reads
+ * `accountFieldSchemas.ts`, its Capability section reads this module. 6-3
+ * consumes the capability-only view directly for the reworked flow.
+ *
+ * (2-2's `providerFieldSections.ts` remains the key→section classifier used by
+ * the interim module-config screen to keep account extras out of the
+ * capability form.)
+ */
 
 export interface FieldDefinition {
   key: string;
@@ -14,6 +30,12 @@ export interface FieldDefinition {
   required?: boolean;
   width?: 'full' | 'half';
   /**
+   * Render the field read-only (managed/engine-owned values). `FormField`
+   * honours this for text/number/checkbox inputs; the account form also forces
+   * read-only for system-managed account types.
+   */
+  readOnly?: boolean;
+  /**
    * Marks a field as catalog-backed (provider-registry 2-1). The form renderer
    * routes such fields through the model picker (`CatalogModelSelect`) when
    * `getModelsForModule(provider, module)` yields entries; otherwise the field
@@ -28,12 +50,14 @@ export interface ProviderSchema {
   hasModelFetch?: boolean;
 }
 
+/**
+ * Capability-only provider field schemas (account fields removed — see the
+ * module docblock). Keys match the 13 surviving provider types.
+ */
 export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   openai: {
     hasModelFetch: true,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', placeholder: 'gpt-4o', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server. Preset values are applied server-side.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: '-1 for unlimited', disabledValue: -1 },
@@ -59,9 +83,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   openaicompatible: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: 'http://localhost:8080/v1' },
-      { key: 'api_key', label: 'API Key', type: 'password' },
       { key: 'model', label: 'Model', type: 'text', required: true, catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
@@ -82,8 +103,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   openrouter: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', required: true, placeholder: 'google/gemini-flash-2.5', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
@@ -109,8 +128,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   elevenlabs: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'voice_id', label: 'Voice ID', type: 'text', placeholder: '21m00Tcm4TlvDq8ikWAM' },
       { key: 'model_id', label: 'Model ID', type: 'text', placeholder: 'eleven_monolingual_v1' },
       { key: 'stability', label: 'Stability', type: 'number', step: 0.01, min: 0, max: 1 },
@@ -122,9 +139,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   soulvoice: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'endpoint', label: 'Endpoint URL', type: 'text', required: true, placeholder: 'http://localhost:5000' },
-      { key: 'api_key', label: 'API Key', type: 'password', placeholder: 'Optional for self-hosted Soulvoice Engine' },
       { key: 'model', label: 'Model', type: 'text', catalog: true },
       { key: 'voice_config_file', label: 'Voice Config File', type: 'text' },
       { key: 'format', label: 'Format', type: 'text', placeholder: 'wav' },
@@ -135,39 +149,28 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   localai: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
       { key: 'model', label: 'Model', type: 'text', catalog: true },
     ],
   },
   mistral: {
     hasModelFetch: false,
-    fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'api_key', label: 'API Key', type: 'password', required: true },
-    ],
+    fields: [],
   },
   ollama: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: 'http://localhost:11434' },
       { key: 'model', label: 'Model', type: 'text', catalog: true },
     ],
   },
   comfyui: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: 'http://localhost:8188' },
-      { key: 'api_key', label: 'API Key', type: 'password' },
       { key: 'workflow_profiles', label: 'Workflow Profiles', type: 'text', placeholder: 'JSON string' },
     ],
   },
   google: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', placeholder: 'gemini-2.5-flash', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_output_tokens', label: 'Max Output Tokens', type: 'number', disabledValue: 0 },
@@ -190,8 +193,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   xai: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', placeholder: 'grok-3', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },
@@ -221,8 +222,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   anthropic: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', placeholder: 'claude-sonnet-4-20250514', catalog: true },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', required: true, placeholder: '4096' },
@@ -235,9 +234,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
   soulbitscloud: {
     hasModelFetch: false,
     fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: CLOUD_HOSTS.inference },
-      { key: 'api_key', label: 'API Key', type: 'password', required: true },
       { key: 'model', label: 'Model', type: 'text', placeholder: 'qwen-35-9b' },
       { key: 'sampling_preset_name', label: 'Sampling Preset', type: 'text', placeholder: 'Leave empty for manual', tooltip: 'Name of a preset on the Soulbits Engine server.' },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', disabledValue: -1 },

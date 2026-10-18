@@ -168,6 +168,17 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
+        {/* ── Providers (shared provider accounts: keys, endpoints, verify) ── */}
+        <ThemedCard elevated accentStripe style={styles.card}>
+          <SectionHeader title={t('providersGroup')} style={styles.sectionHeader} />
+          <SettingsLinkRow
+            icon="key-variant"
+            label={t('providers')}
+            onPress={() => navigation.navigate('Providers')}
+            theme={theme}
+          />
+        </ThemedCard>
+
         {/* ── Desktop sync (changeset-v1 LAN sync config + status, 3-5) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
           <SectionHeader title={t('desktopSyncGroup')} style={styles.sectionHeader} />

@@ -18,3 +18,4 @@ export { default as updates } from './en/updates.json';
 export { default as engineLogs } from './en/engineLogs.json';
 export { default as engineStatus } from './en/engineStatus.json';
 export { default as boot } from './en/boot.json';
+export { default as providers } from './en/providers.json';

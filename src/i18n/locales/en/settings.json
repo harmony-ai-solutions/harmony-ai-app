@@ -112,6 +112,8 @@
   "marketLibraryTitle": "My Library",
   "voiceInputGroup": "Voice",
   "voiceInput": "Voice input",
+  "providersGroup": "Providers",
+  "providers": "Providers",
   "engineLogs": "Engine logs",
   "engineGroup": "Engine",
   "engineStatus": "Engine status",

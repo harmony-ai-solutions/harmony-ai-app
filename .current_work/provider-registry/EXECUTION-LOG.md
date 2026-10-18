@@ -17,13 +17,14 @@ Legend: ⏳ running · ✅ committed · ⏸ paused/blocked · ⬜ queued
 - ✅ 3-3 runtime resolution + validation — ModelInfo (label+rich fields, A7-owned) + VerifyResult 6-state + emission helpers (zero-value=unset, WireMapper→5-2 loader); ValidateConfig now (VerifyResult, error) across all providers. HANDOFF→6-1: ModelInfo wire shape CHANGED (name/description → label+fields); validate-provider details now warn-only capability findings.
 - ✅ 4-x client run COMPLETE: 4-1 (`9114468`) · 4-2 (`2d452d5`) · 4-3 (`46ab5d6`) · 4-4 (`c916db4`) · 4-5 (`1e711a9`) · 4-6 (`ce033ba`) · 4-7 (`b81c1bb`) · 4-8 (`cbcd78e`) · 4-9 (`e0440fc`) · 4-10 (`20d8652`) · 4-11 (`707dbc1`+v0.1.2+`09eaa51`+`4d2a1f2`) · 4-12 (`edb5328`) · 4-13 (`a147829`)
 - ✅ 5-1 verify/models endpoints — `a217dd1` (stateless verify, models+fingerprint writer, voices; retired validate-provider + /api/models). **App hold RELEASED.**
-- ⏳ 5-2 capability catalog + gated emission (R-MD addendum binding; merger seam + wire-table replacement + 4-x catalog debts)
+- ✅ 5-2 capability catalog + gated emission — `8d9c1ba` (121KB embedded catalog, catalog-authoritative wire/suppression w/ in-code fallback, merger installed, GET /api/providers/capabilities landed → 6-1 fixture flag RESOLVED)
+- **ENGINE CHAIN COMPLETE (code phases). Remaining: 7-1 release (docs + AppVersion bump + dispatch).**
 
 ## App chain (harmony-ai-app, serial; RESUMED after engine 3-2+5-1)
 - ✅ 1-2 competitor removal — `04541dd` (12 files, −412 net)
 - ✅ 2-1 model catalog + pickers — `c186e1e` (tier-2 constants + CatalogModelSelect + 27 tests)
 - ✅ 2-2 sampling presets + form structure — `27a80c1` (usePresets + SamplingPresetSelect + 4-section form; 1538/1538)
-- ⏳ 6-1 provider repo re-target + contract canary 1.6.0 — `tbd` committed · ⬜ 6-2..6-5 · FLAGS: capabilities route fixture pinned ahead of engine 5-2 (verify when it lands); 6-3 removes legacyProviderAdapter + stash, drops provider_config_id
+- ⏳ 6-1 ✅ `4d1128e` · 6-2 ✅ `tbd` (ProvidersScreen + accountFieldSchemas + AccountForm; verify chips; 409 UX) · ⏳ 6-3 running · ⬜ 6-4..6-5 · 6-3 scope: remove legacyProviderAdapter + stash, drop provider_config_id, delete providerModelCatalog.ts, flat module writes
 
 ## Release
 - ⬜ 7-1 docs + dev-channel release (after both chains)
