@@ -8,7 +8,7 @@
  * `deleted_at` needs coercion (JSON string → `Date | null`).
  *
  * Write surface (3-4 engine follow-up) backed by the standalone provider CRUD
- * routes — 1:1 with the app's 16-repo model:
+ * routes — 1:1 with the app's 13-repo model:
  *   - create → `POST /api/providers` `{provider, config}` (engine mints the id;
  *     the response `config.id` is returned, matching the SQLite signature).
  *   - update → `PUT /api/providers/:id` `{config}` (partial merge).
@@ -23,13 +23,10 @@
 
 import type {
   AnthropicProviderConfig,
-  CharacterAIProviderConfig,
   ComfyUIProviderConfig,
   ElevenLabsProviderConfig,
   GoogleProviderConfig,
   SoulvoiceProviderConfig,
-  KajiwotoProviderConfig,
-  KindroidProviderConfig,
   LocalAIProviderConfig,
   MistralProviderConfig,
   OllamaProviderConfig,
@@ -193,15 +190,6 @@ export const updateAnthropicProviderConfig = anthropic.update;
 export const deleteAnthropicProviderConfig = anthropic.delete;
 export const isAnthropicProviderConfigInUse = anthropic.isInUse;
 
-const characterai = makeProviderApi<CharacterAIProviderConfig>('characterai');
-export const getCharacterAIProviderConfig = characterai.get;
-export const getAllCharacterAIProviderConfigs = characterai.getAll;
-export const getCharacterAIProviderConfigByName = characterai.getByName;
-export const createCharacterAIProviderConfig = characterai.create;
-export const updateCharacterAIProviderConfig = characterai.update;
-export const deleteCharacterAIProviderConfig = characterai.delete;
-export const isCharacterAIProviderConfigInUse = characterai.isInUse;
-
 const comfyui = makeProviderApi<ComfyUIProviderConfig>('comfyui');
 export const getComfyUIProviderConfig = comfyui.get;
 export const getAllComfyUIProviderConfigs = comfyui.getAll;
@@ -237,24 +225,6 @@ export const createSoulvoiceProviderConfig = soulvoice.create;
 export const updateSoulvoiceProviderConfig = soulvoice.update;
 export const deleteSoulvoiceProviderConfig = soulvoice.delete;
 export const isSoulvoiceProviderConfigInUse = soulvoice.isInUse;
-
-const kajiwoto = makeProviderApi<KajiwotoProviderConfig>('kajiwoto');
-export const getKajiwotoProviderConfig = kajiwoto.get;
-export const getAllKajiwotoProviderConfigs = kajiwoto.getAll;
-export const getKajiwotoProviderConfigByName = kajiwoto.getByName;
-export const createKajiwotoProviderConfig = kajiwoto.create;
-export const updateKajiwotoProviderConfig = kajiwoto.update;
-export const deleteKajiwotoProviderConfig = kajiwoto.delete;
-export const isKajiwotoProviderConfigInUse = kajiwoto.isInUse;
-
-const kindroid = makeProviderApi<KindroidProviderConfig>('kindroid');
-export const getKindroidProviderConfig = kindroid.get;
-export const getAllKindroidProviderConfigs = kindroid.getAll;
-export const getKindroidProviderConfigByName = kindroid.getByName;
-export const createKindroidProviderConfig = kindroid.create;
-export const updateKindroidProviderConfig = kindroid.update;
-export const deleteKindroidProviderConfig = kindroid.delete;
-export const isKindroidProviderConfigInUse = kindroid.isInUse;
 
 const localai = makeProviderApi<LocalAIProviderConfig>('localai');
 export const getLocalAIProviderConfig = localai.get;

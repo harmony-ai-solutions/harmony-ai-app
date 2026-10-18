@@ -712,9 +712,6 @@ The app mirrors Harmony Link's provider configuration system via sync (not manag
 | Ollama | `ollama` | LLM (local Ollama) |
 | ElevenLabs | `elevenlabs` | TTS |
 | HarmonySpeech | `harmonyspeech` | TTS/STT/VAD |
-| CharacterAI | `characterai` | Chat backend |
-| Kajiwoto | `kajiwoto` | Chat backend |
-| Kindroid | `kindroid` | Chat backend |
 | ComfyUI | `comfyui` | Image generation |
 | RAG | `rag_*` | Retrieval-Augmented Generation |
 | TTS OpenAI | `tts_openai` | TTS (OpenAI voices) |

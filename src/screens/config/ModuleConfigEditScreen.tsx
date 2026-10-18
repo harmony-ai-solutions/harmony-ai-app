@@ -77,15 +77,6 @@ import {
   createSoulvoiceProviderConfig, updateSoulvoiceProviderConfig, getSoulvoiceProviderConfig, deleteSoulvoiceProviderConfig,
 } from '../../database/repositories';
 import {
-  createKindroidProviderConfig, updateKindroidProviderConfig, getKindroidProviderConfig, deleteKindroidProviderConfig,
-} from '../../database/repositories';
-import {
-  createKajiwotoProviderConfig, updateKajiwotoProviderConfig, getKajiwotoProviderConfig, deleteKajiwotoProviderConfig,
-} from '../../database/repositories';
-import {
-  createCharacterAIProviderConfig, updateCharacterAIProviderConfig, getCharacterAIProviderConfig, deleteCharacterAIProviderConfig,
-} from '../../database/repositories';
-import {
   createLocalAIProviderConfig, updateLocalAIProviderConfig, getLocalAIProviderConfig, deleteLocalAIProviderConfig,
 } from '../../database/repositories';
 import {
@@ -174,9 +165,6 @@ const PROVIDER_REPOSITORIES: Record<string, {
   openrouter: { create: createOpenRouterProviderConfig, update: updateOpenRouterProviderConfig, get: getOpenRouterProviderConfig, delete: deleteOpenRouterProviderConfig },
   elevenlabs: { create: createElevenLabsProviderConfig, update: updateElevenLabsProviderConfig, get: getElevenLabsProviderConfig, delete: deleteElevenLabsProviderConfig },
   soulvoice: { create: createSoulvoiceProviderConfig, update: updateSoulvoiceProviderConfig, get: getSoulvoiceProviderConfig, delete: deleteSoulvoiceProviderConfig },
-  kindroid: { create: createKindroidProviderConfig, update: updateKindroidProviderConfig, get: getKindroidProviderConfig, delete: deleteKindroidProviderConfig },
-  kajiwoto: { create: createKajiwotoProviderConfig, update: updateKajiwotoProviderConfig, get: getKajiwotoProviderConfig, delete: deleteKajiwotoProviderConfig },
-  characterai: { create: createCharacterAIProviderConfig, update: updateCharacterAIProviderConfig, get: getCharacterAIProviderConfig, delete: deleteCharacterAIProviderConfig },
   localai: { create: createLocalAIProviderConfig, update: updateLocalAIProviderConfig, get: getLocalAIProviderConfig, delete: deleteLocalAIProviderConfig },
   mistral: { create: createMistralProviderConfig, update: updateMistralProviderConfig, get: getMistralProviderConfig, delete: deleteMistralProviderConfig },
   ollama: { create: createOllamaProviderConfig, update: updateOllamaProviderConfig, get: getOllamaProviderConfig, delete: deleteOllamaProviderConfig },

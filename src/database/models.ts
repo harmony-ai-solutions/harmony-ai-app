@@ -199,31 +199,6 @@ export interface ElevenLabsProviderConfig {
   deleted_at: Date | null;
 }
 
-export interface KindroidProviderConfig {
-  id: string;
-  name: string;
-  api_key: string;
-  kindroid_id: string;
-  deleted_at: Date | null;
-}
-
-export interface KajiwotoProviderConfig {
-  id: string;
-  name: string;
-  username: string;
-  password: string;
-  room_url: string;
-  deleted_at: Date | null;
-}
-
-export interface CharacterAIProviderConfig {
-  id: string;
-  name: string;
-  api_token: string;
-  chatroom_url: string;
-  deleted_at: Date | null;
-}
-
 export interface LocalAIProviderConfig {
   id: string;
   name: string;
@@ -523,9 +498,6 @@ export type ProviderConfig =
   | OpenAICompatibleProviderConfig
   | SoulvoiceProviderConfig
   | ElevenLabsProviderConfig
-  | KindroidProviderConfig
-  | KajiwotoProviderConfig
-  | CharacterAIProviderConfig
   | LocalAIProviderConfig
   | MistralProviderConfig
   | OllamaProviderConfig

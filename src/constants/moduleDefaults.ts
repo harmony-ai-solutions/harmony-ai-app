@@ -91,22 +91,6 @@ export const PROVIDER_DEFAULTS: Record<string, Record<string, any>> = {
     sample_rate: 22050,
     stream: 0,
   },
-  kindroid: {
-    name: '',
-    api_key: '',
-    kindroid_id: '',
-  },
-  kajiwoto: {
-    name: '',
-    username: '',
-    password: '',
-    room_url: '',
-  },
-  characterai: {
-    name: '',
-    api_token: '',
-    chatroom_url: '',
-  },
   localai: {
     name: '',
     model: '',

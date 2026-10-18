@@ -33,9 +33,6 @@ export const SIMPLE_FIELD_KEYS: ReadonlySet<string> = new Set([
   'language',
   'speed',
   'format',
-  'kindroid_id',
-  'chatroom_url',
-  'room_url',
   'workflow_profiles',
   'voice_config_file',
 ]);

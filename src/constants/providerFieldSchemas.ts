@@ -124,31 +124,6 @@ export const PROVIDER_SCHEMAS: Record<string, ProviderSchema> = {
       { key: 'stream', label: 'Stream', type: 'number', step: 1, min: 0, max: 1 },
     ],
   },
-  kindroid: {
-    hasModelFetch: false,
-    fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'api_key', label: 'API Key', type: 'password', required: true },
-      { key: 'kindroid_id', label: 'Kindroid ID', type: 'text', required: true },
-    ],
-  },
-  kajiwoto: {
-    hasModelFetch: false,
-    fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'username', label: 'Username', type: 'text', required: true },
-      { key: 'password', label: 'Password', type: 'password', required: true },
-      { key: 'room_url', label: 'Room URL', type: 'text' },
-    ],
-  },
-  characterai: {
-    hasModelFetch: false,
-    fields: [
-      { key: 'name', label: 'Config Name', type: 'text', required: true },
-      { key: 'api_token', label: 'API Token', type: 'password', required: true },
-      { key: 'chatroom_url', label: 'Chatroom URL', type: 'text' },
-    ],
-  },
   localai: {
     hasModelFetch: false,
     fields: [
