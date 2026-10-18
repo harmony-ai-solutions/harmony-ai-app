@@ -19,6 +19,10 @@ import type { CharacterProfile } from '../../database/models';
 afterEach(cleanup);
 beforeEach(cleanup);
 
+// Heavy full-screen async renders: the default 5s ceiling flakes on slower CI
+// runners (deterministic on the Ubuntu 26 image) while always passing locally.
+jest.setTimeout(15000);
+
 let user: ReturnType<typeof userEvent.setup>;
 beforeEach(() => {
   user = userEvent.setup();
