@@ -151,6 +151,39 @@ describe('refreshUpdates — no TTL (always fetch)', () => {
   });
 });
 
+describe('refreshUpdates — partial manifest availability (engine/latest.json may not exist)', () => {
+  const notFound = (): Response =>
+    ({ ok: false, status: 404, json: async () => ({}) } as unknown as Response);
+
+  it('surfaces a newer app even when the engine manifest 404s (dev loop: engine/latest.json is never written)', async () => {
+    fetchMock = jest.fn(async (url: string) =>
+      url.includes('/engine/') ? notFound() : jsonResponse(appManifest),
+    );
+    setUpdatesFetchImpl(fetchMock as unknown as (u: string) => Promise<Response>);
+    const state = await refreshUpdates();
+    expect(state.appUpdate?.version).toBe('1.4.0');
+    expect(getEngineManifest()).toBeNull();
+  });
+
+  it('still updates the engine deep-link cache when only the engine manifest exists', async () => {
+    fetchMock = jest.fn(async (url: string) =>
+      url.includes('/engine/') ? jsonResponse(engineManifest) : notFound(),
+    );
+    setUpdatesFetchImpl(fetchMock as unknown as (u: string) => Promise<Response>);
+    const state = await refreshUpdates();
+    expect(state.appUpdate).toBeNull();
+    expect(getEngineManifest()?.version).toBe('v0.3.2');
+  });
+
+  it('treats both manifests failing as a network failure (offline cache still serves)', async () => {
+    await refreshUpdates();
+    expect(store[UPDATE_CACHE_KEY]).toBeTruthy();
+    setUpdatesFetchImpl((async () => notFound()) as unknown as (u: string) => Promise<Response>);
+    const state = await refreshUpdates();
+    expect(state.appUpdate?.version).toBe('1.4.0');
+  });
+});
+
 describe('refreshUpdates — dev-release loop regression', () => {
   it('stays silent when the manifest matches the installed dev version', async () => {
     // Installed v1.3.0-dev == manifest v1.3.0-dev → no banner.

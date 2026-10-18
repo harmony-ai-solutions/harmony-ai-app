@@ -292,10 +292,27 @@ export async function refreshUpdates(_opts: { force?: boolean } = {}): Promise<U
       await Promise.all([loadDismissed(), loadCache()]);
 
       try {
-        const [engine, app] = await Promise.all([
+        // Each manifest is INDIVIDUALLY optional (regression, owner report
+        // 2026-10-18): engine/latest.json does not exist until the first
+        // tagged engine release (the dev-loop sidecar publishes never write
+        // it), and its 404 used to reject this Promise.all — killing the app
+        // banner too. Only when BOTH fetches fail is the check treated as a
+        // network failure (the offline-cache path below).
+        const [engineRes, appRes] = await Promise.allSettled([
           fetchJson<EngineReleaseManifest>(RELEASES.engineManifestUrl),
           fetchJson<AppReleaseManifest>(RELEASES.appManifestUrl),
         ]);
+        const engine = engineRes.status === 'fulfilled' ? engineRes.value : null;
+        const app = appRes.status === 'fulfilled' ? appRes.value : null;
+        if (engineRes.status === 'rejected') {
+          log.debug('Engine manifest unavailable (non-fatal):', String(engineRes.reason));
+        }
+        if (appRes.status === 'rejected') {
+          log.debug('App manifest unavailable (non-fatal):', String(appRes.reason));
+        }
+        if (!engine && !app) {
+          throw new Error('all manifest fetches failed');
+        }
         await persistCache({ engine, app, checkedAt: Date.now() });
       } catch (e) {
         // Network failure → serve whatever cache we have (an offline launch
