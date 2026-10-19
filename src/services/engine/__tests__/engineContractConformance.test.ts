@@ -66,9 +66,10 @@ describe('engine contract — version gate', () => {
 
   it('accepts an equal or newer engine artifact and rejects an older one', () => {
     expect(checkContractVersion(ENGINE_CONTRACT_VERSION).ok).toBe(true);
-    expect(checkContractVersion('1.6.0').ok).toBe(true);
     expect(checkContractVersion('1.7.0').ok).toBe(true);
+    expect(checkContractVersion('1.8.0').ok).toBe(true);
     expect(checkContractVersion('2.0.0').ok).toBe(true);
+    expect(checkContractVersion('1.6.0').ok).toBe(false);
     expect(checkContractVersion('1.5.0').ok).toBe(false);
     expect(checkContractVersion('1.4.0').ok).toBe(false);
     expect(checkContractVersion('1.2.0').ok).toBe(false);
@@ -202,6 +203,34 @@ describe('engine contract — endpoint manifest completeness', () => {
     expect(entry.entityId).toBe('ent-1');
     expect(entry.isPrompt).toBe(false);
     expect(entry.message).toBe('composed reply');
+  });
+
+  it('declares the 2-4 TTS voice-cloning/design endpoints (1.7.0 contract)', () => {
+    const ids = REQUIRED_ENGINE_ENDPOINTS.map(e => e.id);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        'moduleConfigs.ttsEmbedSpeaker',
+        'moduleConfigs.ttsTestSpeech',
+        'providers.elevenlabsCloneVoice',
+        'providers.elevenlabsVoiceDesign',
+      ]),
+    );
+    // The loopback mock resolves the first matching route, so the static
+    // `tts/…` paths MUST be declared before `/api/module-configs/:module/:id`.
+    expect(ids.indexOf('moduleConfigs.ttsEmbedSpeaker')).toBeLessThan(
+      ids.indexOf('moduleConfigs.get'),
+    );
+    expect(ids.indexOf('moduleConfigs.ttsTestSpeech')).toBeLessThan(
+      ids.indexOf('moduleConfigs.get'),
+    );
+    expect(CONTRACT_FIXTURES.speakerEmbedding).toMatchObject({ status: 'success' });
+    expect(CONTRACT_FIXTURES.ttsSpeechTest).toMatchObject({ format: 'audio/mpeg' });
+    expect(CONTRACT_FIXTURES.elevenLabsVoiceClone).toMatchObject({
+      data: { voice_id: '21m00Tcm4TlvDq8ikWAM' },
+    });
+    expect(CONTRACT_FIXTURES.elevenLabsVoiceDesign).toMatchObject({
+      data: { text: 'Hello there' },
+    });
   });
 
   it('the sync-client status fixture carries the 7-2 relay/group + 7-6 quota + 7-8 authority fields', () => {

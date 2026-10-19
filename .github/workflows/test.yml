@@ -96,13 +96,18 @@ jobs:
     name: Engine-contract drift
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # `secrets` is NOT available in a step-level `if:` (GitHub rejects the whole
+    # file as invalid: "Unrecognized named-value: 'secrets'"). Map the PAT into
+    # the job env and gate the steps on `env.HARMONY_LINK_REPO_PAT` instead.
+    env:
+      HARMONY_LINK_REPO_PAT: ${{ secrets.HARMONY_LINK_REPO_PAT }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: '20'
       - name: Checkout engine repo
-        if: ${{ secrets.HARMONY_LINK_REPO_PAT != '' }}
+        if: env.HARMONY_LINK_REPO_PAT != ''
         uses: actions/checkout@v5
         with:
           repository: harmony-ai-solutions/harmony-link-private
@@ -110,8 +115,8 @@ jobs:
           token: ${{ secrets.HARMONY_LINK_REPO_PAT }}
           path: engine
       - name: Compare contract versions + canonical fixtures
-        if: ${{ secrets.HARMONY_LINK_REPO_PAT != '' }}
+        if: env.HARMONY_LINK_REPO_PAT != ''
         run: node scripts/check-engine-contract.mjs --engine-repo engine --engine-fixtures engine/docs/api/management/fixtures/management-contract.fixtures.json
       - name: Skipped (no engine PAT)
-        if: ${{ secrets.HARMONY_LINK_REPO_PAT == '' }}
+        if: env.HARMONY_LINK_REPO_PAT == ''
         run: echo "HARMONY_LINK_REPO_PAT not set — engine-contract drift check skipped"

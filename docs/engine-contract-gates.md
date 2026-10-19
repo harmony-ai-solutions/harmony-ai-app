@@ -24,12 +24,25 @@
 
 `src/services/engine/engineContract.ts` exports `ENGINE_CONTRACT_VERSION`,
 mirroring `info.version` in the engine repo's
-`docs/api/management/openapi.yaml` (today `1.6.0`). `checkContractVersion(artifact)`
+`docs/api/management/openapi.yaml` (today `1.7.0`). `checkContractVersion(artifact)`
 rejects an engine artifact that advertises a contract **older** than the one the
 TS layer is written against. `checkContractVersionExact` backs the fixture drift
 canary.
 
-**Latest bump — 1.5.0 → 1.6.0 (provider-registry 3-2/5-1/5-2/6-1).** The
+**Latest bump — 1.6.0 → 1.7.0 (2-4 follow-up).** The provider config editor's
+TTS voice surface called four engine routes that had landed in the router without
+a spec entry. They are now versioned app-facing routes:
+`POST /api/module-configs/tts/embed-speaker` (stateless speaker embedding),
+`POST /api/module-configs/tts/test-speech` (stateless direct synthesis),
+`POST /api/providers/elevenlabs/voices/clone` (Instant Voice Cloning) and
+`POST /api/providers/elevenlabs/voices/design` (Voice Design preview + save), all
+accepting a shared `provider_account_id` or stateless `api_key`/`base_url`. New
+shared fixtures: `speakerEmbedding` / `ttsSpeechTest` / `elevenLabsVoiceClone` /
+`elevenLabsVoiceDesign`; the endpoint manifest grows 49 → 53. Additive only — no
+existing path or shape changed. See the engine's
+`docs/Management-API-Versioning.md` §"TTS voice cloning / design".
+
+**Previous bump — 1.5.0 → 1.6.0 (provider-registry 3-2/5-1/5-2/6-1).** The
 provider surface re-targeted from the per-type `provider_config_*` tables to the
 unified `provider_accounts` model: `GET /api/providers` returns account-shaped
 rows grouped by type, `POST` takes `{type, account}`, `PUT` takes `{account}`,

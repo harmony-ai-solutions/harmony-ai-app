@@ -100,8 +100,18 @@
  * `providerList` (account rows) / `providerRefresh` / `providerVerify` /
  * `providerModels` / `providerCapabilities` / `moduleConfig` /
  * `moduleConfigCreate`.
+ *
+ * 1.6.0 → 1.7.0 (2-4 follow-up): the TTS voice-cloning/design surface the
+ * provider config editor calls landed in the engine router without a spec entry.
+ * Four stateless `/api` routes are now part of the versioned contract —
+ * `POST /api/module-configs/tts/embed-speaker`,
+ * `POST /api/module-configs/tts/test-speech`,
+ * `POST /api/providers/elevenlabs/voices/clone` and
+ * `POST /api/providers/elevenlabs/voices/design` — with the shared fixtures
+ * `speakerEmbedding` / `ttsSpeechTest` / `elevenLabsVoiceClone` /
+ * `elevenLabsVoiceDesign`. No existing shape changed (additive/MINOR).
  */
-export const ENGINE_CONTRACT_VERSION = '1.6.0';
+export const ENGINE_CONTRACT_VERSION = '1.7.0';
 
 /** Outcome of a contract-version comparison. */
 export interface ContractVersionCheck {
@@ -313,6 +323,22 @@ export const REQUIRED_ENGINE_ENDPOINTS: ContractEndpoint[] = [
     fixture: 'moduleConfigList',
     note: 'module config list (schema-driven forms)',
   },
+  // Static `tts/…` utilities declared BEFORE the `:module/:id` param route so the
+  // loopback mock's first-match regex resolves them correctly.
+  {
+    id: 'moduleConfigs.ttsEmbedSpeaker',
+    method: 'POST',
+    path: '/api/module-configs/tts/embed-speaker',
+    fixture: 'speakerEmbedding',
+    note: 'stateless speaker embedding for voice cloning (2-4)',
+  },
+  {
+    id: 'moduleConfigs.ttsTestSpeech',
+    method: 'POST',
+    path: '/api/module-configs/tts/test-speech',
+    fixture: 'ttsSpeechTest',
+    note: 'stateless direct synthesis for the TTS test studio (2-4)',
+  },
   {
     id: 'moduleConfigs.get',
     method: 'GET',
@@ -407,6 +433,20 @@ export const REQUIRED_ENGINE_ENDPOINTS: ContractEndpoint[] = [
     path: '/api/providers/models',
     fixture: 'providerModels',
     note: 'live model discovery recipe + account voices (R10)',
+  },
+  {
+    id: 'providers.elevenlabsCloneVoice',
+    method: 'POST',
+    path: '/api/providers/elevenlabs/voices/clone',
+    fixture: 'elevenLabsVoiceClone',
+    note: 'Instant Voice Cloning — reference samples → voice id (2-4)',
+  },
+  {
+    id: 'providers.elevenlabsVoiceDesign',
+    method: 'POST',
+    path: '/api/providers/elevenlabs/voices/design',
+    fixture: 'elevenLabsVoiceDesign',
+    note: 'Voice Design previews + save (2-4)',
   },
 
   // ── Sync client runtime (3-5) ───────────────────────────────────────────

@@ -63,6 +63,10 @@ const DRIVERS: Record<string, () => Promise<unknown>> = {
   'characterProfiles.images': () => engineApiClient.listCharacterImages('prof-1'),
   'characterProfiles.favorite': () => engineApiClient.setCharacterProfileFavorite('prof-1', true),
   'moduleConfigs.list': () => engineApiClient.listModuleConfigs('tts'),
+  'moduleConfigs.ttsEmbedSpeaker': () =>
+    engineApiClient.embedSpeaker({ provider: 'soulbitscloud', input_audio: 'UklGRg==' }),
+  'moduleConfigs.ttsTestSpeech': () =>
+    engineApiClient.testTtsSpeech({ provider: 'soulbitscloud', text: 'Hello there' }),
   'moduleConfigs.get': () => engineApiClient.getModuleConfig('tts', 'mc-1'),
   'moduleConfigs.create': () =>
     engineApiClient.createModuleConfig('tts', { name: 'default', provider: 'soulbitscloud' }),
@@ -79,6 +83,10 @@ const DRIVERS: Record<string, () => Promise<unknown>> = {
     engineApiClient.refreshSoulbitsCloudProviderConfigs('paseto', 'https://inference.example'),
   'providers.verify': () => engineApiClient.verifyProvider({ type: 'openai', api_key: 'sk-x' }),
   'providers.models': () => engineApiClient.listProviderModels({ type: 'openai', api_key: 'sk-x' }),
+  'providers.elevenlabsCloneVoice': () =>
+    engineApiClient.cloneElevenLabsVoice({ name: 'Aria', audio_files: ['UklGRg=='] }),
+  'providers.elevenlabsVoiceDesign': () =>
+    engineApiClient.designElevenLabsVoice({ action: 'preview', voice_description: 'warm' }),
   'syncClient.status': () => engineApiClient.getSyncClientStatus(),
   'syncGroup.keyStatus': () => engineApiClient.getSyncGroupKeyStatus(),
   'syncGroup.init': () => engineApiClient.initSyncGroup(),

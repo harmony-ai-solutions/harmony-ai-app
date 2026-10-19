@@ -28,6 +28,8 @@ import type {
   CloudAccountStatusDto,
   CloudSignInStartDto,
   ConversationMessageDto,
+  ElevenLabsVoiceCloneResponseDto,
+  ElevenLabsVoiceDesignResponseDto,
   EmojiActionDto,
   EmojiActionsResponseDto,
   EmotionResponseDto,
@@ -44,8 +46,10 @@ import type {
   ProviderModelsResponseDto,
   ProviderVerifyResultDto,
   ProviderWriteResponseDto,
+  SpeakerEmbeddingResponseDto,
   SyncClientStatusDto,
   SyncGroupKeyStatusDto,
+  TtsSpeechTestResponseDto,
 } from '../EngineApiClient';
 import type { LanSyncPairingPayload, SyncPairingPayload } from '../../sync/syncCloudTypes';
 
@@ -55,7 +59,7 @@ import type { LanSyncPairingPayload, SyncPairingPayload } from '../../sync/syncC
  * otherwise (bumping one side without the other is the deliberate-drift canary
  * the plan asks for).
  */
-export const FIXTURE_CONTRACT_VERSION = '1.6.0';
+export const FIXTURE_CONTRACT_VERSION = '1.7.0';
 
 const CREATED = '2026-10-12T09:00:00Z';
 const UPDATED = '2026-10-12T10:00:00Z';
@@ -506,6 +510,42 @@ const characterStatsFixture: CharacterStatsResponseDto = {
   stats: { 'ent-1': { likes: 3, chats: 5 } },
 };
 
+// ── TTS voice cloning / design (2-4 follow-up, contract 1.7.0) ─────────────
+// Mirrors the engine-side canonical `speakerEmbedding` / `ttsSpeechTest` /
+// `elevenLabsVoiceClone` / `elevenLabsVoiceDesign` fixtures. The engine answers
+// these with `{status:"success", …}` envelopes; the DTOs keep `status` optional.
+export const speakerEmbeddingFixture: SpeakerEmbeddingResponseDto = {
+  status: 'success',
+  data: 'AACAPwAAAEA=',
+};
+
+export const ttsSpeechTestFixture: TtsSpeechTestResponseDto = {
+  status: 'success',
+  audio_base64: 'UklGRg==',
+  format: 'audio/mpeg',
+};
+
+export const elevenLabsVoiceCloneFixture: ElevenLabsVoiceCloneResponseDto = {
+  status: 'success',
+  data: { voice_id: '21m00Tcm4TlvDq8ikWAM' },
+};
+
+export const elevenLabsVoiceDesignFixture: ElevenLabsVoiceDesignResponseDto = {
+  status: 'success',
+  data: {
+    previews: [
+      {
+        generated_voice_id: 'gd-1',
+        audio_base_64: 'UklGRg==',
+        media_type: 'audio/mpeg',
+        duration_secs: 2.4,
+        language: 'en',
+      },
+    ],
+    text: 'Hello there',
+  },
+};
+
 const backupTargetsFixture = {
   targets: [{ type: 'local', label: 'Local folder', v1: true, note: 'device storage' }],
 };
@@ -593,6 +633,10 @@ export const CONTRACT_FIXTURES: Record<string, unknown> = {
   providerVerify: providerVerifyFixture,
   providerModels: providerModelsFixture,
   providerCapabilities: providerCapabilitiesFixture,
+  speakerEmbedding: speakerEmbeddingFixture,
+  ttsSpeechTest: ttsSpeechTestFixture,
+  elevenLabsVoiceClone: elevenLabsVoiceCloneFixture,
+  elevenLabsVoiceDesign: elevenLabsVoiceDesignFixture,
   syncClientStatus: syncClientStatusFixture,
   syncGroupKeyStatus: syncGroupKeyStatusFixture,
   lanPairingPayload: lanPairingPayloadFixture,
