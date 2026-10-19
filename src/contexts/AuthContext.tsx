@@ -124,6 +124,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return;
         }
 
+        // Proactive startup refresh (provider-registry follow-up). The 6-4
+        // seeding ensure-flow writes whatever `getToken()` returns into the
+        // engine account, so a cached-but-expired PASETO would be propagated as
+        // a stale credential. Refresh FIRST when the token is expired or within
+        // the refresh-ahead window; success emits `auth:changed`, and the
+        // existing listeners (tokenSync + seedingEnsure) carry the fresh PASETO
+        // through — no propagation code lives here.
+        //
+        // Transient failures are swallowed (the lazy 401 path stays
+        // authoritative and MUST NOT be pre-empted by a network blip). A
+        // terminal failure (rejected refresh token) returns false here and then
+        // falls through to the getProfile() → auth:expired/invalidate path.
+        await AuthService.refreshIfExpiring().catch((error: unknown) => {
+          log.warn(
+            'Startup proactive refresh skipped:',
+            error instanceof Error ? error.message : String(error),
+          );
+        });
+
         // Token loaded — try to fetch the profile.
         const profile = await AuthService.getProfile();
         if (!cancelled) {

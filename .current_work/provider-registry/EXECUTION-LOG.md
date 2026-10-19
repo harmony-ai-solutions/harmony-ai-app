@@ -36,3 +36,13 @@ Legend: ⏳ running · ✅ committed · ⏸ paused/blocked · ⬜ queued
 - 2026-10-18: wave 1 dispatched — R-AUDIO, R-MD, engine 1-1, app 1-2.
 - 2026-10-18: engine chain complete (1-1 → 5-2, 19 commits incl. Silero client v0.1.2 regen+push).
 - 2026-10-18: app chain complete (1-2 → 6-5, gates green throughout; runInBand 1631/1631 final).
+- 2026-10-19: SHIPPED engine v0.4.3-dev + app v0.4.5-dev (dev channel).
+
+## Patch v0.4.6 (owner device testing round 1 — 2026-10-19)
+Owner reports: (1) chat-entry from CharactersScreen fails w/ unspecified error; (2) soulbitscloud account shows STT-flavored name + key icon says token expired (expectation: startup refreshes the token). App-logs gap: no in-app app-log access (engine logs only) — owner ruling: viewer+share+error-diag logging, ONE combined release (app v0.4.6 + engine v0.4.4-dev).
+- ✅ Engine 000053 name canonicalization — `bbd7b4c` (longestName merge fix; "Soulbits Cloud"; 3 tests; 43 pkgs green). DIAGNOSED: migration_provider_accounts.go:704.
+- ⏳ App token freshness fix — running (startup proactive refresh + ensure-flow stale-token guard). DIAGNOSED: AuthService.getToken() no expiry check; auth:changed only on login/register/refresh; ensure bootstrap propagates stale PASETO (seeding.ts:153).
+- ⏳ Bug-1 chat-entry repro/diagnosis — running (released APK on emulator + logcat + static trace).
+- ⬜ App logging feature (dispatches after token fix lands; serial app chain)
+- ⬜ Bug-1 fix (pending diagnosis)
+- ⬜ Combined release: app v0.4.6 + engine v0.4.4-dev (owner go required)

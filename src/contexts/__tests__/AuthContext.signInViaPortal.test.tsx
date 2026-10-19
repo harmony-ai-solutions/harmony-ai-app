@@ -25,6 +25,7 @@ jest.mock('../../services/auth/AuthService', () => ({
   default: {
     getToken: jest.fn(async () => { throw new Error('no token'); }),
     getProfile: jest.fn(),
+    refreshIfExpiring: jest.fn(async () => false),
     invalidate: jest.fn(async () => {}),
     logout: jest.fn(async () => {}),
     applyConnectSessionTokens: jest.fn(async () => {}),
@@ -187,6 +188,25 @@ describe('AuthContext — signInViaPortal', () => {
     });
 
     expect(textOf(getByTestId('signInVersion'))).toBe('1');
+  });
+});
+
+describe('AuthContext — startup proactive refresh', () => {
+  it('calls refreshIfExpiring on the bootstrap path when a cached token exists', async () => {
+    (AuthService.getToken as jest.Mock).mockResolvedValueOnce('paseto-cached');
+
+    await renderAuth();
+    await flush();
+
+    expect(AuthService.refreshIfExpiring).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call refreshIfExpiring when there is no cached token', async () => {
+    // getToken() throws by default (no credential) → the refresh is skipped.
+    await renderAuth();
+    await flush();
+
+    expect(AuthService.refreshIfExpiring).not.toHaveBeenCalled();
   });
 });
 

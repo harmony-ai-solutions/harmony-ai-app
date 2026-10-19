@@ -356,6 +356,66 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
     return true;
   }
 
+  /**
+   * Deduplicated refresh — the single refresh entry point for every caller
+   * OTHER than `refresh()` itself.
+   *
+   * Concurrent callers share ONE in-flight refresh (the same `_refreshing`
+   * promise {@link fetch} uses), so a proactive startup refresh and a
+   * concurrent authenticated 401 retry never rotate the token twice — which,
+   * with a rotating refresh token, risks a reuse-detection rejection.
+   *
+   * Semantics match {@link refresh}: resolves `true` on success, `false` on a
+   * TERMINAL failure (rejected refresh token / none cached), and THROWS on a
+   * transient failure (network / 5xx) so the caller can retry WITHOUT
+   * invalidating the still-valid credentials.
+   */
+  async refreshDeduped(): Promise<boolean> {
+    try {
+      return await (this._refreshing ??= this.refresh());
+    } finally {
+      this._refreshing = null;
+    }
+  }
+
+  /**
+   * Proactive startup refresh (provider-registry follow-up): refresh the token
+   * pair when the cached PASETO is expired or within `thresholdMs` of expiry
+   * AND a refresh token is available. Routes through {@link refreshDeduped} so
+   * it never races a concurrent 401 retry.
+   *
+   * Returns `true` when a refresh ran and succeeded, `false` when no refresh
+   * was needed OR the refresh token was rejected (terminal). THROWS on a
+   * transient failure — the startup caller MUST swallow that (a momentary
+   * network blip must not log the user out; the lazy 401 path stays
+   * authoritative).
+   *
+   * @param thresholdMs refresh-ahead window (default 5 minutes).
+   */
+  async refreshIfExpiring(thresholdMs: number = 5 * 60 * 1000): Promise<boolean> {
+    // Load the credential (populates _refresh + _expiresAtMs) if the cache is
+    // cold. A throw here means there is no credential at all — nothing to do.
+    try {
+      await this.getToken();
+    } catch {
+      return false;
+    }
+
+    if (!this._refresh) {
+      return false; // no refresh token — cannot refresh
+    }
+
+    // `_expiresAtMs` is 0 (absent) or NaN (unparseable) → refresh defensively;
+    // otherwise refresh once we are inside the threshold window.
+    const exp = this._expiresAtMs;
+    const needsRefresh = !(exp > 0) || Date.now() >= exp - thresholdMs;
+    if (!needsRefresh) {
+      return false;
+    }
+
+    return this.refreshDeduped();
+  }
+
   // ──── Logout ────────────────────────────────────────────────────────
   /**
    * Best-effort logout: notify the backend, then clear local credentials
@@ -530,14 +590,10 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
     }
 
     // ── 401 — attempt one deduplicated refresh, then retry once ───────
-    try {
-      const ok = await (this._refreshing ??= this.refresh());
-      if (!ok) {
-        await this.invalidate();
-        throw new AuthExpiredError();
-      }
-    } finally {
-      this._refreshing = null;
+    const ok = await this.refreshDeduped();
+    if (!ok) {
+      await this.invalidate();
+      throw new AuthExpiredError();
     }
 
     const fresh = await this.getToken();

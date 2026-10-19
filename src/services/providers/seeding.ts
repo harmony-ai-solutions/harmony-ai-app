@@ -104,10 +104,18 @@ export async function ensureSeededDefaults(pasetoOverride?: string): Promise<voi
       return;
     }
 
-    const accountId = await ensureSoulbitsAccount(paseto);
+    // Stale-token guard (provider-registry follow-up): never write an EXPIRED
+    // PASETO into the engine account. If the cached token is already expired,
+    // attempt one refresh first; when no valid token is obtainable, SKIP the
+    // account write (and the gap-fill) rather than propagating stale
+    // credentials. A still-valid token passes straight through, unchanged.
+    const freshPaseto = await resolveFreshToken(paseto);
+    if (!freshPaseto) return;
+
+    const accountId = await ensureSoulbitsAccount(freshPaseto);
     if (!accountId) return;
 
-    await gapFill(accountId, paseto);
+    await gapFill(accountId, freshPaseto);
   } catch (error) {
     // Never block sign-in on a seeding failure.
     log.warn('ensureSeededDefaults failed:', error);
@@ -143,6 +151,57 @@ async function readCachedToken(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Cached cloud PASETO expiry in epoch ms, or 0 when unknown/unavailable. */
+function safeExpiresAt(): number {
+  try {
+    return AuthService.getTokenExpiresAt();
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Return a token that is safe to write into the engine account.
+ *
+ * A token that is NOT already expired passes straight through (the common path
+ * — behaviour is unchanged). An EXPIRED token triggers exactly one refresh
+ * through {@link AuthService.refreshDeduped} (shared dedup with the 401-retry
+ * and startup paths — never a parallel refresh). Returns null — so the caller
+ * SKIPS the account write — when no valid token is obtainable: a terminal
+ * rejection, a transient refresh failure, or a refresh that yields an expired
+ * token. Never throws.
+ */
+async function resolveFreshToken(fallback: string): Promise<string | null> {
+  const expiresAt = safeExpiresAt();
+  const expired = expiresAt > 0 && Date.now() >= expiresAt;
+  if (!expired) {
+    // Fresh (or unknown-expiry) token — use as-is.
+    return fallback;
+  }
+
+  let refreshed = false;
+  try {
+    refreshed = await AuthService.refreshDeduped();
+  } catch (error) {
+    // Transient refresh failure — do NOT propagate the stale token.
+    log.warn('Expired cloud token: refresh failed (transient) — skipping account write:', error);
+    return null;
+  }
+
+  if (!refreshed) {
+    log.warn('Expired cloud token: refresh rejected — skipping account write');
+    return null;
+  }
+
+  const token = await readCachedToken();
+  const newExpiresAt = safeExpiresAt();
+  if (!token || !(newExpiresAt > 0) || Date.now() >= newExpiresAt) {
+    log.warn('Expired cloud token: refresh produced no valid token — skipping account write');
+    return null;
+  }
+  return token;
 }
 
 /**

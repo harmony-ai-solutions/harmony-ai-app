@@ -38,7 +38,13 @@ jest.mock('i18next', () => ({
 
 jest.mock('../../auth/AuthService', () => ({
   __esModule: true,
-  default: { on: jest.fn(), off: jest.fn(), getToken: jest.fn() },
+  default: {
+    on: jest.fn(),
+    off: jest.fn(),
+    getToken: jest.fn(),
+    getTokenExpiresAt: jest.fn(),
+    refreshDeduped: jest.fn(),
+  },
 }));
 
 jest.mock('../../engine/EngineApiClient', () => ({
@@ -69,7 +75,13 @@ jest.mock('../../../database/repositories', () => ({
 
 // ── Typed mock handles ──────────────────────────────────────────────────────
 
-const auth = AuthService as unknown as { on: jest.Mock; off: jest.Mock; getToken: jest.Mock };
+const auth = AuthService as unknown as {
+  on: jest.Mock;
+  off: jest.Mock;
+  getToken: jest.Mock;
+  getTokenExpiresAt: jest.Mock;
+  refreshDeduped: jest.Mock;
+};
 const engine = engineApiClient as unknown as { listProviderModels: jest.Mock };
 const r = repo as unknown as {
   listAccounts: jest.Mock;
@@ -166,6 +178,9 @@ beforeEach(() => {
   jest.clearAllMocks();
 
   auth.getToken.mockResolvedValue('paseto-current');
+  // Default: a comfortably-fresh cached token (well outside any threshold).
+  auth.getTokenExpiresAt.mockReturnValue(Date.now() + 60 * 60 * 1000);
+  auth.refreshDeduped.mockResolvedValue(true);
   r.listAccounts.mockResolvedValue([account()]);
   r.createAccount.mockResolvedValue('acct-created');
   r.updateAccount.mockResolvedValue(undefined);
@@ -264,6 +279,86 @@ describe('ensureSeededDefaults — token first', () => {
     r.listAccounts.mockRejectedValue(new Error('engine offline'));
 
     await expect(ensureSeededDefaults('paseto-1')).resolves.toBeUndefined();
+  });
+});
+
+// ── Stale-token guard (provider-registry follow-up) ─────────────────────────
+
+describe('ensureSeededDefaults — stale-token guard', () => {
+  it('writes a fresh token as today, without refreshing', async () => {
+    engineSeededInstall();
+
+    await ensureSeededDefaults();
+
+    expect(auth.refreshDeduped).not.toHaveBeenCalled();
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
+      api_key: 'paseto-current',
+      base_url: CLOUD_HOSTS.inference,
+    });
+  });
+
+  it('refreshes an expired cached token once, then writes the fresh PASETO', async () => {
+    engineSeededInstall();
+    auth.getTokenExpiresAt
+      .mockReturnValueOnce(Date.now() - 1000) // expired at the guard
+      .mockReturnValueOnce(Date.now() + 60 * 60 * 1000); // fresh after refresh
+    auth.getToken
+      .mockResolvedValueOnce('paseto-stale') // initial read
+      .mockResolvedValueOnce('paseto-fresh'); // post-refresh read
+    auth.refreshDeduped.mockResolvedValue(true);
+
+    await ensureSeededDefaults();
+
+    expect(auth.refreshDeduped).toHaveBeenCalledTimes(1);
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
+      api_key: 'paseto-fresh',
+      base_url: CLOUD_HOSTS.inference,
+    });
+  });
+
+  it('skips the account write when an expired token is rejected (terminal)', async () => {
+    engineSeededInstall();
+    auth.getTokenExpiresAt.mockReturnValue(Date.now() - 1000);
+    auth.refreshDeduped.mockResolvedValue(false);
+
+    await ensureSeededDefaults();
+
+    expect(auth.refreshDeduped).toHaveBeenCalledTimes(1);
+    expect(r.updateAccount).not.toHaveBeenCalled();
+    expect(r.createAccount).not.toHaveBeenCalled();
+  });
+
+  it('skips the account write on a transient refresh failure and never throws', async () => {
+    engineSeededInstall();
+    auth.getTokenExpiresAt.mockReturnValue(Date.now() - 1000);
+    auth.refreshDeduped.mockRejectedValue(new Error('network'));
+
+    await expect(ensureSeededDefaults()).resolves.toBeUndefined();
+
+    expect(r.updateAccount).not.toHaveBeenCalled();
+    expect(r.listAccounts).not.toHaveBeenCalled();
+  });
+
+  it('skips the account write when the refreshed token is itself expired', async () => {
+    engineSeededInstall();
+    auth.getTokenExpiresAt
+      .mockReturnValueOnce(Date.now() - 1000) // expired at the guard
+      .mockReturnValueOnce(Date.now() - 500); // still expired after refresh
+    auth.refreshDeduped.mockResolvedValue(true);
+
+    await ensureSeededDefaults();
+
+    expect(r.updateAccount).not.toHaveBeenCalled();
+  });
+
+  it('does not write an expired token even when carried by the auth:changed event', async () => {
+    engineSeededInstall();
+    auth.getTokenExpiresAt.mockReturnValue(Date.now() - 1000);
+    auth.refreshDeduped.mockResolvedValue(false);
+
+    await ensureSeededDefaults('paseto-event');
+
+    expect(r.updateAccount).not.toHaveBeenCalled();
   });
 });
 
