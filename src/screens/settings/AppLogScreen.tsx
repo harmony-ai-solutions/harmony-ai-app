@@ -24,6 +24,7 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useAppAlert } from '../../contexts/AppAlertContext';
 import { useToast } from '../../contexts/AppToastContext';
@@ -64,6 +65,53 @@ export function formatAppLogClock(timestamp: string): string {
   return m[2] ? `${m[1]}.${m[2].padEnd(3, '0')}` : m[1];
 }
 
+/** A display row: one logical entry plus its collapsed duplicate count + ids. */
+export interface AppLogRow {
+  entry: AppLogEntry;
+  count: number;
+  ids: number[];
+}
+
+/** The identity used to collapse consecutive duplicate entries (ignores time/id). */
+function appLogIdentity(entry: AppLogEntry): string {
+  return [entry.level, entry.namespace ?? '', entry.message].join('\u0000');
+}
+
+/**
+ * Collapse runs of consecutive identical entries (identity = level + namespace +
+ * message) into a single row, keeping the NEWEST entry of the run as the
+ * representative — mirroring EngineLogScreen's `applyStreamEvent` newest-wins
+ * dedup. Non-adjacent identical entries stay separate (runs are contiguous).
+ * Order is preserved (oldest → newest), matching the chronological tail.
+ */
+export function buildAppLogRows(entries: readonly AppLogEntry[]): AppLogRow[] {
+  const rows: AppLogRow[] = [];
+  for (const entry of entries) {
+    const head = rows[rows.length - 1];
+    if (head && appLogIdentity(head.entry) === appLogIdentity(entry)) {
+      rows[rows.length - 1] = { entry, count: head.count + 1, ids: [...head.ids, entry.id] };
+    } else {
+      rows.push({ entry, count: 1, ids: [entry.id] });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Filter rows by the same criteria as {@link filterAppLogEntries}, applied to
+ * each row's representative entry. Reuses the entry filter verbatim (via the
+ * surviving ids) so the criteria stay in one place and a collapsed count
+ * survives filtering — the rows are built from the raw buffer first, then
+ * filtered (engine-style: dedup at ingestion, filter the collapsed rows).
+ */
+export function filterAppLogRows(
+  rows: readonly AppLogRow[],
+  criteria: AppLogFilter = {},
+): AppLogRow[] {
+  const kept = new Set(filterAppLogEntries(rows.map(row => row.entry), criteria).map(e => e.id));
+  return rows.filter(row => kept.has(row.entry.id));
+}
+
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 export const AppLogScreen: React.FC = () => {
@@ -77,14 +125,20 @@ export const AppLogScreen: React.FC = () => {
   const [filter, setFilter] = useState<AppLogFilter>(EMPTY_APP_LOG_FILTER);
   const [following, setFollowing] = useState(true);
 
-  const listRef = useRef<FlatList<AppLogEntry>>(null);
+  const listRef = useRef<FlatList<AppLogRow>>(null);
   const versionRef = useRef(appLogBuffer.getVersion());
+  // Read inside the poll tick so a pause is honoured without a stale closure.
+  const followingRef = useRef(following);
+  followingRef.current = following;
 
-  // Poll the buffer; only re-render when the mutation version changed.
+  // Poll the buffer; only re-render when the mutation version changed. While
+  // paused the snapshot is frozen (buffer mutations are not applied); resuming
+  // catches up to the current buffer immediately.
   useEffect(() => {
     const tick = () => {
       const version = appLogBuffer.getVersion();
       if (version === versionRef.current) return;
+      if (!followingRef.current) return; // paused: hold the visible snapshot
       versionRef.current = version;
       setRaw([...appLogBuffer.getEntries()]);
     };
@@ -93,7 +147,22 @@ export const AppLogScreen: React.FC = () => {
     return () => clearInterval(id);
   }, []);
 
-  const visible = useMemo(() => filterAppLogEntries(raw, filter), [raw, filter]);
+  /** Toggle follow/pause; on resume, catch the frozen snapshot up to the buffer. */
+  const toggleFollow = useCallback(() => {
+    const next = !followingRef.current;
+    followingRef.current = next; // apply immediately so the next tick sees it
+    setFollowing(next);
+    if (next) {
+      versionRef.current = appLogBuffer.getVersion();
+      setRaw([...appLogBuffer.getEntries()]);
+    }
+  }, []);
+
+  // Build rows from the raw buffer (collapsing consecutive duplicates) before
+  // filtering, so a dedup count survives level/search filtering.
+  const visible = useMemo(() => filterAppLogRows(buildAppLogRows(raw), filter), [raw, filter]);
+  // Export/copy operate on the representative entries of the visible rows.
+  const visibleEntries = useMemo(() => visible.map(row => row.entry), [visible]);
 
   const levelColors = useMemo(() => {
     if (!theme) return {} as Record<string, string>;
@@ -107,18 +176,30 @@ export const AppLogScreen: React.FC = () => {
 
   const share = useCallback(async () => {
     try {
-      const text = buildAppDiagnosticsReport(visible);
+      const text = buildAppDiagnosticsReport(visibleEntries);
       await Share.share({ title: t('title'), message: text });
     } catch (err) {
       log.warn('App-log share failed:', err);
       showToast(t('shareFailedToast'));
     }
-  }, [visible, t, showToast]);
+  }, [visibleEntries, t, showToast]);
 
   const copy = useCallback(async () => {
-    const ok = await copyAppLogEntries(visible);
+    const ok = await copyAppLogEntries(visibleEntries);
     showToast(ok ? t('copiedToast') : t('copyFailedToast'));
-  }, [visible, t, showToast]);
+  }, [visibleEntries, t, showToast]);
+
+  /** Copy one row's line to the clipboard (long-press). Never throws. */
+  const copyEntry = useCallback((row: AppLogRow) => {
+    const ns = row.entry.namespace ?? '';
+    const head = `[${row.entry.timestamp}] ${row.entry.level.toUpperCase()}${ns ? ` ${ns}` : ''}`;
+    const line = row.count > 1 ? `${head} — ${row.entry.message} (×${row.count})` : `${head} — ${row.entry.message}`;
+    try {
+      Clipboard.setString(line);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const clear = useCallback(() => {
     showAlert(t('clearConfirmTitle'), t('clearConfirmMessage'), [
@@ -143,29 +224,44 @@ export const AppLogScreen: React.FC = () => {
 
   if (!theme) return null;
 
-  const renderRow = ({ item }: { item: AppLogEntry }) => (
-    <View style={styles.row} testID={`app-log-row-${item.id}`}>
+  const renderRow = ({ item }: { item: AppLogRow }) => (
+    <TouchableOpacity
+      activeOpacity={0.6}
+      onLongPress={() => copyEntry(item)}
+      style={styles.row}
+      testID={`app-log-row-${item.entry.id}`}
+    >
       <ThemedText variant="muted" size={11} style={styles.rowTime}>
-        {formatAppLogClock(item.timestamp)}
+        {formatAppLogClock(item.entry.timestamp)}
       </ThemedText>
       <ThemedText
         size={11}
         weight="medium"
-        style={[styles.rowLevel, { color: levelColors[item.level] ?? theme.colors.text.secondary }]}
+        style={[styles.rowLevel, { color: levelColors[item.entry.level] ?? theme.colors.text.secondary }]}
       >
-        {item.level.toUpperCase()}
+        {item.entry.level.toUpperCase()}
       </ThemedText>
       <View style={styles.rowBody}>
-        {item.namespace ? (
+        {item.entry.namespace ? (
           <ThemedText variant="accent" size={11}>
-            {item.namespace}{' '}
+            {item.entry.namespace}{' '}
           </ThemedText>
         ) : null}
         <ThemedText size={12} style={styles.rowMessage}>
-          {item.message}
+          {item.entry.message}
         </ThemedText>
+        {item.count > 1 && (
+          <View
+            style={[styles.dedupBadge, { backgroundColor: hexToRgba(theme.colors.accent.primary, 0.15) }]}
+            testID={`app-log-row-dedup-${item.entry.id}`}
+          >
+            <ThemedText variant="accent" size={10} weight="medium">
+              ×{item.count}
+            </ThemedText>
+          </View>
+        )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -176,7 +272,7 @@ export const AppLogScreen: React.FC = () => {
         right={
           <View style={styles.headerActions}>
             <TouchableOpacity
-              onPress={() => setFollowing(prev => !prev)}
+              onPress={toggleFollow}
               style={styles.headerIcon}
               testID="app-log-follow-toggle"
               accessibilityLabel={following ? t('pause') : t('follow')}
@@ -266,7 +362,7 @@ export const AppLogScreen: React.FC = () => {
       <FlatList
         ref={listRef}
         data={visible}
-        keyExtractor={item => String(item.id)}
+        keyExtractor={item => String(item.entry.id)}
         renderItem={renderRow}
         style={styles.list}
         contentContainerStyle={styles.listContent}
@@ -347,8 +443,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 4, gap: 6 },
   rowTime: { width: 74, fontVariant: ['tabular-nums'] },
   rowLevel: { width: 44 },
-  rowBody: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start' },
+  rowBody: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', gap: 6 },
   rowMessage: { flexShrink: 1 },
+  dedupBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 8 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
 });
 

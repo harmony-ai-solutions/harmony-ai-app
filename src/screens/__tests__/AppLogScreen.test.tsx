@@ -7,7 +7,8 @@
 
 import React from 'react';
 import { Share } from 'react-native';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 
 afterEach(cleanup);
 beforeEach(() => {
@@ -81,8 +82,8 @@ jest.mock('../../services/diagnostics/appDiagnostics', () => ({
   copyAppLogEntries: (...args: unknown[]) => (mockCopyEntries as jest.Mock)(...args),
 }));
 
-import { AppLogScreen } from '../settings/AppLogScreen';
-import { appLogBuffer } from '../../utils/appLogs';
+import { AppLogScreen, APP_LOG_POLL_MS, buildAppLogRows } from '../settings/AppLogScreen';
+import { appLogBuffer, type AppLogEntry } from '../../utils/appLogs';
 
 function seed() {
   appLogBuffer.clear();
@@ -166,5 +167,148 @@ describe('AppLogScreen actions', () => {
     fireEvent.press(getByTestId('app-log-copy'));
     await waitFor(() => expect(mockCopyEntries).toHaveBeenCalled());
     await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('copiedToast'));
+  });
+});
+
+// ── Pure row building (dedup) ────────────────────────────────────────────────
+
+function entry(over: Partial<AppLogEntry> = {}): AppLogEntry {
+  return {
+    id: over.id ?? 1,
+    timestamp: over.timestamp ?? '2026-10-19T10:00:00.000Z',
+    level: over.level ?? 'info',
+    namespace: over.namespace ?? '[Svc]',
+    message: over.message ?? 'hello',
+  };
+}
+
+describe('buildAppLogRows', () => {
+  it('collapses consecutive duplicates onto the newest representative', () => {
+    const rows = buildAppLogRows([
+      entry({ id: 1, message: 'a' }),
+      entry({ id: 2, message: 'a' }),
+      entry({ id: 3, level: 'warn', namespace: null, message: 'b' }),
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].entry.id).toBe(2); // newest entry of the run
+    expect(rows[0].count).toBe(2);
+    expect(rows[0].ids).toEqual([1, 2]);
+    expect(rows[1].count).toBe(1);
+    expect(rows[1].entry.id).toBe(3);
+  });
+
+  it('ignores the timestamp when collapsing (keeps the newest)', () => {
+    const rows = buildAppLogRows([
+      entry({ id: 1, timestamp: '2026-10-19T10:00:00.000Z', message: 'a' }),
+      entry({ id: 2, timestamp: '2026-10-19T10:00:05.000Z', message: 'a' }),
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].count).toBe(2);
+    expect(rows[0].entry.timestamp).toBe('2026-10-19T10:00:05.000Z');
+  });
+
+  it('does not collapse non-adjacent same-content entries', () => {
+    const rows = buildAppLogRows([
+      entry({ id: 1, message: 'a' }),
+      entry({ id: 2, message: 'b' }),
+      entry({ id: 3, message: 'a' }),
+    ]);
+    expect(rows).toHaveLength(3);
+    expect(rows.every(r => r.count === 1)).toBe(true);
+  });
+
+  it('returns an empty array for empty input', () => {
+    expect(buildAppLogRows([])).toEqual([]);
+  });
+});
+
+// ── Dedup badge + per-row long-press copy ────────────────────────────────────
+
+describe('AppLogScreen dedup + copy', () => {
+  it('collapses consecutive duplicates and renders the ×N badge', async () => {
+    appLogBuffer.clear();
+    appLogBuffer.push({
+      timestamp: '2026-10-19T10:00:00.000Z',
+      level: 'info',
+      namespace: '[Svc]',
+      message: 'dup line',
+    });
+    appLogBuffer.push({
+      timestamp: '2026-10-19T10:00:01.000Z',
+      level: 'info',
+      namespace: '[Svc]',
+      message: 'dup line',
+    });
+    const { getByText, queryAllByText, getByTestId } = await render(<AppLogScreen />);
+    expect(queryAllByText('dup line')).toHaveLength(1);
+    expect(getByText('×2')).toBeTruthy();
+    const newestId = appLogBuffer.getEntries()[1].id;
+    expect(getByTestId(`app-log-row-dedup-${newestId}`)).toBeTruthy();
+  });
+
+  it('copies a single row line on long-press', async () => {
+    seed();
+    const { getByTestId } = await render(<AppLogScreen />);
+    const first = appLogBuffer.getEntries()[0];
+    fireEvent(getByTestId(`app-log-row-${first.id}`), 'longPress');
+    expect(Clipboard.setString).toHaveBeenCalledWith(
+      '[2026-10-19T10:00:00.000Z] INFO [Svc] — hello world',
+    );
+  });
+
+  it('appends the ×count to a collapsed row copy', async () => {
+    appLogBuffer.clear();
+    appLogBuffer.push({
+      timestamp: '2026-10-19T10:00:00.000Z',
+      level: 'info',
+      namespace: null,
+      message: 'dup',
+    });
+    appLogBuffer.push({
+      timestamp: '2026-10-19T10:00:01.000Z',
+      level: 'info',
+      namespace: null,
+      message: 'dup',
+    });
+    const { getByTestId } = await render(<AppLogScreen />);
+    const newestId = appLogBuffer.getEntries()[1].id;
+    fireEvent(getByTestId(`app-log-row-${newestId}`), 'longPress');
+    expect(Clipboard.setString).toHaveBeenCalledWith('[2026-10-19T10:00:01.000Z] INFO — dup (×2)');
+  });
+});
+
+// ── Pause freezes the visible snapshot ───────────────────────────────────────
+
+describe('AppLogScreen pause', () => {
+  it('does not apply buffer mutations while paused and catches up on resume', async () => {
+    jest.useFakeTimers();
+    try {
+      seed();
+      const { getByTestId, queryByText } = await render(<AppLogScreen />);
+      expect(queryByText('hello world')).toBeTruthy();
+
+      // pause
+      await fireEvent.press(getByTestId('app-log-follow-toggle'));
+
+      // mutate the buffer while paused
+      appLogBuffer.push({
+        timestamp: '2026-10-19T10:00:02.000Z',
+        level: 'warn',
+        namespace: null,
+        message: 'paused-arrival',
+      });
+      await act(async () => {
+        jest.advanceTimersByTime(APP_LOG_POLL_MS * 3);
+      });
+
+      // frozen: the new entry is not rendered
+      expect(queryByText('paused-arrival')).toBeNull();
+
+      // resume → catch up immediately
+      await fireEvent.press(getByTestId('app-log-follow-toggle'));
+      expect(queryByText('paused-arrival')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
