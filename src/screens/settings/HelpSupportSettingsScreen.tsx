@@ -131,6 +131,14 @@ export const HelpSupportSettingsScreen: React.FC = () => {
             theme={theme}
             showSeparator
           />
+          {/* App logs — the app's own log viewer (on-device field debugging). */}
+          <SettingsLinkRow
+            icon="text-box-outline"
+            label={t('appLogs')}
+            onPress={() => navigation.navigate('AppLog')}
+            theme={theme}
+            showSeparator
+          />
         </ThemedCard>
       </ScrollView>
     </ThemedView>

@@ -41,8 +41,7 @@ Legend: ⏳ running · ✅ committed · ⏸ paused/blocked · ⬜ queued
 ## Patch v0.4.6 (owner device testing round 1 — 2026-10-19)
 Owner reports: (1) chat-entry from CharactersScreen fails w/ unspecified error; (2) soulbitscloud account shows STT-flavored name + key icon says token expired (expectation: startup refreshes the token). App-logs gap: no in-app app-log access (engine logs only) — owner ruling: viewer+share+error-diag logging, ONE combined release (app v0.4.6 + engine v0.4.4-dev).
 - ✅ Engine 000053 name canonicalization — `bbd7b4c` (longestName merge fix; "Soulbits Cloud"; 3 tests; 43 pkgs green). DIAGNOSED: migration_provider_accounts.go:704.
-- ⏳ App token freshness fix — running (startup proactive refresh + ensure-flow stale-token guard). DIAGNOSED: AuthService.getToken() no expiry check; auth:changed only on login/register/refresh; ensure bootstrap propagates stale PASETO (seeding.ts:153).
-- ⏳ Bug-1 chat-entry repro/diagnosis — running (released APK on emulator + logcat + static trace).
-- ⬜ App logging feature (dispatches after token fix lands; serial app chain)
-- ⬜ Bug-1 fix (pending diagnosis)
+- ✅ App token freshness fix — `dbfd94a` (startup refreshIfExpiring + ensure-flow resolveFreshToken stale-guard; +15 tests; runInBand 1646/1646). DIAGNOSED: AuthService.getToken() no expiry check; auth:changed only on login/register/refresh; ensure bootstrap propagated stale PASETO (seeding.ts:153).
+- ⏳ Bug-1 fix (engine) — running: entity-load tolerance + boot propagation + migration 000054 dangling-ref healing. DIAGNOSED (repro agent): LoadAllEntities all-or-nothing 500s GET /api/entities on migrated DB w/ soft-deleted-config refs; embedded boot continues w/ empty cache.
+- ⏳ App logging feature — DISPATCHED (ring buffer + viewer + share + error-diag; owner option A)
 - ⬜ Combined release: app v0.4.6 + engine v0.4.4-dev (owner go required)

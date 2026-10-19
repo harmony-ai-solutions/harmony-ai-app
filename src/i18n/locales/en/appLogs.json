@@ -1,0 +1,19 @@
+{
+  "title": "App logs",
+  "searchPlaceholder": "Search messages…",
+  "levelAll": "All levels",
+  "follow": "Follow",
+  "pause": "Pause",
+  "share": "Share logs",
+  "copy": "Copy",
+  "clear": "Clear",
+  "clearConfirmTitle": "Clear app logs?",
+  "clearConfirmMessage": "This removes the in-memory buffer and the persisted tail. It cannot be undone.",
+  "clearedToast": "App logs cleared",
+  "copiedToast": "Diagnostics copied to clipboard",
+  "copyFailedToast": "Could not copy diagnostics",
+  "shareFailedToast": "Could not share logs",
+  "entryCount": "{{count}} entries",
+  "empty": "No app log entries yet.",
+  "previousSession": "Previous session"
+}

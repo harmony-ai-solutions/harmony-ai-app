@@ -206,6 +206,13 @@ export const SettingsScreen: React.FC = () => {
             theme={theme}
             showSeparator
           />
+          <SettingsLinkRow
+            icon="text-box-outline"
+            label={t('appLogs')}
+            onPress={() => navigation.navigate('AppLog')}
+            theme={theme}
+            showSeparator
+          />
         </ThemedCard>
 
         {/* ── Backup & restore (user-owned-storage continuity, 2-6) ── */}

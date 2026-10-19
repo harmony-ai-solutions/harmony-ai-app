@@ -115,6 +115,7 @@
   "providersGroup": "Providers",
   "providers": "Providers",
   "engineLogs": "Engine logs",
+  "appLogs": "App logs",
   "engineGroup": "Engine",
   "engineStatus": "Engine status",
   "notificationDelivery": "Alerts & delivery",

@@ -1,4 +1,11 @@
 import { logger, consoleTransport } from 'react-native-logs';
+import {
+  appLogBuffer,
+  loadPersistedAppLogs,
+  makeCaptureTransport,
+  markAppLogDirty,
+  startAppLogPersistence,
+} from './appLogs';
 
 /** App-wide tag for filtering Soulbits logs in ADB logcat */
 const APP_TAG = 'SOULBITS';
@@ -41,41 +48,70 @@ const formatFunc = (level: string, extension?: string | null, ...msg: any[]): st
 };
 
 /**
- * Logger configuration for Soulbits App
+ * Console transport gate.
  *
- * - Development (__DEV__): All levels (debug, info, warn, error)
- * - Production: Only ERROR level
- * - All logs prefixed with [SOULBITS] for easy logcat filtering
+ * Dev: every level reaches the console (unchanged).
+ * Release: only ERROR reaches the console so prod logcat stays quiet — while
+ * the ring buffer (a separate transport) still receives info+.
  */
-const config = {
-  levels: {
-    debug: 0,
-    info: 1,
-    warn: 2,
-    error: 3,
-  },
-  severity: __DEV__ ? 'debug' : 'error',
-  transport: errorHandlingTransport,
-  transportOptions: {
-    colors: {
-      debug: 'blueBright',
-      info: 'white',
-      warn: 'yellowBright',
-      error: 'redBright',
-    } as const,
-  },
-  // Synchronous under Jest: the async transport batches via a timer, which can
-  // flush AFTER a test environment tears down ("Cannot log after tests are
-  // done"). The app keeps the async transport.
-  async: !(globalThis as unknown as { __JEST__?: boolean }).__JEST__,
-  dateFormat: 'time',
-  formatFunc,
-  printLevel: true,
-  printDate: __DEV__, // Only show timestamps in dev
-  enabled: true,
-};
+export function makeConsoleGate(isDev: boolean): (props: any) => void {
+  return (props: any) => {
+    if (!isDev && props?.level?.text !== 'error') return;
+    errorHandlingTransport(props);
+  };
+}
 
-const rootLogger = logger.createLogger(config);
+const isJest = (): boolean =>
+  (globalThis as unknown as { __JEST__?: boolean }).__JEST__ === true;
+
+/**
+ * Build the logger configuration.
+ *
+ * - Development (__DEV__): all levels (debug, info, warn, error) to console + buffer
+ * - Production: `severity: 'info'` lets info+ through to the transports; the
+ *   ring buffer captures info+, the console gate drops everything below error.
+ * - All console logs prefixed with [SOULBITS] for easy logcat filtering.
+ *
+ * Exported for tests (release-mode config assertions).
+ */
+export function buildLoggerConfig(dev: boolean, jest: boolean) {
+  return {
+    levels: {
+      debug: 0,
+      info: 1,
+      warn: 2,
+      error: 3,
+    },
+    severity: dev ? 'debug' : 'info',
+    transport: [makeCaptureTransport(appLogBuffer, markAppLogDirty), makeConsoleGate(dev)],
+    transportOptions: {
+      colors: {
+        debug: 'blueBright',
+        info: 'white',
+        warn: 'yellowBright',
+        error: 'redBright',
+      } as const,
+    },
+    // Synchronous under Jest: the async transport batches via a timer, which can
+    // flush AFTER a test environment tears down ("Cannot log after tests are
+    // done"). The app keeps the async transport.
+    async: !jest,
+    dateFormat: 'time',
+    formatFunc,
+    printLevel: true,
+    printDate: dev, // Only show timestamps in dev
+    enabled: true,
+  };
+}
+
+const rootLogger = logger.createLogger(buildLoggerConfig(__DEV__, isJest()));
+
+// Best-effort, non-blocking persistence of a bounded log tail (no-op under Jest):
+// restore the previous session's tail, then flush periodically while dirty.
+if (!isJest()) {
+  void loadPersistedAppLogs();
+  startAppLogPersistence();
+}
 
 /**
  * Create a logger with a specific namespace (e.g. '[ServiceName]')

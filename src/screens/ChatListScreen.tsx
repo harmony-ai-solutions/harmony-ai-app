@@ -57,6 +57,7 @@ import { openCharacterChat } from '../services/CharacterChatService';
 import { getLockedEntityIds } from '../services/variant/entityAccess';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { createLogger } from '../utils/logger';
+import { copyAppDiagnosticsWithToast } from '../services/diagnostics/appDiagnostics';
 import {
   getChatConversationSettingsBatch,
   setConversationPinned,
@@ -734,7 +735,18 @@ export const ChatListScreen: React.FC = () => {
         showAlert(t('common:error'), t('characters:chatOpenReservedName'));
         return;
       }
-      showAlert(t('common:error'), t('characters:chatOpenFailed'));
+      showAlert(t('common:error'), t('characters:chatOpenFailed'), [
+        { text: t('common:close'), style: 'cancel' },
+        {
+          text: t('common:copyDiagnostics'),
+          onPress: () => {
+            void copyAppDiagnosticsWithToast(showToast, {
+              success: t('common:diagnosticsCopied'),
+              failure: t('common:diagnosticsCopyFailed'),
+            });
+          },
+        },
+      ]);
     }
   };
 

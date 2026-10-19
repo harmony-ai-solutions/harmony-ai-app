@@ -23,5 +23,8 @@
   "notConfigured": "Not configured",
   "comingSoon": "Coming Soon",
   "version": "Soulbits · v{{version}}",
-  "goBack": "Go back"
+  "goBack": "Go back",
+  "copyDiagnostics": "Copy diagnostics",
+  "diagnosticsCopied": "Diagnostics copied to clipboard",
+  "diagnosticsCopyFailed": "Could not copy diagnostics"
 }

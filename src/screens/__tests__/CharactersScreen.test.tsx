@@ -35,6 +35,7 @@ jest.mock('../../hooks/useReducedMotion', () => ({
 }));
 
 const mockShowAlert = jest.fn();
+const mockShowToast = jest.fn();
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -58,7 +59,7 @@ jest.mock('react-native-safe-area-context', () => ({
 // CharactersScreen shows themed toasts (favorites/categories feedback) —
 // mock the toast context so renders don't require AppToastProvider.
 jest.mock('../../contexts/AppToastContext', () => ({
-  useToast: () => ({ showToast: jest.fn() }),
+  useToast: () => ({ showToast: mockShowToast }),
 }));
 
 // The screen reads the signed-in user (senju's creator/profile features) —
@@ -696,6 +697,32 @@ describe('CharactersScreen — reserved-name card flow (D33 / review-5 UX pin)',
     expect(mockShowAlert).toHaveBeenCalledTimes(1);
     expect(mockShowAlert).toHaveBeenCalledWith('common:error', 'chatOpenReservedName');
     expect(mockShowAlert).not.toHaveBeenCalledWith('common:error', 'chatOpenFailed');
+  });
+});
+
+describe('CharactersScreen — generic error Copy diagnostics', () => {
+  it('offers a Copy diagnostics action that copies the report and toasts', async () => {
+    const Clipboard = require('@react-native-clipboard/clipboard');
+    const { openCharacterChat } = require('../../services/CharacterChatService');
+    (openCharacterChat as jest.Mock).mockRejectedValue(new Error('generic failure'));
+    mockShowAlert.mockClear();
+    mockShowToast.mockClear();
+    (Clipboard.setString as jest.Mock).mockClear();
+
+    const utils = await renderScreen();
+    await fireEvent.press(utils.getByTestId('chat-p1'));
+    await flush();
+
+    expect(mockShowAlert).toHaveBeenCalledTimes(1);
+    const buttons = mockShowAlert.mock.calls[0][2];
+    const copyButton = buttons.find((b: any) => b.text === 'common:copyDiagnostics');
+    expect(copyButton).toBeTruthy();
+
+    copyButton.onPress();
+    await flush();
+
+    expect(Clipboard.setString).toHaveBeenCalled();
+    expect(mockShowToast).toHaveBeenCalledWith('common:diagnosticsCopied');
   });
 });
 

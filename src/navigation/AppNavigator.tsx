@@ -35,6 +35,7 @@ import type { RestoreOffer } from '../services/backup/restoreOnboarding';
 import { IOSLifecycleInfoScreen } from '../screens/settings/IOSLifecycleInfoScreen';
 import { HelpSupportSettingsScreen } from '../screens/settings/HelpSupportSettingsScreen';
 import { EngineLogScreen } from '../screens/settings/EngineLogScreen';
+import { AppLogScreen } from '../screens/settings/AppLogScreen';
 import { EngineStatusScreen } from '../screens/settings/EngineStatusScreen';
 import { NotificationSettingsScreen } from '../screens/settings/NotificationSettingsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
@@ -138,6 +139,8 @@ export type RootStackParamList = {
   HelpSupportSettings: undefined;
   /** Engine logs — the embedded engine's log viewer + diagnostics export (7-11). */
   EngineLog: undefined;
+  /** App logs — the app's own log viewer + diagnostics export. */
+  AppLog: undefined;
   /** Engine status — the embedded engine's live status, ports + diagnostics. */
   EngineStatus: undefined;
   /** Notification feed — pushed over the tabs from the header bell */
@@ -244,6 +247,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           <Stack.Screen name="IOSLifecycleInfo" component={IOSLifecycleInfoScreen} />
           <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />
           <Stack.Screen name="EngineLog" component={EngineLogScreen} />
+          <Stack.Screen name="AppLog" component={AppLogScreen} />
           <Stack.Screen name="EngineStatus" component={EngineStatusScreen} />
           <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
           <Stack.Screen name="DisabledAIs" component={DisabledAIsScreen} />

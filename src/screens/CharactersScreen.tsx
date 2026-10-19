@@ -31,6 +31,7 @@ import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigatio
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { createLogger } from '../utils/logger';
+import { copyAppDiagnosticsWithToast } from '../services/diagnostics/appDiagnostics';
 import { TagChips } from '../components/character-card/TagChips';
 import { parseJsonColumn } from '../components/character-card/lorebook';
 import { useReducedMotion } from '../hooks/useReducedMotion';
@@ -476,7 +477,18 @@ export const CharactersScreen: React.FC = () => {
         showAlert(t('common:error'), t('chatOpenReservedName'));
         return;
       }
-      showAlert(t('common:error'), t('chatOpenFailed'));
+      showAlert(t('common:error'), t('chatOpenFailed'), [
+        { text: t('common:close'), style: 'cancel' },
+        {
+          text: t('common:copyDiagnostics'),
+          onPress: () => {
+            void copyAppDiagnosticsWithToast(showToast, {
+              success: t('common:diagnosticsCopied'),
+              failure: t('common:diagnosticsCopyFailed'),
+            });
+          },
+        },
+      ]);
     }
   };
 
