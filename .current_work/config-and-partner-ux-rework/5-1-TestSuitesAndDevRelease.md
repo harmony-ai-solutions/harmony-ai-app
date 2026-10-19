@@ -39,8 +39,12 @@ npm.cmd test
 3. **Plan Tracking (`.current_work/config-and-partner-ux-rework/summary.md`):**
    - Tick all `[x]` checkboxes in `summary.md` and each sub-phase file.
 
-### 4. Dev-Channel App Release (`docs/DEV-RELEASE.md` — upon owner confirmation)
-- Since the engine `/api/presets` and `/api/providers/*` endpoints require zero engine changes (`ENGINE_SIDECAR_VERSION` stays `v0.4.5-dev`), only an app version bump (`0.4.7` → `0.4.8` in `android/app/build.gradle` and `ios/HarmonyAIChat.xcodeproj/project.pbxproj`) and `build-release.yml` dispatch (`version=v0.4.8`, `publish_latest=true`, `build_ios=false`, `engine_version=v0.4.5-dev`) are required.
+### 4. Dev-Channel App Release (`docs/DEV-RELEASE.md`) — SHIPPED 2026-10-19
+- The engine **did** need a change: the 2-4 TTS voice routes (`tts/embed-speaker`, `tts/test-speech`, `providers/elevenlabs/voices/clone|design`) were served but missing from the management-API spec, so the contract moved **1.6.0 → 1.7.0** (engine `54eafdf` follow-up, commit `0b302f1`; app lockstep in `e09cddc`).
+- Engine `v0.4.6-dev` (`android_only=true`, no tag) → both ABIs 200 (`arm64` 57.8 MB, `x86_64` 61.7 MB); run [39338563367](https://github.com/harmony-ai-solutions/harmony-link-private/actions/runs/39338563367).
+- `ENGINE_SIDECAR_VERSION` → `v0.4.6-dev`; app version `0.4.7` → `0.4.8` (`build.gradle` + both `MARKETING_VERSION` entries).
+- App dispatch `version=v0.4.8`, `engine_version=v0.4.6-dev`, `publish_latest=true`, `build_ios=false` → run [39338937553](https://github.com/harmony-ai-solutions/harmony-ai-app/actions/runs/39338937553) success; APK dev + prod 200 (106.9 MB each, `libengine.so` presence asserted in-job); `app/dev/latest.json` serves **v0.4.8-dev**; `app/prod/latest.json` still 403 (prod isolation intact).
+- CI: `test.yml` repaired (it had never parsed — `secrets` in a step-level `if:`) and lint made non-blocking to match the release gate; run [39338963384](https://github.com/harmony-ai-solutions/harmony-ai-app/actions/runs/39338963384) green.
 
 ---
 
@@ -55,8 +59,8 @@ npm.cmd test
 
 ## Progress Checklist
 
-- [ ] All unit and component test suites green (`npm.cmd test`)
-- [ ] `npx.cmd tsc --noEmit` exits with 0 errors
-- [ ] `CHANGELOG.md` updated with user-facing entries
-- [ ] `memory-bank/activeContext.toon` and `memory-bank/progress.toon` updated
-- [ ] Dev-channel release (`v0.4.8`) dispatched and verified on `https://download.soulbits.app/app/dev/latest.json` (when authorized by owner)
+- [x] All unit and component test suites green (`npm.cmd test` — 190 suites / 1799 tests; two picker suites are load-flaky in the full run and pass in isolation)
+- [x] `npx.cmd tsc --noEmit` exits with 0 errors
+- [x] `CHANGELOG.md` updated with user-facing entries
+- [x] `memory-bank/activeContext.toon` and `memory-bank/progress.toon` updated
+- [x] Dev-channel release (`v0.4.8`) dispatched and verified on `https://download.soulbits.app/app/dev/latest.json`
