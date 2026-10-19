@@ -149,6 +149,16 @@ export function shouldReloadAfterSync(tables: string[]): boolean {
   return tables.includes('conversation_messages') || tables.includes('chat_conversation_settings');
 }
 
+/**
+ * Whether the bottom-right `+` (New Chat) FAB should render. The FAB opens the
+ * character picker and mints a conversation, both of which need a usable engine
+ * connection — while `!canUseChat` the screen is showing the engine-starting
+ * empty state, so an actionable FAB would only lead to a dead end.
+ */
+export function shouldShowNewChatFab(canUseChat: boolean): boolean {
+  return canUseChat;
+}
+
 interface ChatListItem {
   interactionId: string;
   entityId: string;
@@ -1163,12 +1173,14 @@ export const ChatListScreen: React.FC = () => {
       )}
 
 
-      <ThemedFab
-        icon="plus"
-        onPress={() => setPickerVisible(true)}
-        style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }}
-        testID="new-chat-fab"
-      />
+      {shouldShowNewChatFab(canUseChat) && (
+        <ThemedFab
+          icon="plus"
+          onPress={() => setPickerVisible(true)}
+          style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }}
+          testID="new-chat-fab"
+        />
+      )}
 
       {/* "Start a new chat" picker — cards + unused entities, persona-scoped */}
       <ChatPartnerPickerModal

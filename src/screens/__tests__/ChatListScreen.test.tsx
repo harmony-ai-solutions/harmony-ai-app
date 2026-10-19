@@ -18,6 +18,7 @@
 import {
   resolveDisplayUnreadCount,
   shouldReloadAfterSync,
+  shouldShowNewChatFab,
 } from '../ChatListScreen';
 
 describe('ChatListScreen derived-unread badge seam (3-1)', () => {
@@ -58,5 +59,17 @@ describe('ChatListScreen sync-apply reload gate (3-1 → 4-1)', () => {
     expect(shouldReloadAfterSync(['entities'])).toBe(false);
     expect(shouldReloadAfterSync(['entity_module_mappings'])).toBe(false);
     expect(shouldReloadAfterSync([])).toBe(false);
+  });
+});
+
+describe('ChatListScreen New Chat FAB guard (1-1)', () => {
+  it('renders the + FAB when chat is usable', () => {
+    expect(shouldShowNewChatFab(true)).toBe(true);
+  });
+
+  it('hides the + FAB when chat is not usable (!canUseChat)', () => {
+    // While the screen shows the "engine starting" empty state, an actionable
+    // FAB would open a picker that cannot mint a conversation.
+    expect(shouldShowNewChatFab(false)).toBe(false);
   });
 });

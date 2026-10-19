@@ -53,10 +53,37 @@ export const ThemedCard: React.FC<ThemedCardProps> = ({
     const borderStart = 'rgba(255, 255, 255, 0.20)';
     const borderEnd = hexToRgba(theme.colors.accent.secondary, 0.10);
 
+    // Forward inner padding/gap overrides from `style` to `styles.body` so
+    // callers passing `style={{ padding: 0 }}` (e.g. CreateAIScreen,
+    // ModuleConfigEditScreen, SettingsScreen) don't get double-padded by
+    // `styles.body.padding: 16`.
+    const flat = StyleSheet.flatten(style) || {};
+    const {
+        padding,
+        paddingHorizontal,
+        paddingVertical,
+        paddingTop,
+        paddingBottom,
+        paddingLeft,
+        paddingRight,
+        gap,
+        ...outerStyle
+    } = flat;
+    const bodyStyleOverrides = {
+        ...(padding !== undefined ? { padding } : {}),
+        ...(paddingHorizontal !== undefined ? { paddingHorizontal } : {}),
+        ...(paddingVertical !== undefined ? { paddingVertical } : {}),
+        ...(paddingTop !== undefined ? { paddingTop } : {}),
+        ...(paddingBottom !== undefined ? { paddingBottom } : {}),
+        ...(paddingLeft !== undefined ? { paddingLeft } : {}),
+        ...(paddingRight !== undefined ? { paddingRight } : {}),
+        ...(gap !== undefined ? { gap } : {}),
+    };
+
     return (
         <View
             style={[
-                style,
+                outerStyle,
                 {
                     // Subtle ambient glow — low opacity, wide radius
                     shadowColor: glowColor,
@@ -76,7 +103,7 @@ export const ThemedCard: React.FC<ThemedCardProps> = ({
                 style={styles.border}
             >
                 {/* ── Deep dark glass body ── */}
-                <View style={[styles.body, { backgroundColor: glassFill }]}>
+                <View style={[styles.body, { backgroundColor: glassFill }, bodyStyleOverrides]}>
                     {/* Specular sweep — faint diagonal light across the glass surface */}
                     <LinearGradient
                         colors={['rgba(255, 255, 255, 0.10)', 'transparent']}

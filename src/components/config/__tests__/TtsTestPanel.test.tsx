@@ -1,5 +1,5 @@
 /**
- * TtsTestPanel — TTS playback test block (persona-modules 2-3, reworked).
+ * TtsTestPanel — TTS playback test studio (persona-modules 2-3, Phase 3-5).
  *
  * Verifies:
  *  - offline state renders "Connect to Soulbits Engine to test" and never plays
@@ -9,12 +9,14 @@
  *    ENTITY_UTTERANCE and plays the inline audio via AudioPlayer
  *  - Stop during playback stops AudioPlayer
  *  - the session-service error message surfaces in the error state
- *  (session service + player mocked; contract-shaped fixtures, no live engine)
+ *  - stateless direct synthesis via `testTtsSpeech` works with only a
+ *    `providerType` (no entityId)
+ *  - paralinguistic chips append their tag to the sample text
  */
 
 import React from 'react';
 import { act, cleanup, fireEvent, render } from '@testing-library/react-native';
-import { TtsTestPanel } from '../TtsTestPanel';
+import { TtsTestPanel, paralinguisticTagTestId } from '../TtsTestPanel';
 
 afterEach(cleanup);
 beforeEach(cleanup);
@@ -28,6 +30,13 @@ jest.mock('../../../utils/logger', () => ({
 }));
 
 jest.mock('../../../utils/haptics', () => ({ hapticLightPress: jest.fn() }));
+
+jest.mock('react-native-linear-gradient', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return ({ children, style, ...props }: any) =>
+    React.createElement(View, { style, ...props }, children);
+});
 
 jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => {
   const React = require('react');
@@ -70,7 +79,15 @@ jest.mock('../../themed/ThemedButton', () => {
 
 jest.mock('../../../services/AudioPlayer', () => ({
   __esModule: true,
-  default: { playAudio: jest.fn(), stop: jest.fn() },
+  default: {
+    playAudio: jest.fn(),
+    playBase64Audio: jest.fn(),
+    stop: jest.fn(),
+  },
+}));
+
+jest.mock('../../../services/engine/EngineApiClient', () => ({
+  engineApiClient: { testTtsSpeech: jest.fn() },
 }));
 
 let mockRunTest: jest.Mock;
@@ -91,10 +108,13 @@ jest.mock('../../../services/voiceInput/moduleTestSessionService', () => {
 });
 
 import AudioPlayer from '../../../services/AudioPlayer';
+import { engineApiClient } from '../../../services/engine/EngineApiClient';
 import { runTest, ModuleTestSessionError } from '../../../services/voiceInput/moduleTestSessionService';
 
 const mockPlayAudio = (AudioPlayer as any).playAudio as jest.Mock;
+const mockPlayBase64Audio = (AudioPlayer as any).playBase64Audio as jest.Mock;
 const mockStop = (AudioPlayer as any).stop as jest.Mock;
+const mockTestTtsSpeech = engineApiClient.testTtsSpeech as jest.Mock;
 mockRunTest = runTest as jest.Mock;
 
 async function flush() {
@@ -110,7 +130,13 @@ beforeEach(() => {
   mockIsConnected = true;
   mockCapturedSendEvents = [];
   mockPlayAudio.mockResolvedValue(undefined);
+  mockPlayBase64Audio.mockResolvedValue(undefined);
   mockStop.mockResolvedValue(undefined);
+  mockTestTtsSpeech.mockResolvedValue({
+    status: 'ok',
+    audio_base64: 'QUJDRA==',
+    format: 'wav',
+  });
   mockRunTest.mockImplementation(async (_entityId: string, fn: any) => {
     mockCapturedSendEvents = [];
     return fn({
@@ -191,5 +217,82 @@ describe('TtsTestPanel — synthesize + playback', () => {
 
     expect(utils.getByTestId('tts-error')).toBeTruthy();
     expect(utils.getByText(/unknown provider_type/)).toBeTruthy();
+  });
+});
+
+describe('TtsTestPanel — stateless direct synthesis (Phase 3-5)', () => {
+  it('keeps the test studio available offline when a providerType is given', async () => {
+    mockIsConnected = false;
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+
+    expect(utils.queryByText('ttsOfflineTitle')).toBeNull();
+    expect(utils.getByTestId('tts-play-button')).toBeTruthy();
+  });
+
+  it('synthesizes via testTtsSpeech without an entityId and plays base64 audio', async () => {
+    const capability = { model: 'soulvoice-x', voice_config_file: 'narrator.voice.json' };
+    const utils = await render(
+      <TtsTestPanel
+        providerType="soulvoice"
+        accountId="acc-1"
+        capability={capability}
+      />,
+    );
+    await flush();
+
+    await fireEvent.changeText(utils.getByTestId('tts-text-input'), 'Hello direct');
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    expect(mockTestTtsSpeech).toHaveBeenCalledWith({
+      text: 'Hello direct',
+      provider: 'soulvoice',
+      provider_account_id: 'acc-1',
+      model: 'soulvoice-x',
+      capability_json: capability,
+      voice_config_file: 'narrator.voice.json',
+    });
+    expect(mockPlayBase64Audio).toHaveBeenCalledWith('QUJDRA==', 'audio/wav');
+    expect(mockRunTest).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a direct-synthesis failure', async () => {
+    mockTestTtsSpeech.mockRejectedValue(new Error('engine down'));
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    expect(utils.getByTestId('tts-error')).toBeTruthy();
+    expect(mockPlayBase64Audio).not.toHaveBeenCalled();
+  });
+});
+
+describe('TtsTestPanel — paralinguistic quick-insert chips', () => {
+  it('appends a chip tag to the sample text', async () => {
+    const tags = ['[laughter]', '[sigh]', '[clears throat]'];
+    const utils = await render(
+      <TtsTestPanel providerType="soulvoice" paralinguisticTags={tags} />,
+    );
+    await flush();
+
+    expect(utils.getByTestId('tts-tag-chips')).toBeTruthy();
+    expect(utils.getByTestId(paralinguisticTagTestId('[clears throat]'))).toBeTruthy();
+
+    await fireEvent.press(utils.getByTestId(paralinguisticTagTestId('[laughter]')));
+    expect(utils.getByTestId('tts-text-input').props.value).toBe('sampleText [laughter]');
+
+    await fireEvent.press(utils.getByTestId(paralinguisticTagTestId('[sigh]')));
+    expect(utils.getByTestId('tts-text-input').props.value).toBe(
+      'sampleText [laughter] [sigh]',
+    );
+  });
+
+  it('renders no chips when the model declares none', async () => {
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+    expect(utils.queryByTestId('tts-tag-chips')).toBeNull();
   });
 });

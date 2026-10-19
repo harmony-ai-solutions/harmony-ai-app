@@ -60,6 +60,13 @@ export interface StartAudioStreamOptions {
   bufferDurationSeconds?: number;
   /** Called for every streamed transcript. */
   onTranscript: (transcript: StreamTranscript) => void;
+  /**
+   * Called when the engine's AutoVAD gate opens/closes
+   * (`STT_SPEECH_STARTED` / `STT_SPEECH_STOPPED`). `speaking` is `true` on
+   * speech start and `false` on speech end; `timestampMs` is the local
+   * `Date.now()` receipt time (useful for live VAD segment bars).
+   */
+  onVoiceActivity?: (speaking: boolean, timestampMs: number) => void;
   /** Called on a terminal/async failure. */
   onError?: (error: Error) => void;
   /** Called on lifecycle state changes. */

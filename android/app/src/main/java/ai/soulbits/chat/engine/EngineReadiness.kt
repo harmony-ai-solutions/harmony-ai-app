@@ -15,6 +15,8 @@ data class ReadyInfo(
   val bind: String,
   val pid: Int,
   val dataDir: String,
+  val token: String = "",
+  val rawLine: String = "",
 )
 
 /**
@@ -55,6 +57,8 @@ object EngineReadiness {
       bind = obj.optString("bind", "127.0.0.1"),
       pid = obj.optInt("pid", -1),
       dataDir = obj.optString("dataDir", ""),
+      token = obj.optString("token", ""),
+      rawLine = line,
     )
   }
 

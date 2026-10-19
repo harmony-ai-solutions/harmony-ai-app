@@ -28,13 +28,21 @@ export const SIMPLE_FIELD_KEYS: ReadonlySet<string> = new Set([
   'endpoint',
   'model',
   'model_id',
+  'image_model',
+  'image_aspect_ratio',
+  'aspect_ratio',
   'voice_id',
   'voice',
   'language',
   'speed',
   'format',
-  'workflow_profiles',
   'voice_config_file',
+  // TTS acoustic / prosody essentials (Phase 3-5).
+  'instructions',
+  'exaggeration',
+  'cfg_weight',
+  'pitch',
+  'energy',
   // provider-registry 2-2: the sampling preset dropdown is an essential
   // control (it supplies defaults for the sampling params), so it is visible
   // in Simple mode. The params it feeds stay behind the Advanced toggle.

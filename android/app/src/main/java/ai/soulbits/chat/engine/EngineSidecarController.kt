@@ -76,8 +76,8 @@ object EngineSidecarController {
     }
     val existing = manager
     if (existing != null && existing.isAlive()) {
-      // Already running — re-announce readiness if we have it.
-      existing.lastReady()?.let { listeners.forEach { l -> l.onReady(it, "") } }
+      // Already running — re-announce readiness if we have it (preserving rawLine + token).
+      existing.lastReady()?.let { listeners.forEach { l -> l.onReady(it, it.rawLine) } }
       setStatus(STATUS_READY)
       return true
     }

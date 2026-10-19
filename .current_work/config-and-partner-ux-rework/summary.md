@@ -40,27 +40,27 @@ All phase documents align with:
 
 Track the completion of each phase and sub-phase as implementation progresses:
 
-- [ ] **Phase 1: Core Bug Fixes & Shared Primitives**
-  - [ ] Chats Connection Overlay & Chat Menu Fix ([1-1-ChatsConnectionOverlayFix.md](1-1-ChatsConnectionOverlayFix.md))
-  - [ ] Capability Warnings, Module Field Scoping & FormField Upgrades ([1-2-CapabilityWarningsAndModuleFieldScoping.md](1-2-CapabilityWarningsAndModuleFieldScoping.md))
-  - [ ] Themed Primitives, Outline Button & Header Polish ([1-3-ThemedPrimitivesAndHeaderPolish.md](1-3-ThemedPrimitivesAndHeaderPolish.md))
-- [ ] **Phase 2: TextGen WebUI YAML Preset Management, Engine Speech Upgrades & Shared Config Chrome**
-  - [ ] Preset CRUD API Client & TextGen YAML Serializer ([2-1-YamlPresetCrudAndSerializer.md](2-1-YamlPresetCrudAndSerializer.md))
-  - [ ] SamplingPresetSelect Bar, Save-as-Preset Modal & Unsupported Param Drawer ([2-2-SamplingPresetSelectAndSaveModal.md](2-2-SamplingPresetSelectAndSaveModal.md))
-  - [ ] Unified General + Provider + Account Card & Capability Mode Switch ([2-3-SharedGeneralProviderAccountCard.md](2-3-SharedGeneralProviderAccountCard.md))
-  - [ ] Engine TTS Voice Design/Cloning, ElevenLabs & Realtime VAD Upgrades ([2-4-EngineTtsVoiceCloningAndSttUpgrade.md](2-4-EngineTtsVoiceCloningAndSttUpgrade.md))
-- [ ] **Phase 3: Per-Module Config Screen Reworks (All 8 Modules)**
-  - [ ] Backend Config Screen — Main Chat LLM ([3-1-BackendConfigScreen.md](3-1-BackendConfigScreen.md))
-  - [ ] Cognition Config Screen — Emotion & Inner Monologue ([3-2-CognitionConfigScreen.md](3-2-CognitionConfigScreen.md))
-  - [ ] Movement Config Screen — Action & Avatar Execution ([3-3-MovementConfigScreen.md](3-3-MovementConfigScreen.md))
-  - [ ] RAG Config Screen — Memory & Embeddings ([3-4-RagConfigScreen.md](3-4-RagConfigScreen.md))
-  - [ ] TTS Config Screen — Speech Synthesis & Voice Pickers ([3-5-TtsConfigScreen.md](3-5-TtsConfigScreen.md))
-  - [ ] STT Config Screen — Segmented Transcription + VAD Pipeline ([3-6-SttConfigScreen.md](3-6-SttConfigScreen.md))
-  - [ ] Vision Config Screen — Multimodal Image Understanding ([3-7-VisionConfigScreen.md](3-7-VisionConfigScreen.md))
-  - [ ] Imagination Config Screen — Cloud Image Gen & ComfyUI ([3-8-ImaginationConfigScreen.md](3-8-ImaginationConfigScreen.md))
-- [ ] **Phase 4: Edit AI Partner Screen (`CreateAIScreen`) 1:1 Rework**
-  - [ ] i18n Namespace Fix, Identity Card & Header Export Action ([4-1-CreateAiI18nAndIdentityCard.md](4-1-CreateAiI18nAndIdentityCard.md))
-  - [ ] Consolidated Character Card Sections Accordion & Summary Badges ([4-2-CharacterCardSectionsAccordionAndBadges.md](4-2-CharacterCardSectionsAccordionAndBadges.md))
-  - [ ] Module Wiring Selector Alignment & Provider/Model Subtitles ([4-3-EntityModuleWiringSelectorRework.md](4-3-EntityModuleWiringSelectorRework.md))
-- [ ] **Phase 5: Verification, Tests & Dev Release**
-  - [ ] Test Suites, Documentation & Dev-Channel Release ([5-1-TestSuitesAndDevRelease.md](5-1-TestSuitesAndDevRelease.md))
+- [x] **Phase 1: Core Bug Fixes & Shared Primitives**
+  - [x] Chats Connection Overlay & Chat Menu Fix ([1-1-ChatsConnectionOverlayFix.md](1-1-ChatsConnectionOverlayFix.md))
+  - [x] Capability Warnings, Module Field Scoping & FormField Upgrades ([1-2-CapabilityWarningsAndModuleFieldScoping.md](1-2-CapabilityWarningsAndModuleFieldScoping.md))
+  - [x] Themed Primitives, Outline Button & Header Polish ([1-3-ThemedPrimitivesAndHeaderPolish.md](1-3-ThemedPrimitivesAndHeaderPolish.md))
+- [x] **Phase 2: TextGen WebUI YAML Preset Management, Engine Speech Upgrades & Shared Config Chrome**
+  - [x] Preset CRUD API Client & TextGen YAML Serializer ([2-1-YamlPresetCrudAndSerializer.md](2-1-YamlPresetCrudAndSerializer.md))
+  - [x] SamplingPresetSelect Bar, Save-as-Preset Modal & Unsupported Param Drawer ([2-2-SamplingPresetSelectAndSaveModal.md](2-2-SamplingPresetSelectAndSaveModal.md))
+  - [x] Unified General + Provider + Account Card & Capability Mode Switch ([2-3-SharedGeneralProviderAccountCard.md](2-3-SharedGeneralProviderAccountCard.md))
+  - [x] Engine TTS Voice Design/Cloning, ElevenLabs & Realtime VAD Upgrades ([2-4-EngineTtsVoiceCloningAndSttUpgrade.md](2-4-EngineTtsVoiceCloningAndSttUpgrade.md))
+- [x] **Phase 3: Per-Module Config Screen Reworks (All 8 Modules)**
+  - [x] Backend Config Screen — Main Chat LLM ([3-1-BackendConfigScreen.md](3-1-BackendConfigScreen.md))
+  - [x] Cognition Config Screen — Emotion & Inner Monologue ([3-2-CognitionConfigScreen.md](3-2-CognitionConfigScreen.md))
+  - [x] Movement Config Screen — Action & Avatar Execution ([3-3-MovementConfigScreen.md](3-3-MovementConfigScreen.md))
+  - [x] RAG Config Screen — Memory & Embeddings ([3-4-RagConfigScreen.md](3-4-RagConfigScreen.md))
+  - [x] TTS Config Screen — Speech Synthesis & Voice Pickers ([3-5-TtsConfigScreen.md](3-5-TtsConfigScreen.md))
+  - [x] STT Config Screen — Segmented Transcription + VAD Pipeline ([3-6-SttConfigScreen.md](3-6-SttConfigScreen.md))
+  - [x] Vision Config Screen — Multimodal Image Understanding ([3-7-VisionConfigScreen.md](3-7-VisionConfigScreen.md))
+  - [x] Imagination Config Screen — Cloud Image Gen & ComfyUI ([3-8-ImaginationConfigScreen.md](3-8-ImaginationConfigScreen.md))
+- [x] **Phase 4: Edit AI Partner Screen (`CreateAIScreen`) 1:1 Rework**
+  - [x] i18n Namespace Fix, Identity Card & Header Export Action ([4-1-CreateAiI18nAndIdentityCard.md](4-1-CreateAiI18nAndIdentityCard.md))
+  - [x] Consolidated Character Card Sections Accordion & Summary Badges ([4-2-CharacterCardSectionsAccordionAndBadges.md](4-2-CharacterCardSectionsAccordionAndBadges.md))
+  - [x] Module Wiring Selector Alignment & Provider/Model Subtitles ([4-3-EntityModuleWiringSelectorRework.md](4-3-EntityModuleWiringSelectorRework.md))
+- [x] **Phase 5: Verification, Tests & Dev Release**
+  - [x] Test Suites, Documentation & Dev-Channel Release ([5-1-TestSuitesAndDevRelease.md](5-1-TestSuitesAndDevRelease.md))

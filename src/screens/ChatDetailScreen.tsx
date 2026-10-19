@@ -2677,14 +2677,16 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                   >
                     <Icon name="account-switch-outline" size={18} color={theme!.colors.accent.primary} />
                   </View>
-                  <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
-                    {t('myPersonas')}
-                  </ThemedText>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText size={15} weight="medium">
+                      {t('myPersonas')}
+                    </ThemedText>
+                    <ThemedText variant="muted" size={11}>
+                      {t('myPersonasCaption')}
+                    </ThemedText>
+                  </View>
                   <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
-                <ThemedText variant="muted" size={11} style={styles.menuItemCaption}>
-                  {t('myPersonasCaption')}
-                </ThemedText>
                 <View
                   style={[
                     styles.menuItemSeparator,
@@ -2710,14 +2712,16 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                       color={theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover}
                     />
                   </View>
-                  <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
-                    {t('partnerSettings')}
-                  </ThemedText>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText size={15} weight="medium">
+                      {t('partnerSettings')}
+                    </ThemedText>
+                    <ThemedText variant="muted" size={11}>
+                      {t('partnerSettingsCaption', { name: headerName })}
+                    </ThemedText>
+                  </View>
                   <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
-                <ThemedText variant="muted" size={11} style={styles.menuItemCaption}>
-                  {t('partnerSettingsCaption', { name: headerName })}
-                </ThemedText>
                 <View
                   style={[
                     styles.menuItemSeparator,
@@ -2774,7 +2778,6 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                   <ThemedText size={15} weight="medium" style={{ flex: 1, color: theme!.colors.status.error }}>
                     {isDisabled ? t('enable') : t('disableTitle', { name: headerName })}
                   </ThemedText>
-                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
                 <View
                   style={[
@@ -2796,9 +2799,8 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                     <Icon name="delete-outline" size={18} color={theme!.colors.status.error} />
                   </View>
                   <ThemedText size={15} weight="medium" style={{ flex: 1, color: theme!.colors.status.error }}>
-                    Delete Entity
+                    {t('deleteCharacter', { name: headerName })}
                   </ThemedText>
-                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
@@ -3275,13 +3277,6 @@ const styles = StyleSheet.create({
   menuItemSeparator: {
     height: StyleSheet.hairlineWidth,
     marginLeft: 62,
-  },
-  menuItemCaption: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    paddingTop: 0,
-    marginTop: -4,
-    marginLeft: 46,
   },
   disabledBanner: {
     flexDirection: 'row',

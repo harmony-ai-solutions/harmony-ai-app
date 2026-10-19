@@ -87,10 +87,11 @@ class EngineSidecarModule(private val reactContext: ReactApplicationContext) :
     mainHandler.removeCallbacks(readyTimeout)
     mainHandler.postDelayed(readyTimeout, READY_TIMEOUT_MS)
 
-    // Already running — resolve immediately from the cached readiness.
+    // Already running — resolve immediately from the cached readiness
+    // (preserving the original rawLine + loopback token).
     val ready = EngineSidecarController.getReady()
     if (ready != null && EngineSidecarController.isAlive()) {
-      resolvePendingStart(ready, "")
+      resolvePendingStart(ready, ready.rawLine)
       return
     }
 
@@ -210,13 +211,14 @@ class EngineSidecarModule(private val reactContext: ReactApplicationContext) :
 
   private fun readyMap(info: ReadyInfo, rawLine: String): WritableMap =
     Arguments.createMap().apply {
-      putString("rawLine", rawLine)
+      putString("rawLine", rawLine.ifEmpty { info.rawLine })
       putInt("wsPort", info.ws)
       putInt("wssPort", info.wss)
       putInt("adminPort", info.admin)
       putString("bind", info.bind)
       putInt("pid", info.pid)
       putString("dataDir", info.dataDir)
+      putString("token", info.token)
     }
 
   /** Marshal event emission onto the UI thread (callbacks arrive off-thread). */

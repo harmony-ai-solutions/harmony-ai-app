@@ -281,6 +281,28 @@ describe('native-backed API', () => {
     }
   });
 
+  it('startEngineSidecar recovers the loopback token when an already-running sidecar resolves with rawLine=""', async () => {
+    const mod = loadModule();
+    // 1st start: fresh launch with rawLine containing token.
+    const first = await mod.startEngineSidecar();
+    expect(first.token).toBe('a1b2c3');
+
+    // 2nd start (e.g. JS reload while sidecar is alive): older native bridge
+    // returns rawLine="" and no token field — cached token for the same
+    // pid/wsPort/adminPort is restored.
+    mockNative.start.mockResolvedValueOnce({
+      rawLine: '',
+      wsPort: 28080,
+      wssPort: 28443,
+      adminPort: 28081,
+      bind: '127.0.0.1',
+      pid: 12345,
+      dataDir: '/data/user/0/ai.soulbits.chat/files/engine',
+    });
+    const second = await mod.startEngineSidecar();
+    expect(second.token).toBe('a1b2c3');
+  });
+
   it('stopEngineSidecar forwards to native and no-ops without a module', async () => {
     const mod = loadModule();
     await mod.stopEngineSidecar();

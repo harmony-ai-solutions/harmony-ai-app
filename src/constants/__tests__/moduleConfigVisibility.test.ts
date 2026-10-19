@@ -7,7 +7,28 @@ import {
 describe('moduleConfigVisibility', () => {
   describe('isSimpleFieldKey', () => {
     it('returns true for essential provider fields', () => {
-      for (const key of ['name', 'api_key', 'api_token', 'base_url', 'endpoint', 'model', 'model_id', 'voice_id', 'voice', 'speed', 'format', 'sampling_preset_name']) {
+      for (const key of [
+        'name',
+        'api_key',
+        'api_token',
+        'base_url',
+        'endpoint',
+        'model',
+        'model_id',
+        'image_model',
+        'image_aspect_ratio',
+        'aspect_ratio',
+        'voice_id',
+        'voice',
+        'speed',
+        'pitch',
+        'energy',
+        'exaggeration',
+        'cfg_weight',
+        'instructions',
+        'format',
+        'sampling_preset_name',
+      ]) {
         expect(isSimpleFieldKey(key)).toBe(true);
       }
     });
@@ -25,8 +46,8 @@ describe('moduleConfigVisibility', () => {
         'stop_tokens',
         'reasoning_effort',
         'extra_params',
-        'image_aspect_ratio',
         'image_size',
+        'workflow_profiles',
         'stability',
         'similarity_boost',
       ]) {

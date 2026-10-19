@@ -519,6 +519,144 @@ export interface PresetDetailResponseDto {
   params: Record<string, unknown>;
 }
 
+/** `POST /api/presets` response (`201 Created`). */
+export interface PresetSaveResponseDto {
+  name: string;
+  status: string;
+}
+
+/** `DELETE /api/presets/:name` response (`200 OK`). */
+export interface PresetDeleteResponseDto {
+  name: string;
+  status: string;
+}
+
+// ── Voice configurations, speaker embedding & direct TTS (Phase 2-4 / 3-5) ──
+// The engine exposes named voice profiles at `/api/voices` for the providers
+// with server-side voice config files (`soulvoice` / `soulbitscloud`). Shapes
+// are intentionally loose: the engine's `config.VoiceConfig` carries
+// provider-specific keys the app round-trips opaquely.
+
+/** One named voice configuration (`GET /api/voices` row). */
+export interface VoiceConfigDto {
+  name: string;
+  description?: string;
+  /** The provider-specific voice config payload. */
+  config?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/** `GET /api/voices` response. */
+export interface VoiceConfigListResponseDto {
+  voices: VoiceConfigDto[];
+}
+
+/** `POST /api/module-configs/tts/embed-speaker` body. */
+export interface SpeakerEmbeddingRequestDto {
+  provider?: string;
+  provider_account_id?: string | null;
+  model?: string;
+  capability_json?: Record<string, unknown> | string;
+  /** Base64-encoded reference audio (raw base64 or data URI). */
+  input_audio?: string;
+  audio?: string;
+  [key: string]: unknown;
+}
+
+/** `POST /api/module-configs/tts/embed-speaker` response. */
+export interface SpeakerEmbeddingResponseDto {
+  status?: string;
+  /** Base64-encoded speaker embedding vector (float32 little-endian array). */
+  data: string;
+  [key: string]: unknown;
+}
+
+/** `POST /api/module-configs/tts/test-speech` body (stateless synthesis). */
+export interface TtsSpeechTestRequestDto {
+  text: string;
+  provider?: string;
+  provider_account_id?: string | null;
+  model?: string;
+  capability_json?: Record<string, unknown> | string;
+  voice_config_file?: string;
+  format?: string;
+  [key: string]: unknown;
+}
+
+/** `POST /api/module-configs/tts/test-speech` response. */
+export interface TtsSpeechTestResponseDto {
+  status?: string;
+  /** Base64-encoded synthesized audio returned by `/api/module-configs/tts/test-speech`. */
+  audio_base64?: string;
+  /** Fallback alias if returned as `data` or `audio`. */
+  data?: string;
+  audio?: string;
+  format?: string;
+  [key: string]: unknown;
+}
+
+/** `POST /api/providers/elevenlabs/voices/clone` body (Instant Voice Cloning). */
+export interface ElevenLabsVoiceCloneRequestDto {
+  name: string;
+  description?: string;
+  /** Base64-encoded reference samples (1–3). */
+  audio_files: string[];
+  filenames?: string[];
+  remove_background_noise?: boolean;
+  provider_account_id?: string | null;
+  [key: string]: unknown;
+}
+
+/** `POST /api/providers/elevenlabs/voices/clone` response. */
+export interface ElevenLabsVoiceCloneResponseDto {
+  status?: string;
+  data?: {
+    voice_id: string;
+    requires_verification?: boolean;
+    [key: string]: unknown;
+  };
+  voice_id?: string;
+  [key: string]: unknown;
+}
+
+/** `POST /api/providers/elevenlabs/voices/design` body (Voice Design). */
+export interface ElevenLabsVoiceDesignRequestDto {
+  action?: 'preview' | 'save';
+  voice_name?: string;
+  voice_description?: string;
+  /** The preview voice id returned by `create-previews`. */
+  generated_voice_id?: string;
+  /** Design sample text. */
+  text?: string;
+  auto_generate_text?: boolean;
+  loudness?: number;
+  quality?: number;
+  guidance_scale?: number;
+  seed?: number;
+  provider_account_id?: string | null;
+  [key: string]: unknown;
+}
+
+/** `POST /api/providers/elevenlabs/voices/design` response. */
+export interface ElevenLabsVoiceDesignResponseDto {
+  status?: string;
+  data?: {
+    voice_id?: string;
+    name?: string;
+    previews?: Array<{
+      generated_voice_id: string;
+      audio_base_64: string;
+      media_type?: string;
+      duration_secs?: number;
+      [key: string]: unknown;
+    }>;
+    [key: string]: unknown;
+  };
+  voice_id?: string;
+  previews?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
 /** One entity's aggregated social stats (`GET /api/stats/characters`). */
 export interface CharacterStatDto {
   likes: number;
@@ -1422,6 +1560,128 @@ export class EngineApiClient {
   getPreset(name: string): Promise<PresetDetailResponseDto> {
     return this.getJson<PresetDetailResponseDto>(
       `/api/presets/${encodeURIComponent(name)}`,
+    );
+  }
+
+  /**
+   * Create or overwrite a TextGen WebUI YAML preset on the engine
+   * (`POST /api/presets`). The engine validates `content` against
+   * `config.SamplingPreset` and writes `<DataDir>/presets/<name>.yaml`.
+   */
+  savePreset(name: string, content: string): Promise<PresetSaveResponseDto> {
+    return this.sendJson<PresetSaveResponseDto>('POST', '/api/presets', {
+      name,
+      content,
+    });
+  }
+
+  /** Delete a sampling preset by name (`DELETE /api/presets/:name`). */
+  deletePreset(name: string): Promise<PresetDeleteResponseDto> {
+    return this.sendJson<PresetDeleteResponseDto>(
+      'DELETE',
+      `/api/presets/${encodeURIComponent(name)}`,
+    );
+  }
+
+  // ── Named voice configurations (`/api/voices`, Phase 3-5) ──────────────
+
+  /** List the engine's named voice configurations (`GET /api/voices`). */
+  async listVoiceConfigs(): Promise<VoiceConfigListResponseDto> {
+    const res = await this.getJson<
+      VoiceConfigListResponseDto | Array<VoiceConfigDto | string>
+    >('/api/voices');
+    const rawList = Array.isArray(res) ? res : (res?.voices ?? []);
+    const voices: VoiceConfigDto[] = rawList.map((item) =>
+      typeof item === 'string' ? { name: item } : item,
+    );
+    return { voices };
+  }
+
+  /** One named voice configuration (`GET /api/voices/:name`). */
+  getVoiceConfig(name: string): Promise<VoiceConfigDto> {
+    return this.getJson<VoiceConfigDto>(`/api/voices/${encodeURIComponent(name)}`);
+  }
+
+  /** Create a named voice configuration (`POST /api/voices`). */
+  createVoiceConfig(
+    name: string,
+    config: Record<string, unknown>,
+  ): Promise<VoiceConfigDto> {
+    return this.sendJson<VoiceConfigDto>('POST', '/api/voices', { name, config });
+  }
+
+  /** Update a named voice configuration (`PUT /api/voices/:name`). */
+  updateVoiceConfig(
+    name: string,
+    config: Record<string, unknown>,
+  ): Promise<VoiceConfigDto> {
+    return this.sendJson<VoiceConfigDto>(
+      'PUT',
+      `/api/voices/${encodeURIComponent(name)}`,
+      { name, config },
+    );
+  }
+
+  /** Delete a named voice configuration (`DELETE /api/voices/:name`). */
+  deleteVoiceConfig(name: string): Promise<{ name: string; status: string }> {
+    return this.sendJson<{ name: string; status: string }>(
+      'DELETE',
+      `/api/voices/${encodeURIComponent(name)}`,
+    );
+  }
+
+  // ── Direct TTS test + speaker embedding (Phase 2-4 / 3-5) ──────────────
+
+  /**
+   * Run `EmbedSpeaker` against a reference audio sample
+   * (`POST /api/module-configs/tts/embed-speaker` → `POST /v1/embed/speaker`).
+   */
+  embedSpeaker(
+    payload: SpeakerEmbeddingRequestDto,
+  ): Promise<SpeakerEmbeddingResponseDto> {
+    return this.sendJson<SpeakerEmbeddingResponseDto>(
+      'POST',
+      '/api/module-configs/tts/embed-speaker',
+      payload,
+    );
+  }
+
+  /**
+   * Stateless direct synthesis for the TTS test studio
+   * (`POST /api/module-configs/tts/test-speech`) — works without an active
+   * entity session / saved module config.
+   */
+  testTtsSpeech(
+    payload: TtsSpeechTestRequestDto,
+  ): Promise<TtsSpeechTestResponseDto> {
+    return this.sendJson<TtsSpeechTestResponseDto>(
+      'POST',
+      '/api/module-configs/tts/test-speech',
+      payload,
+    );
+  }
+
+  // ── ElevenLabs voice cloning & design (Phase 2-4 / 3-5) ────────────────
+
+  /** Instant Voice Cloning (`POST /api/providers/elevenlabs/voices/clone`). */
+  cloneElevenLabsVoice(
+    payload: ElevenLabsVoiceCloneRequestDto,
+  ): Promise<ElevenLabsVoiceCloneResponseDto> {
+    return this.sendJson<ElevenLabsVoiceCloneResponseDto>(
+      'POST',
+      '/api/providers/elevenlabs/voices/clone',
+      payload,
+    );
+  }
+
+  /** Voice Design (`POST /api/providers/elevenlabs/voices/design`). */
+  designElevenLabsVoice(
+    payload: ElevenLabsVoiceDesignRequestDto,
+  ): Promise<ElevenLabsVoiceDesignResponseDto> {
+    return this.sendJson<ElevenLabsVoiceDesignResponseDto>(
+      'POST',
+      '/api/providers/elevenlabs/voices/design',
+      payload,
     );
   }
 

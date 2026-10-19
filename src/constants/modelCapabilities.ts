@@ -12,9 +12,10 @@
  *    to the models applicable to a module (live lists are already
  *    engine-filtered via the route's `module` param and pass through unfiltered).
  *  - {@link isSamplingParamKey} / {@link isParamSupported} — the R12 param
- *    warnings: a model whose `param_support`/`capabilities` are DECLARED and omit
- *    a param → warn (never block); UNDECLARED → no warning (sparse coverage
- *    pre-5-2, plan 6-3 step 3).
+ *    warnings: a model whose `param_support` is DECLARED and omits a param →
+ *    warn (never block); UNDECLARED → no warning (sparse coverage pre-5-2,
+ *    plan 6-3 step 3). `capabilities` is NEVER consulted here — it carries
+ *    modality tags, not sampling-parameter names.
  */
 
 import type { ModelInfoDto } from '../services/engine/EngineApiClient';
@@ -95,14 +96,134 @@ export function isSamplingParamKey(key: string): boolean {
  * The set of parameters a model declares support for, or `null` when the model
  * declares NONE (sparse coverage ⇒ the caller emits no warning, R12 "undefined
  * ⇒ no warning").
+ *
+ * IMPORTANT: only `param_support` is consulted. `capabilities` carries
+ * high-level modality/feature tags (`"vision"`, `"reasoning"`, `"tools"`, …),
+ * NEVER sampling-parameter names — merging it in produced false-positive
+ * `⚠ Not supported` badges on every sampling param (R12 regression).
  */
 export function supportedParams(
   model: ModelInfoDto | null | undefined,
 ): ReadonlySet<string> | null {
   if (!model) return null;
-  const declared = [...(model.param_support ?? []), ...(model.capabilities ?? [])];
+  const declared = model.param_support ?? [];
   if (declared.length === 0) return null;
   return new Set(declared);
+}
+
+/**
+ * Split capability fields into the ones the selected model supports and the
+ * ones it genuinely does not. When the model declares no `param_support`
+ * (`supportedParams` → `null`) NOTHING is unsupported: every field is
+ * supported (unknown ⇒ never warn/hide).
+ */
+export function partitionFieldsBySupport<T extends { key: string }>(
+  fields: readonly T[],
+  model: ModelInfoDto | null | undefined,
+): { supportedFields: T[]; unsupportedFields: T[] } {
+  const supported = supportedParams(model);
+  if (!supported) {
+    return { supportedFields: [...fields], unsupportedFields: [] };
+  }
+  const supportedFields: T[] = [];
+  const unsupportedFields: T[] = [];
+  for (const field of fields) {
+    if (supported.has(field.key)) supportedFields.push(field);
+    else unsupportedFields.push(field);
+  }
+  return { supportedFields, unsupportedFields };
+}
+
+/**
+ * Capability-tree metadata attached by the engine to TTS model descriptors
+ * (`ModelInfo.meta.speech_options`, Phase 2-4 / 3-5). Loose by design: the
+ * engine owns the shape and may add fields without an app DTO break.
+ */
+export interface SpeechOptionsMeta {
+  /** `single_speaker_tts` / `voice_cloning` / `instant_clone` / `voice_design`. */
+  operation_modes?: string[];
+  supports_voice_cloning?: boolean;
+  supports_voice_design?: boolean;
+  /** ISO-639-1 language codes the model can speak. */
+  languages?: string[];
+  /** Built-in voice ids/names (shape varies per provider). */
+  voices?: Array<string | { id?: string; name?: string }>;
+  /** Chatterbox-style tags (`[laughter]`, `[sigh]`, …). */
+  paralinguistic_tags?: string[];
+  /** Generation params the model accepts (`pitch`, `speed`, `cfg_weight`, …). */
+  supported_generation_params?: string[];
+  [key: string]: unknown;
+}
+
+/**
+ * Read `model.meta.speech_options` (the engine's TTS capability tree), or
+ * `null` when the model (or its metadata) does not declare any.
+ */
+export function getSpeechOptions(
+  model: ModelInfoDto | null | undefined,
+): SpeechOptionsMeta | null {
+  const raw = (model?.meta as Record<string, unknown> | undefined)?.['speech_options'];
+  if (!raw || typeof raw !== 'object') return null;
+  return raw as SpeechOptionsMeta;
+}
+
+/**
+ * Resolve the effective TTS `SpeechOptionsMeta` for a provider + model ID,
+ * enriching sparse/cached catalog descriptors on `soulbitscloud` and
+ * `soulvoice` so the UI always knows whether the model belongs to the
+ * OpenVoice/HarmonySpeech family (`speed`, `pitch`, `energy`, `style`, `seed`)
+ * or the Chatterbox family (`exaggeration`, `cfg_weight`, paralinguistic tags,
+ * sampling params, `norm_loudness`) and exposes the Voice Cloning workflow.
+ */
+export function resolveEffectiveSpeechOptions(
+  model: ModelInfoDto | null | undefined,
+  modelId?: string | null,
+  providerType?: string | null,
+): SpeechOptionsMeta | null {
+  const declared = getSpeechOptions(model);
+  if (declared && Array.isArray(declared.supported_generation_params) && declared.supported_generation_params.length > 0) {
+    return declared;
+  }
+
+  const slug = String(modelId ?? model?.id ?? '').toLowerCase();
+  const isSoul = providerType === 'soulbitscloud' || providerType === 'soulvoice';
+
+  if (slug.includes('chatterbox')) {
+    return {
+      ...declared,
+      supports_voice_cloning: true,
+      operation_modes: declared?.operation_modes ?? ['single_speaker_tts', 'voice_cloning'],
+      paralinguistic_tags: declared?.paralinguistic_tags ?? [
+        '[laughter]',
+        '[sigh]',
+        '[gasp]',
+        '[chuckle]',
+        '[clears throat]',
+      ],
+      supported_generation_params: [
+        'exaggeration',
+        'cfg_weight',
+        'temperature',
+        'repetition_penalty',
+        'top_p',
+        'min_p',
+        'top_k',
+        'norm_loudness',
+        'seed',
+      ],
+    };
+  }
+
+  if (isSoul) {
+    return {
+      ...declared,
+      supports_voice_cloning: declared?.supports_voice_cloning ?? true,
+      operation_modes: declared?.operation_modes ?? ['single_speaker_tts', 'voice_cloning'],
+      supported_generation_params: ['speed', 'pitch', 'energy', 'style', 'seed'],
+    };
+  }
+
+  return declared;
 }
 
 /**

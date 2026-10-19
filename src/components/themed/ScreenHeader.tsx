@@ -31,6 +31,12 @@ interface ScreenHeaderProps {
   contentStyle?: ViewStyle;
   /** If provided, the left avatar slot + title become a single tappable unit that calls this on press */
   onTitlePress?: () => void;
+  /**
+   * Render the decorative 40dp top-left gradient stripe. Defaults to `!onBack`
+   * — root/tab headers keep the stripe, while pushed stack screens (which have
+   * a `←` back arrow) get a tighter, standard app bar without the stray bar.
+   */
+  showAccentStripe?: boolean;
 }
 
 /**
@@ -57,16 +63,29 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
   style,
   contentStyle,
   onTitlePress,
+  showAccentStripe,
 }) => {
   const { theme } = useAppTheme();
   const { top: safeTop } = useSafeAreaInsets();
 
   if (!theme) return null;
 
+  // Stack screens (which render a back arrow) skip the decorative stripe so the
+  // `←` never has a floating 40dp progress-bar look above it.
+  const shouldShowStripe = showAccentStripe ?? !onBack;
+
   return (
-    <View style={[styles.wrapper, { paddingTop: safeTop + 12 }, style]}>
+    <View
+      style={[
+        styles.wrapper,
+        { paddingTop: safeTop + (shouldShowStripe ? 12 : 8) },
+        style,
+      ]}
+    >
       {/* ── Gradient accent stripe ── */}
-      <ThemedGradient gradient="primary" style={styles.accentStripe} />
+      {shouldShowStripe && (
+        <ThemedGradient gradient="primary" style={styles.accentStripe} />
+      )}
 
       <View style={[styles.content, contentStyle]}>
         {/* ── Title row ── */}

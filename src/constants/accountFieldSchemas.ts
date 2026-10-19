@@ -27,7 +27,8 @@
  *     anthropic, google; managed — soulbitscloud.
  */
 
-import type { FieldDefinition } from './providerFieldSchemas';
+import type { FieldDefinition, ModuleCapabilityScope } from './providerFieldSchemas';
+import { getProviderFieldsForModule, LLM_CHAT_MODULES } from './providerFieldSchemas';
 import type { ProviderAccountWriteDto } from '../services/engine/EngineApiClient';
 
 export interface AccountSchema {
@@ -315,15 +316,39 @@ export function capabilityOverlayOf(
   return overlay;
 }
 
-/** The capability defaults for a provider type (PROVIDER_DEFAULTS minus the account keys). */
+/**
+ * The capability defaults for a provider type (PROVIDER_DEFAULTS minus the
+ * account keys).
+ *
+ * When `modelModuleType` is supplied the result is additionally scoped to the
+ * fields that apply to that module (`getProviderFieldsForModule`), so creating
+ * a Backend slot never seeds TTS/Imagination keys into its `capability_json`.
+ * `extra_params` is seeded only for the LLM chat modules (it is the TextGen
+ * extended-sampling blob).
+ */
 export function capabilityDefaultsOf(
   type: string,
   providerDefaults: Record<string, unknown>,
+  modelModuleType?: string,
 ): Record<string, unknown> {
   const accountKeys = accountFieldKeys(type);
+  const moduleKeys =
+    modelModuleType !== undefined
+      ? new Set(getProviderFieldsForModule(type, modelModuleType).map((field) => field.key))
+      : null;
+  const seedExtraParams =
+    moduleKeys === null || LLM_CHAT_MODULES.includes(modelModuleType as ModuleCapabilityScope);
+
   const overlay: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(providerDefaults ?? {})) {
     if (accountKeys.has(key)) continue;
+    if (moduleKeys !== null) {
+      if (key === 'extra_params') {
+        if (!seedExtraParams) continue;
+      } else if (!moduleKeys.has(key)) {
+        continue;
+      }
+    }
     overlay[key] = value;
   }
   return overlay;

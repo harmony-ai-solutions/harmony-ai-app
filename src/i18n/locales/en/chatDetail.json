@@ -41,6 +41,7 @@
   "editResendBody": "Send this edited message? The original response will be removed.",
   "deleteEntityTitle": "Delete Entity",
   "deleteEntityBody": "Delete \"{{name}}\"? Chat history will be preserved but this entity will no longer be accessible.",
+  "deleteCharacter": "Delete {{name}}",
   "retryFailedTitle": "Retry Failed",
   "errorTitle": "Error",
   "myPersonas": "My Personas",

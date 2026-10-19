@@ -1,19 +1,24 @@
 /**
- * SamplingPresetSelect — engine preset dropdown + preview chips (2-2).
+ * SamplingPresetSelect — persistent preset picker + Save-as-YAML modal (2-2).
  *
  * Covers the behaviours the phase doc calls out:
- *  - the dropdown renders the engine's `GET /api/presets` list (+ "Manual");
+ *  - the picker is ALWAYS rendered (even with zero presets) with "None (Manual)";
  *  - selecting a preset shows preview chips from `getPreset().params`;
  *  - an explicit local value is labelled as overriding the preset (§11 A3);
- *  - "Manual" clears the preset (onChange(''));
- * plus the no-presets free-text fallback.
+ *  - "Save as…" pre-fills the YAML editor from the current capability and saves
+ *    via `savePreset`, then activates the new preset;
+ *  - delete confirms, calls `deletePreset` and resets to Manual.
  */
 
 import React from 'react';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
 import {
   SamplingPresetSelect,
-  PRESET_FREE_TEXT_TESTID,
+  PRESET_SAVE_MODAL_TESTID,
+  PRESET_DELETE_BUTTON_TESTID,
+  PRESET_YAML_INPUT_TESTID,
+  PRESET_NAME_INPUT_TESTID,
   presetChipTestId,
   presetOverrideTestId,
 } from '../SamplingPresetSelect';
@@ -21,7 +26,12 @@ import { engineApiClient } from '../../../services/engine/EngineApiClient';
 import { resetPresetsCache } from '../../../hooks/usePresets';
 
 jest.mock('../../../services/engine/EngineApiClient', () => ({
-  engineApiClient: { listPresets: jest.fn(), getPreset: jest.fn() },
+  engineApiClient: {
+    listPresets: jest.fn(),
+    getPreset: jest.fn(),
+    savePreset: jest.fn(),
+    deletePreset: jest.fn(),
+  },
 }));
 
 jest.mock('react-i18next', () => ({
@@ -63,6 +73,8 @@ jest.mock('../../themed/ThemedText', () => {
 
 const listPresets = engineApiClient.listPresets as jest.Mock;
 const getPreset = engineApiClient.getPreset as jest.Mock;
+const savePreset = engineApiClient.savePreset as jest.Mock;
+const deletePreset = engineApiClient.deletePreset as jest.Mock;
 
 const PRESET_LIST = {
   presets: [
@@ -76,6 +88,14 @@ beforeEach(() => {
   resetPresetsCache();
   listPresets.mockReset();
   getPreset.mockReset();
+  savePreset.mockReset();
+  deletePreset.mockReset();
+  savePreset.mockResolvedValue({ name: 'saved', status: 'ok' });
+  deletePreset.mockResolvedValue({ name: 'creative', status: 'ok' });
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 async function renderSelect(
@@ -96,15 +116,29 @@ async function renderSelect(
 }
 
 describe('SamplingPresetSelect', () => {
-  it('renders a dropdown of engine presets plus a Manual option', async () => {
-    listPresets.mockResolvedValue(PRESET_LIST);
+  it('always renders the persistent picker with the presets, even when empty', async () => {
+    listPresets.mockResolvedValue({ presets: [] });
     const { utils } = await renderSelect();
 
     const row = await waitFor(() => utils.getByLabelText('Sampling Preset'));
-    fireEvent.press(row);
+    expect(row).toBeTruthy();
+    await fireEvent.press(row);
+    await waitFor(() => expect(utils.getAllByText('None (Manual)').length).toBeGreaterThan(0));
+  });
 
-    await waitFor(() => expect(utils.getByText('creative')).toBeTruthy());
-    expect(utils.getByText('precise')).toBeTruthy();
+  it('renders engine presets in the picker and selects one', async () => {
+    listPresets.mockResolvedValue(PRESET_LIST);
+    const onChange = jest.fn();
+    const { utils } = await renderSelect({ onChange });
+
+    const row = await waitFor(() => utils.getByLabelText('Sampling Preset'));
+    await fireEvent.press(row);
+
+    await waitFor(() => expect(utils.getByText('creative (2 params)')).toBeTruthy());
+    expect(utils.getByText('precise (1 params)')).toBeTruthy();
+
+    await fireEvent.press(utils.getByText('creative (2 params)'));
+    expect(onChange).toHaveBeenCalledWith('creative');
   });
 
   it('shows preview chips from getPreset().params for the selected preset', async () => {
@@ -118,7 +152,7 @@ describe('SamplingPresetSelect', () => {
     const { utils } = await renderSelect({ value: 'creative' });
 
     await waitFor(() => expect(utils.getByTestId(presetChipTestId('temperature'))).toBeTruthy());
-    expect(utils.getByText(/temperature=0\.7/)).toBeTruthy();
+    expect(utils.getByText(/temperature: 0\.7/)).toBeTruthy();
     expect(utils.getByTestId(presetChipTestId('top_p'))).toBeTruthy();
     expect(getPreset).toHaveBeenCalledWith('creative');
   });
@@ -140,9 +174,9 @@ describe('SamplingPresetSelect', () => {
     await waitFor(() =>
       expect(utils.getByTestId(presetOverrideTestId('temperature'))).toBeTruthy(),
     );
-    // The chip still shows the preset value, plus the override annotation.
-    expect(utils.getByText(/temperature=0\.7/)).toBeTruthy();
-    expect(utils.getByText(/presetLocalWins/)).toBeTruthy();
+    // The chip shows the preset value, plus the override annotation.
+    expect(utils.getByText(/temperature: 0\.7/)).toBeTruthy();
+    expect(utils.getByText(/0\.9 \(local wins\)/)).toBeTruthy();
   });
 
   it('does not annotate an override when the local value is not explicit', async () => {
@@ -163,27 +197,88 @@ describe('SamplingPresetSelect', () => {
     expect(utils.queryByTestId(presetOverrideTestId('temperature'))).toBeNull();
   });
 
-  it('clears the preset (onChange("")) when Manual is chosen', async () => {
+  it('pre-fills the YAML editor from the current capability when "Save as…" opens', async () => {
+    listPresets.mockResolvedValue(PRESET_LIST);
+    const { utils } = await renderSelect({
+      localValues: { temperature: 0.7, top_p: 0.95 },
+    });
+
+    await waitFor(() => expect(utils.getByTestId(PRESET_SAVE_MODAL_TESTID)).toBeTruthy());
+    await fireEvent.press(utils.getByTestId(PRESET_SAVE_MODAL_TESTID));
+
+    const yaml = await waitFor(() => utils.getByTestId(PRESET_YAML_INPUT_TESTID));
+    expect(yaml.props.value).toBe('temperature: 0.7\ntop_p: 0.95\n');
+    expect(utils.getByTestId(PRESET_NAME_INPUT_TESTID)).toBeTruthy();
+  });
+
+  it('saves the named YAML preset and activates it', async () => {
+    listPresets.mockResolvedValue(PRESET_LIST);
+    const onChange = jest.fn();
+    const { utils } = await renderSelect({
+      onChange,
+      localValues: { temperature: 0.7 },
+    });
+
+    await fireEvent.press(await waitFor(() => utils.getByTestId(PRESET_SAVE_MODAL_TESTID)));
+    const nameInput = await waitFor(() => utils.getByTestId(PRESET_NAME_INPUT_TESTID));
+    await fireEvent.changeText(nameInput, 'my-preset');
+    expect(utils.getByTestId(PRESET_NAME_INPUT_TESTID).props.value).toBe('my-preset');
+    await fireEvent.changeText(
+      utils.getByTestId(PRESET_YAML_INPUT_TESTID),
+      'temperature: 0.7\n',
+    );
+    await fireEvent.press(utils.getByTestId('preset-save-confirm'));
+
+    await waitFor(() =>
+      expect(savePreset).toHaveBeenCalledWith('my-preset', 'temperature: 0.7\n'),
+    );
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith('my-preset'));
+  });
+
+  it('rejects an invalid preset name without saving', async () => {
+    listPresets.mockResolvedValue(PRESET_LIST);
+    const { utils } = await renderSelect();
+
+    await fireEvent.press(await waitFor(() => utils.getByTestId(PRESET_SAVE_MODAL_TESTID)));
+    const nameInput = await waitFor(() => utils.getByTestId(PRESET_NAME_INPUT_TESTID));
+    await fireEvent.changeText(nameInput, '../evil');
+    await fireEvent.press(utils.getByTestId('preset-save-confirm'));
+
+    await waitFor(() => expect(utils.getByTestId('preset-name-error')).toBeTruthy());
+    expect(savePreset).not.toHaveBeenCalled();
+  });
+
+  it('confirms, deletes the selected preset and resets to Manual', async () => {
     listPresets.mockResolvedValue(PRESET_LIST);
     getPreset.mockResolvedValue({ name: 'creative', source: 'bundled', params: {} });
     const onChange = jest.fn();
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
 
     const { utils } = await renderSelect({ value: 'creative', onChange });
 
-    const row = await waitFor(() => utils.getByLabelText('Sampling Preset'));
-    fireEvent.press(row);
-    await waitFor(() => expect(utils.getByText('presetManual')).toBeTruthy());
-    fireEvent.press(utils.getByText('presetManual'));
+    const deleteButton = await waitFor(() => utils.getByTestId(PRESET_DELETE_BUTTON_TESTID));
+    await fireEvent.press(deleteButton);
 
-    expect(onChange).toHaveBeenCalledWith('');
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    const buttons = alertSpy.mock.calls[0][2] as Array<{
+      style?: string;
+      onPress?: () => void;
+    }>;
+    const destructive = buttons.find((b) => b.style === 'destructive');
+
+    await act(async () => {
+      destructive?.onPress?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(deletePreset).toHaveBeenCalledWith('creative'));
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(''));
   });
 
-  it('falls back to free text when no presets are available', async () => {
-    listPresets.mockResolvedValue({ presets: [] });
-
-    const { utils } = await renderSelect();
-
-    await waitFor(() => expect(utils.getByTestId(PRESET_FREE_TEXT_TESTID)).toBeTruthy());
-    expect(utils.getByText('presetNone')).toBeTruthy();
+  it('hides the Delete button while Manual is selected', async () => {
+    listPresets.mockResolvedValue(PRESET_LIST);
+    const { utils } = await renderSelect({ value: '' });
+    await waitFor(() => expect(utils.getByTestId(PRESET_SAVE_MODAL_TESTID)).toBeTruthy());
+    expect(utils.queryByTestId(PRESET_DELETE_BUTTON_TESTID)).toBeNull();
   });
 });

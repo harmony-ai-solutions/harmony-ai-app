@@ -58,7 +58,7 @@ export const AdvancedSamplingParams: React.FC<AdvancedSamplingParamsProps> = ({
     setShowAddModal(false);
   };
 
-  const getInputType = (key: string, value: any): 'number' | 'boolean' | 'text' => {
+  const getInputType = (key: string): 'number' | 'boolean' | 'text' => {
     const info = EXTENDED_PARAMS.find(p => p.key === key);
     if (info?.type === 'boolean') return 'boolean';
     if (info) return 'number';
@@ -70,7 +70,7 @@ export const AdvancedSamplingParams: React.FC<AdvancedSamplingParamsProps> = ({
   const renderParamItem = ({ item: key }: { item: string }) => {
     const info = EXTENDED_PARAMS.find(p => p.key === key);
     const value = params[key];
-    const inputType = getInputType(key, value);
+    const inputType = getInputType(key);
     const label = info?.label || key;
 
     return (
@@ -138,42 +138,21 @@ export const AdvancedSamplingParams: React.FC<AdvancedSamplingParamsProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Collapsible header matching SectionHeader pattern */}
+      {/* Collapsible dashed drawer row (File 2 `drawer-row`) */}
       <TouchableOpacity
-        style={[
-          styles.header,
-          {
-            borderColor: theme.colors.border.default,
-          },
-        ]}
+        testID="advanced-sampling-drawer"
+        style={styles.drawerRow}
         onPress={() => setExpanded(!expanded)}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
       >
-        <LinearGradient
-          colors={[theme.colors.background.elevated, 'transparent']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFill}
-        />
-        <LinearGradient
-          colors={[theme.colors.accent.primary, theme.colors.accent.secondary]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={styles.headerPip}
-        />
-        <ThemedText variant="muted" weight="bold" size={11} style={styles.headerLabel}>
-          {`ADVANCED SAMPLING PARAMETERS`.toUpperCase()}
+        <ThemedText size={11.5} numberOfLines={1} style={styles.drawerLabel}>
+          ⚙ Extended YAML Samplers (top_k, min_p, dry, xtc, mirostat…)
         </ThemedText>
-        <View style={styles.headerCount}>
-          <ThemedText variant="muted" size={12}>
-            {paramCount}
-          </ThemedText>
-        </View>
-        <Icon
-          name={expanded ? 'chevron-up' : 'chevron-down'}
-          size={18}
-          color={theme.colors.text.muted}
-        />
+        <ThemedText size={11.5} style={styles.drawerCount}>
+          {`${paramCount} active ${expanded ? '▴' : '▾'}`}
+        </ThemedText>
       </TouchableOpacity>
 
       {expanded && (
@@ -293,28 +272,28 @@ const styles = StyleSheet.create({
     marginVertical: 8,
   },
 
-  // ── Collapsible header ──
-  header: {
+  // ── Collapsible dashed drawer row ──
+  drawerRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#334155',
+    borderRadius: 8,
     paddingVertical: 8,
-    paddingHorizontal: 16,
-    gap: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
+    paddingHorizontal: 10,
+    marginTop: 4,
   },
-  headerPip: {
-    width: 4,
-    height: 16,
-    borderRadius: 2,
-  },
-  headerLabel: {
+  drawerLabel: {
     flex: 1,
-    letterSpacing: 0.8,
+    color: '#94a3b8',
   },
-  headerCount: {
-    marginRight: 2,
+  drawerCount: {
+    color: '#cbd5e1',
+    fontWeight: '600',
   },
 
   // ── Expanded content ──

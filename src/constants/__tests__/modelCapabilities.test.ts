@@ -6,8 +6,10 @@
 import {
   MODULE_CAPABILITY_TAGS,
   catalogModelsForModule,
+  getSpeechOptions,
   isSamplingParamKey,
   isParamSupported,
+  partitionFieldsBySupport,
   supportedParams,
   findModel,
 } from '../modelCapabilities';
@@ -17,6 +19,9 @@ const chat: ModelInfoDto = { id: 'chat-1', capabilities: ['chat'] };
 const embed: ModelInfoDto = { id: 'embed-1', capabilities: ['embedding'] };
 const unknown: ModelInfoDto = { id: 'unknown-1' };
 const noTemp: ModelInfoDto = { id: 'notemp-1', capabilities: ['chat'], param_support: ['top_p'] };
+// The R12 regression: capabilities DECLARED, param_support absent. Modality tags
+// must never be treated as a param set.
+const visionOnly: ModelInfoDto = { id: 'vision-1', capabilities: ['vision'] };
 
 describe('catalogModelsForModule', () => {
   const models = [chat, embed, unknown];
@@ -57,9 +62,54 @@ describe('param support (R12 warnings)', () => {
     expect(isParamSupported(undefined, 'temperature')).toBeNull();
   });
 
+  it('ignores capabilities (modality tags are not a param set) — R12 regression', () => {
+    expect(supportedParams(visionOnly)).toBeNull();
+    expect(isParamSupported(visionOnly, 'temperature')).toBeNull();
+    expect(isParamSupported(visionOnly, 'vision')).toBeNull();
+  });
+
   it('warns only when a declared set omits the param', () => {
     expect(isParamSupported(noTemp, 'top_p')).toBe(true);
     expect(isParamSupported(noTemp, 'temperature')).toBe(false);
+  });
+});
+
+describe('partitionFieldsBySupport', () => {
+  const fields = [{ key: 'temperature' }, { key: 'top_p' }, { key: 'model' }];
+
+  it('keeps every field supported when the model declares no param set', () => {
+    expect(partitionFieldsBySupport(fields, unknown)).toEqual({
+      supportedFields: fields,
+      unsupportedFields: [],
+    });
+    expect(partitionFieldsBySupport(fields, visionOnly).unsupportedFields).toEqual([]);
+    expect(partitionFieldsBySupport(fields, undefined).unsupportedFields).toEqual([]);
+  });
+
+  it('splits a declared set into supported and unsupported fields', () => {
+    const { supportedFields, unsupportedFields } = partitionFieldsBySupport(fields, noTemp);
+    expect(supportedFields.map((f) => f.key)).toEqual(['top_p']);
+    expect(unsupportedFields.map((f) => f.key)).toEqual(['temperature', 'model']);
+  });
+});
+
+describe('getSpeechOptions', () => {
+  it('reads meta.speech_options', () => {
+    const model: ModelInfoDto = {
+      id: 'tts-1',
+      capabilities: ['tts'],
+      meta: { speech_options: { operation_modes: ['voice_design'], languages: ['en'] } },
+    };
+    expect(getSpeechOptions(model)).toEqual({
+      operation_modes: ['voice_design'],
+      languages: ['en'],
+    });
+  });
+
+  it('returns null when absent', () => {
+    expect(getSpeechOptions(unknown)).toBeNull();
+    expect(getSpeechOptions(undefined)).toBeNull();
+    expect(getSpeechOptions({ id: 'x', meta: { speech_options: 'nope' } })).toBeNull();
   });
 });
 

@@ -55,6 +55,8 @@ jest.mock('@react-navigation/native', () => {
     useFocusEffect: (cb: () => void) => {
       React.useEffect(() => {
         cb();
+        // Test double: run the focus callback once on mount only.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
       }, []);
     },
   };
@@ -330,6 +332,29 @@ describe('ProvidersScreen — delete + 409 referencing configs', () => {
 
     await waitFor(() => expect(providersRepo.deleteAccount).toHaveBeenCalledWith('acc1'));
     await waitFor(() => expect(mockShowToast).toHaveBeenCalledWith('deletedToast'));
+  });
+});
+
+describe('ProvidersScreen — managed accounts (Phase 2-3)', () => {
+  it('excludes managed providers from the "Add account" type picker', async () => {
+    const utils = await renderScreen();
+
+    await fireEvent.press(utils.getByTestId('providers-add'));
+    await waitFor(() => expect(utils.getByTestId('account-type-picker')).toBeTruthy());
+
+    expect(utils.queryByTestId('account-type-soulbitscloud')).toBeNull();
+    expect(utils.getByTestId('account-type-openai')).toBeTruthy();
+  });
+
+  it('hides Edit/Delete on managed rows but keeps Test key', async () => {
+    (providersRepo.listAccounts as jest.Mock).mockResolvedValue([
+      account({ id: 'cloud1', type: 'soulbitscloud', name: 'Cloud', api_key: 'paseto' }),
+    ]);
+    const utils = await renderScreen();
+
+    await waitFor(() => expect(utils.getByTestId('test-key-cloud1')).toBeTruthy());
+    expect(utils.queryByTestId('edit-cloud1')).toBeNull();
+    expect(utils.queryByTestId('delete-cloud1')).toBeNull();
   });
 });
 

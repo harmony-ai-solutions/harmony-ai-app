@@ -67,6 +67,7 @@ jest.mock('../../utils/logger', () => ({
 
 const engineService = jest.requireMock('../../services/engine/EngineService');
 const cm = jest.requireMock('../../services/connection/ConnectionManager').default;
+const csm = jest.requireMock('../../services/ConnectionStateManager').default;
 
 function engineConnection(overrides: Record<string, any> = {}) {
   return {
@@ -175,5 +176,78 @@ describe('SyncConnectionContext — embedded engine connect()', () => {
     // Before the fix the insecure-ssl attempt set isCertFlowActiveRef and never
     // cleared it, so this toast was suppressed — the "no error visible" symptom.
     expect(mockShowToast).toHaveBeenCalledWith('syncConnection:failedToConnect');
+  });
+});
+
+/**
+ * Regression: the `"Not connected"` overlay on ChatListScreen while the embedded
+ * engine is running (phase 1-1).
+ *
+ * Embedded-engine boots never write the legacy QR-pairing keys, so
+ * `ConnectionStateManager.markConnected()` emits `'state:changed'` with
+ * `isPaired: false`. Before the fix `handleStateChange` overwrote the provider's
+ * engine-derived `isPaired` with that value, flipping `canUseChat` to false the
+ * moment the loopback WS connected and replacing the loaded list with the
+ * "engine starting" empty state.
+ */
+describe('SyncConnectionContext — engine availability survives state:changed (1-1)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    engineService.getEngineConnection.mockReturnValue(null);
+    engineService.onEngineConnectionChange.mockReturnValue(jest.fn());
+    cm.createConnection.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  /** Invoke every handler the provider registered for an event. */
+  function emit(event: string, payload: any) {
+    const handlers = csm.on.mock.calls
+      .filter(([name]: any[]) => name === event)
+      .map(([, handler]: any[]) => handler);
+    for (const handler of handlers) handler(payload);
+    return handlers.length;
+  }
+
+  it('seeds isPaired from an already-running engine on mount (no !canUseChat flash)', async () => {
+    engineService.getEngineConnection.mockReturnValue(engineConnection());
+
+    const { result } = await renderProvider();
+
+    expect(result.current.isPaired).toBe(true);
+    expect(result.current.canUseChat).toBe(true);
+  });
+
+  it('state:changed with isPaired:false does NOT clear isPaired/canUseChat while the engine is available', async () => {
+    engineService.getEngineConnection.mockReturnValue(engineConnection());
+
+    const { result } = await renderProvider();
+    expect(result.current.canUseChat).toBe(true);
+
+    // This is exactly what ConnectionStateManager.markConnected() emits after
+    // the loopback WS opens on an embedded-engine boot (no legacy pairing keys).
+    await act(async () => {
+      const handlerCount = emit('state:changed', { isPaired: false, isConnected: true });
+      expect(handlerCount).toBeGreaterThan(0);
+    });
+
+    expect(result.current.isPaired).toBe(true);
+    expect(result.current.canUseChat).toBe(true);
+    expect(result.current.isConnected).toBe(true);
+  });
+
+  it('state:changed still clears isPaired when the engine is genuinely unavailable', async () => {
+    engineService.getEngineConnection.mockReturnValue(null);
+
+    const { result } = await renderProvider();
+
+    await act(async () => {
+      emit('state:changed', { isPaired: false, isConnected: false });
+    });
+
+    expect(result.current.isPaired).toBe(false);
+    expect(result.current.canUseChat).toBe(false);
   });
 });

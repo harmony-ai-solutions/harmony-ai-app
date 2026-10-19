@@ -49,6 +49,7 @@ import { createLogger } from '../../utils/logger';
 import { isProviderAvailable } from '../../services/variant/providerAvailability';
 import {
   accountToFormValues,
+  isAccountManaged,
   maskApiKey,
   parseAccountExtra,
 } from '../../constants/accountFieldSchemas';
@@ -188,8 +189,13 @@ export const ProvidersScreen: React.FC = () => {
     [grouped],
   );
 
+  // System-managed providers (soulbitscloud) are created by cloud auth / token
+  // rotation, never manually from the "+ Add account" picker.
   const availableTypes = useMemo(
-    () => PROVIDER_TYPE_ORDER.filter(type => isProviderAvailable(type)),
+    () =>
+      PROVIDER_TYPE_ORDER.filter(
+        type => isProviderAvailable(type) && !isAccountManaged(type),
+      ),
     [],
   );
 
@@ -377,6 +383,8 @@ export const ProvidersScreen: React.FC = () => {
 
   const renderAccountRow = (account: ProviderAccount) => {
     const masked = maskApiKey(account.api_key);
+    // System-managed accounts are read-only: keep "Test key", hide Edit/Delete.
+    const managed = isAccountManaged(account.type);
     return (
       <View key={account.id} style={styles.accountRow}>
         <View style={styles.accountInfo}>
@@ -415,20 +423,24 @@ export const ProvidersScreen: React.FC = () => {
             onPress={() => runVerify(account)}
             testID={`test-key-${account.id}`}
           />
-          <ActionIcon
-            icon="pencil-outline"
-            label={t('edit')}
-            color={theme.colors.text.secondary}
-            onPress={() => handleEdit(account)}
-            testID={`edit-${account.id}`}
-          />
-          <ActionIcon
-            icon="trash-can-outline"
-            label={t('delete')}
-            color={theme.colors.status.error}
-            onPress={() => handleDelete(account)}
-            testID={`delete-${account.id}`}
-          />
+          {!managed && (
+            <>
+              <ActionIcon
+                icon="pencil-outline"
+                label={t('edit')}
+                color={theme.colors.text.secondary}
+                onPress={() => handleEdit(account)}
+                testID={`edit-${account.id}`}
+              />
+              <ActionIcon
+                icon="trash-can-outline"
+                label={t('delete')}
+                color={theme.colors.status.error}
+                onPress={() => handleDelete(account)}
+                testID={`delete-${account.id}`}
+              />
+            </>
+          )}
         </View>
       </View>
     );

@@ -28,6 +28,10 @@ export interface UsePresetsResult {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  /** Create or overwrite a YAML preset, then refresh the shared list. */
+  savePreset: (name: string, content: string) => Promise<void>;
+  /** Delete a YAML preset, then refresh the shared list. */
+  deletePreset: (name: string) => Promise<void>;
 }
 
 export function usePresets(): UsePresetsResult {
@@ -63,5 +67,24 @@ export function usePresets(): UsePresetsResult {
     };
   }, [load]);
 
-  return { presets, loading, error, refresh: load };
+  const savePreset = useCallback(
+    async (name: string, content: string) => {
+      await engineApiClient.savePreset(name, content);
+      // Invalidate the shared cache so every mounted preset picker refreshes.
+      presetsCache = null;
+      await load();
+    },
+    [load],
+  );
+
+  const deletePreset = useCallback(
+    async (name: string) => {
+      await engineApiClient.deletePreset(name);
+      presetsCache = null;
+      await load();
+    },
+    [load],
+  );
+
+  return { presets, loading, error, refresh: load, savePreset, deletePreset };
 }

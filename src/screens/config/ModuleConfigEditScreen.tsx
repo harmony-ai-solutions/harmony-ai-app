@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  TextInput,
   Platform,
   KeyboardAvoidingView,
   RefreshControl,
@@ -33,8 +32,19 @@ import { ThemedText } from '../../components/themed/ThemedText';
 import { hapticLightPress } from '../../utils/haptics';
 import { useAppAlert } from '../../contexts/AppAlertContext';
 import { AccountForm } from '../../components/providers/AccountForm';
-import { ProviderSlotSection } from '../../components/config/ProviderSlotSection';
+import {
+  ProviderSlotSection,
+  groupFieldsIntoRows,
+} from '../../components/config/ProviderSlotSection';
 import type { SlotState } from '../../components/config/ProviderSlotSection';
+import { FormField } from '../../components/config/FormField';
+import { useProviderCapabilityCatalog } from '../../hooks/useProviderCapabilityCatalog';
+import {
+  catalogModelsForModule,
+  findModel,
+  getSpeechOptions,
+} from '../../constants/modelCapabilities';
+import type { FieldDefinition } from '../../constants/providerFieldSchemas';
 import {
   MODULE_TYPES,
   ModuleTypeConfig,
@@ -190,6 +200,9 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   // Simple vs Advanced mode toggle — Simple hides the deep technical fields.
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // STT presents one interactive 2-stage pipeline instead of two slot walls.
+  const [activeSttStage, setActiveSttStage] = useState<'vad' | 'transcription'>('transcription');
+  const { catalog } = useProviderCapabilityCatalog();
 
   const slotDefs: SlotDef[] = useMemo(
     () =>
@@ -278,10 +291,14 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
   if (!theme) return null;
 
-  const emptySlotFor = (providerType: string): SlotState => ({
+  const emptySlotFor = (providerType: string, modelModuleType: string): SlotState => ({
     providerType,
     accountId: null,
-    capability: capabilityDefaultsOf(providerType, PROVIDER_DEFAULTS[providerType] ?? {}),
+    capability: capabilityDefaultsOf(
+      providerType,
+      PROVIDER_DEFAULTS[providerType] ?? {},
+      modelModuleType,
+    ),
   });
 
   const loadConfig = async () => {
@@ -302,7 +319,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
       const nextSlots: Record<string, SlotState> = {};
       const nextExplicit: Record<string, Record<string, boolean>> = {};
       for (const def of slotDefs) {
-        nextSlots[def.slot] = emptySlotFor(storeProvider);
+        nextSlots[def.slot] = emptySlotFor(storeProvider, def.modelModuleType);
         nextExplicit[def.slot] = {};
       }
       setFormValues({ ...defaults, name: '' });
@@ -379,9 +396,13 @@ export const ModuleConfigEditScreen: React.FC = () => {
     setFormValues((prev) => ({ ...prev, [key]: value }));
   };
 
-  /** Provider type switch: reset the account + reseed the capability defaults. */
+  /** Provider type switch: reset the account + reseed the module-scoped defaults. */
   const handleProviderSwitch = (slot: string, providerType: string) => {
-    setSlots((prev) => ({ ...prev, [slot]: emptySlotFor(providerType) }));
+    const def = slotDefs.find((d) => d.slot === slot);
+    setSlots((prev) => ({
+      ...prev,
+      [slot]: emptySlotFor(providerType, def?.modelModuleType ?? moduleType),
+    }));
     setExplicitFields((prev) => ({ ...prev, [slot]: {} }));
   };
 
@@ -390,6 +411,15 @@ export const ModuleConfigEditScreen: React.FC = () => {
       ...prev,
       [slot]: { ...(prev[slot] ?? EMPTY_SLOT), accountId },
     }));
+  };
+
+  /** "Disabled (Manual Push-to-Talk only)" — clears the VAD slot. */
+  const handleDisableSlot = (slot: string) => {
+    setSlots((prev) => ({
+      ...prev,
+      [slot]: { ...EMPTY_SLOT },
+    }));
+    setExplicitFields((prev) => ({ ...prev, [slot]: {} }));
   };
 
   const handleCapabilityChange = (slot: string, key: string, value: any) => {
@@ -439,8 +469,10 @@ export const ModuleConfigEditScreen: React.FC = () => {
       return;
     }
 
-    // Provider required per slot.
+    // Provider required per slot. STT's VAD stage may be disabled entirely
+    // (manual push-to-talk) — the engine treats an empty VAD provider as off.
     for (const def of slotDefs) {
+      if (isSTT && def.slot === 'vad' && !slots[def.slot]?.providerType) continue;
       if (!slots[def.slot]?.providerType) {
         const key = isSTT
           ? def.slot === 'transcription'
@@ -532,35 +564,13 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
   const moduleConfig = getModuleConfig();
 
-  // ── Text input with theme styling (for module-specific fields) ──
-  const renderThemedInput = (
-    label: string,
-    value: any,
-    onChangeText: (text: string) => void,
-    placeholder: string,
-    keyboardType: 'default' | 'decimal-pad' | 'number-pad' = 'default',
-  ) => (
-    <View>
-      <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-        {label}
-      </ThemedText>
-      <TextInput
-        style={[
-          styles.input,
-          {
-            color: theme.colors.text.primary,
-            borderColor: theme.colors.border.default,
-            backgroundColor: theme.colors.background.base,
-          },
-        ]}
-        value={value?.toString() ?? ''}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        keyboardType={keyboardType}
-        placeholderTextColor={theme.colors.text.muted}
-      />
-    </View>
-  );
+  // ── Selected TTS model (for test-panel paralinguistic tags) ──
+  const ttsSlot = slots.provider;
+  const selectedTtsModel = useMemo(() => {
+    if (moduleType !== 'tts' || !ttsSlot?.providerType) return null;
+    const entries = catalogModelsForModule(catalog[ttsSlot.providerType], 'tts');
+    return findModel(entries, ttsSlot.capability?.model) ?? null;
+  }, [moduleType, ttsSlot, catalog]);
 
   // ── Loading state ──
   if (loading) {
@@ -577,10 +587,44 @@ export const ModuleConfigEditScreen: React.FC = () => {
     );
   }
 
-  const renderSlots = () =>
-    slotDefs.map((def) => {
+  /** RAG's Embedding Concurrency footer (Advanced only, inside Capability). */
+  const renderRagFooter = () => {
+    const fields = getModuleConfig()?.moduleSpecificFields ?? [];
+    if (fields.length === 0) return null;
+    return (
+      <>
+        {groupFieldsIntoRows(fields).map((row) => (
+          <View
+            key={row.map((f) => f.key).join('-')}
+            style={row.length > 1 ? styles.twoColRow : undefined}
+          >
+            {row.map((field) => (
+              <View key={field.key} style={row.length > 1 ? styles.halfCol : undefined}>
+                <FormField
+                  field={field}
+                  value={formValues[field.key]}
+                  onChange={handleModuleFieldChange}
+                  testID={`module-field-${field.key}`}
+                />
+              </View>
+            ))}
+          </View>
+        ))}
+      </>
+    );
+  };
+
+  const renderSlots = () => {
+    // STT shows exactly ONE stage at a time (Stage 1 VAD / Stage 2
+    // Transcription) as a single Provider + Capability card (Phase 3-6).
+    const defs = isSTT
+      ? slotDefs.filter((def) => def.slot === activeSttStage)
+      : slotDefs;
+
+    return defs.map((def) => {
       const slotState = slots[def.slot] ?? EMPTY_SLOT;
       const typeAccounts = accounts.filter((a) => a.type === slotState.providerType);
+      const isVadStage = isSTT && def.slot === 'vad';
       return (
         <ProviderSlotSection
           key={def.slot}
@@ -592,6 +636,11 @@ export const ModuleConfigEditScreen: React.FC = () => {
           accounts={typeAccounts}
           showAdvanced={showAdvanced}
           explicitFields={explicitFields[def.slot] ?? {}}
+          configName={!isSTT ? formValues.name : undefined}
+          onConfigNameChange={
+            !isSTT ? (val) => handleModuleFieldChange('name', val) : undefined
+          }
+          onToggleAdvanced={!isSTT ? setShowAdvanced : undefined}
           onProviderChange={(type) => handleProviderSwitch(def.slot, type)}
           onAccountChange={(id) => handleAccountChange(def.slot, id)}
           onCapabilityChange={(key, value) => handleCapabilityChange(def.slot, key, value)}
@@ -599,77 +648,354 @@ export const ModuleConfigEditScreen: React.FC = () => {
             hapticLightPress();
             setEditorSlot(def.slot);
           }}
+          footerContent={
+            !isSTT && moduleType === 'rag' && showAdvanced ? renderRagFooter() : undefined
+          }
+          singleCard={isSTT}
+          cardTitle={
+            isSTT
+              ? isVadStage
+                ? t('stage1CardTitle')
+                : t('stage2CardTitle')
+              : undefined
+          }
+          cardBadge={
+            isSTT
+              ? isVadStage
+                ? t('stage1Badge')
+                : t('stage2Badge')
+              : undefined
+          }
+          allowDisable={isVadStage}
+          onDisableSlot={isVadStage ? () => handleDisableSlot(def.slot) : undefined}
         />
       );
     });
+  };
+
+  /** Compact `Simple | Advanced` switch for the STT pipeline header (2-3). */
+  const renderSttModeSwitch = () => (
+    <View style={[styles.modeSegmented, { backgroundColor: theme.colors.background.base }]}>
+      <TouchableOpacity
+        testID="mode-simple-button"
+        onPress={() => {
+          hapticLightPress();
+          setShowAdvanced(false);
+        }}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityState={{ selected: !showAdvanced }}
+        style={[
+          styles.modeSegment,
+          !showAdvanced && [
+            styles.modeSegmentActive,
+            { backgroundColor: theme.colors.accent.primary },
+          ],
+        ]}
+      >
+        <ThemedText
+          size={11}
+          weight="medium"
+          variant={showAdvanced ? 'secondary' : 'primary'}
+          style={!showAdvanced ? styles.modeSegmentActiveText : undefined}
+        >
+          {t('modeSimple')}
+        </ThemedText>
+      </TouchableOpacity>
+      <TouchableOpacity
+        testID="mode-advanced-button"
+        onPress={() => {
+          hapticLightPress();
+          setShowAdvanced(true);
+        }}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityState={{ selected: showAdvanced }}
+        style={[
+          styles.modeSegment,
+          showAdvanced && [
+            styles.modeSegmentActive,
+            { backgroundColor: theme.colors.accent.primary },
+          ],
+        ]}
+      >
+        <ThemedText
+          size={11}
+          weight="medium"
+          variant={showAdvanced ? 'primary' : 'secondary'}
+          style={showAdvanced ? styles.modeSegmentActiveText : undefined}
+        >
+          {t('modeAdvanced')}
+        </ThemedText>
+      </TouchableOpacity>
+    </View>
+  );
+
+  /** Realtime Audio Pipeline banner (Stage 1 VAD ➔ Stage 2 Transcription). */
+  const renderSttPipeline = () => {
+    const vad = slots.vad;
+    const tx = slots.transcription;
+    const providerLabelFor = (slot: string, id?: string): string => {
+      if (!id) return slot === 'vad' ? 'Manual Push-to-Talk' : 'Select provider';
+      const found = providerOptionsForSlot(slot).find((p) => p.id === id);
+      return found?.name ?? id;
+    };
+    const vadModelLabel = vad?.capability?.model
+      ? String(vad.capability.model) === 'silero-vad'
+        ? 'Silero VAD'
+        : String(vad.capability.model)
+      : vad?.providerType
+        ? 'Silero VAD'
+        : 'Disabled';
+    const txModelLabel = tx?.capability?.model
+      ? String(tx.capability.model).includes('whisper')
+        ? 'FasterWhisper'
+        : String(tx.capability.model)
+      : 'FasterWhisper';
+
+    return (
+      <ThemedCard elevated style={styles.section}>
+        <SectionHeader title={t('sttPipelineTitle')} right={renderSttModeSwitch()} />
+        <View style={styles.sectionContent}>
+          <FormField
+            field={{
+              key: 'name',
+              label: t('configName'),
+              type: 'text',
+              required: true,
+              placeholder: t('configNamePlaceholder'),
+            }}
+            value={formValues.name ?? ''}
+            onChange={(_key, value) => handleModuleFieldChange('name', value)}
+            testID="config-name-stt"
+          />
+
+          <View style={styles.pipelineLabelRow}>
+            <ThemedText size={12} variant="secondary">
+              {t('pipelineStages')}
+            </ThemedText>
+            {Boolean(vad?.providerType) && (
+              <View
+                style={[
+                  styles.autoVadBadge,
+                  {
+                    borderColor: theme.colors.status.success + '66',
+                    backgroundColor: theme.colors.status.success + '1A',
+                  },
+                ]}
+              >
+                <ThemedText
+                  size={10}
+                  weight="medium"
+                  style={{ color: theme.colors.status.success }}
+                >
+                  {t('autoVadActive')}
+                </ThemedText>
+              </View>
+            )}
+          </View>
+
+          <View
+            style={[
+              styles.pipelineFlow,
+              {
+                backgroundColor: 'rgba(7, 11, 20, 0.75)',
+                borderColor: theme.colors.border.default,
+              },
+            ]}
+          >
+            <TouchableOpacity
+              testID="stt-stage-vad"
+              onPress={() => {
+                hapticLightPress();
+                setActiveSttStage('vad');
+              }}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityState={{ selected: activeSttStage === 'vad' }}
+              style={[
+                styles.pipelineNode,
+                {
+                  borderColor:
+                    activeSttStage === 'vad'
+                      ? theme.colors.accent.primary
+                      : theme.colors.border.default,
+                  backgroundColor:
+                    activeSttStage === 'vad'
+                      ? theme.colors.accent.primary + '24'
+                      : theme.colors.background.surface,
+                },
+              ]}
+            >
+              <ThemedText size={10} weight="bold" numberOfLines={1} style={styles.pipelineStageLabel}>
+                {t('stage1Label')}
+              </ThemedText>
+              <ThemedText size={12} weight="bold" numberOfLines={1} style={styles.pipelineStageValue}>
+                {`${vad?.providerType ? '🟢' : '⚪'} ${vadModelLabel}`}
+              </ThemedText>
+              <ThemedText size={10.5} numberOfLines={1} style={styles.pipelineStageVadCaption}>
+                {`${providerLabelFor('vad', vad?.providerType)} · ${
+                  vad?.capability?.threshold ?? 0.5
+                } thr`}
+              </ThemedText>
+            </TouchableOpacity>
+
+            <ThemedText size={14} weight="bold" style={styles.pipelineArrow}>
+              ➔
+            </ThemedText>
+
+            <TouchableOpacity
+              testID="stt-stage-transcription"
+              onPress={() => {
+                hapticLightPress();
+                setActiveSttStage('transcription');
+              }}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityState={{ selected: activeSttStage === 'transcription' }}
+              style={[
+                styles.pipelineNode,
+                {
+                  borderColor:
+                    activeSttStage === 'transcription'
+                      ? theme.colors.accent.primary
+                      : theme.colors.border.default,
+                  backgroundColor:
+                    activeSttStage === 'transcription'
+                      ? theme.colors.accent.primary + '24'
+                      : theme.colors.background.surface,
+                },
+              ]}
+            >
+              <ThemedText size={10} weight="bold" numberOfLines={1} style={styles.pipelineStageLabel}>
+                {t('stage2Label')}
+              </ThemedText>
+              <ThemedText size={12} weight="bold" numberOfLines={1} style={styles.pipelineStageValue}>
+                {`📝 ${txModelLabel}`}
+              </ThemedText>
+              <ThemedText size={10.5} numberOfLines={1} style={styles.pipelineStageTxCaption}>
+                {tx?.providerType
+                  ? `${providerLabelFor('transcription', tx.providerType)} · ${
+                      tx?.capability?.model || 'v3-turbo'
+                    }`
+                  : 'Select provider'}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+
+          <ThemedText size={11} variant="muted">
+            {t('sttPipelineHint')}
+          </ThemedText>
+        </View>
+      </ThemedCard>
+    );
+  };
 
   const renderModuleSection = () => {
     if (isSTT) {
+      // Realtime Stream Buffer & Overlap is an Advanced-only concern (Phase 3-6).
+      if (!showAdvanced) return null;
+      const bufferFields: FieldDefinition[] = [
+        {
+          key: 'main_stream_time_millis',
+          label: t('chunkWindow'),
+          type: 'number',
+          width: 'half',
+          placeholder: '2000',
+        },
+        {
+          key: 'transition_stream_time_millis',
+          label: t('transitionOverlap'),
+          type: 'number',
+          width: 'half',
+          placeholder: '1000',
+        },
+        {
+          key: 'max_buffer_count',
+          label: t('maxSpeechChunks'),
+          type: 'number',
+          placeholder: '5',
+          tooltip: t('sttMaxSpeechChunksHint'),
+        },
+      ];
+
       return (
-        <ThemedCard elevated accentStripe style={styles.section}>
-          <SectionHeader title="STT Settings" />
+        <ThemedCard elevated style={styles.section}>
+          <SectionHeader
+            title={t('sttBufferTitle')}
+            right={
+              <View style={styles.cyanBadge}>
+                <ThemedText size={10} weight="medium" style={{ color: '#38BDF8' }}>
+                  AutoVAD Window
+                </ThemedText>
+              </View>
+            }
+          />
           <View style={styles.sectionContent}>
-            {renderThemedInput(
-              t('mainStreamTime'),
-              formValues.main_stream_time_millis,
-              (text) => handleModuleFieldChange('main_stream_time_millis', text ? parseInt(text, 10) : null),
-              '2000',
-              'number-pad',
-            )}
-            {renderThemedInput(
-              t('transitionStreamTime'),
-              formValues.transition_stream_time_millis,
-              (text) => handleModuleFieldChange('transition_stream_time_millis', text ? parseInt(text, 10) : null),
-              '1000',
-              'number-pad',
-            )}
-            {renderThemedInput(
-              t('maxBufferCount'),
-              formValues.max_buffer_count,
-              (text) => handleModuleFieldChange('max_buffer_count', text ? parseInt(text, 10) : null),
-              '5',
-              'number-pad',
-            )}
+            {groupFieldsIntoRows(bufferFields).map((row) => (
+              <View
+                key={row.map((f) => f.key).join('-')}
+                style={row.length > 1 ? styles.twoColRow : undefined}
+              >
+                {row.map((field) => (
+                  <View key={field.key} style={row.length > 1 ? styles.halfCol : undefined}>
+                    <FormField
+                      field={field}
+                      value={formValues[field.key]}
+                      onChange={handleModuleFieldChange}
+                      testID={`module-field-${field.key}`}
+                    />
+                  </View>
+                ))}
+              </View>
+            ))}
           </View>
         </ThemedCard>
       );
     }
 
-    const fields = moduleConfig?.moduleSpecificFields ?? [];
+    // RAG's Embedding Concurrency renders inside the capability card footer.
+    if (moduleType === 'rag') return null;
+
+    const allFields = moduleConfig?.moduleSpecificFields ?? [];
+    // `output_type` is a legacy persisted scalar, intentionally hidden from the
+    // TTS behavior card (it still round-trips through save).
+    const fields =
+      moduleType === 'tts'
+        ? allFields.filter((field) => field.key !== 'output_type')
+        : allFields;
     if (fields.length === 0) return null;
+
+    const title =
+      moduleType === 'movement'
+        ? t('movementExecution')
+        : moduleType === 'vision'
+        ? t('imagePreprocessing')
+        : moduleType === 'cognition'
+        ? t('cognitionSettings')
+        : moduleType === 'tts'
+        ? t('moduleBehaviorTts')
+        : `${moduleConfig?.name ?? moduleType} Settings`;
+
     return (
-      <ThemedCard elevated accentStripe style={styles.section}>
-        <SectionHeader title="Module Settings" />
+      <ThemedCard elevated style={styles.section}>
+        <SectionHeader title={title} />
         <View style={styles.sectionContent}>
-          {fields.map((field) => (
-            <View key={field.key}>
-              <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-                {field.label}
-              </ThemedText>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    color: theme.colors.text.primary,
-                    borderColor: theme.colors.border.default,
-                    backgroundColor: theme.colors.background.base,
-                  },
-                ]}
-                value={formValues[field.key]?.toString() ?? ''}
-                onChangeText={(text) => {
-                  if (field.type === 'number') {
-                    handleModuleFieldChange(
-                      field.key,
-                      text === '' ? null : field.step && field.step < 1 ? parseFloat(text) : parseInt(text, 10),
-                    );
-                  } else {
-                    handleModuleFieldChange(field.key, text);
-                  }
-                }}
-                placeholder={field.placeholder}
-                keyboardType={field.type === 'number' ? 'decimal-pad' : 'default'}
-                placeholderTextColor={theme.colors.text.muted}
-              />
+          {groupFieldsIntoRows(fields).map((row) => (
+            <View
+              key={row.map((f) => f.key).join('-')}
+              style={row.length > 1 ? styles.twoColRow : undefined}
+            >
+              {row.map((field) => (
+                <View key={field.key} style={row.length > 1 ? styles.halfCol : undefined}>
+                  <FormField
+                    field={field}
+                    value={formValues[field.key]}
+                    onChange={handleModuleFieldChange}
+                    testID={`module-field-${field.key}`}
+                  />
+                </View>
+              ))}
             </View>
           ))}
         </View>
@@ -700,8 +1026,19 @@ export const ModuleConfigEditScreen: React.FC = () => {
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel="Save configuration"
               accessibilityRole="button"
+              testID="header-save-button"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                backgroundColor: 'rgba(236, 72, 153, 0.14)',
+                borderWidth: 1,
+                borderColor: 'rgba(236, 72, 153, 0.4)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
             >
-              <Icon name="check" size={24} color={theme.colors.accent.primary} />
+              <Icon name="check" size={18} color={theme.colors.accent.primary} />
             </TouchableOpacity>
           )
         }
@@ -725,93 +1062,8 @@ export const ModuleConfigEditScreen: React.FC = () => {
             />
           }
         >
-          {/* ── General Section ── */}
-          <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title="General" />
-            <View style={styles.sectionContent}>
-              {renderThemedInput(
-                t('configName'),
-                formValues.name,
-                (text) => handleModuleFieldChange('name', text),
-                'Enter config name',
-              )}
-            </View>
-          </ThemedCard>
-
-          {/* ── Simple / Advanced mode toggle ── */}
-          <ThemedCard elevated style={styles.section}>
-            <View style={styles.modeToggleRow}>
-              <View style={styles.modeToggleCopy}>
-                <ThemedText size={15} weight="medium">
-                  {t('modeLabel')}
-                </ThemedText>
-                <ThemedText size={12} variant="muted" style={styles.modeToggleHint}>
-                  {showAdvanced ? t('modeAdvancedHint') : t('modeSimpleHint')}
-                </ThemedText>
-              </View>
-
-              <View
-                style={[
-                  styles.modeSegmented,
-                  { backgroundColor: theme.colors.background.surface },
-                ]}
-              >
-                <TouchableOpacity
-                  style={[
-                    styles.modeSegment,
-                    !showAdvanced && [
-                      styles.modeSegmentActive,
-                      { backgroundColor: theme.colors.accent.primary },
-                    ],
-                  ]}
-                  onPress={() => {
-                    hapticLightPress();
-                    setShowAdvanced(false);
-                  }}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('modeSimple')}
-                  accessibilityState={{ selected: !showAdvanced }}
-                >
-                  <ThemedText
-                    size={13}
-                    weight="medium"
-                    variant={showAdvanced ? 'secondary' : 'primary'}
-                    style={!showAdvanced ? styles.modeSegmentActiveText : undefined}
-                  >
-                    {t('modeSimple')}
-                  </ThemedText>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.modeSegment,
-                    showAdvanced && [
-                      styles.modeSegmentActive,
-                      { backgroundColor: theme.colors.accent.primary },
-                    ],
-                  ]}
-                  onPress={() => {
-                    hapticLightPress();
-                    setShowAdvanced(true);
-                  }}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('modeAdvanced')}
-                  accessibilityState={{ selected: showAdvanced }}
-                >
-                  <ThemedText
-                    size={13}
-                    weight="medium"
-                    variant={showAdvanced ? 'primary' : 'secondary'}
-                    style={showAdvanced ? styles.modeSegmentActiveText : undefined}
-                  >
-                    {t('modeAdvanced')}
-                  </ThemedText>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ThemedCard>
+          {/* ── STT: Realtime Audio Pipeline (Config Name + stage flow) ── */}
+          {isSTT && renderSttPipeline()}
 
           {/* ── Provider → Account → Capability, per slot ── */}
           {renderSlots()}
@@ -820,21 +1072,48 @@ export const ModuleConfigEditScreen: React.FC = () => {
           {renderModuleSection()}
 
           {/* ── STT/VAD recorder test block (2-2) ── */}
-          {isSTT && slots.transcription?.providerType && (
-            <ThemedCard elevated accentStripe style={styles.section}>
-              <SectionHeader title={t('testConfiguration')} />
+          {isSTT && (
+            <ThemedCard elevated style={styles.section}>
+              <SectionHeader title={t('realtimeVadSttTestStudio')} />
               <View style={styles.sectionContent}>
                 <SttTestPanel enabled={!!slots.transcription?.providerType} entityId={entityId} />
               </View>
             </ThemedCard>
           )}
 
-          {/* ── TTS playback test block (2-3) ── */}
-          {moduleType === 'tts' && slots.provider?.providerType && (
-            <ThemedCard elevated accentStripe style={styles.section}>
-              <SectionHeader title={t('testConfiguration')} />
+          {/* ── TTS playback test block (2-3 / 3-5) ── */}
+          {moduleType === 'tts' && (
+            <ThemedCard elevated style={styles.section}>
+              <SectionHeader
+                title={t('voiceTestStudio')}
+                right={
+                  <View
+                    style={[
+                      styles.greenBadge,
+                      {
+                        borderColor: theme.colors.status.success + '66',
+                        backgroundColor: theme.colors.status.success + '1A',
+                      },
+                    ]}
+                  >
+                    <ThemedText
+                      size={10}
+                      weight="medium"
+                      style={{ color: theme.colors.status.success }}
+                    >
+                      {t('directEngineSynthesis')}
+                    </ThemedText>
+                  </View>
+                }
+              />
               <View style={styles.sectionContent}>
-                <TtsTestPanel entityId={entityId} />
+                <TtsTestPanel
+                  entityId={entityId}
+                  providerType={slots.provider?.providerType}
+                  accountId={slots.provider?.accountId}
+                  capability={slots.provider?.capability}
+                  paralinguisticTags={getSpeechOptions(selectedTtsModel)?.paralinguistic_tags}
+                />
               </View>
             </ThemedCard>
           )}
@@ -843,16 +1122,11 @@ export const ModuleConfigEditScreen: React.FC = () => {
           {!isCreate && (
             <ThemedCard
               elevated
-              style={[
-                styles.section,
-                styles.dangerSection,
-                { borderColor: theme.colors.status.error },
-              ]}
+              style={styles.section}
             >
               <SectionHeader
                 title="Danger Zone"
                 accentPip={false}
-                style={{ borderBottomColor: theme.colors.status.error + '44' }}
               />
               <View style={styles.sectionContent}>
                 <TouchableOpacity
@@ -933,12 +1207,63 @@ const styles = StyleSheet.create({
   section: {
     padding: 0,
     overflow: 'hidden',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   sectionContent: {
-    padding: 16,
-    gap: 12,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    paddingTop: 2,
+    gap: 10,
   },
+  twoColRow: { flexDirection: 'row', gap: 10 },
+  halfCol: { flex: 1 },
+  cyanBadge: {
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.35)',
+    backgroundColor: 'rgba(56, 189, 248, 0.14)',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  pipelineLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  autoVadBadge: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  greenBadge: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  pipelineFlow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 8,
+  },
+  pipelineNode: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 2,
+  },
+  pipelineStageLabel: { fontSize: 10, color: '#64748B' },
+  pipelineStageValue: { fontSize: 12 },
+  pipelineStageVadCaption: { fontSize: 10.5, color: '#E879F9' },
+  pipelineStageTxCaption: { fontSize: 10.5, color: '#38BDF8' },
+  pipelineArrow: { color: '#E879F9', fontSize: 14 },
   dangerSection: {
     borderWidth: 1.5,
   },

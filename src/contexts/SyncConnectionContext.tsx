@@ -67,7 +67,10 @@ interface SyncConnectionProviderProps {
 }
 
 export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ children, readOnly = false }) => {
-  const [isPaired, setIsPaired] = useState(false);
+  // Seed from the engine's published connection (if any) so an already-ready
+  // embedded engine does not flash the "not connected" overlay for one frame
+  // before the mount-time initialization resolves.
+  const [isPaired, setIsPaired] = useState(() => getEngineConnection() !== null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -92,7 +95,7 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isConnectingRef = useRef(false);
   const isReconnectingRef = useRef(false);
-  const isPairedRef = useRef(false);
+  const isPairedRef = useRef(getEngineConnection() !== null);
   const isConnectedRef = useRef(false);
   // True while a cert-verification decision is pending (the cert modal is the
   // intended UX) — suppresses connection-error toasts during TLS/cert churn.
@@ -206,8 +209,14 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     };
 
     const handleStateChange = (state: any) => {
-      setIsPairedSync(state.isPaired || false);
-      setIsConnectedSync(state.isConnected || false);
+      // `markConnected()` emits `state:changed` with the LEGACY QR-pairing flag,
+      // which embedded-engine boots never write (no `soulbits_paired` key) — so
+      // it reports `isPaired: false`. The embedded engine's availability is the
+      // real pairing signal; without `|| engineAvailable()` this handler wiped
+      // `isPaired` the moment the loopback WS connected and flipped the chat
+      // list back to the "not connected" overlay.
+      setIsPairedSync(Boolean(state.isPaired) || engineAvailable());
+      setIsConnectedSync(Boolean(state.isConnected));
     };
 
     // ── Read-only mode (second React root, e.g. floating chat overlay) ──

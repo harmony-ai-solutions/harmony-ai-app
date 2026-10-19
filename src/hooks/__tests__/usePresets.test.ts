@@ -10,16 +10,24 @@ import { resetPresetsCache, usePresets } from '../usePresets';
 import { engineApiClient } from '../../services/engine/EngineApiClient';
 
 jest.mock('../../services/engine/EngineApiClient', () => ({
-  engineApiClient: { listPresets: jest.fn() },
+  engineApiClient: {
+    listPresets: jest.fn(),
+    savePreset: jest.fn(),
+    deletePreset: jest.fn(),
+  },
 }));
 
 const listPresets = engineApiClient.listPresets as jest.Mock;
+const savePreset = engineApiClient.savePreset as jest.Mock;
+const deletePreset = engineApiClient.deletePreset as jest.Mock;
 
 const LIST = { presets: [{ name: 'creative', source: 'bundled', param_count: 2 }] };
 
 beforeEach(() => {
   resetPresetsCache();
   listPresets.mockReset();
+  savePreset.mockReset();
+  deletePreset.mockReset();
 });
 
 describe('usePresets', () => {
@@ -58,5 +66,42 @@ describe('usePresets', () => {
 
     await result.current.refresh();
     expect(listPresets).toHaveBeenCalledTimes(2);
+  });
+
+  it('savePreset calls the engine then refreshes the shared list', async () => {
+    listPresets.mockResolvedValue(LIST);
+    savePreset.mockResolvedValue({ name: 'fresh', status: 'created' });
+
+    const { result } = await renderHook(() => usePresets());
+    await waitFor(() => expect(listPresets).toHaveBeenCalledTimes(1));
+
+    await result.current.savePreset('fresh', 'temperature: 0.5\n');
+
+    expect(savePreset).toHaveBeenCalledWith('fresh', 'temperature: 0.5\n');
+    expect(listPresets).toHaveBeenCalledTimes(2);
+  });
+
+  it('deletePreset calls the engine then refreshes the shared list', async () => {
+    listPresets.mockResolvedValue(LIST);
+    deletePreset.mockResolvedValue({ name: 'creative', status: 'deleted' });
+
+    const { result } = await renderHook(() => usePresets());
+    await waitFor(() => expect(listPresets).toHaveBeenCalledTimes(1));
+
+    await result.current.deletePreset('creative');
+
+    expect(deletePreset).toHaveBeenCalledWith('creative');
+    expect(listPresets).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates a save failure without refetching', async () => {
+    listPresets.mockResolvedValue(LIST);
+    savePreset.mockRejectedValue(new Error('nope'));
+
+    const { result } = await renderHook(() => usePresets());
+    await waitFor(() => expect(listPresets).toHaveBeenCalledTimes(1));
+
+    await expect(result.current.savePreset('x', '')).rejects.toThrow('nope');
+    expect(listPresets).toHaveBeenCalledTimes(1);
   });
 });

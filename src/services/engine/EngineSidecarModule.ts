@@ -26,6 +26,7 @@
  */
 
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../../utils/logger';
 import type {
   EngineExitInfo,
@@ -211,9 +212,28 @@ export function nextEngineStatus(
 
 const eventListeners = new Set<(event: EngineSidecarEvent) => void>();
 
+const READY_CACHE_KEY = '@soulbits:engine_ready_cache';
+
+function fallbackPayloadFromBridge(raw: any): EngineReadyPayload | null {
+  const wsPort = Number(raw?.wsPort);
+  const adminPort = Number(raw?.adminPort);
+  if (!Number.isFinite(wsPort) || wsPort <= 0 || !Number.isFinite(adminPort) || adminPort <= 0) {
+    return null;
+  }
+  return {
+    wsPort,
+    wssPort: Number(raw?.wssPort) || 0,
+    adminPort,
+    bind: raw?.bind ?? '127.0.0.1',
+    pid: Number(raw?.pid) || -1,
+    dataDir: raw?.dataDir ?? '',
+    token: typeof raw?.token === 'string' ? raw.token : '',
+  };
+}
+
 function normalizeReady(raw: any): EngineSidecarEvent | null {
   const rawLine = typeof raw?.rawLine === 'string' ? raw.rawLine : '';
-  const parsed = parseReadyLine(rawLine);
+  const parsed = parseReadyLine(rawLine) ?? fallbackPayloadFromBridge(raw);
   if (!parsed) return null;
   return { type: 'ready', payload: parsed, rawLine };
 }
@@ -315,27 +335,69 @@ export async function startEngineSidecar(
   if (!native || typeof native.start !== 'function') {
     throw new Error('EngineSidecar native module unavailable');
   }
-  const result: NativeEngineStartResult = await native.start({
+  const nativeOpts = {
     dbKey: options.dbKey,
     dataDir: options.dataDir,
     logLevel: options.logLevel,
     maxRestarts: options.maxRestarts,
-  });
-  const parsed = parseReadyLine(typeof result?.rawLine === 'string' ? result.rawLine : '');
-  if (parsed) return parsed;
-  // Defensive fallback: an already-parsed bridge result (older/newer native).
-  const wsPort = Number(result?.wsPort);
-  const adminPort = Number(result?.adminPort);
-  if (Number.isFinite(wsPort) && wsPort > 0 && Number.isFinite(adminPort) && adminPort > 0) {
-    return {
-      wsPort,
-      wssPort: Number(result?.wssPort) || 0,
-      adminPort,
-      bind: result?.bind ?? '127.0.0.1',
-      pid: Number(result?.pid) || -1,
-      dataDir: result?.dataDir ?? '',
-      token: typeof result?.token === 'string' ? result.token : '',
-    };
+  };
+  let result: NativeEngineStartResult = await native.start(nativeOpts);
+  let parsed = parseReadyLine(typeof result?.rawLine === 'string' ? result.rawLine : '');
+  if (parsed) {
+    if (parsed.token) {
+      AsyncStorage.setItem(READY_CACHE_KEY, JSON.stringify(parsed)).catch(() => {});
+    }
+    return parsed;
+  }
+
+  // Defensive fallback: an already-running sidecar where an older native bridge
+  // resolved from `lastReady` with `rawLine: ""` and no `token` field.
+  const fallback = fallbackPayloadFromBridge(result);
+  if (fallback) {
+    if (!fallback.token) {
+      try {
+        const cachedRaw = await AsyncStorage.getItem(READY_CACHE_KEY);
+        if (cachedRaw) {
+          const cached = JSON.parse(cachedRaw) as EngineReadyPayload;
+          if (
+            cached?.token &&
+            cached.wsPort === fallback.wsPort &&
+            cached.adminPort === fallback.adminPort &&
+            (fallback.pid <= 0 || cached.pid === fallback.pid)
+          ) {
+            fallback.token = cached.token;
+          }
+        }
+      } catch {
+        // Ignore cache read failures.
+      }
+    }
+    // If still missing token from an already-running process with empty rawLine,
+    // cycle the sidecar once so it emits a fresh `ENGINE_READY` line with token.
+    if (
+      !fallback.token &&
+      result?.rawLine === '' &&
+      typeof native.stop === 'function'
+    ) {
+      try {
+        log.info('Sidecar already running without cached loopback token; cycling sidecar to recover token');
+        await native.stop();
+        result = await native.start(nativeOpts);
+        parsed = parseReadyLine(typeof result?.rawLine === 'string' ? result.rawLine : '');
+        if (parsed) {
+          if (parsed.token) {
+            AsyncStorage.setItem(READY_CACHE_KEY, JSON.stringify(parsed)).catch(() => {});
+          }
+          return parsed;
+        }
+      } catch (e) {
+        log.warn('Failed to cycle sidecar for token recovery:', e);
+      }
+    }
+    if (fallback.token) {
+      AsyncStorage.setItem(READY_CACHE_KEY, JSON.stringify(fallback)).catch(() => {});
+    }
+    return fallback;
   }
   throw new Error('EngineSidecar.start resolved without a parseable readiness payload');
 }

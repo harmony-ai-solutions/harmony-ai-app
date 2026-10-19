@@ -81,8 +81,20 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     OLLAMA_OPTION,
     LOCALAI_OPTION,
   ], hasGeneralSettings: true, moduleSpecificFields: [
-    { key: 'max_cognition_events', label: 'Max Cognition Events', type: 'number', placeholder: '10' },
-    { key: 'generate_expressions', label: 'Generate Expressions (0/1)', type: 'number', placeholder: '0 or 1' },
+    {
+      key: 'max_cognition_events',
+      label: 'Max Cognition Events',
+      type: 'number',
+      placeholder: '10',
+      tooltip: 'Number of recent interaction events evaluated per cognition cycle.',
+    },
+    {
+      key: 'generate_expressions',
+      label: 'Generate Expressions',
+      type: 'toggle',
+      toggleValueType: 'numeric',
+      tooltip: 'Emit emotional and facial expression updates during cognition turns.',
+    },
   ] },
   { id: 'movement', name: 'Movement', icon: 'run', description: 'Movement execution', providerOptions: [
     { id: 'openai', name: 'OpenAI', icon: 'api' },
@@ -96,8 +108,26 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     OLLAMA_OPTION,
     LOCALAI_OPTION,
   ], hasGeneralSettings: false, moduleSpecificFields: [
-    { key: 'startup_sync_timeout', label: 'Startup Sync Timeout', type: 'number', placeholder: '0' },
-    { key: 'execution_threshold', label: 'Execution Threshold', type: 'number', placeholder: '0' },
+    {
+      key: 'startup_sync_timeout',
+      label: 'Startup Sync Timeout (ms)',
+      type: 'number',
+      width: 'half',
+      disabledValue: 0,
+      placeholder: '0 ms (none)',
+      tooltip: 'Wait time for client sync at session start.',
+    },
+    {
+      key: 'execution_threshold',
+      label: 'Execution Threshold',
+      type: 'number',
+      width: 'half',
+      step: 0.05,
+      min: 0,
+      max: 1,
+      placeholder: '0.5',
+      tooltip: 'Minimum confidence threshold (0–1).',
+    },
   ] },
   { id: 'rag', name: 'RAG', icon: 'brain', description: 'Retrieval augmented generation', providerOptions: [
     { id: 'openai', name: 'OpenAI', icon: 'api' },
@@ -108,7 +138,14 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     OLLAMA_OPTION,
     LOCALAI_OPTION,
   ], hasGeneralSettings: false, moduleSpecificFields: [
-    { key: 'embedding_concurrency', label: 'Embedding Concurrency', type: 'number', placeholder: '0' },
+    {
+      key: 'embedding_concurrency',
+      label: 'Embedding Concurrency',
+      type: 'number',
+      disabledValue: 0,
+      placeholder: 'Auto (default)',
+      tooltip: 'Maximum parallel embedding requests (leave empty for engine default).',
+    },
   ] },
   { id: 'stt', name: 'STT', icon: 'microphone', description: 'Speech to text', providerOptions: STT_TRANSCRIPTION_PROVIDERS,
     hasGeneralSettings: false, moduleSpecificFields: [] },  // STT is special: two slots (transcription + VAD) — see STT_SLOT_PROVIDER_OPTIONS and ModuleConfigEditScreen
@@ -121,9 +158,10 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     { id: 'soulvoice', name: 'Soulvoice', icon: 'volume-high' },
     LOCALAI_OPTION,
   ], hasGeneralSettings: false, moduleSpecificFields: [
+    // Legacy scalar kept so saving a config never wipes it (hidden in the UI).
     { key: 'output_type', label: 'Output Type', type: 'text', placeholder: 'e.g. mp3, wav' },
-    { key: 'words_to_replace', label: 'Words to Replace', type: 'text', placeholder: 'Comma-separated words' },
-    { key: 'vocalize_nonverbal', label: 'Vocalize Nonverbal (0/1)', type: 'number', placeholder: '0 or 1' },
+    { key: 'vocalize_nonverbal', label: 'Vocalize Nonverbal Actions', type: 'toggle', toggleValueType: 'numeric', tooltip: 'Speak roleplay actions inside *asterisks*' },
+    { key: 'words_to_replace', label: 'Pronunciation Overrides (Words to Replace)', type: 'comma-list', placeholder: 'e.g. Soulbits=Soul-bits, Ciel=See-el' },
   ] },
   { id: 'vision', name: 'Vision', icon: 'eye', description: 'Vision processing', providerOptions: [
     { id: 'openai', name: 'OpenAI', icon: 'api' },
@@ -137,8 +175,22 @@ export const MODULE_TYPES: ModuleTypeConfig[] = [
     OLLAMA_OPTION,
     LOCALAI_OPTION,
   ], hasGeneralSettings: false, moduleSpecificFields: [
-    { key: 'resolution_width', label: 'Resolution Width', type: 'number', placeholder: '1024' },
-    { key: 'resolution_height', label: 'Resolution Height', type: 'number', placeholder: '1024' },
+    {
+      key: 'resolution_width',
+      label: 'Max Width (px)',
+      type: 'number',
+      width: 'half',
+      placeholder: '1024',
+      tooltip: 'Maximum image width in pixels.',
+    },
+    {
+      key: 'resolution_height',
+      label: 'Max Height (px)',
+      type: 'number',
+      width: 'half',
+      placeholder: '1024',
+      tooltip: 'Maximum image height in pixels.',
+    },
   ] },
   { id: 'imagination', name: 'Imagination', icon: 'lightbulb', description: 'Imagination engine', providerOptions: [
     { id: 'comfyui', name: 'ComfyUI', icon: 'palette' },

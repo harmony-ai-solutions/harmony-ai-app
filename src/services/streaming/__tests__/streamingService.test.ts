@@ -172,6 +172,57 @@ describe('startAudioStream — FETCH → RESULT round-trip', () => {
   });
 });
 
+describe('startAudioStream — AutoVAD voice activity', () => {
+  it('forwards STT_SPEECH_STARTED / STT_SPEECH_STOPPED to onVoiceActivity', async () => {
+    const onVoiceActivity = jest.fn();
+    await startAudioStream({ ...DEFAULT_OPTS, onVoiceActivity });
+
+    capturedHandler!({ event_type: 'STT_SPEECH_STARTED', status: 'NEW', payload: {} });
+    capturedHandler!({ event_type: 'STT_SPEECH_STOPPED', status: 'NEW', payload: {} });
+
+    expect(onVoiceActivity).toHaveBeenNthCalledWith(1, true, expect.any(Number));
+    expect(onVoiceActivity).toHaveBeenNthCalledWith(2, false, expect.any(Number));
+  });
+
+  it('ignores voice activity for another entity id', async () => {
+    const onVoiceActivity = jest.fn();
+    await startAudioStream({ ...DEFAULT_OPTS, onVoiceActivity });
+
+    capturedHandler!({
+      event_type: 'STT_SPEECH_STARTED',
+      entity_id: 'someone-else',
+      payload: {},
+    });
+    capturedHandler!({
+      event_type: 'STT_SPEECH_STARTED',
+      entity_id: 'claire',
+      payload: {},
+    });
+
+    expect(onVoiceActivity).toHaveBeenCalledTimes(1);
+    expect(onVoiceActivity).toHaveBeenCalledWith(true, expect.any(Number));
+  });
+
+  it('is optional — no subscriber means no crash', async () => {
+    await startAudioStream({ ...DEFAULT_OPTS });
+    expect(() =>
+      capturedHandler!({ event_type: 'STT_SPEECH_STOPPED', payload: {} }),
+    ).not.toThrow();
+  });
+
+  it('surfaces a throwing onVoiceActivity handler through onError', async () => {
+    const onError = jest.fn();
+    const onVoiceActivity = jest.fn(() => {
+      throw new Error('handler boom');
+    });
+    await startAudioStream({ ...DEFAULT_OPTS, onError, onVoiceActivity });
+
+    capturedHandler!({ event_type: 'STT_SPEECH_STARTED', payload: {} });
+
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'handler boom' }));
+  });
+});
+
 describe('startAudioStream — result fan-out + teardown', () => {
   it('fans out STT_OUTPUT_TEXT to onTranscript', async () => {
     const onTranscript = jest.fn();

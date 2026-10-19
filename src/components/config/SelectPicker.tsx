@@ -65,13 +65,14 @@ export const SelectPicker: React.FC<SelectPickerProps> = ({
         activeOpacity={0.65}
       >
         <ThemedText
-          size={15}
+          size={13.5}
+          numberOfLines={1}
           variant={isPlaceholder ? 'muted' : 'primary'}
           style={styles.rowText}
         >
           {displayText}
         </ThemedText>
-        <Icon name="chevron-down" size={18} color={theme.colors.text.muted} />
+        <Icon name="chevron-down" size={16} color={theme.colors.text.muted} />
       </TouchableOpacity>
 
       <Modal
@@ -201,10 +202,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    minHeight: 44,
+    borderRadius: 9,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    minHeight: 38,
+    gap: 6,
   },
   rowText: {
     flex: 1,
