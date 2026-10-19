@@ -1,12 +1,13 @@
 /**
  * AppLogScreen — the on-device viewer for the app's own log stream.
  *
- * Mirrors the EngineLogScreen conventions: a chronological tail with follow/
- * pause, a level filter row, text search, and share/copy/clear header actions.
- * Backed by the in-memory ring buffer in `src/utils/appLogs.ts` (captured by
- * the logger's capture transport). Export text carries a diagnostics header
- * (app version, engine contract version, platform/OS, device model, app
- * uptime, entry count + time range).
+ * Mirrors the EngineLogScreen conventions: a newest-first live view with
+ * follow/pause, a level filter row, text search, and share/copy/clear header
+ * actions. Backed by the in-memory ring buffer in `src/utils/appLogs.ts`
+ * (captured by the logger's capture transport). Export text stays chronological
+ * (oldest → newest) and carries a diagnostics header (app version, engine
+ * contract version, platform/OS, device model, app uptime, entry count + time
+ * range).
  *
  * Entry point: Settings → Help & Support → "App logs".
  */
@@ -82,14 +83,17 @@ function appLogIdentity(entry: AppLogEntry): string {
  * message) into a single row, keeping the NEWEST entry of the run as the
  * representative — mirroring EngineLogScreen's `applyStreamEvent` newest-wins
  * dedup. Non-adjacent identical entries stay separate (runs are contiguous).
- * Order is preserved (oldest → newest), matching the chronological tail.
+ * Returns rows NEWEST → OLDEST so the viewer (and every render) shows the latest
+ * activity at the top, matching EngineLogScreen.
  */
 export function buildAppLogRows(entries: readonly AppLogEntry[]): AppLogRow[] {
   const rows: AppLogRow[] = [];
-  for (const entry of entries) {
+  // Walk newest → oldest: the first entry of a run is its newest representative.
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i];
     const head = rows[rows.length - 1];
     if (head && appLogIdentity(head.entry) === appLogIdentity(entry)) {
-      rows[rows.length - 1] = { entry, count: head.count + 1, ids: [...head.ids, entry.id] };
+      rows[rows.length - 1] = { entry: head.entry, count: head.count + 1, ids: [entry.id, ...head.ids] };
     } else {
       rows.push({ entry, count: 1, ids: [entry.id] });
     }
@@ -161,8 +165,13 @@ export const AppLogScreen: React.FC = () => {
   // Build rows from the raw buffer (collapsing consecutive duplicates) before
   // filtering, so a dedup count survives level/search filtering.
   const visible = useMemo(() => filterAppLogRows(buildAppLogRows(raw), filter), [raw, filter]);
-  // Export/copy operate on the representative entries of the visible rows.
-  const visibleEntries = useMemo(() => visible.map(row => row.entry), [visible]);
+  // Export/copy operate on the representative entries of the visible rows,
+  // re-ordered oldest → newest so the shared diagnostics reads top-down (the
+  // list itself is newest-first).
+  const exportEntries = useMemo(
+    () => [...visible.map(row => row.entry)].reverse(),
+    [visible],
+  );
 
   const levelColors = useMemo(() => {
     if (!theme) return {} as Record<string, string>;
@@ -176,18 +185,18 @@ export const AppLogScreen: React.FC = () => {
 
   const share = useCallback(async () => {
     try {
-      const text = buildAppDiagnosticsReport(visibleEntries);
+      const text = buildAppDiagnosticsReport(exportEntries);
       await Share.share({ title: t('title'), message: text });
     } catch (err) {
       log.warn('App-log share failed:', err);
       showToast(t('shareFailedToast'));
     }
-  }, [visibleEntries, t, showToast]);
+  }, [exportEntries, t, showToast]);
 
   const copy = useCallback(async () => {
-    const ok = await copyAppLogEntries(visibleEntries);
+    const ok = await copyAppLogEntries(exportEntries);
     showToast(ok ? t('copiedToast') : t('copyFailedToast'));
-  }, [visibleEntries, t, showToast]);
+  }, [exportEntries, t, showToast]);
 
   /** Copy one row's line to the clipboard (long-press). Never throws. */
   const copyEntry = useCallback((row: AppLogRow) => {
@@ -371,7 +380,8 @@ export const AppLogScreen: React.FC = () => {
         windowSize={11}
         removeClippedSubviews
         onContentSizeChange={() => {
-          if (following) listRef.current?.scrollToEnd({ animated: false });
+          // Newest-first: follow pins the view to the top (like EngineLogScreen).
+          if (following) listRef.current?.scrollToOffset({ offset: 0, animated: false });
         }}
         ListEmptyComponent={
           <View style={styles.center}>

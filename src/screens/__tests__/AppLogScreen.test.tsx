@@ -75,7 +75,7 @@ jest.mock('../../components/themed/ScreenHeader', () => {
   return { __esModule: true, ScreenHeader: ({ right, children, ...props }: any) => React.createElement(View, props, right, children) };
 });
 
-const mockBuildReport = jest.fn(() => 'APP-REPORT');
+const mockBuildReport = jest.fn((..._args: unknown[]) => 'APP-REPORT');
 const mockCopyEntries = jest.fn(() => Promise.resolve(true));
 jest.mock('../../services/diagnostics/appDiagnostics', () => ({
   buildAppDiagnosticsReport: (...args: unknown[]) => (mockBuildReport as jest.Mock)(...args),
@@ -102,12 +102,18 @@ function seed() {
 }
 
 describe('AppLogScreen render', () => {
-  it('renders the buffer entries chronologically', async () => {
+  it('renders the buffer entries newest-first', async () => {
     seed();
-    const { getByText, getByTestId } = await render(<AppLogScreen />);
+    const { getByText, getByTestId, getAllByTestId } = await render(<AppLogScreen />);
     expect(getByText('hello world')).toBeTruthy();
     expect(getByText('boom failure')).toBeTruthy();
     expect(getByTestId('app-log-count')).toBeTruthy();
+
+    const [older, newer] = appLogBuffer.getEntries();
+    expect(getAllByTestId(/^app-log-row-\d+$/).map(row => row.props.testID)).toEqual([
+      `app-log-row-${newer.id}`,
+      `app-log-row-${older.id}`,
+    ]);
   });
 
   it('shows the empty state when the buffer is empty', async () => {
@@ -157,6 +163,10 @@ describe('AppLogScreen actions', () => {
     const { getByTestId } = await render(<AppLogScreen />);
     fireEvent.press(getByTestId('app-log-share'));
     await waitFor(() => expect(mockBuildReport).toHaveBeenCalled());
+    // The viewer is newest-first, but the exported report stays chronological.
+    const [older, newer] = appLogBuffer.getEntries();
+    const sharedEntries = mockBuildReport.mock.calls[0][0] as AppLogEntry[];
+    expect(sharedEntries.map(e => e.id)).toEqual([older.id, newer.id]);
     await waitFor(() => expect(shareSpy).toHaveBeenCalledWith(expect.objectContaining({ message: 'APP-REPORT' })));
     shareSpy.mockRestore();
   });
@@ -190,11 +200,20 @@ describe('buildAppLogRows', () => {
       entry({ id: 3, level: 'warn', namespace: null, message: 'b' }),
     ]);
     expect(rows).toHaveLength(2);
-    expect(rows[0].entry.id).toBe(2); // newest entry of the run
-    expect(rows[0].count).toBe(2);
-    expect(rows[0].ids).toEqual([1, 2]);
-    expect(rows[1].count).toBe(1);
-    expect(rows[1].entry.id).toBe(3);
+    expect(rows[0].entry.id).toBe(3); // newest row first
+    expect(rows[0].count).toBe(1);
+    expect(rows[1].entry.id).toBe(2); // newest entry of the duplicate run
+    expect(rows[1].count).toBe(2);
+    expect(rows[1].ids).toEqual([1, 2]);
+  });
+
+  it('returns rows newest → oldest for display', () => {
+    const rows = buildAppLogRows([
+      entry({ id: 1, message: 'a' }),
+      entry({ id: 2, message: 'b' }),
+      entry({ id: 3, message: 'c' }),
+    ]);
+    expect(rows.map(r => r.entry.id)).toEqual([3, 2, 1]);
   });
 
   it('ignores the timestamp when collapsing (keeps the newest)', () => {
