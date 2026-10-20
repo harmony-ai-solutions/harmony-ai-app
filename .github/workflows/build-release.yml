@@ -20,6 +20,14 @@ on:
         description: 'Also build the iOS IPA matrix (macOS runners bill at 10× the Linux minute rate). Release tags always build iOS.'
         type: boolean
         default: false
+      build_environments:
+        description: 'Which environments to build (Android APKs; the iOS matrix follows when build_ios is enabled). Release tags always build both. The prod channel manifest stays tag-only — a prod-only dispatch uploads the versioned APK without advertising it to prod installs.'
+        type: choice
+        options:
+          - dev
+          - prod
+          - both
+        default: dev
       publish_latest:
         description: 'Also publish the channel manifest (app/dev/latest.json) so installed dev builds see this release. Tag runs always publish both channel manifests.'
         type: boolean
@@ -79,7 +87,8 @@ jobs:
   # ───────────────────────────────────────────────────────────────────
 
   # ──────────────────────────────────────────────
-  # Job 1: Build Android APK (matrix: dev, prod)
+  # Job 1: Build Android APK (matrix: dev, prod — dispatch-selectable
+  # via build_environments; tags and 'both' build every entry)
   # ──────────────────────────────────────────────
   build-android:
     name: Build Android APK (${{ matrix.environment }})
@@ -89,7 +98,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: [dev, prod]
+        environment: ${{ fromJSON((github.event_name == 'push' || inputs.build_environments == 'both') && '["dev","prod"]' || (inputs.build_environments == 'prod' && '["prod"]') || '["dev"]') }}
 
     steps:
       - name: Checkout code
@@ -242,7 +251,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: [dev, prod]
+        environment: ${{ fromJSON((github.event_name == 'push' || inputs.build_environments == 'both') && '["dev","prod"]' || (inputs.build_environments == 'prod' && '["prod"]') || '["dev"]') }}
 
     steps:
       - name: Checkout code
@@ -368,7 +377,9 @@ jobs:
   # ──────────────────────────────────────────────
   # Per-channel manifests (owner ruling 2026-10-17): each channel reads ONLY
   # its own file, so dev dispatches are invisible to prod installs.
-  #   - dispatch with publish_latest=true → writes app/dev/latest.json ONLY
+  #   - dispatch with publish_latest=true → writes app/dev/latest.json ONLY,
+  #     and only when dev was built (build_environments=dev|both; a prod-only
+  #     dispatch logs a notice instead and publishes no channel manifest)
   #   - tag v*                              → writes BOTH dev and prod files
   # SINGLE WRITER: only this job writes these files. It needs build-android
   # only (URLs are deterministic, not artifact-derived), so a dispatch that
@@ -410,6 +421,9 @@ jobs:
       - name: Write channel manifests (app/<env>/latest.json)
         env:
           RELEASES_BASE_URL: https://download.soulbits.app
+          # Mirror of the build matrices' selector: which environments this
+          # run actually built ('both' on tags and for build_environments=both).
+          BUILT_ENVIRONMENTS: ${{ (github.event_name == 'push' || inputs.build_environments == 'both') && 'both' || (inputs.build_environments == 'prod' && 'prod') || 'dev' }}
         run: |
           set -euo pipefail
           RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -434,15 +448,23 @@ jobs:
             "ios":     { "url": "${RELEASES_BASE_URL}/app/${VERSION}/prod/harmony-ai-app-${VERSION}-ios.ipa" }
           }
           JSON
-          cat app-dev-latest.json
-          aws s3 cp app-dev-latest.json "s3://soulbits-releases/app/dev/latest.json"
-          echo "✅ dev manifest: https://download.soulbits.app/app/dev/latest.json"
+          # Dev channel manifest: only when the dev APK was actually built in
+          # this run — a prod-only dispatch must not link a non-existent dev APK.
+          if [[ "${BUILT_ENVIRONMENTS}" == "both" || "${BUILT_ENVIRONMENTS}" == "dev" ]]; then
+            cat app-dev-latest.json
+            aws s3 cp app-dev-latest.json "s3://soulbits-releases/app/dev/latest.json"
+            echo "✅ dev manifest: https://download.soulbits.app/app/dev/latest.json"
+          else
+            echo "::notice::dev not built in this run — skipping the dev channel manifest"
+          fi
           # Prod manifest: tag releases ONLY — a dev dispatch must never
           # advertise versions to prod-channel installs.
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             cat app-prod-latest.json
             aws s3 cp app-prod-latest.json "s3://soulbits-releases/app/prod/latest.json"
             echo "✅ prod manifest: https://download.soulbits.app/app/prod/latest.json"
+          elif [[ "${BUILT_ENVIRONMENTS}" == "prod" ]]; then
+            echo "Dispatch run: app/prod/latest.json intentionally NOT published (the prod APK was built and uploaded versioned, but the prod channel manifest stays tag-only by design — prod installs are not advertised to)"
           else
             echo "Dispatch run: app/prod/latest.json intentionally NOT published"
           fi
