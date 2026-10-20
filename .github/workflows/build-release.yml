@@ -44,7 +44,7 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      - run: npm ci
+      - run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Type-check
         run: npx tsc --noEmit
@@ -107,8 +107,20 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # NOTE: deliberately NOT using setup-java's `cache: gradle` — Gradle's
+      # docs warn that the two caching mechanisms interfere. setup-gradle owns
+      # the dependency + build cache for this job.
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # Dispatch runs land on a feature branch, not the default branch —
+          # the action is restore-only off the default branch by default, so
+          # allow writes here or the cache never warms.
+          cache-read-only: false
+          cache-cleanup: on-success
+
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Set VERSION variable
         run: |
@@ -139,14 +151,23 @@ jobs:
           echo "ENGINE_VERSION=${ENGINE_VERSION}" >> $GITHUB_ENV
           echo "::notice::Provisioning Soulbits Engine ${ENGINE_VERSION}"
 
+      - name: Restore engine sidecar
+        # vendorEngineSidecar skips downloads when the .so files already exist
+        # (app/build.gradle: dest.exists() check) — restoring this dir keyed on
+        # the pinned engine version skips the 2× ~60 MB CloudFront downloads.
+        uses: actions/cache@v4
+        with:
+          path: android/app/src/main/jniLibs
+          key: engine-sidecar-${{ env.ENGINE_VERSION }}
+
       - name: Build ${{ matrix.environment }} release APK
         working-directory: android
         run: |
           if [ -z "$GOOGLE_WEB_CLIENT_ID" ]; then echo "::error::GOOGLE_WEB_CLIENT_ID_DEV/_PROD variable not set"; exit 1; fi
-          # Update versionName in build.gradle
-          sed -i "s/versionName \"[^\"]*\"/versionName \"${VERSION}\"/" app/build.gradle
           chmod +x gradlew
           ./gradlew assemble${{ matrix.environment == 'dev' && 'Dev' || 'Prod' }}Release \
+            -PVERSION_NAME="${VERSION}" \
+            -PMETRO_MAX_WORKERS=2 \
             -PRELEASE_KEYSTORE_FILE=release.keystore \
             -PRELEASE_KEYSTORE_PASSWORD="${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}" \
             -PRELEASE_KEY_ALIAS="${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}" \
@@ -185,10 +206,10 @@ jobs:
 
       - name: Update latest APK pointer
         run: |
-          APK_PATH="android/app/build/outputs/apk/${{ matrix.environment }}/release/app-${{ matrix.environment }}-release.apk"
+          S3_VERSIONED="s3://soulbits-releases/app/${VERSION}/${{ matrix.environment }}/harmony-ai-app-${VERSION}-android.apk"
           S3_LATEST="s3://soulbits-releases/app/latest/${{ matrix.environment }}/harmony-ai-app-android.apk"
-          echo "Updating latest pointer: ${S3_LATEST}"
-          aws s3 cp "${APK_PATH}" "${S3_LATEST}"
+          echo "Updating latest pointer (server-side copy): ${S3_LATEST}"
+          aws s3 cp "${S3_VERSIONED}" "${S3_LATEST}"
 
       - name: Print download URLs
         run: |
@@ -225,7 +246,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Resolve engine version
         run: |

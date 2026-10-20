@@ -45,6 +45,17 @@ react {
     //   A list of extra flags to pass to the 'bundle' commands.
     //   See https://github.com/react-native-community/cli/blob/main/docs/commands.md#bundle
     // extraPackagerArgs = []
+    //
+    // Metro worker cap (CI only). GitHub's ubuntu-latest runners are 2 vCPU
+    // and Metro defaults to ~half the cores, so the release bundle gets 1
+    // worker anyway — passing 2 explicitly keeps the bundle from starving the
+    // Gradle daemon, and the flag is opt-in so local builds keep full
+    // parallelism. The RN gradle plugin appends these tokens to the
+    // `react-native bundle` CLI (BundleHermesCTask), so --max-workers reaches
+    // Metro's bundler.
+    if (project.hasProperty("METRO_MAX_WORKERS")) {
+        extraPackagerArgs = ["--max-workers", project.property("METRO_MAX_WORKERS").toString()]
+    }
 
     /* Hermes Commands */
     //   The hermes compiler command to run. By default it is 'hermesc'
@@ -143,7 +154,11 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "0.4.13"
+        // CI passes -PVERSION_NAME=<tag/input> (see .github/workflows/
+        // build-release.yml) instead of rewriting this file with sed. The
+        // fallback stays the repo's current release — bump it here on each
+        // manual release so local/unflagged builds keep a sane version.
+        versionName project.findProperty("VERSION_NAME") ?: "0.4.13"
 
         resValue "string", "build_config_package", "ai.soulbits.chat"
     }
