@@ -206,10 +206,19 @@ jobs:
 
       - name: Update latest APK pointer
         run: |
+          APK_PATH="android/app/build/outputs/apk/${{ matrix.environment }}/release/app-${{ matrix.environment }}-release.apk"
           S3_VERSIONED="s3://soulbits-releases/app/${VERSION}/${{ matrix.environment }}/harmony-ai-app-${VERSION}-android.apk"
           S3_LATEST="s3://soulbits-releases/app/latest/${{ matrix.environment }}/harmony-ai-app-android.apk"
-          echo "Updating latest pointer (server-side copy): ${S3_LATEST}"
-          aws s3 cp "${S3_VERSIONED}" "${S3_LATEST}"
+          # Preferred: server-side CopyObject of the already-uploaded versioned
+          # APK (no ~75 MB re-upload). --copy-props metadata-directive keeps
+          # content-type/metadata but never touches object tagging — the CLI's
+          # tag-preserving default needs s3:GetObjectTagging/PutObjectTagging,
+          # which the ci-releases-uploader IAM user does not have.
+          if ! aws s3 cp "${S3_VERSIONED}" "${S3_LATEST}" --copy-props metadata-directive; then
+            echo "::warning::Server-side latest-pointer copy failed — falling back to a local re-upload."
+            echo "Updating latest pointer (local upload): ${S3_LATEST}"
+            aws s3 cp "${APK_PATH}" "${S3_LATEST}"
+          fi
 
       - name: Print download URLs
         run: |
