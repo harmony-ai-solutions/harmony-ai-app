@@ -10,6 +10,15 @@ jest.mock('../../../utils/logger', () => ({
   createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
 }));
 
+// Default lifecycle source (dropped only when a test injects `appState`).
+jest.mock('react-native-applifecycle', () => ({
+  __esModule: true,
+  AppLifecycle: {
+    addEventListener: jest.fn(() => ({ remove: jest.fn() })),
+    currentState: 'active',
+  },
+}));
+
 import {
   OutreachNotificationService,
   composeLocalNotification,
@@ -140,6 +149,14 @@ describe('OutreachNotificationService — URL + parsing', () => {
 });
 
 describe('OutreachNotificationService — AppState policy', () => {
+  it('defaults to AppLifecycle as the app-state source', () => {
+    const service = new OutreachNotificationService({ getConnection: () => null });
+    const { AppLifecycle } = jest.requireMock('react-native-applifecycle');
+    // Real ON_STOP semantics on Android (a paused-but-visible volume overlay
+    // must not flip the stream into its background policy).
+    expect((service as any).appState).toBe(AppLifecycle);
+  });
+
   it('foreground: surfaces in-app only, never posts an OS notification', async () => {
     const { service, events, posted } = makeService({ appState: 'active' });
     await service.handleEvent(makeEvent());

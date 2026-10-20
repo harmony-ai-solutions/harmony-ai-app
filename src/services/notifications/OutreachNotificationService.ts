@@ -48,8 +48,8 @@
  * Singleton — use {@link attachOutreachNotifications} at boot.
  */
 
-import { AppState } from 'react-native';
 import type { AppStateStatus } from 'react-native';
+import { AppLifecycle } from 'react-native-applifecycle';
 import { createLogger } from '../../utils/logger';
 import { getEngineConnection, onEngineConnectionChange } from '../engine/EngineService';
 import type { EngineConnection } from '../engine/EngineService';
@@ -113,7 +113,7 @@ export interface OutreachNotificationDeps {
   wsFactory?: (url: string) => WebSocketLike;
   /** Admin-key fallback for desktop/self-hosted binds (query param). */
   getAdminApiKey?: () => string;
-  /** AppState source (defaults to RN `AppState`). */
+  /** AppState source (defaults to `AppLifecycle` — see the constructor). */
   appState?: OutreachAppStateSource;
   /** Shared dedupe store (defaults to the process-wide singleton). */
   dedupe?: OutreachDedupe;
@@ -198,7 +198,13 @@ export class OutreachNotificationService {
     this.wsFactory =
       deps.wsFactory ?? ((url: string) => new WebSocket(url) as unknown as WebSocketLike);
     this.getAdminApiKey = deps.getAdminApiKey ?? (() => '');
-    this.appState = deps.appState ?? (AppState as unknown as OutreachAppStateSource);
+    // Default source = AppLifecycle, NOT RN AppState: on Android RN reports
+    // `background` on any Activity onPause, so a paused-but-VISIBLE overlay
+    // (the volume HUD during playback) flipped this stream into its
+    // background policy and churned it. AppLifecycle forwards androidx
+    // ON_STOP (real "app not visible") and falls back to RN AppState on iOS.
+    // The dep stays injectable (tests pass their own AppState-shaped mock).
+    this.appState = deps.appState ?? (AppLifecycle as unknown as OutreachAppStateSource);
     this.dedupe = deps.dedupe ?? outreachDedupe;
     this.getTransport = deps.getTransport ?? getNotificationTransport;
     this.getHideContent = deps.getHideContent ?? getHideContentOnLockScreen;

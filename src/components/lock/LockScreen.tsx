@@ -12,9 +12,9 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  AppState,
   AppStateStatus,
 } from 'react-native';
+import { AppLifecycle } from 'react-native-applifecycle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -96,7 +96,7 @@ export const LockScreen: React.FC = () => {
     let cancelled = false;
     const timer = setTimeout(() => {
       if (cancelled) return;
-      if (AppState.currentState !== 'active') return; // not foregrounded yet
+      if (AppLifecycle.currentState !== 'active') return; // not foregrounded yet
       setBiometricAttempted(true);
       handleBiometricUnlock();
     }, 350);
@@ -110,6 +110,11 @@ export const LockScreen: React.FC = () => {
   // Re-arm the biometric auto-prompt on a TRUE resume (background → active).
   // The OS biometric prompt only ever causes active→inactive→active, never a
   // 'background' state, so this never double-prompts during a normal unlock.
+  //
+  // Source = AppLifecycle, NOT RN AppState: on Android RN's `background` fires
+  // on any Activity onPause, so a paused-but-VISIBLE overlay (volume HUD) would
+  // re-arm the prompt while the lock screen is mounted. AppLifecycle reports a
+  // real ON_STOP leave instead (on iOS it falls back to RN AppState).
   useEffect(() => {
     const handleChange = (next: AppStateStatus) => {
       if (next === 'background') {
@@ -141,7 +146,7 @@ export const LockScreen: React.FC = () => {
         }
       }
     };
-    const subscription = AppState.addEventListener('change', handleChange);
+    const subscription = AppLifecycle.addEventListener('change', handleChange);
     return () => {
       subscription.remove();
     };

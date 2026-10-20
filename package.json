@@ -51,6 +51,7 @@
     "react": "^19.2.7",
     "react-i18next": "^17.0.9",
     "react-native": "^0.86.0",
+    "react-native-applifecycle": "^1.0.0",
     "react-native-audio-record": "^0.2.2",
     "react-native-biometrics": "^3.0.1",
     "react-native-camera-kit": "^18.0.1",

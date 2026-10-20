@@ -153,6 +153,20 @@ jest.mock('react-native-device-info', () => ({
   getSystemVersion: jest.fn(() => '17.0'),
 }));
 
+// Mock react-native-applifecycle (android lifecycle bridge). Its dist is ESM
+// and its module init touches a native module, so tests always get this inert
+// default; lifecycle-sensitive suites override it per-suite with controllable
+// handlers. `Platform` is mocked as iOS here, so RN AppState is the library's
+// own fallback anyway.
+jest.mock('react-native-applifecycle', () => ({
+  __esModule: true,
+  AppLifecycle: {
+    addEventListener: jest.fn(() => ({ remove: jest.fn() })),
+    currentState: 'active',
+    isAvailable: true,
+  },
+}));
+
 // Mock react-native-track-player
 jest.mock('react-native-track-player', () => ({
   State: {

@@ -40,9 +40,12 @@ jest.mock('react-i18next', () => ({
   }),
 }));
 
-jest.mock('../../../utils/logger', () => ({
-  createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
-}));
+jest.mock('../../../utils/logger', () => {
+  // One shared logger object per module instance so tests can assert on warns
+  // (the factory runs lazily, hence no out-of-scope references here).
+  const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
+  return { createLogger: () => logger };
+});
 
 jest.mock('../../../utils/haptics', () => ({ hapticLightPress: jest.fn() }));
 
@@ -171,6 +174,7 @@ import {
   activateKeepScreenOn,
   deactivateKeepScreenOn,
 } from '../../../services/keepScreenOn';
+import { makeWavFixture } from '../../../utils/__tests__/audioFixtures';
 
 const mockPlayAudio = (AudioPlayer as any).playAudio as jest.Mock;
 const mockPlayBase64Audio = (AudioPlayer as any).playBase64Audio as jest.Mock;
@@ -186,6 +190,9 @@ const mockShareOpen = (Share as any).open as jest.Mock;
 const mockActivateKeepAwake = activateKeepScreenOn as jest.Mock;
 const mockDeactivateKeepAwake = deactivateKeepScreenOn as jest.Mock;
 const mockTestTtsSpeech = engineApiClient.testTtsSpeech as jest.Mock;
+const mockLogWarn = (jest.requireMock('../../../utils/logger') as {
+  createLogger: () => { warn: jest.Mock };
+}).createLogger().warn;
 mockRunTest = runTest as jest.Mock;
 
 async function flush() {
@@ -557,6 +564,121 @@ describe('TtsTestPanel — player row, download and completion', () => {
     mockDeactivateKeepAwake.mockClear();
     await utils.unmount();
     expect(mockDeactivateKeepAwake).toHaveBeenCalled();
+  });
+});
+
+describe('TtsTestPanel — actual audio format (bytes win over the declared label)', () => {
+  // The TTS backend declares mp3 but returns WAV bytes; the panel must follow
+  // the bytes for the mime, badge, filename and duration parse.
+  const wavFixture = makeWavFixture({ durationSeconds: 2 });
+  const wavBase64 = wavFixture.base64;
+
+  it('direct synthesis declared mp3 + WAV bytes: mime, badge, filename, duration all WAV', async () => {
+    mockTestTtsSpeech.mockResolvedValue({
+      status: 'ok',
+      audio_base64: wavBase64,
+      format: 'mp3',
+    });
+
+    const utils = await render(
+      <TtsTestPanel providerType="soulvoice" capability={{ format: 'mp3' }} />,
+    );
+    await flush();
+
+    // Before synthesis the badge shows the DECLARED capability format.
+    expect(utils.getByText('MP3')).toBeTruthy();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    // Player + duration parser get the ACTUAL mime.
+    expect(mockPlayBase64Audio).toHaveBeenCalledWith(wavBase64, 'audio/wav');
+    expect(mockGetDurationFromBase64).toHaveBeenCalledWith(wavBase64, 'audio/wav');
+
+    // Badge now reflects the stored actual mime.
+    expect(utils.getByText('WAV')).toBeTruthy();
+    expect(utils.queryByText('MP3')).toBeNull();
+
+    // Download filename + share type follow the stored mime.
+    await fireEvent.press(utils.getByTestId('tts-download-button'));
+    await flush();
+    expect(mockWriteFile.mock.calls[0][0]).toMatch(/\.wav$/);
+    expect(mockShareOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'audio/wav' }),
+    );
+
+    // One mismatch warning, naming both formats.
+    expect(mockLogWarn).toHaveBeenCalledTimes(1);
+    expect(mockLogWarn.mock.calls[0][0]).toContain('declared audio/mp3 but bytes are WAV');
+  });
+
+  it('event stream payload declared audio/mpeg + WAV bytes: plays and stores WAV', async () => {
+    mockRunTest.mockImplementation(async (_entityId: string, fn: any) =>
+      fn({
+        sendEvent: async (ev: any) => {
+          mockCapturedSendEvents.push(ev);
+        },
+        awaitEvent: async () => ({
+          event_type: 'ENTITY_UTTERANCE',
+          status: 'NEW',
+          payload: {
+            message_id: 'tts-msg',
+            content: 'Hello there',
+            audio: wavBase64,
+            audio_type: 'audio/mpeg',
+          },
+        }),
+      }),
+    );
+
+    const utils = await render(<TtsTestPanel entityId="ai-entity-1" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    expect(mockPlayAudio).toHaveBeenCalledWith(wavBase64, 'audio/wav');
+    expect(mockGetDurationFromBase64).toHaveBeenCalledWith(wavBase64, 'audio/wav');
+    expect(utils.getByText('WAV')).toBeTruthy();
+    expect(mockLogWarn.mock.calls[0][0]).toContain('declared audio/mpeg but bytes are WAV');
+  });
+
+  it('matching declared + actual format: no warning', async () => {
+    mockTestTtsSpeech.mockResolvedValue({
+      status: 'ok',
+      audio_base64: wavBase64,
+      format: 'wav',
+    });
+
+    const utils = await render(
+      <TtsTestPanel providerType="soulvoice" capability={{ format: 'wav' }} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    expect(mockPlayBase64Audio).toHaveBeenCalledWith(wavBase64, 'audio/wav');
+    expect(mockLogWarn).not.toHaveBeenCalled();
+    expect(utils.getByText('WAV')).toBeTruthy();
+  });
+
+  it('unrecognizable bytes keep the declared mime (and never warn)', async () => {
+    mockTestTtsSpeech.mockResolvedValue({
+      status: 'ok',
+      audio_base64: 'QUJDRA==',
+      format: 'mp3',
+    });
+
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    expect(mockPlayBase64Audio).toHaveBeenCalledWith('QUJDRA==', 'audio/mp3');
+    expect(mockGetDurationFromBase64).toHaveBeenCalledWith('QUJDRA==', 'audio/mp3');
+    expect(mockLogWarn).not.toHaveBeenCalled();
   });
 });
 

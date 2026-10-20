@@ -1,6 +1,7 @@
 import EventEmitter from 'eventemitter3';
 import DeviceInfo from 'react-native-device-info';
-import { Platform, AppState } from 'react-native';
+import { Platform } from 'react-native';
+import { AppLifecycle } from 'react-native-applifecycle';
 import ConnectionManager from './connection/ConnectionManager';
 import ConnectionStateManager from './ConnectionStateManager';
 import { getEngineConnection } from './engine/EngineService';
@@ -445,7 +446,15 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     // (PurgeInProgressError path). Entity sessions simply stay connected while
     // the purge completes; the existing foreground re-evaluate path restores
     // normal state afterwards.
-    this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+    //
+    // Source = AppLifecycle, NOT RN AppState: on Android RN emits `background`
+    // on ANY Activity onPause, including system overlays that pause but leave
+    // the app VISIBLE (the volume HUD while audio plays). That spurious
+    // `background` tore down entity sessions ~1.5s into every playback.
+    // AppLifecycle forwards androidx ProcessLifecycleOwner ON_STOP, so
+    // `background` only fires when the whole app is really not visible. On iOS
+    // it falls back to RN AppState, so behavior there is unchanged.
+    this.appStateSubscription = AppLifecycle.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'background') {
         log.info('App going to background, closing entity sessions');
         this.closeAllSessions();

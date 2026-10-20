@@ -27,6 +27,7 @@ import {
   Platform,
   AppState,
 } from 'react-native';
+import { AppLifecycle } from 'react-native-applifecycle';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[ChatBubbleService]');
@@ -103,8 +104,13 @@ if (emitter) {
 // The correct UX: close the floating WINDOW when the app backgrounds. The
 // bubble itself stays visible (native overlay, independent of React) and can
 // be tapped again to reopen the window on return.
+//
+// Source = AppLifecycle, NOT RN AppState: on Android RN reports `background`
+// on every Activity onPause, so a paused-but-VISIBLE system overlay (the
+// volume HUD while audio plays) closed the floating window mid-listen.
+// AppLifecycle forwards androidx ON_STOP — a real "app not visible" signal.
 if (Platform.OS === 'android') {
-  AppState.addEventListener('change', (state) => {
+  AppLifecycle.addEventListener('change', (state) => {
     if (state === 'background') {
       log.info('App backgrounded — closing floating chat window (bubble stays).');
       closeBubbleWindow();

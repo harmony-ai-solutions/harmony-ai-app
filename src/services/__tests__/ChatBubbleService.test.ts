@@ -11,6 +11,23 @@
 
 import { NativeModules, Platform } from 'react-native';
 
+jest.mock('react-native-applifecycle', () => {
+  const handlers = new Set();
+  return {
+    __esModule: true,
+    AppLifecycle: {
+      addEventListener: jest.fn((_event: string, handler: (s: string) => void) => {
+        handlers.add(handler);
+        return { remove: jest.fn(() => handlers.delete(handler)) };
+      }),
+      get currentState() {
+        return 'active';
+      },
+      __handlers: handlers,
+    },
+  };
+});
+
 jest.mock('../../utils/logger', () => ({
   createLogger: () => ({
     info: jest.fn(),
@@ -51,6 +68,13 @@ async function loadService() {
   // The AppState listener registered at module load must be cleaned up per
   // load, but the service API is what we assert on.
   return mod;
+}
+
+function fireLifecycle(state: 'active' | 'background') {
+  const { AppLifecycle } = jest.requireMock('react-native-applifecycle') as {
+    AppLifecycle: { __handlers: Set<(s: string) => void> };
+  };
+  AppLifecycle.__handlers.forEach(handler => handler(state));
 }
 
 describe('ChatBubbleService multi-bubble API', () => {
@@ -127,5 +151,24 @@ describe('ChatBubbleService multi-bubble API', () => {
   it('hasBubblePermission still works', async () => {
     const svc = await loadService();
     await expect(svc.hasBubblePermission()).resolves.toBe(true);
+  });
+
+  it('closes the floating window on an AppLifecycle background (not a transient AppState pause)', async () => {
+    await loadService();
+    const { AppLifecycle } = jest.requireMock('react-native-applifecycle') as {
+      AppLifecycle: { addEventListener: jest.Mock; __handlers: Set<(s: string) => void> };
+    };
+
+    // The module-level listener must come from AppLifecycle.
+    expect(AppLifecycle.addEventListener).toHaveBeenCalledWith(
+      'change',
+      expect.any(Function),
+    );
+
+    fireLifecycle('active');
+    expect(mockNative.closeWindow).not.toHaveBeenCalled();
+
+    fireLifecycle('background');
+    expect(mockNative.closeWindow).toHaveBeenCalledTimes(1);
   });
 });

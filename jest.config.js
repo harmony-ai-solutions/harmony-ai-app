@@ -12,7 +12,7 @@
  */
 
 const transformIgnorePatterns = [
-  'node_modules/(?!(react-native|@react-native|@react-navigation|react-native-fs|react-native-keychain|@react-native-documents|react-native-vector-icons|react-native-linear-gradient|react-native-safe-area-context|react-native-screens|react-native-paper|react-native-config|uuid|react-native-track-player|@invertase|@react-native-google-signin|@react-native-community)/)',
+  'node_modules/(?!(react-native|@react-native|@react-navigation|react-native-fs|react-native-keychain|@react-native-documents|react-native-vector-icons|react-native-linear-gradient|react-native-safe-area-context|react-native-screens|react-native-paper|react-native-config|uuid|react-native-track-player|react-native-applifecycle|@invertase|@react-native-google-signin|@react-native-community)/)',
 ];
 
 module.exports = {

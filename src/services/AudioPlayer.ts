@@ -7,6 +7,11 @@ import TrackPlayer, {
 import { parseBuffer } from 'music-metadata';
 import { Buffer } from 'buffer';
 import { createLogger } from '../utils/logger';
+import {
+  audioMimeFor,
+  detectAudioFormat,
+  getWavDurationSeconds,
+} from '../utils/audioFormat';
 
 const log = createLogger('[AudioPlayer]');
 
@@ -57,7 +62,14 @@ export class AudioPlayer {
         await this.initialize();
       }
 
-      const uri = `data:${mimeType};base64,${base64Audio}`;
+      // Use the sniffed format when the bytes are recognizable: the TTS API
+      // may declare mp3 while returning WAV (backend bug), and the data-URI
+      // mime should describe the payload we actually hand to ExoPlayer.
+      const sniffedFormat = detectAudioFormat(base64Audio);
+      const effectiveMime =
+        sniffedFormat === 'unknown' ? mimeType : audioMimeFor(sniffedFormat);
+
+      const uri = `data:${effectiveMime};base64,${base64Audio}`;
 
       const track: Track = {
         id: `audio_${Date.now()}`,
@@ -202,21 +214,70 @@ export class AudioPlayer {
   }
 
   /**
-   * Parse audio duration from a base64-encoded audio string using music-metadata.
-   * Supports WAV, MP3, OGG, FLAC, AAC, M4A, OPUS and other common formats.
+   * True when a DECLARED mime type already names the sniffed format. Used only
+   * to decide whether a declared-vs-actual mismatch is worth logging.
+   */
+  private static declaredMimeMatchesFormat(mimeType: string, format: string): boolean {
+    const value = (mimeType || '').toLowerCase();
+    switch (format) {
+      case 'wav':
+        return value.includes('wav') || value.includes('x-wave');
+      case 'mp3':
+        return value.includes('mpeg') || value.includes('mp3');
+      case 'ogg':
+        return value.includes('ogg') || value.includes('opus');
+      case 'flac':
+        return value.includes('flac');
+      default:
+        return true;
+    }
+  }
+
+  /**
+   * Parse audio duration from a base64-encoded audio string.
+   *
+   * The bytes are sniffed FIRST and the sniffed format wins: the TTS API
+   * declares mp3 but returns WAV bytes, which made music-metadata throw
+   * (`Guessed MIME-type not supported: audio/wav`) and left the player without
+   * a duration. WAV is therefore parsed from its RIFF header directly; every
+   * other sniffed format goes to music-metadata with the CORRECTED mime. Only
+   * a truly unrecognizable payload falls back to the declared `mimeType`.
+   *
    * This is a static, side-effect-free helper that never touches TrackPlayer.
    *
    * @param base64Audio - Base64-encoded audio data
-   * @param mimeType    - MIME type of the audio (e.g. 'audio/wav', 'audio/mpeg')
+   * @param mimeType    - DECLARED MIME type (e.g. 'audio/wav', 'audio/mpeg')
    * @returns Duration in seconds, or null if it could not be determined
    */
   static async getDurationFromBase64(
     base64Audio: string,
     mimeType: string = 'audio/wav'
   ): Promise<number | null> {
+    const declaredMime = mimeType || 'audio/wav';
+    const format = detectAudioFormat(base64Audio);
+    const effectiveMime =
+      format === 'unknown' ? declaredMime : audioMimeFor(format);
+
+    if (format !== 'unknown' && !AudioPlayer.declaredMimeMatchesFormat(declaredMime, format)) {
+      log.info(
+        `Declared ${declaredMime} but bytes are ${format.toUpperCase()} — using the actual format`
+      );
+    }
+
+    // WAV: parse the RIFF header ourselves (music-metadata rejects audio/wav in
+    // this bundle). A malformed header means we cannot know the duration.
+    if (format === 'wav') {
+      const wavDuration = getWavDurationSeconds(base64Audio);
+      if (wavDuration == null) {
+        log.warn('Could not parse WAV duration from the RIFF header');
+        return null;
+      }
+      return wavDuration;
+    }
+
     try {
       const buffer = Buffer.from(base64Audio, 'base64');
-      const metadata = await parseBuffer(buffer, { mimeType });
+      const metadata = await parseBuffer(buffer, { mimeType: effectiveMime });
       const duration = metadata.format.duration;
       return duration != null && duration > 0 ? duration : null;
     } catch (error) {

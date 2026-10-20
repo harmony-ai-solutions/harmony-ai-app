@@ -1,7 +1,7 @@
 /**
  * BiometricLockContext
  *
- * Manages app-lock state: listens to AppState for foreground/background
+ * Manages app-lock state: listens to the app lifecycle for foreground/background
  * transitions, triggers lock screen on resume when biometric lock is enabled.
  */
 import React, {
@@ -12,7 +12,8 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppStateStatus } from 'react-native';
+import { AppLifecycle } from 'react-native-applifecycle';
 import BiometricLockService, { LockMode, UnlockOptions } from '../services/BiometricLockService';
 import { createLogger } from '../utils/logger';
 
@@ -95,7 +96,7 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
   const [isLocked, setIsLocked] = useState(false);
   const [isPinSet, setIsPinSet] = useState(false);
 
-  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const appStateRef = useRef<AppStateStatus>(AppLifecycle.currentState);
   // Grace timer for the transient `inactive` case (see INACTIVE_LOCK_GRACE_MS).
   const inactiveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Count of self-launched external flows (file/image pickers) currently in
@@ -130,8 +131,16 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
     loadState();
   }, []);
 
-  // Listen to app state changes — lock when leaving the foreground.
+  // Listen to app lifecycle changes — lock when leaving the foreground.
   // Subscribe exactly once; read the current `isEnabled` via the ref above.
+  //
+  // Source = AppLifecycle, NOT RN AppState: on Android RN emits `background`
+  // for ANY Activity onPause, so a paused-but-VISIBLE system overlay (the
+  // volume HUD during audio playback) locked the app spuriously. AppLifecycle
+  // forwards androidx ON_STOP → `background` only when the app is really not
+  // visible. On iOS it falls back to RN AppState, so the transient `inactive`
+  // overlay handling below (and its sustained timer) still matters there.
+  // External pickers remain a real ON_STOP, hence the flow deferral logic.
   useEffect(() => {
     const handleAppStateChange = (nextState: AppStateStatus) => {
       const prevState = appStateRef.current;
@@ -192,7 +201,7 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
       appStateRef.current = nextState;
     };
 
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    const subscription = AppLifecycle.addEventListener('change', handleAppStateChange);
 
     return () => {
       subscription.remove();
@@ -208,9 +217,10 @@ export const BiometricLockProvider: React.FC<BiometricLockProviderProps> = ({
   }, []);
 
   // Run a self-launched external flow (system file/image picker, etc.) as a
-  // sub-state. While in-flight, AppState `background` is caused by the picker
-  // being a separate Activity and must not lock. The flow's promise settles at
-  // `onActivityResult`, which on Android fires BEFORE `onResume` — so when the
+  // sub-state. While in-flight, the lifecycle `background` is caused by the
+  // picker being a separate Activity and must not lock. The flow's promise
+  // settles at `onActivityResult`, which on Android fires BEFORE `onResume`
+  // (and therefore before AppLifecycle reports `active`) — so when the
   // flow concludes the app may STILL report `background` on a normal round-trip.
   // Hence we can't decide synchronously: we arm a short confirm timer that the
   // `background → active` transition cancels. If the app never returns to the

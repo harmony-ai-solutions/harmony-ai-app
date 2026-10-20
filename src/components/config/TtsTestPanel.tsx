@@ -36,13 +36,16 @@
  *  - synthesizing → spinner + label (inputs disabled) + disabled download.
  *  - playing / paused → compact player row: 30×30 play/pause bubble, a seek
  *    slider (`AudioPlayer.seekTo`), and a `0:03 / 0:12` time label, followed by
- *    the WAV format badge and the download button.
+ *    the format badge (the ACTUAL sample format, sniffed from its bytes) and the
+ *    download button.
  *  - finished → footer returns to the synthesize button (audio stays loaded):
  *    pressing it with UNCHANGED text replays instantly (`seekTo(0)` +
  *    `resume()`, mirroring ChatBubble), edited text re-synthesizes.
  *
- * Duration comes up-front from the static `getDurationFromBase64` parser and
- * falls back to the polled progress duration.
+ * Duration comes up-front from the static `getDurationFromBase64` parser (which
+ * sniffs the container, so declared-vs-actual mismatches — e.g. mp3 declared but
+ * WAV bytes returned — still yield a duration) and falls back to the polled
+ * progress duration.
  *
  * ## Download
  *
@@ -94,6 +97,11 @@ import {
   deactivateKeepScreenOn,
 } from '../../services/keepScreenOn';
 import { formatDuration } from '../../utils/formatDuration';
+import {
+  audioMimeFor,
+  detectAudioFormat,
+  type AudioFormat,
+} from '../../utils/audioFormat';
 import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 import { TtsTagPickerModal } from './TtsTagPickerModal';
@@ -146,6 +154,53 @@ function audioFileExtension(mime: string): string {
   if (value.includes('aac')) return 'aac';
   if (value.includes('mp4') || value.includes('m4a')) return 'm4a';
   return 'wav';
+}
+
+/** Badge label for a stored sample mime (`audio/mpeg` → `MP3`, `audio/wav` → `WAV`). */
+function formatLabelForMime(mime: string): string {
+  return audioFileExtension(mime).toUpperCase();
+}
+
+/** True when a DECLARED mime already names the sniffed format. */
+function declaredMimeMatchesFormat(mime: string, format: AudioFormat): boolean {
+  const value = (mime || '').toLowerCase();
+  switch (format) {
+    case 'wav':
+      return value.includes('wav');
+    case 'mp3':
+      return value.includes('mpeg') || value.includes('mp3');
+    case 'ogg':
+      return value.includes('ogg') || value.includes('opus');
+    case 'flac':
+      return value.includes('flac');
+    default:
+      return true;
+  }
+}
+
+/**
+ * Trust the BYTES, not the declared label.
+ *
+ * The TTS API currently declares mp3 but returns WAV bytes (backend bug), so a
+ * declared-mime-only sample got an mp3 data-URI / filename / badge and a dead
+ * duration parse. Sniff the actual container once, log the mismatch, and keep
+ * the actual mime — every downstream consumer (badge, download extension,
+ * share type, duration parser) reads `SynthesizedAudio.mime`.
+ */
+function resolveSynthesizedAudio(
+  base64: string,
+  declaredMime: string,
+): SynthesizedAudio {
+  const format = detectAudioFormat(base64);
+  if (format === 'unknown') {
+    return { base64, mime: declaredMime };
+  }
+  if (!declaredMimeMatchesFormat(declaredMime, format)) {
+    log.warn(
+      `TTS sample declared ${declaredMime} but bytes are ${format.toUpperCase()} — using the actual format (backend format bug)`,
+    );
+  }
+  return { base64, mime: audioMimeFor(format) };
 }
 
 /** Prefer `playBase64Audio` when available; fall back to `playAudio`. */
@@ -300,7 +355,7 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
         if (!audio) {
           throw new Error('No audio returned');
         }
-        result = { base64: audio, mime: audioMime(res.format) };
+        result = resolveSynthesizedAudio(audio, audioMime(res.format));
         await playSynthesizedAudio(result.base64, result.mime);
       } else {
         // ── Entity-bound eventserver path ──
@@ -325,7 +380,10 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
         if (!payload?.audio) {
           throw new ModuleTestSessionError('No audio returned');
         }
-        result = { base64: payload.audio, mime: payload.audio_type || 'audio/wav' };
+        result = resolveSynthesizedAudio(
+          payload.audio,
+          payload.audio_type || 'audio/wav',
+        );
         await AudioPlayer.playAudio(result.base64, result.mime);
       }
 
@@ -468,11 +526,16 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
   const hasAudio = lastAudio !== null;
   const showPlayerRow = hasAudio && (isPlaying || isPaused);
   const canDownload = hasAudio && !isBusy;
-  const formatLabel = String(
+  // Prefer the STORED sample's actual mime (sniffed from the bytes) once audio
+  // exists; before synthesis fall back to the declared capability format.
+  const declaredFormatLabel = String(
     capability?.format ?? capability?.audio_format ?? 'wav',
   )
     .replace(/^audio\//, '')
     .toUpperCase();
+  const formatLabel = hasAudio
+    ? formatLabelForMime(lastAudio.mime)
+    : declaredFormatLabel;
 
   // ── No entity AND no direct provider → disabled test panel with a hint ──
   if (!entityId && !providerType) {
