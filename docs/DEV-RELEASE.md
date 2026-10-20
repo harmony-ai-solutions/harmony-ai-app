@@ -2,14 +2,14 @@
 
 How to ship and self-install **dev-channel** APKs quickly, without touching the
 prod channel. This is the fast inner loop: publish a dev APK, the phone's
-in-app `UpdateBanner` picks it up and self-installs.
+in-app update dialog picks it up and self-installs.
 
 > **Version convention — read this first.** Always pass a **PLAIN** `vX.Y.Z` as
 > the dispatch `version` input (`v1.3.0`, not `v1.3.0-dev`). The dev flavour
 > appends `-dev` natively (`versionNameSuffix "-dev"` in
 > `android/app/build.gradle`) and the dev manifest mirrors that exact suffix.
 > Hand-suffixing produces `…-dev-dev`, which never equals the installed version
-> and leaves the banner stuck on.
+> and leaves the update dialog prompting on every launch.
 
 ---
 
@@ -37,7 +37,7 @@ Manifest shape (one file per channel — `<env>` is the file's own channel):
 A build reads **only its own channel's file** (`RELEASES.appManifestUrl` in
 `src/config/cloud.ts`, derived from `APP_ENV`). The dev file's `version` carries
 the flavour's exact `-dev` suffix, so an up-to-date dev install compares **equal**
-(`v1.3.0-dev` == `v1.3.0-dev`) and the update banner stays silent.
+(`v1.3.0-dev` == `v1.3.0-dev`) and the update dialog stays silent.
 
 **Update-check cadence (owner ruling 2026-10-17):** there is **no TTL**. The check
 runs on every **cold start** and on every app **foreground** (`AppState` →
@@ -141,7 +141,8 @@ The dev-release loop spans two repos.
 ### Phone
 
 1. Reopen the app (cold start) **or** pull-to-refresh on the settings screen.
-2. The `UpdateBanner` appears ("App vY.Y.Z-dev available") → tap **Update**.
+2. An update dialog appears automatically ("Update available" / "Download and
+   install app vY.Y.Z-dev now?") → tap **Download & install**.
 3. On the sideload channel the button runs the in-app APK self-update; grant the
    install permission if prompted.
 
@@ -164,9 +165,9 @@ therefore never see a dev version.
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Build fails: "Refusing to build an engine-less APK" | `-PENGINE_SIDECAR_STRICT=true` (CI) with no sidecar artifact | Publish the engine first, or pass `-PENGINE_SIDECAR_VERSION` + `-PENGINE_SIDECAR_BASE_URL` / `-PENGINE_SIDECAR_ARTIFACTS_DIR` |
-| Manifest fetch 403 / banner never shows | Nothing published on that channel yet (e.g. no tag → no `app/prod/latest.json`) | Publish a dev release (`publish_latest=true`), or cut a `v*` tag for prod |
+| Manifest fetch 403 / update dialog never shows | Nothing published on that channel yet (e.g. no tag → no `app/prod/latest.json`) | Publish a dev release (`publish_latest=true`), or cut a `v*` tag for prod |
 | Install rejected: signature mismatch | Installed build is debug-signed, the new APK is release-signed (or a different keystore) | Use the release keystore locally (see Keystore note); uninstall the debug build once |
-| Banner stuck showing the version you just installed | Version suffix mismatch (`…-dev-dev`) | Re-run the dispatch with a PLAIN `vX.Y.Z` |
+| Update dialog keeps prompting for the version you just installed | Version suffix mismatch (`…-dev-dev`) | Re-run the dispatch with a PLAIN `vX.Y.Z` |
 | Where to read the installed version | — | `versionName` is set in `android/app/build.gradle` (`versionName "…"` + the dev flavour's `versionNameSuffix "-dev"`); at runtime it's `DeviceInfo.getVersion()` |
 
 ---

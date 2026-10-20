@@ -26,7 +26,7 @@ import { EngineBootGate } from './src/components/boot/EngineBootGate';
 import { LockScreen } from './src/components/lock/LockScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { DynamicBackground } from './src/components/background/DynamicBackground';
-import { UpdateBanner } from './src/components/updates/UpdateBanner';
+import { UpdatePrompt } from './src/components/updates/UpdatePrompt';
 import { loadHapticPreference } from './src/utils/haptics';
 import { probeRestoreOfferOnce } from './src/services/backup/restoreOnboarding';
 import { onBubbleOpen } from './src/services/ChatBubbleService';
@@ -139,8 +139,8 @@ function AppShell() {
         <EngineBootGate>
           <AppNavigator navigationRef={navigationRef} />
         </EngineBootGate>
-        {/* Non-blocking app-update banner (plan 7-10 §4; engine ships with the app). */}
-        <UpdateBanner />
+        {/* Headless app-update dialog driver (plan 7-10 §4; engine ships with the app). */}
+        <UpdatePrompt />
         {isLocked && <LockScreen />}
       </View>
     </PaperProvider>

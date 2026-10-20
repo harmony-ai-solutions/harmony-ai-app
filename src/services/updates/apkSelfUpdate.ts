@@ -10,7 +10,7 @@
  *
  * iOS has no such flow (platform-forbidden) — the caller links to the portal
  * INSTALLATION instructions instead. The user-confirmation UI lives in the
- * caller (UpdateBanner); this module is the mechanism.
+ * caller (UpdatePrompt); this module is the mechanism.
  */
 
 import { NativeModules, Platform } from 'react-native';

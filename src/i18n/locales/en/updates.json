@@ -1,7 +1,4 @@
 {
-  "appBannerTitle": "App v{{version}} available",
-  "appBannerBody": "Update to get the latest features and fixes.",
-  "updateButton": "Update",
   "dismiss": "Dismiss",
   "about": {
     "title": "About",
