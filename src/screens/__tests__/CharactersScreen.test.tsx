@@ -124,6 +124,8 @@ jest.mock('../../utils/colorUtils', () => ({
 jest.mock('../../services/engine/repositories/characters', () => ({
   getAllCharacterProfiles: jest.fn(),
   getCharacterImages: jest.fn(),
+  getCharacterImagesMetadata: jest.fn(),
+  getPrimaryImage: jest.fn(),
   getDistinctTags: jest.fn(),
   deleteCharacterProfile: jest.fn(),
   createCharacterProfile: jest.fn(),
@@ -430,11 +432,15 @@ jest.mock('../../components/themed/ScreenHeader', () => {
 import {
   getAllCharacterProfiles,
   getCharacterImages,
+  getCharacterImagesMetadata,
+  getPrimaryImage,
   getDistinctTags,
 } from '../../services/engine/repositories/characters';
 
 const mockGetAll = getAllCharacterProfiles as jest.Mock;
 const mockGetImages = getCharacterImages as jest.Mock;
+const mockGetImagesMetadata = getCharacterImagesMetadata as jest.Mock;
+const mockGetPrimaryImage = getPrimaryImage as jest.Mock;
 const mockGetDistinctTags = getDistinctTags as jest.Mock;
 
 function makeProfile(id: string, name: string, tags: string[], creator: string): CharacterProfile {
@@ -492,6 +498,8 @@ async function flush() {
 async function renderScreen() {
   mockGetAll.mockResolvedValue(PROFILES);
   mockGetImages.mockResolvedValue([]);
+  mockGetImagesMetadata.mockResolvedValue([]);
+  mockGetPrimaryImage.mockResolvedValue(null);
   mockGetDistinctTags.mockResolvedValue(ALL_TAGS);
   // RNTL v14 `render` is async here (React 19) — await it like the existing
   // screen tests do (`await render(...)` in chatDetailScenarioGenerate.test).
@@ -595,6 +603,45 @@ describe('CharactersScreen — reduced motion (4-3)', () => {
     await user.press(utils.getByTestId('creator-attribution-p1'));
     expect(utils.getByTestId('active-filter-banner-static')).toBeTruthy();
     expect(utils.queryByTestId('active-filter-banner-animated')).toBeNull();
+  });
+});
+
+describe('CharactersScreen — avatar hydration (contract 1.8.0)', () => {
+  it('uses the metadata list + thumbnail primary (no gallery blob reads)', async () => {
+    const image = (over: Record<string, unknown>) => ({
+      id: 'i1',
+      character_profile_id: 'p1',
+      image_data: '',
+      mime_type: 'image/gif',
+      description: 'avatar',
+      is_primary: true,
+      has_thumbnail: true,
+      display_order: 0,
+      vl_model: '',
+      vl_model_interpretation: '',
+      created_at: new Date(),
+      updated_at: new Date(),
+      deleted_at: null,
+      ...over,
+    });
+
+    mockGetAll.mockResolvedValue([PROFILES[0]]);
+    mockGetImagesMetadata.mockResolvedValue([
+      image({ id: 'i1' }),
+      image({ id: 'i2', is_primary: false, display_order: 1 }),
+    ]);
+    // Thumbnail bytes: a GIF original comes back as JPEG — the data URL must
+    // carry the thumbnail mime.
+    mockGetPrimaryImage.mockResolvedValue(
+      image({ image_data: 'AQID', mime_type: 'image/jpeg' }),
+    );
+
+    const utils = await renderScreen();
+
+    expect(utils.getByTestId('card-p1')).toBeTruthy();
+    expect(mockGetImagesMetadata).toHaveBeenCalledWith('p1');
+    expect(mockGetPrimaryImage).toHaveBeenCalledWith('p1');
+    expect(mockGetImages).not.toHaveBeenCalled();
   });
 });
 

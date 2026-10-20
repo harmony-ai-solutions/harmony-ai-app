@@ -247,20 +247,27 @@ export function mapCharacterProfile(dto: CharacterProfileDto): CharacterProfile 
 
 /**
  * Map a character image *info* DTO (no bytes) to the app's `CharacterImage`
- * model. `image_data` is empty — the two-phase loader fetches bytes from
+ * model. `image_data` is empty unless bytes were fetched separately; the
+ * two-phase loader fetches bytes from
  * `/api/character-profiles/:id/images/:image_id`.
+ *
+ * `mimeType` overrides the metadata mime when the fetched bytes are a derived
+ * thumbnail (contract 1.8.0): a `?variant=thumb` of a GIF is a JPEG/PNG, so the
+ * data URL must use the RESPONSE mime, not the original's.
  */
 export function mapCharacterImageInfo(
   dto: CharacterImageInfoDto,
   imageData = '',
+  mimeType?: string,
 ): CharacterImage {
   return {
     id: dto.id,
     character_profile_id: dto.character_profile_id,
     image_data: imageData,
-    mime_type: dto.mime_type ?? '',
+    mime_type: mimeType ?? dto.mime_type ?? '',
     description: dto.description ?? '',
     is_primary: Boolean(dto.is_primary),
+    has_thumbnail: dto.has_thumbnail === true,
     display_order: toNum(dto.display_order),
     vl_model_interpretation: '',
     vl_model: '',

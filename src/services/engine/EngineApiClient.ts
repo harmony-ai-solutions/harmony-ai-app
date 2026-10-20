@@ -293,8 +293,24 @@ export interface CharacterImageInfoDto {
   description: string;
   is_primary: boolean;
   display_order: number;
+  /**
+   * Contract 1.8.0 (optional for older engines): true when a usable derived
+   * 256px preview is stored (`GET …/images/:image_id?variant=thumb`).
+   */
+  has_thumbnail?: boolean;
   created_at?: string;
   [key: string]: unknown;
+}
+
+/** Bytes fetched from a character-image route (original or thumbnail). */
+export interface CharacterImageBytesDto {
+  /** Base64-encoded bytes (no `data:` prefix). */
+  data: string;
+  /**
+   * The response `Content-Type` (e.g. `image/jpeg` for a thumbnail of an
+   * `image/gif` original). Empty when the engine did not send one.
+   */
+  contentType: string;
 }
 
 /** Create/update body for `/api/entities/:id/emoji-actions` (snake_case). */
@@ -1418,14 +1434,43 @@ export class EngineApiClient {
     );
   }
 
-  /** Raw image bytes for a character image (`GET .../images/:image_id`). */
-  async fetchCharacterImageBase64(profileId: string, imageId: string): Promise<string> {
+  /**
+   * Raw image bytes for a character image (`GET .../images/:image_id`).
+   *
+   * Contract 1.8.0: pass `{ variant: 'thumb' }` for the derived 256px preview
+   * (`?variant=thumb`). The response `Content-Type` is returned alongside the
+   * bytes because the thumbnail's mime can differ from the original's
+   * (`image/jpeg`/`image/png` vs `image/gif`, `image/webp`, …). The original
+   * (no variant) remains byte-identical so animations keep animating.
+   */
+  async fetchCharacterImageBytes(
+    profileId: string,
+    imageId: string,
+    options: { variant?: 'thumb' } = {},
+  ): Promise<CharacterImageBytesDto> {
+    const query = buildQuery({ variant: options.variant });
     const response = await this.request(
-      `/api/character-profiles/${encodeURIComponent(profileId)}/images/${encodeURIComponent(imageId)}`,
+      `/api/character-profiles/${encodeURIComponent(profileId)}/images/${encodeURIComponent(
+        imageId,
+      )}${query}`,
       { headers: { Accept: '*/*' } },
     );
     const buffer = await response.arrayBuffer();
-    return uint8ArrayToBase64(new Uint8Array(buffer));
+    const contentType =
+      response.headers?.get?.('content-type')?.split(';')[0]?.trim() ?? '';
+    return { data: uint8ArrayToBase64(new Uint8Array(buffer)), contentType };
+  }
+
+  /**
+   * Base64 image bytes (kept for callers that only need the payload). Use
+   * {@link fetchCharacterImageBytes} when the mime type matters (thumbnails).
+   */
+  async fetchCharacterImageBase64(
+    profileId: string,
+    imageId: string,
+    options: { variant?: 'thumb' } = {},
+  ): Promise<string> {
+    return (await this.fetchCharacterImageBytes(profileId, imageId, options)).data;
   }
 
   /**

@@ -33,6 +33,7 @@ import type {
 import { createDataURL, base64ToUint8Array } from '../../../database/base64';
 import { engineApiClient } from '../EngineApiClient';
 import { EngineApiError } from '../EngineApiClient';
+import { onEngineConnectionChange, requireEngineConnection } from '../EngineService';
 import { mapCharacterImageInfo, mapCharacterProfile } from '../engineApiMappers';
 import { getAllEntities } from './entities';
 
@@ -250,13 +251,140 @@ export async function deleteCharacterProfileCascade(profileId: string): Promise<
 
 // ── Images ───────────────────────────────────────────────────────────────
 
-async function loadImageBytes(profileId: string, imageId: string): Promise<string> {
+/**
+ * Display-path image cache (contract 1.8.0).
+ *
+ * Key: `${profileId}:${imageId}:${variant}` (`variant` is `thumb` or
+ * `original`). Values keep BOTH the base64 payload and the response
+ * `Content-Type` — a thumbnail of a GIF is a JPEG/PNG, so the data URL must use
+ * the response mime, never the metadata mime.
+ *
+ * - **In-flight dedupe:** concurrent callers for one key share one fetch.
+ * - **Bounded LRU:** `IMAGE_CACHE_MAX_ENTRIES`; a hit re-inserts the entry so
+ *   the oldest (least recently used) one is evicted first.
+ * - **Negative entries:** a thumbnail 404 ("no thumbnail available") is
+ *   remembered for {@link NEGATIVE_CACHE_TTL_MS} so a failed preview does not
+ *   re-ask on every render. Negative entries are never returned as bytes.
+ * - **Lifetime:** module-level, so blur/focus does not evict; cleared on engine
+ *   disconnect ({@link clearCharacterImageCache}).
+ */
+const IMAGE_CACHE_MAX_ENTRIES = 64;
+const NEGATIVE_CACHE_TTL_MS = 30_000;
+
+type ImageVariant = 'thumb' | 'original';
+interface CachedImageBytes {
+  data: string;
+  contentType: string;
+}
+
+const imageBytesCache = new Map<string, CachedImageBytes>();
+const imageBytesInFlight = new Map<string, Promise<CachedImageBytes | null>>();
+const imageNegativeCache = new Map<string, number>();
+
+/** Clear every cached image byte + negative entry (tests, engine restart). */
+export function clearCharacterImageCache(): void {
+  imageBytesCache.clear();
+  imageBytesInFlight.clear();
+  imageNegativeCache.clear();
+}
+
+// The engine restarted/stopped → its bytes (and any remembered "no thumb")
+// no longer apply. Registered lazily on the first image read: importing this
+// module must stay free of side effects for partial EngineService test mocks.
+let cacheLifecycleRegistered = false;
+function ensureCharacterImageCacheLifecycle(): void {
+  if (cacheLifecycleRegistered) return;
+  cacheLifecycleRegistered = true;
   try {
-    return await engineApiClient.fetchCharacterImageBase64(profileId, imageId);
+    if (typeof onEngineConnectionChange === 'function') {
+      onEngineConnectionChange(connection => {
+        if (!connection) clearCharacterImageCache();
+      });
+    }
   } catch {
-    // A missing blob must not fail the metadata list (empty data URL).
-    return '';
+    // A partial EngineService mock (tests) may not expose the subscription.
   }
+}
+
+function characterImageCacheKey(
+  profileId: string,
+  imageId: string,
+  variant: ImageVariant,
+): string {
+  return `${profileId}:${imageId}:${variant}`;
+}
+
+function cacheImageBytes(key: string, bytes: CachedImageBytes): void {
+  // Re-insert so the Map's insertion order tracks recency for LRU eviction.
+  imageBytesCache.delete(key);
+  imageBytesCache.set(key, bytes);
+  while (imageBytesCache.size > IMAGE_CACHE_MAX_ENTRIES) {
+    const oldest = imageBytesCache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    imageBytesCache.delete(oldest);
+  }
+}
+
+/**
+ * Fetch image bytes through the cache/dedupe layer. Returns `null` only for a
+ * remembered "no thumbnail" (404 on the thumb path); transport/other errors
+ * still throw so callers can decide (display paths degrade to no avatar).
+ */
+async function getCachedImageBytes(
+  profileId: string,
+  imageId: string,
+  variant: ImageVariant,
+): Promise<CachedImageBytes | null> {
+  ensureCharacterImageCacheLifecycle();
+  const key = characterImageCacheKey(profileId, imageId, variant);
+
+  const cached = imageBytesCache.get(key);
+  if (cached) {
+    cacheImageBytes(key, cached); // LRU bump
+    return cached;
+  }
+
+  const negativeUntil = imageNegativeCache.get(key);
+  if (negativeUntil !== undefined) {
+    if (negativeUntil > Date.now()) return null;
+    imageNegativeCache.delete(key);
+  }
+
+  const inFlight = imageBytesInFlight.get(key);
+  if (inFlight) return inFlight;
+
+  const pending = (async (): Promise<CachedImageBytes | null> => {
+    try {
+      const bytes = await engineApiClient.fetchCharacterImageBytes(profileId, imageId, {
+        variant: variant === 'thumb' ? 'thumb' : undefined,
+      });
+      cacheImageBytes(key, bytes);
+      return bytes;
+    } catch (e) {
+      if (variant === 'thumb' && e instanceof EngineApiError && e.isNotFound) {
+        imageNegativeCache.set(key, Date.now() + NEGATIVE_CACHE_TTL_MS);
+        return null;
+      }
+      throw e;
+    } finally {
+      imageBytesInFlight.delete(key);
+    }
+  })();
+
+  imageBytesInFlight.set(key, pending);
+  return pending;
+}
+
+/**
+ * A character image's bytes as an entirely metadata-only list (ONE request, no
+ * blob reads) — the fast path for screens that only need the count, the primary
+ * flag or `has_thumbnail`. `image_data` is an empty string.
+ */
+export async function getCharacterImagesMetadata(
+  profileId: string,
+): Promise<CharacterImage[]> {
+  const infos = await engineApiClient.listCharacterImages(profileId);
+  return infos.map(info => mapCharacterImageInfo(info, ''));
 }
 
 export async function getCharacterImages(
@@ -270,6 +398,15 @@ export async function getCharacterImages(
     images.push(mapCharacterImageInfo(info, data));
   }
   return images;
+}
+
+async function loadImageBytes(profileId: string, imageId: string): Promise<string> {
+  try {
+    return await engineApiClient.fetchCharacterImageBase64(profileId, imageId);
+  } catch {
+    // A missing blob must not fail the metadata list (empty data URL).
+    return '';
+  }
 }
 
 export async function getCharacterImage(
@@ -288,12 +425,78 @@ export async function getCharacterImage(
   return null;
 }
 
+/**
+ * The profile's primary image for DISPLAY, using the derived thumbnail when the
+ * engine advertises one (contract 1.8.0):
+ *
+ *   1. metadata list (1 request),
+ *   2. `?variant=thumb` when `has_thumbnail` (2nd request) — its response mime
+ *      (JPEG/PNG) is propagated into `mime_type`,
+ *   3. fall back to the original only when the thumb 404s ("no thumbnail
+ *      available") or an older engine omits `has_thumbnail`.
+ *
+ * Happy path = 2 requests. A thumb that reports 404 costs the fallback original
+ * (3 total) — cached afterwards, so it does not repeat on focus.
+ */
 export async function getPrimaryImage(profileId: string): Promise<CharacterImage | null> {
   const infos = await engineApiClient.listCharacterImages(profileId);
   const primary = infos.find(i => i.is_primary);
   if (!primary) return null;
-  const data = await loadImageBytes(profileId, primary.id);
-  return mapCharacterImageInfo(primary, data);
+
+  if (primary.has_thumbnail === true) {
+    try {
+      const thumb = await getCachedImageBytes(profileId, primary.id, 'thumb');
+      if (thumb) {
+        return mapCharacterImageInfo(
+          primary,
+          thumb.data,
+          thumb.contentType || primary.mime_type || 'image/jpeg',
+        );
+      }
+    } catch {
+      // Transport/thumb failure → try the original below.
+    }
+  }
+
+  try {
+    const original = await getCachedImageBytes(profileId, primary.id, 'original');
+    if (!original) return null;
+    return mapCharacterImageInfo(
+      primary,
+      original.data,
+      original.contentType || primary.mime_type,
+    );
+  } catch {
+    // A display path must not throw for a missing blob.
+    return null;
+  }
+}
+
+/**
+ * An RN `Image` source for a character image served BY URL (original by
+ * default, `?variant=thumb` for tiles). Rendering the original by URL is what
+ * lets the platform decoders animate GIF/animated-WebP and lets the native
+ * image cache do its job. Recompute it on every render: the port/token change
+ * across engine restarts, and the URL itself is the cache key.
+ */
+export function characterImageSource(
+  profileId: string,
+  imageId: string,
+  variant?: 'thumb',
+): { uri: string; headers: Record<string, string> } | null {
+  try {
+    const connection = requireEngineConnection();
+    const query = variant ? `?variant=${variant}` : '';
+    return {
+      uri: `${connection.adminBaseUrl}/api/character-profiles/${encodeURIComponent(
+        profileId,
+      )}/images/${encodeURIComponent(imageId)}${query}`,
+      headers: connection.token ? { 'X-Loopback-Token': connection.token } : {},
+    };
+  } catch {
+    // Engine restarting/stopped — render the fallback (no crash mid-render).
+    return null;
+  }
 }
 
 /**

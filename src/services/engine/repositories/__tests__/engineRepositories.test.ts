@@ -419,6 +419,195 @@ describe('characters adapter', () => {
     expect(infos[0].is_primary).toBe(true);
   });
 
+  describe('display images — thumbnails + cache (contract 1.8.0)', () => {
+    const primaryInfo = (over: Record<string, unknown> = {}) => ({
+      id: 'i1',
+      character_profile_id: 'p1',
+      mime_type: 'image/gif',
+      description: 'avatar',
+      is_primary: true,
+      display_order: 0,
+      has_thumbnail: true,
+      created_at: '2026-10-11T10:00:00Z',
+      ...over,
+    });
+
+    const imagePath = '/api/character-profiles/p1/images/i1';
+
+    beforeEach(() => {
+      charactersRepo.clearCharacterImageCache();
+    });
+
+    it('getPrimaryImage costs 2 requests, asks for the thumb and propagates its mime', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p1/images',
+          json: [primaryInfo()],
+        },
+        {
+          method: 'GET',
+          path: imagePath,
+          bytes: new Uint8Array([1, 2, 3]),
+          headers: { 'content-type': 'image/jpeg' },
+        },
+      ]);
+      install(server);
+
+      const image = await charactersRepo.getPrimaryImage('p1');
+
+      expect(server.calls).toHaveLength(2);
+      expect(server.lastCall('GET', imagePath)!.query.variant).toBe('thumb');
+      // The original is a GIF, the preview is a JPEG — the data URL must use
+      // the RESPONSE mime, not the metadata mime.
+      expect(image?.mime_type).toBe('image/jpeg');
+      expect(charactersRepo.imageToDataURL(image!)).toBe('data:image/jpeg;base64,AQID');
+      expect(image?.character_profile_id).toBe('p1');
+      expect(image?.id).toBe('i1');
+      expect(image?.is_primary).toBe(true);
+    });
+
+    it('falls back to the original when the thumb 404s, keeping the original mime', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p1/images',
+          json: [primaryInfo()],
+        },
+        {
+          method: 'GET',
+          path: imagePath,
+          respond: req =>
+            req.query.variant === 'thumb'
+              ? {
+                  status: 404,
+                  json: {
+                    error: 'no thumbnail available for this image',
+                    fallback: 'original',
+                  },
+                }
+              : {
+                  bytes: new Uint8Array([4, 5, 6]),
+                  headers: { 'content-type': 'image/gif' },
+                },
+        },
+      ]);
+      install(server);
+
+      const image = await charactersRepo.getPrimaryImage('p1');
+
+      // list + thumb 404 + original fallback
+      expect(server.calls).toHaveLength(3);
+      expect(server.lastCall('GET', imagePath)!.query.variant).toBeUndefined();
+      expect(image?.mime_type).toBe('image/gif');
+      expect(charactersRepo.imageToDataURL(image!)).toBe('data:image/gif;base64,BAUG');
+    });
+
+    it('fetches the original directly when the engine has no thumbnail', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p1/images',
+          json: [primaryInfo({ has_thumbnail: false })],
+        },
+        {
+          method: 'GET',
+          path: imagePath,
+          bytes: new Uint8Array([7]),
+          headers: { 'content-type': 'image/png' },
+        },
+      ]);
+      install(server);
+
+      const image = await charactersRepo.getPrimaryImage('p1');
+
+      expect(server.calls).toHaveLength(2);
+      expect(server.lastCall('GET', imagePath)!.query.variant).toBeUndefined();
+      expect(image?.mime_type).toBe('image/png');
+    });
+
+    it('serves a repeat getPrimaryImage from cache without a second byte fetch', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p1/images',
+          json: [primaryInfo()],
+        },
+        {
+          method: 'GET',
+          path: imagePath,
+          bytes: new Uint8Array([1, 2, 3]),
+          headers: { 'content-type': 'image/jpeg' },
+        },
+      ]);
+      install(server);
+
+      await charactersRepo.getPrimaryImage('p1');
+      await charactersRepo.getPrimaryImage('p1');
+
+      // Two metadata lists (cheap), ONE byte fetch.
+      expect(server.calls.filter(c => c.path === imagePath)).toHaveLength(1);
+    });
+
+    it('dedupes concurrent byte fetches for the same key', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p1/images',
+          json: [primaryInfo()],
+        },
+        {
+          method: 'GET',
+          path: imagePath,
+          bytes: new Uint8Array([1, 2, 3]),
+          headers: { 'content-type': 'image/jpeg' },
+        },
+      ]);
+      install(server);
+
+      const [a, b] = await Promise.all([
+        charactersRepo.getPrimaryImage('p1'),
+        charactersRepo.getPrimaryImage('p1'),
+      ]);
+
+      expect(a?.image_data).toBe('AQID');
+      expect(b?.image_data).toBe('AQID');
+      expect(
+        server.calls.filter(c => c.path === imagePath && c.query.variant === 'thumb'),
+      ).toHaveLength(1);
+    });
+
+    it('getCharacterImagesMetadata lists metadata with no blob GET', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p1/images',
+          json: [primaryInfo(), primaryInfo({ id: 'i2', is_primary: false })],
+        },
+      ]);
+      install(server);
+
+      const images = await charactersRepo.getCharacterImagesMetadata('p1');
+
+      expect(server.calls).toHaveLength(1);
+      expect(images).toHaveLength(2);
+      expect(images[0].image_data).toBe('');
+      expect(images[0].has_thumbnail).toBe(true);
+      expect(images[1].is_primary).toBe(false);
+    });
+
+    it('builds an authenticated URL source for thumbnails and originals', () => {
+      expect(charactersRepo.characterImageSource('p1', 'i1', 'thumb')).toEqual({
+        uri: 'http://127.0.0.1:2/api/character-profiles/p1/images/i1?variant=thumb',
+        headers: { 'X-Loopback-Token': 'tok' },
+      });
+      expect(charactersRepo.characterImageSource('p1', 'i1')).toEqual({
+        uri: 'http://127.0.0.1:2/api/character-profiles/p1/images/i1',
+        headers: { 'X-Loopback-Token': 'tok' },
+      });
+    });
+  });
+
   it('hasChatPickerLibrary is true when a live non-persona profile exists', async () => {
     const server = createMockManagementServer([
       { method: 'GET', path: '/api/character-profiles', json: [profileDto()] },

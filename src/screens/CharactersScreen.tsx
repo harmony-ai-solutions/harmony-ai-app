@@ -46,7 +46,8 @@ import { CreatePartnerModal } from '../components/characters/CreatePartnerModal'
 import { AICardPickerModal } from '../components/characters/AICardPickerModal';
 import {
   getAllCharacterProfiles,
-  getCharacterImages,
+  getCharacterImagesMetadata,
+  getPrimaryImage,
   getDistinctTags,
   deleteCharacterProfile,
   deleteCharacterProfileCascade,
@@ -307,14 +308,18 @@ export const CharactersScreen: React.FC = () => {
         log.warn('Failed to load distinct tags:', tagErr);
       }
 
-      // Load primary images + image counts for all profiles in parallel
+      // Primary images + image counts for all profiles in parallel. The list is
+      // metadata-only (contract 1.8.0) and the avatar comes from the derived
+      // thumbnail when the engine has one — no gallery blobs are downloaded.
       const imageMap: Record<string, string | null> = {};
       const countMap: Record<string, number> = {};
       await Promise.all(
         data.map(async profile => {
           try {
-            const images = await getCharacterImages(profile.id);
-            const primary = images.find(img => img.is_primary === true);
+            const [images, primary] = await Promise.all([
+              getCharacterImagesMetadata(profile.id),
+              getPrimaryImage(profile.id),
+            ]);
             imageMap[profile.id] = primary
               ? createDataURL(primary.image_data, primary.mime_type)
               : null;

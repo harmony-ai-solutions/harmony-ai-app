@@ -29,8 +29,15 @@ export interface MockRoute {
   json?: unknown;
   /** Raw bytes (returned by `.arrayBuffer()`). */
   bytes?: Uint8Array;
+  /** Response headers, e.g. `{ 'content-type': 'image/jpeg' }`. */
+  headers?: Record<string, string>;
   /** Optional dynamic responder overriding `json`/`bytes`. */
-  respond?: (req: MockRequest) => { status?: number; json?: unknown; bytes?: Uint8Array };
+  respond?: (req: MockRequest) => {
+    status?: number;
+    json?: unknown;
+    bytes?: Uint8Array;
+    headers?: Record<string, string>;
+  };
 }
 
 function parseUrl(url: string): { path: string; query: Record<string, string> } {
@@ -43,12 +50,26 @@ function parseUrl(url: string): { path: string; query: Record<string, string> } 
   return { path: parsed.pathname, query };
 }
 
-function makeResponse(status: number, json: unknown, bytes?: Uint8Array): Response {
+function makeResponse(
+  status: number,
+  json: unknown,
+  bytes?: Uint8Array,
+  headers: Record<string, string> = {},
+): Response {
   const ok = status >= 200 && status < 300;
   const buffer = bytes ? bytes.slice().buffer : new ArrayBuffer(0);
+  const headerMap: Record<string, string> = {
+    'content-type': bytes ? 'application/octet-stream' : 'application/json',
+  };
+  for (const [name, value] of Object.entries(headers)) {
+    headerMap[name.toLowerCase()] = value;
+  }
   return {
     ok,
     status,
+    headers: {
+      get: (name: string) => headerMap[name.toLowerCase()] ?? null,
+    },
     json: async () => json,
     text: async () => (typeof json === 'string' ? json : JSON.stringify(json ?? '')),
     arrayBuffer: async () => buffer,
@@ -91,7 +112,8 @@ export function createMockManagementServer(routes: MockRoute[]): MockManagementS
     const status = dynamic?.status ?? route.status ?? 200;
     const json = dynamic?.json ?? route.json ?? null;
     const bytes = dynamic?.bytes ?? route.bytes;
-    return makeResponse(status, json, bytes);
+    const responseHeaders = dynamic?.headers ?? route.headers;
+    return makeResponse(status, json, bytes, responseHeaders);
   };
 
   return {

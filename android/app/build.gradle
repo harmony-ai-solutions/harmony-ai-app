@@ -395,6 +395,13 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     // Custom Tabs for the Dropbox/OneDrive OAuth PKCE authorize leg.
     implementation("androidx.browser:browser:1.8.0")
+
+    // Animated image decoders (owner decision: static thumbnails in lists,
+    // animated originals in the full-size viewer). React Native 0.86 pins
+    // Fresco 3.6.0 in node_modules/react-native/gradle/libs.versions.toml
+    // (`fresco = "3.6.0"`); keep these two in lockstep with react-android.
+    implementation("com.facebook.fresco:animated-gif:3.6.0")
+    implementation("com.facebook.fresco:animated-webp:3.6.0")
 }
 
 // Copy react-native-vector-icons fonts to Android assets

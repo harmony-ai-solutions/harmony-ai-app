@@ -66,9 +66,9 @@ describe('engine contract — version gate', () => {
 
   it('accepts an equal or newer engine artifact and rejects an older one', () => {
     expect(checkContractVersion(ENGINE_CONTRACT_VERSION).ok).toBe(true);
-    expect(checkContractVersion('1.7.0').ok).toBe(true);
     expect(checkContractVersion('1.8.0').ok).toBe(true);
     expect(checkContractVersion('2.0.0').ok).toBe(true);
+    expect(checkContractVersion('1.7.0').ok).toBe(false);
     expect(checkContractVersion('1.6.0').ok).toBe(false);
     expect(checkContractVersion('1.5.0').ok).toBe(false);
     expect(checkContractVersion('1.4.0').ok).toBe(false);
@@ -149,6 +149,21 @@ describe('engine contract — mapper conformance against shared fixtures', () =>
     expect(mapped.id).toBe('img-1');
     expect(mapped.is_primary).toBe(true);
     expect(mapped.image_data).toBe('');
+    // Contract 1.8.0: the list advertises a derived thumbnail, never a data_url.
+    expect(characterImageInfoFixture.has_thumbnail).toBe(true);
+    expect(mapped.has_thumbnail).toBe(true);
+  });
+
+  it('character image info uses the RESPONSE mime for thumbnail bytes', () => {
+    // A GIF original's derived preview is a JPEG — the data URL must not claim
+    // `image/gif`.
+    const mapped = mapCharacterImageInfo(
+      { ...characterImageInfoFixture, mime_type: 'image/gif' },
+      'AQID',
+      'image/jpeg',
+    );
+    expect(mapped.mime_type).toBe('image/jpeg');
+    expect(mapped.image_data).toBe('AQID');
   });
 });
 

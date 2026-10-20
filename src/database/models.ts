@@ -450,6 +450,8 @@ export interface CharacterImage {
   mime_type: string;
   description: string;
   is_primary: boolean;
+  /** Contract 1.8.0: a derived 256px preview exists (`?variant=thumb`). */
+  has_thumbnail?: boolean;
   display_order: number;
   vl_model_interpretation: string;
   vl_model: string;

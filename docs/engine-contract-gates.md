@@ -24,12 +24,26 @@
 
 `src/services/engine/engineContract.ts` exports `ENGINE_CONTRACT_VERSION`,
 mirroring `info.version` in the engine repo's
-`docs/api/management/openapi.yaml` (today `1.7.0`). `checkContractVersion(artifact)`
+`docs/api/management/openapi.yaml` (today `1.8.0`). `checkContractVersion(artifact)`
 rejects an engine artifact that advertises a contract **older** than the one the
 TS layer is written against. `checkContractVersionExact` backs the fixture drift
 canary.
 
-**Latest bump — 1.6.0 → 1.7.0 (2-4 follow-up).** The provider config editor's
+**Latest bump — 1.7.0 → 1.8.0 (image previews).** The character-image list
+(`GET /api/character-profiles/:id/images`) is now **metadata-only by default**:
+it reads no blobs and omits `data_url`; `?include_data=1` (also `true`/`yes`)
+opts the old full base64 original back in. Every row gained `has_thumbnail`.
+`GET …/images/:image_id?variant=thumb` serves a derived 256px preview (JPEG q80
+for opaque sources, PNG when the source has alpha), generating + persisting it
+on demand when missing and returning `404 {"error":…,"fallback":"original"}`
+with `Cache-Control: private, no-store` when generation previously failed.
+Original bytes remain untouched (byte-identical bytes/mime, so GIF/APNG/animated
+WebP animation is preserved). The endpoint manifest stays at **53** — the two
+byte routes carry no fixture payload — and the `characterImages` fixture gained
+`has_thumbnail: true`. The app consumes the thumbnail for avatars/gallery tiles
+and renders originals by URL in the full-size viewer.
+
+**Previous bump — 1.6.0 → 1.7.0 (2-4 follow-up).** The provider config editor's
 TTS voice surface called four engine routes that had landed in the router without
 a spec entry. They are now versioned app-facing routes:
 `POST /api/module-configs/tts/embed-speaker` (stateless speaker embedding),
@@ -42,7 +56,7 @@ shared fixtures: `speakerEmbedding` / `ttsSpeechTest` / `elevenLabsVoiceClone` /
 existing path or shape changed. See the engine's
 `docs/Management-API-Versioning.md` §"TTS voice cloning / design".
 
-**Previous bump — 1.5.0 → 1.6.0 (provider-registry 3-2/5-1/5-2/6-1).** The
+**Earlier bump — 1.5.0 → 1.6.0 (provider-registry 3-2/5-1/5-2/6-1).** The
 provider surface re-targeted from the per-type `provider_config_*` tables to the
 unified `provider_accounts` model: `GET /api/providers` returns account-shaped
 rows grouped by type, `POST` takes `{type, account}`, `PUT` takes `{account}`,

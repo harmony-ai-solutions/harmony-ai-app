@@ -59,7 +59,7 @@ import type { LanSyncPairingPayload, SyncPairingPayload } from '../../sync/syncC
  * otherwise (bumping one side without the other is the deliberate-drift canary
  * the plan asks for).
  */
-export const FIXTURE_CONTRACT_VERSION = '1.7.0';
+export const FIXTURE_CONTRACT_VERSION = '1.8.0';
 
 const CREATED = '2026-10-12T09:00:00Z';
 const UPDATED = '2026-10-12T10:00:00Z';
@@ -216,6 +216,9 @@ export const characterImageInfoFixture: CharacterImageInfoDto = {
   description: 'primary',
   is_primary: true,
   display_order: 0,
+  // Contract 1.8.0: a usable derived 256px preview exists. The list is
+  // metadata-only — deliberately no `data_url`.
+  has_thumbnail: true,
   created_at: CREATED,
 };
 

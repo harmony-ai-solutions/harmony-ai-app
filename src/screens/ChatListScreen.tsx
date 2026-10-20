@@ -159,7 +159,7 @@ export function shouldShowNewChatFab(canUseChat: boolean): boolean {
   return canUseChat;
 }
 
-interface ChatListItem {
+export interface ChatListItem {
   interactionId: string;
   entityId: string;
   characterId: string | null;
@@ -168,6 +168,11 @@ interface ChatListItem {
   lastMessageSender: string;
   lastMessageTime: Date | null;
   avatarUri: string | null;
+  /**
+   * Profile whose primary image backs `avatarUri`. Hydration happens AFTER the
+   * first paint (see {@link hydrateListAvatars}) so rows render immediately.
+   */
+  avatarProfileId?: string | null;
   participantKey: string;
   participantIds: string[];
   isGroup: boolean;
@@ -193,6 +198,46 @@ const getEntityDisplayName = (
   if (characterProfileName) return characterProfileName;
   return entityId;
 };
+
+/**
+ * Fill `avatarUri` on already-rendered rows, in parallel and deduped by
+ * profile id. Called as a SECOND phase after the list has painted, so the
+ * first paint never waits on avatars. Multiple rows for one profile share one
+ * avatar lookup; `resolveAvatar` is injectable for tests.
+ */
+export async function hydrateListAvatars(
+  items: ChatListItem[],
+  resolveAvatar: (profileId: string) => Promise<string | null> = async profileId => {
+    const image = await getPrimaryImage(profileId);
+    return image ? imageToDataURL(image) : null;
+  },
+): Promise<ChatListItem[]> {
+  const profileIds = [
+    ...new Set(
+      items
+        .filter(item => !item.avatarUri && item.avatarProfileId)
+        .map(item => item.avatarProfileId as string),
+    ),
+  ];
+  if (profileIds.length === 0) return items;
+
+  const resolved = await Promise.all(
+    profileIds.map(async profileId => {
+      try {
+        return [profileId, await resolveAvatar(profileId)] as const;
+      } catch {
+        return [profileId, null] as const;
+      }
+    }),
+  );
+  const avatarByProfile = new Map(resolved);
+
+  return items.map(item => {
+    if (item.avatarUri || !item.avatarProfileId) return item;
+    const avatarUri = avatarByProfile.get(item.avatarProfileId) ?? null;
+    return avatarUri ? { ...item, avatarUri } : item;
+  });
+}
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
 // Using 'any' here avoids CompositeNavigationProp boilerplate while
@@ -267,9 +312,20 @@ export const ChatListScreen: React.FC = () => {
       const entities = await getAllEntities();
       const entityMap = new Map(entities.map(e => [e.id, e]));
 
-      const listItems: ChatListItem[] = [];
       const seenPrivateKeys = new Set<string>(); // For deduping private interactions per D-01
 
+      interface PlannedRow {
+        row: PhoneConversationPageRow;
+        participantIds: string[];
+        participantKey: string;
+        scope: string;
+        /** Private scope only — the non-impersonated participant. */
+        partnerEntityId?: string;
+      }
+
+      // Phase A — synchronous planning: dedupe, scope and blocked/deleted
+      // filtering. No network calls here, so the row set is known immediately.
+      const plans: PlannedRow[] = [];
       for (const row of rows) {
         let participantIds: string[];
         try {
@@ -302,114 +358,102 @@ export const ChatListScreen: React.FC = () => {
           // (pair) interactions — group chats handle missing members by name.
           if (!entityMap.has(partnerEntityId)) continue;
 
-          const entity = entityMap.get(partnerEntityId);
-
-          // Get last message preview per D-25
-          const lastMsg = await getLastInteractionMessage(activeEntityId, participantKey);
-
-          // Determine who sent the last message
-          let lastMessageSender = '';
-          if (lastMsg) {
-            if (lastMsg.sender_entity_id === activeEntityId) {
-              lastMessageSender = t('you');
-            } else {
-              lastMessageSender = partnerEntityId;
-              if (entity?.character_profile_id) {
-                const profile = await getCharacterProfile(entity.character_profile_id);
-                if (profile) {
-                  lastMessageSender = profile.name;
-                }
-              }
-            }
-          }
-
-          // Get character profile and avatar
-          let avatarUri: string | null = null;
-          let characterProfileName: string | null = null;
-          if (entity?.character_profile_id) {
-            const profile = await getCharacterProfile(entity.character_profile_id);
-            characterProfileName = profile?.name ?? null;
-            const primaryImage = await getPrimaryImage(entity.character_profile_id);
-            if (primaryImage) {
-              avatarUri = imageToDataURL(primaryImage);
-            }
-          }
-
-          const characterName = getEntityDisplayName(
-            entity?.alias ?? null,
-            characterProfileName,
-            partnerEntityId,
-          );
-
-          // Use the most recent interactionId for this participant_key
-          listItems.push({
-            interactionId: row.interactionId,
-            entityId: partnerEntityId,
-            characterId: entity?.character_profile_id ?? null,
-            characterName,
-            lastMessage: lastMsg?.content || t('noMessagesYet'),
-            lastMessageSender,
-            lastMessageTime: lastMsg?.created_at || null,
-            avatarUri,
-            participantKey,
-            participantIds,
-            isGroup: false,
-            // pin/archived filled in below from the settings batch; mute/
-            // disabled from the partner ENTITY flags (Q8); unread derived.
-            pinned: false,
-            archived: false,
-            muted: entity?.is_muted === 1,
-            disabled: entity?.is_disabled === 1,
-            locked: lockedIds.has(partnerEntityId),
-            unreadCount: 0,
-          });
+          plans.push({ row, participantIds, participantKey, scope, partnerEntityId });
         } else if (scope === 'group') {
-          // Group interactions: one entry per participant set per D-01 (the
-          // page query already dedupes by participant_key).
-
           // F5: skip group conversations containing a blocked participant.
           if (participantIds.some(id => filteredIds.has(id))) continue;
+          plans.push({ row, participantIds, participantKey, scope });
+        }
+      }
 
-          // Get last message preview
-          const lastMsg = await getLastInteractionMessage(activeEntityId, participantKey);
+      // Phase B — hydrate previews + profile names IN PARALLEL. Each private
+      // row resolves its profile ONCE and reuses it for the sender name and the
+      // row name. Avatars are deliberately NOT fetched here: they are filled by
+      // `hydrateListAvatars()` after the first paint.
+      const listItems: ChatListItem[] = await Promise.all(
+        plans.map(async plan => {
+          const { row, participantIds, participantKey, scope } = plan;
 
-          // Build display name from participant names per D-12
-          const otherParticipantIds = participantIds.filter(id => id !== activeEntityId);
-          const displayNames: string[] = [];
-          let avatarUri: string | null = null;
+          if (scope === 'private') {
+            const partnerEntityId = plan.partnerEntityId as string;
+            const entity = entityMap.get(partnerEntityId);
+            const characterProfileId = entity?.character_profile_id ?? null;
 
-          for (const pid of otherParticipantIds) {
-            const entity = entityMap.get(pid);
-            if (entity?.character_profile_id) {
-              const profile = await getCharacterProfile(entity.character_profile_id);
-              if (profile) {
-                displayNames.push(profile.name);
-                continue;
+            const [lastMsg, profile] = await Promise.all([
+              getLastInteractionMessage(activeEntityId, participantKey),
+              characterProfileId
+                ? getCharacterProfile(characterProfileId)
+                : Promise.resolve(null),
+            ]);
+
+            // Determine who sent the last message
+            let lastMessageSender = '';
+            if (lastMsg) {
+              if (lastMsg.sender_entity_id === activeEntityId) {
+                lastMessageSender = t('you');
+              } else {
+                lastMessageSender = profile?.name ?? partnerEntityId;
               }
             }
-            displayNames.push(pid);
+
+            const characterName = getEntityDisplayName(
+              entity?.alias ?? null,
+              profile?.name ?? null,
+              partnerEntityId,
+            );
+
+            return {
+              interactionId: row.interactionId,
+              entityId: partnerEntityId,
+              characterId: characterProfileId,
+              characterName,
+              lastMessage: lastMsg?.content || t('noMessagesYet'),
+              lastMessageSender,
+              lastMessageTime: lastMsg?.created_at || null,
+              avatarUri: null,
+              avatarProfileId: characterProfileId,
+              participantKey,
+              participantIds,
+              isGroup: false,
+              // pin/archived filled in below from the settings batch; mute/
+              // disabled from the partner ENTITY flags (Q8); unread derived.
+              pinned: false,
+              archived: false,
+              muted: entity?.is_muted === 1,
+              disabled: entity?.is_disabled === 1,
+              locked: lockedIds.has(partnerEntityId),
+              unreadCount: 0,
+            } satisfies ChatListItem;
           }
 
-          // Try to get avatar from first participant
-          const firstEntity = otherParticipantIds.length > 0 ? entityMap.get(otherParticipantIds[0]) : null;
-          if (firstEntity?.character_profile_id) {
-            const primaryImage = await getPrimaryImage(firstEntity.character_profile_id);
-            if (primaryImage) {
-              avatarUri = imageToDataURL(primaryImage);
-            }
-          }
+          // Group interactions: one entry per participant set per D-01.
+          const lastMsg = await getLastInteractionMessage(activeEntityId, participantKey);
+          const otherParticipantIds = participantIds.filter(id => id !== activeEntityId);
+          const displayNames = await Promise.all(
+            otherParticipantIds.map(async pid => {
+              const entity = entityMap.get(pid);
+              if (entity?.character_profile_id) {
+                const profile = await getCharacterProfile(entity.character_profile_id);
+                if (profile) return profile.name;
+              }
+              return pid;
+            }),
+          );
 
-          const groupName = displayNames.join(', ');
+          // The group avatar comes from its first non-self participant.
+          const firstEntity =
+            otherParticipantIds.length > 0 ? entityMap.get(otherParticipantIds[0]) : null;
 
-          listItems.push({
+          return {
             interactionId: row.interactionId,
             entityId: '', // No single partner for groups
             characterId: null,
-            characterName: groupName,
+            characterName: displayNames.join(', '),
             lastMessage: lastMsg?.content || t('noMessagesYet'),
             lastMessageSender: '',
             lastMessageTime: lastMsg?.created_at || null,
-            avatarUri,
+            avatarUri: null,
+            avatarProfileId: firstEntity?.character_profile_id ?? null,
             participantKey,
             participantIds,
             isGroup: true,
@@ -421,16 +465,19 @@ export const ChatListScreen: React.FC = () => {
             disabled: false,
             locked: false,
             unreadCount: 0,
-          });
-        }
-      }
+          } satisfies ChatListItem;
+        }),
+      );
 
-      // Merge per-conversation pin/archive state from the settings batch.
+      // Merge per-conversation pin/archive state from the settings batch. Both
+      // reads are independent — issue them together.
       const keys = listItems.map(item => item.participantKey);
-      const settingsMap = await getChatConversationSettingsBatch(keys);
-      // Derive unread counts from conversation_messages.is_read, scoped to this
-      // POV entity (A2) — the badge is no longer a stored counter.
-      const unreadMap = await getUnreadCountByParticipantKeys(keys, activeEntityId);
+      const [settingsMap, unreadMap] = await Promise.all([
+        getChatConversationSettingsBatch(keys),
+        // Derive unread counts from conversation_messages.is_read, scoped to
+        // this POV entity (A2) — the badge is no longer a stored counter.
+        getUnreadCountByParticipantKeys(keys, activeEntityId),
+      ]);
       for (const item of listItems) {
         const settings = settingsMap.get(item.participantKey);
         if (settings) {
@@ -468,6 +515,34 @@ export const ChatListScreen: React.FC = () => {
       log.warn('Failed to load disabled entities — chat list filter skipped:', error);
     }
     return filtered;
+  }, []);
+
+  /**
+   * Second paint pass: fill avatars for the rows already on screen. Updates the
+   * live list by participant key (so a concurrent live message update is not
+   * clobbered) and re-sorts only if nothing structural changed.
+   */
+  const applyResolvedAvatars = useCallback(async (base: ChatListItem[]) => {
+    if (!base.some(item => item.avatarProfileId)) return;
+    try {
+      const hydrated = await hydrateListAvatars(base);
+      const avatarByKey = new Map(hydrated.map(item => [item.participantKey, item.avatarUri]));
+      let changed = false;
+      const merged = sortListItems(
+        chatListRef.current.map(item => {
+          const avatarUri = avatarByKey.get(item.participantKey);
+          if (!avatarUri || item.avatarUri) return item;
+          changed = true;
+          return { ...item, avatarUri };
+        }),
+      );
+      if (!changed) return;
+      chatListRef.current = merged;
+      setChatList(merged.filter(item => !item.archived));
+      setArchivedList(merged.filter(item => item.archived));
+    } catch (error) {
+      log.warn('Failed to hydrate chat-list avatars:', error);
+    }
   }, []);
 
   /**
@@ -510,13 +585,17 @@ export const ChatListScreen: React.FC = () => {
         // Keep the floating bubble's unread badge in sync with the
         // conversation that currently has the bubble shown (if any).
         syncBubbleUnreadBadge(sorted);
+
+        // Avatars arrive AFTER the first paint — rows (name, preview, time)
+        // render immediately; the thumbnail pass fills them in.
+        void applyResolvedAvatars(sorted);
       } catch (error) {
         log.error('Failed to load chat list:', error);
       } finally {
         setRefreshing(false);
       }
     },
-    [buildListItems, loadFilteredEntityIds],
+    [applyResolvedAvatars, buildListItems, loadFilteredEntityIds],
   );
 
   /** Load the next page of conversations and append (offset pagination, F6). */
@@ -555,13 +634,14 @@ export const ChatListScreen: React.FC = () => {
       setChatList(merged.filter(item => !item.archived));
       setArchivedList(merged.filter(item => item.archived));
       syncBubbleUnreadBadge(merged);
+      void applyResolvedAvatars(merged);
     } catch (error) {
       log.error('Failed to load more conversations:', error);
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [buildListItems, loadFilteredEntityIds]);
+  }, [applyResolvedAvatars, buildListItems, loadFilteredEntityIds]);
 
   /** Debounce a full reload so rapid session events collapse into one fetch. */
   const scheduleChatListReload = useCallback(() => {

@@ -110,8 +110,17 @@
  * `POST /api/providers/elevenlabs/voices/design` — with the shared fixtures
  * `speakerEmbedding` / `ttsSpeechTest` / `elevenLabsVoiceClone` /
  * `elevenLabsVoiceDesign`. No existing shape changed (additive/MINOR).
+ *
+ * 1.7.0 → 1.8.0 (image previews): `GET /api/character-profiles/:id/images` is
+ * **metadata-only by default** (no `data_url`, no blobs read; `?include_data=1`
+ * opts the old base64 original back in) and each row gains `has_thumbnail`.
+ * `GET …/images/:image_id?variant=thumb` serves a derived 256px JPEG/PNG
+ * (generated on demand; 404 `{error, fallback:"original"}` when generation
+ * cannot produce one). The original byte route is unchanged (byte-identical,
+ * animation preserved). Endpoint manifest stays at 53 (byte routes carry no
+ * fixture payload); fixtures: `characterImages` gained `has_thumbnail`.
  */
-export const ENGINE_CONTRACT_VERSION = '1.7.0';
+export const ENGINE_CONTRACT_VERSION = '1.8.0';
 
 /** Outcome of a contract-version comparison. */
 export interface ContractVersionCheck {

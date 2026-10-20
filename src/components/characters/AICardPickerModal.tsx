@@ -44,8 +44,11 @@ import { ThemedText } from '../themed/ThemedText';
 import { ThemedEmptyState } from '../themed/ThemedEmptyState';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
-import { getAllCharacterProfiles, getCharacterImages } from '../../database/repositories';
-import { createDataURL } from '../../database/base64';
+import {
+  getAllCharacterProfiles,
+  getPrimaryImage,
+  imageToDataURL,
+} from '../../database/repositories';
 import type { CharacterProfile } from '../../database/models';
 import { createLogger } from '../../utils/logger';
 import { CharacterCoverFlowCarousel } from './CharacterCoverFlowCarousel';
@@ -108,11 +111,8 @@ export const AICardPickerModal: React.FC<AICardPickerModalProps> = ({
         await Promise.all(
           data.map(async profile => {
             try {
-              const imgs = await getCharacterImages(profile.id);
-              const primary = imgs.find(img => img.is_primary === true);
-              imageMap[profile.id] = primary
-                ? createDataURL(primary.image_data, primary.mime_type)
-                : null;
+              const primary = await getPrimaryImage(profile.id);
+              imageMap[profile.id] = primary ? imageToDataURL(primary) : null;
             } catch {
               imageMap[profile.id] = null;
             }

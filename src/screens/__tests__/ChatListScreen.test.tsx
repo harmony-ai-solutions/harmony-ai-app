@@ -19,7 +19,33 @@ import {
   resolveDisplayUnreadCount,
   shouldReloadAfterSync,
   shouldShowNewChatFab,
+  hydrateListAvatars,
 } from '../ChatListScreen';
+import type { ChatListItem } from '../ChatListScreen';
+
+function chatListItem(over: Partial<ChatListItem> = {}): ChatListItem {
+  return {
+    interactionId: 'i1',
+    entityId: 'e2',
+    characterId: 'p1',
+    characterName: 'Aria',
+    lastMessage: 'hi',
+    lastMessageSender: 'Aria',
+    lastMessageTime: new Date('2026-10-12T09:00:00Z'),
+    avatarUri: null,
+    avatarProfileId: 'p1',
+    participantKey: 'e1+e2',
+    participantIds: ['e1', 'e2'],
+    isGroup: false,
+    pinned: false,
+    archived: false,
+    muted: false,
+    disabled: false,
+    locked: false,
+    unreadCount: 0,
+    ...over,
+  };
+}
 
 describe('ChatListScreen derived-unread badge seam (3-1)', () => {
   it('shows the derived unread count when the partner is not muted', () => {
@@ -71,5 +97,55 @@ describe('ChatListScreen New Chat FAB guard (1-1)', () => {
     // While the screen shows the "engine starting" empty state, an actionable
     // FAB would open a picker that cannot mint a conversation.
     expect(shouldShowNewChatFab(false)).toBe(false);
+  });
+});
+
+describe('ChatListScreen avatar hydration (contract 1.8.0)', () => {
+  it('exposes rows BEFORE avatars resolve, then fills every row in one pass', async () => {
+    let resolveAvatar!: (uri: string | null) => void;
+    const pendingAvatar = new Promise<string | null>(resolve => {
+      resolveAvatar = resolve;
+    });
+
+    const base = [
+      chatListItem({ participantKey: 'e1+e2' }),
+      chatListItem({ participantKey: 'e1+e3', entityId: 'e3', avatarProfileId: 'p2' }),
+    ];
+    const hydration = hydrateListAvatars(base, () => pendingAvatar);
+
+    // First paint: rows exist (name/preview/time) with NO avatar yet.
+    expect(base).toHaveLength(2);
+    expect(base.every(item => item.avatarUri === null)).toBe(true);
+
+    resolveAvatar('data:image/jpeg;base64,AQID');
+    const filled = await hydration;
+
+    expect(filled[0].avatarUri).toBe('data:image/jpeg;base64,AQID');
+    expect(filled[1].avatarUri).toBe('data:image/jpeg;base64,AQID');
+    expect(filled[0].characterName).toBe('Aria');
+  });
+
+  it('resolves a shared profile once for several rows', async () => {
+    const resolver = jest.fn().mockResolvedValue('data:image/jpeg;base64,AQID');
+    const filled = await hydrateListAvatars(
+      [
+        chatListItem({ participantKey: 'e1+e2' }),
+        chatListItem({ participantKey: 'e1+e2b', entityId: 'e2b' }),
+      ],
+      resolver,
+    );
+
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(resolver).toHaveBeenCalledWith('p1');
+    expect(filled.every(item => item.avatarUri === 'data:image/jpeg;base64,AQID')).toBe(true);
+  });
+
+  it('leaves avatar-less rows untouched', async () => {
+    const resolver = jest.fn();
+    const items = [chatListItem({ avatarProfileId: null })];
+    const filled = await hydrateListAvatars(items, resolver);
+
+    expect(resolver).not.toHaveBeenCalled();
+    expect(filled).toBe(items);
   });
 });

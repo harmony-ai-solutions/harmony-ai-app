@@ -23,6 +23,7 @@ import {
   Platform,
 } from 'react-native';
 import { Image } from 'react-native';
+import type { ImageSourcePropType } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { ThemedText } from '../themed/ThemedText';
 
@@ -30,7 +31,14 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface ImageViewerModalProps {
   visible: boolean;
-  imageUri: string | null;
+  /** Data URL / remote URI (legacy callers). Ignored when `imageSource` is set. */
+  imageUri?: string | null;
+  /**
+   * Full RN image source. Lets a caller render an authenticated URL (e.g. a
+   * character image served with `X-Loopback-Token`) so the platform decoders
+   * animate originals and the native cache applies.
+   */
+  imageSource?: ImageSourcePropType | null;
   description?: string;
   onClose: () => void;
 }
@@ -38,9 +46,12 @@ interface ImageViewerModalProps {
 export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   visible,
   imageUri,
+  imageSource,
   description,
   onClose,
 }) => {
+  const resolvedSource: ImageSourcePropType | null =
+    imageSource ?? (imageUri ? { uri: imageUri } : null);
   return (
     <Modal
       visible={visible}
@@ -72,9 +83,9 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
           centerContent
           bouncesZoom
         >
-          {imageUri ? (
+          {resolvedSource ? (
             <Image
-              source={{ uri: imageUri }}
+              source={resolvedSource}
               style={styles.image}
               resizeMode="contain"
             />

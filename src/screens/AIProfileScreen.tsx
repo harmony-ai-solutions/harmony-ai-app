@@ -49,11 +49,15 @@ import { hexToRgba } from '../utils/colorUtils';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { ProfileTabs } from '../components/profile/ProfileTabs';
 import { ImageCommentModal } from '../components/characters/ImageCommentModal';
+import { ImageViewerModal } from '../components/modals/ImageViewerModal';
 import {
   getAICharacterProfile,
-  getCharacterImages,
+  getCharacterImagesMetadata,
+  getPrimaryImage,
   getSiblingCharacterProfiles,
   getCharacterStats,
+  characterImageSource,
+  imageToDataURL,
   CharacterStats,
 } from '../database/repositories';
 import {
@@ -72,7 +76,6 @@ import {
   isChatLocked,
 } from '../services/marketplace/MarketplaceService';
 import type { MarketplaceListingDetail } from '../services/marketplace/MarketplaceService';
-import { createDataURL } from '../database/base64';
 import { CharacterProfile, CharacterImage } from '../database/models';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
@@ -146,6 +149,9 @@ export const AIProfileScreen: React.FC = () => {
   // ── Comment modal state ────────────────────────────────────────────────
   const [commentImageId, setCommentImageId] = useState<string | null>(null);
   const [commentVisible, setCommentVisible] = useState(false);
+  // Full-size viewer — renders the ORIGINAL by URL (animated GIF/WebP keep
+  // animating via the platform decoders; the thumbnail is only for tiles).
+  const [viewerImage, setViewerImage] = useState<CharacterImage | null>(null);
   const [chatting, setChatting] = useState(false);
   // One-click Duplicate in flight (engine-parity entity copy).
   const [duplicating, setDuplicating] = useState(false);
@@ -172,13 +178,14 @@ export const AIProfileScreen: React.FC = () => {
         log.warn('Failed to load entity flags:', entErr);
       }
 
-      // Primary avatar + full gallery
-      const imgs = await getCharacterImages(profileId);
+      // Primary avatar (thumbnail) + gallery metadata (no blobs — tiles render
+      // the derived preview by URL; contract 1.8.0).
+      const [imgs, primary] = await Promise.all([
+        getCharacterImagesMetadata(profileId),
+        getPrimaryImage(profileId),
+      ]);
       setImages(imgs);
-      const primary = imgs.find(img => img.is_primary === true);
-      setAvatarUri(
-        primary ? createDataURL(primary.image_data, primary.mime_type) : null,
-      );
+      setAvatarUri(primary ? imageToDataURL(primary) : null);
 
       // Other forks of the same AI (same base name, e.g. Max 2 / Max 3)
       const siblings = await getSiblingCharacterProfiles(data.name);
@@ -191,11 +198,8 @@ export const AIProfileScreen: React.FC = () => {
         await Promise.all(
           siblingCopies.map(async copy => {
             try {
-              const copyImgs = await getCharacterImages(copy.id);
-              const copyPrimary = copyImgs.find(img => img.is_primary === true);
-              avatarMap[copy.id] = copyPrimary
-                ? createDataURL(copyPrimary.image_data, copyPrimary.mime_type)
-                : null;
+              const copyPrimary = await getPrimaryImage(copy.id);
+              avatarMap[copy.id] = copyPrimary ? imageToDataURL(copyPrimary) : null;
             } catch {
               avatarMap[copy.id] = null;
             }
@@ -1027,11 +1031,28 @@ export const AIProfileScreen: React.FC = () => {
                       };
                       return (
                         <View key={img.id} style={styles.postCard}>
-                          <Image
-                            source={{ uri: createDataURL(img.image_data, img.mime_type) }}
-                            style={styles.postImage}
-                            resizeMode="cover"
-                          />
+                          <TouchableOpacity
+                            onPress={() => {
+                              hapticLightPress();
+                              setViewerImage(img);
+                            }}
+                            activeOpacity={0.85}
+                            testID={`ai-image-tile-${img.id}`}
+                            accessibilityRole="imagebutton"
+                            accessibilityLabel={img.description || resolvedName}
+                          >
+                            <Image
+                              source={
+                                characterImageSource(
+                                  profileId,
+                                  img.id,
+                                  img.has_thumbnail ? 'thumb' : undefined,
+                                ) ?? undefined
+                              }
+                              style={styles.postImage}
+                              resizeMode="cover"
+                            />
+                          </TouchableOpacity>
                           {/* Date/time caption under the image */}
                           <View style={styles.postDateRow}>
                             <Icon
@@ -1169,6 +1190,16 @@ export const AIProfileScreen: React.FC = () => {
         onClose={handleCommentsClosed}
         // The character's owner can moderate (copy/delete) any comment.
         canModerateAll={isOwner}
+      />
+
+      {/* ── Full-size viewer — ORIGINAL bytes by URL (animation preserved) ── */}
+      <ImageViewerModal
+        visible={viewerImage != null}
+        imageSource={
+          viewerImage ? characterImageSource(profileId, viewerImage.id) : null
+        }
+        description={viewerImage?.description || undefined}
+        onClose={() => setViewerImage(null)}
       />
     </ThemedView>
   );
