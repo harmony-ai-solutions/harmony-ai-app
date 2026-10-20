@@ -14,6 +14,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AuthService from '../../auth/AuthService';
 import { engineApiClient } from '../../engine/EngineApiClient';
+import { getEngineConnection, onEngineConnectionChange } from '../../engine/EngineService';
 import * as repo from '../../../database/repositories';
 import { ensureSeededDefaults, startSeedingEnsure } from '../seeding';
 import { CLOUD_HOSTS } from '../../../config/cloud';
@@ -52,6 +53,11 @@ jest.mock('../../engine/EngineApiClient', () => ({
   engineApiClient: { listProviderModels: jest.fn() },
 }));
 
+jest.mock('../../engine/EngineService', () => ({
+  getEngineConnection: jest.fn(),
+  onEngineConnectionChange: jest.fn(() => jest.fn()),
+}));
+
 jest.mock('../../../database/repositories', () => ({
   __esModule: true,
   listAccounts: jest.fn(),
@@ -83,6 +89,10 @@ const auth = AuthService as unknown as {
   refreshDeduped: jest.Mock;
 };
 const engine = engineApiClient as unknown as { listProviderModels: jest.Mock };
+const engineConnection = {
+  getEngineConnection: getEngineConnection as jest.Mock,
+  onEngineConnectionChange: onEngineConnectionChange as jest.Mock,
+};
 const r = repo as unknown as {
   listAccounts: jest.Mock;
   createAccount: jest.Mock;
@@ -167,6 +177,22 @@ function mockStorage(values: Record<string, string | null>) {
 
 const capModel = (json: string): string => JSON.parse(json).model;
 
+const CONN = { adminBaseUrl: 'http://127.0.0.1:28081' };
+const NOT_CONNECTED =
+  'Engine is not connected — start the engine sidecar before using the management-API data layer';
+
+/** Capture every engine-connection listener registered during a test. */
+function captureEngineListeners() {
+  const listeners: Array<(connection: unknown) => void> = [];
+  engineConnection.onEngineConnectionChange.mockImplementation(
+    (cb: (connection: unknown) => void) => {
+      listeners.push(cb);
+      return jest.fn();
+    },
+  );
+  return listeners;
+}
+
 const flush = async () => {
   for (let i = 0; i < 12; i += 1) {
     // eslint-disable-next-line no-await-in-loop
@@ -176,6 +202,10 @@ const flush = async () => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+
+  // Default: the engine management API is up (no readiness deferral).
+  engineConnection.getEngineConnection.mockReturnValue(CONN);
+  engineConnection.onEngineConnectionChange.mockImplementation(() => jest.fn());
 
   auth.getToken.mockResolvedValue('paseto-current');
   // Default: a comfortably-fresh cached token (well outside any threshold).
@@ -517,6 +547,82 @@ describe('ensureSeededDefaults — persisted guard', () => {
     expect(r.updateAccount).toHaveBeenCalledWith('acct-new', expect.objectContaining({ api_key: 'paseto-1' }));
     expect(r.createBackendConfig).toHaveBeenCalledTimes(1);
     expect(mockedSetItem).toHaveBeenCalledWith('seeding_done_v1:acct-new', '1');
+  });
+});
+
+// ── Engine readiness deferral (cold-start boot race) ────────────────────────
+
+describe('ensureSeededDefaults — engine readiness deferral', () => {
+  it('defers the bootstrap ensure until the engine connects, then re-runs the full flow', async () => {
+    const listeners = captureEngineListeners();
+    engineConnection.getEngineConnection.mockReturnValue(null);
+    r.listAccounts.mockRejectedValueOnce(new Error(NOT_CONNECTED));
+
+    const stop = startSeedingEnsure();
+    await flush();
+
+    // Attempted once, dropped nothing: the retry is armed on readiness.
+    expect(r.listAccounts).toHaveBeenCalledTimes(1);
+    expect(r.updateAccount).not.toHaveBeenCalled();
+    expect(engineConnection.onEngineConnectionChange).toHaveBeenCalledTimes(1);
+
+    // Engine management API is up → re-run the FULL flow (paseto-less).
+    engineConnection.getEngineConnection.mockReturnValue(CONN);
+    listeners.forEach(listener => listener(CONN));
+    await flush();
+
+    expect(r.listAccounts).toHaveBeenCalledTimes(2);
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', {
+      api_key: 'paseto-current',
+      base_url: CLOUD_HOSTS.inference,
+    });
+    stop();
+  });
+
+  it('absorbs a second failure during the same race (one armed retry)', async () => {
+    const listeners = captureEngineListeners();
+    engineConnection.getEngineConnection.mockReturnValue(null);
+    r.listAccounts
+      .mockRejectedValueOnce(new Error(NOT_CONNECTED))
+      .mockRejectedValueOnce(new Error(NOT_CONNECTED));
+
+    const stop = startSeedingEnsure();
+    await flush();
+
+    // A token renewal lands while the retry is armed → fails the same way.
+    const handler = auth.on.mock.calls[0][1] as (paseto: string) => void;
+    handler('paseto-renewed');
+    await flush();
+
+    expect(r.listAccounts).toHaveBeenCalledTimes(2);
+    // Still ONE armed subscription — the newer failure replaced the task.
+    expect(engineConnection.onEngineConnectionChange).toHaveBeenCalledTimes(1);
+
+    engineConnection.getEngineConnection.mockReturnValue(CONN);
+    listeners.forEach(listener => listener(CONN));
+    await flush();
+
+    expect(r.listAccounts).toHaveBeenCalledTimes(3);
+    expect(r.updateAccount).toHaveBeenCalledWith('acct-1', expect.objectContaining({ api_key: 'paseto-current' }));
+    stop();
+  });
+
+  it('logs (never defers) a not-connected failure against a LIVE engine', async () => {
+    const listeners = captureEngineListeners();
+    engineConnection.getEngineConnection.mockReturnValue(CONN);
+    r.listAccounts.mockRejectedValueOnce(new Error(NOT_CONNECTED));
+
+    const stop = startSeedingEnsure();
+    await flush();
+
+    expect(r.listAccounts).toHaveBeenCalledTimes(1);
+    expect(engineConnection.onEngineConnectionChange).not.toHaveBeenCalled();
+
+    // A later connection event must not trigger a surprise retry.
+    listeners.forEach(listener => listener(CONN));
+    await flush();
+    expect(r.listAccounts).toHaveBeenCalledTimes(1);
+    stop();
   });
 });
 

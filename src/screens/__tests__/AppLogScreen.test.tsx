@@ -2,11 +2,13 @@
  * AppLogScreen — viewer tests.
  *
  * Covers rendering entries from the ring buffer, the level filter + text
- * search, the clear confirmation flow, and the share/copy invocations.
+ * search, the clear confirmation flow, the share/copy invocations, the
+ * follow/pause data gating, and the no-scroll-side-effects regression (follow
+ * must never yank the list — EngineLogScreen parity).
  */
 
 import React from 'react';
-import { Share } from 'react-native';
+import { FlatList, Share } from 'react-native';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 
@@ -327,6 +329,49 @@ describe('AppLogScreen pause', () => {
       await fireEvent.press(getByTestId('app-log-follow-toggle'));
       expect(queryByText('paused-arrival')).toBeTruthy();
     } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+// ── Regression: follow must not manipulate the scroll position ──────────────
+// The previous `onContentSizeChange` → scrollToOffset(0) handler fired on every
+// content-size change, including virtualization re-measures DURING the user's
+// own scroll, constantly snapping the view back to the top. EngineLogScreen has
+// no scroll manipulation: follow/pause only gates data ingestion, and
+// newest-first prepending keeps the top current by itself.
+
+describe('AppLogScreen follow has no scroll side effects', () => {
+  it('never calls scrollToOffset when new data arrives while following', async () => {
+    jest.useFakeTimers();
+    const scrollSpy = jest.spyOn(FlatList.prototype, 'scrollToOffset');
+    try {
+      seed();
+      const { getByTestId, queryByText } = await render(<AppLogScreen />);
+      const list = getByTestId('app-log-list');
+
+      // A live arrival while following still ingests data...
+      appLogBuffer.push({
+        timestamp: '2026-10-19T10:00:02.000Z',
+        level: 'info',
+        namespace: null,
+        message: 'live-arrival',
+      });
+      await act(async () => {
+        jest.advanceTimersByTime(APP_LOG_POLL_MS * 2);
+      });
+      expect(queryByText('live-arrival')).toBeTruthy();
+
+      // ...and a content-size change (virtualization re-measure during the
+      // user's own scroll) no longer yanks the view to the top.
+      fireEvent(list, 'contentSizeChange', 360, 2000);
+      await act(async () => {
+        jest.advanceTimersByTime(APP_LOG_POLL_MS);
+      });
+
+      expect(scrollSpy).not.toHaveBeenCalled();
+    } finally {
+      scrollSpy.mockRestore();
       jest.useRealTimers();
     }
   });

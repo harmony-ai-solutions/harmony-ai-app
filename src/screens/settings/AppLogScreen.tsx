@@ -3,7 +3,11 @@
  *
  * Mirrors the EngineLogScreen conventions: a newest-first live view with
  * follow/pause, a level filter row, text search, and share/copy/clear header
- * actions. Backed by the in-memory ring buffer in `src/utils/appLogs.ts`
+ * actions. Follow/pause only gates DATA ingestion — like EngineLogScreen there
+ * is NO scroll manipulation: newest-first prepending keeps the top current by
+ * itself, and any programmatic scroll (e.g. on content-size change) would fight
+ * the user's own scroll while virtualization re-measures rows.
+ * Backed by the in-memory ring buffer in `src/utils/appLogs.ts`
  * (captured by the logger's capture transport). Export text stays chronological
  * (oldest → newest) and carries a diagnostics header (app version, engine
  * contract version, platform/OS, device model, app uptime, entry count + time
@@ -129,7 +133,6 @@ export const AppLogScreen: React.FC = () => {
   const [filter, setFilter] = useState<AppLogFilter>(EMPTY_APP_LOG_FILTER);
   const [following, setFollowing] = useState(true);
 
-  const listRef = useRef<FlatList<AppLogRow>>(null);
   const versionRef = useRef(appLogBuffer.getVersion());
   // Read inside the poll tick so a pause is honoured without a stale closure.
   const followingRef = useRef(following);
@@ -369,20 +372,16 @@ export const AppLogScreen: React.FC = () => {
       </View>
 
       <FlatList
-        ref={listRef}
         data={visible}
         keyExtractor={item => String(item.entry.id)}
         renderItem={renderRow}
         style={styles.list}
+        testID="app-log-list"
         contentContainerStyle={styles.listContent}
         initialNumToRender={30}
         maxToRenderPerBatch={40}
         windowSize={11}
         removeClippedSubviews
-        onContentSizeChange={() => {
-          // Newest-first: follow pins the view to the top (like EngineLogScreen).
-          if (following) listRef.current?.scrollToOffset({ offset: 0, animated: false });
-        }}
         ListEmptyComponent={
           <View style={styles.center}>
             <ThemedText variant="muted" size={13} testID="app-log-empty">

@@ -32,6 +32,16 @@
  * (AsyncStorage — app convention): it re-runs only when the guard is absent
  * (first run for the account) or the soulbitscloud account changed. Failures log
  * via `createLogger` and never block sign-in.
+ *
+ * READINESS DEFERRAL (cold-start boot race): with a cached sign-in,
+ * `auth:changed` fires ~180 ms BEFORE the engine management API connects, so the
+ * first ensure (bootstrap AND event) fails with `Engine is not connected — …`
+ * (see `requireEngineConnection()`). Instead of only logging — which left the
+ * engine account holding an EXPIRED PASETO (TTS 401 `token expired`) — the
+ * failure is parked on the next engine-ready event and the FULL ensure flow is
+ * re-run PASETO-LESS, so it re-reads the cached token through its own
+ * `resolveFreshToken` expiry guard. One retry is armed at a time; a second
+ * failure during the same race is absorbed. Sign-in is never blocked.
  */
 
 import i18n from 'i18next';
@@ -40,6 +50,10 @@ import AuthService from '../auth/AuthService';
 import { CLOUD_HOSTS } from '../../config/cloud';
 import { engineApiClient } from '../engine/EngineApiClient';
 import type { ModelInfoDto } from '../engine/EngineApiClient';
+import {
+  createEngineReadinessDeferral,
+  shouldDeferForEngineReadiness,
+} from '../engine/engineReadiness';
 import { createLogger } from '../../utils/logger';
 import {
   listAccounts,
@@ -70,6 +84,16 @@ const SOULBITS = 'soulbitscloud';
 
 /** Persisted guard prefix — the gap-fill scan runs once per soulbitscloud account. */
 const GUARD_PREFIX = 'seeding_done_v1:';
+
+/**
+ * The single armed "retry the whole ensure flow when the engine is ready" slot.
+ * The deferred task re-runs {@link ensureSeededDefaults} PASETO-LESS on purpose:
+ * the retry must re-read the cached token through its own freshness/expiry guard
+ * (a captured PASETO could already be expired by the time the engine is up).
+ */
+const readinessDeferral = createEngineReadinessDeferral(error => {
+  log.warn('Deferred seeding ensure failed:', error);
+});
 
 // ── Seed targets ────────────────────────────────────────────────────────
 
@@ -117,6 +141,15 @@ export async function ensureSeededDefaults(pasetoOverride?: string): Promise<voi
 
     await gapFill(accountId, freshPaseto);
   } catch (error) {
+    // Cold-start boot race: the engine management API is not up yet. Park ONE
+    // retry on the next engine-ready event instead of dropping the ensure (the
+    // account row would otherwise keep an expired PASETO). A not-connected
+    // error against a live connection is a genuine failure → log only.
+    if (shouldDeferForEngineReadiness(error)) {
+      log.info('Engine not connected yet — deferring seeding until the engine is ready');
+      readinessDeferral.arm(() => ensureSeededDefaults());
+      return;
+    }
     // Never block sign-in on a seeding failure.
     log.warn('ensureSeededDefaults failed:', error);
   }
@@ -126,6 +159,10 @@ export async function ensureSeededDefaults(pasetoOverride?: string): Promise<voi
  * Subscribe to `auth:changed` (login + hourly token renewal) AND run once
  * immediately for the bootstrap-authenticated path (cold start already signed
  * in). Returns a `stop()` that removes the exact handler.
+ *
+ * A trigger that lands before the engine management API is up is not lost: the
+ * ensure flow arms ONE readiness retry ({@link readinessDeferral}) that re-runs
+ * it as soon as the engine connects.
  */
 export function startSeedingEnsure(): () => void {
   const handler = (paseto: string) => {
