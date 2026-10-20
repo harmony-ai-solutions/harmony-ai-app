@@ -10,6 +10,7 @@ import ai.soulbits.chat.engine.EngineSidecarPackage
 import ai.soulbits.chat.backup.BackupPackage
 import ai.soulbits.chat.updates.ApkInstallPackage
 import ai.soulbits.chat.notifications.NotificationsPackage
+import ai.soulbits.chat.keepawake.KeepScreenOnPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -30,6 +31,8 @@ class MainApplication : Application(), ReactApplication {
           add(ApkInstallPackage())
           // Local outreach notifications (plan 7-12 §4b): channel + posting.
           add(NotificationsPackage())
+          // Screen keep-awake while TTS test playback runs.
+          add(KeepScreenOnPackage())
         },
       // Explicitly gate dev support on OUR variant's BuildConfig. The RN 0.86
       // overload defaults this to ReactBuildConfig.DEBUG (the react-android

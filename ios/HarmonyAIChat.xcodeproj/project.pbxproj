@@ -15,6 +15,7 @@
 		A1000000000000000000B002 /* SoulbitsBackupModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F003 /* SoulbitsBackupModule.swift */; };
 		A1000000000000000000B003 /* SoulbitsBackupModule.m in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F004 /* SoulbitsBackupModule.m */; };
 		A1000000000000000000B005 /* SoulbitsNotificationsModule.m in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F007 /* SoulbitsNotificationsModule.m */; };
+		A1000000000000000000B006 /* KeepScreenOnModule.m in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F008 /* KeepScreenOnModule.m */; };
 		A1000000000000000000B004 /* SoulbitsEngine.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F006 /* SoulbitsEngine.xcframework */; };
 /* End PBXBuildFile section */
 
@@ -33,6 +34,7 @@
 		A1000000000000000000F003 /* SoulbitsBackupModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoulbitsBackupModule.swift; sourceTree = "<group>"; };
 		A1000000000000000000F004 /* SoulbitsBackupModule.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SoulbitsBackupModule.m; sourceTree = "<group>"; };
 		A1000000000000000000F007 /* SoulbitsNotificationsModule.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SoulbitsNotificationsModule.m; sourceTree = "<group>"; };
+		A1000000000000000000F008 /* KeepScreenOnModule.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = KeepScreenOnModule.m; sourceTree = "<group>"; };
 		A1000000000000000000F005 /* HarmonyAIChat.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = HarmonyAIChat.entitlements; path = HarmonyAIChat/HarmonyAIChat.entitlements; sourceTree = "<group>"; };
 		A1000000000000000000F006 /* SoulbitsEngine.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = SoulbitsEngine.xcframework; path = Frameworks/SoulbitsEngine.xcframework; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
@@ -90,6 +92,14 @@
 			path = Notifications;
 			sourceTree = "<group>";
 		};
+		A1000000000000000000E004 /* KeepAwake */ = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000F008 /* KeepScreenOnModule.m */,
+			);
+			path = KeepAwake;
+			sourceTree = "<group>";
+		};
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -114,6 +124,7 @@
 				A1000000000000000000E001 /* EngineModule */,
 				A1000000000000000000E002 /* SoulbitsBackup */,
 				A1000000000000000000E003 /* Notifications */,
+				A1000000000000000000E004 /* KeepAwake */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
@@ -293,6 +304,7 @@
 				A1000000000000000000B002 /* SoulbitsBackupModule.swift in Sources */,
 				A1000000000000000000B003 /* SoulbitsBackupModule.m in Sources */,
 				A1000000000000000000B005 /* SoulbitsNotificationsModule.m in Sources */,
+				A1000000000000000000B006 /* KeepScreenOnModule.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
