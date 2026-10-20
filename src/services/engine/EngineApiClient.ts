@@ -294,8 +294,17 @@ export interface CharacterImageInfoDto {
   is_primary: boolean;
   display_order: number;
   /**
-   * Contract 1.8.0 (optional for older engines): true when a usable derived
-   * 256px preview is stored (`GET …/images/:image_id?variant=thumb`).
+   * Contract 1.8.0 tri-state of the derived 256px preview:
+   *  - `ready` — stored; `?variant=thumb` serves it.
+   *  - `pending` — legacy row (`thumbnail_mime IS NULL`); the first
+   *    `?variant=thumb` generates + persists it.
+   *  - `unavailable` — generation failed/unsupported; the thumb route 404s.
+   * Optional for older engines.
+   */
+  thumbnail_state?: 'ready' | 'pending' | 'unavailable';
+  /**
+   * Contract 1.8.0 legacy flag: exactly `thumbnail_state === 'ready'`.
+   * Optional for older engines. Prefer {@link thumbnail_state}.
    */
   has_thumbnail?: boolean;
   created_at?: string;

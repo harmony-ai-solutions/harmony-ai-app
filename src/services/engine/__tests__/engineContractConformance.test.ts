@@ -150,7 +150,9 @@ describe('engine contract — mapper conformance against shared fixtures', () =>
     expect(mapped.is_primary).toBe(true);
     expect(mapped.image_data).toBe('');
     // Contract 1.8.0: the list advertises a derived thumbnail, never a data_url.
+    expect(characterImageInfoFixture.thumbnail_state).toBe('ready');
     expect(characterImageInfoFixture.has_thumbnail).toBe(true);
+    expect(mapped.thumbnail_state).toBe('ready');
     expect(mapped.has_thumbnail).toBe(true);
   });
 

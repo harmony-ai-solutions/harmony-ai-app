@@ -32,7 +32,12 @@ canary.
 **Latest bump — 1.7.0 → 1.8.0 (image previews).** The character-image list
 (`GET /api/character-profiles/:id/images`) is now **metadata-only by default**:
 it reads no blobs and omits `data_url`; `?include_data=1` (also `true`/`yes`)
-opts the old full base64 original back in. Every row gained `has_thumbnail`.
+opts the old full base64 original back in. Every row gained a tri-state
+`thumbnail_state` (`ready` / `pending` / `unavailable`) mirrored by the legacy
+`has_thumbnail` flag (`state === "ready"`). `pending` is the pre-1.8.0 legacy
+row (`thumbnail_mime IS NULL`): the first `?variant=thumb` generates and
+persists the preview, so the app requests it for both `ready` and `pending` and
+never for `unavailable`.
 `GET …/images/:image_id?variant=thumb` serves a derived 256px preview (JPEG q80
 for opaque sources, PNG when the source has alpha), generating + persisting it
 on demand when missing and returning `404 {"error":…,"fallback":"original"}`
@@ -40,8 +45,9 @@ with `Cache-Control: private, no-store` when generation previously failed.
 Original bytes remain untouched (byte-identical bytes/mime, so GIF/APNG/animated
 WebP animation is preserved). The endpoint manifest stays at **53** — the two
 byte routes carry no fixture payload — and the `characterImages` fixture gained
-`has_thumbnail: true`. The app consumes the thumbnail for avatars/gallery tiles
-and renders originals by URL in the full-size viewer.
+`thumbnail_state: "ready"` + `has_thumbnail: true`. The app consumes the
+thumbnail for avatars/gallery tiles (≤3 thumb fetches in flight) and renders
+originals by URL in the full-size viewer.
 
 **Previous bump — 1.6.0 → 1.7.0 (2-4 follow-up).** The provider config editor's
 TTS voice surface called four engine routes that had landed in the router without

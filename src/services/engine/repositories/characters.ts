@@ -252,6 +252,35 @@ export async function deleteCharacterProfileCascade(profileId: string): Promise<
 // ── Images ───────────────────────────────────────────────────────────────
 
 /**
+ * Display decision for the derived preview (contract 1.8.0 tri-state):
+ *
+ * | `thumbnail_state` | request `?variant=thumb`? |
+ * |---|---|
+ * | `ready` | yes |
+ * | `pending` | yes — legacy row, this read generates + persists it |
+ * | `unavailable` | no — the thumb route 404s |
+ * | absent (older engine) | yes only when `has_thumbnail === true` |
+ *
+ * This is the ONE helper every display path uses (`getPrimaryImage`, gallery
+ * tiles), so a `pending` legacy row gets its one-time backfill and an
+ * `unavailable` row never pays for a guaranteed 404.
+ */
+export function shouldUseThumbnail(
+  image: Pick<CharacterImage, 'thumbnail_state' | 'has_thumbnail'>,
+): boolean {
+  switch (image.thumbnail_state) {
+    case 'ready':
+    case 'pending':
+      return true;
+    case 'unavailable':
+      return false;
+    default:
+      // Older engine: only the legacy boolean is available.
+      return image.has_thumbnail === true;
+  }
+}
+
+/**
  * Display-path image cache (contract 1.8.0).
  *
  * Key: `${profileId}:${imageId}:${variant}` (`variant` is `thumb` or
@@ -265,11 +294,18 @@ export async function deleteCharacterProfileCascade(profileId: string): Promise<
  * - **Negative entries:** a thumbnail 404 ("no thumbnail available") is
  *   remembered for {@link NEGATIVE_CACHE_TTL_MS} so a failed preview does not
  *   re-ask on every render. Negative entries are never returned as bytes.
+ * - **Thumbnail concurrency cap:** at most
+ *   {@link MAX_CONCURRENT_THUMBNAIL_FETCHES} `?variant=thumb` requests are in
+ *   flight at once (each miss can decode a multi-MB original on the engine).
+ *   Originals and cache hits never queue behind this FIFO semaphore.
  * - **Lifetime:** module-level, so blur/focus does not evict; cleared on engine
  *   disconnect ({@link clearCharacterImageCache}).
  */
 const IMAGE_CACHE_MAX_ENTRIES = 64;
 const NEGATIVE_CACHE_TTL_MS = 30_000;
+
+/** Max simultaneous `?variant=thumb` fetches (engine decodes on a miss). */
+export const MAX_CONCURRENT_THUMBNAIL_FETCHES = 3;
 
 type ImageVariant = 'thumb' | 'original';
 interface CachedImageBytes {
@@ -280,6 +316,40 @@ interface CachedImageBytes {
 const imageBytesCache = new Map<string, CachedImageBytes>();
 const imageBytesInFlight = new Map<string, Promise<CachedImageBytes | null>>();
 const imageNegativeCache = new Map<string, number>();
+
+// FIFO semaphore for thumbnail fetches only. `activeThumbnailFetches` counts
+// BOTH running fetches and slots transferred to a resolved waiter.
+let activeThumbnailFetches = 0;
+const thumbnailFetchWaiters: Array<() => void> = [];
+
+function acquireThumbnailSlot(): Promise<void> {
+  if (activeThumbnailFetches < MAX_CONCURRENT_THUMBNAIL_FETCHES) {
+    activeThumbnailFetches += 1;
+    return Promise.resolve();
+  }
+  return new Promise<void>(resolve => {
+    thumbnailFetchWaiters.push(resolve);
+  });
+}
+
+function releaseThumbnailSlot(): void {
+  const next = thumbnailFetchWaiters.shift();
+  if (next) {
+    // Hand the slot straight to the next waiter — the count stays unchanged.
+    next();
+    return;
+  }
+  activeThumbnailFetches = Math.max(0, activeThumbnailFetches - 1);
+}
+
+async function runWithThumbnailSlot<T>(task: () => Promise<T>): Promise<T> {
+  await acquireThumbnailSlot();
+  try {
+    return await task();
+  } finally {
+    releaseThumbnailSlot();
+  }
+}
 
 /** Clear every cached image byte + negative entry (tests, engine restart). */
 export function clearCharacterImageCache(): void {
@@ -355,9 +425,14 @@ async function getCachedImageBytes(
 
   const pending = (async (): Promise<CachedImageBytes | null> => {
     try {
-      const bytes = await engineApiClient.fetchCharacterImageBytes(profileId, imageId, {
-        variant: variant === 'thumb' ? 'thumb' : undefined,
-      });
+      const fetchBytes = () =>
+        engineApiClient.fetchCharacterImageBytes(profileId, imageId, {
+          variant: variant === 'thumb' ? 'thumb' : undefined,
+        });
+      const bytes =
+        variant === 'thumb'
+          ? await runWithThumbnailSlot(fetchBytes)
+          : await fetchBytes();
       cacheImageBytes(key, bytes);
       return bytes;
     } catch (e) {
@@ -427,13 +502,14 @@ export async function getCharacterImage(
 
 /**
  * The profile's primary image for DISPLAY, using the derived thumbnail when the
- * engine advertises one (contract 1.8.0):
+ * engine advertises a usable/backfillable one (contract 1.8.0):
  *
  *   1. metadata list (1 request),
- *   2. `?variant=thumb` when `has_thumbnail` (2nd request) — its response mime
- *      (JPEG/PNG) is propagated into `mime_type`,
- *   3. fall back to the original only when the thumb 404s ("no thumbnail
- *      available") or an older engine omits `has_thumbnail`.
+ *   2. `?variant=thumb` when {@link shouldUseThumbnail} says so (`ready`, or
+ *      `pending` for legacy rows — the read generates + persists it) — the
+ *      response mime (JPEG/PNG) is propagated into `mime_type`,
+ *   3. fall back to the original when the thumb 404s, when the state is
+ *      `unavailable`, or when an older engine omits the field.
  *
  * Happy path = 2 requests. A thumb that reports 404 costs the fallback original
  * (3 total) — cached afterwards, so it does not repeat on focus.
@@ -443,7 +519,7 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
   const primary = infos.find(i => i.is_primary);
   if (!primary) return null;
 
-  if (primary.has_thumbnail === true) {
+  if (shouldUseThumbnail(primary)) {
     try {
       const thumb = await getCachedImageBytes(profileId, primary.id, 'thumb');
       if (thumb) {

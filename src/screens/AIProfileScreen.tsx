@@ -58,6 +58,7 @@ import {
   getCharacterStats,
   characterImageSource,
   imageToDataURL,
+  shouldUseThumbnail,
   CharacterStats,
 } from '../database/repositories';
 import {
@@ -96,6 +97,23 @@ interface ImagePostState {
   liked: boolean;
   likes: number;
   commentCount: number;
+}
+
+/**
+ * RN Image source for a gallery tile. Uses the derived preview for `ready` and
+ * `pending` rows (`pending` = legacy row, the read generates + persists it) and
+ * the original URL for `unavailable` / older engines. Exported so the screen
+ * test pins the tile decision without a full render.
+ */
+export function galleryTileImageSource(
+  profileId: string,
+  image: CharacterImage,
+): { uri: string; headers: Record<string, string> } | null {
+  return characterImageSource(
+    profileId,
+    image.id,
+    shouldUseThumbnail(image) ? 'thumb' : undefined,
+  );
 }
 
 export const AIProfileScreen: React.FC = () => {
@@ -1042,13 +1060,7 @@ export const AIProfileScreen: React.FC = () => {
                             accessibilityLabel={img.description || resolvedName}
                           >
                             <Image
-                              source={
-                                characterImageSource(
-                                  profileId,
-                                  img.id,
-                                  img.has_thumbnail ? 'thumb' : undefined,
-                                ) ?? undefined
-                              }
+                              source={galleryTileImageSource(profileId, img) ?? undefined}
                               style={styles.postImage}
                               resizeMode="cover"
                             />

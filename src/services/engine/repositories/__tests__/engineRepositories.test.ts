@@ -596,6 +596,234 @@ describe('characters adapter', () => {
       expect(images[1].is_primary).toBe(false);
     });
 
+    it('shouldUseThumbnail implements the thumbnail_state table', () => {
+      expect(
+        charactersRepo.shouldUseThumbnail({ thumbnail_state: 'ready', has_thumbnail: false }),
+      ).toBe(true);
+      expect(
+        charactersRepo.shouldUseThumbnail({ thumbnail_state: 'pending', has_thumbnail: false }),
+      ).toBe(true);
+      expect(
+        charactersRepo.shouldUseThumbnail({
+          thumbnail_state: 'unavailable',
+          has_thumbnail: true,
+        }),
+      ).toBe(false);
+      // Older engine: legacy boolean only.
+      expect(charactersRepo.shouldUseThumbnail({ has_thumbnail: true })).toBe(true);
+      expect(charactersRepo.shouldUseThumbnail({ has_thumbnail: false })).toBe(false);
+      expect(charactersRepo.shouldUseThumbnail({})).toBe(false);
+    });
+
+    it('backfills a legacy pending row via ?variant=thumb (has_thumbnail false)', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p1/images',
+          json: [
+            primaryInfo({
+              thumbnail_state: 'pending',
+              has_thumbnail: false,
+              mime_type: 'image/gif',
+            }),
+          ],
+        },
+        {
+          method: 'GET',
+          path: imagePath,
+          bytes: new Uint8Array([1, 2, 3]),
+          headers: { 'content-type': 'image/jpeg' },
+        },
+      ]);
+      install(server);
+
+      const image = await charactersRepo.getPrimaryImage('p1');
+
+      expect(server.lastCall('GET', imagePath)!.query.variant).toBe('thumb');
+      expect(image?.mime_type).toBe('image/jpeg');
+      expect(charactersRepo.imageToDataURL(image!)).toBe('data:image/jpeg;base64,AQID');
+    });
+
+    it('never requests the thumb for an unavailable row and fetches the original', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p1/images',
+          json: [
+            primaryInfo({
+              thumbnail_state: 'unavailable',
+              has_thumbnail: false,
+              mime_type: 'image/png',
+            }),
+          ],
+        },
+        {
+          method: 'GET',
+          path: imagePath,
+          bytes: new Uint8Array([9]),
+          headers: { 'content-type': 'image/png' },
+        },
+      ]);
+      install(server);
+
+      const image = await charactersRepo.getPrimaryImage('p1');
+
+      expect(
+        server.calls.filter(c => c.path === imagePath && c.query.variant === 'thumb'),
+      ).toHaveLength(0);
+      expect(server.lastCall('GET', imagePath)!.query.variant).toBeUndefined();
+      expect(image?.mime_type).toBe('image/png');
+      expect(server.calls).toHaveLength(2);
+    });
+
+    it('uses the thumb for a ready row without fetching the original', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p1/images',
+          json: [primaryInfo({ thumbnail_state: 'ready', has_thumbnail: true })],
+        },
+        {
+          method: 'GET',
+          path: imagePath,
+          bytes: new Uint8Array([1, 2, 3]),
+          headers: { 'content-type': 'image/jpeg' },
+        },
+      ]);
+      install(server);
+
+      await charactersRepo.getPrimaryImage('p1');
+
+      expect(server.calls).toHaveLength(2);
+      expect(server.lastCall('GET', imagePath)!.query.variant).toBe('thumb');
+      expect(
+        server.calls.filter(
+          c => c.path === imagePath && c.query.variant === undefined,
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('caps concurrent thumbnail fetches and never queues originals behind them', async () => {
+      const routes = Array.from({ length: 6 }, (_, i) => [
+        {
+          method: 'GET',
+          path: `/api/character-profiles/p${i}/images`,
+          json: [
+            primaryInfo({
+              id: `i${i}`,
+              character_profile_id: `p${i}`,
+              thumbnail_state: 'pending',
+              has_thumbnail: false,
+            }),
+          ],
+        },
+        {
+          method: 'GET',
+          path: `/api/character-profiles/p${i}/images/i${i}`,
+          bytes: new Uint8Array([i + 1]),
+          headers: { 'content-type': 'image/jpeg' },
+        },
+      ]).flat();
+      const server = createMockManagementServer(routes);
+
+      let activeThumbFetches = 0;
+      let maxActiveThumbFetches = 0;
+      const gates: Array<() => void> = [];
+      engineApiClient.setFetchImpl(async (url, init) => {
+        if (!String(url).includes('variant=thumb')) return server.fetch(url, init);
+        activeThumbFetches += 1;
+        maxActiveThumbFetches = Math.max(maxActiveThumbFetches, activeThumbFetches);
+        await new Promise<void>(resolve => gates.push(resolve));
+        activeThumbFetches -= 1;
+        return server.fetch(url, init);
+      });
+
+      const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+      const calls = Array.from({ length: 6 }, (_, i) =>
+        charactersRepo.getPrimaryImage(`p${i}`),
+      );
+
+      for (let i = 0; i < 20 && gates.length < charactersRepo.MAX_CONCURRENT_THUMBNAIL_FETCHES; i++) {
+        await tick();
+      }
+      expect(gates.length).toBe(charactersRepo.MAX_CONCURRENT_THUMBNAIL_FETCHES);
+      // Additional ticks must NOT start a fourth thumb fetch.
+      await tick();
+      await tick();
+      expect(gates.length).toBe(charactersRepo.MAX_CONCURRENT_THUMBNAIL_FETCHES);
+
+      for (let guard = 0; guard < 100; guard++) {
+        if (gates.length === 0) {
+          await tick();
+          if (gates.length === 0) break;
+        }
+        gates.shift()!();
+        await tick();
+      }
+      await Promise.all(calls);
+
+      expect(maxActiveThumbFetches).toBe(charactersRepo.MAX_CONCURRENT_THUMBNAIL_FETCHES);
+      expect(maxActiveThumbFetches).toBeLessThanOrEqual(3);
+    });
+
+    it('collapses duplicate queued keys to one request under the semaphore', async () => {
+      const routes = Array.from({ length: 4 }, (_, i) => [
+        {
+          method: 'GET',
+          path: `/api/character-profiles/p${i}/images`,
+          json: [
+            primaryInfo({
+              id: `i${i}`,
+              character_profile_id: `p${i}`,
+              thumbnail_state: 'pending',
+              has_thumbnail: false,
+            }),
+          ],
+        },
+        {
+          method: 'GET',
+          path: `/api/character-profiles/p${i}/images/i${i}`,
+          bytes: new Uint8Array([i + 1]),
+          headers: { 'content-type': 'image/jpeg' },
+        },
+      ]).flat();
+      const server = createMockManagementServer(routes);
+
+      const thumbRequests: Record<string, number> = {};
+      const gates: Array<() => void> = [];
+      engineApiClient.setFetchImpl(async (url, init) => {
+        const text = String(url);
+        if (!text.includes('variant=thumb')) return server.fetch(url, init);
+        const path = new URL(text).pathname;
+        thumbRequests[path] = (thumbRequests[path] ?? 0) + 1;
+        await new Promise<void>(resolve => gates.push(resolve));
+        return server.fetch(url, init);
+      });
+
+      const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+      // Saturate the three slots.
+      const saturating = [0, 1, 2].map(i => charactersRepo.getPrimaryImage(`p${i}`));
+      for (let i = 0; i < 20 && gates.length < 3; i++) await tick();
+      expect(gates.length).toBe(3);
+
+      // Two callers for the SAME key join while it is still queued.
+      const duplicateA = charactersRepo.getPrimaryImage('p3');
+      const duplicateB = charactersRepo.getPrimaryImage('p3');
+      await tick();
+
+      for (let guard = 0; guard < 100; guard++) {
+        if (gates.length === 0) {
+          await tick();
+          if (gates.length === 0) break;
+        }
+        gates.shift()!();
+        await tick();
+      }
+      await Promise.all([...saturating, duplicateA, duplicateB]);
+
+      expect(thumbRequests['/api/character-profiles/p3/images/i3']).toBe(1);
+    });
+
     it('builds an authenticated URL source for thumbnails and originals', () => {
       expect(charactersRepo.characterImageSource('p1', 'i1', 'thumb')).toEqual({
         uri: 'http://127.0.0.1:2/api/character-profiles/p1/images/i1?variant=thumb',

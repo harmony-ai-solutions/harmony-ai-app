@@ -267,6 +267,7 @@ export function mapCharacterImageInfo(
     mime_type: mimeType ?? dto.mime_type ?? '',
     description: dto.description ?? '',
     is_primary: Boolean(dto.is_primary),
+    thumbnail_state: dto.thumbnail_state,
     has_thumbnail: dto.has_thumbnail === true,
     display_order: toNum(dto.display_order),
     vl_model_interpretation: '',
