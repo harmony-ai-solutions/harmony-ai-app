@@ -5,6 +5,15 @@
  * the settings sub-menus (Account, Appearance, AI & Conversation, Help &
  * Support) share one visual language: icon pill + label + optional trailing
  * element, wrapped in a glassmorphism ThemedCard.
+ *
+ * ## Trailing-value pattern
+ *
+ * Link rows may surface a short CURRENT VALUE via `value` (e.g. the active STT
+ * model, a persona count, a sync authority). It renders as muted 12px text,
+ * right-aligned, single-line, capped at ~45% of the row width, and always sits
+ * before the optional badge and the chevron. `SettingsDetailRow` uses the same
+ * read-only label/value language (without the chevron) for non-navigating
+ * detail lines.
  */
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
@@ -19,7 +28,7 @@ export const SettingsIconPill: React.FC<{
   name: string;
   color: string;
   size?: number;
-}> = ({ name, color, size = 18 }) => (
+}> = ({ name, color, size = 16 }) => (
   <View style={[styles.iconPill, { backgroundColor: hexToRgba(color, 0.12) }]}>
     <Icon name={name} size={size} color={color} />
   </View>
@@ -28,6 +37,8 @@ export const SettingsIconPill: React.FC<{
 export interface SettingsRowProps {
   icon: string;
   label: string;
+  /** Optional short current value shown muted/right-aligned before the chevron. */
+  value?: string;
   onPress?: () => void;
   theme: any;
   badge?: string;
@@ -38,6 +49,7 @@ export interface SettingsRowProps {
 export const SettingsLinkRow: React.FC<SettingsRowProps> = ({
   icon,
   label,
+  value,
   onPress,
   theme,
   badge,
@@ -53,8 +65,18 @@ export const SettingsLinkRow: React.FC<SettingsRowProps> = ({
       hapticLightPress();
       onPress?.();
     }} activeOpacity={0.7}>
-      <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={20} />
+      <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={18} />
       <ThemedText style={styles.linkLabel}>{label}</ThemedText>
+      {value ? (
+        <ThemedText
+          variant="muted"
+          size={12}
+          numberOfLines={1}
+          style={styles.linkValue}
+        >
+          {value}
+        </ThemedText>
+      ) : null}
       {badge && (
         <View style={[styles.badgeChip, { backgroundColor: hexToRgba(theme.colors.accent.primary, 0.15) }]}>
           <ThemedText variant="accent" size={11} weight="medium">
@@ -62,7 +84,7 @@ export const SettingsLinkRow: React.FC<SettingsRowProps> = ({
           </ThemedText>
         </View>
       )}
-      <Icon name="chevron-right" size={20} color={theme.colors.text.muted} />
+      <Icon name="chevron-right" size={18} color={theme.colors.text.muted} />
     </TouchableOpacity>
   </View>
 );
@@ -92,7 +114,7 @@ export const SettingsToggleRow: React.FC<SettingsToggleRowProps> = ({
       />
     )}
     <View style={styles.toggleRow}>
-      <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={20} />
+      <SettingsIconPill name={icon} color={theme.colors.accent.primary} size={18} />
       <ThemedText style={styles.linkLabel}>{label}</ThemedText>
       <Switch value={value} onValueChange={onValueChange} color={theme.colors.accent.primary} />
     </View>
@@ -102,6 +124,8 @@ export const SettingsToggleRow: React.FC<SettingsToggleRowProps> = ({
 export interface SettingsDetailRowProps {
   icon: string;
   label: string;
+  /** Right-aligned current value — the read-only twin of SettingsLinkRow's
+   *  muted 12px trailing-value pattern (no chevron/badge). */
   value?: string;
   valueComponent?: React.ReactNode;
   theme: any;
@@ -135,9 +159,9 @@ export const SettingsDetailRow: React.FC<SettingsDetailRowProps> = ({
 const styles = StyleSheet.create({
   /* Icon pill — shared container for all settings icons */
   iconPill: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 7,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -158,13 +182,13 @@ const styles = StyleSheet.create({
   linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 10,
     paddingHorizontal: 16,
   },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 10,
     paddingHorizontal: 16,
   },
   linkSeparator: {
@@ -173,7 +197,13 @@ const styles = StyleSheet.create({
   },
   linkLabel: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 14,
+  },
+  linkValue: {
+    flexShrink: 1,
+    maxWidth: '45%',
+    marginLeft: 8,
+    textAlign: 'right',
   },
   badgeChip: {
     paddingHorizontal: 8,

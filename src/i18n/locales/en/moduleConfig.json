@@ -87,6 +87,7 @@
   "stage1Badge": "Gates Transcription",
   "stage2Badge": "Runs on Speech Segment",
   "disabledPushToTalk": "Disabled (Manual Push-to-Talk only)",
+  "disabledVoiceInput": "Disabled (voice input off)",
 
   "chunkWindow": "Chunk Window (ms)",
   "transitionOverlap": "Transition Overlap (ms)",

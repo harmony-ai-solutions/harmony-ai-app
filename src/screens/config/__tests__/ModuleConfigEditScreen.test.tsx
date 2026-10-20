@@ -31,6 +31,8 @@ afterEach(async () => {
 beforeEach(async () => {
   await cleanup();
   mockModuleType = 'backend';
+  mockConfigId = undefined;
+  mockGoBack.mockReset();
   mockCatalog = { openai: OPENAI_CATALOG };
   resetPresetsCache();
   clearProviderModelCache();
@@ -43,6 +45,7 @@ beforeEach(async () => {
   (listAccounts as jest.Mock).mockReset().mockResolvedValue([]);
   (createAccount as jest.Mock).mockReset().mockResolvedValue('acc-new');
   (createSTTConfig as jest.Mock).mockReset().mockResolvedValue('s-new');
+  (getSTTConfig as jest.Mock).mockReset().mockResolvedValue(null);
   (createBackendConfig as jest.Mock).mockReset().mockResolvedValue('b-new');
   (createCognitionConfig as jest.Mock).mockReset().mockResolvedValue('c-new');
   (createTTSConfig as jest.Mock).mockReset().mockResolvedValue('t-new');
@@ -50,8 +53,12 @@ beforeEach(async () => {
 
 /** Module type the mocked `useRoute` reports; reset per test. */
 let mockModuleType = 'backend';
+/** Existing config id for edit-mode tests; reset per test. */
+let mockConfigId: string | undefined;
 /** Catalog returned by the mocked capability-registry hook. */
 let mockCatalog: Record<string, ModelInfoDto[]> = {};
+
+const mockGoBack = jest.fn();
 
 const OPENAI_CATALOG: ModelInfoDto[] = [
   { id: 'gpt-6-astra', label: 'gpt-6-astra', capabilities: ['chat'], context: 1050000, provenance: 'known' },
@@ -100,8 +107,13 @@ jest.mock('../../../contexts/AppAlertContext', () => ({
 }));
 
 jest.mock('@react-navigation/native', () => ({
-  useRoute: () => ({ params: { moduleType: mockModuleType } }),
-  useNavigation: () => ({ goBack: jest.fn(), navigate: jest.fn() }),
+  useRoute: () => ({
+    params: {
+      moduleType: mockModuleType,
+      ...(mockConfigId ? { configId: mockConfigId } : {}),
+    },
+  }),
+  useNavigation: () => ({ goBack: mockGoBack, navigate: jest.fn() }),
   useFocusEffect: (cb: () => void) => {
     const React = require('react');
     React.useEffect(() => {
@@ -197,6 +209,10 @@ jest.mock('../../../services/variant/entityAccess', () => ({
   invalidateEntityAccessCache: jest.fn(),
 }));
 
+jest.mock('../../../services/voiceInput/personaVoice', () => ({
+  disablePersonaVoice: jest.fn(async () => undefined),
+}));
+
 // Full repository surface → inert jest.fn()s.
 jest.mock('../../../database/repositories', () => {
   const names = [
@@ -223,10 +239,12 @@ import {
   listAccounts,
   createAccount,
   createSTTConfig,
+  getSTTConfig,
   createBackendConfig,
   createCognitionConfig,
   createTTSConfig,
 } from '../../../database/repositories';
+import { disablePersonaVoice } from '../../../services/voiceInput/personaVoice';
 import type { ProviderAccount } from '../../../database/models';
 
 const account = (over: Partial<ProviderAccount> & { id: string; type: string; name: string }): ProviderAccount => ({
@@ -663,6 +681,33 @@ describe('ModuleConfigEditScreen — STT 2-stage realtime pipeline (3-6)', () =>
     await waitFor(() => expect(createSTTConfig).toHaveBeenCalledTimes(1));
     const body = (createSTTConfig as jest.Mock).mock.calls[0][0];
     expect(body.vad_provider).toBe('');
+  });
+
+  it('writes the voice-input OFF sentinel from the transcription stage chip (edit mode)', async () => {
+    mockModuleType = 'stt';
+    mockConfigId = 'stt-existing';
+    (getSTTConfig as jest.Mock).mockResolvedValue({
+      id: 'stt-existing',
+      name: 'Persona voice input',
+      main_stream_time_millis: 2000,
+      transition_stream_time_millis: 1000,
+      max_buffer_count: 5,
+      transcription_provider: 'openai',
+      transcription_provider_account_id: null,
+      transcription_capability_json: '{}',
+      vad_provider: 'disabled',
+      vad_provider_account_id: null,
+      vad_capability_json: '{}',
+      deleted_at: null,
+    });
+
+    const utils = await renderScreen();
+    await waitFor(() => expect(utils.getByText('stage2CardTitle')).toBeTruthy());
+
+    await fireEvent.press(utils.getByTestId('provider-disabled-transcription'));
+
+    await waitFor(() => expect(disablePersonaVoice).toHaveBeenCalledWith('stt-existing'));
+    expect(mockGoBack).toHaveBeenCalled();
   });
 
   it('hides the stream buffer card until Advanced', async () => {

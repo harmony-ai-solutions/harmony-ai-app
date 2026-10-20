@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, ScrollView, RefreshControl, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/AppToastContext';
@@ -14,6 +14,18 @@ import {
   getHideContentOnLockScreen,
   setHideContentOnLockScreen,
 } from '../services/notifications/NotificationSettings';
+import {
+  getEngineVersionState,
+  onEngineVersionStateChange,
+} from '../services/engine/EngineService';
+import { engineApiClient } from '../services/engine/EngineApiClient';
+import {
+  ensurePersonaVoiceConfig,
+  resolvePersonaVoice,
+} from '../services/voiceInput/personaVoice';
+import type { PersonaVoiceState } from '../services/voiceInput/personaVoice';
+import { getUserEntities } from '../database/repositories';
+import { createLogger } from '../utils/logger';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedCard } from '../components/themed/ThemedCard';
 import { SectionHeader } from '../components/themed/SectionHeader';
@@ -24,6 +36,8 @@ import {
   SettingsLinkRow,
   SettingsToggleRow,
 } from '../components/settings/SettingsRows';
+
+const log = createLogger('[SettingsScreen]');
 
 // AsyncStorage keys for toggle settings
 const STORAGE_KEYS = {
@@ -38,6 +52,7 @@ export const SettingsScreen: React.FC = () => {
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('settings');
   const { t: tLifecycle } = useTranslation('lifecycle');
+  const { t: tDesktopSync } = useTranslation('desktopSync');
   const { showToast } = useToast();
 
   // Toggle states
@@ -47,15 +62,65 @@ export const SettingsScreen: React.FC = () => {
   const [hideContentOnLockScreen, setHideContentOnLockScreenState] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Trailing value chips (READ-only summaries; failures simply omit a chip).
+  const [voiceState, setVoiceState] = useState<PersonaVoiceState | null>(null);
+  const [personaCount, setPersonaCount] = useState<number | null>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [engineVersion, setEngineVersion] = useState<string | null>(
+    () => getEngineVersionState().engineVersion,
+  );
+  const [desktopSyncState, setDesktopSyncState] = useState<string | null>(null);
+
   useEffect(() => {
     loadToggleStates();
   }, []);
 
+  // Engine version is already probed at runtime (same source as Help > About).
+  useEffect(() => onEngineVersionStateChange(s => setEngineVersion(s.engineVersion)), []);
+
+  /**
+   * Refresh the settings-tab value chips on focus (after editing voice input,
+   * personas or desktop sync). Every summary is best-effort: a failed read
+   * leaves its chip hidden instead of blocking the screen.
+   */
+  const loadSummary = useCallback(async () => {
+    try {
+      const [voice, personas] = await Promise.all([
+        resolvePersonaVoice(),
+        getUserEntities(),
+      ]);
+      setVoiceState(voice);
+      setPersonaCount(personas.length);
+    } catch (err) {
+      log.warn('Failed to load voice/persona summary:', err);
+    }
+
+    try {
+      const status = await engineApiClient.getSyncClientStatus();
+      setDesktopSyncState(
+        status.config.enabled
+          ? status.local_authoritative
+            ? tDesktopSync('authorityThisDevice')
+            : tDesktopSync('authorityPeer')
+          : t('off'),
+      );
+    } catch {
+      // Engine unavailable / sync not configured yet — omit the chip.
+      setDesktopSyncState(null);
+    }
+  }, [t, tDesktopSync]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadSummary();
+    }, [loadSummary]),
+  );
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadToggleStates();
+    await Promise.all([loadToggleStates(), loadSummary()]);
     setRefreshing(false);
-  }, []);
+  }, [loadSummary]);
 
   const loadToggleStates = async () => {
     try {
@@ -115,7 +180,37 @@ export const SettingsScreen: React.FC = () => {
     await setHideContentOnLockScreen(value);
   };
 
+  /**
+   * Voice input row — a DIRECT jump into the pinned STT editor. The ensure step
+   * runs first (explicit tap = allowed write): it reuses the linked config when
+   * one exists, repairs a dangling link, or creates the fixed "Persona voice
+   * input" config and links it with a REAL stt_config_id. It never writes a
+   * NULL mapping row, so the engine's LWW wiring cannot be clobbered.
+   */
+  const handleVoiceInputPress = useCallback(async () => {
+    if (voiceBusy) return;
+    setVoiceBusy(true);
+    try {
+      const { configId } = await ensurePersonaVoiceConfig();
+      navigation.navigate('ModuleConfigEdit', { moduleType: 'stt', configId });
+    } catch (err) {
+      log.error('Failed to open voice input config:', err);
+      showToast(t('voiceInputUnavailable'));
+    } finally {
+      setVoiceBusy(false);
+    }
+  }, [voiceBusy, navigation, showToast, t]);
+
   if (!theme) return null;
+
+  const voiceChip = voiceBusy
+    ? '…'
+    : voiceState
+      ? voiceState.status === 'ok'
+        ? voiceState.modelLabel
+        : t('off')
+      : undefined;
+  const personaChip = personaCount != null ? String(personaCount) : undefined;
 
   return (
     <ThemedView style={styles.container}>
@@ -135,9 +230,8 @@ export const SettingsScreen: React.FC = () => {
           />
         }
       >
-        {/* ── Account (submenu) ── */}
+        {/* ── Account (submenu) — single row, no section header ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('account')} style={styles.sectionHeader} />
           <SettingsLinkRow
             icon="account-circle"
             label={t('account')}
@@ -146,9 +240,8 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
-        {/* ── Appearance (submenu) ── */}
+        {/* ── Appearance (submenu) — single row, no section header ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('appearance')} style={styles.sectionHeader} />
           <SettingsLinkRow
             icon="palette"
             label={t('appearance')}
@@ -157,20 +250,28 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
-        {/* ── Voice input (shared-persona STT) — single global surface (2-1) ── */}
+        {/* ── User chat settings: the shared voice input + persona identities ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('voiceInputGroup')} style={styles.sectionHeader} />
+          <SectionHeader title={t('userChatGroup')} style={styles.sectionHeader} />
           <SettingsLinkRow
             icon="microphone-outline"
             label={t('voiceInput')}
-            onPress={() => navigation.navigate('VoiceInputSettings')}
+            value={voiceChip}
+            onPress={() => void handleVoiceInputPress()}
             theme={theme}
+          />
+          <SettingsLinkRow
+            icon="account-group-outline"
+            label={t('personas')}
+            value={personaChip}
+            onPress={() => navigation.navigate('PersonaList')}
+            theme={theme}
+            showSeparator
           />
         </ThemedCard>
 
         {/* ── Providers (shared provider accounts: keys, endpoints, verify) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('providersGroup')} style={styles.sectionHeader} />
           <SettingsLinkRow
             icon="key-variant"
             label={t('providers')}
@@ -179,23 +280,32 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
-        {/* ── Desktop sync (changeset-v1 LAN sync config + status, 3-5) ── */}
+        {/* ── Backup & sync: user-owned storage + desktop↔phone continuity ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('desktopSyncGroup')} style={styles.sectionHeader} />
+          <SectionHeader title={t('backupSyncGroup')} style={styles.sectionHeader} />
+          <SettingsLinkRow
+            icon="cloud-upload-outline"
+            label={t('backup')}
+            onPress={() => navigation.navigate('BackupSettings')}
+            theme={theme}
+          />
           <SettingsLinkRow
             icon="sync"
             label={t('desktopSync')}
+            value={desktopSyncState ?? undefined}
             onPress={() => navigation.navigate('DesktopSync')}
             theme={theme}
+            showSeparator
           />
         </ThemedCard>
 
-        {/* ── Engine (embedded Soulbits Engine status + log viewer) ── */}
+        {/* ── System (embedded Soulbits Engine status + app/engine logs) ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('engineGroup')} style={styles.sectionHeader} />
+          <SectionHeader title={t('systemGroup')} style={styles.sectionHeader} />
           <SettingsLinkRow
             icon="engine-outline"
             label={t('engineStatus')}
+            value={engineVersion ?? undefined}
             onPress={() => navigation.navigate('EngineStatus')}
             theme={theme}
           />
@@ -215,21 +325,9 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
-        {/* ── Backup & restore (user-owned-storage continuity, 2-6) ── */}
-        <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('backupGroup')} style={styles.sectionHeader} />
-          <SettingsLinkRow
-            icon="cloud-upload-outline"
-            label={t('backup')}
-            onPress={() => navigation.navigate('BackupSettings')}
-            theme={theme}
-          />
-        </ThemedCard>
-
-        {/* ── Background presence (iOS blind-tick honest limits, 4-3) ── */}
+        {/* ── Background presence (iOS blind-tick honest limits, 4-3) — single row ── */}
         {Platform.OS === 'ios' && (
           <ThemedCard elevated accentStripe style={styles.card}>
-            <SectionHeader title={tLifecycle('settingsGroup')} style={styles.sectionHeader} />
             <SettingsLinkRow
               icon="weather-night"
               label={tLifecycle('settingsRow')}
@@ -287,9 +385,8 @@ export const SettingsScreen: React.FC = () => {
           />
         </ThemedCard>
 
-        {/* ── Help & Support (submenu) ── */}
+        {/* ── Help & Support (submenu) — single row, no section header ── */}
         <ThemedCard elevated accentStripe style={styles.card}>
-          <SectionHeader title={t('support')} style={styles.sectionHeader} />
           <SettingsLinkRow
             icon="help-circle"
             label={t('support')}
@@ -310,10 +407,10 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     paddingBottom: 32,
-    gap: 16,
+    gap: 12,
   },
   card: {
-    gap: 12,
+    gap: 4,
     padding: 0,
     overflow: 'hidden',
   },

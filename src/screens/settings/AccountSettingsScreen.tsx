@@ -324,7 +324,6 @@ export const AccountSettingsScreen: React.FC = () => {
             whole surface — purchases are disabled at launch) */}
         {isAuthed && !isStoreVariant() ? (
           <ThemedCard elevated accentStripe style={styles.card}>
-            <SectionHeader title={t('billing')} style={styles.sectionHeader} />
             <SettingsLinkRow
               icon="credit-card"
               label={t('manageSubscription')}

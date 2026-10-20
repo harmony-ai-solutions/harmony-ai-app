@@ -103,12 +103,12 @@ jest.mock('../../../utils/colorUtils', () => ({
 }));
 
 describe('AccountSettingsScreen — variant gating (7-14 V4)', () => {
-  it('full: shows the Billing & Purchases card', async () => {
+  it('full: shows the Manage subscription row without a single-row header', async () => {
     setAppVariantForTests('full');
     await render(<AccountSettingsScreen />);
 
-    // SectionHeader uppercases its title.
-    expect(screen.getByText('BILLING')).toBeTruthy();
+    // Option-B density: the single-row billing card drops its SectionHeader.
+    expect(screen.queryByText('BILLING')).toBeNull();
     expect(screen.getByText('manageSubscription')).toBeTruthy();
   });
 

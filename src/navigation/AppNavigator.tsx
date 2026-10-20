@@ -25,8 +25,8 @@ import { BackgroundSettingsScreen } from '../screens/settings/BackgroundSettings
 import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen';
 import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen';
 import { AppearanceSettingsScreen } from '../screens/settings/AppearanceSettingsScreen';
-import { VoiceInputSettingsScreen } from '../screens/settings/VoiceInputSettingsScreen';
 import { ProvidersScreen } from '../screens/settings/ProvidersScreen';
+import { PersonaListScreen } from '../screens/settings/PersonaListScreen';
 import { DesktopSyncScreen } from '../screens/settings/DesktopSyncScreen';
 import { BackupSettingsScreen } from '../screens/settings/BackupSettingsScreen';
 import { RestoreOnboardingScreen } from '../screens/setup/RestoreOnboardingScreen';
@@ -119,8 +119,8 @@ export type RootStackParamList = {
   };
   AccountSettings: undefined;
   AppearanceSettings: undefined;
-  /** Voice input — the single global shared-persona STT config surface (2-1). */
-  VoiceInputSettings: undefined;
+  /** Personas — the Settings-tab dedicated persona list (set active / edit). */
+  PersonaList: undefined;
   /** Providers — the shared provider-account management surface (6-2). */
   Providers: undefined;
   /** Desktop sync — the changeset-v1 desktop↔phone sync config + status
@@ -238,7 +238,7 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
           <Stack.Screen name="PersonaEdit" component={PersonaEditScreen} />
           <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
           <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
-          <Stack.Screen name="VoiceInputSettings" component={VoiceInputSettingsScreen} />
+          <Stack.Screen name="PersonaList" component={PersonaListScreen} />
           <Stack.Screen name="Providers" component={ProvidersScreen} />
           <Stack.Screen name="DesktopSync" component={DesktopSyncScreen} />
           <Stack.Screen name="BackupSettings" component={BackupSettingsScreen} />

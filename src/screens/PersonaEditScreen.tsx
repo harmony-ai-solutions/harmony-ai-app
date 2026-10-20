@@ -98,6 +98,7 @@ import {
 } from '../database/repositories';
 import type { UserPersonaAvatar, UserPersonaProfileFields } from '../database/repositories';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import { ensurePersonaVoiceConfig } from '../services/voiceInput/personaVoice';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
 
@@ -982,6 +983,18 @@ export const PersonaEditScreen: React.FC = () => {
     ]);
   }, [isEdit, isBuiltIn, isActivePersona, personaId, navigation, showAlert, t]);
 
+  // ── Shared voice input (all personas) ──────────────────────────────────
+  /** Direct jump to the pinned STT editor; ensure-link runs on this tap only. */
+  const handleManageVoiceInput = useCallback(async () => {
+    try {
+      const { configId } = await ensurePersonaVoiceConfig();
+      navigation.navigate('ModuleConfigEdit', { moduleType: 'stt', configId });
+    } catch (err) {
+      log.error('Failed to open voice input config:', err);
+      showAlert(t('common:error'), t('settings:voiceInputUnavailable'));
+    }
+  }, [navigation, showAlert, t]);
+
   if (!theme || !loaded) return null;
 
   // ── Styles derived from theme ────────────────────────────────────────────
@@ -1423,7 +1436,7 @@ export const PersonaEditScreen: React.FC = () => {
                 </ThemedText>
               </View>
               <TouchableOpacity
-                onPress={() => navigation.navigate('VoiceInputSettings')}
+                onPress={() => void handleManageVoiceInput()}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 testID="persona-voice-input-manage"
                 accessibilityRole="button"

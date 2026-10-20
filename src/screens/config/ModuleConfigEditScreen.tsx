@@ -63,6 +63,7 @@ import { capabilityDefaultsOf } from '../../constants/accountFieldSchemas';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { SttTestPanel } from '../../components/config/SttTestPanel';
 import { TtsTestPanel } from '../../components/config/TtsTestPanel';
+import { disablePersonaVoice } from '../../services/voiceInput/personaVoice';
 import {
   createBackendConfig, updateBackendConfig, getBackendConfig, deleteBackendConfig,
   createCognitionConfig, updateCognitionConfig, getCognitionConfig, deleteCognitionConfig,
@@ -422,6 +423,24 @@ export const ModuleConfigEditScreen: React.FC = () => {
     setExplicitFields((prev) => ({ ...prev, [slot]: {} }));
   };
 
+  /**
+   * "Disabled (voice input off)" on the STT transcription stage — a DELIBERATE
+   * user write of the engine 'disabled' sentinel through the persona-voice
+   * helper (the same LWW-safe OFF write the retired VoiceInputSettingsScreen
+   * performed). The linked mapping is left intact so the user can switch a
+   * provider back on later. Only offered in edit mode (a config id exists).
+   */
+  const handleDisableVoiceInput = async () => {
+    if (!configId) return;
+    try {
+      await disablePersonaVoice(configId);
+      navigation.goBack();
+    } catch (error) {
+      log.error('Failed to disable voice input:', error);
+      showAlert(t('common:error'), t('saveFailed'));
+    }
+  };
+
   const handleCapabilityChange = (slot: string, key: string, value: any) => {
     setSlots((prev) => ({
       ...prev,
@@ -625,6 +644,10 @@ export const ModuleConfigEditScreen: React.FC = () => {
       const slotState = slots[def.slot] ?? EMPTY_SLOT;
       const typeAccounts = accounts.filter((a) => a.type === slotState.providerType);
       const isVadStage = isSTT && def.slot === 'vad';
+      // Voice input OFF is a deliberate sentinel write, offered only when an
+      // existing STT config is being edited (a create has nothing to disable).
+      const isVoiceInputStage =
+        isSTT && def.slot === 'transcription' && !isCreate;
       return (
         <ProviderSlotSection
           key={def.slot}
@@ -666,8 +689,19 @@ export const ModuleConfigEditScreen: React.FC = () => {
                 : t('stage2Badge')
               : undefined
           }
-          allowDisable={isVadStage}
-          onDisableSlot={isVadStage ? () => handleDisableSlot(def.slot) : undefined}
+          allowDisable={isVadStage || isVoiceInputStage}
+          disableLabel={
+            isVoiceInputStage ? t('disabledVoiceInput') : undefined
+          }
+          onDisableSlot={
+            isVadStage
+              ? () => handleDisableSlot(def.slot)
+              : isVoiceInputStage
+                ? () => {
+                    void handleDisableVoiceInput();
+                  }
+                : undefined
+          }
         />
       );
     });

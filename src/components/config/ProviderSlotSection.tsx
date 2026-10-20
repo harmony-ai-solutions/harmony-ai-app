@@ -78,6 +78,9 @@ const SOUL_TTS_PROVIDERS = ['soulbitscloud', 'soulvoice'];
 const FALLBACK_TTS_LANGUAGES = ['Auto', 'EN', 'DE', 'FR', 'ES', 'IT', 'PT', 'JA', 'KO', 'ZH'];
 const FALLBACK_TTS_VOICES = ['Claire', 'Bella', 'Nova', 'Alloy', 'Echo', 'Shimmer'];
 
+/** Engine sentinel written when a slot is deliberately turned off. */
+const DISABLED_PROVIDER = 'disabled';
+
 /** Module → capability-card title key (matches the HTML design previews). */
 const CAPABILITY_TITLE_KEYS: Record<string, string> = {
   backend: 'capabilityChat',
@@ -154,9 +157,11 @@ export interface ProviderSlotSectionProps {
   cardTitle?: string;
   /** Single-card mode: right-hand badge text. */
   cardBadge?: string;
-  /** Adds a `Disabled (Manual Push-to-Talk only)` provider chip. */
+  /** Adds a `Disabled` provider chip. */
   allowDisable?: boolean;
-  /** Clears the slot's provider (used by the Disabled chip). */
+  /** Chip label override (default: `disabledPushToTalk`). */
+  disableLabel?: string;
+  /** Clears (or disables) the slot's provider (used by the Disabled chip). */
   onDisableSlot?: () => void;
 }
 
@@ -229,6 +234,7 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
   cardTitle,
   cardBadge,
   allowDisable = false,
+  disableLabel,
   onDisableSlot,
 }) => {
   const { theme } = useAppTheme();
@@ -294,6 +300,9 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
     : sectionTitle(t('capability'));
 
   // ── Provider type chips (Phase 1-3: no redundant gradient pip) ──
+  const isDisabledSelection =
+    !state.providerType || state.providerType === DISABLED_PROVIDER;
+
   const renderProviderChips = () => (
     <View style={styles.providerChips}>
       {providerOptions.map((option) => {
@@ -337,10 +346,10 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
           style={[
             styles.providerChip,
             {
-              borderColor: !state.providerType
+              borderColor: isDisabledSelection
                 ? theme.colors.accent.primary
                 : theme.colors.border.default,
-              backgroundColor: !state.providerType
+              backgroundColor: isDisabledSelection
                 ? theme.colors.accent.primary + '1A'
                 : theme.colors.background.base,
             },
@@ -351,16 +360,16 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
           }}
           activeOpacity={0.7}
           accessibilityRole="button"
-          accessibilityState={{ selected: !state.providerType }}
+          accessibilityState={{ selected: isDisabledSelection }}
         >
           <ThemedText
             size={13}
-            variant={!state.providerType ? 'accent' : 'primary'}
-            weight={!state.providerType ? 'medium' : 'normal'}
+            variant={isDisabledSelection ? 'accent' : 'primary'}
+            weight={isDisabledSelection ? 'medium' : 'normal'}
           >
-            {t('disabledPushToTalk')}
+            {disableLabel ?? t('disabledPushToTalk')}
           </ThemedText>
-          {!state.providerType && (
+          {isDisabledSelection && (
             <Icon name="check" size={14} color={theme.colors.accent.primary} style={{ marginLeft: 4 }} />
           )}
         </TouchableOpacity>
