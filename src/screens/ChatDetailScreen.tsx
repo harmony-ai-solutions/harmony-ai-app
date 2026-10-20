@@ -20,7 +20,9 @@ import {
   View,
   TouchableWithoutFeedback,
   Animated,
+  Image,
 } from 'react-native';
+import type { ImageSourcePropType } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import LinearGradient from 'react-native-linear-gradient';
 import { Avatar } from 'react-native-paper';
@@ -28,6 +30,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { v7 as uuidv7 } from 'uuid';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -72,6 +75,7 @@ import { getUserPersona } from '../database/repositories';
 import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import ChatBackgroundService from '../services/ChatBackgroundService';
 import { createLogger } from '../utils/logger';
 import { ConversationMessage, CharacterProfile } from '../database/models';
 import {
@@ -421,6 +425,20 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     routeParticipantKey || ''
   );
 
+  // The partner ENTITY whose chat background/dim this conversation shows.
+  // Backgrounds are entity-scoped (not persona-scoped): switching persona
+  // keeps the same character background.
+  const chatEntityId = useMemo(
+    () => participantIds.find(id => id !== ownEntityId) ?? null,
+    [participantIds, ownEntityId],
+  );
+
+  /** Resolved background image + scrim opacity for the message area. */
+  const [chatBackground, setChatBackground] = useState<{
+    source: ImageSourcePropType | null;
+    dim: number;
+  } | null>(null);
+
   const [actionSheetMessage, setActionSheetMessage] =
     useState<ConversationMessage | null>(null);
   // Reply-to context: the message the user is replying to (consumed on send).
@@ -762,6 +780,30 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     };
   }, [participantKey, participantIds, ownEntityId]);
+
+  // Chat background (entity-scoped). Reloaded on focus so returning from the
+  // picker (or the AI profile image viewer) shows the new image immediately.
+  // A dangling profile/file ref self-heals to "no background" on read.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      if (!chatEntityId) {
+        setChatBackground(null);
+        return undefined;
+      }
+      ChatBackgroundService.loadChatBackground(chatEntityId)
+        .then(resolved => {
+          if (cancelled) return;
+          setChatBackground({ source: resolved.source, dim: resolved.dim });
+        })
+        .catch(err => {
+          if (!cancelled) log.warn('Failed to load chat background:', err);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [chatEntityId]),
+  );
 
   // Load messages and last-read timestamp on mount
   useEffect(() => {
@@ -1960,6 +2002,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     })();
   }, [ownEntityId, participantIds, navigation]);
 
+  // Open the per-entity chat background picker (Set background). The
+  // background belongs to the partner entity, so it survives persona switches.
+  const handleOpenBackgroundPicker = useCallback(() => {
+    setMenuVisible(false);
+    if (!chatEntityId) return;
+    hapticLightPress();
+    navigation.navigate('ChatBackgroundPicker', {
+      entityId: chatEntityId,
+      participantKey: participantKey || undefined,
+      povEntityId: ownEntityId,
+    });
+  }, [chatEntityId, participantKey, ownEntityId, navigation]);
+
   // Open the AI partner's profile page (AIProfile) when the user taps the
   // header avatar or character name in a private chat with an AI character.
   const handleOpenPartnerProfile = useCallback(() => {
@@ -2615,6 +2670,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                 handleEntityContextMenu();
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              testID="chat-entity-menu-button"
             >
               <Icon
                 name="dots-vertical"
@@ -2718,6 +2774,40 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                     </ThemedText>
                     <ThemedText variant="muted" size={11}>
                       {t('partnerSettingsCaption', { name: headerName })}
+                    </ThemedText>
+                  </View>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
+                <View
+                  style={[
+                    styles.menuItemSeparator,
+                    { backgroundColor: theme!.colors.border.default + '44' },
+                  ]}
+                />
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleOpenBackgroundPicker}
+                  activeOpacity={0.65}
+                  testID="chat-set-background"
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: (theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover) + '1A' },
+                    ]}
+                  >
+                    <Icon
+                      name="wallpaper"
+                      size={18}
+                      color={theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText size={15} weight="medium">
+                      {t('setBackground')}
+                    </ThemedText>
+                    <ThemedText variant="muted" size={11}>
+                      {t('setBackgroundCaption')}
                     </ThemedText>
                   </View>
                   <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
@@ -2852,6 +2942,28 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
       <View
         style={styles.keyboardAvoid}
       >
+      {/* Entity chat background: cover image + dark scrim (dim/100) behind
+          the message list. Bubbles are opaque cards, so they stay legible. */}
+      {chatBackground?.source && (
+        <View
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+          testID="chat-background-layer"
+        >
+          <Image
+            source={chatBackground.source}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: '#000', opacity: chatBackground.dim / 100 },
+            ]}
+            testID="chat-background-scrim"
+          />
+        </View>
+      )}
       <View
         style={[
           styles.content,

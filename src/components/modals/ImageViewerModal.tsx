@@ -8,6 +8,8 @@
  *  - visible: boolean
  *  - imageUri: data URL or remote URL
  *  - description?: optional caption shown below the image
+ *  - backgroundAction?: chat-background action pill (label + onPress); the
+ *    caller owns the label so it can render the "✓ Current background" state
  *  - onClose: () => void
  */
 
@@ -40,6 +42,17 @@ interface ImageViewerModalProps {
    */
   imageSource?: ImageSourcePropType | null;
   description?: string;
+  /**
+   * "Set as background" action. The caller supplies the label (and `active`
+   * styling) so the same modal serves profile images: when the viewed image
+   * already IS the background the caller passes the "✓ Current background"
+   * label and tapping removes it.
+   */
+  backgroundAction?: {
+    label: string;
+    active?: boolean;
+    onPress: () => void;
+  };
   onClose: () => void;
 }
 
@@ -48,6 +61,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   imageUri,
   imageSource,
   description,
+  backgroundAction,
   onClose,
 }) => {
   const resolvedSource: ImageSourcePropType | null =
@@ -95,6 +109,31 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             </View>
           )}
         </ScrollView>
+
+        {/* Chat-background action (profile image viewer) */}
+        {backgroundAction && (
+          <View style={styles.actionBar}>
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                backgroundAction.active && styles.actionButtonActive,
+              ]}
+              onPress={backgroundAction.onPress}
+              activeOpacity={0.75}
+              testID="image-viewer-background-action"
+              accessibilityRole="button"
+            >
+              <Icon
+                name={backgroundAction.active ? 'check' : 'wallpaper'}
+                size={16}
+                color={backgroundAction.active ? '#b84fd0' : 'rgba(255,255,255,0.9)'}
+              />
+              <ThemedText size={13} weight="medium" style={styles.actionText}>
+                {backgroundAction.label}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Description caption */}
         {!!description && (
@@ -144,6 +183,29 @@ const styles = StyleSheet.create({
     height: SCREEN_HEIGHT * 0.78,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  actionBar: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(15,21,37,0.72)',
+  },
+  actionButtonActive: {
+    borderColor: 'rgba(184,79,208,0.65)',
+    backgroundColor: 'rgba(184,79,208,0.18)',
+  },
+  actionText: {
+    color: 'rgba(255,255,255,0.92)',
   },
   captionBar: {
     backgroundColor: 'rgba(0,0,0,0.6)',

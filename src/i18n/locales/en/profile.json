@@ -171,5 +171,7 @@
   "aiDisabledToast": "Disabled {{name}}",
   "aiEnabledToast": "Enabled {{name}}",
   "aiMutedToast": "Muted {{name}}",
-  "aiUnmutedToast": "Unmuted {{name}}"
+  "aiUnmutedToast": "Unmuted {{name}}",
+  "setAsBackground": "Set as background",
+  "currentBackground": "✓ Current background"
 }

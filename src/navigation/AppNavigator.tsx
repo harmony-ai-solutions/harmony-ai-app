@@ -9,6 +9,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { MainTabNavigator, MainTabParamList } from './MainTabNavigator';
 import { LandingScreen } from '../screens/LandingScreen';
 import { ChatDetailScreen } from '../screens/ChatDetailScreen';
+import { ChatBackgroundPickerScreen } from '../screens/ChatBackgroundPickerScreen';
 import { AIProfileScreen } from '../screens/AIProfileScreen';
 import { UserProfileScreen } from '../screens/UserProfileScreen';
 import { CreateAIScreen } from '../screens/CreateAIScreen';
@@ -71,6 +72,18 @@ export type RootStackParamList = {
   };
   /** AI Profile — the AI character's own profile page (mirrors My Profile). */
   AIProfile: { profileId: string };
+  /**
+   * ChatBackgroundPicker — per-entity chat background + dim picker.
+   * `entityId` is the PARTNER entity (the background follows the character,
+   * not the persona). `participantKey`/`povEntityId` are optional so the
+   * picker can list image bubbles from the current conversation; without them
+   * the Chat-history tab is empty (the Profile tab still works).
+   */
+  ChatBackgroundPicker: {
+    entityId: string;
+    participantKey?: string;
+    povEntityId?: string;
+  };
   /**
    * UserProfile — a generic profile page for any cloud user (e.g. an AI
    * character's creator). Pushed from the creator badge on AI profiles.
@@ -210,6 +223,10 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
 
           {/* ── Full-screen detail routes pushed over the tabs ─────────── */}
           <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
+          <Stack.Screen
+            name="ChatBackgroundPicker"
+            component={ChatBackgroundPickerScreen}
+          />
           <Stack.Screen name="AIProfile" component={AIProfileScreen} />
           <Stack.Screen name="UserProfile" component={UserProfileScreen} />
           <Stack.Screen name="CreateAI" component={CreateAIScreen} />

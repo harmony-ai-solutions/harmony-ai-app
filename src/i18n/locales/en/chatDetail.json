@@ -102,5 +102,14 @@
   "statusError": "Connection error",
   "entityDisabledTitle": "Partner disabled",
   "entityDisabledBody": "{{name}} is disabled. You can't chat until you enable it.",
-  "entityDisabledEnable": "Enable {{name}}"
+  "entityDisabledEnable": "Enable {{name}}",
+  "setBackground": "Set background",
+  "setBackgroundCaption": "Character profile or chat images · this chat only",
+  "backgroundPickerTitle": "Chat background",
+  "profileSource": "Profile",
+  "chatHistorySource": "Chat history",
+  "noBackground": "No background",
+  "dim": "Dim",
+  "backgroundProfileEmpty": "No profile images yet",
+  "backgroundHistoryEmpty": "No images in this chat yet"
 }

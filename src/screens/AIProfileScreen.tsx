@@ -72,6 +72,8 @@ import { createUserPersonaFromCard } from '../database/repositories';
 import * as SocialService from '../services/social/SocialService';
 import type { StubCharacterCreator } from '../services/social/SocialService';
 import { openCharacterChat } from '../services/CharacterChatService';
+import ChatBackgroundService from '../services/ChatBackgroundService';
+import type { ChatBackgroundRef } from '../services/ChatBackgroundService';
 import {
   getListingForProfile,
   isChatLocked,
@@ -144,6 +146,8 @@ export const AIProfileScreen: React.FC = () => {
   const [aiEntityId, setAiEntityId] = useState<string | null>(null);
   const [entityDisabled, setEntityDisabledState] = useState(false);
   const [entityMuted, setEntityMutedState] = useState(false);
+  // Current per-entity chat background (image viewer action reflects it).
+  const [backgroundRef, setBackgroundRef] = useState<ChatBackgroundRef | null>(null);
 
   // ── Social state ───────────────────────────────────────────────────────
   const [profileLiked, setProfileLiked] = useState(false);
@@ -191,6 +195,11 @@ export const AIProfileScreen: React.FC = () => {
           setAiEntityId(ent.id);
           setEntityDisabledState(ent.is_disabled === 1);
           setEntityMutedState(ent.is_muted === 1);
+          // The chat background is stored on this entity — the exact entity a
+          // chat with this profile resolves to (same lookup handlePartnerSettings
+          // uses in reverse). Personas have their own user-type entities.
+          const bg = await ChatBackgroundService.getChatBackgroundRecord(ent.id);
+          setBackgroundRef(bg.ref);
         }
       } catch (entErr) {
         log.warn('Failed to load entity flags:', entErr);
@@ -485,6 +494,39 @@ export const AIProfileScreen: React.FC = () => {
       );
     } catch (err) {
       log.warn('Failed to toggle mute:', err);
+      showToast(t('common:error'));
+    }
+  };
+
+  // Image viewer action — the viewed gallery image becomes the entity's chat
+  // background; when it already IS the background, tapping removes it.
+  const isViewerImageBackground =
+    !!viewerImage &&
+    backgroundRef?.kind === 'profile' &&
+    backgroundRef.profileId === profileId &&
+    backgroundRef.imageId === viewerImage.id;
+
+  const handleToggleImageBackground = async () => {
+    if (!aiEntityId || !viewerImage) return;
+    hapticLightPress();
+    try {
+      if (isViewerImageBackground) {
+        await ChatBackgroundService.clearChatBackground(aiEntityId);
+        setBackgroundRef(null);
+      } else {
+        await ChatBackgroundService.setChatBackgroundProfile(
+          aiEntityId,
+          profileId,
+          viewerImage.id,
+        );
+        setBackgroundRef({
+          kind: 'profile',
+          profileId,
+          imageId: viewerImage.id,
+        });
+      }
+    } catch (err) {
+      log.warn('Failed to update chat background:', err);
       showToast(t('common:error'));
     }
   };
@@ -1211,6 +1253,17 @@ export const AIProfileScreen: React.FC = () => {
           viewerImage ? characterImageSource(profileId, viewerImage.id) : null
         }
         description={viewerImage?.description || undefined}
+        backgroundAction={
+          aiEntityId && viewerImage
+            ? {
+                label: isViewerImageBackground
+                  ? t('currentBackground')
+                  : t('setAsBackground'),
+                active: isViewerImageBackground,
+                onPress: handleToggleImageBackground,
+              }
+            : undefined
+        }
         onClose={() => setViewerImage(null)}
       />
     </ThemedView>

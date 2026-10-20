@@ -20,6 +20,9 @@ const REPLY_MODE_PREFIX = '@soulbits_chat_reply_mode_';
 // persona resolution now runs off `entities` (the persona switcher + global
 // key). These keys are swept once at app bootstrap (Q14); nothing writes them.
 const LEGACY_ENTITY_PREF_PREFIX = 'chat_entity_pref_';
+// Per-entity chat background (ChatBackgroundService's key family). Entity-id
+// keyed like the reply-mode keys, so the boot-window wipe clears it too.
+const CHAT_BACKGROUND_PREFIX = '@soulbits_chat_background_';
 
 /** Reply pacing for a conversation: instant, or realistic (typing-delay). */
 export type ChatReplyMode = 'instant' | 'realistic';
@@ -120,6 +123,7 @@ async function sweepLegacyEntityPrefs(): Promise<void> {
  * after the database wipe + full re-sync:
  *   - `chat_global_impersonated_entity` (single global key)
  *   - `@soulbits_chat_reply_mode_*` (per participant key)
+ *   - `@soulbits_chat_background_*` (per entity key — ChatBackgroundService)
  *   - legacy `chat_entity_pref_*` (per-chat persona prefs, dead since Q14)
  *
  * Unlike `sweepLegacyEntityPrefs`, this clears the GLOBAL key and the
@@ -134,6 +138,7 @@ async function sweepWipePreferences(): Promise<void> {
       key =>
         key === GLOBAL_ENTITY_KEY ||
         key.startsWith(REPLY_MODE_PREFIX) ||
+        key.startsWith(CHAT_BACKGROUND_PREFIX) ||
         key.startsWith(LEGACY_ENTITY_PREF_PREFIX),
     );
     if (wipeKeys.length > 0) {
