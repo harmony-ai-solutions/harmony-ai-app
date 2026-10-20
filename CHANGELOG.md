@@ -124,6 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Profile
 #### Changed
+- **The profile tabs are no longer icon-only** — Posts, **Favorites** and Personas now carry a small label under their icon (the active one tinted with the accent colour), so the bookmark tab reads "Favorites" instead of being an unlabelled guess. The AI character profile keeps its icon-only tabs (`ProfileTabs` gained an opt-in `showLabels` prop).
 - **Display name now saves to the cloud** (per account). Username, bio and avatar upload are coming soon — those fields are shown but disabled with a "coming soon" hint.
 
 ### Chat & Messaging
