@@ -294,7 +294,7 @@ export interface CharacterImageInfoDto {
   is_primary: boolean;
   display_order: number;
   /**
-   * Contract 1.8.0 tri-state of the derived 256px preview:
+   * Contract 1.8.0 tri-state of the derived 512px preview:
    *  - `ready` — stored; `?variant=thumb` serves it.
    *  - `pending` — legacy row (`thumbnail_mime IS NULL`); the first
    *    `?variant=thumb` generates + persists it.
@@ -1446,11 +1446,18 @@ export class EngineApiClient {
   /**
    * Raw image bytes for a character image (`GET .../images/:image_id`).
    *
-   * Contract 1.8.0: pass `{ variant: 'thumb' }` for the derived 256px preview
+   * Contract 1.8.0: pass `{ variant: 'thumb' }` for the derived 512px preview
    * (`?variant=thumb`). The response `Content-Type` is returned alongside the
    * bytes because the thumbnail's mime can differ from the original's
    * (`image/jpeg`/`image/png` vs `image/gif`, `image/webp`, …). The original
    * (no variant) remains byte-identical so animations keep animating.
+   *
+   * The `Accept` header negotiates the engine's base64 JSON envelope
+   * (`application/vnd.soulbits.image-base64+json`): the engine then transfers
+   * the image as text, which avoids RN's `Response.arrayBuffer()` bridge
+   * (BlobModule → FileReaderModule → JS base64 decode) and is dramatically
+   * cheaper on device. Engines/mocks that answer with raw bytes keep working:
+   * the binary `arrayBuffer()` path is the fallback.
    */
   async fetchCharacterImageBytes(
     profileId: string,
@@ -1462,11 +1469,18 @@ export class EngineApiClient {
       `/api/character-profiles/${encodeURIComponent(profileId)}/images/${encodeURIComponent(
         imageId,
       )}${query}`,
-      { headers: { Accept: '*/*' } },
+      { headers: { Accept: 'application/vnd.soulbits.image-base64+json, */*' } },
     );
-    const buffer = await response.arrayBuffer();
     const contentType =
       response.headers?.get?.('content-type')?.split(';')[0]?.trim() ?? '';
+    if (contentType === 'application/vnd.soulbits.image-base64+json') {
+      const payload = (await response.json()) as { data?: string; mime_type?: string };
+      return {
+        data: payload.data ?? '',
+        contentType: payload.mime_type ?? '',
+      };
+    }
+    const buffer = await response.arrayBuffer();
     return { data: uint8ArrayToBase64(new Uint8Array(buffer)), contentType };
   }
 

@@ -199,6 +199,7 @@ export function mapEntityConfig(id: string, cfg: EntityConfigDto): Entity {
     entity_type: cfg.entity_type ?? 'ai',
     is_muted: cfg.is_muted ? 1 : 0,
     is_disabled: cfg.is_disabled ? 1 : 0,
+    character_profile_name: cfg.character_profile?.name ?? null,
     created_at: toDate(cfg.created_at),
     updated_at: toDate(cfg.updated_at),
     deleted_at: toDateOrNull(cfg.deleted_at),

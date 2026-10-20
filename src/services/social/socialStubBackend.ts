@@ -424,9 +424,13 @@ export async function deleteImageComment(id: string): Promise<void> {
 
 // ── Block list (replaces blocked_users table + blockedContent repo reads) ─
 
-/** The set of blocked cloud user ids. */
+/**
+ * The set of blocked cloud user ids.
+ *
+ * Synchronous in-memory `Set` read — deliberately NO `simulateLatency()`: this
+ * runs on the critical render path of the chat list and the characters grid.
+ */
 export async function getBlockedUserIds(): Promise<Set<string>> {
-  await simulateLatency();
   return new Set(blocked);
 }
 

@@ -291,43 +291,69 @@ export const CharactersScreen: React.FC = () => {
 
   const loadProfiles = useCallback(async () => {
     try {
-      let data = await getAllCharacterProfiles();
+      // Profiles, the block list and the distinct library tags load together
+      // (the tag read shares the in-flight profile read, so this is 2 requests,
+      // not 6). Each dependency is isolated: a failing block/tag read must never
+      // stop the grid from rendering.
+      const [allProfiles, blockedIds, tags] = await Promise.all([
+        getAllCharacterProfiles(),
+        SocialService.getBlockedUserIds().catch(err => {
+          log.warn('Failed to load blocked users — profile filter skipped:', err);
+          return new Set<string>();
+        }),
+        // Distinct library tags for the filter chip row (4-3) — isolated so a
+        // tag-load failure never aborts the profile/image load below.
+        getDistinctTags().catch(tagErr => {
+          log.warn('Failed to load distinct tags:', tagErr);
+          return null;
+        }),
+      ]);
+
       // Hide AI characters created by blocked users app-wide. The stub block
       // list is user-id-based; the pure filter drops profiles whose id is in
       // the blocked set (the future backend resolves creator→profile ids).
-      const blockedIds = await SocialService.getBlockedUserIds();
-      data = filterBlockedCharacterProfiles(data, blockedIds);
+      const data = filterBlockedCharacterProfiles(allProfiles, blockedIds);
       setProfiles(data);
 
-      // Distinct library tags for the filter chip row (4-3) — isolated so a
-      // tag-load failure never aborts the profile/image load below.
-      try {
-        const tags = await getDistinctTags();
-        setAllTags(tags);
-      } catch (tagErr) {
-        log.warn('Failed to load distinct tags:', tagErr);
+      // Seed favorites straight from the profile rows (they carry
+      // `is_favorite`) — the categories/favorites load stays for custom
+      // categories and for mocks that stub getFavoriteCharacterProfileIds.
+      if (data.some(p => p.is_favorite === 1)) {
+        setFavoriteIds(new Set(data.filter(p => p.is_favorite === 1).map(p => p.id)));
       }
+
+      if (tags !== null) setAllTags(tags);
+
+      // The grid and the ＋ FAB must render NOW — the per-profile thumbnail
+      // pass below fills portraits in progressively, it must not gate the UI.
+      setIsLoading(false);
 
       // Primary images + image counts for all profiles in parallel. The list is
       // metadata-only (contract 1.8.0) and the avatar comes from the derived
       // thumbnail when the engine has one — no gallery blobs are downloaded.
+      // Each card gets its portrait as soon as ITS thumbnail lands instead of
+      // waiting for the whole library.
       const imageMap: Record<string, string | null> = {};
       const countMap: Record<string, number> = {};
       await Promise.all(
         data.map(async profile => {
+          let imageUri: string | null = null;
+          let count = 0;
           try {
             const [images, primary] = await Promise.all([
               getCharacterImagesMetadata(profile.id),
               getPrimaryImage(profile.id),
             ]);
-            imageMap[profile.id] = primary
-              ? createDataURL(primary.image_data, primary.mime_type)
-              : null;
-            countMap[profile.id] = images.length;
+            imageUri = primary ? createDataURL(primary.image_data, primary.mime_type) : null;
+            count = images.length;
           } catch {
-            imageMap[profile.id] = null;
-            countMap[profile.id] = 0;
+            imageUri = null;
+            count = 0;
           }
+          imageMap[profile.id] = imageUri;
+          countMap[profile.id] = count;
+          setPrimaryImages(prev => ({ ...prev, [profile.id]: imageUri }));
+          setImageCounts(prev => ({ ...prev, [profile.id]: count }));
         }),
       );
       setPrimaryImages(imageMap);

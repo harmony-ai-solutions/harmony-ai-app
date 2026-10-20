@@ -65,6 +65,12 @@ export interface Entity {
   entity_type?: string;
   is_muted?: number;
   is_disabled?: number;
+  /**
+   * The linked character profile's display name, embedded by
+   * `GET /api/entities` (`character_profile.name`). Optional: it is a read-side
+   * convenience so list screens never need a per-row profile fetch.
+   */
+  character_profile_name?: string | null;
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;

@@ -204,6 +204,9 @@ const getEntityDisplayName = (
  * profile id. Called as a SECOND phase after the list has painted, so the
  * first paint never waits on avatars. Multiple rows for one profile share one
  * avatar lookup; `resolveAvatar` is injectable for tests.
+ *
+ * `onAvatarResolved` fires per profile the moment its avatar lands, letting the
+ * screen paint each row as it arrives instead of waiting for the whole batch.
  */
 export async function hydrateListAvatars(
   items: ChatListItem[],
@@ -211,6 +214,7 @@ export async function hydrateListAvatars(
     const image = await getPrimaryImage(profileId);
     return image ? imageToDataURL(image) : null;
   },
+  onAvatarResolved?: (profileId: string, avatarUri: string | null) => void,
 ): Promise<ChatListItem[]> {
   const profileIds = [
     ...new Set(
@@ -223,11 +227,20 @@ export async function hydrateListAvatars(
 
   const resolved = await Promise.all(
     profileIds.map(async profileId => {
+      let avatarUri: string | null = null;
       try {
-        return [profileId, await resolveAvatar(profileId)] as const;
+        avatarUri = await resolveAvatar(profileId);
       } catch {
-        return [profileId, null] as const;
+        avatarUri = null;
       }
+      if (onAvatarResolved) {
+        try {
+          onAvatarResolved(profileId, avatarUri);
+        } catch {
+          // A progressive-update callback must never break the batch.
+        }
+      }
+      return [profileId, avatarUri] as const;
     }),
   );
   const avatarByProfile = new Map(resolved);
@@ -366,10 +379,19 @@ export const ChatListScreen: React.FC = () => {
         }
       }
 
-      // Phase B — hydrate previews + profile names IN PARALLEL. Each private
-      // row resolves its profile ONCE and reuses it for the sender name and the
-      // row name. Avatars are deliberately NOT fetched here: they are filled by
+      // Phase B — hydrate previews + profile names IN PARALLEL. Rows from
+      // `getPhoneConversationsPage` are already hydrated by the engine's
+      // chat-list (`lastMessage`, `pinned`, `archived`, `unreadCount`), so the
+      // only reads left are the legacy fallbacks for hand-built rows. Avatars
+      // are deliberately NOT fetched here: they are filled by
       // `hydrateListAvatars()` after the first paint.
+      const missingSettingsKeys: string[] = [];
+      const missingUnreadKeys: string[] = [];
+      const noteMissingHydration = (row: PhoneConversationPageRow, key: string) => {
+        if (row.pinned === undefined || row.archived === undefined) missingSettingsKeys.push(key);
+        if (row.unreadCount === undefined) missingUnreadKeys.push(key);
+      };
+
       const listItems: ChatListItem[] = await Promise.all(
         plans.map(async plan => {
           const { row, participantIds, participantKey, scope } = plan;
@@ -378,13 +400,20 @@ export const ChatListScreen: React.FC = () => {
             const partnerEntityId = plan.partnerEntityId as string;
             const entity = entityMap.get(partnerEntityId);
             const characterProfileId = entity?.character_profile_id ?? null;
+            // `GET /api/entities` embeds the linked profile's name — a per-row
+            // `GET /api/character-profiles/:id` is only needed when it is absent.
+            const embeddedName = entity?.character_profile_name || null;
 
             const [lastMsg, profile] = await Promise.all([
-              getLastInteractionMessage(activeEntityId, participantKey),
-              characterProfileId
+              // Pre-hydrated rows carry the last message — skip `/messages`.
+              row.lastMessage !== undefined
+                ? Promise.resolve(row.lastMessage)
+                : getLastInteractionMessage(activeEntityId, participantKey),
+              characterProfileId && !embeddedName
                 ? getCharacterProfile(characterProfileId)
                 : Promise.resolve(null),
             ]);
+            const profileName = embeddedName || profile?.name || null;
 
             // Determine who sent the last message
             let lastMessageSender = '';
@@ -392,17 +421,20 @@ export const ChatListScreen: React.FC = () => {
               if (lastMsg.sender_entity_id === activeEntityId) {
                 lastMessageSender = t('you');
               } else {
-                lastMessageSender = profile?.name ?? partnerEntityId;
+                lastMessageSender = profileName ?? partnerEntityId;
               }
             }
 
             const characterName = getEntityDisplayName(
               entity?.alias ?? null,
-              profile?.name ?? null,
+              profileName,
               partnerEntityId,
             );
 
-            return {
+            const muted = entity?.is_muted === 1;
+            const locked = lockedIds.has(partnerEntityId);
+
+            const item: ChatListItem = {
               interactionId: row.interactionId,
               entityId: partnerEntityId,
               characterId: characterProfileId,
@@ -415,23 +447,35 @@ export const ChatListScreen: React.FC = () => {
               participantKey,
               participantIds,
               isGroup: false,
-              // pin/archived filled in below from the settings batch; mute/
-              // disabled from the partner ENTITY flags (Q8); unread derived.
-              pinned: false,
-              archived: false,
-              muted: entity?.is_muted === 1,
+              // pin/archive/unread come straight off the chat-list row; mute/
+              // disabled are partner ENTITY flags (Q8).
+              pinned: row.pinned ?? false,
+              archived: row.archived ?? false,
+              muted,
               disabled: entity?.is_disabled === 1,
-              locked: lockedIds.has(partnerEntityId),
-              unreadCount: 0,
+              locked,
+              unreadCount:
+                row.unreadCount !== undefined
+                  ? resolveDisplayUnreadCount(row.unreadCount, muted, locked)
+                  : 0,
             } satisfies ChatListItem;
+            noteMissingHydration(row, participantKey);
+            return item;
           }
 
           // Group interactions: one entry per participant set per D-01.
-          const lastMsg = await getLastInteractionMessage(activeEntityId, participantKey);
+          const lastMsg =
+            row.lastMessage !== undefined
+              ? row.lastMessage
+              : await getLastInteractionMessage(activeEntityId, participantKey);
           const otherParticipantIds = participantIds.filter(id => id !== activeEntityId);
           const displayNames = await Promise.all(
             otherParticipantIds.map(async pid => {
               const entity = entityMap.get(pid);
+              // Entity rows already carry the display label (alias, then the
+              // linked profile's name) — only fall back to a profile read.
+              const embeddedName = entity?.alias || entity?.character_profile_name;
+              if (embeddedName) return embeddedName;
               if (entity?.character_profile_id) {
                 const profile = await getCharacterProfile(entity.character_profile_id);
                 if (profile) return profile.name;
@@ -444,7 +488,7 @@ export const ChatListScreen: React.FC = () => {
           const firstEntity =
             otherParticipantIds.length > 0 ? entityMap.get(otherParticipantIds[0]) : null;
 
-          return {
+          const item: ChatListItem = {
             interactionId: row.interactionId,
             entityId: '', // No single partner for groups
             characterId: null,
@@ -458,37 +502,55 @@ export const ChatListScreen: React.FC = () => {
             participantIds,
             isGroup: true,
             // Groups have no single partner entity — mute/disable/lock flags
-            // are not applicable. pin/archived/unread filled in below.
-            pinned: false,
-            archived: false,
+            // are not applicable. pin/archived/unread come from the row.
+            pinned: row.pinned ?? false,
+            archived: row.archived ?? false,
             muted: false,
             disabled: false,
             locked: false,
-            unreadCount: 0,
+            unreadCount:
+              row.unreadCount !== undefined
+                ? resolveDisplayUnreadCount(row.unreadCount, false, false)
+                : 0,
           } satisfies ChatListItem;
+          noteMissingHydration(row, participantKey);
+          return item;
         }),
       );
 
-      // Merge per-conversation pin/archive state from the settings batch. Both
-      // reads are independent — issue them together.
-      const keys = listItems.map(item => item.participantKey);
-      const [settingsMap, unreadMap] = await Promise.all([
-        getChatConversationSettingsBatch(keys),
-        // Derive unread counts from conversation_messages.is_read, scoped to
-        // this POV entity (A2) — the badge is no longer a stored counter.
-        getUnreadCountByParticipantKeys(keys, activeEntityId),
-      ]);
-      for (const item of listItems) {
-        const settings = settingsMap.get(item.participantKey);
-        if (settings) {
+      // Legacy/partial rows only: hand-built rows that carry no pre-hydrated
+      // pin/archive/unread still get the batched reads. A real page carries
+      // every field, so BOTH batches are skipped (no extra HTTP requests).
+      if (missingSettingsKeys.length > 0) {
+        const wanted = new Set(missingSettingsKeys);
+        const settingsMap = await getChatConversationSettingsBatch(
+          missingSettingsKeys,
+          activeEntityId,
+        );
+        for (const item of listItems) {
+          if (!wanted.has(item.participantKey)) continue;
+          const settings = settingsMap.get(item.participantKey);
+          if (!settings) continue;
           item.pinned = settings.pinned;
           item.archived = settings.archived;
         }
-        item.unreadCount = resolveDisplayUnreadCount(
-          unreadMap.get(item.participantKey) ?? 0,
-          item.muted,
-          item.locked,
+      }
+      if (missingUnreadKeys.length > 0) {
+        const wanted = new Set(missingUnreadKeys);
+        // Derive unread counts from conversation_messages.is_read, scoped to
+        // this POV entity (A2) — the badge is no longer a stored counter.
+        const unreadMap = await getUnreadCountByParticipantKeys(
+          missingUnreadKeys,
+          activeEntityId,
         );
+        for (const item of listItems) {
+          if (!wanted.has(item.participantKey)) continue;
+          item.unreadCount = resolveDisplayUnreadCount(
+            unreadMap.get(item.participantKey) ?? 0,
+            item.muted,
+            item.locked,
+          );
+        }
       }
 
       return listItems;
@@ -504,16 +566,20 @@ export const ChatListScreen: React.FC = () => {
    */
   const loadFilteredEntityIds = useCallback(async (): Promise<Set<string>> => {
     const filtered = new Set<string>();
-    try {
-      (await getBlockedUserIds()).forEach(id => filtered.add(id));
-    } catch (error) {
-      log.warn('Failed to load blocked users — chat list filter skipped:', error);
-    }
-    try {
-      (await getDisabledEntityIds()).forEach(id => filtered.add(id));
-    } catch (error) {
-      log.warn('Failed to load disabled entities — chat list filter skipped:', error);
-    }
+    // Both reads are independent, synchronous-ish lookups — issue them together
+    // instead of paying two round-trips one after the other.
+    const [blocked, disabled] = await Promise.all([
+      getBlockedUserIds().catch(error => {
+        log.warn('Failed to load blocked users — chat list filter skipped:', error);
+        return new Set<string>();
+      }),
+      getDisabledEntityIds().catch(error => {
+        log.warn('Failed to load disabled entities — chat list filter skipped:', error);
+        return [] as string[];
+      }),
+    ]);
+    blocked.forEach(id => filtered.add(id));
+    disabled.forEach(id => filtered.add(id));
     return filtered;
   }, []);
 
@@ -525,7 +591,22 @@ export const ChatListScreen: React.FC = () => {
   const applyResolvedAvatars = useCallback(async (base: ChatListItem[]) => {
     if (!base.some(item => item.avatarProfileId)) return;
     try {
-      const hydrated = await hydrateListAvatars(base);
+      // Progressive pass: each avatar paints the moment its profile resolves.
+      const paintResolved = (profileId: string, avatarUri: string | null) => {
+        if (!avatarUri) return;
+        let changed = false;
+        const next = chatListRef.current.map(item => {
+          if (item.avatarUri || item.avatarProfileId !== profileId) return item;
+          changed = true;
+          return { ...item, avatarUri };
+        });
+        if (!changed) return;
+        chatListRef.current = next;
+        setChatList(next.filter(item => !item.archived));
+        setArchivedList(next.filter(item => item.archived));
+      };
+
+      const hydrated = await hydrateListAvatars(base, undefined, paintResolved);
       const avatarByKey = new Map(hydrated.map(item => [item.participantKey, item.avatarUri]));
       let changed = false;
       const merged = sortListItems(
@@ -554,19 +635,22 @@ export const ChatListScreen: React.FC = () => {
   const loadChatList = useCallback(
     async (activeEntityId: string) => {
       try {
-        const filteredIds = await loadFilteredEntityIds();
-        // Store-variant runtime lock (7-14 V3): locked entities stay VISIBLE,
-        // so they are NOT added to the filtered (hidden) set — the flag rides
-        // the row for greying / badge suppression / detail gating.
-        const lockedIds = await getLockedEntityIds();
-
         listPageRef.current = 0;
         listHasMoreRef.current = true;
 
-        const rows = await getPhoneConversationsPage(activeEntityId, {
-          limit: CHAT_LIST_PAGE_SIZE,
-          offset: 0,
-        });
+        // Filters, store-lock flags and the conversation page are independent
+        // reads — start all three together instead of chaining awaits.
+        const [filteredIds, lockedIds, rows] = await Promise.all([
+          loadFilteredEntityIds(),
+          // Store-variant runtime lock (7-14 V3): locked entities stay VISIBLE,
+          // so they are NOT added to the filtered (hidden) set — the flag rides
+          // the row for greying / badge suppression / detail gating.
+          getLockedEntityIds(),
+          getPhoneConversationsPage(activeEntityId, {
+            limit: CHAT_LIST_PAGE_SIZE,
+            offset: 0,
+          }),
+        ]);
 
         const items = await buildListItems(activeEntityId, rows, filteredIds, lockedIds);
         const sorted = sortListItems(items);
@@ -607,12 +691,15 @@ export const ChatListScreen: React.FC = () => {
     loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      const filteredIds = await loadFilteredEntityIds();
-      const lockedIds = await getLockedEntityIds();
-      const rows = await getPhoneConversationsPage(activeEntityId, {
-        limit: CHAT_LIST_PAGE_SIZE,
-        offset: listPageRef.current * CHAT_LIST_PAGE_SIZE,
-      });
+      // Same three independent reads as loadChatList — issue them together.
+      const [filteredIds, lockedIds, rows] = await Promise.all([
+        loadFilteredEntityIds(),
+        getLockedEntityIds(),
+        getPhoneConversationsPage(activeEntityId, {
+          limit: CHAT_LIST_PAGE_SIZE,
+          offset: listPageRef.current * CHAT_LIST_PAGE_SIZE,
+        }),
+      ]);
 
       if (rows.length === 0) {
         listHasMoreRef.current = false;

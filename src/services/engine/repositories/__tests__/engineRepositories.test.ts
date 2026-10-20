@@ -75,8 +75,65 @@ describe('interactions adapter', () => {
         interactionScope: 'private',
         participantKey: 'e1+e2',
         participantIds: '["e1","e2"]',
+        lastMessage: null,
+        lastMessageAt: null,
+        unreadCount: 0,
+        pinned: false,
+        archived: false,
+        replyMode: 'realistic',
       },
     ]);
+  });
+
+  it('carries the pre-hydrated chat-list fields through (last message, unread, pin/archive, reply mode)', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: /chat-list/,
+        json: {
+          conversations: [
+            chatListRow({
+              last_message: {
+                id: 'm9',
+                entity_id: 'e1',
+                sender_entity_id: 'e2',
+                interaction_id: 'i1',
+                content: 'see you tonight',
+                message_type: 'text',
+                emotional_state_bits: 0,
+                is_recon_followup: false,
+                is_edited: false,
+                is_pinned: false,
+                is_read: false,
+                created_at: '2026-10-11T10:00:00Z',
+                updated_at: '2026-10-11T10:00:00Z',
+                deleted_at: null,
+              },
+              last_message_at: '2026-10-11T10:00:00Z',
+              unread_count: 3,
+              pinned: true,
+              archived: true,
+              reply_mode: 'instant',
+            }),
+          ],
+          has_more: false,
+          next_offset: null,
+        },
+      },
+    ]);
+    install(server);
+    const [row] = await interactionsRepo.getPhoneConversationsPage('e1', {
+      limit: 20,
+      offset: 0,
+    });
+
+    expect(row.lastMessage?.content).toBe('see you tonight');
+    expect(row.lastMessage?.created_at.toISOString()).toBe('2026-10-11T10:00:00.000Z');
+    expect(row.lastMessageAt).toBe('2026-10-11T10:00:00Z');
+    expect(row.unreadCount).toBe(3);
+    expect(row.pinned).toBe(true);
+    expect(row.archived).toBe(true);
+    expect(row.replyMode).toBe('instant');
   });
 
   it('derives the sorted pair key for entityHasPhoneInteraction', async () => {
@@ -833,6 +890,177 @@ describe('characters adapter', () => {
         uri: 'http://127.0.0.1:2/api/character-profiles/p1/images/i1',
         headers: { 'X-Loopback-Token': 'tok' },
       });
+    });
+  });
+
+  describe('display images — request-count reductions', () => {
+    const BASE64_TYPE = 'application/vnd.soulbits.image-base64+json';
+    const imagePath = '/api/character-profiles/p1/images/i1';
+
+    beforeEach(() => {
+      charactersRepo.clearCharacterImageCache();
+    });
+
+    it('parses the base64 JSON envelope without arrayBuffer()', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: imagePath,
+          json: { data: 'AQID', mime_type: 'image/jpeg' },
+          headers: { 'content-type': `${BASE64_TYPE}; charset=utf-8` },
+        },
+      ]);
+      install(server);
+
+      const bytes = await engineApiClient.fetchCharacterImageBytes('p1', 'i1', {
+        variant: 'thumb',
+      });
+
+      expect(bytes).toEqual({ data: 'AQID', contentType: 'image/jpeg' });
+      const call = server.lastCall('GET', imagePath)!;
+      // The negotiation header is what makes the engine answer with base64.
+      expect(call.headers.Accept).toBe(`${BASE64_TYPE}, */*`);
+      expect(call.query.variant).toBe('thumb');
+    });
+
+    it('still decodes raw bytes when the engine answers with image/jpeg', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: imagePath,
+          bytes: new Uint8Array([1, 2, 3]),
+          headers: { 'content-type': 'image/jpeg' },
+        },
+      ]);
+      install(server);
+
+      const bytes = await engineApiClient.fetchCharacterImageBytes('p1', 'i1');
+
+      expect(bytes).toEqual({ data: 'AQID', contentType: 'image/jpeg' });
+    });
+
+    it('shares ONE metadata list between concurrent getCharacterImagesMetadata + getPrimaryImage', async () => {
+      const server = createMockManagementServer([
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p1/images',
+          json: [
+            {
+              id: 'i1',
+              character_profile_id: 'p1',
+              mime_type: 'image/jpeg',
+              description: 'avatar',
+              is_primary: true,
+              display_order: 0,
+              thumbnail_state: 'ready',
+              has_thumbnail: true,
+              created_at: '2026-10-11T10:00:00Z',
+            },
+          ],
+        },
+        {
+          method: 'GET',
+          path: imagePath,
+          bytes: new Uint8Array([1, 2, 3]),
+          headers: { 'content-type': 'image/jpeg' },
+        },
+      ]);
+      install(server);
+
+      const [images, primary] = await Promise.all([
+        charactersRepo.getCharacterImagesMetadata('p1'),
+        charactersRepo.getPrimaryImage('p1'),
+      ]);
+
+      expect(images).toHaveLength(1);
+      expect(primary?.image_data).toBe('AQID');
+      // ONE list request for both callers (was 2 before the in-flight dedupe).
+      expect(
+        server.calls.filter(c => c.path === '/api/character-profiles/p1/images'),
+      ).toHaveLength(1);
+    });
+
+    it('serves a ready thumbnail while three pending generations hold every slot', async () => {
+      const info = (i: number, state: 'ready' | 'pending') => ({
+        id: `i${i}`,
+        character_profile_id: `p${i}`,
+        mime_type: 'image/gif',
+        description: 'avatar',
+        is_primary: true,
+        display_order: 0,
+        thumbnail_state: state,
+        has_thumbnail: state === 'ready',
+        created_at: '2026-10-11T10:00:00Z',
+      });
+      const routes = [
+        ...Array.from({ length: 3 }, (_, i) => [
+          {
+            method: 'GET',
+            path: `/api/character-profiles/p${i}/images`,
+            json: [info(i, 'pending')],
+          },
+          {
+            method: 'GET',
+            path: `/api/character-profiles/p${i}/images/i${i}`,
+            bytes: new Uint8Array([1, 2, 3]),
+            headers: { 'content-type': 'image/jpeg' },
+          },
+        ]).flat(),
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p3/images',
+          json: [info(3, 'ready')],
+        },
+        {
+          method: 'GET',
+          path: '/api/character-profiles/p3/images/i3',
+          bytes: new Uint8Array([4, 5, 6]),
+          headers: { 'content-type': 'image/jpeg' },
+        },
+      ];
+      const server = createMockManagementServer(routes);
+
+      let activePending = 0;
+      let maxActivePending = 0;
+      const gates: Array<() => void> = [];
+      engineApiClient.setFetchImpl(async (url, init) => {
+        const text = String(url);
+        if (!text.includes('variant=thumb')) return server.fetch(url, init);
+        // The READY row is an already-stored blob — never gated (and never
+        // queued behind the generation semaphore).
+        if (text.includes('/p3/')) return server.fetch(url, init);
+        activePending += 1;
+        maxActivePending = Math.max(maxActivePending, activePending);
+        await new Promise<void>(resolve => gates.push(resolve));
+        activePending -= 1;
+        return server.fetch(url, init);
+      });
+
+      const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+      const saturating = [0, 1, 2].map(i => charactersRepo.getPrimaryImage(`p${i}`));
+      for (let i = 0; i < 20 && gates.length < charactersRepo.MAX_CONCURRENT_THUMBNAIL_FETCHES; i++) {
+        await tick();
+      }
+      expect(gates.length).toBe(charactersRepo.MAX_CONCURRENT_THUMBNAIL_FETCHES);
+
+      // All three slots are held by PENDING generations; the ready row still
+      // resolves immediately (no semaphore wait).
+      const ready = await charactersRepo.getPrimaryImage('p3');
+      expect(ready?.image_data).toBe('BAUG');
+
+      for (let guard = 0; guard < 100; guard++) {
+        if (gates.length === 0) {
+          await tick();
+          if (gates.length === 0) break;
+        }
+        gates.shift()!();
+        await tick();
+      }
+      await Promise.all(saturating);
+
+      expect(maxActivePending).toBeLessThanOrEqual(
+        charactersRepo.MAX_CONCURRENT_THUMBNAIL_FETCHES,
+      );
     });
   });
 

@@ -14,6 +14,7 @@
  */
 
 import { engineApiClient } from '../EngineApiClient';
+import type { ChatListRowDto } from '../EngineApiClient';
 
 export interface ChatConversationSettings {
   participantKey: string;
@@ -81,7 +82,15 @@ export async function getChatConversationSettings(
   return defaultSettings(participantKey);
 }
 
-/** Settings for many conversations (used by the chat list). */
+/**
+ * Settings for many conversations (used by the chat list).
+ *
+ * `entityId` is the POV entity: its chat-list already folds pinned/archived per
+ * conversation, so ONE read usually resolves every wanted key. Partner entity
+ * ids are only queried (in parallel) for the keys that read did not cover — the
+ * old implementation scanned every entity embedded in every participant key
+ * sequentially (21 round-trips for a 20-row page).
+ */
 export async function getChatConversationSettingsBatch(
   participantKeys: string[],
   entityId?: string | null,
@@ -89,27 +98,49 @@ export async function getChatConversationSettingsBatch(
   const result = new Map<string, ChatConversationSettings>();
   if (participantKeys.length === 0) return result;
   const wanted = new Set(participantKeys);
-  const entityIds = new Set<string>();
-  if (entityId) entityIds.add(entityId);
-  for (const key of participantKeys) for (const id of entitiesInKey(key)) entityIds.add(id);
+  const unmatched = new Set(participantKeys);
 
-  for (const id of entityIds) {
-    try {
-      const res = await engineApiClient.entityChatList(id, { limit: 200 });
-      for (const row of res.conversations ?? []) {
-        if (!wanted.has(row.participant_key)) continue;
-        result.set(row.participant_key, {
-          participantKey: row.participant_key,
-          entityId: id,
-          pinned: !!row.pinned,
-          archived: !!row.archived,
-          replyMode: row.reply_mode === 'instant' ? 'instant' : 'realistic',
-        });
-      }
-    } catch {
-      // A failed entity read must not break the batch.
+  const absorb = (id: string, rows: readonly ChatListRowDto[] | undefined): void => {
+    for (const row of rows ?? []) {
+      if (!wanted.has(row.participant_key)) continue;
+      unmatched.delete(row.participant_key);
+      result.set(row.participant_key, {
+        participantKey: row.participant_key,
+        entityId: id,
+        pinned: !!row.pinned,
+        archived: !!row.archived,
+        replyMode: row.reply_mode === 'instant' ? 'instant' : 'realistic',
+      });
     }
+  };
+
+  // 1. The POV entity's chat-list covers every conversation it participates in
+  //    (all of them in practice) — one request, no partner fan-out.
+  if (entityId) {
+    try {
+      const res = await engineApiClient.entityChatList(entityId, { limit: 200 });
+      absorb(entityId, res.conversations);
+    } catch {
+      // A failed POV read must not break the batch — partners are tried below.
+    }
+    if (unmatched.size === 0) return result;
   }
+
+  // 2. Fall back to the remaining candidate entity ids, all in parallel.
+  const entityIds = new Set<string>();
+  for (const key of unmatched) for (const id of entitiesInKey(key)) entityIds.add(id);
+  if (entityId) entityIds.delete(entityId);
+
+  await Promise.all(
+    [...entityIds].map(async id => {
+      try {
+        const res = await engineApiClient.entityChatList(id, { limit: 200 });
+        absorb(id, res.conversations);
+      } catch {
+        // A failed entity read must not break the batch.
+      }
+    }),
+  );
   return result;
 }
 

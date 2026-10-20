@@ -20,6 +20,18 @@ export interface PhoneConversationPageRow {
   interactionScope: string;
   participantKey: string;
   participantIds: string;
+  /**
+   * Pre-hydrated fields straight off the engine's chat-list row
+   * (`GET /api/entities/:id/chat-list`). The screen uses them as-is instead of
+   * re-fetching the last message / profile / settings per conversation; they
+   * stay OPTIONAL so callers that build rows by hand (tests) still work.
+   */
+  lastMessage?: ConversationMessage | null;
+  lastMessageAt?: string | null;
+  unreadCount?: number;
+  pinned?: boolean;
+  archived?: boolean;
+  replyMode?: 'realistic' | 'instant';
 }
 
 /**
@@ -111,11 +123,20 @@ export async function getPhoneConversationsPage(
     limit: options.limit,
     offset: options.offset,
   });
+  // The engine's chat-list row is already fully hydrated (last message, unread
+  // count, pin/archive, reply mode) — carry every field through so the chat
+  // list never re-fetches them one conversation at a time.
   return (res.conversations ?? []).map(row => ({
     interactionId: row.interaction_id,
     interactionScope: row.interaction_scope,
     participantKey: row.participant_key,
     participantIds: row.participant_ids,
+    lastMessage: row.last_message ? mapConversationMessage(row.last_message) : null,
+    lastMessageAt: row.last_message_at ?? null,
+    unreadCount: row.unread_count ?? 0,
+    pinned: Boolean(row.pinned),
+    archived: Boolean(row.archived),
+    replyMode: row.reply_mode === 'instant' ? 'instant' : 'realistic',
   }));
 }
 

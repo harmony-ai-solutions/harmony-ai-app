@@ -33,6 +33,7 @@ import type {
 import { createDataURL, base64ToUint8Array } from '../../../database/base64';
 import { engineApiClient } from '../EngineApiClient';
 import { EngineApiError } from '../EngineApiClient';
+import type { CharacterImageInfoDto } from '../EngineApiClient';
 import { onEngineConnectionChange, requireEngineConnection } from '../EngineService';
 import { mapCharacterImageInfo, mapCharacterProfile } from '../engineApiMappers';
 import { getAllEntities } from './entities';
@@ -86,17 +87,36 @@ export async function getCharacterProfile(
   }
 }
 
+/**
+ * In-flight dedupe for the whole-library profile read. Concurrent callers
+ * (favorites, distinct tags, the screen's own load) share ONE request pair.
+ * Cleared the moment it settles, so sequential reads always re-read the engine
+ * (no stale library after an edit).
+ */
+let allProfilesInFlight: Promise<CharacterProfile[]> | null = null;
+
 export async function getAllCharacterProfiles(
   _includeDeleted = false,
 ): Promise<CharacterProfile[]> {
-  const [dtos, owned] = await Promise.all([
-    engineApiClient.listCharacterProfiles(),
-    personaOwnedProfileIds(),
-  ]);
-  return dtos
-    .map(mapCharacterProfile)
-    .filter(p => !owned.has(p.id))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  if (allProfilesInFlight) return allProfilesInFlight;
+
+  const pending = (async (): Promise<CharacterProfile[]> => {
+    const [dtos, owned] = await Promise.all([
+      engineApiClient.listCharacterProfiles(),
+      personaOwnedProfileIds(),
+    ]);
+    return dtos
+      .map(mapCharacterProfile)
+      .filter(p => !owned.has(p.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  })();
+
+  allProfilesInFlight = pending;
+  try {
+    return await pending;
+  } finally {
+    if (allProfilesInFlight === pending) allProfilesInFlight = null;
+  }
 }
 
 export async function getUserCharacterProfiles(
@@ -297,6 +317,9 @@ export function shouldUseThumbnail(
  * - **Thumbnail concurrency cap:** at most
  *   {@link MAX_CONCURRENT_THUMBNAIL_FETCHES} `?variant=thumb` requests are in
  *   flight at once (each miss can decode a multi-MB original on the engine).
+ *   Only rows the engine must GENERATE (`pending` / unspecified) queue; a
+ *   `ready` thumbnail is an already-stored ~45 KB blob (no decode), so it is
+ *   served straight away and never waits behind pending generations.
  *   Originals and cache hits never queue behind this FIFO semaphore.
  * - **Lifetime:** module-level, so blur/focus does not evict; cleared on engine
  *   disconnect ({@link clearCharacterImageCache}).
@@ -313,9 +336,41 @@ interface CachedImageBytes {
   contentType: string;
 }
 
+/** Options that tune the fetch without changing the cache key. */
+interface CachedImageBytesOptions {
+  /**
+   * The row's `thumbnail_state`. `ready` thumbnails are stored blobs and skip
+   * the generation semaphore; `pending` / absent ones may decode engine-side
+   * and therefore queue.
+   */
+  thumbnailState?: CharacterImage['thumbnail_state'];
+}
+
 const imageBytesCache = new Map<string, CachedImageBytes>();
 const imageBytesInFlight = new Map<string, Promise<CachedImageBytes | null>>();
 const imageNegativeCache = new Map<string, number>();
+
+/**
+ * In-flight dedupe for the per-profile image metadata list. Display paths that
+ * need the list AND the primary image at once
+ * (`Promise.all([getCharacterImagesMetadata(id), getPrimaryImage(id)])`) then
+ * issue ONE `GET …/images` per profile instead of two.
+ */
+const imageListInFlight = new Map<string, Promise<CharacterImageInfoDto[]>>();
+
+/** `listCharacterImages` with in-flight dedupe (cleared when it settles). */
+async function listCharacterImagesOnce(profileId: string): Promise<CharacterImageInfoDto[]> {
+  const inFlight = imageListInFlight.get(profileId);
+  if (inFlight) return inFlight;
+
+  const pending = engineApiClient.listCharacterImages(profileId);
+  imageListInFlight.set(profileId, pending);
+  try {
+    return await pending;
+  } finally {
+    if (imageListInFlight.get(profileId) === pending) imageListInFlight.delete(profileId);
+  }
+}
 
 // FIFO semaphore for thumbnail fetches only. `activeThumbnailFetches` counts
 // BOTH running fetches and slots transferred to a resolved waiter.
@@ -356,6 +411,7 @@ export function clearCharacterImageCache(): void {
   imageBytesCache.clear();
   imageBytesInFlight.clear();
   imageNegativeCache.clear();
+  imageListInFlight.clear();
 }
 
 // The engine restarted/stopped → its bytes (and any remembered "no thumb")
@@ -404,6 +460,7 @@ async function getCachedImageBytes(
   profileId: string,
   imageId: string,
   variant: ImageVariant,
+  options: CachedImageBytesOptions = {},
 ): Promise<CachedImageBytes | null> {
   ensureCharacterImageCacheLifecycle();
   const key = characterImageCacheKey(profileId, imageId, variant);
@@ -423,16 +480,18 @@ async function getCachedImageBytes(
   const inFlight = imageBytesInFlight.get(key);
   if (inFlight) return inFlight;
 
+  // A `ready` thumbnail is a stored blob: no engine-side decode, so it must not
+  // wait behind pending generations (a 20-card grid would otherwise trickle in
+  // three at a time).
+  const needsGeneration = variant === 'thumb' && options.thumbnailState !== 'ready';
+
   const pending = (async (): Promise<CachedImageBytes | null> => {
     try {
       const fetchBytes = () =>
         engineApiClient.fetchCharacterImageBytes(profileId, imageId, {
           variant: variant === 'thumb' ? 'thumb' : undefined,
         });
-      const bytes =
-        variant === 'thumb'
-          ? await runWithThumbnailSlot(fetchBytes)
-          : await fetchBytes();
+      const bytes = needsGeneration ? await runWithThumbnailSlot(fetchBytes) : await fetchBytes();
       cacheImageBytes(key, bytes);
       return bytes;
     } catch (e) {
@@ -458,7 +517,7 @@ async function getCachedImageBytes(
 export async function getCharacterImagesMetadata(
   profileId: string,
 ): Promise<CharacterImage[]> {
-  const infos = await engineApiClient.listCharacterImages(profileId);
+  const infos = await listCharacterImagesOnce(profileId);
   return infos.map(info => mapCharacterImageInfo(info, ''));
 }
 
@@ -515,13 +574,15 @@ export async function getCharacterImage(
  * (3 total) — cached afterwards, so it does not repeat on focus.
  */
 export async function getPrimaryImage(profileId: string): Promise<CharacterImage | null> {
-  const infos = await engineApiClient.listCharacterImages(profileId);
+  const infos = await listCharacterImagesOnce(profileId);
   const primary = infos.find(i => i.is_primary);
   if (!primary) return null;
 
   if (shouldUseThumbnail(primary)) {
     try {
-      const thumb = await getCachedImageBytes(profileId, primary.id, 'thumb');
+      const thumb = await getCachedImageBytes(profileId, primary.id, 'thumb', {
+        thumbnailState: primary.thumbnail_state,
+      });
       if (thumb) {
         return mapCharacterImageInfo(
           primary,
