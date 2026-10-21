@@ -19,10 +19,13 @@
  * Image refs
  * ----------
  *  - Profile gallery images are referenced by id (`{kind:'profile', profileId,
- *    imageId}`). The URL is rebuilt on every render via
- *    `characterImageSource` — engine restarts rotate the port/token, so a
- *    stored URL would go stale. A missing id (image deleted) self-heals: the
- *    read drops the ref.
+ *    imageId}`). The DISPLAY source is rebuilt on every read: the ORIGINAL bytes
+ *    come from the app's image byte cache and are rendered as a `data:` URL
+ *    (`getCachedImageBytes` → `createDataURL`). A URL + `source.headers` source
+ *    is not an option — RN's Fabric image loader drops the headers, so the
+ *    engine 401s the GET and the layer paints blank (owner device, Android 15,
+ *    2026-10-21). A missing id (image deleted) self-heals: the read drops the
+ *    ref.
  *  - Chat-history images arrive as base64 `image_data`; a settings row must
  *    never hold megabytes of base64, so the bytes are written once to the
  *    persistent document directory (`chat-backgrounds/`) and only the file
@@ -34,8 +37,10 @@ import type { ImageSourcePropType } from 'react-native';
 import RNFS from 'react-native-fs';
 import {
   characterImageSource,
+  getCachedImageBytes,
   getCharacterImagesMetadata,
 } from './engine/repositories/characters';
+import { createDataURL } from '../database/base64';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[ChatBackgroundService]');
@@ -291,6 +296,10 @@ export function chatBackgroundFileUri(path: string): string {
  * rendered right now (dangling ref OR a transient engine/file-system
  * failure) — callers use {@link isChatBackgroundRefDangling} to decide
  * whether the stored ref should be dropped.
+ *
+ * Profile refs render the ORIGINAL bytes from the app's display cache as a
+ * `data:` URL — a URL + headers source is blank under Fabric (see the module
+ * header). The header/URL builder stays only as the cheap liveness probe.
  */
 export async function resolveChatBackgroundSource(
   ref: ChatBackgroundRef | null,
@@ -306,15 +315,24 @@ export async function resolveChatBackgroundSource(
     return { uri: chatBackgroundFileUri(ref.path) };
   }
 
-  const source = characterImageSource(ref.profileId, ref.imageId);
-  if (!source) return null;
+  // Engine restarting/stopped — no source, but keep the ref for the next focus.
+  if (!characterImageSource(ref.profileId, ref.imageId)) return null;
   try {
     const images = await getCharacterImagesMetadata(ref.profileId);
     if (!images.some(image => image.id === ref.imageId)) return null;
   } catch {
-    // Engine unavailable — keep the ref, let the URL source try to render.
+    // Engine unavailable — keep the ref; the byte read below decides whether a
+    // cached copy can still be shown.
   }
-  return source;
+  try {
+    const bytes = await getCachedImageBytes(ref.profileId, ref.imageId, 'original');
+    if (!bytes) return null;
+    // Response mime, never an assumed one: originals keep GIF/WebP.
+    return { uri: createDataURL(bytes.data, bytes.contentType || 'image/jpeg') };
+  } catch {
+    // Transient engine failure — render nothing now, keep the stored ref.
+    return null;
+  }
 }
 
 /**

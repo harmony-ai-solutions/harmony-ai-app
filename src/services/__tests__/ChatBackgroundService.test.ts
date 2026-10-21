@@ -13,6 +13,7 @@ import ChatBackgroundService, {
 } from '../ChatBackgroundService';
 import {
   characterImageSource,
+  getCachedImageBytes,
   getCharacterImagesMetadata,
 } from '../engine/repositories/characters';
 
@@ -47,16 +48,20 @@ jest.mock('../../utils/logger', () => ({
 }));
 
 jest.mock('../engine/repositories/characters', () => ({
+  // Stays the cheap liveness probe; renders never use the URL any more.
   characterImageSource: jest.fn((profileId: string, imageId: string) => ({
     uri: `http://127.0.0.1:2/api/character-profiles/${profileId}/images/${imageId}`,
     headers: {},
   })),
+  // Display bytes resolve as a data URL, the same path as every other surface.
+  getCachedImageBytes: jest.fn(),
   getCharacterImagesMetadata: jest.fn(),
 }));
 
 const RNFS = require('react-native-fs');
 
 const mockCharacterImageSource = characterImageSource as jest.Mock;
+const mockGetCachedImageBytes = getCachedImageBytes as jest.Mock;
 const mockGetCharacterImagesMetadata = getCharacterImagesMetadata as jest.Mock;
 
 const ENTITY = 'ent-1';
@@ -66,6 +71,11 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockStore.clear();
   mockGetCharacterImagesMetadata.mockResolvedValue([]);
+  // The original path keeps its own mime (GIF/WebP stay animated).
+  mockGetCachedImageBytes.mockResolvedValue({
+    data: 'ORIGINAL_BASE64',
+    contentType: 'image/gif',
+  });
   (RNFS.exists as jest.Mock).mockResolvedValue(false);
 });
 
@@ -202,17 +212,44 @@ describe('ChatBackgroundService — persistence', () => {
 });
 
 describe('ChatBackgroundService — resolution and self-healing', () => {
-  it('rebuilds a profile URL from the stored id', async () => {
+  it('renders a profile ref from the byte cache as a data URL', async () => {
     await ChatBackgroundService.setChatBackgroundProfile(ENTITY, 'p1', 'img-1');
     mockGetCharacterImagesMetadata.mockResolvedValue([{ id: 'img-1' }]);
 
     const resolved = await ChatBackgroundService.loadChatBackground(ENTITY);
 
+    // The URL builder is only the liveness probe; the render source is bytes.
     expect(mockCharacterImageSource).toHaveBeenCalledWith('p1', 'img-1');
+    expect(mockGetCachedImageBytes).toHaveBeenCalledWith('p1', 'img-1', 'original');
     expect(resolved.source).toEqual({
-      uri: 'http://127.0.0.1:2/api/character-profiles/p1/images/img-1',
-      headers: {},
+      uri: 'data:image/gif;base64,ORIGINAL_BASE64',
     });
+  });
+
+  it('renders nothing for a profile ref whose bytes cannot be read, keeping the ref', async () => {
+    await ChatBackgroundService.setChatBackgroundProfile(ENTITY, 'p1', 'img-1');
+    mockGetCharacterImagesMetadata.mockResolvedValue([{ id: 'img-1' }]);
+    mockGetCachedImageBytes.mockRejectedValueOnce(new Error('offline'));
+
+    const resolved = await ChatBackgroundService.loadChatBackground(ENTITY);
+
+    expect(resolved.source).toBeNull();
+    expect(resolved.ref).toEqual({
+      kind: 'profile',
+      profileId: 'p1',
+      imageId: 'img-1',
+    });
+  });
+
+  it('renders nothing when the cache reports no bytes, keeping the ref', async () => {
+    await ChatBackgroundService.setChatBackgroundProfile(ENTITY, 'p1', 'img-1');
+    mockGetCharacterImagesMetadata.mockResolvedValue([{ id: 'img-1' }]);
+    mockGetCachedImageBytes.mockResolvedValueOnce(null);
+
+    const resolved = await ChatBackgroundService.loadChatBackground(ENTITY);
+
+    expect(resolved.source).toBeNull();
+    expect(JSON.parse(mockStore.get(KEY) as string).ref.imageId).toBe('img-1');
   });
 
   it('drops a profile ref whose image was deleted (keeps dim)', async () => {
