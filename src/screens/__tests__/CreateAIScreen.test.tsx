@@ -42,6 +42,22 @@ const mockT = (key: string, options?: unknown) => {
 const mockGoBack = jest.fn();
 const mockNavigation = { navigate: jest.fn(), goBack: mockGoBack };
 
+/**
+ * Latest `useFocusEffect` callbacks — lets a test simulate the back-nav from
+ * ModuleConfigEdit (push/pop does NOT remount this screen).
+ */
+const mockFocusCallbacks: Array<() => void | (() => void)> = [];
+
+jest.mock('@react-navigation/native', () => {
+  const React = require('react');
+  return {
+    useFocusEffect: (cb: () => void) => {
+      mockFocusCallbacks.push(cb);
+      React.useEffect(cb, [cb]);
+    },
+  };
+});
+
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: mockT }),
 }));
@@ -669,6 +685,34 @@ describe('CreateAIScreen — module wiring (4-3)', () => {
     expect(utils.getByTestId('module-selected-backend')).toBeTruthy();
     expect(utils.getByText('selected:b1')).toBeTruthy();
     expect(utils.getByTestId('edit-module-config-backend')).toBeTruthy();
+  });
+
+  it('refetches the option lists on focus (back from ModuleConfigEdit)', async () => {
+    mockGetBackendConfigs.mockResolvedValueOnce([]);
+    mockFocusCallbacks.length = 0;
+
+    const utils = await renderScreen();
+    await flush();
+    // Mount focus load saw no backend options.
+    expect(utils.queryByTestId('module-option-backend-b2')).toBeNull();
+
+    // Saving/creating a config on the pushed ModuleConfigEdit screen does not
+    // remount this one — only a focus event gets us back to fresh data.
+    mockGetBackendConfigs.mockResolvedValue([
+      {
+        id: 'b2',
+        name: 'Fresh config',
+        provider: 'soulbitscloud',
+        capability_json: '{"model":"new-model"}',
+      },
+    ]);
+
+    await act(async () => {
+      mockFocusCallbacks.forEach(cb => cb());
+    });
+    await flush();
+
+    expect(utils.getByTestId('module-option-backend-b2')).toBeTruthy();
   });
 });
 

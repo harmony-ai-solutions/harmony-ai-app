@@ -37,6 +37,7 @@ import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from 'react-i18next';
@@ -497,9 +498,22 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, []);
 
-  useEffect(() => {
-    loadModuleConfigs();
-  }, [loadModuleConfigs]);
+  /**
+   * Refetch on FOCUS, not just mount. This screen stays mounted while the
+   * native stack pushes ModuleConfigEdit, so a config saved/created there left
+   * every module selector (TTS/Cognition/STT/Backend…) showing the old list
+   * until the user navigated fully away (owner device, 2026-10-21). Focus also
+   * covers the first mount, replacing the mount-only load.
+   *
+   * No cancellation: the load only replaces the option lists wholesale, so a
+   * read that lands after a quick push/pop is harmless — the next focus ends
+   * with the freshest list.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      loadModuleConfigs();
+    }, [loadModuleConfigs]),
+  );
 
   // ── Prefill from an existing profile (route param prefillProfileId) ─────────
   useEffect(() => {
