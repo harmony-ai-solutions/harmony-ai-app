@@ -172,14 +172,14 @@ android {
         // build-release.yml) instead of rewriting this file with sed. The
         // fallback stays the repo's current release — bump it here on each
         // manual release so local/unflagged builds keep a sane version.
-        versionName project.findProperty("VERSION_NAME") ?: "0.4.23"
+        versionName project.findProperty("VERSION_NAME") ?: "0.4.24"
         // Derived from versionName — MUST be monotonic across releases. A flat
         // versionCode makes the system installer refuse the self-update
         // ("App not installed", observed as a silent no-op on HyperOS/Android 15
         // — owner bug report 2026-10-21): Android rejects any install whose
         // versionCode is not HIGHER than the installed one.
         versionCode deriveVersionCode(
-            (project.findProperty("VERSION_NAME") ?: "0.4.23").toString(),
+            (project.findProperty("VERSION_NAME") ?: "0.4.24").toString(),
         )
 
         resValue "string", "build_config_package", "ai.soulbits.chat"
