@@ -1142,7 +1142,6 @@ export const ModuleConfigEditScreen: React.FC = () => {
               />
               <View style={styles.sectionContent}>
                 <TtsTestPanel
-                  entityId={entityId}
                   providerType={slots.provider?.providerType}
                   accountId={slots.provider?.accountId}
                   capability={slots.provider?.capability}

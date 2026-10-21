@@ -141,8 +141,7 @@
   "tagSearchPlaceholder": "Search tags…",
   "noTagMatches": "No matching tags",
   "ttsOfflineTitle": "Connect to Soulbits Engine to test",
-  "ttsOfflineHint": "The test panel runs the engine's configured TTS provider. Connect to Soulbits Engine to try it.",
-  "usesSavedConfig": "Tests your saved configuration (unsaved draft changes aren't applied).",
-  "ttsNeedsEntityHint": "Available once the AI has been created.",
+  "ttsOfflineHint": "The test panel synthesizes through Soulbits Engine with the settings above. Connect to Soulbits Engine to try it.",
+  "ttsNeedsProviderHint": "Choose a provider above to test it here.",
   "ttsError": "The test failed: {{message}}"
 }

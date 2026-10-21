@@ -2,26 +2,30 @@
  * TtsTestPanel — TTS playback test studio for the TTS config editor
  * (persona-modules 2-3, reworked Phase 3-5 and again for the player rework).
  *
- * ## Two transports
+ * ## One transport — stateless direct synthesis
  *
- * 1. **Entity-bound (eventserver):** when an `entityId` is available (and no
- *    `providerType` is supplied), the panel INITs a transient `debug` session,
- *    sends the existing `TTS_GENERATE_SPEECH` event with
- *    `tts_output_type: "binary"` and plays the `ENTITY_UTTERANCE` audio through
- *    the app's AudioPlayer. The engine synthesizes with the entity's SYNCED TTS
- *    config.
+ * The panel posts the live form settings to
+ * `POST /api/module-configs/tts/test-speech` and plays the returned
+ * `audio_base64`. This lets users test voice cloning, pitch/speed and voice
+ * design immediately on the config editor, without saving a module config or
+ * binding an AI entity.
  *
- * 2. **Stateless direct synthesis (Phase 3-5):** when `providerType` is given —
- *    even if there is no `entityId` — the panel posts the live form settings to
- *    `POST /api/module-configs/tts/test-speech` and plays the returned
- *    `audio_base64`. This lets users test voice cloning, pitch/speed and voice
- *    design immediately on the config editor, without saving a module config or
- *    binding an AI entity.
+ * The entity-bound eventserver path (`INIT_ENTITY` + `TTS_GENERATE_SPEECH`) was
+ * REMOVED by owner decision (2026-10-21): a saved config reaches the entity
+ * anyway when it is spawned for a chat/game turn, so the panel never needs to
+ * bother the entity — and the stateless route always tests the form state the
+ * user is looking at.
  *
- * Both transports converge on the same player state: the synthesized audio is
- * kept as `lastAudio: { base64, mime }` plus the `lastSynthText` it was
- * synthesized from, so the sample can be replayed or downloaded without another
- * engine round-trip.
+ * The `provider` field is REQUIRED by that route (engine
+ * `management/routes_modules.go` → `normalizeTTSProvider`: missing/unknown →
+ * "provider is required"/"unsupported provider type", surfaced as an error
+ * status), so until a provider is selected the panel renders an honest
+ * "select a provider" hint instead of a button that could only fail.
+ *
+ * The player state is the same as before: the synthesized audio is kept as
+ * `lastAudio: { base64, mime }` plus the `lastSynthText` it was synthesized
+ * from, so the sample can be replayed or downloaded without another engine
+ * round-trip.
  *
  * ## Player row (rework)
  *
@@ -91,7 +95,6 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer, { AudioPlayer as AudioPlayerClass } from '../../services/AudioPlayer';
-import { runTest, ModuleTestSessionError } from '../../services/voiceInput/moduleTestSessionService';
 import { engineApiClient } from '../../services/engine/EngineApiClient';
 import {
   activateKeepScreenOn,
@@ -127,8 +130,6 @@ interface SynthesizedAudio {
 }
 
 export interface TtsTestPanelProps {
-  /** The AI entity whose saved TTS config should be tested. */
-  entityId?: string;
   /** Provider type for stateless direct synthesis (`testTtsSpeech`). */
   providerType?: string;
   /** Selected provider account id (direct synthesis). */
@@ -242,7 +243,6 @@ async function parseAudioDuration(base64: string, mime: string): Promise<number 
 }
 
 export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
-  entityId,
   providerType,
   accountId,
   capability,
@@ -264,8 +264,8 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isOffline = !isConnected;
-  const useDirectSynthesis = Boolean(providerType);
-  const canSynthesize = Boolean(entityId) || useDirectSynthesis;
+  // The test-speech route always needs a provider type (see the header note).
+  const canSynthesize = Boolean(providerType);
 
   // ── Screen keep-awake — ONLY while audio is actually playing ──────────
   // Pausing/idle/synthesizing releases it (paused playback has no audio
@@ -330,9 +330,9 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     };
   }, [phase]);
 
-  /** Run synthesis over the active transport and start playback. */
+  /** Synthesize the sample over the stateless test-speech API and play it. */
   const synthesize = useCallback(async () => {
-    if (!canSynthesize) return;
+    if (!canSynthesize || !providerType) return;
     const spoken = text.trim();
     if (!spoken) return;
 
@@ -340,53 +340,20 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     setPhase('synthesizing');
     setError(null);
     try {
-      let result: SynthesizedAudio;
-
-      if (useDirectSynthesis) {
-        // ── Stateless direct synthesis (no entity / no saved config) ──
-        const res = await engineApiClient.testTtsSpeech({
-          text: spoken,
-          provider: providerType,
-          provider_account_id: accountId ?? null,
-          model: capability?.model,
-          capability_json: capability,
-          voice_config_file: capability?.voice_config_file,
-        });
-        const audio = res.audio_base64 || res.audio || res.data;
-        if (!audio) {
-          throw new Error('No audio returned');
-        }
-        result = resolveSynthesizedAudio(audio, audioMime(res.format));
-        await playSynthesizedAudio(result.base64, result.mime);
-      } else {
-        // ── Entity-bound eventserver path ──
-        const payload = await runTest(entityId as string, async ({ sendEvent, awaitEvent }) => {
-          await sendEvent({
-            event_type: 'TTS_GENERATE_SPEECH',
-            payload: {
-              utterance: {
-                type: 'UTTERANCE_COMBINED',
-                content: spoken,
-                entity_id: entityId,
-              },
-              tts_output_type: 'binary',
-            },
-          });
-          const resp = await awaitEvent('ENTITY_UTTERANCE', {
-            predicate: (e) => e.payload?.audio,
-          });
-          return resp?.payload ?? null;
-        });
-
-        if (!payload?.audio) {
-          throw new ModuleTestSessionError('No audio returned');
-        }
-        result = resolveSynthesizedAudio(
-          payload.audio,
-          payload.audio_type || 'audio/wav',
-        );
-        await AudioPlayer.playAudio(result.base64, result.mime);
+      const res = await engineApiClient.testTtsSpeech({
+        text: spoken,
+        provider: providerType,
+        provider_account_id: accountId ?? null,
+        model: capability?.model,
+        capability_json: capability,
+        voice_config_file: capability?.voice_config_file,
+      });
+      const audio = res.audio_base64 || res.audio || res.data;
+      if (!audio) {
+        throw new Error('No audio returned');
       }
+      const result = resolveSynthesizedAudio(audio, audioMime(res.format));
+      await playSynthesizedAudio(result.base64, result.mime);
 
       // Duration up-front so the seeker is correct on the very first frame;
       // the polled progress duration takes over if the parse failed.
@@ -398,20 +365,14 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
       setPhase('playing');
     } catch (err: any) {
       setPhase('error');
-      setError(
-        err instanceof ModuleTestSessionError
-          ? err.message
-          : t('ttsError', { message: err?.message ?? '' }),
-      );
+      setError(t('ttsError', { message: err?.message ?? '' }));
       log.error('TTS test failed:', err);
     }
   }, [
     text,
-    entityId,
     providerType,
     accountId,
     capability,
-    useDirectSynthesis,
     canSynthesize,
     t,
   ]);
@@ -508,20 +469,20 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
 
   if (!theme) return null;
 
-  // Offline: only block the eventserver transport. Direct synthesis still has a
-  // chance if the engine HTTP route is reachable.
-  if (isOffline && !providerType) {
+  // ── No provider selected yet → nothing to synthesize with ──
+  // `POST /api/module-configs/tts/test-speech` REQUIRES `provider`
+  // (engine `normalizeTTSProvider` → "provider is required"), so a
+  // provider-less request could ONLY fail. Rather than a button that silently
+  // errors, show the honest precondition.
+  if (!providerType) {
     return (
       <View style={styles.wrapper}>
         <View style={styles.offlineRow}>
-          <Icon name="link-off" size={20} color={theme.colors.text.muted} />
-          <ThemedText size={13} variant="muted" style={styles.offlineText}>
-            {t('ttsOfflineTitle')}
+          <Icon name="information-outline" size={20} color={theme.colors.text.muted} />
+          <ThemedText size={13} variant="muted" style={styles.offlineText} testID="tts-needs-provider">
+            {t('ttsNeedsProviderHint')}
           </ThemedText>
         </View>
-        <ThemedText size={12} variant="muted">
-          {t('ttsOfflineHint')}
-        </ThemedText>
       </View>
     );
   }
@@ -543,23 +504,6 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     ? formatLabelForMime(lastAudio.mime)
     : declaredFormatLabel;
 
-  // ── No entity AND no direct provider → disabled test panel with a hint ──
-  if (!entityId && !providerType) {
-    return (
-      <View style={styles.wrapper}>
-        <View style={styles.offlineRow}>
-          <Icon name="information-outline" size={20} color={theme.colors.text.muted} />
-          <ThemedText size={13} variant="muted" style={styles.offlineText} testID="tts-needs-entity">
-            {t('ttsNeedsEntityHint')}
-          </ThemedText>
-        </View>
-        <ThemedText size={12} variant="muted">
-          {t('usesSavedConfig')}
-        </ThemedText>
-      </View>
-    );
-  }
-
   const insertTag = (tag: string) => {
     if (isBusy) return;
     hapticLightPress();
@@ -572,11 +516,19 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
 
   return (
     <View style={styles.wrapper}>
-      {/* ── Transport note (only when falling back to saved entity config) ── */}
-      {!useDirectSynthesis ? (
-        <ThemedText size={12} variant="muted">
-          {t('usesSavedConfig')}
-        </ThemedText>
+      {/* ── Offline notice (non-blocking: the engine HTTP route may still answer) ── */}
+      {isOffline ? (
+        <>
+          <View style={styles.offlineRow} testID="tts-offline-notice">
+            <Icon name="link-off" size={16} color={theme.colors.text.muted} />
+            <ThemedText size={12} variant="muted" style={styles.offlineText}>
+              {t('ttsOfflineTitle')}
+            </ThemedText>
+          </View>
+          <ThemedText size={12} variant="muted">
+            {t('ttsOfflineHint')}
+          </ThemedText>
+        </>
       ) : null}
 
       {/* ── Paralinguistic quick-insert chips (`tag-pill`) ── */}
