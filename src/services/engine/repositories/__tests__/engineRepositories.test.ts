@@ -740,6 +740,18 @@ describe('characters adapter', () => {
       expect(images[1].is_primary).toBe(false);
     });
 
+    it('treats an empty (Go nil-slice) image list as [] rather than null', async () => {
+      // The engine marshals an empty Go slice to JSON null; screens call
+      // `.map`/`.find` on the result, so the client must normalize it.
+      const server = createMockManagementServer([
+        { method: 'GET', path: '/api/character-profiles/p1/images', json: null },
+      ]);
+      install(server);
+
+      await expect(charactersRepo.getCharacterImagesMetadata('p1')).resolves.toEqual([]);
+      await expect(charactersRepo.getPrimaryImage('p1')).resolves.toBeNull();
+    });
+
     it('shouldUseThumbnail implements the thumbnail_state table', () => {
       expect(
         charactersRepo.shouldUseThumbnail({ thumbnail_state: 'ready', has_thumbnail: false }),

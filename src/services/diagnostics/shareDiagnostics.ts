@@ -94,10 +94,48 @@ export interface ShareDiagnosticsOptions {
   filterSummary?: string;
 }
 
+export interface ShareTextFileReportOptions {
+  /** Share-sheet title (also the subject line). */
+  title: string;
+  /** File name in the cache dir (the OS dedupes collisions). */
+  filename: string;
+  /** The full text to write + share. */
+  report: string;
+}
+
+/**
+ * Write a plain-text report to the app cache dir and share the FILE URL.
+ *
+ * Sharing a file — rather than a huge `Share.share({ message })` string — keeps
+ * the intent under Android's binder/parcel limit (~1000 entries overflow a
+ * message extra) and lets targets such as "Save to device" materialize the
+ * content. `react-native-share` streams the file URL instead of inlining it.
+ *
+ * Returns the written path. The caller owns error UX (a share-sheet cancel is
+ * not an error worth surfacing aggressively).
+ */
+export async function shareTextFileReport(
+  options: ShareTextFileReportOptions,
+): Promise<string> {
+  const dir = RNFS.CachesDirectoryPath || RNFS.DocumentDirectoryPath;
+  const path = `${dir}/${options.filename}`;
+  await RNFS.writeFile(path, options.report, 'utf8');
+  log.info(`Report written (${options.report.length} bytes)`);
+
+  await Share.open({
+    title: options.title,
+    subject: options.title,
+    type: 'text/plain',
+    url: `file://${path}`,
+    filename: options.filename,
+    failOnCancel: false,
+  });
+
+  return path;
+}
+
 /**
  * Build + write + share the diagnostics report. Returns the written file path.
- * The caller owns error UX (a share-sheet cancel is not an error worth
- * surfacing aggressively).
  */
 export async function shareDiagnosticsReport(
   options: ShareDiagnosticsOptions,
@@ -111,19 +149,9 @@ export async function shareDiagnosticsReport(
     filterSummary: options.filterSummary,
   });
 
-  const dir = RNFS.CachesDirectoryPath || RNFS.DocumentDirectoryPath;
-  const path = `${dir}/${diagnosticsFileName(generatedAt)}`;
-  await RNFS.writeFile(path, report, 'utf8');
-  log.info(`Diagnostics report written (${report.length} bytes)`);
-
-  await Share.open({
+  return shareTextFileReport({
     title: 'Soulbits Engine diagnostics',
-    subject: 'Soulbits Engine diagnostics',
-    type: 'text/plain',
-    url: `file://${path}`,
     filename: diagnosticsFileName(generatedAt),
-    failOnCancel: false,
+    report,
   });
-
-  return path;
 }

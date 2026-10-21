@@ -24,7 +24,6 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  Share,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
@@ -48,6 +47,8 @@ import {
   buildAppDiagnosticsReport,
   copyAppLogEntries,
 } from '../../services/diagnostics/appDiagnostics';
+import { diagnosticsFileName } from '../../services/diagnostics/buildDiagnosticsReport';
+import { shareTextFileReport } from '../../services/diagnostics/shareDiagnostics';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[AppLogScreen]');
@@ -189,7 +190,15 @@ export const AppLogScreen: React.FC = () => {
   const share = useCallback(async () => {
     try {
       const text = buildAppDiagnosticsReport(exportEntries);
-      await Share.share({ title: t('title'), message: text });
+      // Share the report as a FILE, not a `Share.share({ message })` blob: a
+      // full buffer overflows Android's intent/binder limit and message-only
+      // targets (e.g. "Save to device") cannot materialize it. The engine log
+      // viewer has always shared this way.
+      await shareTextFileReport({
+        title: 'Soulbits App diagnostics',
+        filename: diagnosticsFileName(),
+        report: text,
+      });
     } catch (err) {
       log.warn('App-log share failed:', err);
       showToast(t('shareFailedToast'));

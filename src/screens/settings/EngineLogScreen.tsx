@@ -27,6 +27,8 @@ import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { useAppAlert } from '../../contexts/AppAlertContext';
+import { useToast } from '../../contexts/AppToastContext';
 import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedCard } from '../../components/themed/ThemedCard';
@@ -43,6 +45,7 @@ import {
   type EngineLogStreamStatus,
 } from '../../services/engine/EngineLogStream';
 import { shareDiagnosticsReport } from '../../services/diagnostics/shareDiagnostics';
+import { formatLogEntry } from '../../services/diagnostics/buildDiagnosticsReport';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[EngineLogScreen]');
@@ -229,12 +232,22 @@ export function rowsToEntries(rows: LogRow[]): EngineLogEntryDto[] {
   return rows.map(r => r.entry);
 }
 
+/**
+ * Clipboard text for the Copy action: the visible entries oldest → newest, one
+ * share-report line each (the same formatting the diagnostics dump uses).
+ */
+export function buildCopyText(rows: LogRow[]): string {
+  return [...rows].reverse().map(row => formatLogEntry(row.entry)).join('\n');
+}
+
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 export const EngineLogScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { theme } = useAppTheme();
   const { t } = useTranslation('engineLogs');
+  const { showAlert } = useAppAlert();
+  const { showToast } = useToast();
 
   const [rows, setRows] = useState<LogRow[]>([]);
   const [status, setStatus] = useState<EngineLogStreamStatus>('idle');
@@ -375,6 +388,42 @@ export const EngineLogScreen: React.FC = () => {
     }
   }, [rows, sharing, t]);
 
+  const copy = useCallback(() => {
+    try {
+      Clipboard.setString(buildCopyText(rows));
+      showToast(t('copiedToast'));
+    } catch {
+      showToast(t('copyFailedToast'));
+    }
+  }, [rows, showToast, t]);
+
+  /**
+   * Clear the LOCAL view: drop the buffered rows + pagination window and let the
+   * live stream keep running. The engine's ring buffer cannot be wiped through
+   * the management API — the contract exposes only reads + runtime verbosity
+   * under `/api/development/logs`, no DELETE — so this deliberately does not
+   * call the engine. Old history reappears only if the live stream re-sends it.
+   */
+  const clear = useCallback(() => {
+    showAlert(t('clearConfirmTitle'), t('clearConfirmMessage'), [
+      { text: t('common:cancel'), style: 'cancel' },
+      {
+        text: t('clear'),
+        style: 'destructive',
+        onPress: () => {
+          // Drop buffered pre-clear frames too, so they cannot re-fill the pane
+          // on the next 250 ms flush.
+          pendingRef.current = [];
+          setRows([]);
+          setHasMore(false);
+          setLoadingOlder(false);
+          setError(null);
+          showToast(t('clearedToast'));
+        },
+      },
+    ]);
+  }, [showAlert, showToast, t]);
+
   const copyEntry = useCallback((entry: EngineLogEntryDto) => {
     const line = `[${entry.timestamp}] ${entry.level.toUpperCase()} ${entry.component}${
       entry.entityId ? ` ${entry.entityId}` : ''
@@ -454,6 +503,14 @@ export const EngineLogScreen: React.FC = () => {
               />
             </TouchableOpacity>
             <TouchableOpacity
+              onPress={copy}
+              style={styles.headerIcon}
+              testID="engine-log-copy"
+              accessibilityLabel={t('copy')}
+            >
+              <Icon name="content-copy" size={20} color={theme.colors.accent.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity
               onPress={share}
               style={styles.headerIcon}
               testID="log-share"
@@ -461,6 +518,14 @@ export const EngineLogScreen: React.FC = () => {
               disabled={sharing}
             >
               <Icon name="share-variant" size={20} color={theme.colors.accent.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={clear}
+              style={styles.headerIcon}
+              testID="engine-log-clear"
+              accessibilityLabel={t('clear')}
+            >
+              <Icon name="delete-sweep-outline" size={20} color={theme.colors.status.error} />
             </TouchableOpacity>
           </View>
         }

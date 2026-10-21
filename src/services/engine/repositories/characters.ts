@@ -518,7 +518,9 @@ export async function getCharacterImagesMetadata(
   profileId: string,
 ): Promise<CharacterImage[]> {
   const infos = await listCharacterImagesOnce(profileId);
-  return infos.map(info => mapCharacterImageInfo(info, ''));
+  // Defensive: the client normalizes the engine's nil-slice → JSON null, but a
+  // future adapter must not resurrect the `.map` crash on an empty gallery.
+  return (infos ?? []).map(info => mapCharacterImageInfo(info, ''));
 }
 
 export async function getCharacterImages(

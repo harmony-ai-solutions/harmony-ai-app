@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { FlatList, Share } from 'react-native';
+import { FlatList } from 'react-native';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 
@@ -82,6 +82,11 @@ const mockCopyEntries = jest.fn(() => Promise.resolve(true));
 jest.mock('../../services/diagnostics/appDiagnostics', () => ({
   buildAppDiagnosticsReport: (...args: unknown[]) => (mockBuildReport as jest.Mock)(...args),
   copyAppLogEntries: (...args: unknown[]) => (mockCopyEntries as jest.Mock)(...args),
+}));
+
+const mockShareTextFileReport = jest.fn(() => Promise.resolve('/mock/caches/report.txt'));
+jest.mock('../../services/diagnostics/shareDiagnostics', () => ({
+  shareTextFileReport: (...args: unknown[]) => (mockShareTextFileReport as jest.Mock)(...args),
 }));
 
 import { AppLogScreen, APP_LOG_POLL_MS, buildAppLogRows } from '../settings/AppLogScreen';
@@ -159,8 +164,7 @@ describe('AppLogScreen actions', () => {
     expect(mockShowToast).toHaveBeenCalledWith('clearedToast');
   });
 
-  it('shares the filtered buffer through the OS share sheet', async () => {
-    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
+  it('shares the filtered buffer as a written text file', async () => {
     seed();
     const { getByTestId } = await render(<AppLogScreen />);
     fireEvent.press(getByTestId('app-log-share'));
@@ -169,8 +173,17 @@ describe('AppLogScreen actions', () => {
     const [older, newer] = appLogBuffer.getEntries();
     const sharedEntries = mockBuildReport.mock.calls[0][0] as AppLogEntry[];
     expect(sharedEntries.map(e => e.id)).toEqual([older.id, newer.id]);
-    await waitFor(() => expect(shareSpy).toHaveBeenCalledWith(expect.objectContaining({ message: 'APP-REPORT' })));
-    shareSpy.mockRestore();
+    // A file URL (not a full-report `Share.share({ message })` blob) is shared,
+    // so a large buffer stays under Android's intent limit.
+    await waitFor(() =>
+      expect(mockShareTextFileReport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Soulbits App diagnostics',
+          filename: expect.stringMatching(/^soulbits-diagnostics-.+\.txt$/),
+          report: 'APP-REPORT',
+        }),
+      ),
+    );
   });
 
   it('copies the filtered buffer and confirms with a toast', async () => {

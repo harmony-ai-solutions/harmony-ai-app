@@ -7,7 +7,8 @@
  */
 
 import React from 'react';
-import { cleanup, render, waitFor } from '@testing-library/react-native';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 
 afterEach(cleanup);
 beforeEach(() => {
@@ -15,8 +16,19 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
+const mockShowAlert = jest.fn();
+const mockShowToast = jest.fn();
+
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
+}));
+
+jest.mock('../../contexts/AppAlertContext', () => ({
+  useAppAlert: () => ({ showAlert: mockShowAlert }),
+}));
+
+jest.mock('../../contexts/AppToastContext', () => ({
+  useToast: () => ({ showToast: mockShowToast }),
 }));
 
 jest.mock('../../utils/logger', () => ({
@@ -98,6 +110,7 @@ jest.mock('../../services/diagnostics/shareDiagnostics', () => ({
 
 import {
   EngineLogScreen,
+  buildCopyText,
   applyStreamEvent,
   mergeBackfill,
   buildEngineLogQuery,
@@ -110,6 +123,8 @@ import {
   type LogRow,
   EMPTY_LOG_FILTER,
 } from '../settings/EngineLogScreen';
+import { EngineLogStream } from '../../services/engine/EngineLogStream';
+import { engineApiClient } from '../../services/engine/EngineApiClient';
 import type { EngineLogEntryDto } from '../../services/engine/EngineApiClient';
 
 function entry(over: Partial<EngineLogEntryDto> = {}): EngineLogEntryDto {
@@ -189,6 +204,17 @@ describe('engine log view logic', () => {
     expect(merged.map(r => r.entry.id)).toEqual([7, 6, 5]);
   });
 
+  it('builds chronological copy text from newest-first rows', () => {
+    const rows: LogRow[] = [
+      { entry: entry({ id: 2, timestamp: '2026-10-13T11:59:00Z', message: 'newer' }), count: 1, ids: [2] },
+      { entry: entry({ id: 1, timestamp: '2026-10-13T11:58:00Z', message: 'older' }), count: 1, ids: [1] },
+    ];
+    expect(buildCopyText(rows).split('\n')).toEqual([
+      '[2026-10-13T11:58:00Z] INFO  chat ent-1 — older',
+      '[2026-10-13T11:59:00Z] INFO  chat ent-1 — newer',
+    ]);
+  });
+
   it('builds the REST query from the filter state', () => {
     expect(
       buildEngineLogQuery({
@@ -238,7 +264,60 @@ describe('EngineLogScreen render', () => {
     const { getByTestId } = await render(<EngineLogScreen />);
     expect(getByTestId('log-search')).toBeTruthy();
     expect(getByTestId('log-follow-toggle')).toBeTruthy();
+    expect(getByTestId('engine-log-copy')).toBeTruthy();
     expect(getByTestId('log-share')).toBeTruthy();
+    expect(getByTestId('engine-log-clear')).toBeTruthy();
     await waitFor(() => expect(getByTestId('log-empty')).toBeTruthy());
+  });
+});
+
+describe('EngineLogScreen actions', () => {
+  function mockPage(entries: EngineLogEntryDto[]) {
+    (engineApiClient.engineLogs as jest.Mock).mockResolvedValueOnce({
+      entries,
+      count: entries.length,
+      offset: 0,
+      limit: 200,
+    });
+  }
+
+  it('copies the visible entries oldest → newest and confirms with a toast', async () => {
+    mockPage([
+      entry({ id: 2, timestamp: '2026-10-13T11:59:00Z', message: 'newer' }),
+      entry({ id: 1, timestamp: '2026-10-13T11:58:00Z', message: 'older' }),
+    ]);
+    const { getByTestId } = await render(<EngineLogScreen />);
+    await waitFor(() => expect(getByTestId('log-row-2')).toBeTruthy());
+
+    fireEvent.press(getByTestId('engine-log-copy'));
+
+    expect(Clipboard.setString).toHaveBeenCalledWith(
+      [
+        '[2026-10-13T11:58:00Z] INFO  chat ent-1 — older',
+        '[2026-10-13T11:59:00Z] INFO  chat ent-1 — newer',
+      ].join('\n'),
+    );
+    expect(mockShowToast).toHaveBeenCalledWith('copiedToast');
+  });
+
+  it('confirms before clearing the local view and keeps the stream running', async () => {
+    mockPage([entry({ id: 1 })]);
+    const { getByTestId } = await render(<EngineLogScreen />);
+    await waitFor(() => expect(getByTestId('log-row-1')).toBeTruthy());
+
+    fireEvent.press(getByTestId('engine-log-clear'));
+
+    expect(mockShowAlert).toHaveBeenCalledTimes(1);
+    const buttons = mockShowAlert.mock.calls[0][2];
+    const destructive = buttons.find((b: any) => b.style === 'destructive');
+    expect(destructive).toBeTruthy();
+
+    destructive.onPress();
+    await waitFor(() => expect(getByTestId('log-empty')).toBeTruthy());
+    expect(mockShowToast).toHaveBeenCalledWith('clearedToast');
+
+    // Clearing is view-local: the live WS tail is never torn down.
+    const stream = (EngineLogStream as unknown as jest.Mock).mock.results[0].value;
+    expect(stream.stop).not.toHaveBeenCalled();
   });
 });

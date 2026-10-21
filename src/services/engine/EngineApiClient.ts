@@ -1437,10 +1437,14 @@ export class EngineApiClient {
     );
   }
 
+  /**
+   * The profile's image list. The engine is Go: an empty slice marshals to JSON
+   * `null`, so normalize here — callers freely `.map`/`.find`/iterate the result.
+   */
   listCharacterImages(profileId: string): Promise<CharacterImageInfoDto[]> {
-    return this.getJson<CharacterImageInfoDto[]>(
+    return this.getJson<CharacterImageInfoDto[] | null>(
       `/api/character-profiles/${encodeURIComponent(profileId)}/images`,
-    );
+    ).then(dtos => dtos ?? []);
   }
 
   /**

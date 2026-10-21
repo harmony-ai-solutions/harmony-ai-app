@@ -28,6 +28,7 @@ import {
   collectDiagnosticsHeader,
   resolveEngineVersion,
   shareDiagnosticsReport,
+  shareTextFileReport,
 } from '../shareDiagnostics';
 import { ENGINE_CONTRACT_VERSION } from '../../engine/engineContract';
 import type { EngineLogEntryDto } from '../../engine/EngineApiClient';
@@ -76,6 +77,30 @@ describe('shareDiagnostics', () => {
     );
     expect(Share.open).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'text/plain', failOnCancel: false }),
+    );
+  });
+
+  it('shares an arbitrary text report as a cache file (app-log export)', async () => {
+    const path = await shareTextFileReport({
+      title: 'Soulbits App diagnostics',
+      filename: 'soulbits-diagnostics-2026-10-21.txt',
+      report: 'APP-BODY',
+    });
+    expect(path).toBe('/mock/caches/soulbits-diagnostics-2026-10-21.txt');
+    expect(RNFS.writeFile).toHaveBeenCalledWith(
+      '/mock/caches/soulbits-diagnostics-2026-10-21.txt',
+      'APP-BODY',
+      'utf8',
+    );
+    expect(Share.open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Soulbits App diagnostics',
+        subject: 'Soulbits App diagnostics',
+        type: 'text/plain',
+        url: 'file:///mock/caches/soulbits-diagnostics-2026-10-21.txt',
+        filename: 'soulbits-diagnostics-2026-10-21.txt',
+        failOnCancel: false,
+      }),
     );
   });
 });
