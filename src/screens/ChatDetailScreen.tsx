@@ -31,6 +31,7 @@ import { ScreenHeader } from '../components/themed/ScreenHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
+import { AppLifecycle } from 'react-native-applifecycle';
 import { useTranslation } from 'react-i18next';
 import { v7 as uuidv7 } from 'uuid';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -371,6 +372,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { isConnected } = useSyncConnection();
   const {
     isSessionActive,
+    activeSessions,
     startInteractionSession,
     stopInteractionSession,
     clearFailedSession,
@@ -476,6 +478,41 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Using a ref (not state) avoids re-render cascades and stale closure issues
   // in event listeners that need the current ID at callback time.
   const currentInteractionIdRef = useRef(routeInteractionId);
+  /**
+   * Live context session map. Mirrored into a ref so the re-arm callbacks stay
+   * referentially stable: a new identity on every session update would re-run
+   * the focus effect and re-arm needlessly (same pattern as the context's own
+   * `activeSessionsRef`).
+   */
+  const activeSessionsRef = useRef(activeSessions);
+  activeSessionsRef.current = activeSessions;
+  /**
+   * True while this screen's own INIT is in flight — focus/foreground must not
+   * race the mount effect into a second INIT.
+   */
+  const sessionInitInFlightRef = useRef(false);
+  /**
+   * Toast + translation refs. Both are used by the INIT path, but their
+   * identities are not guaranteed stable (a context provider re-create or a
+   * test double would change them), which would change `initializeSession` and
+   * re-fire the init effect on every render — one INIT per render.
+   */
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
+  const tRef = useRef(t);
+  tRef.current = t;
+  /**
+   * False once this screen unmounts. Used by the session init/re-arm toast so a
+   * slow load that lands after the user left cannot pop a toast over the next
+   * screen.
+   */
+  const screenMountedRef = useRef(true);
+  useEffect(() => {
+    screenMountedRef.current = true;
+    return () => {
+      screenMountedRef.current = false;
+    };
+  }, []);
 
   // HARD GATE — marketplace preview lock (viewable free, chat locked until
   // acquired; own library never locked): once set, this chat is a locked
@@ -877,27 +914,94 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeInteractionId]);
 
-  // Session initialization – (re)start the session when sync connection becomes available
-  useEffect(() => {
-    let mounted = true;
+  // ── Session init / re-arm ──────────────────────────────────────────────
 
-    // GATE (shouldInitializeEntitySession, Q8 / review): never send INIT for a
-    // locked marketplace conversation, while disconnected/un-ready, before the
-    // partner's disabled flag has loaded, or for a DISABLED partner — the
-    // engine would reject with ErrEntityDisabled and the user would see an
-    // error toast. Silent skip (debug log, no toast); re-inits when the flag
-    // loads or when the user re-enables from the chat menu (`isDisabled` is a
-    // dep so the toggle immediately restarts the session).
-    if (
-      !shouldInitializeEntitySession({
+  // GATE (shouldInitializeEntitySession, Q8 / review): never send INIT for a
+  // locked marketplace conversation, while disconnected/un-ready, before the
+  // partner's disabled flag has loaded, or for a DISABLED partner — the engine
+  // would reject with ErrEntityDisabled and the user would see an error toast.
+  // Silent skip (debug log, no toast); re-inits when the flag loads or when the
+  // user re-enables from the chat menu.
+  const canInitializeSession = useCallback(
+    () =>
+      shouldInitializeEntitySession({
         chatLocked: chatLockedRef.current,
         isConnected,
         participantKey,
         disabledLoaded,
         isDisabled,
         locked: isLocked,
-      })
-    ) {
+      }),
+    [isConnected, participantKey, disabledLoaded, isDisabled, isLocked],
+  );
+
+  /** The ONE INIT path: the mount effect and every re-arm call this. */
+  const initializeSession = useCallback(async () => {
+    sessionInitInFlightRef.current = true;
+    try {
+      log.info(`Initializing interaction session for ${routeInteractionId}...`);
+      // Reply mode is read fresh from the SYNCED settings column on every
+      // session init so the mode is not lost between navigations. Uses
+      // participantKey (stable). 4-4: supersedes ChatPreferencesService; the
+      // one-time legacy AsyncStorage migration runs inside getReplyMode.
+      const savedMode = await getReplyMode(participantKey);
+      const mode = savedMode || 'realistic';
+      await startInteractionSession(ownEntityId, participantIds, mode);
+    } catch (error: any) {
+      log.error('Failed to initialize entity session:', error);
+
+      if (!screenMountedRef.current) return;
+
+      const errorMessage = error?.message || 'Unknown error';
+      showToastRef.current(`${tRef.current('common:error')}: ${errorMessage}`);
+    } finally {
+      sessionInitInFlightRef.current = false;
+    }
+  }, [
+    ownEntityId,
+    participantIds,
+    participantKey,
+    routeInteractionId,
+    startInteractionSession,
+  ]);
+
+  /**
+   * True when a session for THIS own entity + participant set already exists —
+   * CONNECTING included. Such a session must not be restarted: the service
+   * would reuse it anyway, and skipping avoids a pointless INIT round-trip and
+   * guarantees a partial session is never torn down. FAILED entries are
+   * terminal, so they do not count (a retry still creates a fresh session).
+   */
+  const hasLiveSessionForParticipantSet = useCallback((): boolean => {
+    const targetKey = [...participantIds].sort().join('+');
+    for (const session of activeSessionsRef.current.values()) {
+      if (session.failed) continue;
+      if (session.ownEntityId !== ownEntityId) continue;
+      if ([...session.participantIds].sort().join('+') !== targetKey) continue;
+      return true;
+    }
+    return false;
+  }, [ownEntityId, participantIds]);
+
+  /**
+   * Re-arm the session after a deliberate teardown.
+   *
+   * EntitySessionService closes every session on whole-app ON_STOP while the
+   * sync connection is deliberately kept up (D1-5 always-connected), so
+   * `isConnected` never changes and the init effect never re-ran: the open chat
+   * stayed dead until a full unmount/remount (owner device, 2026-10-21).
+   * Teardown-on-leave/unmount is unchanged and still intentional.
+   */
+  const rearmSessionIfNeeded = useCallback(() => {
+    if (sessionInitInFlightRef.current) return;
+    if (!canInitializeSession()) return;
+    if (hasLiveSessionForParticipantSet()) return;
+    initializeSession();
+  }, [canInitializeSession, hasLiveSessionForParticipantSet, initializeSession]);
+
+  // Session initialization – (re)start when sync/partner state changes.
+  useEffect(() => {
+    if (!canInitializeSession()) {
       if (isDisabled) {
         log.debug('Skipping session INIT: partner entity is disabled');
       }
@@ -907,41 +1011,35 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       return;
     }
 
-    const initializeSession = async () => {
-      try {
-        log.info(`Initializing interaction session for ${routeInteractionId}...`);
-        // Reply mode is read fresh from the SYNCED settings column on every
-        // session init so the mode is not lost between navigations. Uses
-        // participantKey (stable). 4-4: supersedes ChatPreferencesService; the
-        // one-time legacy AsyncStorage migration runs inside getReplyMode.
-        const savedMode = await getReplyMode(participantKey);
-        const mode = savedMode || 'realistic';
-        await startInteractionSession(ownEntityId, participantIds, mode);
-      } catch (error: any) {
-        if (!mounted) return;
-
-        log.error('Failed to initialize entity session:', error);
-
-        const errorMessage = error?.message || 'Unknown error';
-        showToast(`${t('common:error')}: ${errorMessage}`);
-      }
-    };
-
     initializeSession();
+  }, [canInitializeSession, initializeSession, isDisabled, isLocked]);
 
+  // Re-arm when the screen becomes interactive again: a back-nav from a pushed
+  // screen re-fires focus even though this screen never unmounted.
+  useFocusEffect(
+    useCallback(() => {
+      rearmSessionIfNeeded();
+    }, [rearmSessionIfNeeded]),
+  );
+
+  /**
+   * Re-arm on app FOREGROUND. useFocusEffect does NOT re-fire when the app
+   * returns with this screen already focused, and the ON_STOP teardown leaves
+   * sync connected (D1-5), so nothing else would bring the chat back (owner
+   * device, 2026-10-21). Android emits active/background from androidx
+   * ProcessLifecycleOwner; iOS falls back to AppState (active/inactive/
+   * background). Only a real foreground re-arms.
+   */
+  useEffect(() => {
+    const subscription = AppLifecycle.addEventListener('change', nextState => {
+      const state = nextState as string;
+      if (state !== 'active' && state !== 'foreground') return;
+      rearmSessionIfNeeded();
+    });
     return () => {
-      mounted = false;
+      subscription?.remove?.();
     };
-  }, [
-    routeInteractionId,
-    ownEntityId,
-    participantIds,
-    isConnected,
-    participantKey,
-    isDisabled,
-    disabledLoaded,
-    isLocked,
-  ]);
+  }, [rearmSessionIfNeeded]);
 
   // Listen for new messages and typing indicator
   useEffect(() => {

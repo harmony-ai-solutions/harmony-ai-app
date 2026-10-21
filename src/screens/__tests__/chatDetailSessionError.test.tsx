@@ -121,6 +121,7 @@ jest.mock('../../contexts/SyncConnectionContext', () => ({
 jest.mock('../../contexts/EntitySessionContext', () => ({
   useEntitySession: () => ({
     isSessionActive: () => true,
+    activeSessions: new Map(),
     startInteractionSession: mockStartInteractionSession,
     stopInteractionSession: jest.fn().mockResolvedValue(undefined),
     clearFailedSession: mockClearFailedSession,
