@@ -234,6 +234,9 @@ beforeEach(() => {
 });
 
 describe('TtsTestPanel — provider requirement + offline notice', () => {
+  // Generous timeouts: this block is pure render + flush, but the shared
+  // render/flush helper spins microtasks, and a saturated parallel worker can
+  // push it past Jest's 5 s default (seen in CI on run 39607735066).
   it('shows the provider hint instead of a test button when no provider is selected', async () => {
     const utils = await render(<TtsTestPanel />);
     await flush();
@@ -244,7 +247,7 @@ describe('TtsTestPanel — provider requirement + offline notice', () => {
     expect(utils.queryByTestId('tts-play-button')).toBeNull();
     expect(utils.queryByTestId('tts-text-input')).toBeNull();
     expect(mockTestTtsSpeech).not.toHaveBeenCalled();
-  });
+  }, 20000);
 
   it('keeps the studio available offline when a providerType is given', async () => {
     mockIsConnected = false;
@@ -257,7 +260,7 @@ describe('TtsTestPanel — provider requirement + offline notice', () => {
     expect(utils.getByText('ttsOfflineTitle')).toBeTruthy();
     expect(utils.getByText('ttsOfflineHint')).toBeTruthy();
     expect(utils.getByTestId('tts-play-button')).toBeTruthy();
-  });
+  }, 20000);
 
   it('renders no offline notice while connected', async () => {
     const utils = await render(<TtsTestPanel providerType="soulvoice" />);
@@ -265,7 +268,7 @@ describe('TtsTestPanel — provider requirement + offline notice', () => {
 
     expect(utils.queryByTestId('tts-offline-notice')).toBeNull();
     expect(utils.queryByText('ttsOfflineTitle')).toBeNull();
-  });
+  }, 20000);
 });
 
 describe('TtsTestPanel — stateless direct synthesis (Phase 3-5)', () => {
@@ -623,7 +626,8 @@ describe('TtsTestPanel — player row, download and completion', () => {
     // One hold spans synthesis → playback (no phase churn between the two).
     expect(mockActivateKeepAwake).toHaveBeenCalledTimes(1);
     expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
-  });
+    // Real wall-clock waits (setTimeout boundaries) → allow a slow worker.
+  }, 20000);
 
   it('releases the hold on pause and re-acquires it on resume and genuine end', async () => {
     jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
@@ -679,7 +683,7 @@ describe('TtsTestPanel — player row, download and completion', () => {
 
     expect(utils.getByText('ttsError:engine down')).toBeTruthy();
     expect(mockDeactivateKeepAwake).toHaveBeenCalled();
-  });
+  }, 20000);
 
   it('releases the wake lock when unmounted while playing', async () => {
     const utils = await render(<TtsTestPanel providerType="soulvoice" />);
