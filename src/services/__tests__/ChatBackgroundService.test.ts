@@ -10,6 +10,7 @@
 import ChatBackgroundService, {
   CHAT_BACKGROUND_KEY_PREFIX,
   DEFAULT_CHAT_BACKGROUND_DIM,
+  DEFAULT_CHAT_BACKGROUND_TRANSPARENCY,
 } from '../ChatBackgroundService';
 import {
   characterImageSource,
@@ -80,19 +81,55 @@ beforeEach(() => {
 });
 
 describe('ChatBackgroundService — persistence', () => {
-  it('defaults to no image and 40% dim', async () => {
+  it('defaults to no image, 40% dim and fully opaque', async () => {
     const record = await ChatBackgroundService.getChatBackgroundRecord(ENTITY);
-    expect(record).toEqual({ ref: null, dim: DEFAULT_CHAT_BACKGROUND_DIM });
+    expect(record).toEqual({
+      ref: null,
+      dim: DEFAULT_CHAT_BACKGROUND_DIM,
+      transparency: DEFAULT_CHAT_BACKGROUND_TRANSPARENCY,
+    });
   });
 
-  it('stores a profile ref by id (never a URL) and preserves dim', async () => {
+  it('normalizes transparency (clamps, garbage → 100)', () => {
+    expect(ChatBackgroundService.normalizeChatBackgroundTransparency(150)).toBe(100);
+    expect(ChatBackgroundService.normalizeChatBackgroundTransparency(-10)).toBe(0);
+    expect(ChatBackgroundService.normalizeChatBackgroundTransparency(42.6)).toBe(43);
+    expect(ChatBackgroundService.normalizeChatBackgroundTransparency('55')).toBe(55);
+    // Anything unreadable must leave the image visible, never hidden.
+    expect(ChatBackgroundService.normalizeChatBackgroundTransparency(undefined)).toBe(100);
+    expect(ChatBackgroundService.normalizeChatBackgroundTransparency(null)).toBe(100);
+    expect(ChatBackgroundService.normalizeChatBackgroundTransparency('')).toBe(100);
+    expect(ChatBackgroundService.normalizeChatBackgroundTransparency('nope')).toBe(100);
+    expect(ChatBackgroundService.normalizeChatBackgroundTransparency(NaN)).toBe(100);
+    expect(ChatBackgroundService.normalizeChatBackgroundTransparency(Infinity)).toBe(100);
+  });
+
+  it('reads a pre-slider record as fully opaque', async () => {
+    // Existing installs have no `transparency` field.
+    mockStore.set(
+      KEY,
+      JSON.stringify({
+        ref: { kind: 'profile', profileId: 'p1', imageId: 'img-1' },
+        dim: 40,
+      }),
+    );
+
+    const record = await ChatBackgroundService.getChatBackgroundRecord(ENTITY);
+
+    expect(record.transparency).toBe(DEFAULT_CHAT_BACKGROUND_TRANSPARENCY);
+    expect(record.ref).toEqual({ kind: 'profile', profileId: 'p1', imageId: 'img-1' });
+  });
+
+  it('stores a profile ref by id (never a URL) and preserves dim/transparency', async () => {
     await ChatBackgroundService.setChatBackgroundDim(ENTITY, 65);
+    await ChatBackgroundService.setChatBackgroundTransparency(ENTITY, 30);
     await ChatBackgroundService.setChatBackgroundProfile(ENTITY, 'p1', 'img-9');
 
     const raw = JSON.parse(mockStore.get(KEY) as string);
     expect(raw).toEqual({
       ref: { kind: 'profile', profileId: 'p1', imageId: 'img-9' },
       dim: 65,
+      transparency: 30,
     });
     expect(mockCharacterImageSource).not.toHaveBeenCalled();
   });
@@ -135,6 +172,23 @@ describe('ChatBackgroundService — persistence', () => {
 
     expect(RNFS.unlink).toHaveBeenCalledWith(first);
     expect(JSON.parse(mockStore.get(KEY) as string).ref.path).toBe(second);
+  });
+
+  it('preserves dim/transparency when the background is swapped to a history image', async () => {
+    await ChatBackgroundService.setChatBackgroundProfile(ENTITY, 'p1', 'img-1');
+    await ChatBackgroundService.setChatBackgroundDim(ENTITY, 45);
+    await ChatBackgroundService.setChatBackgroundTransparency(ENTITY, 60);
+
+    const path = await ChatBackgroundService.setChatBackgroundFromBase64(
+      ENTITY,
+      'QUJD',
+      'image/png',
+    );
+
+    const raw = JSON.parse(mockStore.get(KEY) as string);
+    expect(raw.ref).toMatchObject({ kind: 'file', path });
+    expect(raw.dim).toBe(45);
+    expect(raw.transparency).toBe(60);
   });
 
   it('records the new ref BEFORE unlinking the previous file (record-first)', async () => {
@@ -198,15 +252,33 @@ describe('ChatBackgroundService — persistence', () => {
     expect(JSON.parse(mockStore.get(KEY) as string).ref.imageId).toBe('img-1');
   });
 
-  it('clears the image but keeps the chosen dim', async () => {
+  it('clamps transparency to 0–100 and keeps ref/dim', async () => {
+    await ChatBackgroundService.setChatBackgroundProfile(ENTITY, 'p1', 'img-1');
+    await ChatBackgroundService.setChatBackgroundDim(ENTITY, 20);
+
+    await ChatBackgroundService.setChatBackgroundTransparency(ENTITY, 240);
+    let raw = JSON.parse(mockStore.get(KEY) as string);
+    expect(raw.transparency).toBe(100);
+    expect(raw.dim).toBe(20);
+    expect(raw.ref.imageId).toBe('img-1');
+
+    await ChatBackgroundService.setChatBackgroundTransparency(ENTITY, -5);
+    raw = JSON.parse(mockStore.get(KEY) as string);
+    expect(raw.transparency).toBe(0);
+    expect(raw.dim).toBe(20);
+  });
+
+  it('clears the image but keeps the chosen dim/transparency', async () => {
     await ChatBackgroundService.setChatBackgroundProfile(ENTITY, 'p1', 'img-1');
     await ChatBackgroundService.setChatBackgroundDim(ENTITY, 70);
+    await ChatBackgroundService.setChatBackgroundTransparency(ENTITY, 25);
 
     await ChatBackgroundService.clearChatBackground(ENTITY);
 
     expect(JSON.parse(mockStore.get(KEY) as string)).toEqual({
       ref: null,
       dim: 70,
+      transparency: 25,
     });
   });
 });
@@ -224,6 +296,8 @@ describe('ChatBackgroundService — resolution and self-healing', () => {
     expect(resolved.source).toEqual({
       uri: 'data:image/gif;base64,ORIGINAL_BASE64',
     });
+    // `loadChatBackground` returns the render knobs alongside the source.
+    expect(resolved.transparency).toBe(DEFAULT_CHAT_BACKGROUND_TRANSPARENCY);
   });
 
   it('renders nothing for a profile ref whose bytes cannot be read, keeping the ref', async () => {
@@ -252,9 +326,10 @@ describe('ChatBackgroundService — resolution and self-healing', () => {
     expect(JSON.parse(mockStore.get(KEY) as string).ref.imageId).toBe('img-1');
   });
 
-  it('drops a profile ref whose image was deleted (keeps dim)', async () => {
+  it('drops a profile ref whose image was deleted (keeps dim/transparency)', async () => {
     await ChatBackgroundService.setChatBackgroundProfile(ENTITY, 'p1', 'gone');
     await ChatBackgroundService.setChatBackgroundDim(ENTITY, 55);
+    await ChatBackgroundService.setChatBackgroundTransparency(ENTITY, 35);
     mockGetCharacterImagesMetadata.mockResolvedValue([{ id: 'other' }]);
 
     const resolved = await ChatBackgroundService.loadChatBackground(ENTITY);
@@ -262,9 +337,14 @@ describe('ChatBackgroundService — resolution and self-healing', () => {
     expect(resolved).toEqual({
       ref: null,
       dim: 55,
+      transparency: 35,
       source: null,
     });
-    expect(JSON.parse(mockStore.get(KEY) as string).ref).toBeNull();
+    const raw = JSON.parse(mockStore.get(KEY) as string);
+    expect(raw.ref).toBeNull();
+    // The self-heal write keeps the user's dim AND transparency.
+    expect(raw.dim).toBe(55);
+    expect(raw.transparency).toBe(35);
   });
 
   it('keeps a profile ref when the engine metadata read fails', async () => {

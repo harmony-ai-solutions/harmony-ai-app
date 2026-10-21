@@ -237,7 +237,11 @@ beforeEach(() => {
   mockGetAICharacterProfile.mockResolvedValue(profile);
   mockGetImages.mockResolvedValue([galleryImage]);
   mockGetEntity.mockResolvedValue({ id: 'ent-1', is_disabled: 0, is_muted: 0 });
-  service.getChatBackgroundRecord.mockResolvedValue({ ref: null, dim: 40 });
+  service.getChatBackgroundRecord.mockResolvedValue({
+    ref: null,
+    dim: 40,
+    transparency: 100,
+  });
   service.setChatBackgroundProfile.mockResolvedValue(undefined);
   service.clearChatBackground.mockResolvedValue(undefined);
 });
@@ -262,6 +266,7 @@ describe('AIProfileScreen — viewer background action', () => {
     service.getChatBackgroundRecord.mockResolvedValue({
       ref: { kind: 'profile', profileId: 'p1', imageId: 'i1' },
       dim: 40,
+      transparency: 100,
     });
     const { findByTestId, getByText } = await renderProfile();
 
@@ -287,7 +292,11 @@ describe('AIProfileScreen — viewer background action', () => {
 
   it('re-reads the entity background when the screen is focused again', async () => {
     // Mounted with no background (the viewer shows "Set as background").
-    service.getChatBackgroundRecord.mockResolvedValue({ ref: null, dim: 40 });
+    service.getChatBackgroundRecord.mockResolvedValue({
+    ref: null,
+    dim: 40,
+    transparency: 100,
+  });
     const { findByTestId, getByText } = await renderProfile();
 
     await fireEvent.press(await findByTestId('ai-image-tile-i1'));
@@ -298,6 +307,7 @@ describe('AIProfileScreen — viewer background action', () => {
     service.getChatBackgroundRecord.mockResolvedValue({
       ref: { kind: 'profile', profileId: 'p1', imageId: 'i1' },
       dim: 40,
+      transparency: 100,
     });
     const refocus = mockFocusCallbacks[mockFocusCallbacks.length - 1];
     expect(refocus).toBeDefined();

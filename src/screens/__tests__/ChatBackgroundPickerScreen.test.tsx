@@ -120,9 +120,11 @@ jest.mock('../../services/ChatBackgroundService', () => ({
     setChatBackgroundProfile: jest.fn(),
     setChatBackgroundFromBase64: jest.fn(),
     setChatBackgroundDim: jest.fn(),
+    setChatBackgroundTransparency: jest.fn(),
     clearChatBackground: jest.fn(),
   },
   DEFAULT_CHAT_BACKGROUND_DIM: 40,
+  DEFAULT_CHAT_BACKGROUND_TRANSPARENCY: 100,
   chatBackgroundFileUri: (path: string) =>
     path.startsWith('file://') ? path : `file://${path}`,
 }));
@@ -195,10 +197,15 @@ beforeEach(() => {
   mockFetchImage.mockImplementation(async (messageId: string) =>
     messageId === 'm4' ? 'BASE64_B' : 'BASE64_A',
   );
-  service.getChatBackgroundRecord.mockResolvedValue({ ref: null, dim: 40 });
+  service.getChatBackgroundRecord.mockResolvedValue({
+    ref: null,
+    dim: 40,
+    transparency: 100,
+  });
   service.setChatBackgroundProfile.mockResolvedValue(undefined);
   service.setChatBackgroundFromBase64.mockResolvedValue('/docs/bg.png');
   service.setChatBackgroundDim.mockResolvedValue(undefined);
+  service.setChatBackgroundTransparency.mockResolvedValue(undefined);
   service.clearChatBackground.mockResolvedValue(undefined);
 });
 
@@ -216,6 +223,7 @@ describe('ChatBackgroundPickerScreen', () => {
     service.getChatBackgroundRecord.mockResolvedValue({
       ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
       dim: 40,
+      transparency: 100,
     });
     const { findByTestId } = await renderPicker();
 
@@ -248,6 +256,7 @@ describe('ChatBackgroundPickerScreen', () => {
     service.getChatBackgroundRecord.mockResolvedValue({
       ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
       dim: 40,
+      transparency: 100,
     });
     const { getAllByTestId, findByTestId } = await renderPicker();
 
@@ -260,6 +269,7 @@ describe('ChatBackgroundPickerScreen', () => {
     service.getChatBackgroundRecord.mockResolvedValue({
       ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
       dim: 40,
+      transparency: 100,
     });
     const { findByTestId, getAllByTestId } = await renderPicker();
 
@@ -378,6 +388,7 @@ describe('ChatBackgroundPickerScreen', () => {
     service.getChatBackgroundRecord.mockResolvedValue({
       ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
       dim: 40,
+      transparency: 100,
     });
     const { findByTestId, queryAllByTestId } = await renderPicker();
 
@@ -395,6 +406,7 @@ describe('ChatBackgroundPickerScreen', () => {
     service.getChatBackgroundRecord.mockResolvedValue({
       ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
       dim: 40,
+      transparency: 100,
     });
     const { findByTestId, getByTestId } = await renderPicker();
 
@@ -442,6 +454,52 @@ describe('ChatBackgroundPickerScreen', () => {
     });
 
     expect(service.setChatBackgroundDim).toHaveBeenCalledWith('ent-1', 72);
+  });
+
+  it('renders the transparency slider at the stored value', async () => {
+    service.getChatBackgroundRecord.mockResolvedValue({
+      ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
+      dim: 40,
+      transparency: 35,
+    });
+    const { findByTestId, getByText } = await renderPicker();
+
+    expect(await findByTestId('background-transparency-slider')).toBeTruthy();
+    expect(getByText('35%')).toBeTruthy();
+    // The preview starts at the stored image opacity.
+    expect(
+      flattenedOpacity(
+        (await findByTestId('background-dim-preview-image')).props.style,
+      ),
+    ).toBeCloseTo(0.35);
+  });
+
+  it('previews transparency on the image itself, live, and persists on release', async () => {
+    service.getChatBackgroundRecord.mockResolvedValue({
+      ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
+      dim: 40,
+      transparency: 100,
+    });
+    const { findByTestId, getByTestId } = await renderPicker();
+
+    const previewImage = await findByTestId('background-dim-preview-image');
+    expect(flattenedOpacity(previewImage.props.style)).toBeCloseTo(1);
+
+    // Dragging fades the IMAGE (not a new scrim) before anything is persisted.
+    await fireEvent(getByTestId('background-transparency-slider'), 'valueChange', 30);
+    expect(flattenedOpacity(getByTestId('background-dim-preview-image').props.style)).toBeCloseTo(0.3);
+    expect(service.setChatBackgroundTransparency).not.toHaveBeenCalled();
+
+    await fireEvent(
+      getByTestId('background-transparency-slider'),
+      'slidingComplete',
+      30,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(service.setChatBackgroundTransparency).toHaveBeenCalledWith('ent-1', 30);
   });
 
   it('shows an empty state for a chat with no image messages', async () => {

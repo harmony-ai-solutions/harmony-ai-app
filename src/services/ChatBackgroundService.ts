@@ -10,11 +10,13 @@
  * pacing family) — this service follows the same seam and key convention:
  *
  *   `@soulbits_chat_background_<entityId>` → JSON
- *   `{ ref: ChatBackgroundRef | null, dim: number }`
+ *   `{ ref: ChatBackgroundRef | null, dim: number, transparency: number }`
  *
  * `dim` is the dark scrim opacity (0–100) drawn over the image behind the
- * message bubbles. The record is kept even when `ref` is null so the user's
- * dim choice survives "No background" → pick another image.
+ * message bubbles. `transparency` is the IMAGE's own opacity (0–100, default
+ * 100 = fully opaque) — the chat content always renders above the background,
+ * there is no overlay mode. Both are kept even when `ref` is null so the user's
+ * choices survive "No background" → pick another image.
  *
  * Image refs
  * ----------
@@ -51,6 +53,13 @@ export const CHAT_BACKGROUND_KEY_PREFIX = '@soulbits_chat_background_';
 /** Default scrim opacity when the user has not chosen one. */
 export const DEFAULT_CHAT_BACKGROUND_DIM = 40;
 
+/**
+ * Default image opacity: fully opaque. Records written before the transparency
+ * slider existed omit the field and therefore read as 100 — an existing install
+ * looks exactly as it did.
+ */
+export const DEFAULT_CHAT_BACKGROUND_TRANSPARENCY = 100;
+
 /** Persistent directory for chat-history images promoted to a background. */
 const BACKGROUND_DIR = `${RNFS.DocumentDirectoryPath}/chat-backgrounds`;
 
@@ -75,6 +84,8 @@ export type ChatBackgroundRef = ProfileBackgroundRef | FileBackgroundRef;
 export interface ChatBackgroundRecord {
   ref: ChatBackgroundRef | null;
   dim: number;
+  /** Image opacity 0–100 (0 = invisible, 100 = fully opaque). */
+  transparency: number;
 }
 
 /** Record plus the render-ready image source (resolved, validated). */
@@ -90,6 +101,22 @@ function storageKey(entityId: string): string {
 export function normalizeChatBackgroundDim(value: unknown): number {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) return DEFAULT_CHAT_BACKGROUND_DIM;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/**
+ * Clamp a transparency value into the 0–100 integer range (default on garbage).
+ * Garbage falls back to {@link DEFAULT_CHAT_BACKGROUND_TRANSPARENCY} (100), so
+ * a corrupt/missing field can only ever leave the image fully visible — never
+ * silently hide the user's background. `null`/`''` count as garbage here:
+ * `Number()` would turn them into 0 (an invisible image).
+ */
+export function normalizeChatBackgroundTransparency(value: unknown): number {
+  if (value === null || value === undefined || value === '') {
+    return DEFAULT_CHAT_BACKGROUND_TRANSPARENCY;
+  }
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_CHAT_BACKGROUND_TRANSPARENCY;
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
@@ -124,17 +151,27 @@ function parseRef(raw: unknown): ChatBackgroundRef | null {
 
 function parseRecord(raw: string | null): ChatBackgroundRecord {
   if (!raw) {
-    return { ref: null, dim: DEFAULT_CHAT_BACKGROUND_DIM };
+    return {
+      ref: null,
+      dim: DEFAULT_CHAT_BACKGROUND_DIM,
+      transparency: DEFAULT_CHAT_BACKGROUND_TRANSPARENCY,
+    };
   }
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     return {
       ref: parseRef(parsed.ref),
       dim: normalizeChatBackgroundDim(parsed.dim),
+      // Absent (pre-slider record) reads as 100 — see the constant doc.
+      transparency: normalizeChatBackgroundTransparency(parsed.transparency),
     };
   } catch {
     log.warn('Discarding malformed chat background record');
-    return { ref: null, dim: DEFAULT_CHAT_BACKGROUND_DIM };
+    return {
+      ref: null,
+      dim: DEFAULT_CHAT_BACKGROUND_DIM,
+      transparency: DEFAULT_CHAT_BACKGROUND_TRANSPARENCY,
+    };
   }
 }
 
@@ -142,12 +179,22 @@ function parseRecord(raw: string | null): ChatBackgroundRecord {
 export async function getChatBackgroundRecord(
   entityId: string,
 ): Promise<ChatBackgroundRecord> {
-  if (!entityId) return { ref: null, dim: DEFAULT_CHAT_BACKGROUND_DIM };
+  if (!entityId) {
+    return {
+      ref: null,
+      dim: DEFAULT_CHAT_BACKGROUND_DIM,
+      transparency: DEFAULT_CHAT_BACKGROUND_TRANSPARENCY,
+    };
+  }
   try {
     return parseRecord(await AsyncStorage.getItem(storageKey(entityId)));
   } catch (err) {
     log.warn('Failed to read chat background:', err);
-    return { ref: null, dim: DEFAULT_CHAT_BACKGROUND_DIM };
+    return {
+      ref: null,
+      dim: DEFAULT_CHAT_BACKGROUND_DIM,
+      transparency: DEFAULT_CHAT_BACKGROUND_TRANSPARENCY,
+    };
   }
 }
 
@@ -160,6 +207,7 @@ async function writeRecord(
   const normalized: ChatBackgroundRecord = {
     ref: record.ref,
     dim: normalizeChatBackgroundDim(record.dim),
+    transparency: normalizeChatBackgroundTransparency(record.transparency),
   };
   try {
     await AsyncStorage.setItem(storageKey(entityId), JSON.stringify(normalized));
@@ -199,7 +247,7 @@ function sanitizeFilePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
 }
 
-/** Set the background to a profile gallery image, preserving the dim. */
+/** Set the background to a profile gallery image, preserving dim/transparency. */
 export async function setChatBackgroundProfile(
   entityId: string,
   profileId: string,
@@ -210,6 +258,7 @@ export async function setChatBackgroundProfile(
   await writeRecord(entityId, {
     ref: { kind: 'profile', profileId, imageId },
     dim: current.dim,
+    transparency: current.transparency,
   });
 }
 
@@ -247,6 +296,7 @@ export async function setChatBackgroundFromBase64(
     const recorded = await writeRecord(entityId, {
       ref: { kind: 'file', path, mimeType: mimeType || 'image/jpeg', messageId },
       dim: current.dim,
+      transparency: current.transparency,
     });
     if (!recorded) {
       // The new ref did not persist, so the old setting is still what the user
@@ -270,20 +320,41 @@ export async function setChatBackgroundFromBase64(
   }
 }
 
-/** Persist the scrim opacity only (0–100), preserving the ref. */
+/** Persist the scrim opacity only (0–100), preserving the ref/transparency. */
 export async function setChatBackgroundDim(
   entityId: string,
   dim: number,
 ): Promise<void> {
   const current = await getChatBackgroundRecord(entityId);
-  await writeRecord(entityId, { ref: current.ref, dim });
+  await writeRecord(entityId, {
+    ref: current.ref,
+    dim,
+    transparency: current.transparency,
+  });
 }
 
-/** Remove the image, keeping the chosen dim for the next background. */
+/** Persist the image opacity only (0–100), preserving the ref/dim. */
+export async function setChatBackgroundTransparency(
+  entityId: string,
+  transparency: number,
+): Promise<void> {
+  const current = await getChatBackgroundRecord(entityId);
+  await writeRecord(entityId, {
+    ref: current.ref,
+    dim: current.dim,
+    transparency,
+  });
+}
+
+/** Remove the image, keeping the chosen dim/transparency for the next one. */
 export async function clearChatBackground(entityId: string): Promise<void> {
   const current = await getChatBackgroundRecord(entityId);
   await deleteOwnedFile(current.ref);
-  await writeRecord(entityId, { ref: null, dim: current.dim });
+  await writeRecord(entityId, {
+    ref: null,
+    dim: current.dim,
+    transparency: current.transparency,
+  });
 }
 
 /** Render-ready URI for a stored chat-history file. */
@@ -364,9 +435,9 @@ export async function isChatBackgroundRefDangling(
 
 /**
  * Load a chat background for rendering. A dangling ref is cleaned up on read
- * (the setting falls back to "no background" and the dim is preserved). A
- * transient resolution failure keeps the stored ref so it can render again
- * when the engine/file system is back.
+ * (the setting falls back to "no background" and dim/transparency are
+ * preserved). A transient resolution failure keeps the stored ref so it can
+ * render again when the engine/file system is back.
  */
 export async function loadChatBackground(
   entityId: string,
@@ -378,8 +449,12 @@ export async function loadChatBackground(
   if (source) return { ...record, source };
 
   if (await isChatBackgroundRefDangling(record.ref)) {
-    await writeRecord(entityId, { ref: null, dim: record.dim });
-    return { ref: null, dim: record.dim, source: null };
+    await writeRecord(entityId, {
+      ref: null,
+      dim: record.dim,
+      transparency: record.transparency,
+    });
+    return { ref: null, dim: record.dim, transparency: record.transparency, source: null };
   }
   return { ...record, source: null };
 }
@@ -404,15 +479,18 @@ export function isSameBackgroundRef(
 
 export default {
   DEFAULT_CHAT_BACKGROUND_DIM,
+  DEFAULT_CHAT_BACKGROUND_TRANSPARENCY,
   CHAT_BACKGROUND_KEY_PREFIX,
   getChatBackgroundRecord,
   setChatBackgroundProfile,
   setChatBackgroundFromBase64,
   setChatBackgroundDim,
+  setChatBackgroundTransparency,
   clearChatBackground,
   loadChatBackground,
   resolveChatBackgroundSource,
   normalizeChatBackgroundDim,
+  normalizeChatBackgroundTransparency,
   chatBackgroundFileUri,
   isSameBackgroundRef,
 };

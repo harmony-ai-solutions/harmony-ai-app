@@ -78,6 +78,7 @@ import type { CharacterImage } from '../database/models';
 import type { ConversationImageMessageRef } from '../services/engine/repositories/conversation_messages';
 import ChatBackgroundService, {
   DEFAULT_CHAT_BACKGROUND_DIM,
+  DEFAULT_CHAT_BACKGROUND_TRANSPARENCY,
   chatBackgroundFileUri,
 } from '../services/ChatBackgroundService';
 import type { ChatBackgroundRecord } from '../services/ChatBackgroundService';
@@ -373,8 +374,13 @@ export const ChatBackgroundPickerScreen: React.FC = () => {
   const [record, setRecord] = useState<ChatBackgroundRecord>({
     ref: null,
     dim: DEFAULT_CHAT_BACKGROUND_DIM,
+    transparency: DEFAULT_CHAT_BACKGROUND_TRANSPARENCY,
   });
   const [dim, setDim] = useState(DEFAULT_CHAT_BACKGROUND_DIM);
+  // The image's own opacity (0–100); separate from the dim scrim.
+  const [transparency, setTransparency] = useState(
+    DEFAULT_CHAT_BACKGROUND_TRANSPARENCY,
+  );
   const [applying, setApplying] = useState(false);
   // The full history scan runs on its own so a long chat never blocks the
   // profile tab (its count fills in when the scan lands).
@@ -389,6 +395,7 @@ export const ChatBackgroundPickerScreen: React.FC = () => {
         if (cancelled) return;
         setRecord(stored);
         setDim(stored.dim);
+        setTransparency(stored.transparency);
 
         const entity = await getEntity(entityId);
         const pid = entity?.character_profile_id ?? null;
@@ -536,6 +543,23 @@ export const ChatBackgroundPickerScreen: React.FC = () => {
       setDim(next);
       ChatBackgroundService.setChatBackgroundDim(entityId, next).catch(err =>
         log.warn('Failed to persist background dim:', err),
+      );
+    },
+    [entityId],
+  );
+
+  // Same live-then-persist-on-release pattern as dim: dragging is local state
+  // only (the strip previews it), release writes the value once.
+  const handleTransparencyChange = useCallback((value: number) => {
+    setTransparency(Math.round(value));
+  }, []);
+
+  const handleTransparencyComplete = useCallback(
+    (value: number) => {
+      const next = Math.round(value);
+      setTransparency(next);
+      ChatBackgroundService.setChatBackgroundTransparency(entityId, next).catch(
+        err => log.warn('Failed to persist background transparency:', err),
       );
     },
     [entityId],
@@ -733,7 +757,10 @@ export const ChatBackgroundPickerScreen: React.FC = () => {
     );
   };
 
-  /** Dim scrim card + live preview of the CURRENT background at `dim / 100`. */
+  /**
+   * Dim + transparency card with a live preview of the CURRENT background:
+   * `dim` drives the black scrim, `transparency` the image's own opacity.
+   */
   const renderDimCard = () => (
     <View
       style={[
@@ -766,13 +793,36 @@ export const ChatBackgroundPickerScreen: React.FC = () => {
         thumbTintColor={accent}
         testID="background-dim-slider"
       />
-      {/* Live preview: tune dim here instead of bouncing to the chat. */}
+      {/* Image opacity — the layer itself fades, the scrim below is separate. */}
+      <View style={[styles.dimHeader, styles.transparencyHeader]}>
+        <Icon name="opacity" size={16} color={accentSecondary} />
+        <ThemedText size={13} weight="medium" style={{ flex: 1 }}>
+          {t('transparency')}
+        </ThemedText>
+        <ThemedText size={12} variant="muted">
+          {transparency}%
+        </ThemedText>
+      </View>
+      <Slider
+        style={styles.slider}
+        minimumValue={0}
+        maximumValue={100}
+        step={1}
+        value={transparency}
+        onValueChange={handleTransparencyChange}
+        onSlidingComplete={handleTransparencyComplete}
+        minimumTrackTintColor={accent}
+        maximumTrackTintColor={theme.colors.border.default}
+        thumbTintColor={accent}
+        testID="background-transparency-slider"
+      />
+      {/* Live preview: tune dim/transparency here instead of bouncing to chat. */}
       <View style={styles.previewStrip} testID="background-dim-preview">
         {previewSource ? (
           <>
             <Image
               source={previewSource}
-              style={styles.previewImage}
+              style={[styles.previewImage, { opacity: transparency / 100 }]}
               resizeMode="cover"
               testID="background-dim-preview-image"
             />
@@ -924,6 +974,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  // Second control in the same card: one gap above it reads as a division.
+  transparencyHeader: {
+    marginTop: 6,
   },
   slider: {
     width: '100%',

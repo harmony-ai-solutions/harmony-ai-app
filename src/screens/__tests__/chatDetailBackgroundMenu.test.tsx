@@ -153,7 +153,7 @@ jest.mock('../../services/ChatBackgroundService', () => ({
   default: {
     loadChatBackground: jest
       .fn()
-      .mockResolvedValue({ ref: null, dim: 40, source: null }),
+      .mockResolvedValue({ ref: null, dim: 40, transparency: 100, source: null }),
   },
 }));
 
@@ -350,6 +350,25 @@ describe('ChatDetailScreen — entity menu "Set background"', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (EntitySessionService as any).getInteractionSession.mockReturnValue(null);
+  });
+
+  it('renders the background image at its transparency with the dim scrim above', async () => {
+    const ChatBackgroundService = require('../../services/ChatBackgroundService').default;
+    ChatBackgroundService.loadChatBackground.mockResolvedValueOnce({
+      ref: { kind: 'file', path: '/docs/bg.png', mimeType: 'image/jpeg' },
+      dim: 60,
+      transparency: 35,
+      source: { uri: 'file:///docs/bg.png' },
+    });
+
+    const { findByTestId } = await renderScreen();
+    const { StyleSheet } = require('react-native');
+
+    // Image opacity, not a second scrim: the chat content always sits above.
+    const image = await findByTestId('chat-background-image');
+    expect(StyleSheet.flatten(image.props.style).opacity).toBeCloseTo(0.35);
+    const scrim = await findByTestId('chat-background-scrim');
+    expect(StyleSheet.flatten(scrim.props.style).opacity).toBeCloseTo(0.6);
   });
 
   it('renders the entry and navigates to the picker with the partner entity', async () => {

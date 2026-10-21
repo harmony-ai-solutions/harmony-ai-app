@@ -433,10 +433,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     [participantIds, ownEntityId],
   );
 
-  /** Resolved background image + scrim opacity for the message area. */
+  /** Resolved background image + image opacity + scrim opacity for the chat. */
   const [chatBackground, setChatBackground] = useState<{
     source: ImageSourcePropType | null;
     dim: number;
+    transparency: number;
   } | null>(null);
 
   const [actionSheetMessage, setActionSheetMessage] =
@@ -794,7 +795,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       ChatBackgroundService.loadChatBackground(chatEntityId)
         .then(resolved => {
           if (cancelled) return;
-          setChatBackground({ source: resolved.source, dim: resolved.dim });
+          setChatBackground({
+            source: resolved.source,
+            dim: resolved.dim,
+            transparency: resolved.transparency,
+          });
         })
         .catch(err => {
           if (!cancelled) log.warn('Failed to load chat background:', err);
@@ -2943,7 +2948,10 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         style={styles.keyboardAvoid}
       >
       {/* Entity chat background: cover image + dark scrim (dim/100) behind
-          the message list. Bubbles are opaque cards, so they stay legible. */}
+          the message list. `transparency` is the image's own opacity — the
+          scrim stays after it, and every chat element renders above this
+          layer (there is no overlay mode). Bubbles are opaque cards, so they
+          stay legible. */}
       {chatBackground?.source && (
         <View
           style={StyleSheet.absoluteFill}
@@ -2952,8 +2960,12 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
         >
           <Image
             source={chatBackground.source}
-            style={StyleSheet.absoluteFill}
+            style={[
+              StyleSheet.absoluteFill,
+              { opacity: chatBackground.transparency / 100 },
+            ]}
             resizeMode="cover"
+            testID="chat-background-image"
           />
           <View
             style={[

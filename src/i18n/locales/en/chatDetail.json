@@ -110,6 +110,7 @@
   "chatHistorySource": "Chat history",
   "noBackground": "No background",
   "dim": "Dim",
+  "transparency": "Transparency",
   "backgroundProfileEmpty": "No profile images yet",
   "backgroundHistoryEmpty": "No images in this chat yet",
   "backgroundSetFailed": "Couldn't set that background. Try again."
