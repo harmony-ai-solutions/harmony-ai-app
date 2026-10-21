@@ -3,6 +3,16 @@
  *
  * Full-screen overlay displayed when the app is locked via biometric/PIN.
  * Shows a branded unlock prompt with biometric button or PIN entry.
+ *
+ * # Keep-awake
+ *
+ * The lock overlay is the one screen the user cannot get past by "just waking
+ * the phone": when the display slept here, waking it fired the OS biometric
+ * prompt ~350 ms later, the prompt's own screen-off window let the display sleep
+ * again, and the lock re-armed — the "phone is in lockdown, it re-sleeps
+ * instantly" loop (owner device, Android 15, 2026-10-21). So the overlay holds
+ * the display awake for as long as it is mounted (the wrapper refcounts, so the
+ * TTS panel holding it underneath at the same time is safe).
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
@@ -25,6 +35,7 @@ import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedGradient } from '../themed/ThemedGradient';
 import { ThemedButton } from '../themed/ThemedButton';
+import { activateKeepScreenOn, deactivateKeepScreenOn } from '../../services/keepScreenOn';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
 
@@ -57,6 +68,15 @@ export const LockScreen: React.FC = () => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+    };
+  }, []);
+
+  // Hold the display awake while locked — see the header note. Released on
+  // unlock (the overlay unmounts) or any other unmount.
+  useEffect(() => {
+    activateKeepScreenOn();
+    return () => {
+      deactivateKeepScreenOn();
     };
   }, []);
 

@@ -17,7 +17,8 @@
  *    replay-vs-resynthesize, the seek slider and the download/share flow
  *  - the completion poll never reads the pre-start `loading`/`ready`
  *    transients as "finished" (and needs a fresh `playing` per playback)
- *  - keep-awake is activated only while actually playing
+ *  - keep-awake is held across the synthesis wait AND playback, released on a
+ *    genuine end / error / unmount
  */
 
 import React from 'react';
@@ -440,9 +441,11 @@ describe('TtsTestPanel — player row, download and completion', () => {
     // (the old rule ended playback here ~250 ms in).
     await tickWithState('loading');
     expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+    expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
 
     await tickWithState('ready');
     expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+    expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
 
     // A `none`/`stopped` tick BEFORE any `playing` sample is a transient too.
     await tickWithState('stopped');
@@ -579,32 +582,102 @@ describe('TtsTestPanel — player row, download and completion', () => {
     expect(utils.getByTestId('tts-time-label').props.children).toBe('0:05 / 0:12');
   });
 
-  it('keeps the screen awake only while actually playing', async () => {
+  it('holds the screen awake during the synthesis wait, before any audio plays', async () => {
+    // A REAL async boundary is required here: with an instantly-resolving mock
+    // React batches the synthesizing state away and only ever commits
+    // 'playing', so the window under test would never render (in production the
+    // engine round-trip is a real task).
+    let activatesWhenPlaybackStarts = -1;
+    mockPlayBase64Audio.mockImplementation(async () => {
+      activatesWhenPlaybackStarts = mockActivateKeepAwake.mock.calls.length;
+    });
+    mockTestTtsSpeech.mockImplementation(
+      () => new Promise((resolve) => {
+        setTimeout(
+          () => resolve({ status: 'ok', audio_base64: 'QUJDRA==', format: 'wav' }),
+          20,
+        );
+      }),
+    );
+
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+    // Idle holds nothing.
+    expect(mockActivateKeepAwake).not.toHaveBeenCalled();
+
+    const pressed = fireEvent.press(utils.getByTestId('tts-play-button'));
+    // Synthesis still in flight; the busy button is what the user sees while
+    // the (long, no-touch) wait ages the display idle timer.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(utils.getByTestId('tts-play-button')).toBeTruthy();
+    expect(mockActivateKeepAwake).toHaveBeenCalled();
+    expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
+
+    await pressed;
+    await flush();
+
+    // The hold existed BEFORE playback started (the old rule only took it once
+    // 'playing' was committed, leaving the whole synthesis wait uncovered).
+    expect(activatesWhenPlaybackStarts).toBeGreaterThan(0);
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+    // One hold spans synthesis → playback (no phase churn between the two).
+    expect(mockActivateKeepAwake).toHaveBeenCalledTimes(1);
+    expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
+  });
+
+  it('releases the hold on pause and re-acquires it on resume and genuine end', async () => {
     jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
     const utils = await render(<TtsTestPanel providerType="soulvoice" />);
     await flush();
-    expect(mockActivateKeepAwake).not.toHaveBeenCalled();
 
     await fireEvent.press(utils.getByTestId('tts-play-button'));
     await flush();
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
     expect(mockActivateKeepAwake).toHaveBeenCalled();
 
-    // Pause releases the wake lock and never re-activates.
+    // Pause releases it; resume re-acquires it.
     mockActivateKeepAwake.mockClear();
+    mockDeactivateKeepAwake.mockClear();
     await fireEvent.press(utils.getByTestId('tts-play-toggle'));
     await flush();
     expect(mockDeactivateKeepAwake).toHaveBeenCalled();
     expect(mockActivateKeepAwake).not.toHaveBeenCalled();
 
-    // Resume re-acquires it; playback end releases it again.
-    mockActivateKeepAwake.mockClear();
-    mockDeactivateKeepAwake.mockClear();
     await fireEvent.press(utils.getByTestId('tts-play-toggle'));
     await flush();
     expect(mockActivateKeepAwake).toHaveBeenCalled();
 
+    // A genuine end (after a real `playing` observation) releases it again.
+    mockDeactivateKeepAwake.mockClear();
     await tickWithState('playing');
+    expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
     await tickWithState('ended');
+    expect(mockDeactivateKeepAwake).toHaveBeenCalled();
+  });
+
+  it('releases the wake lock when synthesis fails mid-flight', async () => {
+    // Real async boundary (see the synthesis-wait test above) so the panel
+    // actually commits 'synthesizing' — and takes the hold — before the engine
+    // error lands.
+    mockTestTtsSpeech.mockImplementation(
+      () => new Promise((_resolve, reject) => {
+        setTimeout(() => reject(new Error('engine down')), 20);
+      }),
+    );
+
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+
+    const pressed = fireEvent.press(utils.getByTestId('tts-play-button'));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    // The synthesis wait is covered from the start (that is the whole point).
+    expect(mockActivateKeepAwake).toHaveBeenCalled();
+    expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
+
+    await pressed;
+    await flush();
+
+    expect(utils.getByText('ttsError:engine down')).toBeTruthy();
     expect(mockDeactivateKeepAwake).toHaveBeenCalled();
   });
 

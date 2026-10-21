@@ -79,10 +79,13 @@
  *
  * ## Keep-awake
  *
- * The screen is kept on ONLY while audio is actually `playing` (never while
- * paused/idle/synthesizing) via the first-party `KeepScreenOn` native helper
- * (`src/services/keepScreenOn.ts`). Without it the OS dims and sleeps the
- * screen mid-listen → AppState `background` → the biometric lock re-arms.
+ * The screen is kept on across the WHOLE flow — `synthesizing || playing` (never
+ * while paused/idle) — via the first-party `KeepScreenOn` native helper
+ * (`src/services/keepScreenOn.ts`). The synthesis wait is a long, no-touch
+ * stretch that ages the display idle timer out: screen-off → Activity onStop →
+ * applifecycle ON_STOP → the biometric lock re-arms with zero grace, so the
+ * phone locked itself mid-flow (owner device, Android 15, 2026-10-21). The hold
+ * is released on a genuine end (`idle`), on `error`, and on unmount.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -285,17 +288,22 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
   // The test-speech route always needs a provider type (see the header note).
   const canSynthesize = Boolean(providerType);
 
-  // ── Screen keep-awake — ONLY while audio is actually playing ──────────
-  // Pausing/idle/synthesizing releases it (paused playback has no audio
-  // output, so the display may sleep); unmount always releases.
+  // ── Screen keep-awake — held across synthesis AND playback ────────────
+  // The whole flow is a long, no-touch stretch: the synthesis wait ages the
+  // display idle timer out, and screen-off → Activity onStop → applifecycle
+  // ON_STOP → BiometricLockContext re-arms the app lock with zero grace (owner
+  // device, Android 15, 2026-10-21). So the flag is held from the moment
+  // synthesis starts until a GENUINE end. Pausing/dropping to idle/error
+  // releases it; unmount always releases (the wrapper refcounts, so LockScreen
+  // holding it at the same time is fine).
+  const keepAwake = phase === 'synthesizing' || phase === 'playing';
   useEffect(() => {
-    if (phase === 'playing') {
-      activateKeepScreenOn();
-    }
+    if (!keepAwake) return;
+    activateKeepScreenOn();
     return () => {
       deactivateKeepScreenOn();
     };
-  }, [phase]);
+  }, [keepAwake]);
 
   // ── Completion polling (ChatBubble parity) ────────────────────────────
   // `AudioPlayer.playAudio` resolves at playback START, so the only reliable
