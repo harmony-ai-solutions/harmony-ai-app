@@ -146,19 +146,22 @@ export async function getChatBackgroundRecord(
   }
 }
 
+/** Persist a record. Returns false when the write failed (never throws). */
 async function writeRecord(
   entityId: string,
   record: ChatBackgroundRecord,
-): Promise<void> {
-  if (!entityId) return;
+): Promise<boolean> {
+  if (!entityId) return false;
   const normalized: ChatBackgroundRecord = {
     ref: record.ref,
     dim: normalizeChatBackgroundDim(record.dim),
   };
   try {
     await AsyncStorage.setItem(storageKey(entityId), JSON.stringify(normalized));
+    return true;
   } catch (err) {
     log.warn('Failed to persist chat background:', err);
+    return false;
   }
 }
 
@@ -209,6 +212,13 @@ export async function setChatBackgroundProfile(
  * Set the background from a chat-history message image. Writes the base64
  * bytes to the persistent image directory and stores only the file path.
  * Returns the written path (null when the write failed).
+ *
+ * Record-first ordering: the NEW file is written, the NEW ref is recorded, and
+ * only THEN is the previous managed file deleted. Deleting first (the old
+ * order) left a window where a crash between the unlink and the `setItem` lost
+ * the user's background entirely — the self-heal would then fall back to "no
+ * background". A crash before the record write now merely leaves one orphaned
+ * file behind (harmless) while the previous setting stays valid.
  */
 export async function setChatBackgroundFromBase64(
   entityId: string,
@@ -223,14 +233,31 @@ export async function setChatBackgroundFromBase64(
       await RNFS.mkdir(BACKGROUND_DIR);
     }
     const ext = extensionForMime(mimeType);
-    const filename = `${sanitizeFilePart(entityId)}_${Date.now()}.${ext}`;
+    // Unique per write: two applies inside the same millisecond must not reuse
+    // (and then delete) the file the other one just wrote.
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const filename = `${sanitizeFilePart(entityId)}_${Date.now()}_${suffix}.${ext}`;
     const path = `${BACKGROUND_DIR}/${filename}`;
     await RNFS.writeFile(path, base64, 'base64');
-    await deleteOwnedFile(current.ref);
-    await writeRecord(entityId, {
+    const recorded = await writeRecord(entityId, {
       ref: { kind: 'file', path, mimeType: mimeType || 'image/jpeg', messageId },
       dim: current.dim,
     });
+    if (!recorded) {
+      // The new ref did not persist, so the old setting is still what the user
+      // will see on the next read: keep its file and drop the useless copy.
+      try {
+        await RNFS.unlink(path);
+      } catch {
+        // Best effort — an orphan file is harmless.
+      }
+      return null;
+    }
+    // The new record is durable — the previous file can go now (never the file
+    // we just wrote, in case a ref somehow points at the new path).
+    if (!(current.ref && current.ref.kind === 'file' && current.ref.path === path)) {
+      await deleteOwnedFile(current.ref);
+    }
     return path;
   } catch (err) {
     log.error('Failed to store chat-history background image:', err);

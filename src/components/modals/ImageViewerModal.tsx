@@ -10,6 +10,11 @@
  *  - description?: optional caption shown below the image
  *  - backgroundAction?: chat-background action pill (label + onPress); the
  *    caller owns the label so it can render the "✓ Current background" state
+ *  - accentColor?: accent used by the ACTIVE background action. The modal is
+ *    intentionally theme-agnostic dark chrome (overlay, caption and close
+ *    button are fixed dark rgba values), so it does not consume `useAppTheme`:
+ *    the caller passes its live accent token instead, and callers without a
+ *    theme fall back to the shared `DEFAULT_IMAGE_VIEWER_ACCENT` constant.
  *  - onClose: () => void
  */
 
@@ -28,8 +33,16 @@ import { Image } from 'react-native';
 import type { ImageSourcePropType } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { ThemedText } from '../themed/ThemedText';
+import { hexToRgba } from '../../utils/colorUtils';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+/**
+ * Active-pill accent when the caller does not pass one. Matches the app's
+ * default `accent.primary` (hauteGoth) — callers that own a theme should pass
+ * their live token so a re-themed build keeps the viewer in sync.
+ */
+export const DEFAULT_IMAGE_VIEWER_ACCENT = '#b84fd0';
 
 interface ImageViewerModalProps {
   visible: boolean;
@@ -53,6 +66,8 @@ interface ImageViewerModalProps {
     active?: boolean;
     onPress: () => void;
   };
+  /** Active-pill accent (defaults to {@link DEFAULT_IMAGE_VIEWER_ACCENT}). */
+  accentColor?: string;
   onClose: () => void;
 }
 
@@ -62,10 +77,12 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   imageSource,
   description,
   backgroundAction,
+  accentColor = DEFAULT_IMAGE_VIEWER_ACCENT,
   onClose,
 }) => {
   const resolvedSource: ImageSourcePropType | null =
     imageSource ?? (imageUri ? { uri: imageUri } : null);
+  const accent = accentColor || DEFAULT_IMAGE_VIEWER_ACCENT;
   return (
     <Modal
       visible={visible}
@@ -116,7 +133,10 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
             <TouchableOpacity
               style={[
                 styles.actionButton,
-                backgroundAction.active && styles.actionButtonActive,
+                backgroundAction.active && {
+                  borderColor: hexToRgba(accent, 0.65),
+                  backgroundColor: hexToRgba(accent, 0.18),
+                },
               ]}
               onPress={backgroundAction.onPress}
               activeOpacity={0.75}
@@ -126,7 +146,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
               <Icon
                 name={backgroundAction.active ? 'check' : 'wallpaper'}
                 size={16}
-                color={backgroundAction.active ? '#b84fd0' : 'rgba(255,255,255,0.9)'}
+                color={backgroundAction.active ? accent : 'rgba(255,255,255,0.9)'}
               />
               <ThemedText size={13} weight="medium" style={styles.actionText}>
                 {backgroundAction.label}
@@ -199,10 +219,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.22)',
     backgroundColor: 'rgba(15,21,37,0.72)',
-  },
-  actionButtonActive: {
-    borderColor: 'rgba(184,79,208,0.65)',
-    backgroundColor: 'rgba(184,79,208,0.18)',
   },
   actionText: {
     color: 'rgba(255,255,255,0.92)',

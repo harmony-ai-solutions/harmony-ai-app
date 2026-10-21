@@ -195,11 +195,6 @@ export const AIProfileScreen: React.FC = () => {
           setAiEntityId(ent.id);
           setEntityDisabledState(ent.is_disabled === 1);
           setEntityMutedState(ent.is_muted === 1);
-          // The chat background is stored on this entity — the exact entity a
-          // chat with this profile resolves to (same lookup handlePartnerSettings
-          // uses in reverse). Personas have their own user-type entities.
-          const bg = await ChatBackgroundService.getChatBackgroundRecord(ent.id);
-          setBackgroundRef(bg.ref);
         }
       } catch (entErr) {
         log.warn('Failed to load entity flags:', entErr);
@@ -353,18 +348,40 @@ export const AIProfileScreen: React.FC = () => {
     }
   }, [profileId, user?.id]);
 
+  /**
+   * Refresh ONLY the chat background ref for this profile's entity.
+   *
+   * The background belongs to the chat ENTITY (the same one
+   * `handlePartnerSettings` uses in reverse) and can be changed from another
+   * surface — the chat screen's picker, or its menu — while this screen stays
+   * MOUNTED underneath. The viewer's "✓ Current background" label reads
+   * `backgroundRef`, so a back-nav must re-read it; it rides the screen's
+   * EXISTING focus effect (below) rather than adding a second focus mechanism.
+   */
+  const refreshBackgroundRef = useCallback(async () => {
+    try {
+      const ent = await getEntityByCharacterProfileId(profileId);
+      if (!ent) return;
+      const bg = await ChatBackgroundService.getChatBackgroundRecord(ent.id);
+      setBackgroundRef(bg.ref);
+    } catch (err) {
+      log.warn('Failed to refresh chat background:', err);
+    }
+  }, [profileId]);
+
   // Reload on focus (edits to the profile reflect immediately)
   useFocusEffect(
     useCallback(() => {
       loadProfile();
-    }, [loadProfile]),
+      refreshBackgroundRef();
+    }, [loadProfile, refreshBackgroundRef]),
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadProfile();
+    await Promise.all([loadProfile(), refreshBackgroundRef()]);
     setRefreshing(false);
-  }, [loadProfile]);
+  }, [loadProfile, refreshBackgroundRef]);
 
   // ── Actions ────────────────────────────────────────────────────────────
   // "Edit AI Profile and Settings" opens the single edit surface:
@@ -1253,6 +1270,7 @@ export const AIProfileScreen: React.FC = () => {
           viewerImage ? characterImageSource(profileId, viewerImage.id) : null
         }
         description={viewerImage?.description || undefined}
+        accentColor={theme.colors.accent.primary}
         backgroundAction={
           aiEntityId && viewerImage
             ? {

@@ -21,6 +21,16 @@
  * remain unsupported: the ENGINE authors conversation_messages (there is no
  * app-facing create route, and no id-only message GET route). See the 3-2
  * report's write audit.
+ *
+ * Full-conversation image scan
+ * ----------------------------
+ * `getConversationImageMessages` walks EVERY page of a conversation (opaque
+ * `next_cursor`, same ordering/pagination the chat screen uses) and returns
+ * LIGHTWEIGHT metadata only — never a base64 `image_data` string. Display
+ * surfaces that need the bytes for one image fetch it lazily by message id via
+ * `getConversationMessageImageBase64` (the dedicated
+ * `GET /api/messages/:id/image` byte route), which keeps a 3-year chat from
+ * parking megabytes of base64 in JS memory.
  */
 
 import type { ConversationMessage } from '../../../database/models';
@@ -65,6 +75,140 @@ export async function getLastConversationMessage(
   const rows = res.messages ?? [];
   if (rows.length === 0) return null;
   return mapConversationMessage(rows[rows.length - 1]);
+}
+
+/** One message page plus its opaque pagination cursor. */
+export interface ConversationMessagePage {
+  /** The page's messages, chronological (oldest-first) — engine order. */
+  messages: ConversationMessage[];
+  hasMore: boolean;
+  /** Opaque cursor for the NEXT (older) page; null when exhausted. */
+  nextCursor: string | null;
+}
+
+/**
+ * A page of messages WITH its pagination cursor. Unlike
+ * {@link getConversationMessagesByParticipantKey} this keeps `has_more` /
+ * `next_cursor`, which a backwards full scan needs. Pass the previous page's
+ * `nextCursor` VERBATIM as `before` (the cursor is opaque — never synthesize it
+ * from a parsed date).
+ */
+export async function getConversationMessagePage(
+  entityId: string,
+  participantKey: string,
+  limit: number = 20,
+  before?: string,
+): Promise<ConversationMessagePage> {
+  const res = await engineApiClient.entityMessages(entityId, participantKey, {
+    limit,
+    before: before || undefined,
+  });
+  return {
+    messages: (res.messages ?? []).map(mapConversationMessage),
+    hasMore: res.has_more === true,
+    nextCursor: res.next_cursor ?? null,
+  };
+}
+
+/**
+ * Lightweight metadata for one image-bearing message — the picker's list item.
+ * Deliberately carries NO base64: tiles fetch their own bytes lazily.
+ */
+export interface ConversationImageMessageRef {
+  messageId: string;
+  mimeType: string;
+  /** Approx. decoded byte size; 0 when the page did not inline the blob. */
+  byteLength: number;
+  createdAt: Date;
+}
+
+/** Page size used by the full image scan (matches the chat screen's window). */
+export const CONVERSATION_IMAGE_SCAN_PAGE_SIZE = 200;
+
+/** Safety cap for the image scan (50 × 200 = 10k messages). */
+export const CONVERSATION_IMAGE_SCAN_MAX_PAGES = 50;
+
+function isImageMessage(message: ConversationMessage): boolean {
+  if (message.message_type === 'image') return true;
+  return typeof message.image_data === 'string' && message.image_data.length > 0;
+}
+
+/**
+ * FULL scan of a conversation for image messages, newest-first.
+ *
+ * Walks pages with the engine's opaque cursor until the history is exhausted
+ * (or {@link CONVERSATION_IMAGE_SCAN_MAX_PAGES} is hit), extracting only the
+ * metadata for image-bearing messages. Each page is dropped as soon as its
+ * metadata is extracted, so the transient memory ceiling is ONE page rather
+ * than the whole conversation.
+ *
+ * Byte-identical re-sends collapse into one entry (the old tile-dedupe
+ * behaviour) without keeping the blobs: the fingerprint uses the base64 length
+ * plus a head/tail sample, which is enough to recognise the same picture.
+ * `seenMessages` de-duplicates overlapping pages defensively.
+ */
+export async function getConversationImageMessages(
+  entityId: string,
+  participantKey: string,
+  options: { pageSize?: number; maxPages?: number } = {},
+): Promise<ConversationImageMessageRef[]> {
+  const pageSize = options.pageSize ?? CONVERSATION_IMAGE_SCAN_PAGE_SIZE;
+  const maxPages = options.maxPages ?? CONVERSATION_IMAGE_SCAN_MAX_PAGES;
+  const images: ConversationImageMessageRef[] = [];
+  const seenMessages = new Set<string>();
+  const seenFingerprints = new Set<string>();
+
+  let before: string | undefined;
+  for (let page = 0; page < maxPages; page += 1) {
+    const result = await getConversationMessagePage(
+      entityId,
+      participantKey,
+      pageSize,
+      before,
+    );
+
+    // Pages arrive oldest-first; walk each one backwards so the accumulated
+    // list is globally newest-first without re-sorting (the engine stores
+    // timestamps in mixed formats — order comes from the pages themselves).
+    for (let i = result.messages.length - 1; i >= 0; i -= 1) {
+      const message = result.messages[i];
+      if (!isImageMessage(message)) continue;
+      if (seenMessages.has(message.id)) continue;
+      seenMessages.add(message.id);
+
+      const base64 = message.image_data ?? '';
+      if (base64) {
+        const fingerprint = `${base64.length}:${base64.slice(0, 64)}:${base64.slice(-64)}`;
+        if (seenFingerprints.has(fingerprint)) continue;
+        seenFingerprints.add(fingerprint);
+      }
+
+      images.push({
+        messageId: message.id,
+        mimeType: message.image_mime_type || 'image/jpeg',
+        // base64 is ~4/3 of the decoded size; an approximation is all a
+        // "lightweight metadata" list needs.
+        byteLength: base64 ? Math.floor((base64.length * 3) / 4) : 0,
+        createdAt: message.created_at,
+      });
+    }
+
+    if (!result.hasMore || !result.nextCursor) break;
+    before = result.nextCursor;
+  }
+
+  return images;
+}
+
+/**
+ * Base64 bytes of ONE message's image (`GET /api/messages/:id/image`). Empty
+ * string when the message has no image blob; transport errors still throw so
+ * the caller can degrade (a preview tile must not crash the grid).
+ */
+export async function getConversationMessageImageBase64(
+  messageId: string,
+): Promise<string> {
+  return engineApiClient.fetchMessageImageBase64(messageId);
 }
 
 /**

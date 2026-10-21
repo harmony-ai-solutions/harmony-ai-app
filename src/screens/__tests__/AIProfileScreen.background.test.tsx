@@ -5,6 +5,8 @@
  * `getEntityByCharacterProfileId` lookup the chat screen's partner settings
  * uses in reverse). When the viewed image already is the background, the
  * label flips to the current-background variant and tapping removes it.
+ * The background ref is re-read on FOCUS, because it can change from the chat
+ * picker while this screen stays mounted.
  */
 
 import React from 'react';
@@ -50,7 +52,12 @@ jest.mock('@react-navigation/native', () => {
   return {
     useNavigation: () => ({ navigate: jest.fn(), goBack: jest.fn() }),
     useRoute: () => ({ params: { profileId: 'p1' } }),
-    useFocusEffect: (cb: () => void) => React.useEffect(cb, [cb]),
+    // Keeps the latest focus callbacks so a test can simulate a re-focus
+    // (back-nav from the chat screen) on an already-mounted profile.
+    useFocusEffect: (cb: () => void) => {
+      mockFocusCallbacks.push(cb);
+      React.useEffect(cb, [cb]);
+    },
   };
 });
 
@@ -133,7 +140,7 @@ jest.mock('../../components/modals/ImageViewerModal', () => {
   const { View, Text, TouchableOpacity } = require('react-native');
   return {
     __esModule: true,
-    ImageViewerModal: ({ visible, backgroundAction }: any) =>
+    ImageViewerModal: ({ visible, backgroundAction, accentColor }: any) =>
       visible
         ? React.createElement(
             View,
@@ -143,6 +150,7 @@ jest.mock('../../components/modals/ImageViewerModal', () => {
               { testID: 'viewer-background-label' },
               backgroundAction?.label ?? 'none',
             ),
+            React.createElement(Text, { testID: 'viewer-accent' }, accentColor ?? 'none'),
             React.createElement(TouchableOpacity, {
               testID: 'viewer-background-button',
               onPress: backgroundAction?.onPress,
@@ -151,6 +159,9 @@ jest.mock('../../components/modals/ImageViewerModal', () => {
         : null,
   };
 });
+
+/** Latest `useFocusEffect` callbacks, so tests can simulate a re-focus. */
+const mockFocusCallbacks: Array<() => void> = [];
 
 const {
   getAICharacterProfile,
@@ -220,6 +231,7 @@ async function renderProfile() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockFocusCallbacks.length = 0;
   mockGetAICharacterProfile.mockResolvedValue(profile);
   mockGetImages.mockResolvedValue([galleryImage]);
   mockGetEntity.mockResolvedValue({ id: 'ent-1', is_disabled: 0, is_muted: 0 });
@@ -261,5 +273,37 @@ describe('AIProfileScreen — viewer background action', () => {
 
     expect(service.clearChatBackground).toHaveBeenCalledWith('ent-1');
     expect(getByText('setAsBackground')).toBeTruthy();
+  });
+
+  it('passes the live theme accent to the viewer modal', async () => {
+    const { findByTestId } = await renderProfile();
+
+    await fireEvent.press(await findByTestId('ai-image-tile-i1'));
+
+    expect((await findByTestId('viewer-accent')).props.children).toBe('#b84fd0');
+  });
+
+  it('re-reads the entity background when the screen is focused again', async () => {
+    // Mounted with no background (the viewer shows "Set as background").
+    service.getChatBackgroundRecord.mockResolvedValue({ ref: null, dim: 40 });
+    const { findByTestId, getByText } = await renderProfile();
+
+    await fireEvent.press(await findByTestId('ai-image-tile-i1'));
+    expect(getByText('setAsBackground')).toBeTruthy();
+
+    // The user set this image as the background from the CHAT picker while
+    // this profile stayed mounted underneath → back-nav must not show a stale ✓.
+    service.getChatBackgroundRecord.mockResolvedValue({
+      ref: { kind: 'profile', profileId: 'p1', imageId: 'i1' },
+      dim: 40,
+    });
+    const refocus = mockFocusCallbacks[mockFocusCallbacks.length - 1];
+    expect(refocus).toBeDefined();
+    await act(async () => {
+      refocus();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(getByText('currentBackground')).toBeTruthy());
   });
 });

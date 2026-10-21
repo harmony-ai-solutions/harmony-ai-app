@@ -96,7 +96,7 @@ describe('ChatBackgroundService — persistence', () => {
     );
 
     expect(RNFS.writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/chat-backgrounds\/ent-1_\d+\.png$/),
+      expect.stringMatching(/chat-backgrounds\/ent-1_\d+_[a-z0-9]+\.png$/),
       'QUJD',
       'base64',
     );
@@ -125,6 +125,58 @@ describe('ChatBackgroundService — persistence', () => {
 
     expect(RNFS.unlink).toHaveBeenCalledWith(first);
     expect(JSON.parse(mockStore.get(KEY) as string).ref.path).toBe(second);
+  });
+
+  it('records the new ref BEFORE unlinking the previous file (record-first)', async () => {
+    (RNFS.exists as jest.Mock).mockResolvedValue(true);
+    const first = await ChatBackgroundService.setChatBackgroundFromBase64(
+      ENTITY,
+      'FIRST',
+      'image/jpeg',
+    );
+    (RNFS.unlink as jest.Mock).mockClear();
+
+    // Snapshot the persisted record at the moment the old file is deleted: a
+    // crash between unlink and setItem must never be able to lose the image.
+    let recordAtUnlink: { ref: { path: string } } | null = null;
+    (RNFS.unlink as jest.Mock).mockImplementationOnce(async () => {
+      recordAtUnlink = JSON.parse(mockStore.get(KEY) as string);
+    });
+
+    const second = await ChatBackgroundService.setChatBackgroundFromBase64(
+      ENTITY,
+      'SECOND',
+      'image/jpeg',
+    );
+
+    expect(RNFS.unlink).toHaveBeenCalledWith(first);
+    expect(recordAtUnlink).not.toBeNull();
+    expect(recordAtUnlink!.ref.path).toBe(second);
+  });
+
+  it('keeps the previous file and record when the new record cannot be written', async () => {
+    (RNFS.exists as jest.Mock).mockResolvedValue(true);
+    const first = await ChatBackgroundService.setChatBackgroundFromBase64(
+      ENTITY,
+      'FIRST',
+      'image/jpeg',
+    );
+    const recordBefore = mockStore.get(KEY);
+    (RNFS.unlink as jest.Mock).mockClear();
+
+    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    (AsyncStorage.setItem as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
+
+    const second = await ChatBackgroundService.setChatBackgroundFromBase64(
+      ENTITY,
+      'SECOND',
+      'image/jpeg',
+    );
+
+    expect(second).toBeNull();
+    // The stored record still points at the surviving first file.
+    expect(mockStore.get(KEY)).toBe(recordBefore);
+    expect(RNFS.unlink).not.toHaveBeenCalledWith(first);
   });
 
   it('clamps dim to 0–100 and keeps the ref', async () => {

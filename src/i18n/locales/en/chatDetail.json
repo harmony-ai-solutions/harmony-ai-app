@@ -111,5 +111,6 @@
   "noBackground": "No background",
   "dim": "Dim",
   "backgroundProfileEmpty": "No profile images yet",
-  "backgroundHistoryEmpty": "No images in this chat yet"
+  "backgroundHistoryEmpty": "No images in this chat yet",
+  "backgroundSetFailed": "Couldn't set that background. Try again."
 }

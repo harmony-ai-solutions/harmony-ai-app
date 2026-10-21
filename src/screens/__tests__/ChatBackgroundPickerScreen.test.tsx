@@ -1,19 +1,22 @@
 /**
- * ChatBackgroundPickerScreen — two source tabs, counts, current ✓ overlay,
- * "No background" clearing, instant apply + close, dim persistence.
+ * ChatBackgroundPickerScreen — two source tabs with FULL-scan counts, current
+ * ✓ overlay, "No background" clearing, stay-open apply (✓ moves, no goBack),
+ * the live dim preview strip, the failed-history-write toast, and the lazy
+ * per-tile fetch of chat-history bytes (metadata-only list).
  */
 
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, within } from '@testing-library/react-native';
 import { ChatBackgroundPickerScreen } from '../ChatBackgroundPickerScreen';
 import ChatBackgroundService from '../../services/ChatBackgroundService';
 import {
   getEntity,
   getCharacterImagesMetadata,
-  characterImageSource,
-  getRecentConversationMessages,
+  getConversationImageMessages,
+  getConversationMessageImageBase64,
 } from '../../database/repositories';
-import type { CharacterImage, ConversationMessage } from '../../database/models';
+import type { CharacterImage } from '../../database/models';
+import type { ConversationImageMessageRef } from '../../services/engine/repositories/conversation_messages';
 
 const THEME = {
   colors: {
@@ -40,6 +43,7 @@ const THEME = {
 } as any;
 
 const mockGoBack = jest.fn();
+const mockShowToast = jest.fn();
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -58,6 +62,10 @@ jest.mock('@react-navigation/native', () => ({
 
 jest.mock('../../contexts/ThemeContext', () => ({
   useAppTheme: () => ({ theme: THEME }),
+}));
+
+jest.mock('../../contexts/AppToastContext', () => ({
+  useToast: () => ({ showToast: mockShowToast }),
 }));
 
 jest.mock('../../utils/logger', () => ({
@@ -79,9 +87,15 @@ jest.mock('@react-native-community/slider', () => {
   return ({
     testID,
     onSlidingComplete,
+    onValueChange,
     value,
   }: any) =>
-    React.createElement(View, { testID, value, onSlidingComplete });
+    React.createElement(View, {
+      testID,
+      value,
+      onSlidingComplete,
+      onValueChange,
+    });
 });
 
 jest.mock('../../database/repositories', () => ({
@@ -92,7 +106,8 @@ jest.mock('../../database/repositories', () => ({
     headers: {},
   })),
   shouldUseThumbnail: jest.fn(() => false),
-  getRecentConversationMessages: jest.fn(),
+  getConversationImageMessages: jest.fn(),
+  getConversationMessageImageBase64: jest.fn(),
 }));
 
 jest.mock('../../services/ChatBackgroundService', () => ({
@@ -105,11 +120,14 @@ jest.mock('../../services/ChatBackgroundService', () => ({
     clearChatBackground: jest.fn(),
   },
   DEFAULT_CHAT_BACKGROUND_DIM: 40,
+  chatBackgroundFileUri: (path: string) =>
+    path.startsWith('file://') ? path : `file://${path}`,
 }));
 
 const mockGetEntity = getEntity as jest.Mock;
 const mockGetImages = getCharacterImagesMetadata as jest.Mock;
-const mockGetMessages = getRecentConversationMessages as jest.Mock;
+const mockScanImages = getConversationImageMessages as jest.Mock;
+const mockFetchImage = getConversationMessageImageBase64 as jest.Mock;
 const service = ChatBackgroundService as jest.Mocked<typeof ChatBackgroundService>;
 
 function image(id: string, over: Partial<CharacterImage> = {}): CharacterImage {
@@ -130,28 +148,17 @@ function image(id: string, over: Partial<CharacterImage> = {}): CharacterImage {
   };
 }
 
-function message(
-  id: string,
-  imageData: string | null,
+/** Metadata-only history ref (exactly what the full scan returns). */
+function historyRef(
+  messageId: string,
   mimeType = 'image/jpeg',
-): ConversationMessage {
+): ConversationImageMessageRef {
   return {
-    id,
-    entity_id: 'user-1',
-    sender_entity_id: 'ent-1',
-    interaction_id: 'ix',
-    content: imageData ? '' : 'hello',
-    audio_duration: null,
-    message_type: imageData ? 'image' : 'text',
-    image_data: imageData,
-    image_mime_type: imageData ? mimeType : null,
-    emotional_state_bits: 0,
-    is_recon_followup: false,
-    is_edited: false,
-    created_at: new Date('2026-10-12T09:00:00Z'),
-    updated_at: new Date('2026-10-12T09:00:00Z'),
-    deleted_at: null,
-  } as ConversationMessage;
+    messageId,
+    mimeType,
+    byteLength: 0,
+    createdAt: new Date('2026-10-12T09:00:00Z'),
+  };
 }
 
 async function renderPicker() {
@@ -160,6 +167,12 @@ async function renderPicker() {
     await Promise.resolve();
   });
   return utils;
+}
+
+function flattenedOpacity(style: any): number | undefined {
+  const { StyleSheet } = require('react-native');
+  const flat = StyleSheet.flatten(style) ?? {};
+  return flat.opacity;
 }
 
 beforeEach(() => {
@@ -171,12 +184,13 @@ beforeEach(() => {
     is_muted: 0,
   });
   mockGetImages.mockResolvedValue([image('img-1'), image('img-2')]);
-  mockGetMessages.mockResolvedValue([
-    message('m1', 'BASE64_A'),
-    message('m2', null),
-    message('m3', 'BASE64_A'), // duplicate bytes — must not appear twice
-    message('m4', 'BASE64_B', 'image/png'),
+  mockScanImages.mockResolvedValue([
+    historyRef('m4', 'image/png'),
+    historyRef('m1'),
   ]);
+  mockFetchImage.mockImplementation(async (messageId: string) =>
+    messageId === 'm4' ? 'BASE64_B' : 'BASE64_A',
+  );
   service.getChatBackgroundRecord.mockResolvedValue({ ref: null, dim: 40 });
   service.setChatBackgroundProfile.mockResolvedValue(undefined);
   service.setChatBackgroundFromBase64.mockResolvedValue('/docs/bg.png');
@@ -206,8 +220,12 @@ describe('ChatBackgroundPickerScreen', () => {
     expect(getAllByTestId('background-current-check')).toHaveLength(1);
   });
 
-  it('applies a profile image instantly and closes', async () => {
-    const { findByTestId } = await renderPicker();
+  it('applies a profile image but STAYS OPEN, moving the ✓ overlay', async () => {
+    service.getChatBackgroundRecord.mockResolvedValue({
+      ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
+      dim: 40,
+    });
+    const { findByTestId, getAllByTestId } = await renderPicker();
 
     await fireEvent.press(await findByTestId('background-profile-tile-img-1'));
     await act(async () => {
@@ -219,15 +237,72 @@ describe('ChatBackgroundPickerScreen', () => {
       'p1',
       'img-1',
     );
-    expect(mockGoBack).toHaveBeenCalledTimes(1);
+    // Stay-open: no navigation back, and exactly one ✓ — now on the new tile.
+    expect(mockGoBack).not.toHaveBeenCalled();
+    expect(getAllByTestId('background-current-check')).toHaveLength(1);
+    expect(
+      within(await findByTestId('background-profile-tile-img-1')).getByTestId(
+        'background-current-check',
+      ),
+    ).toBeTruthy();
   });
 
-  it('applies a chat-history image by writing it to a file, then closes', async () => {
+  it('scans the FULL chat history and fetches visible tiles lazily', async () => {
     const { findByTestId, findByText } = await renderPicker();
 
-    await fireEvent.press(await findByTestId('background-source-history'));
+    // The tab count comes from the full-scan metadata, not a 200-message window.
     expect(await findByText('chatHistorySource (2)')).toBeTruthy();
+    expect(mockScanImages).toHaveBeenCalledWith('user-1', 'pk');
 
+    await fireEvent.press(await findByTestId('background-source-history'));
+    // The visible tile asks for ITS bytes only — by message id.
+    await findByTestId('background-history-tile-m4');
+    expect(mockFetchImage).toHaveBeenCalledWith('m4');
+  });
+
+  it('does not gate the picker on the full history scan', async () => {
+    let resolveScan: (refs: ConversationImageMessageRef[]) => void = () => {};
+    mockScanImages.mockReturnValue(
+      new Promise<ConversationImageMessageRef[]>(resolve => {
+        resolveScan = resolve;
+      }),
+    );
+    const { findByTestId, findByText } = await renderPicker();
+
+    // The profile tab is already interactive while the scan is in flight.
+    expect(await findByTestId('background-profile-tile-img-1')).toBeTruthy();
+    await fireEvent.press(await findByTestId('background-source-history'));
+    expect(await findByTestId('background-history-scanning')).toBeTruthy();
+
+    await act(async () => {
+      resolveScan([historyRef('m9')]);
+      await Promise.resolve();
+    });
+
+    expect(await findByText('chatHistorySource (1)')).toBeTruthy();
+    expect(await findByTestId('background-history-tile-m9')).toBeTruthy();
+  });
+
+  it('only fetches bytes for tiles inside the list window', async () => {    // 40 image messages: the grid is windowed, so the tail must not be loaded.
+    mockScanImages.mockResolvedValue(
+      Array.from({ length: 40 }, (_unused, i) => historyRef(`m${i + 1}`)),
+    );
+    const { findByTestId } = await renderPicker();
+
+    await fireEvent.press(await findByTestId('background-source-history'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockFetchImage.mock.calls.length).toBeGreaterThan(0);
+    expect(mockFetchImage.mock.calls.length).toBeLessThan(40);
+    expect(mockFetchImage).not.toHaveBeenCalledWith('m40');
+  });
+
+  it('applies a chat-history image from its lazily fetched bytes, staying open', async () => {
+    const { findByTestId, getAllByTestId } = await renderPicker();
+
+    await fireEvent.press(await findByTestId('background-source-history'));
     await fireEvent.press(await findByTestId('background-history-tile-m4'));
     await act(async () => {
       await Promise.resolve();
@@ -239,15 +314,36 @@ describe('ChatBackgroundPickerScreen', () => {
       'image/png',
       'm4',
     );
-    expect(mockGoBack).toHaveBeenCalledTimes(1);
+    expect(mockGoBack).not.toHaveBeenCalled();
+    expect(getAllByTestId('background-current-check')).toHaveLength(1);
+    expect(
+      within(await findByTestId('background-history-tile-m4')).getByTestId(
+        'background-current-check',
+      ),
+    ).toBeTruthy();
   });
 
-  it('clears the background from the dashed "No background" tile', async () => {
+  it('shows the standard error toast when the history write returns null', async () => {
+    service.setChatBackgroundFromBase64.mockResolvedValue(null);
+    const { findByTestId, queryAllByTestId } = await renderPicker();
+
+    await fireEvent.press(await findByTestId('background-source-history'));
+    await fireEvent.press(await findByTestId('background-history-tile-m4'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockShowToast).toHaveBeenCalledWith('backgroundSetFailed');
+    // A failed write must not claim the tile is the background.
+    expect(queryAllByTestId('background-current-check')).toHaveLength(0);
+  });
+
+  it('clears the background from the dashed "No background" tile without closing', async () => {
     service.getChatBackgroundRecord.mockResolvedValue({
       ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
       dim: 40,
     });
-    const { findByTestId } = await renderPicker();
+    const { findByTestId, queryAllByTestId } = await renderPicker();
 
     await fireEvent.press(await findByTestId('background-none-tile'));
     await act(async () => {
@@ -255,7 +351,50 @@ describe('ChatBackgroundPickerScreen', () => {
     });
 
     expect(service.clearChatBackground).toHaveBeenCalledWith('ent-1');
-    expect(mockGoBack).toHaveBeenCalledTimes(1);
+    expect(mockGoBack).not.toHaveBeenCalled();
+    expect(queryAllByTestId('background-current-check')).toHaveLength(0);
+  });
+
+  it('previews the current background with a scrim at the live dim value', async () => {
+    service.getChatBackgroundRecord.mockResolvedValue({
+      ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
+      dim: 40,
+    });
+    const { findByTestId, getByTestId } = await renderPicker();
+
+    expect(await findByTestId('background-dim-preview-image')).toBeTruthy();
+    expect(
+      flattenedOpacity(getByTestId('background-dim-preview-scrim').props.style),
+    ).toBeCloseTo(0.4);
+
+    // Dragging the slider updates the preview live (before release persists).
+    await fireEvent(getByTestId('background-dim-slider'), 'valueChange', 85);
+    expect(
+      flattenedOpacity(getByTestId('background-dim-preview-scrim').props.style),
+    ).toBeCloseTo(0.85);
+  });
+
+  it('previews a just-applied file background', async () => {
+    const { findByTestId, getByTestId } = await renderPicker();
+
+    await fireEvent.press(await findByTestId('background-source-history'));
+    await fireEvent.press(await findByTestId('background-history-tile-m4'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const preview = await findByTestId('background-dim-preview-image');
+    expect(preview.props.source).toEqual({ uri: 'file:///docs/bg.png' });
+    expect(
+      flattenedOpacity(getByTestId('background-dim-preview-scrim').props.style),
+    ).toBeCloseTo(0.4);
+  });
+
+  it('shows the muted placeholder strip when no background is set', async () => {
+    const { findByTestId, queryByTestId } = await renderPicker();
+
+    expect(await findByTestId('background-dim-preview-empty')).toBeTruthy();
+    expect(queryByTestId('background-dim-preview-image')).toBeNull();
   });
 
   it('persists the dim on slider release', async () => {
@@ -270,7 +409,7 @@ describe('ChatBackgroundPickerScreen', () => {
   });
 
   it('shows an empty state for a chat with no image messages', async () => {
-    mockGetMessages.mockResolvedValue([message('m1', null)]);
+    mockScanImages.mockResolvedValue([]);
     const { findByTestId, findByText } = await renderPicker();
 
     await fireEvent.press(await findByTestId('background-source-history'));

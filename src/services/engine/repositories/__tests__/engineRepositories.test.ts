@@ -220,6 +220,93 @@ describe('conversation_messages adapter', () => {
     expect(msgs[0].id).toBe('m1');
   });
 
+  it('full image scan walks every page and returns metadata only', async () => {
+    const imageRow = (id: string, base64: string, mime = 'image/png') => ({
+      id,
+      entity_id: 'e1',
+      sender_entity_id: 'e2',
+      content: '',
+      message_type: 'image',
+      image_data: base64,
+      image_mime_type: mime,
+      emotional_state_bits: 0,
+      is_recon_followup: false,
+      is_edited: false,
+      created_at: '2026-10-11T10:00:00Z',
+      updated_at: '2026-10-11T10:00:00Z',
+      deleted_at: null,
+    });
+    const textRow = {
+      id: 'm2',
+      entity_id: 'e1',
+      sender_entity_id: 'e2',
+      content: 'hi',
+      message_type: 'text',
+      emotional_state_bits: 0,
+      is_recon_followup: false,
+      is_edited: false,
+      created_at: '2026-10-11T09:00:00Z',
+      updated_at: '2026-10-11T09:00:00Z',
+      deleted_at: null,
+    };
+
+    // Newest page first, then the older page via the opaque cursor. m4 repeats
+    // m1's bytes (a re-sent picture) and must not produce a second tile.
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: /messages/,
+        respond: req =>
+          req.query.before === 'c1'
+            ? {
+                json: {
+                  messages: [imageRow('m3', 'BASE64_B'), imageRow('m4', 'BASE64_A')],
+                  has_more: false,
+                  next_cursor: null,
+                },
+              }
+            : {
+                json: {
+                  messages: [imageRow('m1', 'BASE64_A'), textRow],
+                  has_more: true,
+                  next_cursor: 'c1',
+                },
+              },
+      },
+    ]);
+    install(server);
+
+    const refs = await messagesRepo.getConversationImageMessages('e1', 'e1+e2');
+
+    expect(refs.map(ref => ref.messageId)).toEqual(['m1', 'm3']);
+    expect(refs[0].mimeType).toBe('image/png');
+    expect(refs[0].byteLength).toBe(Math.floor(('BASE64_A'.length * 3) / 4));
+    // Metadata only — no base64 ever leaves the scan.
+    expect(Object.keys(refs[0])).not.toContain('image_data');
+    // First request is the newest page (no cursor); the second follows c1.
+    const messagesCalls = server.calls.filter(
+      call => call.method === 'GET' && call.path.endsWith('/messages'),
+    );
+    expect(messagesCalls).toHaveLength(2);
+    expect(messagesCalls[0].query.before).toBeUndefined();
+    expect(messagesCalls[1].query.before).toBe('c1');
+  });
+
+  it('fetches a single message image by id', async () => {
+    const server = createMockManagementServer([
+      {
+        method: 'GET',
+        path: '/api/messages/m1/image',
+        bytes: new Uint8Array([1, 2, 3]),
+        headers: { 'content-type': 'image/png' },
+      },
+    ]);
+    install(server);
+
+    const base64 = await messagesRepo.getConversationMessageImageBase64('m1');
+    expect(base64).toBe('AQID');
+  });
+
   it('builds unread counts from the chat-list pages', async () => {
     const server = createMockManagementServer([
       {
