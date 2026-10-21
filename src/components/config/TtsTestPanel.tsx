@@ -39,8 +39,9 @@
  *    the format badge (the ACTUAL sample format, sniffed from its bytes) and the
  *    download button.
  *  - finished → footer returns to the synthesize button (audio stays loaded):
- *    pressing it with UNCHANGED text replays instantly (`seekTo(0)` +
- *    `resume()`, mirroring ChatBubble), edited text re-synthesizes.
+ *    pressing it with UNCHANGED text replays instantly (the queue is REBUILT
+ *    from the kept bytes — an external reset can outlive the panel's state),
+ *    edited text re-synthesizes.
  *
  * Duration comes up-front from the static `getDurationFromBase64` parser (which
  * sniffs the container, so declared-vs-actual mismatches — e.g. mp3 declared but
@@ -426,10 +427,15 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
       hapticLightPress();
       setError(null);
       try {
-        // Mirror ChatBubble: rewind to the start, then resume the loaded track.
-        await AudioPlayer.seekTo(0);
+        // Rebuild the queue from the kept sample — never seekTo(0)+resume().
+        // An entity-session teardown (whole-app ON_STOP) resets the shared
+        // TrackPlayer singleton while this panel stays mounted, so the panel's
+        // "a sample is loaded" state can outlive the actual queue; resuming a
+        // reset player made the control look dead with no way to regenerate
+        // (owner device, 2026-10-21). playSynthesizedAudio reloads the bytes,
+        // so replay stays instant (no re-synthesis).
+        await playSynthesizedAudio(lastAudio.base64, lastAudio.mime);
         setPosition(0);
-        await AudioPlayer.resume();
         setPhase('playing');
       } catch (err: any) {
         log.warn('Failed to replay synthesized audio:', err);

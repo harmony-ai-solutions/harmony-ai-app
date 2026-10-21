@@ -457,7 +457,7 @@ describe('TtsTestPanel — player row, download and completion', () => {
     expect(isDisabled(utils.getByTestId('tts-download-button'))).toBe(false);
   });
 
-  it('replays unchanged text instantly and re-synthesizes edited text', async () => {
+  it('replays unchanged text instantly (rebuilding the queue) and re-synthesizes edited text', async () => {
     jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
     const utils = await render(<TtsTestPanel providerType="soulvoice" />);
     await flush();
@@ -473,9 +473,12 @@ describe('TtsTestPanel — player row, download and completion', () => {
     await fireEvent.press(utils.getByTestId('tts-play-button'));
     await flush();
 
-    // Same text → instant replay, no second engine round-trip.
-    expect(mockSeekTo).toHaveBeenCalledWith(0);
-    expect(mockResume).toHaveBeenCalled();
+    // Same text → instant replay from the KEPT bytes, no second engine
+    // round-trip. The queue is rebuilt instead of seek/resume: an external
+    // reset (session teardown) can leave the panel's state ahead of TrackPlayer.
+    expect(mockPlayBase64Audio).toHaveBeenCalledWith('QUJDRA==', 'audio/wav');
+    expect(mockSeekTo).not.toHaveBeenCalled();
+    expect(mockResume).not.toHaveBeenCalled();
     expect(mockTestTtsSpeech).toHaveBeenCalledTimes(1);
     expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
 
@@ -488,6 +491,35 @@ describe('TtsTestPanel — player row, download and completion', () => {
 
     expect(mockTestTtsSpeech).toHaveBeenCalledTimes(2);
     expect(mockTestTtsSpeech.mock.calls[1][0].text).toBe('Hello edited');
+  });
+
+  it('replay re-arms the player after a session teardown reset the shared queue', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+
+    await fireEvent.changeText(utils.getByTestId('tts-text-input'), 'Hello teardown');
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    mockGetState.mockResolvedValue('ready');
+    await tick();
+
+    // The whole app stopped (ON_STOP): EntitySessionService's teardown resets
+    // the shared TrackPlayer (a preview is left alone by the ownership-aware
+    // stop, but the queue is gone regardless). The panel is still mounted and
+    // believes a sample is loaded.
+    mockSeekTo.mockClear();
+    mockResume.mockClear();
+    mockPlayBase64Audio.mockClear();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    // The replay reloads the kept bytes — resuming a reset queue would look dead.
+    expect(mockPlayBase64Audio).toHaveBeenCalledWith('QUJDRA==', 'audio/wav');
+    expect(mockResume).not.toHaveBeenCalled();
+    expect(mockSeekTo).not.toHaveBeenCalled();
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
   });
 
   it('pauses and resumes without stopping the loaded track', async () => {

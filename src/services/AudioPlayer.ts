@@ -81,11 +81,11 @@ export class AudioPlayer {
       await TrackPlayer.reset();
       await TrackPlayer.add(track);
       await TrackPlayer.play();
-      
-      // Track which message is currently loaded
-      if (messageId) {
-        this.currentMessageId = messageId;
-      }
+
+      // Ownership follows the LAST loaded track: a preview (no messageId) must
+      // clear a previously played message id, otherwise the session teardown's
+      // ownership check would stop the preview (owner device, 2026-10-21).
+      this.currentMessageId = messageId ?? null;
       
       log.info(`Playing audio${messageId ? ` for message ${messageId}` : ''}`);
     } catch (error) {
@@ -149,13 +149,36 @@ export class AudioPlayer {
   }
 
   /**
-   * Stop playback
+   * Full stop: halt playback AND empty the queue. Panels call this when they
+   * own the player; session teardown must use {@link stopSessionAudio} so a
+   * config-screen preview is never killed by a chat teardown.
    */
   async stop(): Promise<void> {
     await TrackPlayer.stop();
     await TrackPlayer.reset();
     // Clear the current message ID when stopping
     this.currentMessageId = null;
+  }
+
+  /**
+   * Stop playback ONLY when the loaded track belongs to a chat message (a voice
+   * message). Config-screen previews (TTS test panel, voice clone/design) share
+   * this singleton but load their track WITHOUT a message id.
+   *
+   * Why: androidx ProcessLifecycleOwner ON_STOP tears every entity session down
+   * (deliberate — battery), and that teardown used to call `stop()`
+   * unconditionally. On the owner device (2026-10-21) it fired ~2.3 s into a
+   * TTS preview, resetting the queue under a panel that still thought a sample
+   * was loaded, so the player looked dead until a full remount.
+   *
+   * Silent no-op when TrackPlayer was never set up (the chat never played
+   * audio): this removes the recurring 'player_not_initialized' WARN the old
+   * unconditional call produced on every chat exit.
+   */
+  async stopSessionAudio(): Promise<void> {
+    if (!this.isInitialized) return;
+    if (this.currentMessageId === null) return;
+    await this.stop();
   }
 
   /**

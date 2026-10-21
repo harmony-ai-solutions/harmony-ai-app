@@ -1179,16 +1179,20 @@ export class EntitySessionService extends EventEmitter<EntitySessionEvents> {
     log.info(`Stopping interaction session for ${interactionId}`);
 
     try {
-      // Stop any playing audio. Isolated on purpose: AudioPlayer.stop() throws
-      // 'player_not_initialized' when TrackPlayer was never set up (the chat
-      // had no audio playback). Letting that bubble into the outer catch used
-      // to SKIP the connection teardown below — leaking every entity WebSocket
-      // (live heartbeat, "already exists" on the next session, orphaned
-      // engine-side sessions).
+      // Stop SESSION-owned audio only (a message's voice). Isolated on purpose:
+      // the player can throw when TrackPlayer was never set up; letting that
+      // bubble into the outer catch used to SKIP the connection teardown below
+      // — leaking every entity WebSocket (live heartbeat, "already exists" on
+      // the next session, orphaned engine-side sessions).
+      //
+      // Ownership-aware (owner device, 2026-10-21): this teardown also runs
+      // when the whole app stops, which used to kill a config-screen TTS
+      // preview playing on the same TrackPlayer singleton ~2 s in. A preview
+      // loads without a message id, so a session stop leaves it running.
       try {
-        await AudioPlayer.stop();
+        await AudioPlayer.stopSessionAudio();
       } catch (audioError) {
-        log.warn('AudioPlayer.stop() failed during session stop (ignored):', audioError);
+        log.warn('AudioPlayer.stopSessionAudio() failed during session stop (ignored):', audioError);
       }
 
       // Clean up all pending transcriptions for this interaction

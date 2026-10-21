@@ -1,14 +1,35 @@
 /**
- * AudioPlayer.getDurationFromBase64 — sniff the bytes, not the declared mime.
+ * AudioPlayer — duration sniffing + session-owned stop.
  *
- * Regression: the TTS cloud API declares mp3 but returns WAV bytes. The old
- * implementation passed the DECLARED mime to music-metadata, which sniffed
- * `audio/wav` from the bytes and refused it (`Guessed MIME-type not
- * supported`), leaving the player row's time label and seeker dead.
+ * `getDurationFromBase64` regression: the TTS cloud API declares mp3 but
+ * returns WAV bytes. The old implementation passed the DECLARED mime to
+ * music-metadata, which sniffed `audio/wav` from the bytes and refused it
+ * (`Guessed MIME-type not supported`), leaving the player row's time label and
+ * seeker dead.
+ *
+ * `stopSessionAudio` regression (owner device, 2026-10-21): the session
+ * teardown's unconditional `stop()` killed a config-screen TTS preview that
+ * shares this singleton.
  */
+import TrackPlayer from 'react-native-track-player';
 import { parseBuffer } from 'music-metadata';
 import { AudioPlayer } from '../AudioPlayer';
 import { base64OfBytes, makeWavFixture } from '../../utils/__tests__/audioFixtures';
+
+jest.mock('react-native-track-player', () => ({
+  __esModule: true,
+  default: {
+    setupPlayer: jest.fn().mockResolvedValue(undefined),
+    updateOptions: jest.fn().mockResolvedValue(undefined),
+    reset: jest.fn().mockResolvedValue(undefined),
+    add: jest.fn().mockResolvedValue(undefined),
+    play: jest.fn().mockResolvedValue(undefined),
+    stop: jest.fn().mockResolvedValue(undefined),
+    pause: jest.fn().mockResolvedValue(undefined),
+  },
+  State: { Playing: 'playing' },
+  Capability: { Play: 'play', Pause: 'pause', Stop: 'stop' },
+}));
 
 jest.mock('../../utils/logger', () => ({
   createLogger: () => ({
@@ -20,6 +41,7 @@ jest.mock('../../utils/logger', () => ({
 }));
 
 const mockParseBuffer = parseBuffer as jest.Mock;
+const mockTrackPlayer = TrackPlayer as unknown as Record<string, jest.Mock>;
 
 describe('AudioPlayer.getDurationFromBase64', () => {
   beforeEach(() => {
@@ -79,5 +101,60 @@ describe('AudioPlayer.getDurationFromBase64', () => {
   it('returns null when the parser yields a zero/absent duration', async () => {
     mockParseBuffer.mockResolvedValue({ format: {} });
     await expect(AudioPlayer.getDurationFromBase64('QUJDRA==')).resolves.toBeNull();
+  });
+});
+
+describe('AudioPlayer.stopSessionAudio (ownership-aware session teardown)', () => {
+  let player: AudioPlayer;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockTrackPlayer.stop.mockResolvedValue(undefined);
+    mockTrackPlayer.reset.mockResolvedValue(undefined);
+    player = new AudioPlayer();
+  });
+
+  it('is a silent no-op before setup (no player_not_initialized warn)', async () => {
+    await expect(player.stopSessionAudio()).resolves.toBeUndefined();
+    expect(mockTrackPlayer.stop).not.toHaveBeenCalled();
+    expect(mockTrackPlayer.reset).not.toHaveBeenCalled();
+    expect(mockTrackPlayer.setupPlayer).not.toHaveBeenCalled();
+  });
+
+  it('stops a voice message owned by a chat message', async () => {
+    await player.playAudio('QUJD', 'audio/wav', 'msg-1');
+    mockTrackPlayer.stop.mockClear();
+    mockTrackPlayer.reset.mockClear();
+
+    await player.stopSessionAudio();
+
+    expect(mockTrackPlayer.stop).toHaveBeenCalledTimes(1);
+    expect(mockTrackPlayer.reset).toHaveBeenCalledTimes(1);
+    expect(player.getCurrentMessageId()).toBeNull();
+  });
+
+  it('leaves a config preview playing (no message id)', async () => {
+    await player.playAudio('QUJD', 'audio/wav');
+    mockTrackPlayer.stop.mockClear();
+    mockTrackPlayer.reset.mockClear();
+
+    await player.stopSessionAudio();
+
+    expect(mockTrackPlayer.stop).not.toHaveBeenCalled();
+    expect(mockTrackPlayer.reset).not.toHaveBeenCalled();
+    expect(player.getCurrentMessageId()).toBeNull();
+  });
+
+  it('a preview clears a previously played message ownership', async () => {
+    await player.playAudio('QUJD', 'audio/wav', 'msg-1');
+    // Same singleton: loading the preview must take ownership away from the
+    // message, or the teardown would still stop the preview.
+    await player.playAudio('QUJD', 'audio/wav');
+    mockTrackPlayer.stop.mockClear();
+    mockTrackPlayer.reset.mockClear();
+
+    await player.stopSessionAudio();
+
+    expect(mockTrackPlayer.stop).not.toHaveBeenCalled();
   });
 });
