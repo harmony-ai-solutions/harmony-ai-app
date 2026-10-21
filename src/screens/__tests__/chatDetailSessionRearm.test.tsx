@@ -83,13 +83,24 @@ const mockStartSession = jest.fn().mockResolvedValue(undefined);
 const mockStopSession = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('../../contexts/EntitySessionContext', () => ({
+  /**
+   * Faithful stand-in for the PRE-FIX provider's identity behaviour: the
+   * callbacks below are rebuilt on EVERY hook call (fresh arrow closures), which
+   * is exactly what the real provider did on every render in which
+   * `activeSessions` changed — plain functions exposed through a useMemo keyed
+   * on that map. A screen re-render is therefore the same identity churn the
+   * owner-device 3 Hz re-INIT loop was driven by, and the loop regression test
+   * below fails if the screen lets those identities reach an effect's dep array.
+   */
   useEntitySession: () => ({
     // Always "active" for callers that only probe the current interaction —
     // the re-arm uses `activeSessions` (participant-set scoped) instead.
     isSessionActive: (interactionId: string) =>
       mockActiveSessions.has(interactionId),
     activeSessions: mockActiveSessions,
-    startInteractionSession: mockStartSession,
+    // NOTE: re-created per call on purpose (see above); the underlying spy
+    // `mockStartSession` stays stable so assertions count real INITs.
+    startInteractionSession: (...args: any[]) => mockStartSession(...args),
     stopInteractionSession: mockStopSession,
     clearFailedSession: jest.fn().mockResolvedValue(undefined),
   }),
@@ -505,5 +516,59 @@ describe('ChatDetailScreen — session re-arm (focus / foreground)', () => {
     await unmount();
 
     expect(mockStopSession).toHaveBeenCalledWith('ix-test');
+  });
+
+  /**
+   * REGRESSION — the 3 Hz session re-INIT loop (owner device, 2026-10-21).
+   *
+   * Production trace: "Initializing interaction session for <id>…" → "Starting
+   * interaction session…" → "Reusing existing interaction session…" every
+   * ~330 ms while the screen was mounted. `initializeSession` listed
+   * `startInteractionSession`/`isSessionActive` from the context as deps; those
+   * were plain functions rebuilt on every provider render, so a session-map
+   * update that changed nothing (the service RETURNS the existing session, and
+   * the context re-stored it under a fresh Map) produced new identities → new
+   * `initializeSession` → init effect re-fires → GET chat-list + reused INIT →
+   * fresh Map → forever.
+   *
+   * The harness reproduces the provider side faithfully: `useEntitySession`
+   * resolves fresh closures on every call, exactly like the pre-fix provider did
+   * for every render in which `activeSessions` changed. A re-render here is the
+   * same identity churn. Post-fix the init effect depends only on gate state and
+   * reaches the callback through a ref, so nothing re-fires — and even a genuine
+   * re-run is now blocked by the live-session guard.
+   */
+  it('does NOT re-INIT when the provider hands out fresh callback identities (loop regression)', async () => {
+    const { rerender, unmount } = await renderScreen();
+    await flush();
+
+    // Mount INIT happened exactly once (control — the loop must not block it).
+    expect(mockStartSession).toHaveBeenCalledTimes(1);
+
+    // The service reused the live session and the context re-rendered with new
+    // closures: three consecutive identity churns, one per ~330 ms tick in the
+    // owner-device trace.
+    mockActiveSessions.set('ix-test', liveSession('ix-test'));
+    for (let i = 0; i < 3; i++) {
+      rerender(<ChatDetailScreen route={route} navigation={navigation} />);
+      await flush();
+    }
+
+    // Pre-fix this was 2 (measured on the reverted tree): the identity churn
+    // bought one extra GET chat-list + reused INIT, i.e. one tick of the 3 Hz
+    // loop. Post-fix the init effect never re-runs, and if it did,
+    // hasLiveSessionForParticipantSet() would stop it before that round-trip.
+    expect(mockStartSession).toHaveBeenCalledTimes(1);
+
+    // Same guarantee through the re-arm paths (focus + foreground): a live
+    // session is never restarted.
+    await act(async () => {
+      mockFocusCallbacks.forEach(cb => cb());
+    });
+    mockLifecycleHandlers.forEach(handler => handler('active'));
+    await flush();
+    expect(mockStartSession).toHaveBeenCalledTimes(1);
+
+    await unmount();
   });
 });

@@ -966,6 +966,22 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   ]);
 
   /**
+   * Ref-routed INIT handle for the effects below. Same failure mode — and the
+   * same remedy — as showToastRef/tRef above: `initializeSession` is a
+   * useCallback, and any dep of it that changes identity (a context provider
+   * handing out fresh closures, a test double, `participantIds` being re-derived)
+   * rebuilds it. Listing it in an effect's dependency array then re-runs that
+   * effect on every render — the 3 Hz loop from the owner-device trace
+   * (2026-10-21): "Initializing interaction session for <id>…" → context
+   * "Starting interaction session…" → service "Reusing existing interaction
+   * session…", forever, while the screen stayed mounted (stacked screens too).
+   * The effects therefore depend only on the gate STATE that decides when an
+   * INIT may happen, and read the latest callback through this ref.
+   */
+  const initializeSessionRef = useRef(initializeSession);
+  initializeSessionRef.current = initializeSession;
+
+  /**
    * True when a session for THIS own entity + participant set already exists —
    * CONNECTING included. Such a session must not be restarted: the service
    * would reuse it anyway, and skipping avoids a pointless INIT round-trip and
@@ -991,15 +1007,30 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
    * `isConnected` never changes and the init effect never re-ran: the open chat
    * stayed dead until a full unmount/remount (owner device, 2026-10-21).
    * Teardown-on-leave/unmount is unchanged and still intentional.
+   *
+   * Calls the INIT through initializeSessionRef so this callback (and the two
+   * effects wired to it: focus + AppLifecycle) keeps a stable identity — the
+   * other half of the same owner-device loop.
    */
   const rearmSessionIfNeeded = useCallback(() => {
     if (sessionInitInFlightRef.current) return;
     if (!canInitializeSession()) return;
     if (hasLiveSessionForParticipantSet()) return;
-    initializeSession();
-  }, [canInitializeSession, hasLiveSessionForParticipantSet, initializeSession]);
+    initializeSessionRef.current();
+  }, [canInitializeSession, hasLiveSessionForParticipantSet]);
 
   // Session initialization – (re)start when sync/partner state changes.
+  //
+  // Guarded EXACTLY like the re-arm path above (owner device, 2026-10-21). This
+  // effect used to call initializeSession() unconditionally, so every re-run —
+  // and it re-ran on every render while the provider's callbacks were unstable —
+  // paid a GET /api/entities/:id/chat-list (~330 ms) followed by a reused INIT,
+  // then stored the identical session under a fresh Map, which restarted the
+  // cycle. A live session for this participant set (CONNECTING included) or an
+  // INIT already in flight means there is nothing to do. Mount is unaffected:
+  // the service tears sessions down on leave/unmount, so the next mount finds
+  // nothing live and INITs as before; `canInitializeSession`/`isLocked` changes
+  // still re-run this effect and get a fresh INIT when the gate opens.
   useEffect(() => {
     if (!canInitializeSession()) {
       if (isDisabled) {
@@ -1010,9 +1041,20 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
       return;
     }
+    if (sessionInitInFlightRef.current) return;
+    if (hasLiveSessionForParticipantSet()) return;
 
-    initializeSession();
-  }, [canInitializeSession, initializeSession, isDisabled, isLocked]);
+    initializeSessionRef.current();
+  }, [
+    canInitializeSession,
+    hasLiveSessionForParticipantSet,
+    isDisabled,
+    isLocked,
+    // routeInteractionId is NOT a callback dep any more, but a param change on a
+    // re-used screen instance (same mount, new chat) must still re-evaluate the
+    // gate exactly as the pre-fix `initializeSession` dep did.
+    routeInteractionId,
+  ]);
 
   // Re-arm when the screen becomes interactive again: a back-nav from a pushed
   // screen re-fires focus even though this screen never unmounted.
@@ -1301,15 +1343,33 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     await handleSessionRetry();
   }, [handleSessionRetry]);
 
-  // Seed emoji action defaults when session becomes active
+  // Seed emoji action defaults once the session is live.
+  //
+  // The key MUST be the OWN entity id, never the interaction id (owner device,
+  // 2026-10-21). Two reasons:
+  //   1. The engine's `emoji_actions` table is scoped by ENTITY — its FK is
+  //      `emoji_actions.entity_id → entities(id)`. Seeding with an interaction
+  //      id violated it for every row, so the log filled with "Failed to seed
+  //      emoji action defaults: EngineApiError: FOREIGN KEY constraint failed"
+  //      and the engine logged the same per action.
+  //   2. Picker parity — the inline picker already uses the own entity:
+  //      ChatInputBar gets `entityId={ownEntityId}` (chat input bar render
+  //      below) and hands it to EmojiPickerInline, which calls
+  //      EntityEmojiActionService.getActionsMap(entityId). The action editor
+  //      scopes the same way. Seeding the own entity means picker, editor and
+  //      message sending all read one set of actions.
   useEffect(() => {
-    if (currentInteractionIdRef.current && isSessionActive(currentInteractionIdRef.current)) {
-      // Use interactionId as the key for emoji defaults
-      EntityEmojiActionService.seedDefaults(currentInteractionIdRef.current).catch(err => {
-        log.warn('Failed to seed emoji action defaults:', err);
-      });
-    }
-  }, [routeInteractionId, isSessionActive]);
+    if (!ownEntityId) return;
+    const interactionId = currentInteractionIdRef.current;
+    if (!interactionId || !isSessionActive(interactionId)) return;
+    EntityEmojiActionService.seedDefaults(ownEntityId).catch(err => {
+      log.warn('Failed to seed emoji action defaults:', err);
+    });
+    // activeSessions stays a dep on purpose: isSessionActive's identity is now
+    // stable (see EntitySessionContext), so the connecting → active transition —
+    // the moment seeding becomes possible — is only observable through the
+    // session map itself.
+  }, [routeInteractionId, isSessionActive, activeSessions, ownEntityId]);
 
   const handleConfirmAndSendMessage = useCallback(
     async (messageId: string, finalText: string) => {
@@ -1328,12 +1388,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         const base64Audio = pending.audio_data;
 
-        // Resolve emoji actions in the text
+        // Resolve emoji actions in the text.
+        // OWN entity id is the lookup key (engine FK: emoji_actions.entity_id →
+        // entities(id); the picker/editor scope by it too). Passing the
+        // interaction id here always resolved an EMPTY action map, so emoji → RP
+        // substitution and additional_effects silently never fired (owner
+        // device, 2026-10-21).
         let sendText = finalText;
         let additionalEffects = null;
 
         const resolved = await EntityEmojiActionService.resolveMessageActions(
-          currentInteractionIdRef.current,
+          ownEntityId,
           sendText,
         );
 
@@ -1697,13 +1762,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       try {
-        // Resolve emoji actions in the text
+        // Resolve emoji actions in the text.
+        // OWN entity id — not the interaction id — matching the picker/editor and
+        // the engine's entity-scoped emoji_actions FK (see the seed effect above).
+        // With the interaction id this always came back empty, so emoji → RP
+        // substitution and additional_effects silently never fired.
         let sendText = text;
         let additionalEffects = null;
         const replyId = replyToMessage?.id ?? null;
 
         const resolved = await EntityEmojiActionService.resolveMessageActions(
-          currentInteractionIdRef.current,
+          ownEntityId,
           sendText,
         );
 
