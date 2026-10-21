@@ -143,6 +143,21 @@ if (isPlaceholder) {
     println "****************************************************************"
 }
 
+/**
+ * versionCode from a version string like "v0.4.16" / "0.4.16-dev": extracts the
+ * numeric triplet and packs it major * 1e6 + minor * 1e3 + patch. Monotonic
+ * while minor and patch stay < 1000 (this project's numbering). Garbage input
+ * falls back to 0 so a broken tag fails the install loudly instead of
+ * masquerading as a valid release.
+ */
+def deriveVersionCode(String versionName) {
+    def nums = (versionName =~ /\d+/).collect { it as int }
+    def major = nums.size() > 0 ? nums[0] : 0
+    def minor = nums.size() > 1 ? nums[1] : 0
+    def patch = nums.size() > 2 ? nums[2] : 0
+    return major * 1000000 + minor * 1000 + patch
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -153,12 +168,19 @@ android {
         applicationId "ai.soulbits.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
         // CI passes -PVERSION_NAME=<tag/input> (see .github/workflows/
         // build-release.yml) instead of rewriting this file with sed. The
         // fallback stays the repo's current release — bump it here on each
         // manual release so local/unflagged builds keep a sane version.
         versionName project.findProperty("VERSION_NAME") ?: "0.4.16"
+        // Derived from versionName — MUST be monotonic across releases. A flat
+        // versionCode makes the system installer refuse the self-update
+        // ("App not installed", observed as a silent no-op on HyperOS/Android 15
+        // — owner bug report 2026-10-21): Android rejects any install whose
+        // versionCode is not HIGHER than the installed one.
+        versionCode deriveVersionCode(
+            (project.findProperty("VERSION_NAME") ?: "0.4.16").toString(),
+        )
 
         resValue "string", "build_config_package", "ai.soulbits.chat"
     }
