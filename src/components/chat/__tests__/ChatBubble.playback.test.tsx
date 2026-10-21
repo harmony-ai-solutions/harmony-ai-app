@@ -7,6 +7,12 @@
  * back to ▶ ~250 ms into playback (and, in the TTS panel, dropped keep-awake
  * mid-sample). Playback now ends only on a genuine end state AFTER at least one
  * `playing` observation. UI consistency only — ChatBubble holds no keep-awake.
+ *
+ * `paused` is NOT a genuine end (owner device, 2026-10-21): AudioPlayer sets up
+ * RNTP with `autoHandleInterruptions: true`, so any audio-focus loss pauses the
+ * player. The bubble tries ONE auto-resume per start; if the interruption still
+ * holds, it settles back to ▶ with the position kept (the audio stays loaded and
+ * a tap continues from there) instead of reporting the message as finished.
  */
 
 import React from 'react';
@@ -188,6 +194,62 @@ describe('ChatBubble — playback completion classification', () => {
     await tickWithState('playing');
     expect(isShowingPlaying(utils)).toBe(true);
 
+    await tickWithState('ended');
+    expect(isShowingPlaying(utils)).toBe(false);
+  });
+
+  it('auto-resumes once on an external pause, then settles (never reports it as ended early)', async () => {
+    const utils = await render(
+      <ChatBubble message={audioMessage} isOwn={false} theme={theme} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('chat-audio-audio-1'));
+    await flush();
+    await tickWithState('playing');
+    expect(isShowingPlaying(utils)).toBe(true);
+
+    mockResume.mockClear();
+
+    // Audio-focus loss (call, another app, Bluetooth noise, OEM ducking) pauses
+    // the player underneath the bubble: autoHandleInterruptions, not the user.
+    await tickWithState('paused');
+    // One resume attempt, and the bubble still shows playing — the pause was
+    // not read as "the message finished".
+    expect(mockResume).toHaveBeenCalledTimes(1);
+    expect(isShowingPlaying(utils)).toBe(true);
+
+    // The interruption still holds focus → settle back to the play glyph with
+    // NO second attempt (one per start, never a resume loop). There is no
+    // 'paused' surface in the bubble; the loaded track + kept position make the
+    // next tap a continuation, which is the closest equivalent.
+    await tickWithState('paused');
+    expect(mockResume).toHaveBeenCalledTimes(1);
+    expect(isShowingPlaying(utils)).toBe(false);
+  });
+
+  it('keeps playing when the auto-resume brings the audio back', async () => {
+    const utils = await render(
+      <ChatBubble message={audioMessage} isOwn={false} theme={theme} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('chat-audio-audio-1'));
+    await flush();
+    await tickWithState('playing');
+
+    mockResume.mockClear();
+    await tickWithState('paused');
+    expect(mockResume).toHaveBeenCalledTimes(1);
+
+    // Focus came back: the same utterance keeps playing.
+    await tickWithState('playing');
+    expect(isShowingPlaying(utils)).toBe(true);
+
+    await tickWithState('buffering');
+    expect(isShowingPlaying(utils)).toBe(true);
+
+    // …and a genuine end still ends it.
     await tickWithState('ended');
     expect(isShowingPlaying(utils)).toBe(false);
   });

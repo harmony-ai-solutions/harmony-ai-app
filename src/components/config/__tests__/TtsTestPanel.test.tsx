@@ -17,6 +17,10 @@
  *    replay-vs-resynthesize, the seek slider and the download/share flow
  *  - the completion poll never reads the pre-start `loading`/`ready`
  *    transients as "finished" (and needs a fresh `playing` per playback)
+ *  - an EXTERNAL pause (audio focus loss → `autoHandleInterruptions`) triggers
+ *    one auto-resume, then settles into 'paused' — never 'idle' — so the
+ *    player row, the loaded sample and (until it settles) the keep-awake hold
+ *    survive the interruption
  *  - keep-awake is held across the synthesis wait AND playback, released on a
  *    genuine end / error / unmount
  */
@@ -696,6 +700,104 @@ describe('TtsTestPanel — player row, download and completion', () => {
     mockDeactivateKeepAwake.mockClear();
     await utils.unmount();
     expect(mockDeactivateKeepAwake).toHaveBeenCalled();
+  });
+
+  it('auto-resumes once on an external pause, then settles into paused (never idle)', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    await tickWithState('playing');
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+
+    mockResume.mockClear();
+    mockDeactivateKeepAwake.mockClear();
+
+    // An incoming call (or any other app claiming audio focus, Bluetooth
+    // turning noisy, OEM ducking) pauses the player: `autoHandleInterruptions`,
+    // NOT the user — the user's pause never reaches the poll.
+    await tickWithState('paused');
+
+    // Exactly one resume attempt, and the panel is still 'playing': the player
+    // row survives and the keep-awake hold is not dropped mid-listen.
+    expect(mockResume).toHaveBeenCalledTimes(1);
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+    expect(utils.queryByTestId('tts-play-button')).toBeNull();
+    expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
+
+    // The interruption still holds focus → the next `paused` tick settles into
+    // the EXISTING 'paused' phase (row stays, sample stays loaded) with NO
+    // second resume attempt (one per utterance, never a resume loop).
+    await tickWithState('paused');
+    expect(mockResume).toHaveBeenCalledTimes(1);
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+    expect(utils.queryByTestId('tts-play-button')).toBeNull();
+    expect(utils.getByTestId('tts-seek-slider')).toBeTruthy();
+    // 'paused', not 'idle': the toggle shows ▶ and a tap continues playback.
+    expect(utils.getByTestId('tts-play-toggle').props.accessibilityLabel).toBe('play');
+    // Paused is a settled state, so the hold is released there (existing rule).
+    expect(mockDeactivateKeepAwake).toHaveBeenCalled();
+
+    // The user picks the sample back up where the interruption caught them.
+    await fireEvent.press(utils.getByTestId('tts-play-toggle'));
+    await flush();
+    expect(mockResume).toHaveBeenCalledTimes(2);
+    expect(utils.getByTestId('tts-play-toggle').props.accessibilityLabel).toBe('pause');
+  });
+
+  it('keeps playing when the auto-resume brings the audio back', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    await tickWithState('playing');
+
+    mockResume.mockClear();
+    mockDeactivateKeepAwake.mockClear();
+
+    // A brief focus loss: the player is paused, the poll resumes it…
+    await tickWithState('paused');
+    expect(mockResume).toHaveBeenCalledTimes(1);
+
+    // …and the focus comes back, so the SAME utterance keeps playing.
+    await tickWithState('playing');
+    expect(utils.getByTestId('tts-play-toggle').props.accessibilityLabel).toBe('pause');
+    expect(utils.queryByTestId('tts-play-button')).toBeNull();
+    expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
+
+    // A buffering blip after the interruption is still in progress, not an end.
+    await tickWithState('buffering');
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+    expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
+
+    // And the utterance still ends normally afterwards.
+    await tickWithState('ended');
+    expect(utils.queryByTestId('tts-play-toggle')).toBeNull();
+    expect(utils.getByTestId('tts-play-button')).toBeTruthy();
+  });
+
+  it('a genuine ended still ends to idle without any resume attempt', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    await tickWithState('playing');
+
+    mockResume.mockClear();
+    await tickWithState('ended');
+
+    // The paused path must never hijack a real end.
+    expect(mockResume).not.toHaveBeenCalled();
+    expect(utils.queryByTestId('tts-play-toggle')).toBeNull();
+    expect(utils.getByTestId('tts-play-button')).toBeTruthy();
+    // Audio stays loaded after a genuine end (replay/download still work).
+    expect(isDisabled(utils.getByTestId('tts-download-button'))).toBe(false);
   });
 });
 

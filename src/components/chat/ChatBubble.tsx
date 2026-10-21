@@ -5,7 +5,7 @@ import { Avatar, IconButton } from 'react-native-paper';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
-import { hasPlaybackStarted, isPlaybackInProgress } from '../../services/playbackState';
+import { hasPlaybackStarted, isPlaybackPaused, isPlaybackInProgress } from '../../services/playbackState';
 import { Theme } from '../../theme/types';
 import { ConversationMessage } from '../../database/models';
 import { EmojiAwareText } from '../emoji/EmojiAwareText';
@@ -139,6 +139,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
    * the TTS test panel — `src/services/playbackState.ts`).
    */
   const hasStartedRef = useRef(false);
+  /**
+   * Has the poll already tried to auto-resume THIS utterance after an external
+   * audio interruption (`paused`)? One attempt per utterance: a resume that
+   * pauses straight back means the interruption (call, another app holding
+   * audio focus) is still on, and retrying would be a resume loop.
+   */
+  const autoResumeAttemptedRef = useRef(false);
 
   useEffect(() => {
     setEditedText(message.content || '');
@@ -162,9 +169,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           const progress = await AudioPlayer.getProgress();
           setCurrentPosition(progress.position);
           
-          // End only on a genuine end state (ended/stopped/none/paused/error)
-          // AFTER playback was actually observed — `loading`/`ready` are the
-          // player preparing the track, not the utterance finishing.
+          // End only on a genuine end state (ended/stopped/none/error) AFTER
+          // playback was actually observed — `loading`/`ready` are the player
+          // preparing the track, not the utterance finishing, and `paused` is
+          // an external interruption (handled below).
           const state = await AudioPlayer.getState();
           if (isPlaybackInProgress(state)) {
             if (hasPlaybackStarted(state)) {
@@ -173,6 +181,39 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             return;
           }
           if (!hasStartedRef.current) return;
+
+          // `paused` after a real `playing` observation is an EXTERNAL audio
+          // interruption, NOT the end of the message: AudioPlayer sets up RNTP
+          // with `autoHandleInterruptions: true`, so any audio-focus loss (call,
+          // another app claiming audio, Bluetooth turning noisy, OEM ducking)
+          // pauses the player for us (owner device, 2026-10-21). A tap-pause
+          // never lands here — handlePlayAudio clears `isPlaying` itself.
+          //
+          // ChatBubble has no 'paused' surface (the TTS panel's paused phase
+          // keeps its player row), only "playing" and "loaded, tap to
+          // continue", so the closest equivalent is used: try ONE auto-resume
+          // — the interruption is usually a brief focus loss, and playback then
+          // just keeps going. If the resume throws or the player is paused
+          // again on the next tick, stop polling and fall back to the play
+          // glyph WITHOUT resetting the position: the audio stays loaded and
+          // the next tap continues where the interruption caught it, instead of
+          // the bubble looking like the message finished at 0:00.
+          if (isPlaybackPaused(state)) {
+            if (!autoResumeAttemptedRef.current) {
+              autoResumeAttemptedRef.current = true;
+              log.info('Playback paused externally — auto-resuming once');
+              try {
+                await AudioPlayer.resume();
+                // Keep polling: the next tick tells us whether the focus came
+                // back (`playing`/`buffering`) or the interruption still holds.
+                return;
+              } catch (resumeError) {
+                log.warn('Auto-resume after an external interruption failed:', resumeError);
+              }
+            }
+            setIsPlaying(false);
+            return;
+          }
 
           setIsPlaying(false);
           setCurrentPosition(0);
@@ -241,6 +282,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         // Resume playback (track is already loaded)
         await AudioPlayer.resume();
         hasStartedRef.current = false;
+        // Same for the one-shot external-interruption auto-resume: this is a
+        // fresh start, so the bubble may attempt one again if it gets paused.
+        autoResumeAttemptedRef.current = false;
         setIsPlaying(true);
       }
     } catch (error) {

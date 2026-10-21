@@ -176,6 +176,14 @@ jest.mock('react-native-track-player', () => ({
     Paused: 'paused',
     Stopped: 'stopped',
     Buffering: 'buffering',
+    // These three are part of the real RNTP `State` enum and are read by
+    // `src/services/playbackState.ts` (the completion classifier). Without them
+    // `State.Loading` / `State.Ended` / `State.Error` resolve to `undefined`
+    // here, so the classifier's sets silently lose those members and a test
+    // could pass for the wrong reason.
+    Loading: 'loading',
+    Ended: 'ended',
+    Error: 'error',
     Connecting: 'connecting',
   },
   Capability: {

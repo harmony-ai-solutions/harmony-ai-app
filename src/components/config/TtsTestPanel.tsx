@@ -33,8 +33,9 @@
  * `AudioPlayer.playAudio` resolves at playback START (it only calls
  * `TrackPlayer.play()`), so completion is detected the same way ChatBubble does:
  * a 250 ms poll of `AudioPlayer.getProgress()` / `getState()` while `playing`;
- * playback ends on `ended`/`stopped`/`none`/`paused`/`error` after a real
- * `playing` observation → back to `idle` with the audio still loaded.
+ * playback ends on `ended`/`stopped`/`none`/`error` after a real `playing`
+ * observation → back to `idle` with the audio still loaded. `paused` is an
+ * external interruption, handled separately (see "Completion classification").
  *
  *  - idle (no audio) → full-width gradient "▶ Synthesize & Play Sample".
  *  - synthesizing → spinner + label (inputs disabled) + disabled download.
@@ -74,8 +75,22 @@
  * "Finished" is NOT "anything but playing/buffering": RNTP reports `loading`
  * and `ready` while a track is prepared, so that rule ended playback ~250 ms in
  * (the player row vanished and the keep-awake flag was dropped mid-sample).
- * Playback now only ends on `ended`/`stopped`/`none`/`paused`/`error` AND after
- * at least one `playing` observation (`src/services/playbackState.ts`).
+ * Playback now only ends on `ended`/`stopped`/`none`/`error` AND after at least
+ * one `playing` observation (`src/services/playbackState.ts`).
+ *
+ * `paused` is NOT one of those end states any more (owner device, 2026-10-21).
+ * `AudioPlayer.initialize()` sets `autoHandleInterruptions: true` (media3
+ * `handleAudioFocus`), so every audio-focus loss — incoming call, another app
+ * claiming audio, Bluetooth turning noisy, OEM ducking — PAUSES the player
+ * underneath us. Counting that as "finished" dropped the panel to `idle`: the
+ * sample looked dead (no player row, no resume path although the queue still
+ * held the track) and the keep-awake hold was released mid-listen. A pause the
+ * USER asks for never reaches the poll — `handleTogglePlayback` moves `phase`
+ * to `paused` itself — so a `paused` read while `phase === 'playing'` is by
+ * definition external. The poll then auto-resumes ONCE per utterance (the
+ * interruption is usually a short focus loss) and, if the player pauses again
+ * or the resume throws, settles into the EXISTING `paused` phase: player row
+ * stays, sample stays loaded, the user can press play to continue.
  *
  * ## Keep-awake
  *
@@ -113,6 +128,7 @@ import {
 } from '../../services/keepScreenOn';
 import {
   hasPlaybackStarted,
+  isPlaybackPaused,
   isPlaybackInProgress,
 } from '../../services/playbackState';
 import { formatDuration } from '../../utils/formatDuration';
@@ -283,6 +299,14 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
    * allowed to end playback; only a real end AFTER this flips can.
    */
   const hasStartedRef = useRef(false);
+  /**
+   * Has the poll already tried to auto-resume THIS utterance after an external
+   * audio interruption (`paused` while `phase === 'playing'`)? One attempt per
+   * utterance: a resume that immediately pauses again means the interruption
+   * (call, other app holding focus) is still on, and fighting it would be a
+   * resume loop. Reset next to [hasStartedRef] whenever playback starts anew.
+   */
+  const autoResumeAttemptedRef = useRef(false);
 
   const isOffline = !isConnected;
   // The test-speech route always needs a provider type (see the header note).
@@ -308,11 +332,13 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
   // ── Completion polling (ChatBubble parity) ────────────────────────────
   // `AudioPlayer.playAudio` resolves at playback START, so the only reliable
   // "the utterance ended" signal is the player's own state reaching a genuine
-  // END state (`ended`/`stopped`/`none`/`paused`/`error`) AFTER we have seen it
-  // play. `loading`/`ready` are still in progress — RNTP reports them while the
+  // END state (`ended`/`stopped`/`none`/`error`) AFTER we have seen it play.
+  // `loading`/`ready` are still in progress — RNTP reports them while the
   // track is prepared, and reading them as "finished" dropped the player row
-  // and the keep-awake flag ~250 ms into a real sample. Also mirrors the live
-  // position + duration into state.
+  // and the keep-awake flag ~250 ms into a real sample. `paused` is an
+  // EXTERNAL interruption (autoHandleInterruptions), not an end — see the
+  // header's "Completion classification". Also mirrors the live position +
+  // duration into state.
   useEffect(() => {
     if (phase !== 'playing') {
       if (progressIntervalRef.current) {
@@ -343,6 +369,37 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
         // A pre-start transient (`none`/`stopped` while the queue is rebuilt,
         // or a poll tick that beat the first `playing` sample) is NOT an end.
         if (!hasStartedRef.current) return;
+
+        // `paused` after a real `playing` observation is an EXTERNAL audio
+        // interruption, never "finished": the player is parked mid-utterance
+        // (autoHandleInterruptions pauses on any focus loss — see the header).
+        // A pause the USER asked for cannot land here, because
+        // `handleTogglePlayback` moves `phase` to 'paused' itself.
+        if (isPlaybackPaused(state)) {
+          if (!autoResumeAttemptedRef.current) {
+            autoResumeAttemptedRef.current = true;
+            log.info('Playback paused externally — auto-resuming once');
+            try {
+              await AudioPlayer.resume();
+              // Keep polling: the next tick says whether the focus came back
+              // (`playing`/`buffering`) or the interruption still holds.
+              return;
+            } catch (err) {
+              log.warn('Auto-resume after an external interruption failed:', err);
+            }
+          }
+          // Paused again (the interruption persisted) or the resume threw:
+          // settle into the EXISTING 'paused' phase instead of dropping to
+          // 'idle' — the player row and the loaded sample must survive, or the
+          // sample looks dead with no way to continue (owner device,
+          // 2026-10-21). Keep the position; only a genuine end resets it.
+          if (progressIntervalRef.current) {
+            clearInterval(progressIntervalRef.current);
+            progressIntervalRef.current = null;
+          }
+          setPhase('paused');
+          return;
+        }
 
         // Genuine end.
         if (progressIntervalRef.current) {
@@ -382,6 +439,7 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     setError(null);
     // A new utterance: the poll must not end it before it is seen playing.
     hasStartedRef.current = false;
+    autoResumeAttemptedRef.current = false;
     try {
       const res = await engineApiClient.testTtsSpeech({
         text: spoken,
@@ -432,6 +490,8 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
       setError(null);
       // A new playback of the kept sample: re-arm the pre-start guard.
       hasStartedRef.current = false;
+      // …and re-arm the one-shot external-interruption auto-resume.
+      autoResumeAttemptedRef.current = false;
       try {
         // Rebuild the queue from the kept sample — never seekTo(0)+resume().
         // An entity-session teardown (whole-app ON_STOP) resets the shared
