@@ -33,8 +33,8 @@
  * `AudioPlayer.playAudio` resolves at playback START (it only calls
  * `TrackPlayer.play()`), so completion is detected the same way ChatBubble does:
  * a 250 ms poll of `AudioPlayer.getProgress()` / `getState()` while `playing`;
- * the first state that is neither `'playing'` nor `'buffering'` means the
- * utterance ended → back to `idle` with the audio still loaded.
+ * playback ends on `ended`/`stopped`/`none`/`paused`/`error` after a real
+ * `playing` observation → back to `idle` with the audio still loaded.
  *
  *  - idle (no audio) → full-width gradient "▶ Synthesize & Play Sample".
  *  - synthesizing → spinner + label (inputs disabled) + disabled download.
@@ -69,6 +69,14 @@
  * searchable full list, and picking a row appends the tag through the same
  * `insertTag` path as a chip press.
  *
+ * ## Completion classification
+ *
+ * "Finished" is NOT "anything but playing/buffering": RNTP reports `loading`
+ * and `ready` while a track is prepared, so that rule ended playback ~250 ms in
+ * (the player row vanished and the keep-awake flag was dropped mid-sample).
+ * Playback now only ends on `ended`/`stopped`/`none`/`paused`/`error` AND after
+ * at least one `playing` observation (`src/services/playbackState.ts`).
+ *
  * ## Keep-awake
  *
  * The screen is kept on ONLY while audio is actually `playing` (never while
@@ -100,6 +108,10 @@ import {
   activateKeepScreenOn,
   deactivateKeepScreenOn,
 } from '../../services/keepScreenOn';
+import {
+  hasPlaybackStarted,
+  isPlaybackInProgress,
+} from '../../services/playbackState';
 import { formatDuration } from '../../utils/formatDuration';
 import {
   audioMimeFor,
@@ -262,6 +274,12 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
   const [duration, setDuration] = useState(0);
   const [tagPickerVisible, setTagPickerVisible] = useState(false);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /**
+   * Has the CURRENT utterance been observed as `playing`? A poll tick that
+   * lands during RNTP's pre-start `loading`/`ready` transient must never be
+   * allowed to end playback; only a real end AFTER this flips can.
+   */
+  const hasStartedRef = useRef(false);
 
   const isOffline = !isConnected;
   // The test-speech route always needs a provider type (see the header note).
@@ -281,8 +299,12 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
 
   // ── Completion polling (ChatBubble parity) ────────────────────────────
   // `AudioPlayer.playAudio` resolves at playback START, so the only reliable
-  // "the utterance ended" signal is the player's own state leaving
-  // playing/buffering. Also mirrors the live position + duration into state.
+  // "the utterance ended" signal is the player's own state reaching a genuine
+  // END state (`ended`/`stopped`/`none`/`paused`/`error`) AFTER we have seen it
+  // play. `loading`/`ready` are still in progress — RNTP reports them while the
+  // track is prepared, and reading them as "finished" dropped the player row
+  // and the keep-awake flag ~250 ms into a real sample. Also mirrors the live
+  // position + duration into state.
   useEffect(() => {
     if (phase !== 'playing') {
       if (progressIntervalRef.current) {
@@ -300,16 +322,27 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
           setDuration(progress.duration);
         }
 
-        // Auto-stop when playback finishes.
+        // Still working on the utterance (playing / buffering / loading /
+        // ready) — nothing to end. Note the proof that playback really began.
         const state = await AudioPlayer.getState();
-        if (state !== 'playing' && state !== 'buffering') {
-          if (progressIntervalRef.current) {
-            clearInterval(progressIntervalRef.current);
-            progressIntervalRef.current = null;
+        if (isPlaybackInProgress(state)) {
+          if (hasPlaybackStarted(state)) {
+            hasStartedRef.current = true;
           }
-          setPhase('idle');
-          setPosition(0);
+          return;
         }
+
+        // A pre-start transient (`none`/`stopped` while the queue is rebuilt,
+        // or a poll tick that beat the first `playing` sample) is NOT an end.
+        if (!hasStartedRef.current) return;
+
+        // Genuine end.
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current);
+          progressIntervalRef.current = null;
+        }
+        setPhase('idle');
+        setPosition(0);
       } catch (err) {
         // Playback might have stopped or encountered an error.
         log.debug('Playback progress poll failed:', err);
@@ -339,6 +372,8 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     hapticLightPress();
     setPhase('synthesizing');
     setError(null);
+    // A new utterance: the poll must not end it before it is seen playing.
+    hasStartedRef.current = false;
     try {
       const res = await engineApiClient.testTtsSpeech({
         text: spoken,
@@ -387,6 +422,8 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     if (lastAudio && lastSynthText === text.trim()) {
       hapticLightPress();
       setError(null);
+      // A new playback of the kept sample: re-arm the pre-start guard.
+      hasStartedRef.current = false;
       try {
         // Rebuild the queue from the kept sample — never seekTo(0)+resume().
         // An entity-session teardown (whole-app ON_STOP) resets the shared

@@ -15,6 +15,8 @@
  *    inline with a "[+ N more]" chip opening the picker
  *  - the player row (play/pause never stops the track), completion polling,
  *    replay-vs-resynthesize, the seek slider and the download/share flow
+ *  - the completion poll never reads the pre-start `loading`/`ready`
+ *    transients as "finished" (and needs a fresh `playing` per playback)
  *  - keep-awake is activated only while actually playing
  */
 
@@ -191,6 +193,12 @@ async function tick(ms = 250) {
     await Promise.resolve();
   });
   await flush();
+}
+
+/** One poll tick that observes a specific RNTP state. */
+async function tickWithState(state: string) {
+  mockGetState.mockResolvedValue(state);
+  await tick();
 }
 
 /** True when a TouchableOpacity was rendered disabled. */
@@ -409,14 +417,67 @@ describe('TtsTestPanel — player row, download and completion', () => {
     await flush();
     expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
 
-    // Poll reports a live position, then the player leaves playing/buffering.
-    mockGetState.mockResolvedValue('ready');
-    await tick();
+    // A real `playing` observation, then the player reaches its end state.
+    await tickWithState('playing');
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+    await tickWithState('ended');
 
     expect(utils.queryByTestId('tts-play-toggle')).toBeNull();
     expect(utils.getByTestId('tts-play-button')).toBeTruthy();
     // Audio stays loaded, so the sample remains downloadable.
     expect(isDisabled(utils.getByTestId('tts-download-button'))).toBe(false);
+  });
+
+  it('does not end playback on the pre-start loading/ready transients', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    // RNTP prepares the track: `loading` then `ready`. Neither is "finished"
+    // (the old rule ended playback here ~250 ms in).
+    await tickWithState('loading');
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+
+    await tickWithState('ready');
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+
+    // A `none`/`stopped` tick BEFORE any `playing` sample is a transient too.
+    await tickWithState('stopped');
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+
+    // Then it really plays and really ends.
+    await tickWithState('playing');
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+    await tickWithState('ended');
+    expect(utils.queryByTestId('tts-play-toggle')).toBeNull();
+  });
+
+  it('requires a fresh playing observation for every new playback', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    const utils = await render(<TtsTestPanel providerType="soulvoice" />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    await tickWithState('playing');
+    await tickWithState('ended');
+    expect(utils.getByTestId('tts-play-button')).toBeTruthy();
+
+    // Replay: the previous utterance's "it played" proof must not carry over,
+    // so a `ready` tick right after replaying cannot end the new one.
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+
+    await tickWithState('ready');
+    expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
+
+    await tickWithState('playing');
+    await tickWithState('ended');
+    expect(utils.queryByTestId('tts-play-toggle')).toBeNull();
   });
 
   it('replays unchanged text instantly (rebuilding the queue) and re-synthesizes edited text', async () => {
@@ -430,8 +491,8 @@ describe('TtsTestPanel — player row, download and completion', () => {
     expect(mockTestTtsSpeech).toHaveBeenCalledTimes(1);
 
     // Playback finishes → footer shows the synthesize button again.
-    mockGetState.mockResolvedValue('ready');
-    await tick();
+    await tickWithState('playing');
+    await tickWithState('ended');
     await fireEvent.press(utils.getByTestId('tts-play-button'));
     await flush();
 
@@ -445,8 +506,8 @@ describe('TtsTestPanel — player row, download and completion', () => {
     expect(utils.getByTestId('tts-play-toggle')).toBeTruthy();
 
     // Finish again, then edit the text → re-synthesize.
-    mockGetState.mockResolvedValue('ready');
-    await tick();
+    await tickWithState('playing');
+    await tickWithState('ended');
     await fireEvent.changeText(utils.getByTestId('tts-text-input'), 'Hello edited');
     await fireEvent.press(utils.getByTestId('tts-play-button'));
     await flush();
@@ -463,8 +524,8 @@ describe('TtsTestPanel — player row, download and completion', () => {
     await fireEvent.changeText(utils.getByTestId('tts-text-input'), 'Hello teardown');
     await fireEvent.press(utils.getByTestId('tts-play-button'));
     await flush();
-    mockGetState.mockResolvedValue('ready');
-    await tick();
+    await tickWithState('playing');
+    await tickWithState('ended');
 
     // The whole app stopped (ON_STOP): EntitySessionService's teardown resets
     // the shared TrackPlayer (a preview is left alone by the ownership-aware
@@ -542,8 +603,8 @@ describe('TtsTestPanel — player row, download and completion', () => {
     await flush();
     expect(mockActivateKeepAwake).toHaveBeenCalled();
 
-    mockGetState.mockResolvedValue('ready');
-    await tick();
+    await tickWithState('playing');
+    await tickWithState('ended');
     expect(mockDeactivateKeepAwake).toHaveBeenCalled();
   });
 

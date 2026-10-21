@@ -5,6 +5,7 @@ import { Avatar, IconButton } from 'react-native-paper';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
+import { hasPlaybackStarted, isPlaybackInProgress } from '../../services/playbackState';
 import { Theme } from '../../theme/types';
 import { ConversationMessage } from '../../database/models';
 import { EmojiAwareText } from '../emoji/EmojiAwareText';
@@ -131,6 +132,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [showTranscription, setShowTranscription] = useState(false);
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /**
+   * Has playback actually started for the current utterance? RNTP reports
+   * `loading`/`ready` while preparing a track, so a poll tick before the first
+   * `playing` sample must never be read as "finished" (same classification as
+   * the TTS test panel — `src/services/playbackState.ts`).
+   */
+  const hasStartedRef = useRef(false);
 
   useEffect(() => {
     setEditedText(message.content || '');
@@ -154,12 +162,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           const progress = await AudioPlayer.getProgress();
           setCurrentPosition(progress.position);
           
-          // Auto-stop when playback finishes
+          // End only on a genuine end state (ended/stopped/none/paused/error)
+          // AFTER playback was actually observed — `loading`/`ready` are the
+          // player preparing the track, not the utterance finishing.
           const state = await AudioPlayer.getState();
-          if (state !== 'playing' && state !== 'buffering') {
-            setIsPlaying(false);
-            setCurrentPosition(0);
+          if (isPlaybackInProgress(state)) {
+            if (hasPlaybackStarted(state)) {
+              hasStartedRef.current = true;
+            }
+            return;
           }
+          if (!hasStartedRef.current) return;
+
+          setIsPlaying(false);
+          setCurrentPosition(0);
         } catch (error) {
           // Playback might have stopped or encountered an error
           setIsPlaying(false);
@@ -224,6 +240,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         
         // Resume playback (track is already loaded)
         await AudioPlayer.resume();
+        hasStartedRef.current = false;
         setIsPlaying(true);
       }
     } catch (error) {
@@ -315,6 +332,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         {hasAudio && (
           <TouchableOpacity 
             onPress={handlePlayAudio} 
+            testID={`chat-audio-${message.id}`}
             style={[styles.audioContainer, { backgroundColor: theme.colors.background.elevated + '40' }]}
             disabled={isLoadingAudio}
             activeOpacity={1}
