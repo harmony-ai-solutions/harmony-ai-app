@@ -330,8 +330,8 @@ const NEGATIVE_CACHE_TTL_MS = 30_000;
 /** Max simultaneous `?variant=thumb` fetches (engine decodes on a miss). */
 export const MAX_CONCURRENT_THUMBNAIL_FETCHES = 3;
 
-type ImageVariant = 'thumb' | 'original';
-interface CachedImageBytes {
+export type ImageVariant = 'thumb' | 'original';
+export interface CachedImageBytes {
   data: string;
   contentType: string;
 }
@@ -455,8 +455,14 @@ function cacheImageBytes(key: string, bytes: CachedImageBytes): void {
  * Fetch image bytes through the cache/dedupe layer. Returns `null` only for a
  * remembered "no thumbnail" (404 on the thumb path); transport/other errors
  * still throw so callers can decide (display paths degrade to no avatar).
+ *
+ * This is the ONE byte path every render surface uses, turned into a
+ * `data:` URL by the caller (`createDataURL`). URL + `source.headers` Image
+ * sources are not an option: the Fabric loader drops the headers, so the
+ * engine's token check 401s the GET and the tile stays blank (see
+ * {@link characterImageSource}).
  */
-async function getCachedImageBytes(
+export async function getCachedImageBytes(
   profileId: string,
   imageId: string,
   variant: ImageVariant,
@@ -612,11 +618,20 @@ export async function getPrimaryImage(profileId: string): Promise<CharacterImage
 }
 
 /**
- * An RN `Image` source for a character image served BY URL (original by
- * default, `?variant=thumb` for tiles). Rendering the original by URL is what
- * lets the platform decoders animate GIF/animated-WebP and lets the native
- * image cache do its job. Recompute it on every render: the port/token change
- * across engine restarts, and the URL itself is the cache key.
+ * Liveness/validity probe for a character image served BY URL — **not** a
+ * render source any more.
+ *
+ * Under RN New Architecture (`newArchEnabled`, RN 0.86) the Fabric image loader
+ * does not forward `source.headers`, so the engine's `/api` auth middleware
+ * never saw `X-Loopback-Token` and rejected the image GET with 401; Fresco then
+ * painted the tile blank with no JS error (owner device, Android 15,
+ * v0.4.18-dev, 2026-10-21). Every display path renders through
+ * {@link getCachedImageBytes} → `data:` URL instead (the app's own fetch, the
+ * same transport the working avatars/portraits use on that device).
+ *
+ * Still used by ChatBackgroundService to decide whether a stored ref can be
+ * resolved at all (engine restarting/stopped, port/token rotation). Recompute
+ * it on every call: the port/token change across engine restarts.
  */
 export function characterImageSource(
   profileId: string,

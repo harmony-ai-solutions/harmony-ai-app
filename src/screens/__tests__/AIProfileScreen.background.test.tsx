@@ -121,9 +121,11 @@ jest.mock('../../database/repositories', () => ({
   getPrimaryImage: jest.fn(async () => null),
   getSiblingCharacterProfiles: jest.fn(async () => []),
   getCharacterStats: jest.fn(async () => ({ likes: 0, chats: 0 })),
-  characterImageSource: jest.fn((profileId: string, imageId: string) => ({
-    uri: `http://127.0.0.1:2/api/character-profiles/${profileId}/images/${imageId}`,
-    headers: {},
+  // Gallery tiles / viewer resolve bytes through the app's cache (URL + headers
+  // Image sources are blank under the Fabric loader).
+  getCachedImageBytes: jest.fn(async () => ({
+    data: 'IMG_BASE64',
+    contentType: 'image/jpeg',
   })),
   imageToDataURL: jest.fn(() => null),
   shouldUseThumbnail: jest.fn(() => false),

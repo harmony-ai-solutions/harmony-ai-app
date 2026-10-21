@@ -12,6 +12,7 @@ import ChatBackgroundService from '../../services/ChatBackgroundService';
 import {
   getEntity,
   getCharacterImagesMetadata,
+  getCachedImageBytes,
   getConversationImageMessages,
   getConversationMessageImageBase64,
 } from '../../database/repositories';
@@ -101,9 +102,11 @@ jest.mock('@react-native-community/slider', () => {
 jest.mock('../../database/repositories', () => ({
   getEntity: jest.fn(),
   getCharacterImagesMetadata: jest.fn(),
-  characterImageSource: jest.fn((profileId: string, imageId: string) => ({
-    uri: `http://127.0.0.1:2/api/character-profiles/${profileId}/images/${imageId}`,
-    headers: {},
+  // Display bytes come from the app's byte cache as a data URL (URL + headers
+  // Image sources are blank under the Fabric loader).
+  getCachedImageBytes: jest.fn(async () => ({
+    data: 'IMG_BASE64',
+    contentType: 'image/jpeg',
   })),
   shouldUseThumbnail: jest.fn(() => false),
   getConversationImageMessages: jest.fn(),
@@ -126,6 +129,7 @@ jest.mock('../../services/ChatBackgroundService', () => ({
 
 const mockGetEntity = getEntity as jest.Mock;
 const mockGetImages = getCharacterImagesMetadata as jest.Mock;
+const mockGetCachedImageBytes = getCachedImageBytes as jest.Mock;
 const mockScanImages = getConversationImageMessages as jest.Mock;
 const mockFetchImage = getConversationMessageImageBase64 as jest.Mock;
 const service = ChatBackgroundService as jest.Mocked<typeof ChatBackgroundService>;
@@ -206,6 +210,38 @@ describe('ChatBackgroundPickerScreen', () => {
     expect(await findByText('chatHistorySource (2)')).toBeTruthy();
     expect(await findByTestId('background-profile-tile-img-1')).toBeTruthy();
     expect(await findByTestId('background-profile-tile-img-2')).toBeTruthy();
+  });
+
+  it('renders profile tiles and the preview from byte-cache data URLs', async () => {
+    service.getChatBackgroundRecord.mockResolvedValue({
+      ref: { kind: 'profile', profileId: 'p1', imageId: 'img-2' },
+      dim: 40,
+    });
+    const { findByTestId } = await renderPicker();
+
+    const tileImage = await findByTestId('background-profile-image-img-1');
+    expect(tileImage.props.source).toEqual({
+      uri: 'data:image/jpeg;base64,IMG_BASE64',
+    });
+    expect(mockGetCachedImageBytes).toHaveBeenCalledWith(
+      'p1',
+      'img-1',
+      'original',
+      expect.anything(),
+    );
+    // The current-background strip uses the ORIGINAL bytes, also as a data URL.
+    const preview = await findByTestId('background-dim-preview-image');
+    expect(preview.props.source).toEqual({
+      uri: 'data:image/jpeg;base64,IMG_BASE64',
+    });
+  });
+
+  it('keeps the placeholder tile when the byte fetch fails', async () => {
+    mockGetCachedImageBytes.mockRejectedValueOnce(new Error('offline'));
+    const { findByTestId, queryByTestId } = await renderPicker();
+
+    await findByTestId('background-profile-tile-img-1');
+    expect(queryByTestId('background-profile-image-img-1')).toBeNull();
   });
 
   it('marks the current background tile with a check overlay', async () => {

@@ -68,11 +68,12 @@ import { hapticLightPress } from '../utils/haptics';
 import {
   getEntity,
   getCharacterImagesMetadata,
-  characterImageSource,
+  getCachedImageBytes,
   shouldUseThumbnail,
   getConversationImageMessages,
   getConversationMessageImageBase64,
 } from '../database/repositories';
+import { createDataURL } from '../database/base64';
 import type { CharacterImage } from '../database/models';
 import type { ConversationImageMessageRef } from '../services/engine/repositories/conversation_messages';
 import ChatBackgroundService, {
@@ -241,6 +242,106 @@ const HistoryImageTile: React.FC<HistoryTileProps> = ({
         />
       ) : (
         <ActivityIndicator size="small" color={accent} />
+      )}
+      {active && (
+        <View style={styles.checkOverlay} testID="background-current-check">
+          <Icon name="check" size={18} color="#fff" />
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+};
+
+// ── Profile gallery tile (progressive, per-tile) ────────────────────────────
+//
+// Display bytes come from the app's own fetch + byte cache as a data URL, never
+// from a URL + `source.headers` Image source: under RN New Architecture the
+// Fabric image loader does not forward the headers, so the engine's token check
+// 401'd the image GET and Fresco painted the tile blank with no JS error (owner
+// device, Android 15, v0.4.18-dev, 2026-10-21). Module scope, like the history
+// tile, so a parent re-render (dim slider, ✓ move) does not restart the load.
+
+interface ProfileImageTileProps {
+  profileId: string;
+  image: CharacterImage;
+  active: boolean;
+  accent: string;
+  borderColor: string;
+  backgroundColor: string;
+  onPress: () => void;
+}
+
+const ProfileImageTile: React.FC<ProfileImageTileProps> = ({
+  profileId,
+  image,
+  active,
+  accent,
+  borderColor,
+  backgroundColor,
+  onPress,
+}) => {
+  // Metadata rows carry `image_data: ''`; a row that already has bytes renders
+  // synchronously.
+  const [uri, setUri] = useState<string | null>(() =>
+    image.image_data ? createDataURL(image.image_data, image.mime_type) : null,
+  );
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (image.image_data) return undefined;
+    let cancelled = false;
+    setFailed(false);
+    const variant = shouldUseThumbnail(image) ? 'thumb' : 'original';
+    (async () => {
+      try {
+        const bytes =
+          (await getCachedImageBytes(profileId, image.id, variant, {
+            thumbnailState: image.thumbnail_state,
+          })) ??
+          // A remembered "no thumbnail" (thumb 404) still has the original.
+          (variant === 'thumb'
+            ? await getCachedImageBytes(profileId, image.id, 'original')
+            : null);
+        if (cancelled) return;
+        if (!bytes) {
+          setFailed(true);
+          return;
+        }
+        setUri(createDataURL(bytes.data, bytes.contentType || image.mime_type));
+      } catch (err) {
+        if (!cancelled) {
+          // Keep the plain tile background; one missing image is not an error
+          // the user needs to see.
+          log.warn('Failed to load profile tile image:', err);
+          setFailed(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profileId, image]);
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={[
+        styles.tile,
+        { borderColor: active ? accent : borderColor, backgroundColor },
+      ]}
+      testID={`background-profile-tile-${image.id}`}
+      accessibilityRole="button"
+    >
+      {uri ? (
+        <Image
+          source={{ uri }}
+          style={styles.tileImage}
+          resizeMode="cover"
+          testID={`background-profile-image-${image.id}`}
+        />
+      ) : (
+        !failed && <ActivityIndicator size="small" color={accent} />
       )}
       {active && (
         <View style={styles.checkOverlay} testID="background-current-check">
@@ -455,14 +556,43 @@ export const ChatBackgroundPickerScreen: React.FC = () => {
     [record.ref],
   );
 
-  /** Render-ready source of the CURRENT background (preview strip). */
-  const previewSource: ImageSourcePropType | null = useMemo(() => {
+  /**
+   * Render-ready source of the CURRENT background (preview strip).
+   *
+   * File refs are local `file://` URIs. Profile refs resolve the ORIGINAL bytes
+   * through the byte cache into a data URL — a URL + headers source is unusable
+   * under Fabric (see {@link ProfileImageTile}).
+   */
+  const [previewSource, setPreviewSource] = useState<ImageSourcePropType | null>(
+    null,
+  );
+  useEffect(() => {
     const ref = record.ref;
-    if (!ref) return null;
-    if (ref.kind === 'profile') {
-      return characterImageSource(ref.profileId, ref.imageId);
+    if (!ref) {
+      setPreviewSource(null);
+      return undefined;
     }
-    return { uri: chatBackgroundFileUri(ref.path) };
+    if (ref.kind === 'file') {
+      setPreviewSource({ uri: chatBackgroundFileUri(ref.path) });
+      return undefined;
+    }
+    let cancelled = false;
+    // Clear first: never show the previous background while this one loads.
+    setPreviewSource(null);
+    getCachedImageBytes(ref.profileId, ref.imageId, 'original')
+      .then(bytes => {
+        if (cancelled || !bytes) return;
+        setPreviewSource({
+          uri: createDataURL(bytes.data, bytes.contentType || 'image/jpeg'),
+        });
+      })
+      .catch(err => {
+        // The strip keeps its muted placeholder.
+        log.warn('Failed to load the background preview:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [record.ref]);
 
   const gridItems: GridItem[] = useMemo(() => {
@@ -544,40 +674,17 @@ export const ChatBackgroundPickerScreen: React.FC = () => {
     </TouchableOpacity>
   );
 
-  const renderProfileTile = (image: CharacterImage) => {
-    const active = isCurrentProfile(image.id);
-    const source = characterImageSource(
-      profileId!,
-      image.id,
-      shouldUseThumbnail(image) ? 'thumb' : undefined,
-    );
-    return (
-      <TouchableOpacity
-        onPress={() => handlePickProfile(image)}
-        activeOpacity={0.8}
-        style={[
-          styles.tile,
-          {
-            borderColor: active ? accent : theme.colors.border.default + '55',
-            backgroundColor: elevated,
-          },
-        ]}
-        testID={`background-profile-tile-${image.id}`}
-        accessibilityRole="button"
-      >
-        <Image
-          source={source ?? undefined}
-          style={styles.tileImage}
-          resizeMode="cover"
-        />
-        {active && (
-          <View style={styles.checkOverlay} testID="background-current-check">
-            <Icon name="check" size={18} color="#fff" />
-          </View>
-        )}
-      </TouchableOpacity>
-    );
-  };
+  const renderProfileTile = (image: CharacterImage) => (
+    <ProfileImageTile
+      profileId={profileId!}
+      image={image}
+      active={isCurrentProfile(image.id)}
+      accent={accent}
+      borderColor={theme.colors.border.default + '55'}
+      backgroundColor={elevated}
+      onPress={() => handlePickProfile(image)}
+    />
+  );
 
   const renderItem = ({ item }: { item: GridItem }) => {
     if (item.kind === 'none') return renderNoBackgroundTile();

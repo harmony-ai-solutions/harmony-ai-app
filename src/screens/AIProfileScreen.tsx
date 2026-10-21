@@ -20,7 +20,7 @@
  * Reached from the Characters screen by tapping an AI character card.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -28,7 +28,9 @@ import {
   RefreshControl,
   TouchableOpacity,
   Image,
+  ActivityIndicator,
 } from 'react-native';
+import type { ImageStyle, StyleProp } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -56,11 +58,12 @@ import {
   getPrimaryImage,
   getSiblingCharacterProfiles,
   getCharacterStats,
-  characterImageSource,
+  getCachedImageBytes,
   imageToDataURL,
   shouldUseThumbnail,
   CharacterStats,
 } from '../database/repositories';
+import { createDataURL } from '../database/base64';
 import {
   duplicateAIPartner,
   getEntityByCharacterProfileId,
@@ -102,21 +105,88 @@ interface ImagePostState {
 }
 
 /**
- * RN Image source for a gallery tile. Uses the derived preview for `ready` and
- * `pending` rows (`pending` = legacy row, the read generates + persists it) and
- * the original URL for `unavailable` / older engines. Exported so the screen
- * test pins the tile decision without a full render.
+ * A gallery tile's DISPLAY bytes as a `data:` URL (progressive fill).
+ *
+ * Not a URL `Image` source: under RN New Architecture the Fabric image loader
+ * does not forward `source.headers`, so the engine's token check 401'd the image
+ * GET and Fresco painted the tile blank with no JS error (owner device, Android
+ * 15, v0.4.18-dev, 2026-10-21). Rendering through the app's own fetch + byte
+ * cache is the path every working avatar/portrait on that device already uses.
+ *
+ * Picks the derived preview for `ready`/`pending` rows (`pending` = legacy row,
+ * the read generates + persists it) and the original for `unavailable` / older
+ * engines. A remembered "no thumbnail" (thumb 404) still has the original.
+ * Exported so the screen test pins the tile decision without a full render.
  */
-export function galleryTileImageSource(
+export async function galleryTileImageSource(
   profileId: string,
   image: CharacterImage,
-): { uri: string; headers: Record<string, string> } | null {
-  return characterImageSource(
-    profileId,
-    image.id,
-    shouldUseThumbnail(image) ? 'thumb' : undefined,
-  );
+): Promise<string | null> {
+  // A row that already carries bytes needs no request.
+  if (image.image_data) return imageToDataURL(image);
+
+  const variant = shouldUseThumbnail(image) ? 'thumb' : 'original';
+  const bytes =
+    (await getCachedImageBytes(profileId, image.id, variant, {
+      thumbnailState: image.thumbnail_state,
+    })) ??
+    (variant === 'thumb'
+      ? await getCachedImageBytes(profileId, image.id, 'original')
+      : null);
+  if (!bytes) return null;
+  // A thumbnail's mime differs from the original's (JPEG/PNG vs GIF/WebP):
+  // use the RESPONSE mime, never the metadata mime.
+  return createDataURL(bytes.data, bytes.contentType || image.mime_type);
 }
+
+interface GalleryTileImageProps {
+  profileId: string;
+  image: CharacterImage;
+  style: StyleProp<ImageStyle>;
+}
+
+/**
+ * One gallery tile's image, filling in when its bytes land. Module scope (like
+ * the picker's history tile) so a parent re-render — a like/comment tap — does
+ * not restart the load; the byte cache keeps a remount instant.
+ */
+const GalleryTileImage: React.FC<GalleryTileImageProps> = ({
+  profileId,
+  image,
+  style,
+}) => {
+  const [uri, setUri] = useState<string | null>(() =>
+    image.image_data ? imageToDataURL(image) : null,
+  );
+
+  useEffect(() => {
+    if (image.image_data) return undefined;
+    let cancelled = false;
+    galleryTileImageSource(profileId, image)
+      .then(next => {
+        if (!cancelled && next) setUri(next);
+      })
+      .catch(err => {
+        // Display path: an empty tile beats an error for one missing image.
+        log.warn('Failed to load gallery image:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileId, image]);
+
+  if (!uri) {
+    return (
+      <View
+        style={[style, styles.tileImageLoading]}
+        testID={`ai-image-tile-loading-${image.id}`}
+      >
+        <ActivityIndicator size="small" color="rgba(255,255,255,0.5)" />
+      </View>
+    );
+  }
+  return <Image source={{ uri }} style={style} resizeMode="cover" />;
+};
 
 export const AIProfileScreen: React.FC = () => {
   const { theme } = useAppTheme();
@@ -171,9 +241,14 @@ export const AIProfileScreen: React.FC = () => {
   // ── Comment modal state ────────────────────────────────────────────────
   const [commentImageId, setCommentImageId] = useState<string | null>(null);
   const [commentVisible, setCommentVisible] = useState(false);
-  // Full-size viewer — renders the ORIGINAL by URL (animated GIF/WebP keep
-  // animating via the platform decoders; the thumbnail is only for tiles).
+  // Full-size viewer. The ORIGINAL bytes are resolved through the byte cache
+  // (data URL) — animated GIF/WebP keep animating from a data URL on Android,
+  // and a URL + headers source is unusable under Fabric (headers never reach
+  // the engine; see `galleryTileImageSource`). The modal opens immediately and
+  // shows a spinner until the bytes land.
   const [viewerImage, setViewerImage] = useState<CharacterImage | null>(null);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewerLoading, setViewerLoading] = useState(false);
   const [chatting, setChatting] = useState(false);
   // One-click Duplicate in flight (engine-parity entity copy).
   const [duplicating, setDuplicating] = useState(false);
@@ -376,6 +451,35 @@ export const AIProfileScreen: React.FC = () => {
       refreshBackgroundRef();
     }, [loadProfile, refreshBackgroundRef]),
   );
+
+  // Resolve the viewer's ORIGINAL bytes when it opens. `viewerImage` changing
+  // is the open trigger; closing clears the URI so a re-open never flashes the
+  // previous image.
+  useEffect(() => {
+    if (!viewerImage) {
+      setViewerUri(null);
+      setViewerLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setViewerUri(null);
+    setViewerLoading(true);
+    getCachedImageBytes(profileId, viewerImage.id, 'original')
+      .then(bytes => {
+        if (cancelled || !bytes) return;
+        setViewerUri(createDataURL(bytes.data, bytes.contentType || viewerImage.mime_type));
+      })
+      .catch(err => {
+        // The modal keeps its placeholder icon; no error surface for one image.
+        log.warn('Failed to load the full-size image:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setViewerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileId, viewerImage]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1118,10 +1222,10 @@ export const AIProfileScreen: React.FC = () => {
                             accessibilityRole="imagebutton"
                             accessibilityLabel={img.description || resolvedName}
                           >
-                            <Image
-                              source={galleryTileImageSource(profileId, img) ?? undefined}
+                            <GalleryTileImage
+                              profileId={profileId}
+                              image={img}
                               style={styles.postImage}
-                              resizeMode="cover"
                             />
                           </TouchableOpacity>
                           {/* Date/time caption under the image */}
@@ -1263,12 +1367,11 @@ export const AIProfileScreen: React.FC = () => {
         canModerateAll={isOwner}
       />
 
-      {/* ── Full-size viewer — ORIGINAL bytes by URL (animation preserved) ── */}
+      {/* ── Full-size viewer — ORIGINAL bytes as a data URL (still animates) ── */}
       <ImageViewerModal
         visible={viewerImage != null}
-        imageSource={
-          viewerImage ? characterImageSource(profileId, viewerImage.id) : null
-        }
+        imageUri={viewerUri}
+        loading={viewerLoading}
         description={viewerImage?.description || undefined}
         accentColor={theme.colors.accent.primary}
         backgroundAction={
@@ -1476,6 +1579,11 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 1,
     backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  // Same box as `postImage` so the grid never reflows while bytes land.
+  tileImageLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   postDateRow: {
     flexDirection: 'row',

@@ -1,8 +1,10 @@
 /**
- * AIProfileScreen gallery-tile source decision (contract 1.8.0 tri-state).
+ * AIProfileScreen gallery-tile bytes (contract 1.8.0 tri-state).
  *
- * The tile renders BY URL (no base64 blob), so the one thing the screen must get
- * right is whether the URL carries `?variant=thumb`:
+ * The tile renders DISPLAY bytes as a data URL — never a URL + `source.headers`
+ * Image source, which the Fabric loader cannot authenticate (owner device,
+ * Android 15, 2026-10-21). The decision the screen must still get right is
+ * which variant it asks the byte cache for:
  *   ready / pending (legacy backfill) → thumb
  *   unavailable                        → original
  *   field absent (older engine)        → the legacy `has_thumbnail` flag
@@ -36,28 +38,29 @@ jest.mock('../../services/marketplace/MarketplaceService', () => ({
   isChatLocked: jest.fn().mockReturnValue(false),
 }));
 
-// Keep the real `shouldUseThumbnail`, stub only the URL builder so the helper's
-// variant argument is observable.
+// Keep the real `shouldUseThumbnail`/`createDataURL` wiring, stub only the byte
+// cache so the helper's variant argument and the resulting data URL are
+// observable.
 jest.mock('../../services/engine/repositories/characters', () => {
   const actual = jest.requireActual('../../services/engine/repositories/characters');
   return {
     ...actual,
-    characterImageSource: jest.fn(
-      (profileId: string, imageId: string, variant?: 'thumb') => ({
-        uri: `http://127.0.0.1:2/api/character-profiles/${profileId}/images/${imageId}${
-          variant ? `?variant=${variant}` : ''
-        }`,
-        headers: { 'X-Loopback-Token': 'tok' },
-      }),
-    ),
+    getCachedImageBytes: jest.fn(),
   };
 });
 
 import { galleryTileImageSource } from '../AIProfileScreen';
-import { characterImageSource } from '../../services/engine/repositories/characters';
+import { getCachedImageBytes } from '../../services/engine/repositories/characters';
 import type { CharacterImage } from '../../database/models';
 
-const mockCharacterImageSource = characterImageSource as jest.Mock;
+const mockGetCachedImageBytes = getCachedImageBytes as jest.Mock;
+
+/** The thumb route re-encodes; the original keeps its own mime. */
+function bytes(variant: string) {
+  return variant === 'thumb'
+    ? { data: 'THUMB_BASE64', contentType: 'image/jpeg' }
+    : { data: 'ORIGINAL_BASE64', contentType: 'image/gif' };
+}
 
 function galleryImage(over: Partial<CharacterImage> = {}): CharacterImage {
   return {
@@ -79,44 +82,107 @@ function galleryImage(over: Partial<CharacterImage> = {}): CharacterImage {
 
 describe('AIProfileScreen gallery tile — thumbnail_state (contract 1.8.0)', () => {
   beforeEach(() => {
-    mockCharacterImageSource.mockClear();
+    mockGetCachedImageBytes.mockReset();
+    mockGetCachedImageBytes.mockImplementation(
+      async (_profileId: string, _imageId: string, variant: string) => bytes(variant),
+    );
   });
 
-  it('requests ?variant=thumb for a pending legacy image', () => {
-    const source = galleryTileImageSource(
+  it('asks for the thumb of a pending legacy image', async () => {
+    const uri = await galleryTileImageSource(
       'p1',
       galleryImage({ thumbnail_state: 'pending', has_thumbnail: false }),
     );
 
-    expect(mockCharacterImageSource).toHaveBeenCalledWith('p1', 'i1', 'thumb');
-    expect(source?.uri).toBe(
-      'http://127.0.0.1:2/api/character-profiles/p1/images/i1?variant=thumb',
+    expect(mockGetCachedImageBytes).toHaveBeenCalledWith(
+      'p1',
+      'i1',
+      'thumb',
+      expect.objectContaining({ thumbnailState: 'pending' }),
     );
+    // The thumbnail's response mime wins over the metadata mime (GIF original).
+    expect(uri).toBe('data:image/jpeg;base64,THUMB_BASE64');
   });
 
-  it('requests ?variant=thumb for a ready image', () => {
-    galleryTileImageSource(
+  it('asks for the thumb of a ready image', async () => {
+    await galleryTileImageSource(
       'p1',
       galleryImage({ thumbnail_state: 'ready', has_thumbnail: true }),
     );
-    expect(mockCharacterImageSource).toHaveBeenCalledWith('p1', 'i1', 'thumb');
+    expect(mockGetCachedImageBytes).toHaveBeenCalledWith(
+      'p1',
+      'i1',
+      'thumb',
+      expect.anything(),
+    );
   });
 
-  it('uses the original URL for an unavailable image', () => {
-    const source = galleryTileImageSource(
+  it('asks for the original of an unavailable image', async () => {
+    const uri = await galleryTileImageSource(
       'p1',
       galleryImage({ thumbnail_state: 'unavailable', has_thumbnail: false }),
     );
 
-    expect(mockCharacterImageSource).toHaveBeenCalledWith('p1', 'i1', undefined);
-    expect(source?.uri).toBe('http://127.0.0.1:2/api/character-profiles/p1/images/i1');
+    expect(mockGetCachedImageBytes).toHaveBeenCalledWith(
+      'p1',
+      'i1',
+      'original',
+      expect.anything(),
+    );
+    expect(uri).toBe('data:image/gif;base64,ORIGINAL_BASE64');
   });
 
-  it('falls back to has_thumbnail when the engine omits thumbnail_state', () => {
-    galleryTileImageSource('p1', galleryImage({ has_thumbnail: true }));
-    expect(mockCharacterImageSource).toHaveBeenLastCalledWith('p1', 'i1', 'thumb');
+  it('falls back to has_thumbnail when the engine omits thumbnail_state', async () => {
+    await galleryTileImageSource('p1', galleryImage({ has_thumbnail: true }));
+    expect(mockGetCachedImageBytes).toHaveBeenLastCalledWith(
+      'p1',
+      'i1',
+      'thumb',
+      expect.anything(),
+    );
 
-    galleryTileImageSource('p1', galleryImage({ id: 'i2', has_thumbnail: false }));
-    expect(mockCharacterImageSource).toHaveBeenLastCalledWith('p1', 'i2', undefined);
+    await galleryTileImageSource('p1', galleryImage({ id: 'i2', has_thumbnail: false }));
+    expect(mockGetCachedImageBytes).toHaveBeenLastCalledWith(
+      'p1',
+      'i2',
+      'original',
+      expect.anything(),
+    );
+  });
+
+  it('falls back to the original when the remembered thumb 404s', async () => {
+    mockGetCachedImageBytes.mockImplementation(
+      async (_profileId: string, _imageId: string, variant: string) =>
+        variant === 'thumb' ? null : bytes('original'),
+    );
+
+    const uri = await galleryTileImageSource(
+      'p1',
+      galleryImage({ thumbnail_state: 'ready', has_thumbnail: true }),
+    );
+
+    expect(mockGetCachedImageBytes).toHaveBeenLastCalledWith(
+      'p1',
+      'i1',
+      'original',
+    );
+    expect(uri).toBe('data:image/gif;base64,ORIGINAL_BASE64');
+  });
+
+  it('renders a row that already carries bytes without a request', async () => {
+    const uri = await galleryTileImageSource(
+      'p1',
+      galleryImage({ image_data: 'OWN_BYTES', mime_type: 'image/webp' }),
+    );
+
+    expect(mockGetCachedImageBytes).not.toHaveBeenCalled();
+    expect(uri).toBe('data:image/webp;base64,OWN_BYTES');
+  });
+
+  it('returns null when the bytes cannot be resolved (tile keeps its box)', async () => {
+    mockGetCachedImageBytes.mockResolvedValue(null);
+    await expect(
+      galleryTileImageSource('p1', galleryImage({ thumbnail_state: 'unavailable' })),
+    ).resolves.toBeNull();
   });
 });

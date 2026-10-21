@@ -7,6 +7,8 @@
  * Props:
  *  - visible: boolean
  *  - imageUri: data URL or remote URL
+ *  - loading?: bytes still in flight — shows a spinner instead of the
+ *    "no image" icon while a caller resolves an image asynchronously
  *  - description?: optional caption shown below the image
  *  - backgroundAction?: chat-background action pill (label + onPress); the
  *    caller owns the label so it can render the "✓ Current background" state
@@ -18,7 +20,7 @@
  *  - onClose: () => void
  */
 
-import React, { useRef, useCallback } from 'react';
+import React from 'react';
 import {
   Modal,
   View,
@@ -28,6 +30,7 @@ import {
   Dimensions,
   StatusBar,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Image } from 'react-native';
 import type { ImageSourcePropType } from 'react-native';
@@ -49,11 +52,16 @@ interface ImageViewerModalProps {
   /** Data URL / remote URI (legacy callers). Ignored when `imageSource` is set. */
   imageUri?: string | null;
   /**
-   * Full RN image source. Lets a caller render an authenticated URL (e.g. a
-   * character image served with `X-Loopback-Token`) so the platform decoders
-   * animate originals and the native cache applies.
+   * Full RN image source, for callers that must pass one through.
+   *
+   * Prefer `imageUri` with a `data:` URL: under RN New Architecture the Fabric
+   * image loader drops `source.headers`, so an authenticated URL (e.g. a
+   * character image behind `X-Loopback-Token`) 401s at the engine and renders
+   * blank with no JS error (owner device, Android 15, 2026-10-21).
    */
   imageSource?: ImageSourcePropType | null;
+  /** Bytes still in flight: spinner instead of the "no image" icon. */
+  loading?: boolean;
   description?: string;
   /**
    * "Set as background" action. The caller supplies the label (and `active`
@@ -75,6 +83,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   visible,
   imageUri,
   imageSource,
+  loading = false,
   description,
   backgroundAction,
   accentColor = DEFAULT_IMAGE_VIEWER_ACCENT,
@@ -120,6 +129,10 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
               style={styles.image}
               resizeMode="contain"
             />
+          ) : loading ? (
+            <View style={styles.noImagePlaceholder} testID="image-viewer-loading">
+              <ActivityIndicator size="large" color="rgba(255,255,255,0.7)" />
+            </View>
           ) : (
             <View style={styles.noImagePlaceholder}>
               <Icon name="image-off" size={64} color="rgba(255,255,255,0.4)" />
