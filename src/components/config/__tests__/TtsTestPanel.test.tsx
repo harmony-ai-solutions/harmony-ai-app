@@ -14,7 +14,9 @@
  *  - paralinguistic chips append their tag to the sample text, capped at 20
  *    inline with a "[+ N more]" chip opening the picker
  *  - the player row (play/pause never stops the track), completion polling,
- *    replay-vs-resynthesize, the seek slider and the download/share flow
+ *    replay-vs-resynthesize (guarded by the sample text AND the settings the
+ *    sample was synthesized with — a changed voice must re-synthesize), the
+ *    seek slider and the download/share flow
  *  - the completion poll never reads the pre-start `loading`/`ready`
  *    transients as "finished" (and needs a fresh `playing` per playback)
  *  - an EXTERNAL pause (audio focus loss → `autoHandleInterruptions`) triggers
@@ -524,6 +526,88 @@ describe('TtsTestPanel — player row, download and completion', () => {
 
     expect(mockTestTtsSpeech).toHaveBeenCalledTimes(2);
     expect(mockTestTtsSpeech.mock.calls[1][0].text).toBe('Hello edited');
+  });
+
+  it('re-synthesizes when the voice settings change although the text is unchanged', async () => {
+    // Owner report, 2026-10-21: changing the TTS model settings kept replaying
+    // the previous voice, because the replay guard only compared the sample
+    // text. The guard must cover the whole synthesis input (provider, account,
+    // capability overlay) as well.
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    const utils = await render(
+      <TtsTestPanel
+        providerType="soulvoice"
+        accountId="acc-1"
+        capability={{ model: 'soulvoice-turbo', voice: 'aria' }}
+      />,
+    );
+    await flush();
+
+    await fireEvent.changeText(utils.getByTestId('tts-text-input'), 'Same words');
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    expect(mockTestTtsSpeech).toHaveBeenCalledTimes(1);
+    await tickWithState('playing');
+    await tickWithState('ended');
+
+    // The editor rebuilds the capability overlay object on every field edit;
+    // a changed VOICE (new object, SAME text) must NOT take the replay branch.
+    await act(async () => {
+      utils.rerender(
+        <TtsTestPanel
+          providerType="soulvoice"
+          accountId="acc-1"
+          capability={{ voice: 'aria', model: 'soulvoice-turbo', speed: 1.5 }}
+        />,
+      );
+    });
+    await flush();
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    expect(mockTestTtsSpeech).toHaveBeenCalledTimes(2);
+    // The new synthesis carries the LIVE settings.
+    expect(mockTestTtsSpeech.mock.calls[1][0].capability_json).toEqual({
+      voice: 'aria',
+      model: 'soulvoice-turbo',
+      speed: 1.5,
+    });
+  });
+
+  it('still replays instantly when the settings prop is re-created with the same content', async () => {
+    // The editor's per-slot state rebuilds the object on unrelated renders;
+    // a fresh-but-identical capability object must not force a re-synthesis.
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    const capability = { model: 'soulvoice-turbo', voice: 'aria' };
+    const utils = await render(
+      <TtsTestPanel providerType="soulvoice" accountId="acc-1" capability={capability} />,
+    );
+    await flush();
+
+    await fireEvent.changeText(utils.getByTestId('tts-text-input'), 'Same words');
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+    expect(mockTestTtsSpeech).toHaveBeenCalledTimes(1);
+    await tickWithState('playing');
+    await tickWithState('ended');
+
+    await act(async () => {
+      utils.rerender(
+        // Same CONTENT, new object, different key order — must compare equal.
+        <TtsTestPanel
+          providerType="soulvoice"
+          accountId="acc-1"
+          capability={{ voice: 'aria', model: 'soulvoice-turbo' }}
+        />,
+      );
+    });
+    await flush();
+    await fireEvent.press(utils.getByTestId('tts-play-button'));
+    await flush();
+
+    // Instant replay from the kept bytes — no second engine round-trip.
+    expect(mockTestTtsSpeech).toHaveBeenCalledTimes(1);
+    expect(mockPlayBase64Audio).toHaveBeenCalledWith('QUJDRA==', 'audio/wav');
   });
 
   it('replay re-arms the player after a session teardown reset the shared queue', async () => {

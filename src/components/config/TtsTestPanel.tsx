@@ -24,8 +24,10 @@
  *
  * The player state is the same as before: the synthesized audio is kept as
  * `lastAudio: { base64, mime }` plus the `lastSynthText` it was synthesized
- * from, so the sample can be replayed or downloaded without another engine
- * round-trip.
+ * from and a `lastSynthFingerprint` of the settings that produced it, so the
+ * sample can be replayed or downloaded without another engine round-trip —
+ * and can never be replayed once the settings (provider, account, capability
+ * overlay: model, voice, pitch/speed, cloning params …) have moved on.
  *
  * ## Player row (rework)
  *
@@ -44,9 +46,11 @@
  *    the format badge (the ACTUAL sample format, sniffed from its bytes) and the
  *    download button.
  *  - finished → footer returns to the synthesize button (audio stays loaded):
- *    pressing it with UNCHANGED text replays instantly (the queue is REBUILT
- *    from the kept bytes — an external reset can outlive the panel's state),
- *    edited text re-synthesizes.
+ *    pressing it with UNCHANGED text AND settings replays instantly (the queue
+ *    is REBUILT from the kept bytes — an external reset can outlive the
+ *    panel's state), while an edited text OR a changed setting (the voice the
+ *    user is now hearing must come from the settings the user is looking at)
+ *    re-synthesizes.
  *
  * Duration comes up-front from the static `getDurationFromBase64` parser (which
  * sniffs the container, so declared-vs-actual mismatches — e.g. mp3 declared but
@@ -177,6 +181,49 @@ function audioMime(format?: string): string {
   return format.includes('/') ? format : `audio/${format}`;
 }
 
+/**
+ * Stable stringification — object key order INSensitive.
+ *
+ * Used for the replay guard's settings fingerprint. The config editor rebuilds
+ * the capability overlay object on every field edit (`{...prev, [key]: value}`)
+ * and object identities cannot be compared across re-renders; a canonical
+ * serialization makes one field change flip the fingerprint while harmless
+ * re-renders with the same content do not.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value ?? null);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries
+    .map(([key, v]) => `${JSON.stringify(key)}:${stableStringify(v)}`)
+    .join(',')}}`;
+}
+
+/**
+ * Fingerprint of everything that shapes a synthesis run: the provider, the
+ * account, and the live capability overlay. The big-button replay guard
+ * compares this against the fingerprint stored with the kept sample (owner
+ * report, 2026-10-21: changing the TTS voice still replayed the previous
+ * voice, because the guard only compared the sample text).
+ */
+function synthesisFingerprint(input: {
+  providerType?: string;
+  accountId?: string | null;
+  capability?: Record<string, any> | null;
+}): string {
+  return stableStringify({
+    providerType: input.providerType ?? null,
+    accountId: input.accountId ?? null,
+    capability: input.capability ?? null,
+  });
+}
+
 /** File extension for a shareable sample, derived from its mime type. */
 function audioFileExtension(mime: string): string {
   const value = (mime || '').toLowerCase();
@@ -289,6 +336,12 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
   /** The kept sample + the exact text it was synthesized from (replay guard). */
   const [lastAudio, setLastAudio] = useState<SynthesizedAudio | null>(null);
   const [lastSynthText, setLastSynthText] = useState('');
+  /**
+   * The settings fingerprint of the kept sample (the replay guard's other
+   * half): an unchanged text with CHANGED voice settings must re-synthesize,
+   * not replay the previous voice (owner report, 2026-10-21).
+   */
+  const [lastSynthFingerprint, setLastSynthFingerprint] = useState('');
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [tagPickerVisible, setTagPickerVisible] = useState(false);
@@ -462,6 +515,9 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
       setDuration(knownDuration != null && knownDuration > 0 ? knownDuration : 0);
       setLastAudio(result);
       setLastSynthText(spoken);
+      setLastSynthFingerprint(
+        synthesisFingerprint({ providerType, accountId, capability }),
+      );
       setPosition(0);
       setPhase('playing');
     } catch (err: any) {
@@ -479,13 +535,30 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
   ]);
 
   /**
-   * Big-button handler: instant replay when the kept sample was synthesized
-   * from the CURRENT text, otherwise a fresh synthesis (the text was edited).
+   * Fingerprint of the settings the USER is looking at right now. Computed in
+   * the render body so a capability-field edit flips it on the very next
+   * render, before the button is pressed.
+   */
+  const currentFingerprint = synthesisFingerprint({
+    providerType,
+    accountId,
+    capability,
+  });
+
+  /**
+   * Big-button handler: instant replay only when the kept sample was
+   * synthesized from the CURRENT text AND the CURRENT settings (the user must
+   * never hear the previous voice after changing it — owner report,
+   * 2026-10-21); otherwise a fresh synthesis with the live settings.
    */
   const handlePlay = useCallback(async () => {
     if (phase === 'synthesizing') return;
 
-    if (lastAudio && lastSynthText === text.trim()) {
+    if (
+      lastAudio &&
+      lastSynthText === text.trim() &&
+      lastSynthFingerprint === currentFingerprint
+    ) {
       hapticLightPress();
       setError(null);
       // A new playback of the kept sample: re-arm the pre-start guard.
@@ -512,7 +585,16 @@ export const TtsTestPanel: React.FC<TtsTestPanelProps> = ({
     }
 
     await synthesize();
-  }, [phase, lastAudio, lastSynthText, text, synthesize, t]);
+  }, [
+    phase,
+    lastAudio,
+    lastSynthText,
+    lastSynthFingerprint,
+    currentFingerprint,
+    text,
+    synthesize,
+    t,
+  ]);
 
   /** Player-row play/pause bubble. */
   const handleTogglePlayback = useCallback(async () => {
