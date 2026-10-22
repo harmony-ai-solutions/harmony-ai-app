@@ -212,6 +212,17 @@ export async function getConversationMessageImageBase64(
 }
 
 /**
+ * Base64 bytes of ONE message's audio (`GET /api/messages/:id/audio`). Empty
+ * string when the message has no audio blob; transport errors still throw so
+ * the caller can degrade (a chat bubble must not crash the list).
+ */
+export async function getConversationMessageAudioBase64(
+  messageId: string,
+): Promise<string> {
+  return engineApiClient.fetchMessageAudioBase64(messageId);
+}
+
+/**
  * Batched unread counts keyed by participant_key, scoped to the POV entity.
  * Derived from the chat-list endpoint (unread_count per conversation), which is
  * paginated — we walk pages until exhausted or a safety cap is hit.

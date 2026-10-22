@@ -41,7 +41,7 @@ import { useToast } from '../contexts/AppToastContext';
 import { ThemedView } from '../components/themed/ThemedView';
 import { ThemedText } from '../components/themed/ThemedText';
 import { hapticLightPress } from '../utils/haptics';
-import { ChatBubble, isPartnerMessage } from '../components/chat/ChatBubble';
+import { ChatBubble, indicatesAudio, isPartnerMessage } from '../components/chat/ChatBubble';
 import { ChatInputBar, PickedImage } from '../components/chat/ChatInputBar';
 import { TypingIndicator } from '../components/chat/TypingIndicator';
 import { NewMessagesDivider } from '../components/chat/NewMessagesDivider';
@@ -749,12 +749,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       setMessages(existingMessages);
       loadedMessagesRef.current = existingMessages;
 
-      // Detect stuck transcriptions (messages with audio but no text that aren't actively transcribing)
+      // Detect stuck transcriptions (messages with audio but no text that aren't actively transcribing).
+      // Engine parity: timeline payloads are metadata-only — presence is
+      // signaled by the mime column / message_type, not by inline bytes.
       const stuckTranscriptions = existingMessages
         .filter(
           msg =>
-            msg.audio_data &&
-            msg.audio_data.length > 0 &&
+            indicatesAudio(msg) &&
             (!msg.content || msg.content.trim().length === 0) &&
             msg.sender_entity_id === ownEntityId,
         )
