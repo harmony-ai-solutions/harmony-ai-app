@@ -269,6 +269,19 @@ jest.mock('@react-native-clipboard/clipboard', () => ({
 // Mock react-native-vector-icons
 jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => 'Icon');
 
+// Mock @react-native-community/slider (codegen'd native component). Renders a
+// host View that carries the sliding callbacks, so suites can drive seeking
+// with fireEvent(slider, 'slidingComplete', value). Suites that assert the real
+// prop surface override this per-file.
+jest.mock('@react-native-community/slider', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return {
+    __esModule: true,
+    default: (props) => React.createElement(View, props),
+  };
+});
+
 // Mock react-native-websocket-self-signed
 jest.mock('react-native-websocket-self-signed', () => ({
   __esModule: true,
