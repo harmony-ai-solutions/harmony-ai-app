@@ -16,7 +16,7 @@
  */
 
 import React from 'react';
-import { View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { ChatBubble } from '../ChatBubble';
 import { ConversationMessage } from '../../../database/models';
@@ -107,6 +107,8 @@ import {
 
 const mockGetState = (AudioPlayer as any).getState as jest.Mock;
 const mockResume = (AudioPlayer as any).resume as jest.Mock;
+const mockPause = (AudioPlayer as any).pause as jest.Mock;
+const mockSeekTo = (AudioPlayer as any).seekTo as jest.Mock;
 const mockLoadAudio = (AudioPlayer as any).loadAudioForMessage as jest.Mock;
 const mockIsMessageLoaded = (AudioPlayer as any).isMessageLoaded as jest.Mock;
 
@@ -264,6 +266,87 @@ describe('ChatBubble — playback completion classification', () => {
     // …and a genuine end still ends it.
     await tickWithState('ended');
     expect(isShowingPlaying(utils)).toBe(false);
+  });
+});
+
+/**
+ * Transport controls — the same player row shape as the TTS test panel
+ * (`TtsTestPanel`): one play/pause toggle, a seek slider, and a
+ * `0:03 / 0:57` clock. Regression coverage for the owner's 2026-10-22 report
+ * (narrow audio bubble, missing seeker, pause overridden by the auto-resume).
+ */
+describe('ChatBubble — transport controls', () => {
+  it('gives an audio message the width a wrapped text bubble gets', async () => {
+    const utils = await render(
+      <ChatBubble message={audioMessage} isOwn={false} theme={theme} />,
+    );
+    await flush();
+
+    const row = utils.getByTestId('chat-audio-row-audio-1');
+    const flat = StyleSheet.flatten(row.props.style) as { minWidth?: number };
+    expect(flat.minWidth).toBeGreaterThan(200);
+  });
+
+  it('seeks with the slider, sized from row metadata before the track is loaded', async () => {
+    const message: ConversationMessage = {
+      ...audioMessage,
+      id: 'seek-1',
+      audio_duration: 57,
+    };
+    const utils = await render(
+      <ChatBubble message={message} isOwn={false} theme={theme} />,
+    );
+    await flush();
+
+    const slider = utils.getByTestId('chat-audio-seek-seek-1');
+    expect(slider.props.maximumValue).toBe(57);
+    expect(utils.getByText('0:00 / 0:57')).not.toBeNull();
+
+    await fireEvent(slider, 'slidingComplete', 15);
+    await flush();
+    expect(mockSeekTo).toHaveBeenCalledWith(15);
+  });
+
+  it('never auto-resumes a pause the user requested', async () => {
+    const utils = await render(
+      <ChatBubble message={audioMessage} isOwn={false} theme={theme} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('chat-audio-audio-1'));
+    await flush();
+    await tickWithState('playing');
+    expect(isShowingPlaying(utils)).toBe(true);
+
+    mockResume.mockClear();
+
+    // The user taps pause: the intent is claimed before the player is awaited.
+    await fireEvent.press(utils.getByTestId('chat-audio-audio-1'));
+    await flush();
+    expect(mockPause).toHaveBeenCalledTimes(1);
+    expect(isShowingPlaying(utils)).toBe(false);
+
+    // A poll tick observing RNTP's `paused` right after that tap must NOT be
+    // read as an external interruption (the old auto-resume overrode the tap).
+    await tickWithState('paused');
+    expect(mockResume).not.toHaveBeenCalled();
+    expect(isShowingPlaying(utils)).toBe(false);
+  });
+
+  it('still auto-resumes an interruption that was not a tap-pause', async () => {
+    const utils = await render(
+      <ChatBubble message={audioMessage} isOwn={false} theme={theme} />,
+    );
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('chat-audio-audio-1'));
+    await flush();
+    await tickWithState('playing');
+
+    mockResume.mockClear();
+    await tickWithState('paused');
+    expect(mockResume).toHaveBeenCalledTimes(1);
+    expect(isShowingPlaying(utils)).toBe(true);
   });
 });
 

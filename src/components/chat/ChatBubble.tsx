@@ -4,6 +4,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { Avatar, IconButton } from 'react-native-paper';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
+import Slider from '@react-native-community/slider';
 import AudioPlayer from '../../services/AudioPlayer';
 import {
   getConversationMessageAudioBase64,
@@ -20,6 +21,14 @@ import { MessageReactionsBar } from './MessageReactionsBar';
 
 const log = createLogger('[ChatBubble]');
 const { width: screenWidth } = Dimensions.get('window');
+
+/**
+ * Inner width of a bubble at its maximum: `bubble.maxWidth` (75% of the
+ * window) minus the bubble's 12px horizontal padding. The audio row claims it
+ * so a voice note with its transcription collapsed is exactly as wide as a text
+ * bubble that wrapped (owner report, 2026-10-22).
+ */
+const AUDIO_ROW_MIN_WIDTH = Math.max(220, screenWidth * 0.75 - 24);
 
 /**
  * Engine-parity blob presence (desktop frontend parity, `chatStoreUtils.js`):
@@ -242,9 +251,38 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
    */
   const autoResumeAttemptedRef = useRef(false);
 
+  /**
+   * Set the instant the user taps pause, BEFORE `AudioPlayer.pause()` resolves.
+   * The 250 ms progress poll can observe RNTP's `paused` state in the same
+   * window and classify it as an external interruption — which used to
+   * auto-resume the very pause the user just requested (owner device,
+   * 2026-10-22: "sometimes it just continues to play despite I stopped").
+   * A deliberate pause must never be auto-resumed.
+   */
+  const userPausedRef = useRef(false);
+
+  /** True while the finger is on the seeker, so the poll can't fight the thumb. */
+  const isSeekingRef = useRef(false);
+
+  /** A seek made before the track was ever loaded, applied on first play. */
+  const pendingSeekPositionRef = useRef<number | null>(null);
+
   useEffect(() => {
     setEditedText(message.content || '');
   }, [message.content]);
+
+  // FlatList recycles rows: transport state belongs to `message.id`, so reset
+  // it when the row is rebound to a different message.
+  useEffect(() => {
+    setAudioDuration(null);
+    setCurrentPosition(0);
+    setIsPlaying(false);
+    hasStartedRef.current = false;
+    autoResumeAttemptedRef.current = false;
+    userPausedRef.current = false;
+    pendingSeekPositionRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message.id]);
 
   // The FlatList reuses bubble rows; re-derive the inline image bytes whenever
   // the row's message changes — inline bytes win, otherwise the cache.
@@ -301,7 +339,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       progressIntervalRef.current = setInterval(async () => {
         try {
           const progress = await AudioPlayer.getProgress();
-          setCurrentPosition(progress.position);
+          // While the finger is on the seeker, the slider owns the position.
+          if (!isSeekingRef.current) {
+            setCurrentPosition(progress.position);
+          }
           
           // End only on a genuine end state (ended/stopped/none/error) AFTER
           // playback was actually observed — `loading`/`ready` are the player
@@ -333,6 +374,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           // the next tap continues where the interruption caught it, instead of
           // the bubble looking like the message finished at 0:00.
           if (isPlaybackPaused(state)) {
+            // A tap-pause is not an interruption: honour it and stop polling.
+            if (userPausedRef.current) {
+              setIsPlaying(false);
+              return;
+            }
             if (!autoResumeAttemptedRef.current) {
               autoResumeAttemptedRef.current = true;
               log.info('Playback paused externally — auto-resuming once');
@@ -378,10 +424,17 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
     try {
       if (isPlaying) {
-        // Pause playback
-        await AudioPlayer.pause();
-        setIsPlaying(false);
+        // Deliberate pause: claim the intent BEFORE awaiting the player, so an
+        // in-flight poll tick can't mistake it for an external interruption and
+        // auto-resume it.
+        userPausedRef.current = true;
+        try {
+          await AudioPlayer.pause();
+        } finally {
+          setIsPlaying(false);
+        }
       } else {
+        userPausedRef.current = false;
         // Engine parity: the timeline payload is metadata-only — on first play
         // the audio bytes are fetched lazily from
         // `GET /api/messages/:id/audio` (desktop frontend parity: the shared
@@ -426,12 +479,21 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           }, 300);
         }
         
-        // Check if playback has finished (position at or near end)
-        const progress = await AudioPlayer.getProgress();
-        if (audioDuration && progress.position >= audioDuration - 0.5) {
-          // Seek back to beginning if playback has finished
-          await AudioPlayer.seekTo(0);
-          setCurrentPosition(0);
+        // Check if playback has finished (position at or near end) — unless the
+        // user picked a start point on the seeker before ever playing the
+        // track, in which case honour that choice.
+        const pendingSeek = pendingSeekPositionRef.current;
+        if (pendingSeek !== null) {
+          pendingSeekPositionRef.current = null;
+          await AudioPlayer.seekTo(pendingSeek);
+          setCurrentPosition(pendingSeek);
+        } else {
+          const progress = await AudioPlayer.getProgress();
+          if (audioDuration && progress.position >= audioDuration - 0.5) {
+            // Seek back to beginning if playback has finished
+            await AudioPlayer.seekTo(0);
+            setCurrentPosition(0);
+          }
         }
         
         // Resume playback (track is already loaded)
@@ -445,6 +507,28 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     } catch (error) {
       log.error('Failed to toggle playback:', error);
       setIsPlaying(false);
+    }
+  };
+
+  /** Seeker — the finger owns the position until release (the poll backs off). */
+  const handleSeekStart = () => {
+    isSeekingRef.current = true;
+  };
+
+  /** Seeker release — label updates immediately, then the player seeks. */
+  const handleSeekComplete = async (value: number) => {
+    isSeekingRef.current = false;
+    setCurrentPosition(value);
+    if (!AudioPlayer.isMessageLoaded(message.id)) {
+      // The track has not been loaded yet (seek before first play): remember
+      // the chosen start point and apply it once the bytes are loaded.
+      pendingSeekPositionRef.current = value;
+      return;
+    }
+    try {
+      await AudioPlayer.seekTo(value);
+    } catch (error) {
+      log.warn('Failed to seek message audio:', error);
     }
   };
 
@@ -482,6 +566,14 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const isTranscribing = hasAudio && !hasText;
     // Pending send (user's own audio message before sending)
     const isPendingSend = message.message_type === 'audio' && hasText && isOwn;
+
+    // Transport length: the live player duration wins once known, otherwise the
+    // conversation row's metadata (`audio_duration`) — so the seeker works from
+    // the very first frame, before the bytes are even fetched.
+    const seekDuration =
+      audioDuration && audioDuration > 0 ? audioDuration : message.audio_duration ?? 0;
+    const seekMaximum = Math.max(seekDuration, 0.1);
+    const clampedPosition = Math.min(Math.max(currentPosition, 0), seekMaximum);
 
     return (
       <>
@@ -538,50 +630,58 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         )}
         
         {hasAudio && (
-          <TouchableOpacity 
-            onPress={handlePlayAudio} 
-            testID={`chat-audio-${message.id}`}
-            style={[styles.audioContainer, { backgroundColor: theme.colors.background.elevated + '40' }]}
-            disabled={isLoadingAudio}
-            activeOpacity={1}
+          <View
+            style={[
+              styles.audioContainer,
+              // Engine-parity bubbles are content-width by default; audio-only
+              // messages (transcription collapsed) collapsed to a sliver. The
+              // player always claims the same width a wrapped text bubble gets
+              // (bubble maxWidth − horizontal padding).
+              { backgroundColor: theme.colors.background.elevated + '40', minWidth: AUDIO_ROW_MIN_WIDTH },
+            ]}
+            testID={`chat-audio-row-${message.id}`}
           >
-            {isLoadingAudio ? (
-              <ActivityIndicator size="small" color={theme.colors.accent.primary} />
-            ) : (
-              <IconButton
-                icon={isPlaying ? 'pause' : 'play'}
-                size={24}
-                iconColor={theme.colors.accent.primary}
-                animated={false}
-                style={styles.playButton}
+            <TouchableOpacity
+              onPress={handlePlayAudio}
+              testID={`chat-audio-${message.id}`}
+              accessibilityRole="button"
+              accessibilityLabel={isPlaying ? t('pause') : t('play')}
+              disabled={isLoadingAudio}
+              activeOpacity={0.7}
+              style={styles.playButtonTouchable}
+            >
+              {isLoadingAudio ? (
+                <ActivityIndicator size="small" color={theme.colors.accent.primary} />
+              ) : (
+                <IconButton
+                  icon={isPlaying ? 'pause' : 'play'}
+                  size={24}
+                  iconColor={theme.colors.accent.primary}
+                  animated={false}
+                  style={styles.playButton}
                 />
-            )}
-            <View style={styles.audioWaveform}>
-              <View style={[styles.progressBarBackground, { backgroundColor: theme.colors.text.muted + '30' }]}>
-                <View 
-                  style={[
-                    styles.progressBar, 
-                    { 
-                      backgroundColor: theme.colors.accent.primary,
-                      width: audioDuration && audioDuration > 0 
-                        ? `${(currentPosition / audioDuration) * 100}%`
-                        : '0%'
-                    }
-                  ]} 
-                />
-              </View>
-            </View>
+              )}
+            </TouchableOpacity>
+            <Slider
+              testID={`chat-audio-seek-${message.id}`}
+              style={styles.audioSeekSlider}
+              minimumValue={0}
+              maximumValue={seekMaximum}
+              value={clampedPosition}
+              minimumTrackTintColor={theme.colors.accent.primary}
+              maximumTrackTintColor={theme.colors.text.muted + '30'}
+              thumbTintColor={theme.colors.accent.primary}
+              disabled={seekDuration <= 0 || isLoadingAudio}
+              onSlidingStart={handleSeekStart}
+              onSlidingComplete={handleSeekComplete}
+            />
             <ThemedText variant="muted" size={12} style={styles.durationText}>
-              {audioDuration && currentPosition > 0
-                ? `${formatDuration(currentPosition)} / ${formatDuration(audioDuration)}`
-                : audioDuration
-                ? `${formatDuration(currentPosition)} / ${formatDuration(audioDuration)}`
-                : message.audio_duration
-                ? formatDuration(message.audio_duration)
+              {seekDuration > 0
+                ? `${formatDuration(currentPosition)} / ${formatDuration(seekDuration)}`
                 : '--:--'
               }
             </ThemedText>
-          </TouchableOpacity>
+          </View>
         )}
 
         {isTranscribing && !isTranscriptionFailed && (
@@ -915,25 +1015,21 @@ const styles = StyleSheet.create({
   playButton: {
     margin: 0,
   },
-  audioWaveform: {
-    flex: 1,
-    height: 24,
+  playButtonTouchable: {
     justifyContent: 'center',
-    marginHorizontal: 8,
+    alignItems: 'center',
   },
-  progressBarBackground: {
-    width: '100%',
-    height: 4,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressBar: {
-    height: '100%',
-    borderRadius: 2,
+  audioSeekSlider: {
+    flex: 1,
+    height: 30,
+    marginHorizontal: 4,
   },
   durationText: {
     minWidth: 60,
     textAlign: 'right',
+    // Same monospace clock as the TTS test panel's player row — keeps the
+    // running `0:03 / 0:57` from shifting width on every tick.
+    fontFamily: 'monospace',
   },
   waveformBar: {
     height: 4,
