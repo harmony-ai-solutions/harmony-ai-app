@@ -39,4 +39,17 @@ describe('resolveChatConnectionState (4-state mapping, D36)', () => {
       resolveChatConnectionState({ isConnected: false, isSessionActive: true, sessionFailed: false }),
     ).toBe('offline');
   });
+
+  it('offline (not the amber pulse) for a store-locked entity (7-14 V3)', () => {
+    // A locked entity never starts a session — a perpetual amber "connecting"
+    // dot would be misleading; the calm grey offline dot is the clean state.
+    expect(
+      resolveChatConnectionState({
+        isConnected: true,
+        isSessionActive: false,
+        sessionFailed: false,
+        locked: true,
+      }),
+    ).toBe('offline');
+  });
 });

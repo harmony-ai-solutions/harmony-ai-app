@@ -4,7 +4,7 @@
  * Verifies:
  *  - the pure parseWavAudioParams helper (WAV header → channels/bit_depth/sample_rate)
  *  - the pure computeVadBars helper (clamping / empty / duration bounds)
- *  - offline state renders "Connect to Harmony Link to test" and never records
+ *  - offline state renders "Connect to Soulbits Engine to test" and never records
  *  - the record → stop → transcribe state machine drives AudioRecorder + the
  *    ModuleTestSessionService (both mocked): resolves the active persona, sends
  *    STT_INPUT_AUDIO with the pinned event contract, renders the transcript
@@ -61,7 +61,7 @@ jest.mock('../../themed/ThemedText', () => {
 });
 jest.mock('../../themed/ThemedButton', () => {
   const React = require('react');
-  const { View, Text, TouchableOpacity } = require('react-native');
+  const { Text, TouchableOpacity } = require('react-native');
   return { __esModule: true, ThemedButton: ({ label, onPress, testID, disabled, ...props }: any) =>
     React.createElement(TouchableOpacity, { testID, onPress: () => onPress(), disabled, accessibilityRole: 'button', ...props },
       React.createElement(Text, null, label)) };
@@ -82,7 +82,7 @@ jest.mock('../../../services/ChatPreferencesService', () => ({
   default: { getGlobalImpersonatedEntity: jest.fn().mockResolvedValue('claire') },
 }));
 
-jest.mock('../../../database/repositories/userEntities', () => ({
+jest.mock('../../../services/engine/repositories/userEntities', () => ({
   resolvePersonaId: jest.fn().mockResolvedValue('claire'),
 }));
 
@@ -110,7 +110,7 @@ jest.mock('../../../services/streaming/streamingService', () => ({
 
 import AudioRecorder from '../../../services/AudioRecorder';
 import ChatPreferencesService from '../../../services/ChatPreferencesService';
-import { resolvePersonaId } from '../../../database/repositories/userEntities';
+import { resolvePersonaId } from '../../../services/engine/repositories/userEntities';
 import { runTest, ModuleTestSessionError } from '../../../services/voiceInput/moduleTestSessionService';
 import { startAudioStream } from '../../../services/streaming/streamingService';
 
@@ -220,7 +220,7 @@ describe('SttTestPanel — state machine + offline handling', () => {
       mockCapturedSendEvents = [];
       return fn({
         sendEvent: async (ev: any) => { mockCapturedSendEvents.push(ev); },
-        awaitEvent: async (_eventType: string, opts: any) => {
+        awaitEvent: async () => {
           const stt = mockCapturedSendEvents.find((e: any) => e.event_type === 'STT_INPUT_AUDIO');
           const messageId = stt?.payload?.message_id;
           return { event_type: 'STT_OUTPUT_TEXT', status: 'NEW', payload: { message_id: messageId, content: 'hello world' } };
@@ -278,6 +278,33 @@ describe('SttTestPanel — state machine + offline handling', () => {
     expect(mockStopRecording).toHaveBeenCalledTimes(1);
     // One-shot path not used.
     expect(mockRunTest).not.toHaveBeenCalled();
+  });
+
+  it('tracks STT_SPEECH_STARTED / STOPPED and accumulates live VAD segment bars', async () => {
+    const utils = await render(<SttTestPanel enabled />);
+    await flush();
+
+    await fireEvent.press(utils.getByTestId('stt-record-button'));
+    await flush();
+
+    const opts = mockStartAudioStream.mock.calls[0][0];
+    expect(typeof opts.onVoiceActivity).toBe('function');
+
+    const base = Date.now();
+    await act(async () => opts.onVoiceActivity(true, base));
+    expect(utils.getByText(/STT_SPEECH_STARTED · Voice Detected/)).toBeTruthy();
+
+    await act(async () => opts.onVoiceActivity(false, base + 500));
+    expect(utils.getByText(/STT_SPEECH_STOPPED · Waiting for voice/)).toBeTruthy();
+
+    // The completed [start, end] interval populates the live timeline.
+    expect(utils.getByTestId('stt-vad-timeline')).toBeTruthy();
+    expect(utils.getByTestId('stt-live-vad-bar-0')).toBeTruthy();
+
+    // A second utterance accumulates a second bar.
+    await act(async () => opts.onVoiceActivity(true, base + 800));
+    await act(async () => opts.onVoiceActivity(false, base + 1200));
+    expect(utils.getByTestId('stt-live-vad-bar-1')).toBeTruthy();
   });
 
   it('live mode uses the explicit entityId override (skips persona resolution)', async () => {

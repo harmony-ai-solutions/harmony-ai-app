@@ -23,8 +23,6 @@ let mockConnectionManager: EventEmitter & {
   disconnectConnection: jest.Mock;
   createConnection: jest.Mock;
 };
-let mockSyncAndWait: jest.Mock;
-let mockInitiateSync: jest.Mock;
 
 jest.mock('react-native-device-info', () => ({
   getUniqueId: jest.fn().mockResolvedValue('test-device'),
@@ -73,55 +71,29 @@ jest.mock('../connection/ConnectionManager', () => {
   return { __esModule: true, default: cm };
 });
 
-jest.mock('../SyncService', () => {
-  mockSyncAndWait = jest.fn().mockResolvedValue(undefined);
-  mockInitiateSync = jest.fn().mockResolvedValue(undefined);
-  return {
-    __esModule: true,
-    SyncService: {
-      getInstance: () => ({
-        syncAndWait: mockSyncAndWait,
-        initiateSync: mockInitiateSync,
-      }),
-    },
-  };
-});
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   createInteraction: jest.fn().mockResolvedValue(undefined),
   deriveScopeFromParticipants: jest.fn().mockReturnValue('one_on_one'),
   deriveParticipantKey: jest.fn().mockReturnValue('claire+user'),
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   messageExists: jest.fn(),
   createConversationMessage: jest.fn(),
   updateConversationMessage: jest.fn(),
   getConversationMessage: jest.fn(),
 }));
 
-jest.mock('../../database/repositories/entities', () => ({
+jest.mock('../../services/engine/repositories/entities', () => ({
   getEntity: jest.fn().mockResolvedValue(null),
 }));
 
-jest.mock('../../database/repositories/chatConversationSettings', () => ({
+jest.mock('../../services/engine/repositories/chatConversationSettings', () => ({
   getReplyMode: jest.fn().mockResolvedValue('realistic'),
 }));
 
-jest.mock('../../database/connection', () => ({
-  getDatabase: jest.fn(),
-  getSyncDatabase: jest.fn().mockResolvedValue(undefined),
-}));
 
-jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    getStatus: jest.fn().mockReturnValue('idle'),
-    isPurging: jest.fn().mockReturnValue(false),
-  },
-  default: {},
-}));
 
 jest.mock('../ConnectionStateManager', () => ({
   __esModule: true,
@@ -157,8 +129,6 @@ function makeSession(interactionId = 'ix-failed', failed = false): InteractionSe
 describe('EntitySessionService — terminal failure retention (4-3 / D36)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockSyncAndWait.mockClear().mockResolvedValue(undefined);
-    mockInitiateSync.mockClear().mockResolvedValue(undefined);
     mockConnectionManager.sendEvent.mockClear().mockResolvedValue(undefined);
     mockConnectionManager.isConnected.mockClear().mockReturnValue(true);
     mockConnectionManager.disconnectConnection.mockClear();

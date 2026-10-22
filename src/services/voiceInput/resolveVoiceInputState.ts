@@ -17,8 +17,8 @@
  * ## Write path
  *
  * Rows are created/linked ONLY on deliberate user save (a legitimate LWW win) —
- * see VoiceInputSettingsScreen's toggle/save handlers. There is NO bootstrap or
- * ensure-create logic anywhere in the read path.
+ * see `personaVoice.ts#ensurePersonaVoiceConfig` / `disablePersonaVoice`. There
+ * is NO bootstrap or ensure-create logic anywhere in the read path.
  */
 
 import type { EntityModuleMapping, STTConfig } from '../../database/models';

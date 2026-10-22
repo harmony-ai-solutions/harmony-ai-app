@@ -3,6 +3,16 @@
  *
  * Full-screen overlay displayed when the app is locked via biometric/PIN.
  * Shows a branded unlock prompt with biometric button or PIN entry.
+ *
+ * # Keep-awake
+ *
+ * The lock overlay is the one screen the user cannot get past by "just waking
+ * the phone": when the display slept here, waking it fired the OS biometric
+ * prompt ~350 ms later, the prompt's own screen-off window let the display sleep
+ * again, and the lock re-armed — the "phone is in lockdown, it re-sleeps
+ * instantly" loop (owner device, Android 15, 2026-10-21). So the overlay holds
+ * the display awake for as long as it is mounted (the wrapper refcounts, so the
+ * TTS panel holding it underneath at the same time is safe).
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
@@ -12,9 +22,9 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  AppState,
   AppStateStatus,
 } from 'react-native';
+import { AppLifecycle } from 'react-native-applifecycle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -25,6 +35,7 @@ import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedGradient } from '../themed/ThemedGradient';
 import { ThemedButton } from '../themed/ThemedButton';
+import { activateKeepScreenOn, deactivateKeepScreenOn } from '../../services/keepScreenOn';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
 
@@ -57,6 +68,15 @@ export const LockScreen: React.FC = () => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+    };
+  }, []);
+
+  // Hold the display awake while locked — see the header note. Released on
+  // unlock (the overlay unmounts) or any other unmount.
+  useEffect(() => {
+    activateKeepScreenOn();
+    return () => {
+      deactivateKeepScreenOn();
     };
   }, []);
 
@@ -96,7 +116,7 @@ export const LockScreen: React.FC = () => {
     let cancelled = false;
     const timer = setTimeout(() => {
       if (cancelled) return;
-      if (AppState.currentState !== 'active') return; // not foregrounded yet
+      if (AppLifecycle.currentState !== 'active') return; // not foregrounded yet
       setBiometricAttempted(true);
       handleBiometricUnlock();
     }, 350);
@@ -110,6 +130,11 @@ export const LockScreen: React.FC = () => {
   // Re-arm the biometric auto-prompt on a TRUE resume (background → active).
   // The OS biometric prompt only ever causes active→inactive→active, never a
   // 'background' state, so this never double-prompts during a normal unlock.
+  //
+  // Source = AppLifecycle, NOT RN AppState: on Android RN's `background` fires
+  // on any Activity onPause, so a paused-but-VISIBLE overlay (volume HUD) would
+  // re-arm the prompt while the lock screen is mounted. AppLifecycle reports a
+  // real ON_STOP leave instead (on iOS it falls back to RN AppState).
   useEffect(() => {
     const handleChange = (next: AppStateStatus) => {
       if (next === 'background') {
@@ -141,7 +166,7 @@ export const LockScreen: React.FC = () => {
         }
       }
     };
-    const subscription = AppState.addEventListener('change', handleChange);
+    const subscription = AppLifecycle.addEventListener('change', handleChange);
     return () => {
       subscription.remove();
     };

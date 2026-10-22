@@ -20,7 +20,7 @@ See also: [`docs/TESTING.md`](TESTING.md) for the current testing strategy.
 
 ---
 
-### 2. Pact contract tests for the Harmony Link protocol
+### 2. Pact contract tests for the Soulbits Engine protocol
 
 **Description**: Add Pact consumer-driven contract tests between the TS client and the Go server. The TS side defines "what messages I send and what I expect back" as Pact contracts; the Go side verifies each contract against its actual implementation.
 
@@ -287,8 +287,8 @@ fields (verified by `harmony-link-private/eventserver/synchronization_cloudmode_
 The server generates a real JWT internally but doesn't send it in the response
 — cloud deployments rely on the conduct proxy for user auth.
 
-The client's `ConnectionStateManager.applyE2EOverride()` strategy relies on
-this being fine because:
+The (since-removed, 7-9) `ConnectionStateManager.applyE2EOverride()` strategy
+relied on this being fine because:
 1. `request.go:131` skips JWT validation in cloud mode
 2. Empty string satisfies `jwtToken !== null` in `ConnectionStateManager.initialize()`
 3. `saveConnectionCredentials()` overwrites the placeholder with the empty value
@@ -315,9 +315,9 @@ are in place:
 - `soulbits/harmony-link:latest` image present locally
 - `budtmo/docker-android:emulator_14.0` pulled and KVM-validated
 - Healthcheck regex fixed (`READY`, not `device_status=online`)
-- APK buildable with `-PHARMONY_LINK_WSS_URL=...` + `-PHARMONY_LINK_WS_URL=...`
+- APK buildable via `e2e/build-apk.sh` / `e2e/build-apk.ps1` (the E2E gradle flags were removed in 7-9)
 - Maestro flows have real selectors based on actual i18n strings + testIDs
-- `ConnectionStateManager.applyE2EOverride()` implements the auto-pairing strategy
+- `ConnectionStateManager.applyE2EOverride()` implemented the auto-pairing strategy (removed in 7-9)
 
 But the actual end-to-end run (compose up → APK install → Maestro flows) has
 **not been executed**. The next session should pick up from here.
@@ -366,8 +366,7 @@ properties instead, which are per-invocation. The `android/app/build.gradle`
 `buildConfigField` declarations read via `project.findProperty(...)`:
 
 ```gradle
-buildConfigField "String", "HARMONY_LINK_WSS_URL", "\"${project.findProperty('HARMONY_LINK_WSS_URL') ?: ''}\""
-buildConfigField "String", "HARMONY_LINK_WS_URL", "\"${project.findProperty('HARMONY_LINK_WS_URL') ?: ''}\""
+// (Removed in 7-9: the E2E override flags no longer exist.)
 ```
 
 Helper scripts: `e2e/build-apk.sh` + `e2e/build-apk.ps1`.
@@ -386,16 +385,14 @@ to migrate to `gradlew --no-daemon` for E2E builds (slower but more predictable)
 
 ---
 
-### 23. Production-side `HARMONY_LINK_WSS_URL` override now implemented (was deferred)
+### 23. Production-side E2E override — REMOVED in 7-9 (was implemented, then retired)
 
-**Description**: This was originally deferred from Phase 4-1 (see `tls-current-state.md`
-line 78). **Now completed** in `src/services/ConnectionStateManager.ts:applyE2EOverride()`.
+**Description**: Originally deferred from Phase 4-1, implemented in
+`ConnectionStateManager.applyE2EOverride()`, then **removed in 7-9** together
+with the whole `HARMONY_LINK_WSS_URL`/`HARMONY_LINK_WS_URL` chain — the
+remote-WSS pairing model it pre-seeded was deleted in 3-4. No action needed.
 
-Documented here only as a closure record — no action needed.
-
-**Why it matters**: Closes a gap noted in the original Phase 4-1 plan. The
-production code path now reads `Config.HARMONY_LINK_WSS_URL` and
-`Config.HARMONY_LINK_WS_URL` at boot.
+**Why it matters**: Historical closure record; the override no longer exists.
 
 **Effort**: Done.
 

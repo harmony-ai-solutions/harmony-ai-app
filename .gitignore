@@ -104,3 +104,11 @@ client_secret_*.json
 # overrides — never tracked.
 /secrets/
 android/gradle-secrets.*.properties
+
+# Engine sidecar binaries (vendored by the :app:vendorEngineSidecar gradle task; never committed)
+/android/app/src/main/jniLibs/**/libengine.so
+
+# Engine iOS framework (built by the engine repo's build_facade_ios.sh and
+# dropped into ios/Frameworks/ by the owner — task 4-2 owner gate; never committed)
+/ios/Frameworks/*.xcframework
+/ios/Frameworks/*.framework

@@ -43,9 +43,10 @@
 export type WebSocketCtor = typeof WebSocket;
 
 export function getWebSocketCtor(): WebSocketCtor {
-  if (process.env.JEST_WORKER_ID !== undefined) {
+  if ((globalThis as { __JEST__?: boolean }).__JEST__ === true) {
     // Running under Jest — use standard WebSocket (intercepted by jest-websocket-mock).
-    // The jsdom test environment provides a global WebSocket.
+    // The jsdom test environment provides a global WebSocket. The `__JEST__`
+    // flag is set by jest.setup.js (and read by the logger for the same reason).
     return WebSocket;
   }
   // Production — lazy require to keep the native module out of test imports.

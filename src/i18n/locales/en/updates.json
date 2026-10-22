@@ -1,0 +1,26 @@
+{
+  "dismiss": "Dismiss",
+  "about": {
+    "title": "About",
+    "appVersion": "App version",
+    "engineVersion": "Soulbits Engine",
+    "contractVersion": "Management contract",
+    "unknown": "unknown"
+  },
+  "desktopEngine": {
+    "heading": "Download the latest desktop engine",
+    "windows": "Windows",
+    "linux": "Linux"
+  },
+  "selfUpdate": {
+    "title": "Update available",
+    "body": "Download and install app v{{version}} now?",
+    "confirm": "Download & install",
+    "cancel": "Cancel",
+    "downloading": "Downloading…",
+    "installFailed": "Could not install the update: {{message}}",
+    "permissionNeeded": "Allow installing apps from this source, then try again.",
+    "openSettings": "Open settings",
+    "notSupported": "In-app updates are not available on this build."
+  }
+}

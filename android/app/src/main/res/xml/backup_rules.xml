@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Legacy Auto Backup rules (API < 31; superseded by data_extraction_rules.xml on
+  Android 12+). Excludes the engine data dir (DB + staging + RAG) from cloud Auto
+  Backup; device-to-device transfer is governed by data_extraction_rules.xml.
+-->
+<full-backup-content>
+    <exclude domain="file" path="engine" />
+</full-backup-content>

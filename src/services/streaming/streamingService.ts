@@ -110,6 +110,22 @@ export class AudioStreamingService {
           log.error('onTranscript handler threw:', err);
           options.onError?.(err instanceof Error ? err : new Error(String(err)));
         }
+      } else if (
+        event.event_type === 'STT_SPEECH_STARTED' ||
+        event.event_type === 'STT_SPEECH_STOPPED'
+      ) {
+        // Engine AutoVAD gate (modules/stt.go). The session is already scoped to
+        // `options.entityId`; when the envelope carries an entity id, honour it
+        // (never surface another entity's activity on this stream).
+        const eventEntity = event.entity_id ?? event.entityId;
+        if (eventEntity !== undefined && String(eventEntity) !== options.entityId) return;
+        const speaking = event.event_type === 'STT_SPEECH_STARTED';
+        try {
+          options.onVoiceActivity?.(speaking, Date.now());
+        } catch (err) {
+          log.error('onVoiceActivity handler threw:', err);
+          options.onError?.(err instanceof Error ? err : new Error(String(err)));
+        }
       }
     });
 

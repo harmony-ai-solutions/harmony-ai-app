@@ -9,6 +9,9 @@
  * entity WebSockets (live heartbeats, "Connection entity-X already exists,
  * disconnecting first" on the next session, orphaned engine-side sessions).
  *
+ * The call is now ownership-aware (`stopSessionAudio`): a session stop still
+ * leaves a config-screen TTS preview playing (owner device, 2026-10-21).
+ *
  * These tests pin the fix: audio errors (and per-connection teardown errors)
  * must never skip the remaining disconnects.
  */
@@ -52,7 +55,9 @@ jest.mock('../AudioPlayer', () => {
   mockAudioPlayerStop = jest.fn().mockResolvedValue(undefined);
   return {
     __esModule: true,
-    default: { stop: mockAudioPlayerStop },
+    // Ownership-aware stop: session teardown must never call the full stop()
+    // (that reset the shared TrackPlayer queue under config-screen previews).
+    default: { stopSessionAudio: mockAudioPlayerStop },
     AudioPlayer: class {},
   };
 });
@@ -71,20 +76,7 @@ jest.mock('../connection/ConnectionManager', () => {
   return { __esModule: true, default: cm };
 });
 
-jest.mock('../../database/connection', () => ({
-  getDatabase: jest.fn(),
-  getSyncDatabase: jest.fn().mockResolvedValue(undefined),
-}));
 
-jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    getStatus: jest.fn().mockReturnValue('idle'),
-    isPurging: jest.fn().mockReturnValue(false),
-  },
-  default: {},
-}));
 
 function resetSingleton(): void {
   (EntitySessionService as any).instance = null;
@@ -117,8 +109,8 @@ describe('EntitySessionService.stopInteractionSession teardown', () => {
     resetSingleton();
   });
 
-  it('still disconnects ALL connections when AudioPlayer.stop() throws player_not_initialized', async () => {
-    // TrackPlayer was never set up → stop() rejects, exactly like on device.
+  it('still disconnects ALL connections when the ownership-aware audio stop throws', async () => {
+    // TrackPlayer was never set up → stopSessionAudio rejects, exactly like on device.
     mockAudioPlayerStop.mockRejectedValue(
       Object.assign(new Error('Stop failed'), { code: 'player_not_initialized' }),
     );
@@ -132,6 +124,7 @@ describe('EntitySessionService.stopInteractionSession teardown', () => {
     await svc.stopInteractionSession('ix-1');
 
     // The audio error must not skip connection teardown (the on-device bug).
+    expect(mockAudioPlayerStop).toHaveBeenCalledTimes(1);
     expect(mockConnectionManager.disconnectConnection).toHaveBeenCalledWith('entity-claire');
     expect(mockConnectionManager.disconnectConnection).toHaveBeenCalledWith('entity-user');
     // Dead protocol removed: the socket close itself triggers the engine

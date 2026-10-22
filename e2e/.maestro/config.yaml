@@ -1,5 +1,5 @@
 # e2e/.maestro/config.yaml
-# Maestro configuration for the HarmonyAIChat E2E suite.
+# Maestro configuration for the Soulbits E2E suite.
 # See https://maestro.mobile.dev/cli/configuration
 #
 # NOTE: `output` and `format` are CLI-only flags, NOT valid config.yaml keys.

@@ -23,13 +23,13 @@ import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
 import { hapticLightPress } from '../../utils/haptics';
-import { getAllEntities } from '../../database/repositories/entities';
-import { getRecentPhoneInteractions } from '../../database/repositories/interactions';
+import { getAllEntities } from '../../database/repositories';
+import { getRecentPhoneInteractions } from '../../database/repositories';
 import {
   getCharacterProfile,
   getPrimaryImage,
   imageToDataURL,
-} from '../../database/repositories/characters';
+} from '../../database/repositories';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger('[ForwardPickerModal]');

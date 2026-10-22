@@ -10,16 +10,19 @@ import { createLogger } from '../utils/logger';
 
 const log = createLogger('[ChatPreferencesService]');
 const GLOBAL_ENTITY_KEY = 'chat_global_impersonated_entity';
-// Reply pacing preference (A6): stored per participant key. The `@harmony_`
+// Reply pacing preference (A6): stored per participant key. The `@soulbits_`
 // prefix matches the app's reserved AsyncStorage key convention (cf.
-// `@harmony_character_categories`, `@harmony_setting_biometric_lock`).
+// `@soulbits_character_categories`, `@soulbits_setting_biometric_lock`).
 // Interim client-side storage — becomes a synced `chat_conversation_settings`
 // column in engine Phase 2 (B2). Kept here; dies in Phase 4-4.
-const REPLY_MODE_PREFIX = '@harmony_chat_reply_mode_';
+const REPLY_MODE_PREFIX = '@soulbits_chat_reply_mode_';
 // Legacy "chat as an AI character" per-chat persona preference (O2/P4). Dead —
 // persona resolution now runs off `entities` (the persona switcher + global
 // key). These keys are swept once at app bootstrap (Q14); nothing writes them.
 const LEGACY_ENTITY_PREF_PREFIX = 'chat_entity_pref_';
+// Per-entity chat background (ChatBackgroundService's key family). Entity-id
+// keyed like the reply-mode keys, so the boot-window wipe clears it too.
+const CHAT_BACKGROUND_PREFIX = '@soulbits_chat_background_';
 
 /** Reply pacing for a conversation: instant, or realistic (typing-delay). */
 export type ChatReplyMode = 'instant' | 'realistic';
@@ -119,7 +122,8 @@ async function sweepLegacyEntityPrefs(): Promise<void> {
  * preference family whose keys are entity-id-keyed and would otherwise dangle
  * after the database wipe + full re-sync:
  *   - `chat_global_impersonated_entity` (single global key)
- *   - `@harmony_chat_reply_mode_*` (per participant key)
+ *   - `@soulbits_chat_reply_mode_*` (per participant key)
+ *   - `@soulbits_chat_background_*` (per entity key — ChatBackgroundService)
  *   - legacy `chat_entity_pref_*` (per-chat persona prefs, dead since Q14)
  *
  * Unlike `sweepLegacyEntityPrefs`, this clears the GLOBAL key and the
@@ -134,6 +138,7 @@ async function sweepWipePreferences(): Promise<void> {
       key =>
         key === GLOBAL_ENTITY_KEY ||
         key.startsWith(REPLY_MODE_PREFIX) ||
+        key.startsWith(CHAT_BACKGROUND_PREFIX) ||
         key.startsWith(LEGACY_ENTITY_PREF_PREFIX),
     );
     if (wipeKeys.length > 0) {

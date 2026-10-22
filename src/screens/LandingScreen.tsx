@@ -22,7 +22,6 @@ export const LandingScreen: React.FC = () => {
   const { theme } = useAppTheme();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { t } = useTranslation('landing');
-  const { serverUpdateRequired } = useSyncConnection();
   const [refreshing, setRefreshing] = useState(false);
 
   if (!theme) return null;
@@ -37,7 +36,7 @@ export const LandingScreen: React.FC = () => {
       {/* Header */}
       <ScreenHeader
         title={t('title')}
-        right={<ConnectionStatusBadge serverUpdateRequired={serverUpdateRequired} />}
+        right={<ConnectionStatusBadge />}
       />
 
       <ScrollView

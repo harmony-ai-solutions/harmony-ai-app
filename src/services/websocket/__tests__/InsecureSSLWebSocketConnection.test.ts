@@ -262,4 +262,40 @@ describe('InsecureSSLWebSocketConnection', () => {
     await conn.connect(url);
     expect(conn.isConnected()).toBe(true);
   });
+
+  // ── Loopback-token credential (7-11 pattern) ───────────────────────────
+  // The embedded engine is dialed over loopback with a per-process token in the
+  // URL; the (producerless) soulbits_jwt must NOT be required for that path.
+
+  it('dials with the loopback token and no JWT when the URL carries a token param', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    const url = 'ws://127.0.0.1:28080?token=loopback-tok&connection_id=sync';
+    const conn = new InsecureSSLWebSocketConnection();
+
+    await conn.connect(url);
+
+    expect(conn.isConnected()).toBe(true);
+    const ws = FakeWS.getInstance(url);
+    // No Authorization header — the loopback token in the URL is the credential.
+    expect(ws.connect).toHaveBeenCalledWith({});
+  });
+
+  it('still requires a JWT when the URL carries no token param', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    const conn = new InsecureSSLWebSocketConnection();
+    await expect(conn.connect('wss://10.0.2.2:28443/events')).rejects.toThrow(
+      'No JWT credentials available',
+    );
+  });
+
+  it('still sends the JWT authorization header when one exists (legacy pairing)', async () => {
+    // beforeEach seeds a JWT; a token param must not suppress it.
+    const url = 'wss://10.0.2.2:28443/events?token=loopback-tok';
+    const conn = new InsecureSSLWebSocketConnection();
+
+    await conn.connect(url);
+
+    const ws = FakeWS.getInstance(url);
+    expect(ws.connect).toHaveBeenCalledWith({ Authorization: 'Bearer test-jwt' });
+  });
 });

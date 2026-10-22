@@ -4,19 +4,21 @@
  *
  * Regression test for the reported bug: opening a conversation with a
  * freshly-created AI partner showed "Session initialization failed" / the AI
- * offline, even though the sync connection (settings screen) was healthy.
+ * offline, even though the connection was healthy.
  *
  * Root cause: `handleInitEntityResponse` tore the session down on ANY
- * INIT_ENTITY ERROR. CreateAIScreen syncs the new entity to the engine
- * fire-and-forget, so when the chat is opened before the engine ingested it,
- * the engine rejects INIT_ENTITY with an "entity not defined"-class error —
- * and the app gave up instantly (and the context-level retries re-sent
- * INIT_ENTITY WITHOUT syncing, failing identically every time).
+ * INIT_ENTITY ERROR. CreateAIScreen authors the new entity on the engine
+ * (management API) fire-and-forget, so when the chat is opened before the
+ * engine has ingested it, the engine rejects INIT_ENTITY with an
+ * "entity not defined"-class error — and the app gave up instantly.
  *
- * Fix: on an entity-ingestion error, re-sync (best-effort) and re-send
+ * Fix: on an entity-ingestion error, re-dial a fresh connection and re-send
  * INIT_ENTITY, bounded by MAX_INIT_ENTITY_RETRIES. Only after exhausting the
  * retries (or for non-ingestion errors) does the session fail with
  * session:error.
+ *
+ * Task 3-4: the recovery no longer performs a sync (the engine management API
+ * is the data layer) — only the connection re-dial + re-send remain.
  */
 import { EntitySessionService } from '../EntitySessionService';
 import { EventEmitter } from 'eventemitter3';
@@ -27,11 +29,6 @@ let mockConnectionManager: EventEmitter & {
   disconnectConnection: jest.Mock;
   createConnection: jest.Mock;
 };
-let mockSyncAndWait: jest.Mock;
-let mockInitiateSync: jest.Mock;
-let mockGetLastSyncTimestamp: jest.Mock;
-let mockMarkFullResyncRequired: jest.Mock;
-let mockIsPurging: jest.Mock;
 
 jest.mock('react-native-device-info', () => ({
   getUniqueId: jest.fn().mockResolvedValue('test-device'),
@@ -80,59 +77,18 @@ jest.mock('../connection/ConnectionManager', () => {
   return { __esModule: true, default: cm };
 });
 
-// SyncService is a NAMED export; mock syncAndWait, initiateSync,
-// getLastSyncTimestamp and markFullResyncRequired so the recovery path can be
-// observed.
-jest.mock('../SyncService', () => {
-  mockSyncAndWait = jest.fn().mockResolvedValue(undefined);
-  mockInitiateSync = jest.fn().mockResolvedValue(undefined);
-  mockGetLastSyncTimestamp = jest.fn().mockResolvedValue(1750000000); // non-zero → incremental by default
-  mockMarkFullResyncRequired = jest.fn().mockResolvedValue(undefined);
-  return {
-    __esModule: true,
-    SyncService: {
-      getInstance: () => ({
-        syncAndWait: mockSyncAndWait,
-        initiateSync: mockInitiateSync,
-        getLastSyncTimestamp: mockGetLastSyncTimestamp,
-        markFullResyncRequired: mockMarkFullResyncRequired,
-      }),
-    },
-  };
-});
-
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   createInteraction: jest.fn().mockResolvedValue(undefined),
   deriveScopeFromParticipants: jest.fn().mockReturnValue('one_on_one'),
   deriveParticipantKey: jest.fn().mockReturnValue('pk'),
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   messageExists: jest.fn(),
   createConversationMessage: jest.fn(),
   updateConversationMessage: jest.fn(),
   getConversationMessage: jest.fn(),
 }));
-
-jest.mock('../../database/connection', () => ({
-  getDatabase: jest.fn(),
-  getSyncDatabase: jest.fn().mockResolvedValue(undefined),
-}));
-
-jest.mock('../cloud/CloudSessionService', () => {
-  // isPurging is accessed with optional chaining in EntitySessionService;
-  // provide an explicit mock so tests can pin the purge-in-flight guard.
-  mockIsPurging = jest.fn().mockReturnValue(false);
-  return {
-    cloudSessionService: {
-      connect: jest.fn().mockResolvedValue(undefined),
-      disconnect: jest.fn().mockResolvedValue(undefined),
-      getStatus: jest.fn().mockReturnValue('idle'),
-      isPurging: mockIsPurging,
-    },
-    default: {},
-  };
-});
 
 jest.mock('../ConnectionStateManager', () => ({
   __esModule: true,
@@ -171,11 +127,6 @@ const initEntityError = (error: string) => ({
 describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockSyncAndWait.mockClear().mockResolvedValue(undefined);
-    mockInitiateSync.mockClear().mockResolvedValue(undefined);
-    mockGetLastSyncTimestamp.mockClear().mockResolvedValue(1750000000);
-    mockMarkFullResyncRequired.mockClear().mockResolvedValue(undefined);
-    mockIsPurging.mockClear().mockReturnValue(false);
     mockConnectionManager.removeAllListeners();
     mockConnectionManager.sendEvent.mockClear().mockResolvedValue(undefined);
     mockConnectionManager.isConnected.mockClear().mockReturnValue(true);
@@ -184,7 +135,7 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     resetSingleton();
   });
 
-  it('re-syncs and re-sends INIT_ENTITY when the engine rejects with entity_not_defined, instead of failing immediately', async () => {
+  it('re-dials and re-sends INIT_ENTITY when the engine rejects with entity_not_defined, instead of failing immediately', async () => {
     const svc = EntitySessionService.getInstance();
     const session = makeSession();
     (svc as any).sessions.set(session.interactionId, session);
@@ -207,8 +158,7 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     expect((svc as any).sessions.has(session.interactionId)).toBe(true);
     expect(errors).toHaveLength(0);
 
-    // A recovery sync ran + a fresh connection was created + INIT_ENTITY re-sent.
-    expect(mockSyncAndWait).toHaveBeenCalledTimes(1);
+    // A fresh connection was created + INIT_ENTITY re-sent.
     expect(mockConnectionManager.createConnection).toHaveBeenCalledWith(
       'entity-claire-x',
       'entity',
@@ -251,7 +201,6 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     // retry/timer machinery must be able to observe the terminal state.
     expect((svc as any).sessions.has(session.interactionId)).toBe(true);
     expect(session.failed).toMatchObject({ error: 'entity_not_defined' });
-    expect(mockSyncAndWait).not.toHaveBeenCalled();
     expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
   });
 
@@ -274,7 +223,6 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     expect(errors).toEqual(['session limit reached']);
     expect((svc as any).sessions.has(session.interactionId)).toBe(true);
     expect(session.failed).toMatchObject({ error: 'session limit reached' });
-    expect(mockSyncAndWait).not.toHaveBeenCalled();
     expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
   });
 
@@ -294,12 +242,11 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
       session.interactionId,
     );
 
-    // A disabled partner is a terminal state — NO recovery re-sync / re-send,
+    // A disabled partner is a terminal state — NO recovery re-dial / re-send,
     // NO retries. The session fails immediately with the honest error.
     expect(errors).toEqual(['entity_disabled']);
     expect((svc as any).sessions.has(session.interactionId)).toBe(true);
     expect(session.failed).toMatchObject({ error: 'entity_disabled' });
-    expect(mockSyncAndWait).not.toHaveBeenCalled();
     expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
     expect(
       mockConnectionManager.sendEvent.mock.calls.filter(
@@ -329,7 +276,7 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
 
     // The recovery loop ran (ingestion class)...
     await new Promise<void>(resolve => setImmediate(resolve));
-    expect(mockSyncAndWait).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.createConnection).toHaveBeenCalled();
     expect(errors).toHaveLength(0);
 
     // ...and the surfaced error (on exhaustion) is the structured CODE.
@@ -339,7 +286,7 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     expect(session.failed).toMatchObject({ error: 'entity_not_defined' });
   });
 
-  it('treats entity_exists_deleted as TERMINAL (no recovery, no sync hint class) via error_code (D35)', async () => {
+  it('treats entity_exists_deleted as TERMINAL (no recovery) via error_code (D35)', async () => {
     const svc = EntitySessionService.getInstance();
     const session = makeSession();
     (svc as any).sessions.set(session.interactionId, session);
@@ -359,10 +306,10 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
       session.interactionId,
     );
 
-    // Deletion is final — re-syncing cannot resolve it, so no recovery.
+    // Deletion is final — re-dialing cannot resolve it, so no recovery.
     expect(errors).toEqual(['entity_exists_deleted']);
     expect(session.failed).toMatchObject({ error: 'entity_exists_deleted' });
-    expect(mockSyncAndWait).not.toHaveBeenCalled();
+    expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
   });
 
   it('falls back to string-equality classification when no error_code is present (old engines)', async () => {
@@ -382,90 +329,13 @@ describe('EntitySessionService INIT_ENTITY engine-rejection recovery', () => {
     );
 
     await new Promise<void>(resolve => setImmediate(resolve));
-    expect(mockSyncAndWait).toHaveBeenCalledTimes(1);
-    expect(errors).toHaveLength(0);
-  });
-
-  it('escalates to a full re-sync for entity_not_defined when the sync watermark is 0 (purge cleared it / never synced)', async () => {
-    // The purge-completion observer cleared the per-source watermarks
-    // (markFullResyncRequired) — the recovery detects the 0 watermark,
-    // re-marks the full re-sync, and waits on a PLAIN syncAndWait (the kicked
-    // sync self-escalates to force_full_sync via the cleared watermark).
-    mockGetLastSyncTimestamp.mockResolvedValue(0);
-
-    const svc = EntitySessionService.getInstance();
-    const session = makeSession();
-    (svc as any).sessions.set(session.interactionId, session);
-
-    const errors: string[] = [];
-    svc.on('session:error', (_id: string, err: string) => errors.push(err));
-
-    await (svc as any).handleInitEntityResponse(
-      'claire',
-      initEntityError('entity_not_defined'),
-      null,
-      session,
-      session.interactionId,
-    );
-    await new Promise<void>(resolve => setImmediate(resolve));
-
-    expect(errors).toHaveLength(0);
-    expect(mockMarkFullResyncRequired).toHaveBeenCalledTimes(1);
-    expect(mockSyncAndWait).toHaveBeenCalledTimes(1);
-    expect(mockSyncAndWait).toHaveBeenCalledWith(); // plain — no options
     expect(mockConnectionManager.createConnection).toHaveBeenCalled();
-  });
-
-  it('uses an INCREMENTAL syncAndWait when a watermark exists (no regression)', async () => {
-    // Default mocks: watermark non-zero — the recovery keeps its historical
-    // behaviour (plain incremental syncAndWait, no full-resync marking).
-    const svc = EntitySessionService.getInstance();
-    const session = makeSession();
-    (svc as any).sessions.set(session.interactionId, session);
-
-    await (svc as any).handleInitEntityResponse(
-      'claire',
-      initEntityError('entity_not_defined'),
-      null,
-      session,
-      session.interactionId,
-    );
-    await new Promise<void>(resolve => setImmediate(resolve));
-
-    expect(mockMarkFullResyncRequired).not.toHaveBeenCalled();
-    expect(mockSyncAndWait).toHaveBeenCalledTimes(1);
-    expect(mockSyncAndWait).toHaveBeenCalledWith(); // plain — no options
-  });
-
-  it('still bails out of INIT_ENTITY recovery while a purge is in flight (purge guard preserved)', async () => {
-    mockIsPurging.mockReturnValue(true);
-
-    const svc = EntitySessionService.getInstance();
-    const session = makeSession();
-    (svc as any).sessions.set(session.interactionId, session);
-
-    const errors: string[] = [];
-    svc.on('session:error', (_id: string, err: string) => errors.push(err));
-
-    await (svc as any).handleInitEntityResponse(
-      'claire',
-      initEntityError('entity_not_defined'),
-      null,
-      session,
-      session.interactionId,
-    );
-    await new Promise<void>(resolve => setImmediate(resolve));
-
-    // Recovery threw (purge guard) → normal teardown: session:error surfaced.
-    expect(errors).toEqual(['entity_not_defined']);
-    expect(session.failed).toMatchObject({ error: 'entity_not_defined' });
-    expect(mockSyncAndWait).not.toHaveBeenCalled();
-    expect(mockConnectionManager.createConnection).not.toHaveBeenCalled();
+    expect(errors).toHaveLength(0);
   });
 
   it('does not tear down when the transport error storm delivers an INIT_ENTITY app-level error', async () => {
     // BaseWebSocketConnection.handleMessage emits BOTH 'event' and 'error' for
-    // an ERROR-status message: the error object carries the harmony event under
+    // an ERROR-status message: the error object carries the engine event under
     // `error.event`. The error path must defer to the event-path recovery
     // instead of tearing the session down (the bug that defeated recovery).
     const svc = EntitySessionService.getInstance();

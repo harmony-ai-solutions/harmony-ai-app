@@ -1,12 +1,16 @@
 # PR Test Workflow
 #
-# Runs on every pull request and push to main. Four parallel jobs:
-#   - typecheck:     TypeScript compilation check + lint
-#   - unit-tests:    Unit tests with coverage (Node environment)
-#   - integration-tests: Integration tests (Node environment, mocking ConnectionManager)
-#   - migration-tests:   Database migration snapshot + rollforward tests
+# Runs on every pull request and push to main. Three jobs:
+#   - typecheck:        TypeScript compilation check + lint
+#   - unit-tests:       Unit tests with coverage (Node environment)
+#   - contract-drift:   Engine-contract version drift vs the engine repo (task
+#                       5-1; runs only when HARMONY_LINK_REPO_PAT is present —
+#                       the engine repo is private)
 #
-# Combined timeout budget: ~15 min typical, 20 min worst-case.
+# (Task 3-4: the integration-tests and migration-tests jobs were removed with
+# the TS SQLite/sync stack — there is now a single jest `unit` project. Task 5-1:
+# the retired schema-parity job is replaced by the in-unit engine-contract gates
+# plus the optional `contract-drift` job below.)
 
 name: Tests
 
@@ -45,7 +49,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx tsc --noEmit
-      - run: npm run lint
+      # Lint is NON-BLOCKING here too (same ruling as build-release.yml): the
+      # repo carries ~252 pre-existing errors / ~810 warnings in files this
+      # workstream never touches (jest.setup.js env globals, no-bitwise in the
+      # color utils, …). Type-check still gates; re-block this once the debt is
+      # paid down.
+      - name: Lint (non-blocking)
+        run: npm run lint
+        continue-on-error: true
 
   # ─────────────────────────────────────────────────────────────────
   # Unit tests (Node environment — fast)
@@ -79,43 +90,40 @@ jobs:
           path: reports/unit-tests.xml
 
   # ─────────────────────────────────────────────────────────────────
-  # Integration tests (Node environment, mocking ConnectionManager)
+  # Engine-contract drift (task 5-1) — replaces the retired schema-parity job.
+  # Compares the app's ENGINE_CONTRACT_VERSION with the engine repo's
+  # docs/api/management/openapi.yaml info.version, and the app's endpoint
+  # manifest + fixture keys with the engine-side canonical shared wire fixtures
+  # (pinned path: docs/api/management/fixtures/management-contract.fixtures.json).
+  # The engine repo is private, so this runs only when HARMONY_LINK_REPO_PAT is
+  # configured; otherwise it is a no-op skip (the always-on in-unit canary still
+  # guards app-side drift).
   # ─────────────────────────────────────────────────────────────────
-  integration-tests:
-    name: Integration tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: npm
-      - run: npm ci
-      - name: Run integration tests
-        run: npx jest --selectProjects integration --reporters=default --reporters=jest-junit
-        env:
-          JEST_JUNIT_OUTPUT_NAME: integration-tests.xml
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-results
-          path: reports/integration-tests.xml
-
-  # ─────────────────────────────────────────────────────────────────
-  # Migration snapshot tests (subset of unit suite)
-  # ─────────────────────────────────────────────────────────────────
-  migration-tests:
-    name: DB migration tests
+  contract-drift:
+    name: Engine-contract drift
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # `secrets` is NOT available in a step-level `if:` (GitHub rejects the whole
+    # file as invalid: "Unrecognized named-value: 'secrets'"). Map the PAT into
+    # the job env and gate the steps on `env.HARMONY_LINK_REPO_PAT` instead.
+    env:
+      HARMONY_LINK_REPO_PAT: ${{ secrets.HARMONY_LINK_REPO_PAT }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: '20'
-          cache: npm
-      - run: npm ci
-      - name: Run migration tests
-        run: npx jest --selectProjects unit --testPathPatterns migrations
+      - name: Checkout engine repo
+        if: env.HARMONY_LINK_REPO_PAT != ''
+        uses: actions/checkout@v5
+        with:
+          repository: harmony-ai-solutions/harmony-link-private
+          ref: feat/app-engine-parity
+          token: ${{ secrets.HARMONY_LINK_REPO_PAT }}
+          path: engine
+      - name: Compare contract versions + canonical fixtures
+        if: env.HARMONY_LINK_REPO_PAT != ''
+        run: node scripts/check-engine-contract.mjs --engine-repo engine --engine-fixtures engine/docs/api/management/fixtures/management-contract.fixtures.json
+      - name: Skipped (no engine PAT)
+        if: env.HARMONY_LINK_REPO_PAT == ''
+        run: echo "HARMONY_LINK_REPO_PAT not set — engine-contract drift check skipped"

@@ -16,7 +16,7 @@
  * Destructuring silently yields `undefined` if missing, avoiding a
  * bundle evaluation crash.
  *
- * The haptic feedback toggle in Settings (@harmony_setting_haptic_feedback)
+ * The haptic feedback toggle in Settings (@soulbits_setting_haptic_feedback)
  * is honored here: `loadHapticPreference()` should be called once at app
  * startup, and `setHapticFeedbackEnabled()` keeps the in-memory gate in sync
  * when the user flips the toggle. When disabled, all haptic output is a no-op.
@@ -25,7 +25,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /** AsyncStorage key backing the Settings "Haptic feedback" toggle. */
-export const HAPTIC_FEEDBACK_STORAGE_KEY = '@harmony_setting_haptic_feedback';
+export const HAPTIC_FEEDBACK_STORAGE_KEY = '@soulbits_setting_haptic_feedback';
 
 /** Sharp double-tap pattern: vibrate 15ms, pause 30ms, vibrate 15ms */
 const BUTTON_PRESS_PATTERN = [0, 15, 30, 15];

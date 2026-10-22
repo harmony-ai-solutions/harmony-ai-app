@@ -3,19 +3,22 @@
  *
  * Extracted from SyncConnectionContext so it can be unit-tested without
  * rendering the provider (same pattern as Phase 9).
+ *
+ * ── Task 3-4 ─────────────────────────────────────────────────────────────
+ * After the TS sync/cloud stack deletion the app connects ONLY to the embedded
+ * engine (loopback WS + local management API). The former cloud-session
+ * (`CloudSessionStatus`) and self-hosted pairing branches are gone; the status
+ * is a straight function of the local engine connection.
  */
-import type { CloudSessionStatus } from '../services/cloud/CloudSessionService';
 import type { SyncSource } from '../services/ConnectionStateManager';
 
 export type ConnectionStatusLabel =
   | 'connected'
   | 'connecting'
-  | 'preparing'
   | 'offline'
   | 'reconnecting'
   | 'disconnected'
-  | 'notPaired'
-  | 'serverUpdateRequired';
+  | 'notPaired';
 
 export interface ConnectionStatusInfo {
   /** i18n-friendly label key for the current connection state. */
@@ -24,133 +27,45 @@ export interface ConnectionStatusInfo {
   color: string;
   /** Semantic variant for themed colour resolution. */
   variant: 'success' | 'warning' | 'error' | 'muted';
-  /** Which sync mode is active. */
+  /** Which source is active (`selfhosted` = the embedded/local engine). */
   mode: SyncSource;
 }
 
 /**
- * Compute a mode-aware connection status for the current state.
+ * Compute the engine connection status for the current state.
  *
- * @param mode        'cloud' or 'selfhosted' (from ConnectionStateManager.getCurrentSource())
- * @param cloudStatus Cloud session status (only meaningful when mode === 'cloud')
- * @param isPaired    Self-hosted pairing state
- * @param isConnected  Whether the sync WebSocket is currently open
- * @param isReconnecting Whether a reconnect is scheduled/in-flight
- * @param serverUpdateRequired Sticky 3-3/D57 gate: engine sync-schema version
- *                             too old to sync. Checked BEFORE the mode branch —
- *                             it overrides BOTH cloud and self-hosted statuses.
+ * @param mode          Current source (kept for API compatibility; the embedded
+ *                      engine reports `selfhosted`).
+ * @param isPaired      Whether the engine connection is available.
+ * @param isConnected   Whether the engine WebSocket is currently open.
+ * @param isReconnecting Whether a reconnect is scheduled/in-flight.
  */
 export function computeConnectionStatus(
   mode: SyncSource,
-  cloudStatus: CloudSessionStatus,
   isPaired: boolean,
   isConnected: boolean,
   isReconnecting: boolean,
-  serverUpdateRequired: boolean,
 ): ConnectionStatusInfo {
-  // ── 3-3 / D57: sticky server-update-required gate. Checked before the
-  // mode branch so it applies to both cloud and selfhosted modes — while the
-  // engine is too old to sync safely, that is the only status that matters.
-  if (serverUpdateRequired) {
-    return {
-      textKey: 'serverUpdateRequired',
-      color: '#f44336',
-      variant: 'error',
-      mode,
-    };
-  }
-
-  if (mode === 'cloud') {
-    switch (cloudStatus) {
-      case 'ready':
-        if (isConnected) {
-          return {
-            textKey: 'connected',
-            color: '#4CAF50',
-            variant: 'success',
-            mode: 'cloud',
-          };
-        }
-        return {
-          textKey: 'connecting',
-          color: '#ff9800',
-          variant: 'warning',
-          mode: 'cloud',
-        };
-      case 'provisioning':
-      case 'requesting':
-        return {
-          textKey: 'preparing',
-          color: '#ff9800',
-          variant: 'warning',
-          mode: 'cloud',
-        };
-      case 'failed':
-        return {
-          textKey: 'offline',
-          color: '#f44336',
-          variant: 'error',
-          mode: 'cloud',
-        };
-      case 'idle':
-      default:
-        return {
-          textKey: 'offline',
-          color: '#9692b0',
-          variant: 'muted',
-          mode: 'cloud',
-        };
-    }
-  }
-
-  // ── Self-hosted ────────────────────────────────────────────────────────
   if (!isPaired) {
-    return {
-      textKey: 'notPaired',
-      color: '#f44336',
-      variant: 'error',
-      mode: 'selfhosted',
-    };
+    return { textKey: 'notPaired', color: '#f44336', variant: 'error', mode };
   }
   if (isConnected) {
-    return {
-      textKey: 'connected',
-      color: '#4CAF50',
-      variant: 'success',
-      mode: 'selfhosted',
-    };
+    return { textKey: 'connected', color: '#4CAF50', variant: 'success', mode };
   }
   if (isReconnecting) {
-    return {
-      textKey: 'reconnecting',
-      color: '#ff9800',
-      variant: 'warning',
-      mode: 'selfhosted',
-    };
+    return { textKey: 'reconnecting', color: '#ff9800', variant: 'warning', mode };
   }
-  return {
-    textKey: 'disconnected',
-    color: '#9692b0',
-    variant: 'muted',
-    mode: 'selfhosted',
-  };
+  return { textKey: 'disconnected', color: '#9692b0', variant: 'muted', mode };
 }
 
 /**
- * Whether the current mode + state allows the conversation list and chat to
- * render meaningfully.
- *
- * - **cloud:** cloud session is `ready` (broker-routable; local SQLite data
- *   exists at that point).
- * - **self-hosted:** device is paired (conversations exist locally once paired).
+ * Whether the current state allows the conversation list and chat to render
+ * meaningfully. With the embedded engine the app is self-contained — chat is
+ * usable as soon as the engine connection is available.
  */
 export function canUseChatForMode(
-  mode: SyncSource,
-  cloudStatus: CloudSessionStatus,
+  _mode: SyncSource,
   isPaired: boolean,
 ): boolean {
-  if (mode === 'cloud') {
-    return cloudStatus === 'ready';
-  }
   return isPaired;
 }

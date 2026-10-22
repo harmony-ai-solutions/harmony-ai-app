@@ -5,7 +5,7 @@
  * @format
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { StatusBar, View, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PaperProvider } from 'react-native-paper';
@@ -15,19 +15,20 @@ import { ThemeProvider, usePaperTheme, useAppTheme } from './src/contexts/ThemeC
 import { DatabaseProvider, useDatabase } from './src/contexts/DatabaseContext';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { BiometricLockProvider, useBiometricLock } from './src/contexts/BiometricLockContext';
-import { SyncConnectionProvider, useSyncConnection } from './src/contexts/SyncConnectionContext';
+import { SyncConnectionProvider } from './src/contexts/SyncConnectionContext';
 import { EntitySessionProvider } from './src/contexts/EntitySessionContext';
 import { EmojiProvider } from './src/contexts/EmojiContext';
 import { I18nProvider } from './src/contexts/I18nContext';
 import { AppAlertProvider } from './src/contexts/AppAlertContext';
 import { AppToastProvider } from './src/contexts/AppToastContext';
 import { DatabaseLoadingScreen } from './src/components/database/DatabaseLoadingScreen';
-import { InitialPairingModal } from './src/components/modals/InitialPairingModal';
+import { EngineBootGate } from './src/components/boot/EngineBootGate';
 import { LockScreen } from './src/components/lock/LockScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { DynamicBackground } from './src/components/background/DynamicBackground';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { UpdatePrompt } from './src/components/updates/UpdatePrompt';
 import { loadHapticPreference } from './src/utils/haptics';
+import { probeRestoreOfferOnce } from './src/services/backup/restoreOnboarding';
 import { onBubbleOpen } from './src/services/ChatBubbleService';
 import ChatPreferencesService from './src/services/ChatPreferencesService';
 import type { BubbleConversation } from './src/services/ChatBubbleService';
@@ -39,11 +40,8 @@ function AppShell() {
   const paperTheme = usePaperTheme();
   const { theme, loading: themeLoading } = useAppTheme();
   const { isReady, isLoading } = useDatabase();
-  const { isPaired } = useSyncConnection();
   const { isLocked } = useBiometricLock();
   const { signInVersion } = useAuth();
-  const [showPairingModal, setShowPairingModal] = useState(false);
-  const [pairingModalChecked, setPairingModalChecked] = useState(false);
 
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList> | null>(null);
   // Skip the first render (signInVersion starts at 0) — only react to a real
@@ -54,12 +52,32 @@ function AppShell() {
   useEffect(() => {
     if (prevSignInVersionRef.current === signInVersion) return;
     prevSignInVersionRef.current = signInVersion;
-    if (signInVersion > 0) {
-      // Fresh sign-in → send the user straight to their profile page.
+    if (signInVersion <= 0) return;
+
+    // 5-3: fresh-install restore gate. After an explicit sign-in, probe for a
+    // restorable backup; if one is found, surface the skippable restore offer
+    // instead of jumping straight to the profile. Bounded so a slow probe never
+    // blocks the post-sign-in navigation (the "start fresh" path is unchanged).
+    let cancelled = false;
+    (async () => {
+      const offer = await Promise.race([
+        probeRestoreOfferOnce(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+      ]).catch(() => null);
+      if (cancelled) return;
       setTimeout(() => {
-        navigationRef.current?.navigate('MainTabs', { screen: 'MyProfile' });
+        if (offer) {
+          navigationRef.current?.navigate('RestoreOffer', { offer });
+        } else {
+          // Fresh sign-in → send the user straight to their profile page.
+          navigationRef.current?.navigate('MainTabs', { screen: 'MyProfile' });
+        }
       }, 100);
-    }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [signInVersion]);
 
   useEffect(() => {
@@ -98,41 +116,6 @@ function AppShell() {
     return onBubbleOpen(handleBubbleOpen);
   }, []);
 
-  useEffect(() => {
-    const checkFirstLaunch = async () => {
-      const hasSeenPairingPrompt = await AsyncStorage.getItem('has_seen_pairing_prompt');
-
-      if (!hasSeenPairingPrompt && !isPaired && isReady) {
-        setTimeout(() => {
-          setShowPairingModal(true);
-          setPairingModalChecked(true);
-        }, 1000);
-      } else {
-        setPairingModalChecked(true);
-      }
-    };
-
-    if (isReady) {
-      checkFirstLaunch();
-    }
-  }, [isReady, isPaired]);
-
-  const handlePairNow = async () => {
-    await AsyncStorage.setItem('has_seen_pairing_prompt', 'true');
-    setShowPairingModal(false);
-
-    setTimeout(() => {
-      if (navigationRef.current?.isReady()) {
-        navigationRef.current.navigate('ConnectionSetup');
-      }
-    }, 100);
-  };
-
-  const handleMaybeLater = async () => {
-    await AsyncStorage.setItem('has_seen_pairing_prompt', 'true');
-    setShowPairingModal(false);
-  };
-
   if (isLoading || !isReady || themeLoading) {
     return <DatabaseLoadingScreen />;
   }
@@ -148,14 +131,16 @@ function AppShell() {
         <DynamicBackground />
       </View>
       <View style={styles.foregroundLayer}>
-        <AppNavigator navigationRef={navigationRef} />
-        {pairingModalChecked && (
-          <InitialPairingModal
-            visible={showPairingModal}
-            onPair={handlePairNow}
-            onMaybeLater={handleMaybeLater}
-          />
-        )}
+        {/* Owner ruling 2026-10-18: hold the branded splash until the embedded
+            engine reports ready. This gate wraps the whole navigation tree
+            (including AuthGate at the navigator root), so the boot splash is the
+            first thing visible; providers above (DatabaseContext engine
+            lifecycle, update check, backup headless task) are unaffected. */}
+        <EngineBootGate>
+          <AppNavigator navigationRef={navigationRef} />
+        </EngineBootGate>
+        {/* Headless app-update dialog driver (plan 7-10 §4; engine ships with the app). */}
+        <UpdatePrompt />
         {isLocked && <LockScreen />}
       </View>
     </PaperProvider>

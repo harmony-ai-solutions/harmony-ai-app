@@ -10,7 +10,7 @@
  * §5 (extend PATCH /v1/auth/me with `username` / `bio` + an avatar upload
  * endpoint + `avatar_url` in responses). Until then this module is the
  * EXPLICIT stub seam: an AsyncStorage preview scoped per user id
- * (`@harmony_profile/<userId>` — deliberately the OLD UserProfileStore key so
+ * (`@soulbits_profile/<userId>` — deliberately the OLD UserProfileStore key so
  * existing dev devices keep their data).
  *
  * Follows the CategoryPreferencesService pattern: module-level key constant,
@@ -23,7 +23,7 @@ import { createLogger } from '../../utils/logger';
 const log = createLogger('[ProfileExtrasService]');
 
 /** Storage prefix — reused from the deleted UserProfileStore shadow store. */
-const STORAGE_PREFIX = '@harmony_profile';
+const STORAGE_PREFIX = '@soulbits_profile';
 
 /** Per-user profile extras (the stub seam's persisted shape). */
 export interface ProfileExtras {

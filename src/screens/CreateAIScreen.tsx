@@ -29,6 +29,7 @@ import {
   Platform,
   RefreshControl,
   Share,
+  ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedCard } from '../components/themed/ThemedCard';
@@ -36,6 +37,7 @@ import { ScreenHeader } from '../components/themed/ScreenHeader';
 import { SectionHeader } from '../components/themed/SectionHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from 'react-i18next';
@@ -55,6 +57,111 @@ function isReservedPartnerName(raw: string): boolean {
   return lower === 'user' || lower === 'deleted';
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Character-card section summary helpers (4-2)
+//
+// Pure, exported for unit testing (CONVENTIONS: pure helpers live beside the
+// screen and are exercised directly). The accordion rows render these strings
+// in their right-aligned summary pills so the user can see what is populated
+// without expanding every section.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Number of entries in a `character_book` JSON column (defensive parse). */
+export function countLorebookEntries(characterBookJson: string | null): number {
+  const book = parseLorebook(characterBookJson);
+  return Array.isArray(book?.entries) ? book!.entries.length : 0;
+}
+
+export interface CardSectionBadgeState {
+  personality: string;
+  voiceCharacteristics: string;
+  basePrompt: string;
+  scenario: string;
+  exampleDialogues: string;
+  postHistoryInstructions: string;
+  firstMes: string;
+  alternateGreetings: string[];
+  characterBook: string | null;
+  imageCount: number;
+  tags: string[];
+  lifecycleConfig: LifecycleConfig;
+  creatorName: string;
+}
+
+export interface CardSectionBadges {
+  /** Persona & Prompts row: `Configured` / `Default`. */
+  persona: string;
+  /** Greetings row: `1 opening · 2 alt`. */
+  greetings: string;
+  /** Lorebook row: `3 entries`. */
+  lorebook: string;
+  /** Combined Gallery & Tags summary: `2 img · 4 tags`. */
+  galleryTags: string;
+  /** Combined Lifecycle & Attribution summary: `Custom` / `Default`. */
+  lifecycleAttribution: string;
+  /** Granular per-row variants used by the consolidated accordion. */
+  images: string;
+  tagsRow: string;
+  lifecycle: string;
+  attribution: string;
+}
+
+const CONFIGURED = 'Configured';
+const DEFAULT_VALUE = 'Default';
+const CUSTOM = 'Custom';
+
+const hasText = (value: string | null | undefined): boolean =>
+  typeof value === 'string' && value.trim() !== '';
+
+const hasLifecycleValues = (config: LifecycleConfig): boolean =>
+  Object.values(config ?? {}).some(value => {
+    if (value === null || value === undefined || value === '') return false;
+    if (typeof value === 'object') return Object.keys(value as object).length > 0;
+    return true;
+  });
+
+/**
+ * Build the live summary pills for every character-card accordion row.
+ * Pure — no i18n, no state, no theme.
+ */
+export function buildCardSectionBadges(
+  state: CardSectionBadgeState,
+): CardSectionBadges {
+  const personaConfigured =
+    hasText(state.personality) ||
+    hasText(state.voiceCharacteristics) ||
+    hasText(state.basePrompt) ||
+    hasText(state.scenario) ||
+    hasText(state.exampleDialogues) ||
+    hasText(state.postHistoryInstructions);
+
+  const openingCount = hasText(state.firstMes) ? 1 : 0;
+  const altCount = state.alternateGreetings?.length ?? 0;
+  const lorebookCount = countLorebookEntries(state.characterBook);
+  const imageCount = state.imageCount ?? 0;
+  const tagCount = state.tags?.length ?? 0;
+
+  const lifecycleCustom = hasLifecycleValues(state.lifecycleConfig);
+  const attributionCustom = hasText(state.creatorName);
+
+  return {
+    persona: personaConfigured ? CONFIGURED : DEFAULT_VALUE,
+    greetings: `${openingCount} opening${
+      altCount > 0 ? ` · ${altCount} alt` : ''
+    }`,
+    lorebook: `${lorebookCount} ${lorebookCount === 1 ? 'entry' : 'entries'}`,
+    galleryTags: `${imageCount} ${
+      imageCount === 1 ? 'image' : 'images'
+    } · ${tagCount} ${tagCount === 1 ? 'tag' : 'tags'}`,
+    lifecycleAttribution:
+      lifecycleCustom || attributionCustom ? CUSTOM : DEFAULT_VALUE,
+    images: `${imageCount} img`,
+    tagsRow: `${tagCount} tags`,
+    lifecycle: lifecycleCustom ? CUSTOM : DEFAULT_VALUE,
+    attribution: attributionCustom ? CUSTOM : DEFAULT_VALUE,
+  };
+}
+
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppTheme } from '../contexts/ThemeContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
@@ -65,13 +172,16 @@ import { ThemedText } from '../components/themed/ThemedText';
 import { ThemedButton } from '../components/themed/ThemedButton';
 import { ThemedGradient } from '../components/themed/ThemedGradient';
 import { EntityModuleSelectorWithActions } from '../components/entities/EntityModuleSelectorWithActions';
+import { formatModuleConfigSubtitle } from '../components/entities/EntityModuleSelector';
+import { filterModuleConfigsForVariant } from '../services/variant/providerAvailability';
+import { invalidateEntityAccessCache } from '../services/variant/entityAccess';
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { ModuleConfigOption } from '../components/entities/EntityModuleSelector';
 import type { CharacterImage } from '../database/models';
 import { ProfileImagePicker } from '../components/characters/ProfileImagePicker';
 import { MacroHighlighter } from '../components/character-card/MacroHighlighter';
-import { parseJsonColumn } from '../components/character-card/lorebook';
+import { parseJsonColumn, parseLorebook } from '../components/character-card/lorebook';
 import type { LifecycleConfig } from '../components/character-card/LifecycleConfigEditor';
 import {
   AlternateGreetingsSection,
@@ -104,7 +214,7 @@ import {
   getAllCharacterProfiles,
   updateCharacterImage,
   updateCharacterProfile,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 import { setCharacterCreator } from '../services/social/SocialService';
 import {
   createEntity,
@@ -114,12 +224,11 @@ import {
   getEntityByCharacterProfileId,
   getEntityModuleMapping,
   isProfilePersonaOwned,
-  mintEntityId,
   ReservedEntityNameError,
   updateEntityFields,
-} from '../database/repositories/entities';
-import { getUserPersona } from '../database/repositories/userEntities';
-import { getActiveInteractionsByEntity } from '../database/repositories/interactions';
+} from '../database/repositories';
+import { getUserPersona } from '../database/repositories';
+import { getActiveInteractionsByEntity } from '../database/repositories';
 import { createDataURL } from '../database/base64';
 import {
   getAllCognitionConfigs,
@@ -130,8 +239,7 @@ import {
   getAllImaginationConfigs,
   getAllMovementConfigs,
   getAllBackendConfigs,
-} from '../database/repositories/modules';
-import syncService from '../services/SyncService';
+} from '../database/repositories';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
 
@@ -152,8 +260,14 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const { user } = useAuth();
   const { bottom: safeBottom } = useSafeAreaInsets();
   // 'characters' namespace supplies the V3/RP editor labels + validation strings
-  // (createAI has none of them); section titles resolve implicitly in order.
-  const { t } = useTranslation(['createAI', 'characters']);
+  // (createAI has none of them). `nsMode: 'fallback'` makes an unprefixed miss
+  // in `createAI` fall through to `characters` — without it i18next stops at the
+  // first namespace and raw keys (GREETINGSECTION, nicknamePlaceholder) render.
+  // V3-only keys are also prefixed explicitly as belt-and-suspenders so they
+  // resolve deterministically in production AND in Jest mocks.
+  const { t } = useTranslation(['createAI', 'characters'], {
+    nsMode: 'fallback',
+  });
 
   // ── Core fields ──────────────────────────────────────────────────────────────
   const [name, setName] = useState('');
@@ -187,10 +301,13 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // ── Collapsible section toggles ─────────────────────────────────────────────
   const [showDetails, setShowDetails] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  // Module wiring is a first-class card in the Edit AI Partner design, so it
+  // starts expanded (the old "Advanced" disclosure hid it by default).
+  const [showAdvanced, setShowAdvanced] = useState(true);
   // UI-only: tracks the currently focused field for accent highlighting
   const [focusedField, setFocusedField] = useState<
     | 'name'
+    | 'nickname'
     | 'description'
     | 'personality'
     | 'basePrompt'
@@ -332,26 +449,48 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         getAllMovementConfigs(),
         getAllBackendConfigs(),
       ]);
+      // Variant-aware picker options (plan 7-14 V3): a store build only offers
+      // configs wired exclusively to the available provider (soulbitscloud), so
+      // the entity editor can never wire a locked provider. Full = unchanged.
+      // The subtitle carries the provider + model summary (4-3) so users can
+      // tell "Soulbits" / "Test" / "Default SoulbitsCloud" apart in the picker.
       const toOptions = (
+        moduleType: string,
         configs: Array<{ id: string; name: string }>,
-      ): ModuleConfigOption[] => configs.map(c => ({ id: String(c.id), name: c.name }));
-      setCognitionConfigs(toOptions(cognition));
-      setTtsConfigs(toOptions(tts));
-      setSttConfigs(toOptions(stt));
-      setVisionConfigs(toOptions(vision));
-      setRagConfigs(toOptions(rag));
-      setImaginationConfigs(toOptions(imagination));
-      setMovementConfigs(toOptions(movement));
-      setBackendConfigs(toOptions(backend));
+      ): ModuleConfigOption[] =>
+        filterModuleConfigsForVariant(
+          moduleType,
+          configs as unknown as Array<Record<string, unknown>>,
+        ).map(c => ({
+          id: String(c.id),
+          name: c.name as string,
+          subtitle: formatModuleConfigSubtitle(c as Record<string, any>),
+        }));
+      const cognitionOptions = toOptions('cognition', cognition);
+      const ttsOptions = toOptions('tts', tts);
+      const sttOptions = toOptions('stt', stt);
+      const visionOptions = toOptions('vision', vision);
+      const ragOptions = toOptions('rag', rag);
+      const imaginationOptions = toOptions('imagination', imagination);
+      const movementOptions = toOptions('movement', movement);
+      const backendOptions = toOptions('backend', backend);
+      setCognitionConfigs(cognitionOptions);
+      setTtsConfigs(ttsOptions);
+      setSttConfigs(sttOptions);
+      setVisionConfigs(visionOptions);
+      setRagConfigs(ragOptions);
+      setImaginationConfigs(imaginationOptions);
+      setMovementConfigs(movementOptions);
+      setBackendConfigs(backendOptions);
       setHasAnyConfigs(
-        cognition.length > 0 ||
-          tts.length > 0 ||
-          stt.length > 0 ||
-          vision.length > 0 ||
-          rag.length > 0 ||
-          imagination.length > 0 ||
-          movement.length > 0 ||
-          backend.length > 0,
+        cognitionOptions.length > 0 ||
+          ttsOptions.length > 0 ||
+          sttOptions.length > 0 ||
+          visionOptions.length > 0 ||
+          ragOptions.length > 0 ||
+          imaginationOptions.length > 0 ||
+          movementOptions.length > 0 ||
+          backendOptions.length > 0,
       );
     } catch (err) {
       log.error('Failed to load module configs:', err);
@@ -359,9 +498,22 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, []);
 
-  useEffect(() => {
-    loadModuleConfigs();
-  }, [loadModuleConfigs]);
+  /**
+   * Refetch on FOCUS, not just mount. This screen stays mounted while the
+   * native stack pushes ModuleConfigEdit, so a config saved/created there left
+   * every module selector (TTS/Cognition/STT/Backend…) showing the old list
+   * until the user navigated fully away (owner device, 2026-10-21). Focus also
+   * covers the first mount, replacing the mount-only load.
+   *
+   * No cancellation: the load only replaces the option lists wholesale, so a
+   * read that lands after a quick push/pop is harmless — the next focus ends
+   * with the freshest list.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      loadModuleConfigs();
+    }, [loadModuleConfigs]),
+  );
 
   // ── Prefill from an existing profile (route param prefillProfileId) ─────────
   useEffect(() => {
@@ -739,19 +891,19 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleTestScenario = useCallback(async () => {
     if (testState === 'generating') return;
     if (!editProfileId) {
-      showAlert(t('saveFirst'), t('testScenarioNeedsSavedProfile'));
+      showAlert(t('characters:saveFirst'), t('characters:testScenarioNeedsSavedProfile'));
       return;
     }
     try {
       const entity = await getEntityByCharacterProfileId(editProfileId);
       if (!entity) {
-        showAlert(t('common:error'), t('testScenarioNoEntity'));
+        showAlert(t('common:error'), t('characters:testScenarioNoEntity'));
         return;
       }
       const interactions = await getActiveInteractionsByEntity(entity.id);
       const interactionId = interactions[0]?.id;
       if (!interactionId) {
-        showAlert(t('common:error'), t('testScenarioUnavailable'));
+        showAlert(t('common:error'), t('characters:testScenarioUnavailable'));
         return;
       }
       setTestState('generating');
@@ -765,7 +917,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       setTestState('ready');
     } catch (err) {
       log.warn('Test scenario generation failed (engine gate):', err);
-      showAlert(t('common:error'), t('testScenarioUnavailable'));
+      showAlert(t('common:error'), t('characters:testScenarioUnavailable'));
       setTestState('idle');
     }
   }, [editProfileId, testState, impersonatedEntityId, showAlert, t]);
@@ -784,7 +936,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // ── Export (JSON / PNG ccv3) — lifts the CURRENT form state ──────────────────
   const handleExport = async (kind: 'json' | 'png') => {
     if (!name.trim()) {
-      showAlert('Validation', t('validationName'));
+      showAlert('Validation', t('characters:validationName'));
       return;
     }
     try {
@@ -814,11 +966,11 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         Platform.OS === 'ios'
           ? { url: `file://${path}`, title: filename }
           : { message: `file://${path}`, title: filename },
-        { dialogTitle: t('exportCard') },
+        { dialogTitle: t('characters:exportCard') },
       );
     } catch (err) {
       log.error('Failed to export card:', err);
-      showAlert(t('common:error'), t('exportFailed'));
+      showAlert(t('common:error'), t('characters:exportFailed'));
     }
   };
 
@@ -837,7 +989,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   // image rows keep their ids (Phase 8 Step 4 — no more hard-delete+recreate).
   const handleAddImage = async () => {
     if (!editProfileId) {
-      showAlert(t('saveFirst'), t('saveFirstMessage'));
+      showAlert(t('characters:saveFirst'), t('characters:saveFirstMessage'));
       return;
     }
     try {
@@ -851,7 +1003,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       if (!result.assets || !result.assets[0]) return;
       const asset = result.assets[0];
       if (!asset.base64) {
-        showAlert(t('common:error'), t('imageError'));
+        showAlert(t('common:error'), t('characters:imageError'));
         return;
       }
       const mimeType = asset.type ?? 'image/jpeg';
@@ -884,7 +1036,7 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     } catch (err) {
       log.error('Failed to add image:', err);
-      showAlert(t('common:error'), t('addImageFailed'));
+      showAlert(t('common:error'), t('characters:addImageFailed'));
     }
   };
 
@@ -967,18 +1119,18 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         // Validation alerts instead of silent clamping (Phase 8 Step 2).
         const typingWpm = parseInt(typingSpeedWpm, 10);
         if (isNaN(typingWpm) || typingWpm < 1 || typingWpm > 200) {
-          showAlert('Validation', t('validationTypingSpeed'));
+          showAlert('Validation', t('characters:validationTypingSpeed'));
           setIsSaving(false);
           return;
         }
         const audioChance = parseInt(audioResponseChance, 10);
         if (isNaN(audioChance) || audioChance < 0 || audioChance > 100) {
-          showAlert('Validation', t('validationAudioChance'));
+          showAlert('Validation', t('characters:validationAudioChance'));
           setIsSaving(false);
           return;
         }
         if (!validateLifecycleConfig(lifecycleConfig)) {
-          showAlert('Validation', t('lifecycleInvalidNumber'));
+          showAlert('Validation', t('characters:lifecycleInvalidNumber'));
           setIsSaving(false);
           return;
         }
@@ -1086,51 +1238,30 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
             imagination_config_id: imaginationConfigId || null,
             movement_config_id: movementConfigId || null,
           });
+          // Entity wiring changed → the computed lock set is stale (7-14).
+          invalidateEntityAccessCache();
         }
-
-        // Fire-and-forget sync so the engine picks up the edits.
-        syncService.initiateSync().catch(syncErr => {
-          log.warn('Auto-sync after edit failed (non-critical):', syncErr);
-        });
 
         navigation.goBack();
         return;
       }
 
-      // One mint seam (D68): derive the D2 timestamped id from the name
-      // (spaces never survive — D3), throw a TYPED reserved-name error for
-      // `user`/`deleted` (D33 — surfaced by the inline field error), and
-      // ghost-probe the same-second backstop.
-      let entityId: string;
-      try {
-        entityId = await mintEntityId(trimmedName);
-      } catch (mintErr) {
-        if (mintErr instanceof ReservedEntityNameError) {
-          // D33 belt-and-braces: the pre-check above catches the common case;
-          // this typed catch keeps the rejection on the inline field error
-          // (never the generic createFailed alert) even if the predicates
-          // ever drift.
-          setReservedNameBlocked(true);
-          return;
-        }
-        throw mintErr;
-      }
-
       // 1. Either link an existing character profile (from the "From an
-      //    Existing One" flow) or create a brand-new one.
+      //    Existing One" flow) or create a brand-new one. The ENGINE mints the
+      //    profile id (`POST /api/character-profiles` ignores a client id), so
+      //    the returned id drives entity linkage + image uploads below
+      //    (create-then-use-response — owner ruling 1).
       let profileId: string;
       if (prefillProfileId) {
         // Reuse the pre-existing profile — do NOT create a new persona.
         profileId = prefillProfileId;
       } else {
-        profileId = uuidv4();
-
         // The NOT NULL text fields use empty string fallbacks, never null.
         const typingWpm = parseInt(typingSpeedWpm, 10);
         const audioChance = parseInt(audioResponseChance, 10);
 
-        await createCharacterProfile({
-          id: profileId,
+        const createdProfile = await createCharacterProfile({
+          id: '', // ignored by the engine (server-assigned)
           name: trimmedName,
           description: description.trim() || '',
           personality: personality.trim() || '',
@@ -1145,6 +1276,8 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
           scenario: scenario.trim() || '',
           mes_example: exampleDialogues.trim() || '',
         });
+        // Engine-minted profile id — reuse it for entity linkage + images.
+        profileId = createdProfile.id;
 
         // Record the cloud user who created this AI (creator badge + the
         // creator-only Edit Profile / Edit AI Settings buttons depend on it).
@@ -1195,26 +1328,38 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       }
 
-      // 3. Create entity with alias = name (unique among non-deleted entities)
+      // 3. Create the entity. The ENGINE mints the id from the name
+      //    (`POST /api/entities` rejects a client id) — create-then-use-response:
+      //    the returned id drives the module mapping below.
+      let entityId: string;
       try {
-        await createEntity({
-          id: entityId,
-          alias: trimmedName,
+        const entity = await createEntity({
+          name: trimmedName,
           character_profile_id: profileId,
           lifecycle_config: '{}',
-          rag_reindex_required: 1,
         });
+        entityId = entity.id;
       } catch (err: any) {
-        // Alias-unique violation ONLY (idx_entities_alias_unique is a live-only
-        // partial index): another AI partner already uses this name. Ghost-id
-        // collisions already auto-resolved above via mintEntityId,
-        // so any remaining UNIQUE failure on the id itself (or any non-unique
-        // error) must NOT be mislabeled — it falls through to the generic
-        // createFailed alert below.
-        if (
-          err?.message?.includes('UNIQUE') &&
-          err?.message?.includes('alias')
-        ) {
+        if (err instanceof ReservedEntityNameError) {
+          // Belt-and-braces (the pre-check catches the common case): the profile
+          // was created before the entity rejection — roll it back so no orphan
+          // lingers, then keep the rejection on the inline field error.
+          if (!prefillProfileId) {
+            try {
+              await deleteCharacterProfileCascade(profileId);
+            } catch (rollbackErr) {
+              log.warn('Failed to roll back orphaned profile after reserved-name rejection:', rollbackErr);
+            }
+          }
+          setReservedNameBlocked(true);
+          setIsSaving(false);
+          return;
+        }
+        // A live-alias collision is a 400 from the engine
+        // (`{error:"entity alias is already in use"}`) — surface the same
+        // alias-conflict alert. Ghost-id collisions auto-resolve engine-side
+        // (dedupe_id_if_taken), so no id-collision branch is needed.
+        if (err?.message?.includes('alias')) {
           // Roll back ONLY the brand-new profile created in step 1 so a failed
           // attempt cannot leave an orphaned "Name 2" duplicate in the
           // Characters list — the reported bug showed a "name already in use"
@@ -1265,20 +1410,11 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
         movement_config_id: resolvedMovement,
         deleted_at: null,
       });
+      // New entity wiring → the computed lock set is stale (7-14).
+      invalidateEntityAccessCache();
 
-      // 6. Push the new entity (and its profile/mapping) to the engine.
-      //    Fire-and-forget — a full syncAndWait here can block the save for
-      //    up to 45s (e.g. the engine waiting on a size-estimate confirmation),
-      //    which made saving feel like it "takes forever". The entity is
-      //    persisted locally either way; any leftover engine state is picked
-      //    up by the next opportunistic sync.
-      try {
-        syncService.initiateSync().catch(syncErr => {
-          log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
-        });
-      } catch (syncErr) {
-        log.warn('Auto-sync after entity creation failed (non-critical):', syncErr);
-      }
+      // 6. The entity (and its profile/mapping) is authored directly on the
+      //    engine at create time (task 3-4) — no separate sync push is needed.
 
       // 7. Go back to the screen we came from (Characters list).
       navigation.goBack();
@@ -1305,6 +1441,12 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
   const surfaceColor = theme.colors.background.surface;
   const inputTextStyle = { color: theme.colors.text.primary };
 
+  /**
+   * A clean `sb-input` field from the design: label above, crisp dark box with
+   * NO leading icon inside. The `icon` argument is retained for call-site
+   * compatibility but intentionally unused — the proposed clean UX dropped the
+   * decorative in-box icons.
+   */
   const renderField = (
     labelKey: string,
     placeholderKey: string,
@@ -1312,30 +1454,28 @@ export const CreateAIScreen: React.FC<Props> = ({ route, navigation }) => {
     onChange: (v: string) => void,
     field: typeof focusedField,
     multiline = false,
-    icon: string,
+    _icon?: string,
+    containerStyle?: ViewStyle,
+    hideLabel = false,
   ) => {
-const focused = focusedField === field;
+    const focused = focusedField === field;
     return (
-      <View style={styles.fieldGroup}>
-        <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
-          {t(labelKey)}
-        </ThemedText>
+      <View style={[styles.fieldGroup, containerStyle]}>
+        {!hideLabel && (
+          <ThemedText size={12} variant="secondary" style={styles.fieldLabel}>
+            {t(labelKey)}
+          </ThemedText>
+        )}
         <View
           style={[
             styles.inputShell,
             multiline && styles.multilineShell,
             {
-              backgroundColor: hexToRgba(surfaceColor, 0.55),
+              backgroundColor: 'rgba(15, 23, 42, 0.9)',
               borderColor: focused ? accent : theme.colors.border.default,
             },
           ]}
         >
-          <Icon
-            name={icon}
-            size={20}
-            color={focused ? accent : theme.colors.text.muted}
-            style={multiline ? styles.multilineIcon : undefined}
-          />
           <TextInput
             style={[
               styles.input,
@@ -1349,7 +1489,7 @@ const focused = focusedField === field;
             placeholder={t(placeholderKey)}
             placeholderTextColor={theme.colors.text.muted}
             multiline={multiline}
-            numberOfLines={multiline ? 3 : 1}
+            scrollEnabled={multiline ? false : undefined}
             textAlignVertical={multiline ? 'top' : undefined}
             autoCorrect={false}
           />
@@ -1358,35 +1498,91 @@ const focused = focusedField === field;
     );
   };
 
-  // Collapsible section card — same anatomy as Details/Advanced (chevron
-  // header + expandable body). Hosts the V3/RP editor sections in edit mode.
-  const renderCollapsibleCard = (
+  /**
+   * One row of the consolidated "Character Card Sections" accordion: a clean
+   * divided row (title left, summary pill + chevron right) with the expanded
+   * body directly below it inside the same card.
+   */
+  const renderAccordionRow = (
     title: string,
+    badgeText: string,
     open: boolean,
-    setOpen: React.Dispatch<React.SetStateAction<boolean>>,
+    onToggle: () => void,
     children: React.ReactNode,
-    testID?: string,
+    testID: string,
+    aliasTestIDs: string[] = [],
+    isLast = false,
   ) => (
-    <ThemedCard elevated accentStripe style={styles.section}>
+    <View style={[styles.accordionRow, isLast && !open && styles.accordionRowLast]}>
       <TouchableOpacity
-        onPress={() => setOpen(prev => !prev)}
+        onPress={onToggle}
         activeOpacity={0.7}
         testID={testID}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        style={styles.accordionRowHeader}
       >
-        <SectionHeader
-          title={title}
-          right={
-            <Icon
-              name={open ? 'chevron-up' : 'chevron-down'}
-              size={18}
-              color={theme.colors.text.muted}
-            />
-          }
-        />
+        <ThemedText
+          size={14}
+          weight="medium"
+          numberOfLines={1}
+          style={styles.accordionRowTitle}
+        >
+          {title}
+        </ThemedText>
+        <View style={styles.countPill} testID={`${testID}-badge`}>
+          <ThemedText size={11} numberOfLines={1} style={styles.countPillText}>
+            {badgeText} {open ? '▴' : '▾'}
+          </ThemedText>
+        </View>
       </TouchableOpacity>
-      {open && <View style={styles.sectionContent}>{children}</View>}
-</ThemedCard>
+      {/* Backwards-compatible toggle aliases (zero-size, accessible) so the
+          consolidated rows still answer the legacy per-section testIDs. */}
+      {aliasTestIDs.map(alias => (
+        <TouchableOpacity
+          key={alias}
+          onPress={onToggle}
+          testID={alias}
+          accessibilityRole="button"
+          accessibilityLabel={title}
+          style={styles.accordionAlias}
+        />
+      ))}
+      {open && <View style={styles.accordionRowBody}>{children}</View>}
+    </View>
   );
+
+  // ── Live summary pills for the character-card accordion (4-2) ──────────────
+  const cardBadges = buildCardSectionBadges({
+    personality,
+    voiceCharacteristics,
+    basePrompt,
+    scenario,
+    exampleDialogues,
+    postHistoryInstructions,
+    firstMes,
+    alternateGreetings,
+    characterBook,
+    imageCount: editProfileId ? editImages.length : galleryImages.length,
+    tags,
+    lifecycleConfig,
+    creatorName,
+  });
+
+  // Combined accordion rows: either legacy sub-toggle keeps the consolidated
+  // row open (and toggling the row moves both flags together).
+  const galleryOpen = showImages || showTags;
+  const toggleGallery = () => {
+    const next = !galleryOpen;
+    setShowImages(next);
+    setShowTags(next);
+  };
+  const lifecycleOpen = showLifecycle || showAttribution;
+  const toggleLifecycle = () => {
+    const next = !lifecycleOpen;
+    setShowLifecycle(next);
+    setShowAttribution(next);
+  };
 
   return (
     <ThemedView style={styles.container}>
@@ -1398,6 +1594,15 @@ const focused = focusedField === field;
             : t('title')
         }
         onBack={() => navigation.goBack()}
+        right={
+          editProfileId ? (
+            <ExportSection
+              compact
+              onExport={handleExport}
+              disabled={!name.trim()}
+            />
+          ) : undefined
+        }
       />
 
       <KeyboardAvoidingView
@@ -1420,9 +1625,9 @@ const focused = focusedField === field;
             ) : undefined
           }
         >
-          {/* ══════════════════ 1. GENERAL ══════════════════ */}
-          <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title={t('sectionGeneral')} />
+          {/* ══════════════════ 1. IDENTITY ══════════════════ */}
+          <ThemedCard elevated style={styles.section}>
+            <SectionHeader title={t('characters:identity', 'Identity')} />
 
             {/* Live-link mode: the card is SHARED with the source AI — keep
                 the UX honest about what saving will and won't do. */}
@@ -1505,16 +1710,58 @@ const focused = focusedField === field;
             </View>
 
             <View style={styles.sectionContent}>
-              {/* Name (required) */}
-              {renderField(
-                'nameLabel',
-                'namePlaceholder',
-                name,
-                handleNameChange,
-                'name',
-                false,
-                'account-edit',
-              )}
+              {/* Name (required) + Nickname — side-by-side in EDIT mode under a
+                  single combined label so the identity surface stays compact;
+                  Name spans full width on create (where the name mints the
+                  entity id). */}
+              <ThemedText size={12} variant="secondary" style={styles.fieldLabel}>
+                {editProfileId
+                  ? t('nameAndNicknameLabel', 'Name * · Nickname')
+                  : t('nameLabel')}
+              </ThemedText>
+              <View style={editProfileId ? styles.identityNameRow : undefined}>
+                <View style={editProfileId ? styles.identityNameField : undefined}>
+                  {renderField(
+                    'nameLabel',
+                    'namePlaceholder',
+                    name,
+                    handleNameChange,
+                    'name',
+                    false,
+                    'account-edit',
+                    undefined,
+                    true,
+                  )}
+                </View>
+
+                {editProfileId && (
+                  <View style={styles.identityNicknameField} testID="nickname-field">
+                    <View
+                      style={[
+                        styles.inputShell,
+                        {
+                          backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                          borderColor:
+                            focusedField === 'nickname'
+                              ? accent
+                              : theme.colors.border.default,
+                        },
+                      ]}
+                    >
+                      <TextInput
+                        style={[styles.input, inputTextStyle]}
+                        value={nickname}
+                        onChangeText={setNickname}
+                        onFocus={() => setFocusedField('nickname')}
+                        onBlur={() => setFocusedField(null)}
+                        placeholder={t('characters:nicknamePlaceholder', 'Alias (optional)')}
+                        placeholderTextColor={theme.colors.text.muted}
+                        testID="nickname-input"
+                      />
+                    </View>
+                  </View>
+                )}
+              </View>
 
               {/* D33: reserved-name inline error (create mode — `user`/`deleted`) */}
               {reservedNameError ? (
@@ -1543,49 +1790,24 @@ const focused = focusedField === field;
                 'text-box-outline',
               )}
 
-              {/* Nickname (edit mode — V3 field, identity surface) */}
-              {editProfileId && (
-                <View style={styles.fieldGroup} testID="nickname-field">
-                  <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
-                    {t('nickname')}
-                  </ThemedText>
-                  <View style={[styles.inputShell, { backgroundColor: hexToRgba(surfaceColor, 0.55), borderColor: theme.colors.border.default }]}>
-                    <Icon name="account-edit-outline" size={20} color={theme.colors.text.muted} />
-                    <TextInput
-                      style={[styles.input, inputTextStyle]}
-                      value={nickname}
-                      onChangeText={setNickname}
-                      placeholder={t('nicknamePlaceholder')}
-                      placeholderTextColor={theme.colors.text.muted}
-                      testID="nickname-input"
-                    />
-                  </View>
-                </View>
-              )}
-
             </View>
           </ThemedCard>
 
-          {/* ══════════════════ 2. DETAILS ══════════════════ */}
-          <ThemedCard elevated accentStripe style={styles.section}>
-            <TouchableOpacity
-              onPress={() => setShowDetails(prev => !prev)}
-              activeOpacity={0.7}
-            >
-              <SectionHeader
-                title={t('sectionDetails')}
-                right={
-                  <Icon
-                    name={showDetails ? 'chevron-up' : 'chevron-down'}
-                    size={18}
-                    color={theme.colors.text.muted}
-                  />
-                }
-              />
-            </TouchableOpacity>
+          {/* ══════════════════ 2. CHARACTER CARD SECTIONS ══════════════════
+              One glass card with exactly five accordion rows. Each row carries
+              a right-aligned count pill with the chevron INSIDE it (Configured
+              / 1 opening · 2 alt / 3 entries / 2 images · 4 tags / Default) so
+              the card's state is readable without expanding every section. */}
+          <ThemedCard elevated style={styles.section}>
+            <SectionHeader title={t('characterCardSections', 'Character Card Sections')} />
 
-            {showDetails && (
-              <View style={styles.sectionContent}>
+            {/* ── 1. Persona & Prompts ── */}
+            {renderAccordionRow(
+              t('personaPrompts', 'Persona & Prompts'),
+              cardBadges.persona,
+              showDetails,
+              () => setShowDetails(prev => !prev),
+              <View style={styles.accordionRowBodyInner}>
                 {/* Personality */}
                 {renderField(
                   'personalityLabel',
@@ -1623,7 +1845,7 @@ const focused = focusedField === field;
                       style={[
                         styles.inputShell,
                         {
-                          backgroundColor: hexToRgba(surfaceColor, 0.55),
+                          backgroundColor: 'rgba(15, 23, 42, 0.9)',
                           borderColor:
                             focusedField === 'typing'
                               ? accent
@@ -1653,7 +1875,7 @@ const focused = focusedField === field;
                       style={[
                         styles.inputShell,
                         {
-                          backgroundColor: hexToRgba(surfaceColor, 0.55),
+                          backgroundColor: 'rgba(15, 23, 42, 0.9)',
                           borderColor:
                             focusedField === 'audio'
                               ? accent
@@ -1716,15 +1938,14 @@ const focused = focusedField === field;
                 {editProfileId && (
                   <View style={styles.fieldGroup} testID="post-history-field">
                     <ThemedText size={12} variant="secondary" weight="medium" style={styles.fieldLabel}>
-                      {t('postHistoryInstructions')}
+                      {t('characters:postHistoryInstructions', 'Post-history instructions (UJB)')}
                     </ThemedText>
-                    <View style={[styles.inputShell, styles.multilineShell, { backgroundColor: hexToRgba(surfaceColor, 0.55), borderColor: theme.colors.border.default }]}>
-                      <Icon name="text-box-edit-outline" size={20} color={theme.colors.text.muted} style={styles.multilineIcon} />
+                    <View style={[styles.inputShell, styles.multilineShell, { backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: theme.colors.border.default }]}>
                       <TextInput
                         style={[styles.input, styles.multilineInput, inputTextStyle]}
                         value={postHistoryInstructions}
                         onChangeText={setPostHistoryInstructions}
-                        placeholder={t('postHistoryHint')}
+                        placeholder={t('characters:postHistoryHint', 'Injected after the conversation history')}
                         placeholderTextColor={theme.colors.text.muted}
                         multiline
                         numberOfLines={3}
@@ -1739,15 +1960,83 @@ const focused = focusedField === field;
                     />
                   </View>
                 )}
+              </View>,
+              'details-section-toggle',
+              ['persona-prompts-toggle'],
+            )}
 
-                {/* ── Images gallery (create/duplicate flow; edit mode uses the
-                     dedicated picker card with viewer / set-primary / captions) ── */}
-                {!editProfileId && (
-                  <>
-                    <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
-                      {t('imagesLabel')}
+            {/* ── 2. Greetings ── */}
+            {renderAccordionRow(
+              t('greetingsRow', 'Greetings'),
+              cardBadges.greetings,
+              showGreeting,
+              () => setShowGreeting(prev => !prev),
+              <View style={styles.accordionRowBodyInner}>
+                <GreetingEditorSection
+                  firstMes={firstMes}
+                  onChangeFirstMes={setFirstMes}
+                  charName={nickname.trim() || name.trim() || '{{char}}'}
+                  userName={impersonatedEntityName}
+                  testState={testState}
+                  testGreeting={testGreeting}
+                  onTestScenario={handleTestScenario}
+                  onUseTestGreeting={handleUseTestGreeting}
+                  onDiscardTestGreeting={handleDiscardTestGreeting}
+                />
+                <AlternateGreetingsSection
+                  alternateGreetings={alternateGreetings}
+                  firstMes={firstMes}
+                  charName={nickname.trim() || name.trim() || '{{char}}'}
+                  userName={impersonatedEntityName}
+                  onAdd={handleAddAlternate}
+                  onRemove={handleRemoveAlternate}
+                  onMove={handleMoveAlternate}
+                  onEdit={handleEditAlternate}
+                  onPromoteToDefault={handlePromoteToDefault}
+                />
+              </View>,
+              'greeting-section-toggle',
+            )}
+
+            {/* ── 3. Lorebook ── */}
+            {renderAccordionRow(
+              t('characters:lorebookSection', 'Lorebook'),
+              cardBadges.lorebook,
+              showLorebook,
+              () => setShowLorebook(prev => !prev),
+              <View style={styles.accordionRowBodyInner}>
+                <LorebookSection
+                  characterBook={characterBook}
+                  onChange={setCharacterBook}
+                />
+              </View>,
+              'lorebook-section-toggle',
+            )}
+
+            {/* ── 4. Gallery & Tags (one combined row) ── */}
+            {renderAccordionRow(
+              t('galleryTagsRow', 'Gallery & Tags'),
+              cardBadges.galleryTags,
+              galleryOpen,
+              toggleGallery,
+              <>
+                {editProfileId ? (
+                  <View style={styles.accordionRowBodyInner}>
+                    <ProfileImagePicker
+                      images={editImages}
+                      primaryImageId={primaryImageId}
+                      onAddImage={handleAddImage}
+                      onSetPrimary={handleSetPrimary}
+                      onDeleteImage={handleDeleteImage}
+                    />
+                    <ThemedText variant="muted" size={12} style={styles.imageHint}>
+                      {editImages.length > 0
+                        ? `${editImages.length} image${editImages.length !== 1 ? 's' : ''} · Tap to view · Hold for options`
+                        : t('characters:saveFirstMessage')}
                     </ThemedText>
-
+                  </View>
+                ) : (
+                  <View style={styles.accordionRowBodyInner}>
                     <View style={styles.galleryWrap}>
                       {galleryImages.map((img, index) => (
                         <View key={`${index}-${img.base64.length}`} style={styles.galleryTile}>
@@ -1793,111 +2082,32 @@ const focused = focusedField === field;
                     <ThemedText size={11} variant="muted" style={styles.galleryHint}>
                       {t('imagesHint')}
                     </ThemedText>
-                  </>
+                  </View>
                 )}
-              </View>
-            )}
-          </ThemedCard>
 
-          {/* ══════════════════ V3/RP EDITOR SECTIONS (edit mode) ══════════════ */}
-          {editProfileId && (
-            <>
-              {/* Greeting */}
-              {renderCollapsibleCard(
-                t('greetingSection'),
-                showGreeting,
-                setShowGreeting,
-                <>
-                  <GreetingEditorSection
-                    firstMes={firstMes}
-                    onChangeFirstMes={setFirstMes}
-                    charName={nickname.trim() || name.trim() || '{{char}}'}
-                    userName={impersonatedEntityName}
-                    testState={testState}
-                    testGreeting={testGreeting}
-                    onTestScenario={handleTestScenario}
-                    onUseTestGreeting={handleUseTestGreeting}
-                    onDiscardTestGreeting={handleDiscardTestGreeting}
-                  />
-                  <AlternateGreetingsSection
-                    alternateGreetings={alternateGreetings}
-                    firstMes={firstMes}
-                    charName={nickname.trim() || name.trim() || '{{char}}'}
-                    userName={impersonatedEntityName}
-                    onAdd={handleAddAlternate}
-                    onRemove={handleRemoveAlternate}
-                    onMove={handleMoveAlternate}
-                    onEdit={handleEditAlternate}
-                    onPromoteToDefault={handlePromoteToDefault}
-                  />
-                </>,
-                'greeting-section-toggle',
-              )}
-
-              {/* Lorebook */}
-              {renderCollapsibleCard(
-                t('lorebookSection'),
-                showLorebook,
-                setShowLorebook,
-                <LorebookSection
-                  characterBook={characterBook}
-                  onChange={setCharacterBook}
-                />,
-                'lorebook-section-toggle',
-              )}
-
-              {/* Images — viewer / set-primary / captions via ProfileImagePicker */}
-              {renderCollapsibleCard(
-                t('imagesLabel'),
-                showImages,
-                setShowImages,
-                <>
-                  <ProfileImagePicker
-                    images={editImages}
-                    primaryImageId={primaryImageId}
-                    onAddImage={handleAddImage}
-                    onSetPrimary={handleSetPrimary}
-                    onDeleteImage={handleDeleteImage}
-                  />
-                  <ThemedText variant="muted" size={12} style={styles.imageHint}>
-                    {editImages.length > 0
-                      ? `${editImages.length} image${editImages.length !== 1 ? 's' : ''} · Tap to view · Hold for options`
-                      : t('characters:saveFirstMessage')}
-                  </ThemedText>
-                </>,
-                'images-section-toggle',
-              )}
-
-              {/* Tags */}
-              {renderCollapsibleCard(
-                t('tags'),
-                showTags,
-                setShowTags,
+                <View style={styles.combinedDivider} />
                 <TagsSection
                   tags={tags}
                   onChange={setTags}
                   suggestions={libraryTags}
-                />,
-                'tags-section-toggle',
-              )}
+                />
+              </>,
+              'images-section-toggle',
+              ['tags-section-toggle'],
+            )}
 
-              {/* Lifecycle */}
-              {renderCollapsibleCard(
-                t('lifecycleSection'),
-                showLifecycle,
-                setShowLifecycle,
+            {/* ── 5. AI Lifecycle & Attribution (one combined row) ── */}
+            {renderAccordionRow(
+              t('lifecycleAttributionRow', 'AI Lifecycle & Attribution'),
+              cardBadges.lifecycle,
+              lifecycleOpen,
+              toggleLifecycle,
+              <View style={styles.accordionRowBodyInner}>
                 <LifecycleSection
                   config={lifecycleConfig}
                   onChange={setLifecycleConfig}
-                />,
-                'lifecycle-section-toggle',
-              )}
-
-              {/* Attribution */}
-              {renderCollapsibleCard(
-                t('attributionSection'),
-                showAttribution,
-                setShowAttribution,
+                />
+                <View style={styles.combinedDivider} />
                 <AttributionSection
                   creator={creatorName}
                   onChangeCreator={setCreatorName}
@@ -1906,40 +2116,24 @@ const focused = focusedField === field;
                   characterVersion={characterVersion}
                   onChangeCharacterVersion={setCharacterVersion}
                   cardProvenance={cardProvenance}
-                />,
-                'attribution-section-toggle',
-              )}
+                />
+              </View>,
+              'lifecycle-section-toggle',
+              ['attribution-section-toggle'],
+              true,
+            )}
+          </ThemedCard>
 
-              {/* Export */}
-              <ThemedCard elevated accentStripe style={styles.section}>
-                <SectionHeader title={t('exportCard')} />
-                <View style={styles.sectionContent}>
-                  <ExportSection
-                    onExport={handleExport}
-                    disabled={!name.trim()}
-                  />
-                </View>
-              </ThemedCard>
-            </>
-          )}
-
-          {/* ══════════════════ 3. ADVANCED ══════════════════ */}
-          <ThemedCard elevated accentStripe accentTint style={styles.section}>
+          {/* ══════════════════ 3. MODULE WIRING ══════════════════ */}
+          <ThemedCard elevated accentTint style={styles.section}>
+            {/* Standard section header — the card is expanded by default and
+                the rows sit in one clean stack (no noisy sub-group headers). */}
             <TouchableOpacity
               onPress={() => setShowAdvanced(prev => !prev)}
               activeOpacity={0.7}
               testID="advanced-toggle"
             >
-              <SectionHeader
-                title={t('advancedSettings')}
-                right={
-                  <Icon
-                    name={showAdvanced ? 'chevron-up' : 'chevron-down'}
-                    size={18}
-                    color={theme.colors.text.muted}
-                  />
-                }
-              />
+              <SectionHeader title={t('moduleWiring', 'MODULE WIRING')} />
             </TouchableOpacity>
 
             {showAdvanced && (
@@ -1958,10 +2152,8 @@ const focused = focusedField === field;
                     created, or edited right here. A slot with no selection
                     stays unset ("Disabled") — engine-seeded defaults arrive
                     via normal sync; the sheet's "Create new config…" row
-                    opens ModuleConfigEdit. */}
-                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
-                  {t('aiModelSection')}
-                </ThemedText>
+                    opens ModuleConfigEdit. Each picker carries its provider +
+                    model subtitle so configs are distinguishable at a glance. */}
                 <EntityModuleSelectorWithActions
                   label={t('moduleBackend')}
                   moduleType="backend"
@@ -1981,9 +2173,6 @@ const focused = focusedField === field;
                   entityId={editEntityId ?? undefined}
                 />
 
-                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
-                  {t('voiceSection')}
-                </ThemedText>
                 <EntityModuleSelectorWithActions
                   label={t('moduleTTS')}
                   moduleType="tts"
@@ -2003,9 +2192,6 @@ const focused = focusedField === field;
                   entityId={editEntityId ?? undefined}
                 />
 
-                <ThemedText size={12} variant="accent" weight="bold" style={styles.groupLabel}>
-                  {t('configSection')}
-                </ThemedText>
                 <EntityModuleSelectorWithActions
                   label={t('moduleRAG')}
                   moduleType="rag"
@@ -2173,29 +2359,92 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   inputShell: {
+    // Clean `sb-input`: crisp dark box, no leading icons.
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    gap: 10,
-    minHeight: 52,
+    borderRadius: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    minHeight: 38,
   },
   multilineShell: {
-    alignItems: 'flex-start',
-    paddingTop: 13,
-  },
-  multilineIcon: {
-    marginTop: 2,
+    // Prose textareas: full width, symmetric vertical padding.
+    alignItems: 'stretch',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   input: {
     flex: 1,
-    fontSize: 15,
-    paddingVertical: 10,
-    minHeight: 44,
+    fontSize: 14,
+    paddingVertical: 0,
   },
   multilineInput: {
-    minHeight: 88,
+    minHeight: 54,
+    paddingVertical: 0,
+    textAlignVertical: 'top',
+    lineHeight: 20,
+  },
+
+  // ── Identity card: Name + Nickname side-by-side in edit mode ──
+  identityNameRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  identityNameField: {
+    flex: 1.2,
+  },
+  identityNicknameField: {
+    flex: 1,
+  },
+
+  // ── Character Card Sections accordion (`accordion-row` / `count-pill`) ──
+  accordionRow: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(51, 65, 85, 0.65)',
+  },
+  accordionRowLast: {
+    borderBottomWidth: 0,
+  },
+  accordionRowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+  },
+  accordionRowTitle: {
+    flexShrink: 1,
+  },
+  countPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(148, 163, 184, 0.15)',
+    flexShrink: 0,
+  },
+  countPillText: {
+    color: '#cbd5e1',
+  },
+  accordionAlias: {
+    width: 0,
+    height: 0,
+  },
+  accordionRowBody: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  accordionRowBodyInner: {
+    gap: 0,
+  },
+  combinedDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(51, 65, 85, 0.65)',
+    marginVertical: 12,
   },
 
   // ── Advanced ──

@@ -20,7 +20,6 @@ import React from 'react';
 import { renderHook, act } from '@testing-library/react-native';
 import { AppState, AppStateStatus } from 'react-native';
 import { BiometricLockProvider, useBiometricLock } from '../BiometricLockContext';
-
 // ── Mock the lock service so the provider loads an enabled PIN lock ─────────
 jest.mock('../../services/BiometricLockService', () => ({
   __esModule: true,
@@ -35,28 +34,51 @@ jest.mock('../../services/BiometricLockService', () => ({
   },
 }));
 
-// ── AppState driver ─────────────────────────────────────────────────────────
-// Capture the provider's 'change' listener (registered once at mount).
-const getAppStateHandler = (): ((s: AppStateStatus) => void) => {
-  const calls = (AppState.addEventListener as jest.Mock).mock.calls;
-  const changeCall = calls.find((c: unknown[]) => c[0] === 'change');
-  if (!changeCall) {
-    throw new Error('BiometricLockProvider did not register an AppState listener');
-  }
-  return changeCall[1] as (s: AppStateStatus) => void;
-};
+// ── AppLifecycle driver ─────────────────────────────────────────────────────
+// The provider subscribes to `react-native-applifecycle` (real ON_STOP
+// semantics), NOT RN AppState. This mock exposes a controllable handler set +
+// currentState so the suite can drive transitions exactly like before.
+jest.mock('react-native-applifecycle', () => {
+  const handlers = new Set();
+  const state = { current: 'active' };
+  return {
+    __esModule: true,
+    AppLifecycle: {
+      addEventListener: jest.fn((_event: string, handler: (s: AppStateStatus) => void) => {
+        handlers.add(handler);
+        return { remove: jest.fn(() => handlers.delete(handler)) };
+      }),
+      get currentState() {
+        return state.current;
+      },
+      __handlers: handlers,
+      __state: state,
+    },
+  };
+});
+
+interface LifecycleControl {
+  addEventListener: jest.Mock;
+  __handlers: Set<(state: AppStateStatus) => void>;
+  __state: { current: AppStateStatus };
+}
+
+const AppLifecycle = (jest.requireMock('react-native-applifecycle') as {
+  AppLifecycle: LifecycleControl;
+}).AppLifecycle;
 
 const fireAppState = async (state: AppStateStatus) => {
   await act(async () => {
-    getAppStateHandler()(state);
+    AppLifecycle.__handlers.forEach(handler => handler(state));
   });
 };
 
 describe('BiometricLockContext — external flow (Option 3)', () => {
-  // Re-mount the provider for every test with a fresh AppState subscription.
+  // Re-mount the provider for every test with a fresh lifecycle subscription.
   const setup = async () => {
     jest.clearAllMocks();
-    (AppState as any).currentState = 'active';
+    AppLifecycle.__handlers.clear();
+    AppLifecycle.__state.current = 'active';
     const utils = await renderHook(() => useBiometricLock(), {
       wrapper: ({ children }) => <BiometricLockProvider>{children}</BiometricLockProvider>,
     });
@@ -69,6 +91,20 @@ describe('BiometricLockContext — external flow (Option 3)', () => {
     const { result } = await setup();
     const value = await result.current.withExternalFlow(() => Promise.resolve(42));
     expect(value).toBe(42);
+  });
+
+  it('subscribes to AppLifecycle, not RN AppState (volume-overlay fix)', async () => {
+    const appStateSpy = jest.spyOn(AppState, 'addEventListener');
+    try {
+      await setup();
+      expect(AppLifecycle.addEventListener).toHaveBeenCalledWith(
+        'change',
+        expect.any(Function),
+      );
+      expect(appStateSpy).not.toHaveBeenCalledWith('change', expect.any(Function));
+    } finally {
+      appStateSpy.mockRestore();
+    }
   });
 
   it('locks immediately on a genuine background with no flow in-flight', async () => {

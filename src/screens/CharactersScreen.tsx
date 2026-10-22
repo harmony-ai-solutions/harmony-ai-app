@@ -31,6 +31,7 @@ import { TAB_BAR_CONTENT_PAD, TAB_BAR_FAB_OFFSET } from '../components/navigatio
 import { hexToRgba } from '../utils/colorUtils';
 import { hapticLightPress } from '../utils/haptics';
 import { createLogger } from '../utils/logger';
+import { copyAppDiagnosticsWithToast } from '../services/diagnostics/appDiagnostics';
 import { TagChips } from '../components/character-card/TagChips';
 import { parseJsonColumn } from '../components/character-card/lorebook';
 import { useReducedMotion } from '../hooks/useReducedMotion';
@@ -45,7 +46,8 @@ import { CreatePartnerModal } from '../components/characters/CreatePartnerModal'
 import { AICardPickerModal } from '../components/characters/AICardPickerModal';
 import {
   getAllCharacterProfiles,
-  getCharacterImages,
+  getCharacterImagesMetadata,
+  getPrimaryImage,
   getDistinctTags,
   deleteCharacterProfile,
   deleteCharacterProfileCascade,
@@ -54,7 +56,7 @@ import {
   updateCharacterProfile,
   getFavoriteCharacterProfileIds,
   toggleCharacterFavorite,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 import CategoryPreferencesService, {
   CharacterCategory,
 } from '../services/CategoryPreferencesService';
@@ -77,23 +79,22 @@ import {
   createEntityModuleMapping,
   getEntityByCharacterProfileId,
   ReservedEntityNameError,
-} from '../database/repositories/entities';
+} from '../database/repositories';
 import {
   deriveParticipantKey,
   deriveScopeFromParticipants,
-} from '../database/repositories/interactions';
+} from '../database/repositories';
 import { v7 as uuidv7 } from 'uuid';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import {
   resolvePersonaId,
   createUserPersonaFromCard,
-} from '../database/repositories/userEntities';
+} from '../database/repositories';
 import { filterBlockedCharacterProfiles } from '../utils/blockedContentFilters';
 import * as SocialService from '../services/social/SocialService';
 import { CharacterProfile } from '../database/models';
 import { CharacterCardImportError } from '../services/CharacterCardImportService';
 import { openCharacterChat } from '../services/CharacterChatService';
-import syncService from '../services/SyncService';
 
 function importMessageKey(code?: string): string {
   switch (code) {
@@ -290,39 +291,69 @@ export const CharactersScreen: React.FC = () => {
 
   const loadProfiles = useCallback(async () => {
     try {
-      let data = await getAllCharacterProfiles();
+      // Profiles, the block list and the distinct library tags load together
+      // (the tag read shares the in-flight profile read, so this is 2 requests,
+      // not 6). Each dependency is isolated: a failing block/tag read must never
+      // stop the grid from rendering.
+      const [allProfiles, blockedIds, tags] = await Promise.all([
+        getAllCharacterProfiles(),
+        SocialService.getBlockedUserIds().catch(err => {
+          log.warn('Failed to load blocked users — profile filter skipped:', err);
+          return new Set<string>();
+        }),
+        // Distinct library tags for the filter chip row (4-3) — isolated so a
+        // tag-load failure never aborts the profile/image load below.
+        getDistinctTags().catch(tagErr => {
+          log.warn('Failed to load distinct tags:', tagErr);
+          return null;
+        }),
+      ]);
+
       // Hide AI characters created by blocked users app-wide. The stub block
       // list is user-id-based; the pure filter drops profiles whose id is in
       // the blocked set (the future backend resolves creator→profile ids).
-      const blockedIds = await SocialService.getBlockedUserIds();
-      data = filterBlockedCharacterProfiles(data, blockedIds);
+      const data = filterBlockedCharacterProfiles(allProfiles, blockedIds);
       setProfiles(data);
 
-      // Distinct library tags for the filter chip row (4-3) — isolated so a
-      // tag-load failure never aborts the profile/image load below.
-      try {
-        const tags = await getDistinctTags();
-        setAllTags(tags);
-      } catch (tagErr) {
-        log.warn('Failed to load distinct tags:', tagErr);
+      // Seed favorites straight from the profile rows (they carry
+      // `is_favorite`) — the categories/favorites load stays for custom
+      // categories and for mocks that stub getFavoriteCharacterProfileIds.
+      if (data.some(p => p.is_favorite === 1)) {
+        setFavoriteIds(new Set(data.filter(p => p.is_favorite === 1).map(p => p.id)));
       }
 
-      // Load primary images + image counts for all profiles in parallel
+      if (tags !== null) setAllTags(tags);
+
+      // The grid and the ＋ FAB must render NOW — the per-profile thumbnail
+      // pass below fills portraits in progressively, it must not gate the UI.
+      setIsLoading(false);
+
+      // Primary images + image counts for all profiles in parallel. The list is
+      // metadata-only (contract 1.8.0) and the avatar comes from the derived
+      // thumbnail when the engine has one — no gallery blobs are downloaded.
+      // Each card gets its portrait as soon as ITS thumbnail lands instead of
+      // waiting for the whole library.
       const imageMap: Record<string, string | null> = {};
       const countMap: Record<string, number> = {};
       await Promise.all(
         data.map(async profile => {
+          let imageUri: string | null = null;
+          let count = 0;
           try {
-            const images = await getCharacterImages(profile.id);
-            const primary = images.find(img => img.is_primary === true);
-            imageMap[profile.id] = primary
-              ? createDataURL(primary.image_data, primary.mime_type)
-              : null;
-            countMap[profile.id] = images.length;
+            const [images, primary] = await Promise.all([
+              getCharacterImagesMetadata(profile.id),
+              getPrimaryImage(profile.id),
+            ]);
+            imageUri = primary ? createDataURL(primary.image_data, primary.mime_type) : null;
+            count = images.length;
           } catch {
-            imageMap[profile.id] = null;
-            countMap[profile.id] = 0;
+            imageUri = null;
+            count = 0;
           }
+          imageMap[profile.id] = imageUri;
+          countMap[profile.id] = count;
+          setPrimaryImages(prev => ({ ...prev, [profile.id]: imageUri }));
+          setImageCounts(prev => ({ ...prev, [profile.id]: count }));
         }),
       );
       setPrimaryImages(imageMap);
@@ -335,32 +366,10 @@ export const CharactersScreen: React.FC = () => {
     }
   }, []);
 
-  // 4-1 / 000044: live favorites refresh. SyncService emits `sync:data-applied`
-  // after an inbound apply commits; when it touched `character_profiles`, reload
-  // the favorite ids so the favorites filter reflects engine-side changes even if
-  // this screen stays focused (the focus reload above only fires on re-focus).
-  // Favorites now ride inside the profile row as `is_favorite`, so the profile
-  // table filter covers them (the old favorites sidecar table is gone).
-  // 3-4: persona-cascade tombstones (`entities`) and avatar churn
-  // (`character_image`) can also go stale while focused — reload the profile
-  // list so freed persona-owned cards and changed avatars surface immediately.
-  useEffect(() => {
-    const handleSyncApplied = (payload: { tables: string[] }) => {
-      if (payload.tables.includes('character_profiles')) {
-        loadFavoritesAndCategories();
-      }
-      if (
-        payload.tables.includes('entities') ||
-        payload.tables.includes('character_image')
-      ) {
-        loadProfiles();
-      }
-    };
-    syncService.on('sync:data-applied', handleSyncApplied);
-    return () => {
-      syncService.off('sync:data-applied', handleSyncApplied);
-    };
-  }, [loadFavoritesAndCategories, loadProfiles]);
+  // 3-4: live refresh of engine-authored profile changes is driven by re-reads
+  // on focus (the legacy `sync:data-applied` listener is gone with the sync
+  // stack). Favorites ride inside the profile row as `is_favorite`.
+
 
   // Reload on focus (handles return from edit screen)
   useFocusEffect(
@@ -499,7 +508,18 @@ export const CharactersScreen: React.FC = () => {
         showAlert(t('common:error'), t('chatOpenReservedName'));
         return;
       }
-      showAlert(t('common:error'), t('chatOpenFailed'));
+      showAlert(t('common:error'), t('chatOpenFailed'), [
+        { text: t('common:close'), style: 'cancel' },
+        {
+          text: t('common:copyDiagnostics'),
+          onPress: () => {
+            void copyAppDiagnosticsWithToast(showToast, {
+              success: t('common:diagnosticsCopied'),
+              failure: t('common:diagnosticsCopyFailed'),
+            });
+          },
+        },
+      ]);
     }
   };
 
@@ -717,13 +737,6 @@ export const CharactersScreen: React.FC = () => {
   const closeReviewAndRefresh = async () => {
     setPendingImport(null);
     await loadProfiles();
-
-    // Push the imported profile (+ image) to the engine so it can be used in
-    // chat sessions. Without an explicit sync, the engine never learns about
-    // the imported profile until some unrelated sync happens.
-    syncService.initiateSync().catch(syncErr => {
-      log.warn('Auto-sync after character import failed (non-critical):', syncErr);
-    });
   };
 
   const handleImportError = (err: unknown) => {

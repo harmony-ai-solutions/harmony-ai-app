@@ -14,9 +14,17 @@
 # See android/app/build.gradle (release buildType). Production/beta builds
 # (prodRelease without this flag) are completely unaffected.
 #
-# Also passes HARMONY_LINK_WSS_URL + HARMONY_LINK_WS_URL via -P flags so
-# gradle's buildConfigField picks them up reliably (avoids the daemon env
-# caching issues with ENVFILE).
+# `-PE2E_ENGINE_PEER_WS_URL` / `-PE2E_ENGINE_PEER_WSS_URL` inject the container
+# engine's LAN endpoints (plan 7-13). They are declared as BuildConfig fields
+# ONLY for E2E builds (the `E2E_DEBUG_SIGNING` marker) and feed
+# src/services/engine/e2eEngineOverride.ts, which points the app's embedded
+# engine sync client at the container engine so the standard device-approval
+# handshake runs (a new device registers PENDING; approve it with
+# e2e/approve-pending-devices.sh). Override the defaults with E2E_PEER_WS_URL /
+# E2E_PEER_WSS_URL. NOTE: pairing also requires the app to actually ship the
+# engine sidecar (gradle `-PENGINE_SIDECAR_VERSION` + `-PENGINE_SIDECAR_BASE_URL`
+# / `-PENGINE_SIDECAR_ARTIFACTS_DIR`); without it the override is a harmless
+# no-op (no engine to configure). See e2e/README.md.
 #
 # Usage:
 #   ./e2e/build-apk.sh
@@ -30,11 +38,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT/android"
 
+E2E_PEER_WS_URL="${E2E_PEER_WS_URL:-10.0.2.2:28080}"
+E2E_PEER_WSS_URL="${E2E_PEER_WSS_URL:-10.0.2.2:28443}"
+
 echo "Building devRelease APK (JS-bundled, debug-signed) with E2E gradle properties..."
 ./gradlew assembleDevRelease \
   -PE2E_DEBUG_SIGNING=true \
-  -PHARMONY_LINK_WSS_URL=wss://10.0.2.2:28443 \
-  -PHARMONY_LINK_WS_URL=ws://10.0.2.2:28080
+  -PE2E_ENGINE_PEER_WS_URL="$E2E_PEER_WS_URL" \
+  -PE2E_ENGINE_PEER_WSS_URL="$E2E_PEER_WSS_URL"
 
 echo "Copying APK to e2e/app-debug.apk..."
 APK_SRC="app/build/outputs/apk/dev/release/app-dev-release.apk"

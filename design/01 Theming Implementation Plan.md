@@ -47,7 +47,7 @@ Perfect! Those are great decisions. Let me update the implementation plan with y
 └─────────────────────────────────────┘
 ```
 
-This matches the Kajiwoto pattern you mentioned - bottom nav for core features, side/overlay menu for settings.
+This matches the pattern you mentioned - bottom nav for core features, side/overlay menu for settings.
 
 ---
 

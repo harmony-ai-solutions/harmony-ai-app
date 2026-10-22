@@ -15,7 +15,6 @@ import type { InteractionSession } from '../EntitySessionService';
 import { EventEmitter } from 'eventemitter3';
 
 let mockConnectionManager: any;
-let mockInitiateSync: jest.Mock;
 
 jest.mock('react-native-device-info', () => ({
   getUniqueId: jest.fn().mockResolvedValue('test-device'),
@@ -60,43 +59,21 @@ jest.mock('../connection/ConnectionManager', () => {
   return { __esModule: true, default: cm };
 });
 
-jest.mock('../SyncService', () => {
-  mockInitiateSync = jest.fn().mockResolvedValue(undefined);
-  return {
-    __esModule: true,
-    SyncService: {
-      getInstance: () => ({ initiateSync: mockInitiateSync, syncAndWait: jest.fn().mockResolvedValue(undefined) }),
-    },
-  };
-});
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   createInteraction: jest.fn().mockResolvedValue(undefined),
   deriveScopeFromParticipants: jest.fn().mockReturnValue('one_on_one'),
   deriveParticipantKey: jest.fn().mockReturnValue('pk'),
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   messageExists: jest.fn(),
   createConversationMessage: jest.fn(),
   updateConversationMessage: jest.fn(),
   getConversationMessage: jest.fn(),
 }));
 
-jest.mock('../../database/connection', () => ({
-  getDatabase: jest.fn(),
-  getSyncDatabase: jest.fn().mockResolvedValue(undefined),
-}));
 
-jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    getStatus: jest.fn().mockReturnValue('idle'),
-    isPurging: jest.fn().mockReturnValue(false),
-  },
-  default: {},
-}));
 
 function resetSingleton(): void {
   (EntitySessionService as any).instance = null;
@@ -134,7 +111,6 @@ function successResponse(eventId: string, eventType: string, payload: Record<str
 describe('EntitySessionService — generateGreeting (§2-4)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockInitiateSync.mockClear();
     resetSingleton();
   });
 
@@ -253,7 +229,6 @@ describe('EntitySessionService — generateGreeting (§2-4)', () => {
 describe('EntitySessionService — startNewScenario (§2-4)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockInitiateSync.mockClear();
     resetSingleton();
   });
 

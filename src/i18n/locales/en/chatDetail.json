@@ -41,6 +41,7 @@
   "editResendBody": "Send this edited message? The original response will be removed.",
   "deleteEntityTitle": "Delete Entity",
   "deleteEntityBody": "Delete \"{{name}}\"? Chat history will be preserved but this entity will no longer be accessible.",
+  "deleteCharacter": "Delete {{name}}",
   "retryFailedTitle": "Retry Failed",
   "errorTitle": "Error",
   "myPersonas": "My Personas",
@@ -88,6 +89,7 @@
   "disableTitle": "Disable {{name}}",
   "disableBody": "Disable {{name}}? You will no longer send or receive messages with this AI. You can enable anytime.",
   "disabledBanner": "You disabled this AI. You can't send or receive messages until you enable it.",
+  "lockedBanner": "This entity uses a provider not available in this build.",
   "enable": "Enable",
   "openBubble": "Open chat bubble",
   "toastDisabled": "AI disabled",
@@ -100,5 +102,16 @@
   "statusError": "Connection error",
   "entityDisabledTitle": "Partner disabled",
   "entityDisabledBody": "{{name}} is disabled. You can't chat until you enable it.",
-  "entityDisabledEnable": "Enable {{name}}"
+  "entityDisabledEnable": "Enable {{name}}",
+  "setBackground": "Set background",
+  "setBackgroundCaption": "Character profile or chat images · this chat only",
+  "backgroundPickerTitle": "Chat background",
+  "profileSource": "Profile",
+  "chatHistorySource": "Chat history",
+  "noBackground": "No background",
+  "dim": "Dim",
+  "transparency": "Transparency",
+  "backgroundProfileEmpty": "No profile images yet",
+  "backgroundHistoryEmpty": "No images in this chat yet",
+  "backgroundSetFailed": "Couldn't set that background. Try again."
 }

@@ -24,7 +24,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
-import { getUserEntities, Persona } from '../../database/repositories/userEntities';
+import { getUserEntities, Persona } from '../../database/repositories';
 import { hapticLightPress } from '../../utils/haptics';
 import { createLogger } from '../../utils/logger';
 

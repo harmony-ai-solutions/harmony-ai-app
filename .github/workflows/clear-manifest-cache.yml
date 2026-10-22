@@ -1,0 +1,53 @@
+name: Clear Manifest Cache
+
+# Dispatch-only utility (owner ruling 2026-10-18): invalidates the CloudFront
+# edge cache for the release manifests. The download distribution uses
+# Managed-CachingOptimized (24h TTL, origin Cache-Control ignored), so a
+# manifest rewritten out-of-band — or published before this workflow existed —
+# can serve stale at the edge. Run this after such a write to make it visible
+# immediately.
+#
+# Requires:
+#   - repo variable CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID (tofu shared output
+#     cloudfront_download_distribution_id)
+#   - the ci-releases-uploader cloudfront:CreateInvalidation grant (tofu)
+
+on:
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: 'CloudFront invalidation paths (space-separated)'
+        default: '/app/dev/latest.json /app/prod/latest.json /engine/latest.json'
+        type: string
+
+jobs:
+  invalidate:
+    name: Invalidate CloudFront manifest cache
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_S3_UPLOAD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_S3_UPLOAD_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Create invalidation
+        env:
+          DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID }}
+          INVALIDATION_PATHS: ${{ github.event.inputs.paths }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISTRIBUTION_ID}" ]; then
+            echo "::error::CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID repo variable is not set (tofu shared output cloudfront_download_distribution_id)"
+            exit 1
+          fi
+          # AWS CLI v2 multi-path form: one --paths flag followed by each path
+          # as a separate argument (repeated --paths flags override, and a
+          # quoted space-separated string is ONE path in v2).
+          ARGS=(--distribution-id "${DISTRIBUTION_ID}" --paths)
+          for p in ${INVALIDATION_PATHS}; do
+            ARGS+=("$p")
+          done
+          INVALIDATION=$(aws cloudfront create-invalidation "${ARGS[@]}" --no-cli-pager)
+          echo "Invalidation created: ${INVALIDATION}"

@@ -1,14 +1,14 @@
 # e2e/docker-compose.yml
 # ─────────────────────────────────────────────────────────────────────────────
-# E2E Test Stack — HarmonyAIChat
+# E2E Test Stack — Soulbits
 #
 # Orchestrates three services for Android E2E testing:
-#   1. harmony-link     — Go backend (published production image, headless mode)
+#   1. soulbits-engine  — Go backend (locally-built image, headless mode)
 #   2. android-emulator — Android 14 emulator via budtmo/docker-android
 #   3. maestro-runner   — Test runner that installs the APK and executes Maestro flows
 #
 # Usage:
-#   docker compose -f e2e/docker-compose.yml up -d harmony-link android-emulator
+#   docker compose -f e2e/docker-compose.yml up -d soulbits-engine android-emulator
 #   # Wait for emulator to boot (check http://localhost:6080 for noVNC view),
 #   # then run the test runner:
 #   docker compose -f e2e/docker-compose.yml up maestro-runner
@@ -21,46 +21,46 @@
 
 services:
   # ──────────────────────────────────────────────────────────────────────────
-  # Harmony Link Go Backend
-  # Uses the locally-built soulbits/harmony-link image (built fresh from
-  # harmony-link-private). To rebuild:
-  #   cd harmony-link-private && docker build -f Dockerfile.build -t soulbits/harmony-link:latest .
-  #
-  # CLOUD_MODE=true enables auto-approval of new devices (no manual desktop
-  # UI confirmation needed). The E2E app connects, sends a handshake request,
-  # and the server auto-registers the device in sync_devices. See
-  # harmony-link-private/eventserver/synchronization.go:260.
+  # Soulbits Engine Go Backend
+  # Uses the locally-built image (built fresh from harmony-link-private). To
+  # rebuild:
+  #   cd harmony-link-private && docker build -t soulbits/harmony-link:latest .
   #
   # The image runs headless via CMD ["disable-gui"] and ships with:
   #   - /health endpoint (plain HTTP, port 28080)
   #   - Self-signed TLS cert generation (Go code, no shell scripts)
-  #   - Cloud-mode env var configuration (CLOUD_MODE + HL_* pattern)
-  # See .current_work/test-framework-overhaul/6-2-HarmonyLinkService.md for the
-  # full rationale from the soulbits-cloud-backend reference pattern.
+  #
+  # AUTH (plan 7-13): there is no CLOUD_MODE bypass any more — the management
+  # API, the event WS and device approval are unconditionally enforced. A new
+  # sync device registers PENDING (is_approved=0) and must be approved over the
+  # admin API (X-Admin-API-Key on the admin port below) before it can pair.
+  # See "Device approval" in e2e/README.md.
+  #
+  # All configuration uses the engine's single SE_* environment namespace
+  # (plan 7-13; the old HL_* names were never read, and the HARMONY_LINK_*
+  # viper prefix never mapped the nested keys).
   # ──────────────────────────────────────────────────────────────────────────
-  harmony-link:
+  soulbits-engine:
     # Locally-built image — do NOT set pull_policy: always (not on Docker Hub).
-    # Built from harmony-link-private/Dockerfile.build, tagged soulbits/harmony-link:latest.
+    # Built from harmony-link-private/Dockerfile, tagged soulbits/harmony-link:latest.
     image: soulbits/harmony-link:latest
     pull_policy: never
-    container_name: harmony-link
-    hostname: harmony-link
+    container_name: soulbits-engine
+    hostname: soulbits-engine
     ports:
       - "28080:28080"   # HTTP/WS — healthcheck uses plain HTTP here
       - "28443:28443"   # WSS/TLS — app sync traffic
-      # - "28081:28081" # Admin API (uncomment if E2E exercises it)
+      - "28081:28081"   # Admin API — device approval (X-Admin-API-Key)
     environment:
-      CLOUD_MODE: "true"
-      HL_GENERAL_PORT: "28080"
-      HL_WSS_PORT: "28443"
-      HL_ADMIN_PORT: "28081"
-      HL_DATA_DIR: "/data"
-      HL_DATABASE_FILENAME: "data.sqlite"
-      HL_DATABASE_ENCRYPTION: "false"
-      HL_INFERENCE_TOKEN: "e2e-test-token"
-      # HL_ADMIN_API_KEY: "e2e-admin"  # uncomment if admin API is exercised
+      SE_WS_PORT: "28080"
+      SE_WSS_PORT: "28443"   # explicit: the main binary default is 0 = a RANDOM port
+      SE_ADMIN_PORT: "28081"
+      SE_ADMIN_API_KEY: "e2e-admin"
+      SE_DATA_DIR: "/data"
+      SE_DATABASE_FILENAME: "data.sqlite"
+      SE_DATABASE_ENCRYPTION: "false"
     # /data must be writable by uid 1000 (the image's non-root user, see
-    # Dockerfile.build: `User=1000:0`). A named volume is created root-owned
+    # Dockerfile: `User=1000:0`). A named volume is created root-owned
     # (mode 0755), so the uid-1000 process cannot create the SQLite DB file
     # there → "unable to open database file: no such file or directory".
     # tmpfs owned by uid 1000 fixes the write permission AND yields a fresh
@@ -80,7 +80,7 @@ services:
       retries: 12          # up to 60s startup grace
       start_period: 10s
     networks:
-      - harmony-e2e
+      - soulbits-e2e
     restart: unless-stopped
 
   # ──────────────────────────────────────────────────────────────────────────
@@ -95,16 +95,16 @@ services:
     privileged: true       # required for emulator device access
     devices:
       - /dev/kvm:/dev/kvm  # KVM acceleration — must exist on host
-    # ── Port-forward bridge: emulator (10.0.2.2) → harmony-link container ──
+    # ── Port-forward bridge: emulator (10.0.2.2) → soulbits-engine container ──
     # The Android emulator is a QEMU VM. From inside it, the special address
     # 10.0.2.2 maps to the QEMU host = THIS container's loopback — NOT to the
     # Docker host and NOT to sibling containers. So the app's hardcoded
     # wss://10.0.2.2:28443 / ws://10.0.2.2:28080 can never reach the
-    # harmony-link container (which lives on the harmony-e2e bridge at its own
-    # IP, e.g. 172.23.0.2) without help.
+    # soulbits-engine container (which lives on the soulbits-e2e bridge at its
+    # own IP, e.g. 172.23.0.2) without help.
     #
     # socat listens on this container's loopback (where 10.0.2.2 lands) and
-    # forwards raw TCP to harmony-link by Docker DNS. TLS passes through
+    # forwards raw TCP to soulbits-engine by Docker DNS. TLS passes through
     # transparently (bytes are untouched), so WSS works unchanged. socat ships
     # in the budtmo image; `exec` then hands off to the original startup script
     # (entrypoint is `sh -c`, so `command` is the script body — `$$APP_PATH`
@@ -118,7 +118,7 @@ services:
     command:
       - sh
       - -c
-      - socat TCP-LISTEN:28080,fork,reuseaddr TCP:harmony-link:28080 & socat TCP-LISTEN:28443,fork,reuseaddr TCP:harmony-link:28443 & exec $$APP_PATH/mixins/scripts/run.sh
+      - socat TCP-LISTEN:28080,fork,reuseaddr TCP:soulbits-engine:28080 & socat TCP-LISTEN:28443,fork,reuseaddr TCP:soulbits-engine:28443 & exec $$APP_PATH/mixins/scripts/run.sh
     environment:
       EMULATOR_DEVICE: "Samsung Galaxy S10"
       WEB_VNC: "true"       # set "false" in CI to reduce overhead
@@ -142,13 +142,13 @@ services:
       retries: 30          # up to 5 minutes for first boot
       start_period: 30s
     networks:
-      - harmony-e2e
+      - soulbits-e2e
     restart: unless-stopped
 
   # ──────────────────────────────────────────────────────────────────────────
   # Maestro Test Runner (custom image built from e2e/Dockerfile.maestro)
   #
-  # Depends on both harmony-link and android-emulator being healthy before
+  # Depends on both soulbits-engine and android-emulator being healthy before
   # it starts. The command:
   #   1. Connects ADB to the emulator
   #   2. Waits for the device to be ready
@@ -165,13 +165,13 @@ services:
       dockerfile: e2e/Dockerfile.maestro
     container_name: maestro-runner
     depends_on:
-      harmony-link:
+      soulbits-engine:
         condition: service_healthy
       android-emulator:
         condition: service_healthy
     environment:
-      - HARMONY_LINK_URL=wss://harmony-link:28443
-      - HARMONY_LINK_HEALTH_URL=http://harmony-link:28080/health
+      - SOULBITS_ENGINE_URL=wss://soulbits-engine:28443
+      - SOULBITS_ENGINE_HEALTH_URL=http://soulbits-engine:28080/health
       - ADB_TARGET=android-emulator:5555  # override for host-emulator fallback
     volumes:
       # The APK must be built separately before running the stack:
@@ -200,10 +200,10 @@ services:
         maestro test /app/.maestro --format junit --output /app/reports/junit-report.xml
       "
     networks:
-      - harmony-e2e
+      - soulbits-e2e
 
 networks:
-  harmony-e2e:
+  soulbits-e2e:
     driver: bridge
 
 volumes:

@@ -1,6 +1,6 @@
-# Harmony AI Chat
+# Soulbits AI Chat
 
-Open Source Android AI Chat Application - Your AI companions powered by your own backend or Harmony Cloud.
+Open Source Android AI Chat Application - Your AI companions powered by your own backend or Soulbits Cloud.
 
 ## Downloads
 
@@ -15,21 +15,24 @@ See [INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions.
 
 ## 🎯 Project Overview
 
-Harmony AI App is a React Native Android application that serves as a mobile frontend for the Harmony Link ecosystem. It provides:
+Harmony AI App is a React Native mobile application for the Harmony AI ecosystem. It runs the **Soulbits Engine embedded on the device** and is a thin client over that engine's management API — there is no separate app-side database. It provides:
 
-- **Connected Mode**: Connect to your Harmony Link backend or Harmony Cloud
-- **On-Device Mode**: Limited standalone operation with local AI models (future feature)
-- **Privacy-First**: Full control over your data when using self-hosted backends
-- **Open Source**: Completely transparent and customizable
+- **Embedded engine (primary)**: the engine runs on the device (Android: a sidecar child process shipping `libengine.so`; iOS: the in-process `SoulbitsEngine.xcframework`) and owns the one database. The app reads and writes through its loopback management REST API + event WebSocket.
+- **Desktop pairing (engine↔engine)**: the on-device engine syncs with a desktop Soulbits Engine over the LAN using the **changeset-v1** protocol (SQLite session-extension changesets; the desktop is the write authority, the phone yields and buffers).
+- **Cloud account**: sign-in with a SoulbitsCloud account injects inference provider configs; backup is **user-owned-storage** (encrypted engine snapshots to the user's own iCloud / WebDAV / Dropbox / OneDrive / local folder) with a W1 account-escrow key wrap — the operator stores no user database data.
+- **Shared provider accounts & live model lists**: enter an API key **once** as a provider account and reuse it across every module config; **test the key in-app** (valid / invalid / throttled / blocked / scope-limited / unreachable), pick models and voices from **live provider lists** with a catalog fallback and sampling **presets**, and activate **Mistral, Ollama and LocalAI** alongside Soulbits Cloud. Fresh sign-ins are seeded with ready-to-use Soulbits Cloud defaults.
+- **Privacy-First**: your data lives on your device (and in storage you own).
+- **Open Source**: completely transparent and customizable
+
+> The old TS SQLite replica, its mirrored migrations, and the app-side sync stack were **deleted** — the embedded engine is the single data layer. See [docs/HARMONY-LINK-INTEGRATION.md](docs/HARMONY-LINK-INTEGRATION.md) and the engine-contract gates in [docs/engine-contract-gates.md](docs/engine-contract-gates.md).
 
 ## Implementation Progress
 
 ### Phase 1: Core Features
 - [X] Chat interface with message list
 - [X] Text input and message sending
-- [X] Local data persistence (SQLite)
-- [X] Backend integration (Harmony Link API)
-- [X] Data Sync with Backend
+- [X] Embedded engine data layer (management API — no app-side SQLite replica)
+- [X] Engine↔engine changeset sync (desktop pairing)
 - [X] Character selection
 - [X] Import Tavern Card V1/V2/V3 character cards (PNG or JSON)
 - [X] AI Audio message support (STT/TTS)
@@ -39,7 +42,7 @@ Harmony AI App is a React Native Android application that serves as a mobile fro
 - [ ] On-device AI model integration / Full Offline Mode
 - [ ] AI Lifecycle system - Define daily & weekly routines for characters + dynamic events based on lore
 - [ ] Proactive AI behaviour - Initiates new conversations, Time Awareness, App Notifications
-- [ ] Configure Settings and configuration in App directly (Harmony Link not needed)
+- [ ] Configure Settings and configuration in App directly (Soulbits Engine not needed)
 - [ ] Custom character creation
 - [ ] Voice Calls with AIs
 
@@ -48,12 +51,12 @@ Harmony AI App is a React Native Android application that serves as a mobile fro
 - [ ] 3rd Party Messenger integrations (WhatsApp, Telegram, Discord etc)
 - [ ] Group chats (Multi-Humans + AIs; Across Messengers)
 - [ ] Video Share with AIs
-- [ ] Cloud backup (GDrive, iCloud Drive)
+- [X] User-owned-storage encrypted backup (iCloud Drive / WebDAV / Dropbox / OneDrive / local folder)
 
 ## 📖 Documentation
 
 - **Design Document**: See `design/00 Design Document.md`
-- **Harmony Link**: https://github.com/harmony-ai-solutions/harmony-link-private
+- **Soulbits Engine**: https://github.com/harmony-ai-solutions/harmony-link-private
 - **React Native**: https://reactnative.dev/
 - **React Native Paper**: https://callstack.github.io/react-native-paper/
 
@@ -63,7 +66,7 @@ The Harmony AI app requires the following permissions:
 
 ### Android
 - **RECORD_AUDIO**: Required for sending voice messages in chats
-- **INTERNET**: Required for connecting to Harmony Link servers
+- **INTERNET**: Required for connecting to Soulbits Engine servers
 - **CAMERA**: Required for sending images (requested only when used)
 
 Permissions are requested at runtime when the feature is first used, following Android best practices.
@@ -215,6 +218,8 @@ Before you begin, ensure you have the following installed:
    npx react-native run-android
    ```
 
+   > `npm run android` also builds + vendors the embedded engine when missing/stale (`preandroid` → `scripts/build-engine-sidecar.cjs`) and starts Metro, so `npm start` is optional. Engine repo override: `SOULBITS_ENGINE_REPO`; force rebuild: `ENGINE_SIDECAR_REBUILD=1`.
+
 ### Development Workflow
 
 - **Hot Reload**: Shake the device or press `Ctrl+M` (Windows) / `Cmd+M` (Mac) → Enable Hot Reloading
@@ -285,10 +290,8 @@ See [docs/TESTING.md](docs/TESTING.md) for the full testing strategy, architectu
 Quick reference:
 
 ```bash
-npm test                                    # All unit + integration tests
+npm test                                    # Unit tests (single jest `unit` project)
 npx jest --selectProjects unit              # Unit tests only
-npx jest --selectProjects integration       # Integration tests only
-npx jest --selectProjects unit --testPathPatterns migrations  # Migration tests
 npx tsc --noEmit                            # Type check
 docker compose -f e2e/docker-compose.yml up # Android E2E (Docker + KVM)
 ```
@@ -312,7 +315,7 @@ harmony-ai-app/
 │   ├── services/           # API and service integrations
 │   │   └── api/           # Backend communication
 │   ├── theme/              # Design system & theming
-│   │   ├── colors.ts      # Color palette (Harmony Link design)
+│   │   ├── colors.ts      # Color palette (Soulbits Engine design)
 │   │   └── theme.ts       # React Native Paper theme
 │   ├── types/              # TypeScript type definitions
 │   └── utils/              # Utility functions
@@ -325,17 +328,17 @@ harmony-ai-app/
 
 ## 🛠️ Tech Stack
 
-- **Framework**: React Native 0.83.1
+- **Framework**: React Native 0.86.0
 - **Language**: TypeScript
 - **Navigation**: React Navigation (Native Stack)
 - **UI Library**: React Native Paper (Material Design 3)
 - **Icons**: React Native Vector Icons
-- **Storage**: AsyncStorage (foundation for future SQLite)
-- **State Management**: React Hooks (Redux/Zustand can be added later)
+- **Data layer**: the **embedded Soulbits Engine** over its loopback management REST API + event WebSocket (there is no app-side SQLite replica); settings/preferences in AsyncStorage; secrets in the device Keychain/Keystore
+- **State Management**: React Hooks + Context
 
 ### Design System
 
-The app uses a custom dark theme matching Harmony Link's design:
+The app uses a custom dark theme matching Soulbits Engine's design:
 - **Background**: `#282828` (rgb(40, 40, 40))
 - **Surface**: `#404040`
 - **Primary (Orange)**: `#ea580c`

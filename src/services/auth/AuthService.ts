@@ -5,8 +5,8 @@
  * backend.  Emits `auth:changed` on login/refresh and `auth:expired` when
  * re-authentication is required.
  *
- * CRITICAL: Cloud credentials live in Keychain (service `com.harmonyai.cloud.auth`)
- * and are COMPLETELY independent from the self-hosted HL `harmony_jwt` path
+ * CRITICAL: Cloud credentials live in Keychain (service `com.soulbits.cloud.auth`)
+ * and are COMPLETELY independent from the self-hosted HL `soulbits_jwt` path
  * (AsyncStorage).  This file never touches AsyncStorage or the HL connection path.
  */
 
@@ -247,6 +247,65 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
     await this.handleTokenResponse(data);
   }
 
+  // ──── Delegated device enrollment (plan 7-15 E2) ────────────────────
+
+  /**
+   * Exchange a single-use desktop-issued enrollment grant for this device's OWN
+   * cloud session (`POST /v1/auth/device/enroll`).
+   *
+   * The backend returns EXACTLY the `TokenResponse` shape every login/OAuth path
+   * returns, so this funnels through {@link handleTokenResponse} — the same
+   * Keychain persistence + `auth:changed` emit as `login()` (NO parallel token
+   * path). Throws {@link AuthError} on a rejected grant (401
+   * `enrollment_grant_invalid` on replay/expiry) or a transport error.
+   */
+  async enrollDevice(params: {
+    grant: string;
+    deviceId: string;
+    deviceName: string;
+    platform: string;
+  }): Promise<void> {
+    const res = await fetch(AUTH_ENDPOINTS.deviceEnroll, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant: params.grant,
+        device_id: params.deviceId,
+        device_name: params.deviceName,
+        platform: params.platform,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await parseErrorBody(res);
+      throw new AuthError('enrollDevice', body?.error ?? `HTTP ${res.status}`, res.status);
+    }
+
+    const data = (await res.json()) as TokenResponse;
+    await this.handleTokenResponse(data);
+  }
+
+  // ──── Portal connect-session redeem (Option B sign-in) ──────────────
+
+  /**
+   * Persist a token pair redeemed from the portal connect-session poll
+   * (`GET /v1/devices/connect-session/{id}` on the `approved` transition).
+   *
+   * The redeem response is EXACTLY the login `TokenResponse` shape
+   * (`{token, refresh_token, expires_at}`), so this funnels through
+   * {@link handleTokenResponse} — the IDENTICAL Keychain persistence +
+   * `auth:changed` emit as `login()`. There is NO parallel token path: the
+   * AuthContext `auth:changed` listener fetches the profile and flips to
+   * `authenticated`, exactly as it did for email/password.
+   */
+  async applyConnectSessionTokens(tokens: {
+    token: string;
+    refresh_token: string;
+    expires_at: string;
+  }): Promise<void> {
+    await this.handleTokenResponse(tokens);
+  }
+
   // ──── Refresh ───────────────────────────────────────────────────────
 
   /**
@@ -297,8 +356,67 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
     return true;
   }
 
-  // ──── Logout ────────────────────────────────────────────────────────
+  /**
+   * Deduplicated refresh — the single refresh entry point for every caller
+   * OTHER than `refresh()` itself.
+   *
+   * Concurrent callers share ONE in-flight refresh (the same `_refreshing`
+   * promise {@link fetch} uses), so a proactive startup refresh and a
+   * concurrent authenticated 401 retry never rotate the token twice — which,
+   * with a rotating refresh token, risks a reuse-detection rejection.
+   *
+   * Semantics match {@link refresh}: resolves `true` on success, `false` on a
+   * TERMINAL failure (rejected refresh token / none cached), and THROWS on a
+   * transient failure (network / 5xx) so the caller can retry WITHOUT
+   * invalidating the still-valid credentials.
+   */
+  async refreshDeduped(): Promise<boolean> {
+    try {
+      return await (this._refreshing ??= this.refresh());
+    } finally {
+      this._refreshing = null;
+    }
+  }
 
+  /**
+   * Proactive startup refresh (provider-registry follow-up): refresh the token
+   * pair when the cached PASETO is expired or within `thresholdMs` of expiry
+   * AND a refresh token is available. Routes through {@link refreshDeduped} so
+   * it never races a concurrent 401 retry.
+   *
+   * Returns `true` when a refresh ran and succeeded, `false` when no refresh
+   * was needed OR the refresh token was rejected (terminal). THROWS on a
+   * transient failure — the startup caller MUST swallow that (a momentary
+   * network blip must not log the user out; the lazy 401 path stays
+   * authoritative).
+   *
+   * @param thresholdMs refresh-ahead window (default 5 minutes).
+   */
+  async refreshIfExpiring(thresholdMs: number = 5 * 60 * 1000): Promise<boolean> {
+    // Load the credential (populates _refresh + _expiresAtMs) if the cache is
+    // cold. A throw here means there is no credential at all — nothing to do.
+    try {
+      await this.getToken();
+    } catch {
+      return false;
+    }
+
+    if (!this._refresh) {
+      return false; // no refresh token — cannot refresh
+    }
+
+    // `_expiresAtMs` is 0 (absent) or NaN (unparseable) → refresh defensively;
+    // otherwise refresh once we are inside the threshold window.
+    const exp = this._expiresAtMs;
+    const needsRefresh = !(exp > 0) || Date.now() >= exp - thresholdMs;
+    if (!needsRefresh) {
+      return false;
+    }
+
+    return this.refreshDeduped();
+  }
+
+  // ──── Logout ────────────────────────────────────────────────────────
   /**
    * Best-effort logout: notify the backend, then clear local credentials
    * regardless of the server response.
@@ -472,14 +590,10 @@ class AuthServiceClass extends EventEmitter<AuthServiceEvents> {
     }
 
     // ── 401 — attempt one deduplicated refresh, then retry once ───────
-    try {
-      const ok = await (this._refreshing ??= this.refresh());
-      if (!ok) {
-        await this.invalidate();
-        throw new AuthExpiredError();
-      }
-    } finally {
-      this._refreshing = null;
+    const ok = await this.refreshDeduped();
+    if (!ok) {
+      await this.invalidate();
+      throw new AuthExpiredError();
     }
 
     const fresh = await this.getToken();

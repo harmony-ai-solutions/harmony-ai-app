@@ -1,100 +1,56 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback, ReactNode } from 'react';
 import ConnectionStateManager, { type SyncSource } from '../services/ConnectionStateManager';
 import ConnectionManager from '../services/connection/ConnectionManager';
-import SyncService, { SyncService as SyncServiceClass } from '../services/SyncService';
-import { cloudSessionService, type CloudSessionStatus, type CloudSessionInfo, type PurgeTerminalPayload } from '../services/cloud/CloudSessionService';
-import { PurgeInProgressError } from '@harmony-ai-solutions/soulbits-api-client';
-import AuthService from '../services/auth/AuthService';
-import DeviceAuthService from '../services/cloud/DeviceAuthService';
-import { parseDeviceDeepLink } from '../services/cloud/deviceDeepLink';
-import { DeviceAuthModal } from '../components/cloud/DeviceAuthModal';
-import { Linking } from 'react-native';
+import { getEngineConnection, onEngineConnectionChange } from '../services/engine/EngineService';
+import { appendLoopbackToken } from '../services/websocket/loopbackToken';
 import { createLogger } from '../utils/logger';
-import { CLOUD_HOSTS, WS_PATHS } from '../config/cloud';
 import i18n from './I18nContext';
-import { useAppAlert } from './AppAlertContext';
 import { useToast } from './AppToastContext';
-import { shouldPromptForSyncEstimate } from './syncEstimateHelper';
 import {
   computeConnectionStatus,
   canUseChatForMode,
   type ConnectionStatusInfo,
 } from './connectionStatusHelper';
-import {
-  isSyncTransportSettled,
-  shouldShowConnectionErrorToastForConnection,
-} from './syncSettlementHelper';
 
 const log = createLogger('[SyncConnectionContext]');
 
 /**
- * Whether the app should maintain a sync WebSocket connection.
+ * Engine-connection status context (task 3-4).
  *
- * Cloud mode has no device-pairing handshake, so ConnectionStateManager's
- * `isPaired` flag is always false there (it tracks the self-hosted ws://
- * handshake + JWT pair). Cloud connections are maintained whenever the broker
- * session is 'ready'. Self-hosted mode continues to use `isPaired` as before.
+ * After the TS sync/cloud stack deletion the app talks to a single peer: the
+ * EMBEDDED engine (loopback WS + local management API). This provider owns only
+ * the engine WebSocket connection lifecycle + status; the former cloud-session,
+ * purge, size-estimate, name-clash and sync-protocol machinery is gone.
  *
- * Used in place of `ConnectionStateManager.getIsPaired()` by the disconnect /
- * error handlers so cloud-mode connections auto-reconnect instead of dying
- * silently on the first WS drop.
+ * The embedded engine's readiness (`EngineService`) is the "paired" signal; the
+ * engine's loopback WS URL is the dial target when available, falling back to
+ * the persisted ConnectionStateManager URL (E2E / legacy pairing).
  */
-const shouldMaintainConnection = (): boolean => {
-  if (cloudSessionService.getStatus() === 'ready') {
-    return true;
-  }
-  return ConnectionStateManager.getIsPaired();
-};
 
 interface SyncConnectionContextType {
-  // Pairing state
+  /** Whether the engine connection is available (embedded engine ready, or a
+   *  persisted pairing exists). */
   isPaired: boolean;
-  
-  // Sync connection state
+
+  // Engine connection state
   isConnected: boolean;
   isConnecting: boolean;
   isReconnecting: boolean;
   reconnectAttempt: number;
   nextReconnectIn: number;
-  
+
   // Actions
   connect: () => Promise<void>;
   disconnect: () => void;
   reconnect: () => Promise<void>;
-  
+
   // UI helpers
   showToast: (message: string) => void;
 
-  // ── Phase 10: mode-aware chat usability & connection status ────────────
-  /** True when the app can show/send chat in the current mode.
-   *  - cloud:  cloudSessionService.getStatus() === 'ready'
-   *  - self-hosted: isPaired */
+  /** True when the app can show/send chat (engine connection available). */
   canUseChat: boolean;
-  /** Human-readable connection status derived from current mode + state.
-   *  Includes textKey for i18n, colour, semantic variant, and mode. */
+  /** Human-readable connection status (textKey for i18n, colour, variant, mode). */
   connectionStatus: ConnectionStatusInfo;
-  /** Sticky gate (3-3/D57): the engine advertises a sync-schema version below
-   *  the app's — syncs are suppressed (initiateSync choke point + suppressed
-   *  auto-reconnect) until the engine is updated and re-handshakes. */
-  serverUpdateRequired: boolean;
-  /** True while a cloud data purge blocks connecting: OUR purge is running
-   *  (initiating/polling/deadline), a connect was 409-blocked by another
-   *  device's purge (PurgeInProgressError → we adopt its status), or a
-   *  cold-start attach found a purge in flight. While true, auto-reconnect
-   *  scheduling is suppressed, connection-lost toasts are suppressed (WS
-   *  drops during the purge's kill phase are expected), and the status text
-   *  renders "Your data is being deleted" instead of disconnected/reconnecting. */
-  purgeBlocking: boolean;
-  /** True from a successful cloud purge (purge:done) until the user
-   *  acknowledges the result (the settings screen's persistent success card /
-   *  the success dialog's buttons). While true, the post-purge forced
-   *  re-sync's SYNC_DATA_SIZE_ESTIMATE prompt is HELD BACK (never
-   *  auto-confirmed) so it cannot clobber the purge success dialog in the
-   *  single-slot AppAlertContext — dismissPurgeResult() presents it. */
-  purgeResultPending: boolean;
-  /** Acknowledge the post-purge result: clears purgeResultPending and
-   *  immediately presents any deferred size-estimate prompt. */
-  dismissPurgeResult: () => void;
 }
 
 const SyncConnectionContext = createContext<SyncConnectionContextType | undefined>(undefined);
@@ -102,68 +58,29 @@ const SyncConnectionContext = createContext<SyncConnectionContextType | undefine
 interface SyncConnectionProviderProps {
   children: ReactNode;
   /**
-   * Read-only mode: reflects shared connection state ONLY — never
-   * initializes, connects, reconnects, syncs, or toasts. Used by second
-   * React roots (e.g. the floating chat overlay) so they observe the main
-   * app's connection without tearing it down.
+   * Read-only mode: reflects shared connection state ONLY — never initializes,
+   * connects, reconnects, or toasts. Used by second React roots (e.g. the
+   * floating chat overlay) so they observe the main app's connection without
+   * tearing it down.
    */
   readOnly?: boolean;
 }
 
 export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ children, readOnly = false }) => {
-  const [isPaired, setIsPaired] = useState(false);
+  // Seed from the engine's published connection (if any) so an already-ready
+  // embedded engine does not flash the "not connected" overlay for one frame
+  // before the mount-time initialization resolves.
+  const [isPaired, setIsPaired] = useState(() => getEngineConnection() !== null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [nextReconnectIn, setNextReconnectIn] = useState(0);
-  
-  // ── Phase 10: cloud status + source tracking ───────────────────────────
-  const [cloudStatus, setCloudStatus] = useState<CloudSessionStatus>(cloudSessionService.getStatus());
   const [currentSource, setCurrentSource] = useState<SyncSource>('selfhosted');
 
-  // ── 3-3 / D57: sticky server-update-required gate ──────────────────────
-  // Mirrored from SyncService (single source of truth); drives the derived
-  // connectionStatus member AND the reconnect/on-connect suppression below.
-  const [serverUpdateRequired, setServerUpdateRequired] = useState(false);
-
-  // ── Cloud data purge blocking gate ──────────────────────────────────────
-  // True while a purge (ours, an adopted other-device purge, or a cold-start
-  // attach) blocks connecting — see purgeBlocking on the context type.
-  // Ref-mirrored like serverUpdateRequired because reconnect/disconnect event
-  // closures registered with [] deps must never read stale React state.
-  const [purgeBlocking, setPurgeBlocking] = useState<boolean>(cloudSessionService.isPurging());
-  const purgeBlockingRef = useRef<boolean>(cloudSessionService.isPurging());
-
-  // ── Post-purge result surface + estimate-prompt deferral ────────────────
-  // A successful purge (purge:done) raises this; the settings screen renders a
-  // PERSISTENT success card while it is true — the one-shot success alert can
-  // be clobbered by the post-purge re-sync's size-estimate prompt (the
-  // single-slot AppAlertContext is LAST-WINS). Ref-mirrored like purgeBlocking
-  // because the []-deps estimate listener must never read stale React state.
-  const [purgeResultPending, setPurgeResultPending] = useState(false);
-  const purgeResultPendingRef = useRef(false);
-  // The prompt-worthy estimate parked while the purge result is unacknowledged
-  // — presented VERBATIM (never auto-confirmed) by dismissPurgeResult().
-  const deferredEstimatePromptRef = useRef<(() => void) | null>(null);
-  const setPurgeResultPendingSync = (value: boolean) => {
-    purgeResultPendingRef.current = value;
-    setPurgeResultPending(value);
-  };
-
-  // Themed alert dialog (AppAlertProvider is mounted ABOVE this provider in
-  // App.tsx). Captured in a ref because handleSyncEstimate is registered in a
-  // `[]`-deps effect and must never close over a stale showAlert.
-  const { showAlert } = useAppAlert();
-  const showAlertRef = useRef(showAlert);
-  useEffect(() => {
-    showAlertRef.current = showAlert;
-  }, [showAlert]);
-
   // Themed toast (AppToastProvider is mounted ABOVE this provider in App.tsx).
-  // Captured in a ref for the same reason as showAlert: connection/sync event
-  // listeners are registered with `[]` deps and must never close over a stale
-  // showToast (which replaces the old OS-native ToastAndroid on Android).
+  // Captured in a ref because connection event listeners are registered with
+  // `[]` deps and must never close over a stale showToast.
   const { showToast: showThemedToast } = useToast();
   const showToastRef = useRef(showThemedToast);
   useEffect(() => {
@@ -173,26 +90,17 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   const hasInitialized = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const connectionManager = ConnectionManager;
-  
-  // use refs for values that are read inside event-handler closures.
-  // React state is only safe to read in the render cycle; closures captured inside
-  // useEffect see whatever value the state had when the effect last ran.  Using refs
-  // gives the handlers the latest value without needing them as effect dependencies.
-  const reconnectTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isConnectingRef        = useRef(false);
-  const isReconnectingRef      = useRef(false);
-  const isPairedRef            = useRef(false);
-  const isConnectedRef         = useRef(false);
-  // True while a cert-verification decision is pending/in-progress (the cert
-  // modal is the intended UX). Suppresses connection-error toasts during the
-  // expected TLS/cert churn of the pairing flow. Cleared once the transport
-  // settles successfully.
-  const isCertFlowActiveRef    = useRef(false);
-  // 3-3 / D57: sticky-gate mirror read by closures (event listeners registered
-  // with [] deps must never read stale React state).
-  const serverUpdateRequiredRef = useRef(false);
 
-  // Keep refs in sync with state so both UI renders (state) and closures (refs) are accurate.
+  // Refs mirror state so `[]`-deps closures read current values.
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isConnectingRef = useRef(false);
+  const isReconnectingRef = useRef(false);
+  const isPairedRef = useRef(getEngineConnection() !== null);
+  const isConnectedRef = useRef(false);
+  // True while a cert-verification decision is pending (the cert modal is the
+  // intended UX) — suppresses connection-error toasts during TLS/cert churn.
+  const isCertFlowActiveRef = useRef(false);
+
   const setIsConnectingSync = (value: boolean) => {
     isConnectingRef.current = value;
     setIsConnecting(value);
@@ -209,115 +117,34 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     isConnectedRef.current = value;
     setIsConnected(value);
   };
-  const setServerUpdateRequiredSync = (value: boolean) => {
-    serverUpdateRequiredRef.current = value;
-    setServerUpdateRequired(value);
-  };
-  const setPurgeBlockingSync = (value: boolean) => {
-    purgeBlockingRef.current = value;
-    setPurgeBlocking(value);
-  };
 
   const RECONNECT_INTERVALS = [1000, 2000, 4000, 8000, 16000, 30000];
 
-  // ── WS consecutive-failure counter (Phase 8) ────────────────────────────
-  // When RN WebSocket dials fail repeatedly (connect-time rejections), the
-  // HTTP status code is lost (RN surfaces all upgrade failures as generic
-  // `onerror`).  After `MAX_WS_FAILURES_BEFORE_REPROVISION` consecutive
-  // failures in cloud mode we re-provision the broker session.
-  const MAX_WS_FAILURES_BEFORE_REPROVISION = 5;
-  const wsFailureCountRef = useRef(0);
+  /** The engine is "available" when its embedded connection is published. */
+  const engineAvailable = (): boolean => getEngineConnection() !== null;
 
-  // ---------------------------------------------------------------------------
-  // Reconnect scheduling (uses refs – never stale)
-  // ---------------------------------------------------------------------------
   const scheduleReconnect = () => {
-    // ── Cloud data purge blocking: never auto-reconnect while a purge is in
-    // flight — the broker would 409 every dial (purge_in_progress), and WS
-    // drops during the purge's kill phase are expected, not failures. The
-    // purge banner + "Your data is being deleted" status text carry the
-    // message; connecting resumes when the purge settles (purge:done /
-    // purge:failed / status idle clear the gate below).
-    if (purgeBlockingRef.current) {
-      log.info('Cloud data purge blocking — suppressing auto-reconnect scheduling');
-      return;
-    }
-    // ── 3-3 / D57: while the server-update-required gate is sticky, do NOT
-    // auto-reconnect — the loop connect → handshake → abort → reconnect is
-    // exactly what D57 forbids (the gate must never tear down the WS as its
-    // mechanism). Recovery is the slow re-probe (SyncService), which re-dials
-    // ONCE and re-handshakes; manual reconnect() still works.
-    if (serverUpdateRequiredRef.current) {
-      log.info('Server update required — suppressing auto-reconnect scheduling (D57)');
-      return;
-    }
     if (reconnectTimeoutRef.current !== null) {
       log.info('Reconnect already scheduled');
       return;
     }
-    
     const currentAttempt = reconnectAttemptsRef.current;
     const delay = RECONNECT_INTERVALS[Math.min(currentAttempt, RECONNECT_INTERVALS.length - 1)];
     const attemptNumber = currentAttempt + 1;
-    
+
     log.info(`Scheduling reconnect attempt ${attemptNumber} in ${delay}ms`);
-    
     setIsReconnectingSync(true);
     setNextReconnectIn(delay);
-    
+
     reconnectTimeoutRef.current = setTimeout(async () => {
-      log.info(`Executing reconnect attempt ${attemptNumber}`);
-      
       reconnectAttemptsRef.current = attemptNumber;
       setReconnectAttempts(attemptNumber);
       setNextReconnectIn(0);
       reconnectTimeoutRef.current = null;
-      
       try {
-        const source = await ConnectionStateManager.getCurrentSource();
-
-        if (source === 'cloud') {
-          // ── Cloud: token-expiry pre-check before WS dial ──────────────
-          if (AuthService.isTokenExpired()) {
-            log.info('Cloud token expired, refreshing before reconnect');
-            const ok = await AuthService.refresh();
-            if (!ok) {
-              log.warn('Cloud token refresh failed — auth expired, cannot reconnect');
-              setIsConnectingSync(false);
-              return;
-            }
-          }
-
-          // ── Cloud: consecutive WS failure → re-provision broker session ─
-          const { shouldReprovision, nextCount } = shouldReprovisionAfterWsFailure(
-            wsFailureCountRef.current,
-            MAX_WS_FAILURES_BEFORE_REPROVISION,
-          );
-          wsFailureCountRef.current = nextCount;
-          if (shouldReprovision) {
-            log.info('Max cloud WS failures reached — re-provisioning broker session');
-            // force: true bypasses CloudSessionService's cached `ready` state.
-            // Without this, the call would no-op on the stale cached status and
-            // the app would keep dialing WS against the same broken session.
-            // Forcing a fresh broker round-trip lets the server reconcile state
-            // (grace recovery, fresh session, etc.) and return a routable endpoint.
-            await cloudSessionService.connect({ force: true });
-          }
-
-          await connect();
-        } else {
-          // ── Self-hosted ───────────────────────────────────────────────
-          if (ConnectionStateManager.getIsTokenExpired()) {
-            log.info('Token expired, performing handshake to refresh...');
-            await connectWithRefresh();
-          } else {
-            log.info('Token valid, connecting normally...');
-            await connect();
-          }
-        }
+        await connect();
       } catch (error) {
         log.error('Auto-reconnect failed:', error);
-        log.info('Scheduling next reconnect after failed attempt');
         scheduleReconnect();
       }
     }, delay);
@@ -334,153 +161,47 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
   // Connection event handlers
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    const handleSyncConnected = async () => {
-      log.info('Sync connected');
+    const handleSyncConnected = () => {
+      log.info('Engine connection established');
       ConnectionStateManager.markConnected();
-      // A live WS means no purge can be blocking (the broker 409s connects
-      // mid-purge) — belt-and-braces clear so the gate can never stick on.
-      setPurgeBlockingSync(false);
       setIsConnectedSync(true);
       setIsConnectingSync(false);
       setIsReconnectingSync(false);
       reconnectAttemptsRef.current = 0;
-      wsFailureCountRef.current = 0; // reset WS failure counter on successful connection
       setReconnectAttempts(0);
       setNextReconnectIn(0);
+      isCertFlowActiveRef.current = false;
       showToast(i18n.t('syncConnection:connectedToast'));
-
-      // ── Settled-transport gate ────────────────────────────────────────────
-      // During pairing the app first connects over plaintext ws:// to perform
-      // the handshake and learn the server's WSS upgrade details. Auto-syncing
-      // on that provisional connection is wrong:
-      //   1. Sensitive sync data (characters, entities, messages) would cross
-      //      the wire unencrypted before the TLS decision is made.
-      //   2. The subsequent ws→wss upgrade tears the connection down mid-sync,
-      //      orphaning the SyncService session (the "sync already in progress"
-      //      stuck-state bug).
-      // So only auto-sync once the transport is settled: a TLS connection, or
-      // plaintext ws:// only if the user explicitly persisted 'unencrypted'.
-      const conn = connectionManager.getSyncConnection();
-      const persistedMode = await ConnectionStateManager.getSecurityMode();
-      const settled = isSyncTransportSettled(conn?.mode, persistedMode);
-
-      // A successfully settled connection resolves any pending cert decision —
-      // connection errors on the settled transport may toast again.
-      if (settled) {
-        isCertFlowActiveRef.current = false;
-      }
-
-      if (!settled) {
-        log.info('Sync connected on provisional connection — deferring sync until transport settles');
-        return;
-      }
-
-      // ── 3-3 / D57: while the server-update-required gate is sticky, do NOT
-      // auto-sync on connect. Instead re-handshake: the engine's
-      // HANDSHAKE_ACCEPT carries its sync-schema version, which is how the
-      // gate re-evaluates (and clears) itself after the engine is updated.
-      if (serverUpdateRequiredRef.current) {
-        log.info('Connected while server update required — re-handshaking to re-evaluate engine version');
-        SyncServiceClass.getInstance().requestHandshake().catch((err: any) => {
-          log.warn('Re-handshake on connect failed (non-critical):', err);
-        });
-        return;
-      }
-
-      // Trigger background sync to pick up any messages generated while disconnected
-      SyncServiceClass.getInstance().initiateSync().catch((err: any) => {
-        log.warn('Auto-sync on connect failed (non-critical):', err);
-      });
     };
 
     const handleSyncDisconnected = () => {
-      log.info('Sync disconnected');
+      log.info('Engine connection lost');
       ConnectionStateManager.markDisconnected();
       setIsConnectedSync(false);
-
-      // While a cloud data purge blocks connecting, a WS drop is EXPECTED —
-      // the purge hard-kills the session (kill phase). Do not schedule a
-      // reconnect and do not treat this as an error: the purge banner +
-      // "Your data is being deleted" status text carry the message.
-      if (purgeBlockingRef.current) {
-        log.info('Connection lost during cloud data purge — expected (session killed by purge); not scheduling reconnect');
-        setIsConnectingSync(false);
-        return;
-      }
-
-      // Use ConnectionStateManager.getIsPaired() instead of isPairedRef.current
-      // to avoid stale-value races when clearSelfHostedCredentials() +
-      // disconnectConnection() are called in sequence (mode switch).
-      // ConnectionStateManager sets isPaired=false synchronously before its
-      // await barrier, so it is always current when this fires.
-      if (shouldMaintainConnection() && !isReconnectingRef.current && !isConnectingRef.current) {
-        log.info('Connection lost. Scheduling auto-reconnect...');
+      if ((isPairedRef.current || engineAvailable()) && !isReconnectingRef.current && !isConnectingRef.current) {
         scheduleReconnect();
-      } else if (isConnectingRef.current) {
-        log.info('Disconnect during connection attempt – catch block will handle reconnect');
       }
-      
       setIsConnectingSync(false);
     };
 
-    const handleSyncError = async (error: any) => {
-      log.error('Sync connection error:', error);
+    const handleSyncError = (error: any) => {
+      log.error('Engine connection error:', error);
       const errorMessage = error?.message || error?.toString?.() || 'Connection error';
-
-      const isHeartbeatTimeout = error?.code === 'HEARTBEAT_TIMEOUT' ||
-                                 errorMessage?.includes('heartbeat timeout');
-
-      if (isHeartbeatTimeout) {
-        log.warn('Heartbeat timeout detected – connection is dead');
-        
-        ConnectionStateManager.markDisconnected();
-        setIsConnectedSync(false);
-        setIsConnectingSync(false);
-        
-        // shouldMaintainConnection() covers both cloud (session ready) and
-        // self-hosted (isPaired) — getIsPaired() alone is false in cloud mode.
-        if (shouldMaintainConnection() && !isReconnectingRef.current) {
-          log.info('Scheduling reconnect after heartbeat timeout');
-          scheduleReconnect();
-        }
-      } else {
-        // ── Toast gate ────────────────────────────────────────────────────
-        // During pairing the app deliberately connects over plaintext ws://
-        // (provisional), then upgrades to wss:// and verifies the cert. TLS/
-        // cert/connection errors in that window are EXPECTED byproducts — the
-        // cert modal is the intended UX, not a toast. Also never toast while
-        // a reconnect is in flight (backoff loop) or a cert decision is
-        // pending. Only the very first failure on a settled transport may toast.
-        const shouldToast = await shouldShowConnectionErrorToastForConnection({
-          getConnectionInfo: () => connectionManager.getSyncConnection(),
-          getSecurityMode: () => ConnectionStateManager.getSecurityMode(),
-          isReconnecting: isReconnectingRef.current,
-          reconnectAttempt: reconnectAttemptsRef.current,
-          isCertFlowActive: isCertFlowActiveRef.current,
-          // WS errors during a cloud data purge are expected (kill phase);
-          // the purge banner + status text carry the message instead.
-          isPurgeBlocking: purgeBlockingRef.current,
-        });
-        if (shouldToast) {
-          showToast(i18n.t('syncConnection:connectionError', { message: errorMessage }));
-        }
-        
-        // shouldMaintainConnection() covers both cloud (session ready) and
-        // self-hosted (isPaired) — getIsPaired() alone is false in cloud mode.
-        if (shouldMaintainConnection() && !isReconnectingRef.current && !isConnectingRef.current) {
-          log.info('Connection error detected, scheduling reconnect...');
-          ConnectionStateManager.markDisconnected();
-          setIsConnectedSync(false);
-          scheduleReconnect();
-        }
+      ConnectionStateManager.markDisconnected();
+      setIsConnectedSync(false);
+      setIsConnectingSync(false);
+      // Suppress toasts while a reconnect is in flight or a cert decision is
+      // pending (the cert modal is the intended UX).
+      if (!isReconnectingRef.current && !isCertFlowActiveRef.current) {
+        showToast(i18n.t('syncConnection:connectionError', { message: errorMessage }));
+      }
+      if ((isPairedRef.current || engineAvailable()) && !isReconnectingRef.current && !isConnectingRef.current) {
+        scheduleReconnect();
       }
     };
 
     const handleCertVerificationFailed = (_error: any) => {
       log.info('Certificate verification failed');
-      // A cert-verification decision is now pending — the cert modal is the
-      // intended UX for TLS failures, so suppress connection-error toasts
-      // until the transport settles (cleared in handleSyncConnected).
       isCertFlowActiveRef.current = true;
       cancelReconnect();
       setIsReconnectingSync(false);
@@ -488,237 +209,41 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     };
 
     const handleStateChange = (state: any) => {
-      log.info('State changed:', state);
-      setIsPairedSync(state.isPaired || false);
-      setIsConnectedSync(state.isConnected || false);
+      // `markConnected()` emits `state:changed` with the LEGACY QR-pairing flag,
+      // which embedded-engine boots never write (no `soulbits_paired` key) — so
+      // it reports `isPaired: false`. The embedded engine's availability is the
+      // real pairing signal; without `|| engineAvailable()` this handler wiped
+      // `isPaired` the moment the loopback WS connected and flipped the chat
+      // list back to the "not connected" overlay.
+      setIsPairedSync(Boolean(state.isPaired) || engineAvailable());
+      setIsConnectedSync(Boolean(state.isConnected));
     };
 
     // ── Read-only mode (second React root, e.g. floating chat overlay) ──
-    // The MAIN root owns the connection. A second SyncConnectionProvider must
-    // only OBSERVE the shared singletons — if it ran initializeConnection() /
-    // connect() it would re-create the 'sync' connection and tear down the
-    // main app's live WebSocket (→ "disconnected from cloud" + a floating
-    // window stuck on its loading gate). Mirror state, never mutate it.
+    // Observe the shared singletons; never mutate the connection.
     if (readOnly) {
       const onConnected = () => setIsConnectedSync(true);
       const onDisconnected = () => setIsConnectedSync(false);
-      const onServerUpdateRequired = (value: boolean) => setServerUpdateRequiredSync(value);
+      const offEngine = onEngineConnectionChange(conn => setIsPairedSync(conn !== null));
       connectionManager.on('connected:sync', onConnected);
       connectionManager.on('disconnected:sync', onDisconnected);
-      SyncService.on('sync:server-update-required', onServerUpdateRequired);
       ConnectionStateManager.on('state:changed', handleStateChange);
       const summary = ConnectionStateManager.getConnectionSummary();
-      setIsPairedSync(summary.isPaired || false);
+      setIsPairedSync(summary.isPaired || engineAvailable());
       setIsConnectedSync(summary.isConnected || false);
-      setServerUpdateRequiredSync(SyncService.getServerUpdateRequired());
       return () => {
+        offEngine();
         connectionManager.off('connected:sync', onConnected);
         connectionManager.off('disconnected:sync', onDisconnected);
-        SyncService.off('sync:server-update-required', onServerUpdateRequired);
         ConnectionStateManager.off('state:changed', handleStateChange);
       };
     }
 
-    const handleSyncCompleted = (session: any) => {
-      log.info('Sync completed:', session);
-      showToast(i18n.t('syncConnection:syncComplete', { sent: session.recordsSent, received: session.recordsReceived }));
-    };
-
-    const handleSyncErrorEvent = (error: string) => {
-      log.error('Sync service error:', error);
-      showToast(i18n.t('syncConnection:syncFailed', { error }));
-    };
-
-    // Defense-in-depth: ensure a SYNC_REJECT resets state + notifies the user
-    // from any screen (e.g. auto-sync on connect), not just SyncSettingsScreen.
-    const handleSyncRejected = (payload: any) => {
-      log.warn('Sync rejected:', payload);
-      const message = payload?.message || payload?.reason || '';
-      showToast(i18n.t('syncConnection:syncRejected', { message }));
-    };
-
-    // ── 3-3 / D57: sticky server-update-required gate ─────────────────────
-    // Entered by SyncService on an old-engine handshake accept or an
-    // `unsupported_schema_version` SYNC_REJECT. While sticky, auto-reconnect
-    // and the on-connect sync are suppressed (above); when it CLEARS (engine
-    // updated + accepted handshake), reset reconnect state so the resumed
-    // sync path starts clean (any stale reconnect timer is cancelled).
-    const handleServerUpdateRequiredChange = (value: boolean) => {
-      setServerUpdateRequiredSync(value);
-      if (!value) {
-        cancelReconnect();
-        setIsReconnectingSync(false);
-        setNextReconnectIn(0);
-      }
-    };
-
-    // One-shot re-dial requested by the slow re-probe when the WS is down
-    // (the engine likely restarted to apply the update). Dial exactly ONCE —
-    // no reconnect scheduling while sticky (the on-connect handler re-
-    // handshakes, which is how the gate re-evaluates the engine version).
-    const handleServerUpdateProbeReconnect = () => {
-      log.info('Server-update re-probe: dialing sync connection once');
-      connect().catch((err: any) => {
-        log.warn('Server-update re-probe: re-dial failed:', err);
-      });
-    };
-
-    // The engine sends a SYNC_DATA_SIZE_ESTIMATE before pushing data and
-    // blocks until we confirm. Surface it to the user when:
-    //  - this is the INITIAL sync (no last-sync watermark yet → new install,
-    //    force_full_sync pull) — ALWAYS prompt for any non-empty estimate, or
-    //  - the estimated download exceeds the configured threshold (default 5 MB).
-    // Anything at or below the limit — and empty estimates — auto-confirm
-    // silently so the engine unblocks and the sync proceeds without interruption.
-    const handleSyncEstimate = async (payload: any) => {
-      log.info('Size estimate received:', payload);
-      // The engine serializes the estimate with snake_case JSON tags
-      // (SyncDataSizeEstimatePayload in eventserver/synchronization.go) —
-      // read total_records / image_count / estimated_download_mb.
-      const records = Number(payload?.total_records ?? 0);
-      const images = Number(payload?.image_count ?? 0);
-      const mb = Number(payload?.estimated_download_mb ?? 0);
-
-      // Initial sync = no persisted last-sync watermark (initiateSync escalates
-      // to force_full_sync when getLastSync() returns 0). The estimate arrives
-      // BEFORE the watermark is written (SYNC_FINALIZE), so a 0 watermark here
-      // reliably identifies the very first sync on a fresh install.
-      const source = await ConnectionStateManager.getCurrentSource();
-      const lastSync = await ConnectionStateManager.getLastSync(source);
-      const isInitialSync = lastSync === 0;
-
-      const limitMB = await ConnectionStateManager.getSyncEstimateLimitMB();
-      if (!shouldPromptForSyncEstimate({ totalRecords: records, imageCount: images, estimatedDownloadMB: mb, limitMB, isInitialSync })) {
-        log.info(
-          isInitialSync
-            ? 'Initial sync with empty estimate — auto-confirming'
-            : `Size estimate within limit (${mb} MB, limit ${limitMB === null ? 'Unlimited' : `${limitMB} MB`}) or empty — auto-confirming`,
-        );
-        SyncService.confirmSizeEstimate(true).catch((err: any) => {
-          log.warn('Auto-confirm of size estimate failed:', err);
-        });
-        return;
-      }
-
-      log.info(
-        isInitialSync
-          ? `Initial sync (no watermark) — prompting for size estimate confirmation (${mb} MB, ${records} records)`
-          : `Size estimate exceeds limit (${mb} MB > ${limitMB} MB) — prompting for confirmation`,
-      );
-
-      // Format the estimate for display only (up to two decimal places) — the
-      // decision above compared the RAW float so threshold checks stay exact.
-      const mbDisplay = Number(mb.toFixed(2));
-      const message =
-        images > 0
-          ? i18n.t('syncConnection:sizeEstimateConfirmImages', { records, mb: mbDisplay, images })
-          : i18n.t('syncConnection:sizeEstimateConfirm', { records, mb: mbDisplay });
-
-      // Themed dialog via AppAlertContext (AppAlertProvider is now mounted
-      // ABOVE SyncConnectionProvider in App.tsx). Use the ref-mirrored
-      // showAlertRef so this []-deps listener never closes over a stale one.
-      // Presented NOW, or AFTER the pending post-purge result is acknowledged
-      // (below) — never dropped, never auto-confirmed.
-      const presentEstimatePrompt = () => {
-        showAlertRef.current(
-          i18n.t('syncConnection:alertTitle'),
-          message,
-          [
-            {
-              text: i18n.t('common:cancel'),
-              style: 'cancel',
-              onPress: () => {
-                SyncService.confirmSizeEstimate(false).catch((err: any) => {
-                  log.warn('Reject size estimate failed:', err);
-                });
-              },
-            },
-            {
-              text: i18n.t('common:confirm'),
-              onPress: () => {
-                SyncService.confirmSizeEstimate(true).catch((err: any) => {
-                  log.warn('Confirm size estimate failed:', err);
-                });
-              },
-            },
-          ],
-          { icon: 'cloud-download-outline', blockBackdropDismiss: true },
-        );
-      };
-
-      // ── Post-purge deferral ───────────────────────────────────────────────
-      // A successful purge raises purgeResultPending until the user
-      // acknowledges the persistent success surface (settings card / success
-      // dialog). The forced post-purge re-sync ALWAYS classifies as
-      // isInitialSync (the purge cleared the watermark) → its estimate is
-      // prompt-worthy → presenting it now would instantly REPLACE the purge
-      // success dialog in the single-slot, LAST-WINS AppAlertContext. Park the
-      // prompt instead — SyncService.pendingSizeEstimate keeps the engine
-      // blocked, and dismissPurgeResult() presents it verbatim. It is NEVER
-      // auto-confirmed: the user always makes the accept/reject decision.
-      if (purgeResultPendingRef.current) {
-        log.info('Post-purge result not acknowledged yet — deferring the size estimate prompt (the engine stays blocked until it is answered)');
-        deferredEstimatePromptRef.current = presentEstimatePrompt;
-        return;
-      }
-
-      presentEstimatePrompt();
-    };
-
-    // A name clash during sync apply: an incoming server record's unique
-    // `name` collides with a DIFFERENT local row (e.g. two instances seeded
-    // the same default config with different UUIDs). The sync is PAUSED until
-    // the user picks a resolution. "Apply to all" memorizes the decision for
-    // every other clash in this sync session only.
-    const handleSyncNameClash = (clash: any) => {
-      log.warn('Sync name clash detected:', clash);
-      const name = clash?.name || '';
-      const table = clash?.table || '';
-      const resolve = (resolution: 'overwrite' | 'keep' | 'rename') => (
-        applyToAll?: boolean,
-      ) => {
-        SyncService.resolveNameClash(resolution, !!applyToAll).catch((err: any) => {
-          log.warn(`Resolve name clash (${resolution}) failed:`, err);
-        });
-      };
-
-      showAlertRef.current(
-        i18n.t('syncConnection:nameClashTitle'),
-        i18n.t('syncConnection:nameClashMessage', { name, table }),
-        [
-          {
-            text: i18n.t('syncConnection:nameClashOverwrite'),
-            onPress: resolve('overwrite'),
-          },
-          {
-            text: i18n.t('syncConnection:nameClashKeep'),
-            onPress: resolve('keep'),
-          },
-          {
-            text: i18n.t('syncConnection:nameClashRename'),
-            onPress: resolve('rename'),
-          },
-        ],
-        {
-          icon: 'swap-horizontal',
-          blockBackdropDismiss: true,
-          checkbox: { label: i18n.t('syncConnection:nameClashApplyToAll') },
-        },
-      );
-    };
-
-    connectionManager.on('connected:sync',            handleSyncConnected);
-    connectionManager.on('disconnected:sync',         handleSyncDisconnected);
-    connectionManager.on('error:sync',                handleSyncError);
-    connectionManager.on('cert:verification_failed',  handleCertVerificationFailed);
-    ConnectionStateManager.on('state:changed',        handleStateChange);
-    SyncService.on('sync:completed',                  handleSyncCompleted);
-    SyncService.on('sync:error',                      handleSyncErrorEvent);
-    SyncService.on('sync:rejected',                   handleSyncRejected);
-    SyncService.on('sync:estimate',                   handleSyncEstimate);
-    SyncService.on('sync:nameclash',                  handleSyncNameClash);
-    SyncService.on('sync:server-update-required',     handleServerUpdateRequiredChange);
-    SyncService.on('sync:server-update-probe-reconnect', handleServerUpdateProbeReconnect);
+    connectionManager.on('connected:sync', handleSyncConnected);
+    connectionManager.on('disconnected:sync', handleSyncDisconnected);
+    connectionManager.on('error:sync', handleSyncError);
+    connectionManager.on('cert:verification_failed', handleCertVerificationFailed);
+    ConnectionStateManager.on('state:changed', handleStateChange);
 
     if (!hasInitialized.current) {
       hasInitialized.current = true;
@@ -726,32 +251,16 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     }
 
     return () => {
-      connectionManager.off('connected:sync',            handleSyncConnected);
-      connectionManager.off('disconnected:sync',         handleSyncDisconnected);
-      connectionManager.off('error:sync',                handleSyncError);
-      connectionManager.off('cert:verification_failed',  handleCertVerificationFailed);
-      ConnectionStateManager.off('state:changed',        handleStateChange);
-      SyncService.off('sync:completed',                  handleSyncCompleted);
-      SyncService.off('sync:error',                      handleSyncErrorEvent);
-      SyncService.off('sync:rejected',                   handleSyncRejected);
-      SyncService.off('sync:estimate',                   handleSyncEstimate);
-      SyncService.off('sync:nameclash',                  handleSyncNameClash);
-      SyncService.off('sync:server-update-required',     handleServerUpdateRequiredChange);
-      SyncService.off('sync:server-update-probe-reconnect', handleServerUpdateProbeReconnect);
+      connectionManager.off('connected:sync', handleSyncConnected);
+      connectionManager.off('disconnected:sync', handleSyncDisconnected);
+      connectionManager.off('error:sync', handleSyncError);
+      connectionManager.off('cert:verification_failed', handleCertVerificationFailed);
+      ConnectionStateManager.off('state:changed', handleStateChange);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------------------------------------------------------------------------
-  // Cloud-mode auto-connect
-  // ---------------------------------------------------------------------------
-  // Self-hosted mode connects on app boot via initializeConnection() (gated on
-  // isPaired). Cloud mode has no pairing handshake, so isPaired is always false
-  // and initializeConnection() never calls connect(). The broker session
-  // becoming 'ready' is the cloud equivalent of "paired + ready to dial" — this
-  // listener bridges that gap: when the session transitions to 'ready' in cloud
-  // mode and no WS is already up/pending, open one. Without it the UI shows
-  // "Cloud Session ready" but the conduct-proxy never receives a WS upgrade.
-  // ── Track current source ─────────────────────────────────────────────────
+  // Track the current source for status derivation.
   useEffect(() => {
     ConnectionStateManager.getCurrentSource().then(setCurrentSource);
     const handler = (_state: any) => {
@@ -761,329 +270,23 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     return () => { ConnectionStateManager.off('state:changed', handler); };
   }, []);
 
-  // ── Phase 10: cloud-status tracking re-render ──────────────────────────
-  // Separate from the auto-connect effect below so status-driven re-renders
-  // (canUseChat / connectionStatus) are not coupled to WS dial logic.
-  useEffect(() => {
-    const onStatus = (s: CloudSessionStatus) => { setCloudStatus(s); };
-    cloudSessionService.on('status', onStatus);
-    return () => { cloudSessionService.off('status', onStatus); };
-  }, []);
-
-  // ── D-DEV-01: device-authorization gate ─────────────────────────────────
-  // connect() 403 device_authorization_required → show the 6-digit email-code
-  // modal. Driven solely by the 'deviceAuthRequired' status — the service sets
-  // it atomically in its catch block (single source of truth; the legacy
-  // service event was removed with the connect bypass).
-  const [showDeviceAuth, setShowDeviceAuth] = useState(false);
-  useEffect(() => {
-    const onStatus = (s: CloudSessionStatus) => {
-      if (s === 'deviceAuthRequired') {
-        setShowDeviceAuth(true);
-      }
-    };
-    cloudSessionService.on('status', onStatus);
-    return () => {
-      cloudSessionService.off('status', onStatus);
-    };
-  }, []);
-
-  // ── After the code is verified: re-provision the broker session. The
-  // device is now authorized; the 'ready' status handler auto-dials the WS.
-  // Plain function (file convention for closures over refs — no hook deps).
-  const handleDeviceAuthVerified = async () => {
-    setShowDeviceAuth(false);
-    try {
-      await cloudSessionService.connect({ force: true });
-    } catch (e) {
-      log.warn('Reconnect after device auth failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
-      scheduleReconnect();
-    }
-  };
-
-  // ── D-DEV-01 deep link (Phase 4-1): soulbits://device-auth?code=<6-digit> ──
-  // Fired from the portal device-approve page's "Open in the app" button.
-  // Two sources, both registered ONCE (this effect has [] deps):
-  //   - cold start:  Linking.getInitialURL() — app launched via the link
-  //   - warm:        Linking.addEventListener('url') — app already running
-  // The listener is active regardless of modal visibility, but ONLY acts when a
-  // device-auth flow is pending (status 'deviceAuthRequired' or modal visible).
-  // A valid link verifies the code through the shared DeviceAuthService and then
-  // reuses handleDeviceAuthVerified() (the same path as the modal's onVerified)
-  // — the modal's verify logic is NOT duplicated here. Stale links (no pending
-  // flow) are a no-op.
-  const showDeviceAuthRef = useRef(showDeviceAuth);
-  useEffect(() => {
-    showDeviceAuthRef.current = showDeviceAuth;
-  }, [showDeviceAuth]);
-  const handleDeviceAuthVerifiedRef = useRef(handleDeviceAuthVerified);
-  useEffect(() => {
-    handleDeviceAuthVerifiedRef.current = handleDeviceAuthVerified;
-  }, [handleDeviceAuthVerified]);
-
-  useEffect(() => {
-    const handleDeepLink = async (url: string | null) => {
-      if (!url) {
-        return;
-      }
-      const parsed = parseDeviceDeepLink(url);
-      if (!parsed) {
-        log.info('Ignoring non device-auth deep link:', url);
-        return;
-      }
-      // Gate on a pending flow: the 403 status is the service's single source
-      // of truth; the modal ref covers the brief window where the status event
-      // has not re-emitted after a prior dismiss/re-show.
-      const flowPending =
-        cloudSessionService.getStatus() === 'deviceAuthRequired' ||
-        showDeviceAuthRef.current;
-      if (!flowPending) {
-        log.info('Device-auth deep link received but no flow pending — ignoring (stale link):', url);
-        return;
-      }
-      log.info('Device-auth deep link received — verifying code');
-      try {
-        await DeviceAuthService.verifyCode(parsed.code);
-        await handleDeviceAuthVerifiedRef.current();
-      } catch (e) {
-        log.warn(
-          'Device-auth deep link verify failed:',
-          e instanceof Error ? `${e.name}: ${e.message}` : String(e),
-        );
-      }
-    };
-
-    // Cold start — a link that launched the app.
-    Linking.getInitialURL()
-      .then(url => handleDeepLink(url))
-      .catch(err => {
-        log.warn('getInitialURL failed:', err);
-      });
-
-    // Warm — link received while the app is foregrounded.
-    const subscription = Linking.addEventListener('url', event => {
-      handleDeepLink(event.url);
-    });
-
-    return () => subscription.remove();
-  }, []);
-
-  useEffect(() => {
-    if (readOnly) return; // second roots must never auto-connect
-    const onCloudStatus = async (s: CloudSessionStatus, info?: CloudSessionInfo) => {
-      const source = await ConnectionStateManager.getCurrentSource();
-      if (source !== 'cloud') return;
-
-      if (s === 'ready') {
-        // Re-entrancy guard: connect() itself can drive a ready transition
-        // (it awaits cloudSessionService.connect() which emits 'ready'); skip
-        // if a WS is already up or a connect is already in flight.
-        if (isConnectedRef.current || isConnectingRef.current) {
-          log.info('Cloud session ready but WS already up/pending — skipping auto-connect');
-          return;
-        }
-        log.info('Cloud session ready — opening sync WebSocket to conduct proxy');
-        try {
-          await connect();
-        } catch (e) {
-          log.warn('Auto-connect after cloud ready failed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e));
-          scheduleReconnect();
-        }
-      } else if (s === 'failed') {
-        log.warn(`Cloud session failed: ${info?.failureReason ?? 'unknown'}`);
-        cancelReconnect();
-        setIsReconnectingSync(false);
-        setIsConnectingSync(false);
-        setNextReconnectIn(0);
-        // Do NOT auto-reconnect in a tight loop — the broker already failed.
-        // Phase 9 offers a manual retry via cloudSessionService.disconnect()
-        // then connect().
-      }
-    };
-    cloudSessionService.on('status', onCloudStatus);
-    return () => { cloudSessionService.off('status', onCloudStatus); };
-  }, []);
-
-  // Acknowledge the post-purge result: clears the pending surface and presents
-  // any deferred size-estimate prompt verbatim. Stable ([] deps — refs only)
-  // so the settings screen can call it from its own []-deps listeners.
-  const dismissPurgeResult = useCallback(() => {
-    setPurgeResultPendingSync(false);
-    const presentDeferred = deferredEstimatePromptRef.current;
-    deferredEstimatePromptRef.current = null;
-    presentDeferred?.();
-  }, []);
-
-  // ── Purge re-evaluation (Phase 6) ──────────────────────────────────────
-  // When a user-initiated cloud purge finishes (success), clear any in-flight
-  // reconnect scheduling, mark a persisted "full re-sync pending" (cleared
-  // watermarks → the NEXT sync escalates to force_full_sync, even across an
-  // app restart), and re-establish the connection so the on-connect auto-sync
-  // runs that forced re-sync AUTOMATICALLY — the purge's own WS kill made the
-  // old broker session dead, so we force a fresh broker round-trip first.
-  //
-  // Before this follow-up, the app deliberately did NOT reconnect here and the
-  // success dialog manually guided the user to "Reconnect, then use Force full
-  // re-sync" — but the on-connect auto-sync was INCREMENTAL (the engine keeps
-  // its own per-device watermark and resends nothing), so the engine stayed
-  // empty and kept rejecting INIT_ENTITY with entity_not_defined. The cleared
-  // watermark now makes that same auto-sync a FULL forced re-sync.
-  //
-  // `purge:done` fires ONLY for outcome 'deleted' (failed/deadline settle via
-  // purge:failed / purge:terminal — neither re-syncs: re-uploading after a
-  // FAILED purge would defeat the user's deletion intent).
-  useEffect(() => {
-    const reEvaluateAfterPurge = async () => {
-      log.info('Cloud data purge deleted — resetting reconnect state and scheduling the forced full re-sync');
-      cancelReconnect();
-      setIsReconnectingSync(false);
-      setIsConnectingSync(false);
-      setNextReconnectIn(0);
-
-      // Raise the pending-result gate: the settings screen's PERSISTENT
-      // success card renders until the user acknowledges, and the forced
-      // re-sync's size-estimate prompt defers (never clobbers the success
-      // dialog). Cleared by dismissPurgeResult / a completed forced sync.
-      setPurgeResultPendingSync(true);
-
-      // Mark the full re-sync BEFORE dialing so the on-connect auto-sync
-      // observes the cleared watermark and escalates to force_full_sync.
-      try {
-        await SyncServiceClass.getInstance().markFullResyncRequired();
-      } catch (e) {
-        log.warn('Failed to mark full re-sync required after purge:', e instanceof Error ? e.message : String(e));
-      }
-
-      try {
-        // The purge killed the broker session (hard-kill) — force a fresh
-        // POST /v1/session/connect round-trip so the first dial doesn't 404
-        // against the dead session, then open the sync WS. connect() itself
-        // provisions when the status isn't cached-'ready'; force:true also
-        // covers a stale cached 'ready' (the 404 / backend dial failed loop).
-        await cloudSessionService.connect({ force: true });
-        await connect();
-      } catch (err) {
-        log.warn('Post-purge reconnect failed — scheduling reconnect:', err instanceof Error ? err.message : String(err));
-        scheduleReconnect();
-      }
-    };
-    const onPurgeFailed = () => {
-      // Failed deletion: mere reconnect-state reset (no auto-reconnect, no
-      // re-sync — re-uploading would defeat the deletion intent; the screen's
-      // Retry-deletion card is the recovery path). The success surface (and
-      // with it the estimate deferral) is gone — a failed purge triggers no
-      // forced re-sync whose estimate could be pending, so restore normal
-      // estimate prompting.
-      log.info('Cloud data purge failed — resetting reconnect state (no auto-reconnect)');
-      cancelReconnect();
-      setIsReconnectingSync(false);
-      setIsConnectingSync(false);
-      setNextReconnectIn(0);
-      setPurgeResultPendingSync(false);
-      deferredEstimatePromptRef.current = null;
-    };
-    // The post-purge FORCED re-sync completed (its estimate was presented and
-    // answered) — the pending result surface and any still-deferred prompt are
-    // moot. Only a forced session clears the gate: it is the only sync whose
-    // estimate was (or would have been) deferred.
-    const onSyncCompleted = (session: any) => {
-      if (!session?.forceFullSync) {
-        return;
-      }
-      setPurgeResultPendingSync(false);
-      deferredEstimatePromptRef.current = null;
-    };
-    // Any sync session died while its estimate prompt was deferred (e.g. the
-    // engine aborts an never-confirmed session after ~60s): drop the stale
-    // deferred prompt so it cannot outlive its session. The pending RESULT
-    // surface stays up (still unacknowledged); the watermark rewrite only
-    // happens on SYNC_FINALIZE, so the next auto-sync re-forces and its
-    // estimate re-defers fresh.
-    const onSyncDied = () => {
-      deferredEstimatePromptRef.current = null;
-    };
-    cloudSessionService.on('purge:done', reEvaluateAfterPurge);
-    cloudSessionService.on('purge:failed', onPurgeFailed);
-    SyncService.on('sync:completed', onSyncCompleted);
-    SyncService.on('sync:aborted', onSyncDied);
-    SyncService.on('sync:error', onSyncDied);
-    SyncService.on('sync:rejected', onSyncDied);
-    return () => {
-      cloudSessionService.off('purge:done', reEvaluateAfterPurge);
-      cloudSessionService.off('purge:failed', onPurgeFailed);
-      SyncService.off('sync:completed', onSyncCompleted);
-      SyncService.off('sync:aborted', onSyncDied);
-      SyncService.off('sync:error', onSyncDied);
-      SyncService.off('sync:rejected', onSyncDied);
-    };
-  }, []);
-
-  // ── Cloud data purge blocking gate ─────────────────────────────────────
-  // Drives `purgeBlocking` (see the context type). Event-observing only —
-  // passive in BOTH roots, so this effect is registered for readOnly roots
-  // too (second React roots must observe, never mutate the connection).
-  // Raised by: status 'purging' (our purge or an adopted other-device purge),
-  // and a connect() PurgeInProgressError (handled in the connect catch).
-  // Cleared by: status 'idle' (purge settled deleted/failed), the terminal
-  // events themselves, a successful WS connect (belt-and-braces), and a
-  // cold-start attach resolving to none (below). Deadline keeps blocking —
-  // connecting stays paused until the server-side purge finishes.
-  useEffect(() => {
-    const onStatus = (s: CloudSessionStatus) => {
-      if (s === 'purging') {
-        setPurgeBlockingSync(true);
-      } else if (s === 'idle') {
-        setPurgeBlockingSync(false);
-      }
-    };
-    const onTerminal = (payload: PurgeTerminalPayload) => {
-      if (payload.outcome !== 'deadline') {
-        setPurgeBlockingSync(false);
-      }
-    };
-    const onLegacySettled = () => setPurgeBlockingSync(false);
-    // A deadline-latched run was reconciled away (re-probe GET reported none):
-    // the server-side run is gone — connecting unblocks immediately.
-    const onCleared = () => setPurgeBlockingSync(false);
-    cloudSessionService.on('status', onStatus);
-    cloudSessionService.on('purge:terminal', onTerminal);
-    cloudSessionService.on('purge:done', onLegacySettled);
-    cloudSessionService.on('purge:failed', onLegacySettled);
-    cloudSessionService.on('purge:cleared', onCleared);
-    return () => {
-      cloudSessionService.off('status', onStatus);
-      cloudSessionService.off('purge:terminal', onTerminal);
-      cloudSessionService.off('purge:done', onLegacySettled);
-      cloudSessionService.off('purge:failed', onLegacySettled);
-      cloudSessionService.off('purge:cleared', onCleared);
-    };
-  }, []);
-
-  // Cold-start attach (MAIN root only): if a purge was already running when
-  // the app launched (initiated here before a kill, or on another device),
-  // one status GET adopts it → CloudSessionService starts polling and the
-  // status/terminal events above raise/clear the gate. A `none` result is a
-  // no-op (and clears any stale gate from a previous run).
+  // The embedded engine's readiness IS the pairing signal — reflect it and dial
+  // the connection when the engine becomes available.
   useEffect(() => {
     if (readOnly) return;
-    let cancelled = false;
-    cloudSessionService.attachToRunningPurge()
-      .then(result => {
-        if (cancelled) return;
-        if (result.kind === 'none' && !cloudSessionService.isPurging()) {
-          // Server reports no run AND the service isn't holding a deadline
-          // latch (a failed re-probe GET preserves the latch and returns
-          // 'none' too — that must NOT unblock connecting).
-          setPurgeBlockingSync(false);
-        }
-        // 'adopted' / 'terminal': CloudSessionService emitted the status /
-        // terminal events synchronously — the listeners above set the gate.
-      })
-      .catch(e => {
-        log.warn('Cold-start purge attach failed:', e instanceof Error ? e.message : String(e));
-      });
-    return () => { cancelled = true; };
-  }, [readOnly]);
+    const off = onEngineConnectionChange(conn => {
+      const available = conn !== null;
+      setIsPairedSync(available || ConnectionStateManager.getIsPaired());
+      if (available && !isConnectedRef.current && !isConnectingRef.current && !isReconnectingRef.current) {
+        connect().catch(err => {
+          log.warn('Engine-ready auto-connect failed:', err instanceof Error ? err.message : String(err));
+          scheduleReconnect();
+        });
+      }
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Connection actions
@@ -1094,46 +297,27 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       return;
     }
 
-    // Suppress every auto-connect / reconnect / foreground / WS-failure
-    // re-provision entry while a user-initiated cloud purge is in flight.
-    // The broker 409s connects mid-purge anyway; this guard keeps the app from
-    // dialing a WS (and toasting connection errors) during the purge window.
-    if (cloudSessionService.isPurging()) {
-      log.info('Cloud data purge in progress — skipping connect');
-      return;
-    }
-
     try {
       setIsConnectingSync(true);
-      log.info('Connecting to sync...');
-      
-      const source = await ConnectionStateManager.getCurrentSource();
+      log.info('Connecting to the engine...');
+
       let url: string;
       let mode: string;
-      if (source === 'cloud') {
-        // Phase 7/8: async provisioning → poll until ready, no stale-session
-        // heuristic (the broker owns readiness via its connect-timeout).
-        const st = cloudSessionService.getStatus();
-        if (st !== 'ready') {
-          log.info(`Cloud session status: ${st}, waiting for ready...`);
-          await cloudSessionService.connect();
+      const engine = getEngineConnection();
+      if (engine) {
+        // Embedded engine: prefer the PLAIN loopback WS (ws://) and authenticate
+        // with the per-process loopback token the sidecar publishes in its
+        // readiness payload (the same 7-11 posture the management API and the
+        // log-stream WS use). Loopback plaintext + loopback token keeps the
+        // self-signed-TLS native library off the chat-critical path; fall back
+        // to wss:// only when the sidecar advertises no plain WS port.
+        if (engine.wsBaseUrl) {
+          mode = 'unencrypted';
+          url = appendLoopbackToken(engine.wsBaseUrl, engine.token);
+        } else {
+          mode = 'insecure-ssl';
+          url = appendLoopbackToken(engine.wssBaseUrl, engine.token);
         }
-
-        // Token-expiry pre-check before WS dial — prevents expired-PASETO
-        // reconnect loop (RN's WebSocket surfaces 401 upgrade rejections as
-        // generic onerror with no status code).
-        if (AuthService.isTokenExpired()) {
-          log.info('Cloud token expired, refreshing before WS dial');
-          const ok = await AuthService.refresh();
-          if (!ok) {
-            log.warn('Token refresh failed — auth expired, cannot open WS');
-            setIsConnectingSync(false);
-            return;
-          }
-        }
-
-        url = `${CLOUD_HOSTS.conductProxyWs}${WS_PATHS.sync}`;
-        mode = 'cloud';
       } else {
         mode = (await ConnectionStateManager.getSecurityMode()) || 'secure';
         url = mode === 'unencrypted'
@@ -1142,127 +326,32 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
       }
 
       if (!url) {
-        throw new Error('No server URL configured');
+        throw new Error('No engine URL configured');
       }
 
-      // A secure (TLS) dial during pairing may legitimately fail on cert
-      // verification — mark the cert flow active so expected TLS errors in
-      // this window don't surface as toasts. Cleared on a settled connect
-      // (handleSyncConnected) or when the transport otherwise resolves.
+      // A secure (TLS) dial may legitimately fail on cert verification — mark
+      // the cert flow active so expected TLS errors don't surface as toasts.
       if (mode === 'secure' || mode === 'insecure-ssl') {
         isCertFlowActiveRef.current = true;
       }
 
       await connectionManager.createConnection('sync', 'sync', url, mode as any);
-      
-      log.info('Sync connection established');
+      log.info('Engine connection established');
     } catch (error: any) {
-      // A 409 purge_in_progress from connectPoll means ANOTHER device is
-      // currently resetting its cloud data. This is expected — do NOT treat it
-      // as a connection failure or schedule a reconnect (the reconnect loop
-      // would spin uselessly until the other purge finishes). Drop to a
-      // non-reconnecting state, toast so the user knows to wait, raise the
-      // purgeBlocking gate (status text → "Your data is being deleted"), and
-      // ADOPT the running purge's status so this device tracks it: the one
-      // GET makes the banner/status drive off the same purge:progress /
-      // purge:terminal events as our own purges, and the gate clears on the
-      // other purge's terminal event.
-      if (error instanceof PurgeInProgressError) {
-        log.info('Cloud connect blocked: purge in progress on another device');
-        cancelReconnect();
-        setIsReconnectingSync(false);
-        setIsConnectingSync(false);
-        setIsConnectedSync(false);
-        setNextReconnectIn(0);
-        setPurgeBlockingSync(true);
-        showToast(i18n.t('syncSettings:purgeInProgressOtherDevice'));
-        cloudSessionService.attachToRunningPurge().catch((e) => {
-          log.warn('Purge status attach after 409 connect-block failed:', e instanceof Error ? e.message : String(e));
-        });
-        return;
-      }
-
       log.error('Connect failed:', error);
+      // Re-arm error toasts. An insecure-ssl attempt sets this flag to suppress
+      // expected TLS/cert errors, but nothing ever cleared it: after a single
+      // insecure-ssl attempt it lingered forever and handleSyncError (which
+      // checks the flag) suppressed ALL connection-error UI from then on — the
+      // "no error visible" symptom. A failed attempt must clear it so subsequent
+      // errors surface again.
+      isCertFlowActiveRef.current = false;
       setIsConnectingSync(false);
       setIsConnectedSync(false);
-      
-      // Same toast gate as handleSyncError: suppress failedToConnect when this
-      // failure is an expected byproduct of the pairing/cert flow, a
-      // reconnect attempt, or the cloud data purge window (only the very
-      // first failure on a settled transport may toast).
-      const shouldToast = await shouldShowConnectionErrorToastForConnection({
-        getConnectionInfo: () => connectionManager.getSyncConnection(),
-        getSecurityMode: () => ConnectionStateManager.getSecurityMode(),
-        isReconnecting: isReconnectingRef.current,
-        reconnectAttempt: reconnectAttemptsRef.current,
-        isCertFlowActive: isCertFlowActiveRef.current,
-        isPurgeBlocking: purgeBlockingRef.current,
-      });
-      if (shouldToast) {
+      if (!isReconnectingRef.current) {
         showToast(i18n.t('syncConnection:failedToConnect'));
       }
-      
       throw error;
-    }
-  };
-
-  const connectWithRefresh = async (): Promise<void> => {
-    if (isConnectingRef.current) return;
-
-    // Check if we're in cloud mode — cloud connections don't use self-hosted
-    // handshake-refresh; they use PASETO refresh via AuthService.refresh() instead.
-    const source = await ConnectionStateManager.getCurrentSource();
-    if (source === 'cloud') {
-      log.info('Cloud mode — skipping self-hosted handshake refresh, calling connect()');
-      try {
-        await connect();
-      } catch (e) {
-        log.error('Cloud connect after refresh check failed:', e);
-        setIsConnectingSync(false);
-        setIsConnectedSync(false);
-        scheduleReconnect();
-      }
-      return;
-    }
-
-    try {
-      setIsConnectingSync(true);
-      log.info('Attempting to refresh self-hosted token...');
-      
-      const wsUrl = await ConnectionStateManager.getWSUrl();
-      if (!wsUrl) throw new Error('No WS URL available');
-      
-      const connectionPromise = connectionManager.createConnection('sync', 'sync', wsUrl, 'unencrypted');
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error(i18n.t('syncConnection:handshakeTimeout'))), 10000)
-      );
-      
-      await Promise.race([connectionPromise, timeoutPromise]);
-      
-      log.info('Connection established, waiting for handshake response...');
-      await SyncService.requestHandshakeWithWait(15000);
-      
-      log.info('Token refresh successful, switching to encrypted connection...');
-      
-      connectionManager.disconnectConnection('sync');
-      
-      setIsConnectingSync(false);
-      
-      await connect();
-    } catch (error: any) {
-      log.error('Token refresh failed:', error);
-      
-      connectionManager.disconnectConnection('sync');
-      setIsConnectingSync(false);
-      setIsConnectedSync(false);
-
-      const currentSummary = ConnectionStateManager.getConnectionSummary();
-      log.info('Handshake failed, isPaired:', currentSummary.isPaired);
-      
-      if (currentSummary.isPaired) {
-        log.info('Scheduling reconnect after handshake failure');
-        scheduleReconnect();
-      }
     }
   };
 
@@ -1270,39 +359,18 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     try {
       await ConnectionStateManager.initialize();
       const summary = ConnectionStateManager.getConnectionSummary();
-      
-      setIsPairedSync(summary.isPaired);
+      const paired = summary.isPaired || engineAvailable();
+      setIsPairedSync(paired);
       setIsConnectedSync(summary.isConnected);
-      
-      log.info('Initialized:', summary);
-      
-      // Check the current mode first — cloud mode should never attempt a
-      // self-hosted handshake even when stale pairing credentials exist.
-      const source = await ConnectionStateManager.getCurrentSource();
 
-      if (summary.isPaired && !summary.isTokenExpired) {
-        log.info('Auto-connecting...');
+      log.info('Initialized:', { ...summary, engineAvailable: engineAvailable() });
+
+      if (paired) {
         try {
           await connect();
         } catch {
           log.info('Scheduling reconnect after initialization failure');
           scheduleReconnect();
-        }
-      } else if (summary.isPaired && summary.requiresRepair) {
-        if (source === 'cloud') {
-          // Cloud mode with expired PASETO — just call connect() which will
-          // trigger CloudWebSocketConnection → onclose 1008/4401 → auth refresh
-          // inline. No self-hosted handshake needed.
-          log.info('Cloud mode with expired token — connecting (inline refresh will fire)');
-          try {
-            await connect();
-          } catch {
-            log.info('Cloud connect with expired token failed, scheduling reconnect');
-            scheduleReconnect();
-          }
-        } else {
-          log.info('Self-hosted token expired, attempting re-handshake...');
-          await connectWithRefresh();
         }
       }
     } catch (error) {
@@ -1312,66 +380,43 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
 
   const reconnect = async (): Promise<void> => {
     log.info('Manual reconnect triggered');
-    
     cancelReconnect();
-    
     reconnectAttemptsRef.current = 0;
     setReconnectAttempts(0);
     setIsReconnectingSync(false);
     setNextReconnectIn(0);
-    
     connectionManager.disconnectConnection('sync');
     await ConnectionStateManager.markDisconnected();
     setIsConnectedSync(false);
-    
     await connect();
   };
 
   const disconnect = () => {
     log.info('Manual disconnect');
-    
     cancelReconnect();
-    
     setIsReconnectingSync(false);
     setReconnectAttempts(0);
     setNextReconnectIn(0);
-    
     connectionManager.disconnectConnection('sync');
     ConnectionStateManager.markDisconnected();
     setIsConnectedSync(false);
   };
 
-  const showToast = (message: string) => {
+  const showToast = useCallback((message: string) => {
     log.info('Toast:', message);
     showToastRef.current(message);
-  };
+  }, []);
 
-  // ── Phase 10: derived values ───────────────────────────────────────────
-  // Memoized so the context value (and its consumers) only updates when the
-  // underlying inputs actually change — otherwise these recomputed objects
-  // would force a new context value (and a re-render of every consumer) on
-  // every provider render (e.g. during connection churn).
+  // ── Derived values (memoized so consumers only re-render on real changes) ──
   const canUseChat = useMemo(
-    () => canUseChatForMode(currentSource, cloudStatus, isPaired),
-    [currentSource, cloudStatus, isPaired],
+    () => canUseChatForMode(currentSource, isPaired),
+    [currentSource, isPaired],
   );
   const connectionStatus = useMemo(
-    () => computeConnectionStatus(
-      currentSource,
-      cloudStatus,
-      isPaired,
-      isConnected,
-      isReconnecting,
-      serverUpdateRequired,
-    ),
-    [currentSource, cloudStatus, isPaired, isConnected, isReconnecting, serverUpdateRequired],
+    () => computeConnectionStatus(currentSource, isPaired, isConnected, isReconnecting),
+    [currentSource, isPaired, isConnected, isReconnecting],
   );
 
-  // Memoize the context value over the exposed state + derived values. The
-  // callbacks (connect/disconnect/reconnect/showToast) read live state through
-  // refs / external services / setters rather than closure-captured React state,
-  // so memoized instances stay correct between recomputations (same pattern as
-  // EntitySessionContext).
   const value: SyncConnectionContextType = useMemo(() => ({
     isPaired,
     isConnected,
@@ -1385,27 +430,15 @@ export const SyncConnectionProvider: React.FC<SyncConnectionProviderProps> = ({ 
     showToast,
     canUseChat,
     connectionStatus,
-    serverUpdateRequired,
-    purgeBlocking,
-    purgeResultPending,
-    dismissPurgeResult,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
     isPaired, isConnected, isConnecting, isReconnecting,
-    reconnectAttempts, nextReconnectIn, canUseChat, connectionStatus,
-    serverUpdateRequired, purgeBlocking, purgeResultPending,
+    reconnectAttempts, nextReconnectIn, canUseChat, connectionStatus, showToast,
   ]);
 
   return (
     <SyncConnectionContext.Provider value={value}>
       {children}
-      {/* D-DEV-01: shown when the broker refuses connect until the device is
-          authorized via the emailed 6-digit code. */}
-      <DeviceAuthModal
-        visible={showDeviceAuth}
-        onVerified={handleDeviceAuthVerified}
-        onDismiss={() => setShowDeviceAuth(false)}
-      />
     </SyncConnectionContext.Provider>
   );
 };
@@ -1417,26 +450,3 @@ export const useSyncConnection = (): SyncConnectionContextType => {
   }
   return context;
 };
-
-// ── Pure helper extracted for testability ──────────────────────────────
-
-/**
- * Increment the WS failure counter and check whether the broker session
- * should be re-provisioned.
- *
- * Pure function — no side effects.  Returns the decision + next count
- * so callers can apply them atomically.
- *
- * @param currentCount  The current failure count before this increment.
- * @param maxFailures   Threshold at which re-provision triggers (default 5).
- */
-export function shouldReprovisionAfterWsFailure(
-  currentCount: number,
-  maxFailures: number = 5,
-): { shouldReprovision: boolean; nextCount: number } {
-  const nextCount = currentCount + 1;
-  if (nextCount >= maxFailures) {
-    return { shouldReprovision: true, nextCount: 0 };
-  }
-  return { shouldReprovision: false, nextCount };
-}

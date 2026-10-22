@@ -56,7 +56,7 @@ import { AppAlertProvider } from '../../contexts/AppAlertContext';
 import { BiometricLockProvider } from '../../contexts/BiometricLockContext';
 import { SyncConnectionProvider } from '../../contexts/SyncConnectionContext';
 import { EntitySessionProvider } from '../../contexts/EntitySessionContext';
-import { isDatabaseReady } from '../../database';
+import { getEngineConnection } from '../../services/engine/EngineService';
 import { createLogger } from '../../utils/logger';
 import { closeBubbleWindow } from '../../services/ChatBubbleService';
 import { BubbleConversation } from '../../services/ChatBubbleService';
@@ -99,16 +99,16 @@ const FloatingChatContent: React.FC<FloatingChatProps> = ({ conversation }) => {
   // migration can deadlock on the SQLite lock and leave the window spinning
   // forever. Instead, poll the shared readiness flag and give up after a
   // short grace so the overlay can never hang.
-  const [dbReady, setDbReady] = useState<boolean>(isDatabaseReady());
+  const [dbReady, setDbReady] = useState<boolean>(getEngineConnection() !== null);
   useEffect(() => {
-    if (isDatabaseReady()) {
+    if (getEngineConnection() !== null) {
       setDbReady(true);
       return;
     }
     let cancelled = false;
     let elapsed = 0;
     const poll = setInterval(() => {
-      if (isDatabaseReady()) {
+      if (getEngineConnection() !== null) {
         setDbReady(true);
         clearInterval(poll);
         return;

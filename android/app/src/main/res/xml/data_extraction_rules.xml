@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android data-extraction rules (plan 2-6 step 4).
+
+  Three recovery tiers (research §1.4):
+    1. Device-to-device transfer  — full, local, fast.
+    2. User-owned-storage backup  — full, on-demand, encrypted (2-6).
+    3. Auto Backup (cloud)        — small preferences only.
+
+  The engine data dir (files/engine) holds the encrypted DB, the plaintext
+  backup staging dir, and the RAG side objects. It exceeds Auto Backup's 25 MB
+  hard cap (over-quota = nothing backed up), so it is EXCLUDED from
+  <cloud-backup> and INCLUDED in <device-transfer> so D2D carries the DB.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- The whole engine dir (DB + staging + RAG) is too large for the
+             25 MB Auto Backup cap and is covered by the user-storage backup. -->
+        <exclude domain="file" path="engine" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- D2D carries the full engine data dir locally on new-device setup. -->
+        <include domain="file" path="engine" />
+    </device-transfer>
+</data-extraction-rules>

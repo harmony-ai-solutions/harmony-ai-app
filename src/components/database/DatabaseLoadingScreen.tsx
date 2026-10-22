@@ -1,63 +1,29 @@
 /**
- * Database Loading Screen
+ * Boot Gate Screen
  *
- * Glassmorphism-themed loading / error screen displayed during database
- * initialization. Matches the app's design language used in ComingSoonScreen,
- * ProfileSettingsScreen, and other full-screen placeholders.
+ * Full-screen gate shown while the app boots — the theme is resolving and the
+ * engine feature flags are being hydrated from storage (see DatabaseContext).
+ * Despite the component/file name this is NOT a database screen: there is no
+ * app-local database, the embedded engine owns all data, and the gate never
+ * waits on the engine. Matches the app's design language used in
+ * ComingSoonScreen, ProfileSettingsScreen, and other full-screen placeholders.
  */
-import React, { useState } from 'react';
+import React from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTranslation } from 'react-i18next';
 import { useDatabase } from '../../contexts/DatabaseContext';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import { useAppAlert } from '../../contexts/AppAlertContext';
 import { ThemedView } from '../themed/ThemedView';
 import { ThemedText } from '../themed/ThemedText';
 import { ThemedGradient } from '../themed/ThemedGradient';
 import { ThemedCard } from '../themed/ThemedCard';
 import { ThemedButton } from '../themed/ThemedButton';
-import { wipeDatabaseCompletely } from '../../database';
 
 export function DatabaseLoadingScreen() {
-  const { isLoading, isRebuilding, error, retryInitialization } = useDatabase();
+  const { error, retryInitialization } = useDatabase();
   const { theme } = useAppTheme();
   const { t } = useTranslation('database');
-  const { showAlert } = useAppAlert();
-  const [isWiping, setIsWiping] = useState(false);
-
-  const handleWipeDatabase = () => {
-    showAlert(t('wipeConfirmTitle'), t('wipeConfirmMessage'), [
-      { text: t('common:cancel'), style: 'cancel' },
-      {
-        text: t('wipeReinit'),
-        style: 'destructive',
-        onPress: async () => {
-          setIsWiping(true);
-          try {
-            await wipeDatabaseCompletely();
-            showAlert(t('wipeSuccess'), t('wipeSuccessMessage'), [
-              {
-                text: t('common:ok'),
-                onPress: () => {
-                  setIsWiping(false);
-                  retryInitialization();
-                },
-              },
-            ]);
-          } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : String(err);
-            showAlert(t('common:error'), t('wipeFailed', { message: errorMessage }), [
-              {
-                text: t('common:ok'),
-                onPress: () => setIsWiping(false),
-              },
-            ]);
-          }
-        },
-      },
-    ]);
-  };
 
   if (!theme) return null;
 
@@ -70,7 +36,7 @@ export function DatabaseLoadingScreen() {
           <View style={styles.iconWrapper}>
             <ThemedGradient gradient="primary" style={styles.iconRing}>
               <ThemedView variant="elevated" style={styles.iconInner}>
-                <Icon name="database-off" size={48} color={theme.colors.status?.error ?? '#ff5252'} />
+                <Icon name="alert-circle-outline" size={48} color={theme.colors.status?.error ?? '#ff5252'} />
               </ThemedView>
             </ThemedGradient>
           </View>
@@ -95,14 +61,6 @@ export function DatabaseLoadingScreen() {
           </ThemedText>
 
           <ThemedCard elevated accentStripe accentTint style={styles.errorCard}>
-            <View style={styles.errorList}>
-              {[t('errorStorage'), t('errorCorruption'), t('errorPermissions')].map((item, i) => (
-                <View key={i} style={styles.errorItem}>
-                  <Icon name="alert-circle-outline" size={14} color={theme.colors.status?.error ?? '#ff5252'} />
-                  <ThemedText variant="secondary" size={13}>{item}</ThemedText>
-                </View>
-              ))}
-            </View>
             <ThemedText
               variant="muted"
               size={11}
@@ -118,15 +76,6 @@ export function DatabaseLoadingScreen() {
               variant="primary"
               icon="refresh"
               onPress={retryInitialization}
-              disabled={isWiping}
-              style={styles.button}
-            />
-            <ThemedButton
-              label={isWiping ? t('wiping') : t('wipeReinit')}
-              variant="outline"
-              icon="delete-sweep"
-              onPress={handleWipeDatabase}
-              disabled={isWiping}
               style={styles.button}
             />
           </View>
@@ -160,7 +109,7 @@ export function DatabaseLoadingScreen() {
           hierarchy="header"
           style={styles.headline}
         >
-          {isRebuilding ? t('rebuilding') : t('initializing')}
+          {t('startingTitle')}
         </ThemedText>
 
         <ThemedText
@@ -169,7 +118,7 @@ export function DatabaseLoadingScreen() {
           hierarchy="subtext"
           style={styles.description}
         >
-          {isRebuilding ? t('rebuildingDescription') : t('settingUp')}
+          {t('startingDescription')}
         </ThemedText>
 
         {/* Decorative bottom accent bar */}
@@ -230,14 +179,6 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
     marginBottom: 24,
-  },
-  errorList: {
-    gap: 8,
-  },
-  errorItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   errorDetails: {
     fontFamily: 'monospace',

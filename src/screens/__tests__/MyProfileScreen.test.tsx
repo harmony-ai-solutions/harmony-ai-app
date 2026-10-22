@@ -9,14 +9,24 @@
 import React from 'react';
 import { act, cleanup, fireEvent, render } from '@testing-library/react-native';
 import { MyProfileScreen } from '../MyProfileScreen';
-import type { Persona } from '../../database/repositories/userEntities';
+import type { Persona } from '../../services/engine/repositories/userEntities';
 
 afterEach(cleanup);
 beforeEach(cleanup);
 
-jest.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}));
+jest.mock('react-i18next', () => {
+  // Small translation table so label-text assertions read like the UI; every
+  // other key falls through to the key itself (the suite's convention).
+  const translations: Record<string, string> = {
+    tabPosts: 'Posts',
+    tabSaved: 'Saved',
+    tabFavorites: 'Favorites',
+    tabPersonas: 'Personas',
+  };
+  return {
+    useTranslation: () => ({ t: (key: string) => translations[key] ?? key }),
+  };
+});
 
 jest.mock('../../utils/logger', () => ({
   createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }),
@@ -157,10 +167,10 @@ jest.mock('../../components/social/PostCard', () => {
 });
 
 // Repos + services.
-jest.mock('../../database/repositories/characters', () => ({
+jest.mock('../../services/engine/repositories/characters', () => ({
   getUserCharacterProfiles: jest.fn().mockResolvedValue([]),
 }));
-jest.mock('../../database/repositories/userEntities', () => ({
+jest.mock('../../services/engine/repositories/userEntities', () => ({
   getUserEntities: jest.fn(),
 }));
 jest.mock('../../services/ChatPreferencesService', () => ({
@@ -186,7 +196,7 @@ jest.mock('../../services/social/SocialService', () => ({
   getPostComments: jest.fn().mockResolvedValue([]),
 }));
 
-import { getUserEntities } from '../../database/repositories/userEntities';
+import { getUserEntities } from '../../services/engine/repositories/userEntities';
 import { useAuth } from '../../contexts/AuthContext';
 
 const mockGetUserEntities = getUserEntities as jest.Mock;
@@ -252,6 +262,17 @@ describe('MyProfileScreen — unauthenticated local mode + personas tab (5-4 §2
     expect(utils.getByTestId('profile-tab-personas')).toBeTruthy();
     // The local fallback identity still shows.
     expect(utils.getByText('User')).toBeTruthy();
+  });
+
+  it('shows a small label under each tab icon (Posts / Favorites / Personas)', async () => {
+    mockGetUserEntities.mockResolvedValue([USER_ENTITY]);
+
+    const utils = await render(<MyProfileScreen />);
+    await flush();
+
+    expect(utils.getByTestId('profile-tab-label-posts').props.children).toBe('Posts');
+    expect(utils.getByTestId('profile-tab-label-saved').props.children).toBe('Favorites');
+    expect(utils.getByTestId('profile-tab-label-personas').props.children).toBe('Personas');
   });
 
   it('shows the sign-in empty state in the Posts tab when unauthenticated', async () => {

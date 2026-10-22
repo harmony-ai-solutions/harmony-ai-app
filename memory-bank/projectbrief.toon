@@ -1,9 +1,9 @@
 # Harmony AI App Brief
-@Overview: Open-source Android mobile app for AI character chat. Mobile frontend for Harmony Link ecosystem.
+@Overview: Open-source Android mobile app for AI character chat. Mobile frontend for Soulbits Engine ecosystem.
 @Purpose:
-- Mobile access to Harmony Link AI characters
+- Mobile access to Soulbits Engine AI characters
 - Chat with AI on Android devices
-- Connected mode (Harmony Link/Cloud) + on-device AI
+- Connected mode (Soulbits Engine/Cloud) + on-device AI
 - Privacy-first with user-controlled backends
 - Testing field for messenger integration
 @Goals:
@@ -14,10 +14,10 @@
 - Messenger Integration: WhatsApp/Telegram (future premium)
 - Open Source: Community-driven, transparent
 @Innovation: Mobile-first AI chat + flexible backends (privacy or convenience). On-device AI for offline. Messenger integration vision for everyday platforms.
-@Users: Privacy-conscious users, Harmony Link users, power users, content creators, AI app developers.
-@Reqs: Android primary (iOS community), React Native, Harmony Link APIs (WS/REST), SQLite persistence with sync, Executorch integration, Material Design 3, text/voice/image support, character memory.
+@Users: Privacy-conscious users, Soulbits Engine users, power users, content creators, AI app developers.
+@Reqs: Android primary (iOS community), React Native, Soulbits Engine APIs (WS/REST), SQLite persistence with sync, Executorch integration, Material Design 3, text/voice/image support, character memory.
 @RecentUpdates[SDK+Presets]:
-- Harmony Link backend migrated from go-openai to openai-go v3 SDK
+- Soulbits Engine backend migrated from go-openai to openai-go v3 SDK
 - New Sampling Preset system: YAML preset files loaded from <dataDir>/presets/*.yaml
 - Presets enable advanced LLM sampling control (typical_p, tfs, dry_*, etc.)
 - App syncs preset name + extra params via WebSocket (not management API)
@@ -28,7 +28,7 @@
 - New LLM API parameters from Phase 09 flow through sync pipeline to app
 - Provider config parameters across 8 layers: migration → models → repos → sync → clients → frontend schemas
 - Key-value-list field type for editing extra_params in UI
-- Lifecycle Settings UI added to Harmony Link (not synced to app — autonomy controlled locally)
+- Lifecycle Settings UI added to Soulbits Engine (not synced to app — autonomy controlled locally)
 @RecentUpdates[ProviderExpansion]:
 - xAI/Google/Anthropic providers added across all module types
 - Model field unification: migration 000030 consolidates model columns
@@ -36,3 +36,11 @@
 - Dead module-specific schemas removed, merged into main provider schemas
 - Movement module supports Google/xAI/Anthropic providers
 - Shared isProviderConfigInUse() helper with UNION ALL
+@RecentUpdates[ProviderRegistry]:
+- Competitor providers (Kindroid, Character.AI, Kajiwoto) removed completely — clients, configs, sync tables, app pickers; existing configs hard-deleted (ruling R9/A6)
+- Shared provider accounts: one `provider_accounts` table for credentials + per-module capability overlays; the 16 per-module provider_config_* tables retired (engine sync surface 35→20); management contract 1.5.0→1.6.0
+- New Providers settings screen: accounts grouped by type, API-key "Test key" verification chips, delete protection listing referencing configs
+- Module configs reworked to a Provider → Account → Capability → Module flow with catalog-backed model pickers (live "Fetch from provider") and sampling presets (A3: presets supply defaults, explicit local values override)
+- Mistral/Ollama/LocalAI activated; per-slot STT provider lists (VAD = soulbitscloud + soulvoice only; ollama STT experimental)
+- Seeded Soulbits defaults (7 configs incl. cloud VAD silero-vad); soulbitscloud account PASETO ensured on every sign-in/re-auth (A9 division: engine seeds structure, app ensures token)
+- Shipped as v0.4.5-dev on the dev channel (release run 39174517889)

@@ -22,6 +22,9 @@
   "none": "None",
   "notConfigured": "Not configured",
   "comingSoon": "Coming Soon",
-  "version": "Harmony AI Chat · v{{version}}",
-  "goBack": "Go back"
+  "version": "Soulbits · v{{version}}",
+  "goBack": "Go back",
+  "copyDiagnostics": "Copy diagnostics",
+  "diagnosticsCopied": "Diagnostics copied to clipboard",
+  "diagnosticsCopyFailed": "Could not copy diagnostics"
 }

@@ -38,7 +38,7 @@ import {
   getUserCharacterProfiles,
   getCharacterProfile,
   getPrimaryImage,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 import type { CharacterSnapshot } from '../services/marketplace/MarketplaceService';
 import {
   publishListing,

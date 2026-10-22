@@ -1,16 +1,16 @@
 # Themings System
 
 ## Overview
-The Harmony AI App features a robust, dynamic theming system that ensures a consistent and modern user interface while allowing for extensive user personalization. The system is built on top of React Context and integrates seamlessly with React Native Paper (Material Design 3).
+The Soulbits app features a robust, dynamic theming system that ensures a consistent and modern user interface while allowing for extensive user personalization. The system is built on top of React Context and integrates seamlessly with React Native Paper (Material Design 3).
 
 ## Key Features
-- **6 Default Themes**: Includes professionally designed themes like Midnight Rose, Classic Harmony, and Forest Night.
+- **6 Default Themes**: Includes professionally designed themes like Midnight Rose, Classic Soulbits, and Forest Night.
 - **Dynamic Theme Switching**: Users can switch themes instantly without restarting the app.
 - **Advanced Theme Editor**: A feature-rich editor that allows full customization of all theme colors using RGB sliders.
 - **Custom Theme Management**: Create, edit, and delete personal themes.
 - **Import/Export**: Share themes as JSON files using the system file picker.
 - **Persistence**: All theme preferences and custom themes are saved locally using `AsyncStorage`.
-- **Harmony Link Sync**: (Planned) Synchronize themes with the Harmony Link backend.
+- **Soulbits Engine Sync**: (Planned) Synchronize themes with the Soulbits Engine backend.
 
 ## Theme Structure
 A theme in Harmony AI App consists of several color categories:

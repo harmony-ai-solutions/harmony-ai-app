@@ -12,8 +12,8 @@
 
 import { EntitySessionService } from '../EntitySessionService';
 import { EventEmitter } from 'eventemitter3';
-import { getEntity } from '../../database/repositories/entities';
-import { createConversationMessage } from '../../database/repositories/conversation_messages';
+import { getEntity } from '../../services/engine/repositories/entities';
+import { createConversationMessage } from '../../services/engine/repositories/conversation_messages';
 
 let mockConnectionManager: EventEmitter;
 
@@ -60,29 +60,23 @@ jest.mock('../connection/ConnectionManager', () => {
   return { __esModule: true, default: cm };
 });
 
-jest.mock('../SyncService', () => ({
-  __esModule: true,
-  SyncService: {
-    getInstance: () => ({ initiateSync: jest.fn().mockResolvedValue(undefined) }),
-  },
-}));
 
 // derive* are mocked so the participant key is deterministic ('pk') and the
 // test never touches the real interactions repo.
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   createInteraction: jest.fn().mockResolvedValue(undefined),
   deriveScopeFromParticipants: jest.fn().mockReturnValue('private'),
   deriveParticipantKey: jest.fn().mockReturnValue('pk'),
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   messageExists: jest.fn().mockResolvedValue(false),
   createConversationMessage: jest.fn().mockResolvedValue(undefined),
   updateConversationMessage: jest.fn().mockResolvedValue(undefined),
   getConversationMessage: jest.fn().mockResolvedValue(null),
 }));
 
-jest.mock('../../database/repositories/entities', () => ({
+jest.mock('../../services/engine/repositories/entities', () => ({
   getEntity: jest.fn(),
   getAllEntities: jest.fn().mockResolvedValue([]),
   setEntityMuted: jest.fn().mockResolvedValue(undefined),
@@ -90,20 +84,7 @@ jest.mock('../../database/repositories/entities', () => ({
   getDisabledEntityIds: jest.fn().mockResolvedValue([]),
 }));
 
-jest.mock('../../database/connection', () => ({
-  getDatabase: jest.fn(),
-  getSyncDatabase: jest.fn().mockResolvedValue(undefined),
-}));
 
-jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    getStatus: jest.fn().mockReturnValue('idle'),
-    isPurging: jest.fn().mockReturnValue(false),
-  },
-  default: {},
-}));
 
 function resetSingleton(): void {
   (EntitySessionService as any).instance = null;
@@ -136,13 +117,13 @@ const incomingUtteranceEvent = {
   },
 };
 
-describe('EntitySessionService incoming-message entity gate (Q8/A5)', () => {
+describe('EntitySessionService incoming-message entity gate (Q8/A5/D-35)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetSingleton();
   });
 
-  it('stores the incoming message for a NON-disabled partner (mute is UI-only)', async () => {
+  it('emits message:received for a NON-disabled partner (mute is UI-only)', async () => {
     (getEntity as jest.Mock).mockResolvedValue({
       id: 'claire',
       alias: 'Claire',
@@ -153,12 +134,15 @@ describe('EntitySessionService incoming-message entity gate (Q8/A5)', () => {
 
     const svc = EntitySessionService.getInstance();
     seedSession(svc as any);
+    const received = jest.fn();
+    svc.on('message:received', received);
 
     await (svc as any).handleEntityEvent('claire', incomingUtteranceEvent);
 
-    // Muted partner: message is STILL stored (badge suppression moved to the
-    // UI layer, O10 — the service no longer bumps or suppresses any counter).
-    expect(createConversationMessage).toHaveBeenCalled();
+    // D-35: the app no longer persists incoming messages (the engine authors
+    // them); the event drives a UI refresh. Muted partners still flow through.
+    expect(received).toHaveBeenCalled();
+    expect(createConversationMessage).not.toHaveBeenCalled();
   });
 
   it('drops the incoming message from a DISABLED partner entity', async () => {
@@ -172,24 +156,28 @@ describe('EntitySessionService incoming-message entity gate (Q8/A5)', () => {
 
     const svc = EntitySessionService.getInstance();
     seedSession(svc as any);
+    const received = jest.fn();
+    svc.on('message:received', received);
 
     await (svc as any).handleEntityEvent('claire', incomingUtteranceEvent);
 
-    // Disabled partner (defense-in-depth): the message is DROPPED and never
-    // reaches the database.
-    expect(createConversationMessage).not.toHaveBeenCalled();
+    // Disabled partner (defense-in-depth): the message is DROPPED — no UI
+    // refresh is emitted.
+    expect(received).not.toHaveBeenCalled();
   });
 
-  it('drops the incoming message when the partner entity cannot be resolved (unknown)', async () => {
+  it('emits message:received when the partner entity cannot be resolved (unknown)', async () => {
     (getEntity as jest.Mock).mockResolvedValue(null);
 
     const svc = EntitySessionService.getInstance();
     seedSession(svc as any);
+    const received = jest.fn();
+    svc.on('message:received', received);
 
     await (svc as any).handleEntityEvent('claire', incomingUtteranceEvent);
 
     // No entity record → treat as not disabled, keep the message flowing (the
     // primary enforcement is engine-side INIT rejection).
-    expect(createConversationMessage).toHaveBeenCalled();
+    expect(received).toHaveBeenCalled();
   });
 });

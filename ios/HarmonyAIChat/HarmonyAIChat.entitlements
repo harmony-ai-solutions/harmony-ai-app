@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Task 2-6 / 4-2: the SoulbitsBackup iCloud container (zero-consent,
+	     system-uploaded user-owned backup storage). The container identifier
+	     must match kICloudContainerIdentifier in SoulbitsBackupModule.swift. -->
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.ai.soulbits.chat</string>
+	</array>
+	<key>com.apple.developer.ubiquity-container-identifiers</key>
+	<array>
+		<string>iCloud.ai.soulbits.chat</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudDocuments</string>
+	</array>
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+
+	<!-- Task 2-6: W2 synchronizable Keychain wrap. The access group must match
+	     kKeychainAccessGroup in SoulbitsBackupModule.swift when that constant is
+	     set (nil uses this default group). -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)ai.soulbits.chat</string>
+	</array>
+
+	<!-- Task 4-3 ride-along: silent keepalive pushes + BGProcessingTask. The
+	     handler lands with 4-3; the capability is declared here so the same
+	     provisioning profile/entitlements review covers both. -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

@@ -107,7 +107,7 @@ export abstract class BaseWebSocketConnection extends EventEmitter<WebSocketConn
         // Still process the message, just be careful with payload access
       }
 
-      const harmonyEvent = {
+      const engineEvent = {
         event_id: message.event_id || `unknown_${Date.now()}`,
         event_type: message.event_type,
         status: message.status,
@@ -115,13 +115,13 @@ export abstract class BaseWebSocketConnection extends EventEmitter<WebSocketConn
       };
 
       // Emit the event for ConnectionManager to route
-      this.emit('event', harmonyEvent);
-      
+      this.emit('event', engineEvent);
+
       // Check if event has ERROR status and emit as error
-      if (harmonyEvent.status === 'ERROR') {
-        log.error('Received ERROR event:', harmonyEvent);
-        const errorMsg = harmonyEvent.payload?.message || harmonyEvent.payload?.error || harmonyEvent.payload?.error_message || 'An error occurred';
-        this.emit('error', { message: errorMsg, event: harmonyEvent });
+      if (engineEvent.status === 'ERROR') {
+        log.error('Received ERROR event:', engineEvent);
+        const errorMsg = engineEvent.payload?.message || engineEvent.payload?.error || engineEvent.payload?.error_message || 'An error occurred';
+        this.emit('error', { message: errorMsg, event: engineEvent });
       }
     } catch (error) {
       log.error('Error parsing message:', error);

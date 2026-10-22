@@ -1,9 +1,19 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, ReactNode } from 'react';
 import EntitySessionService, { InteractionSession } from '../services/EntitySessionService';
 import { useSyncConnection } from './SyncConnectionContext';
+import { isEntityLocked } from '../services/variant/entityAccess';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('[EntitySessionContext]');
+
+/**
+ * App-side terminal sentinel for a store-variant locked entity (plan 7-14 V3).
+ * A locked entity's provider is not offered by this build, so INIT is refused
+ * BEFORE it reaches the engine; the message must be classified as non-retryable
+ * so the bounded retry loop gives up immediately (no "Scheduling retry 1/3"
+ * spin) and the screen shows its neutral lock state.
+ */
+const ENTITY_PROVIDER_LOCKED = 'entity_provider_locked';
 
 interface RetryState {
   attempts: number;
@@ -17,6 +27,51 @@ const DEFAULT_RETRY_POLICY = {
   maxDelay: 10000,
   backoffMultiplier: 2
 };
+
+/**
+ * True when storing `next` in place of `prev` would not observably change
+ * anything the UI reads (owner device, 2026-10-21 — the 3 Hz re-INIT loop).
+ *
+ * Why this exists: `EntitySessionService.startInteractionSession` REUSES a live
+ * session for the same participant set and returns the very same object, so
+ * `newMap.set(id, session)` stored identical CONTENT under a brand-new Map
+ * REFERENCE. The provider's `value` useMemo (deps: activeSessions) then
+ * recomputed and handed consumers freshly-built closures, which are deps of
+ * ChatDetailScreen's `initializeSession` → the init effect re-fired → GET
+ * /api/entities/:id/chat-list + a reused INIT … every ~330 ms, forever, for
+ * every mounted chat screen. Returning the PREVIOUS map in this case keeps the
+ * provider value referentially stable and cuts the loop at its source (the
+ * screen guard in ChatDetailScreen is the second belt).
+ *
+ * Deliberately compares the fields consumers actually read (plus `replyMode`,
+ * which decides pacing and therefore must not be silently dropped):
+ * interactionId, own entity, failed marker, hasFirstMes, started, replyMode,
+ * the participant id LIST (order matters — `participantIds` is rendered and
+ * joined verbatim in places) and every connection's status.
+ */
+function sessionEntryUnchanged(
+  prev: InteractionSession | undefined,
+  next: InteractionSession,
+): boolean {
+  if (!prev) return false;
+  if (prev === next) return true;
+  if (prev.interactionId !== next.interactionId) return false;
+  if (prev.ownEntityId !== next.ownEntityId) return false;
+  if (prev.failed?.error !== next.failed?.error) return false;
+  if (prev.hasFirstMes !== next.hasFirstMes) return false;
+  if (prev.started !== next.started) return false;
+  if (prev.replyMode !== next.replyMode) return false;
+  if (prev.participantIds.length !== next.participantIds.length) return false;
+  for (let i = 0; i < prev.participantIds.length; i++) {
+    if (prev.participantIds[i] !== next.participantIds[i]) return false;
+  }
+  if (prev.connections.size !== next.connections.size) return false;
+  for (const [entityId, connection] of prev.connections) {
+    const other = next.connections.get(entityId);
+    if (!other || other.status !== connection.status) return false;
+  }
+  return true;
+}
 
 interface EntitySessionContextType {
   // Interaction session management
@@ -67,6 +122,13 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
   const { isConnected: isSyncConnected } = useSyncConnection();
 
   const canStartSession = isSyncConnected;
+
+  // Live-value mirror for the ref-routed callbacks below: `canStartSession` is
+  // state-derived, so a callback that closed over it directly would have to be
+  // rebuilt on every connection change — and every rebuild changes the context
+  // value's identity (the 3 Hz re-INIT loop, owner device 2026-10-21).
+  const canStartSessionRef = useRef(canStartSession);
+  canStartSessionRef.current = canStartSession;
 
   // Monitor sync connection and clean up sessions when it drops.
   // 4-3 (D36) evaluation: sync loss keeps the deliberate FULL teardown (no
@@ -177,14 +239,43 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     // keeps the exhaustive-deps rule satisfied without re-subscribing.
   }, [entitySessionService]);
 
-  const startInteractionSession = async (
+  /**
+   * INIT implementation. NOT exported directly: consumers get the ref-routed
+   * `startInteractionSession` wrapper below, whose identity never changes.
+   *
+   * Identity note (owner device 2026-10-21 — the 3 Hz re-INIT loop): this
+   * function is a plain closure rebuilt on every provider render, so exposing
+   * it as-is made the context value's `startInteractionSession` change identity
+   * whenever `activeSessions` changed. ChatDetailScreen lists it as a dep of its
+   * `initializeSession`, so every session-map update re-fired that screen's init
+   * effect → `getReplyMode()` (GET /api/entities/:id/chat-list, ~330 ms) +
+   * a REUSED `startInteractionSession` (log: "Reusing existing interaction
+   * session") → a fresh Map with identical content → next render → loop.
+   */
+  const startInteractionSessionImpl = async (
     ownEntityId: string,
     participantIds: string[],
     replyMode: string = 'realistic',
     preserveRetryState: boolean = false
   ): Promise<void> => {
-    if (!canStartSession) {
+    if (!canStartSessionRef.current) {
       throw new Error('Sync connection required for entity sessions');
+    }
+
+    // Store-variant entity lock (plan 7-14 V3): a locked partner (a provider
+    // this build doesn't offer) must never INIT. Refuse here as defense in
+    // depth for any start path that bypasses ChatDetail's gate. No-op / false
+    // in the full variant (isEntityLocked short-circuits, zero fetches).
+    const lockedPartner = (
+      await Promise.all(
+        participantIds
+          .filter(id => id !== ownEntityId)
+          .map(async id => ((await isEntityLocked(id)) ? id : null)),
+      )
+    ).find((id): id is string => id !== null);
+    if (lockedPartner) {
+      log.warn(`Refusing session INIT: partner ${lockedPartner} is locked in this build (7-14).`);
+      throw new Error(ENTITY_PROVIDER_LOCKED);
     }
 
     // Derive a participant-based key for pre-session retry deduplication.
@@ -214,6 +305,28 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
 
       // Add to state immediately (connections are 'connecting')
       setActiveSessions(prev => {
+        const existing = prev.get(session.interactionId);
+        // Identity-stability fast path (owner device, 2026-10-21 — the 3 Hz
+        // re-INIT loop): a REUSED session arrives here as the SAME object
+        // already stored under its canonical id, i.e. identical content. Storing
+        // it again would allocate a new Map REFERENCE for no observable change,
+        // recompute the provider `value` useMemo and hand consumers new
+        // callbacks — which re-fired ChatDetailScreen's init effect forever.
+        // Returning `prev` makes this call a true no-op.
+        //
+        // The one exception is a stale ALIAS: if another key still points at
+        // this same session object (pre-canonical temp id), the re-key must
+        // still happen, so that case falls through to the copy below.
+        let aliasedUnderOtherKey = false;
+        for (const [key, value] of prev.entries()) {
+          if (key !== session.interactionId && value === session) {
+            aliasedUnderOtherKey = true;
+            break;
+          }
+        }
+        if (!aliasedUnderOtherKey && sessionEntryUnchanged(existing, session)) {
+          return prev;
+        }
         const newMap = new Map(prev);
         newMap.set(session.interactionId, session);
         return newMap;
@@ -228,6 +341,42 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
       throw error;
     }
   };
+
+  /**
+   * Live implementation handle for the ref-routed public `startInteractionSession`
+   * below. The ref is re-pointed on every provider render, so the wrapper always
+   * runs the CURRENT implementation (freshest state/closure) while its own
+   * identity stays frozen — the property ChatDetailScreen's init effect needs.
+   */
+  const startInteractionSessionImplRef = useRef(startInteractionSessionImpl);
+  startInteractionSessionImplRef.current = startInteractionSessionImpl;
+
+  /**
+   * STABLE `startInteractionSession` exposed through the context.
+   *
+   * Why a wrapper instead of `useCallback` on the implementation: the body calls
+   * the local `startInitializationTimer`/`scheduleRetry` helpers, which are
+   * themselves rebuilt every render and form a cycle with `retryInitialization`
+   * → so no honest dependency array can keep a useCallback'd implementation
+   * stable. Delegating through a ref gives the same guarantee without touching
+   * the retry machinery's behaviour (the impl captured at call time is always
+   * the latest one).
+   */
+  const startInteractionSession = useCallback(
+    (
+      ownEntityId: string,
+      participantIds: string[],
+      replyMode?: string,
+      preserveRetryState?: boolean
+    ): Promise<void> =>
+      startInteractionSessionImplRef.current(
+        ownEntityId,
+        participantIds,
+        replyMode,
+        preserveRetryState
+      ),
+    [],
+  );
 
   const startInitializationTimer = (
     interactionId: string,
@@ -454,6 +603,12 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
       return false;
     }
 
+    // 7-14 V3: a store-variant locked entity is terminal — the provider is not
+    // offered by this build, so retrying INIT can never succeed.
+    if (message.includes(ENTITY_PROVIDER_LOCKED)) {
+      return false;
+    }
+
     // Retry on network errors, timeouts, connection failures
     if (message.includes('timeout') ||
         message.includes('Connection') ||
@@ -504,7 +659,15 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     await entitySessionService.sendTextMessage(interactionId, message);
   };
 
-  const isSessionActive = (interactionId: string): boolean => {
+  /**
+   * STABLE `isSessionActive` (identity pinned; reads live state via
+   * activeSessionsRef). It used to be a plain function rebuilt every render and
+   * the provider `value` useMemo handed the new identity to consumers whenever
+   * `activeSessions` changed — enough to re-run ChatDetailScreen's emoji-seed and
+   * re-arm effects (and, through `initializeSession`'s deps, the init effect) on
+   * every session-map tick. See the 3 Hz re-INIT note above.
+   */
+  const isSessionActive = useCallback((interactionId: string): boolean => {
     const session = activeSessionsRef.current.get(interactionId);
     // 4-3 (D36): a flagged (failed) session is never active — retained entries
     // must not pass the gate anywhere (verified safe-to-retain precondition).
@@ -514,7 +677,7 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     return Array.from(session.connections.values()).every(
       conn => conn.status === 'active'
     );
-  };
+  }, []);
 
   const clearFailedSession = async (ownEntityId: string, participantIds: string[]): Promise<void> => {
     // 4-3 bounded retention (review 4): drop flagged (failed) entries for this
@@ -538,6 +701,20 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
   // Memoize so consumers only re-render when exposed state actually changes
   // (activeSessions / canStartSession). The callbacks read live state through
   // activeSessionsRef, so a memoized instance stays correct between recomputes.
+  //
+  // activeSessions only gets a NEW reference when something observably changed:
+  // the start path returns the previous Map for a reused session (see
+  // sessionEntryUnchanged), so a re-INIT that the service short-circuits no
+  // longer re-renders every consumer — which was the identity half of the 3 Hz
+  // re-INIT loop (owner device, 2026-10-21). isSessionActive and
+  // startInteractionSession are identity-stable useCallbacks now, so listing
+  // them as deps is safe and keeps the lint rule honest.
+  //
+  // stopInteractionSession / clearFailedSession / sendMessage are deliberately
+  // NOT listed: they are still plain closures, so listing them would recompute
+  // this memo on every provider render — exactly the churn this comment is
+  // about. Their identity is not consumed by any effect dependency chain that
+  // matters (no consumer lists them in an effect dep array).
   const value: EntitySessionContextType = useMemo(() => ({
     activeSessions,
     isSessionActive,
@@ -548,7 +725,7 @@ export const EntitySessionProvider: React.FC<EntitySessionProviderProps> = ({ ch
     sendMessage,
     canStartSession,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeSessions, canStartSession]);
+  }), [activeSessions, canStartSession, isSessionActive, startInteractionSession]);
 
   return (
     <EntitySessionContext.Provider value={value}>

@@ -114,6 +114,7 @@ jest.mock('../../contexts/SyncConnectionContext', () => ({
 jest.mock('../../contexts/EntitySessionContext', () => ({
   useEntitySession: () => ({
     isSessionActive: () => true,
+    activeSessions: new Map(),
     startInteractionSession: jest.fn().mockResolvedValue(undefined),
     stopInteractionSession: jest.fn(),
     clearFailedSession: jest.fn().mockResolvedValue(undefined),
@@ -130,20 +131,14 @@ jest.mock('../../services/EntitySessionService', () => {
   // Open-conversation registry (senju's unread tracking) — no-ops for tests.
   svc.registerOpenConversation = jest.fn();
   svc.unregisterOpenConversation = jest.fn();
+  // D-35 pending-message surface (optimistic in-memory outgoing rows).
+  svc.getPendingMessages = jest.fn().mockReturnValue([]);
+  svc.reconcilePendingMessages = jest.fn();
+  svc.clearPendingMessages = jest.fn();
+  svc.patchPendingMessage = jest.fn();
   return { __esModule: true, EntitySessionService: svc, default: svc };
 });
 
-jest.mock('../../services/SyncService', () => {
-  const instance = {
-    syncAndWait: jest.fn().mockResolvedValue(undefined),
-    initiateSync: jest.fn().mockResolvedValue(undefined),
-  };
-  return {
-    __esModule: true,
-    SyncService: { getInstance: () => instance },
-    __mockSyncServiceInstance: instance,
-  };
-});
 
 jest.mock('../../services/EntityEmojiActionService', () => ({
   __esModule: true,
@@ -167,7 +162,7 @@ jest.mock('../../services/ChatPreferencesService', () => ({
   },
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   getConversationMessagesByParticipantKey: jest.fn().mockResolvedValue([]),
   getRecentConversationMessages: jest.fn().mockResolvedValue([]),
   updateConversationMessage: jest.fn().mockResolvedValue(undefined),
@@ -178,18 +173,18 @@ jest.mock('../../database/repositories/conversation_messages', () => ({
   getUnreadCountByParticipantKeys: jest.fn().mockResolvedValue(new Map()),
 }));
 
-jest.mock('../../database/repositories/characters', () => ({
+jest.mock('../../services/engine/repositories/characters', () => ({
   getPrimaryImage: jest.fn().mockResolvedValue(null),
   getCharacterProfile: jest.fn().mockResolvedValue(null),
   imageToDataURL: jest.fn().mockReturnValue(null),
 }));
 
-jest.mock('../../database/repositories/entities', () => ({
+jest.mock('../../services/engine/repositories/entities', () => ({
   getAllEntities: jest.fn().mockResolvedValue([]),
   deleteEntity: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   deriveParticipantKey: jest.fn().mockReturnValue('pk'),
   deriveScopeFromParticipants: jest.fn().mockReturnValue('one_on_one'),
 }));
@@ -299,8 +294,7 @@ jest.mock('../../components/themed/ThemedButton', () => {
   };
 });
 
-const { getRecentConversationMessages } = require('../../database/repositories/conversation_messages');
-const { syncAndWait } = require('../../services/SyncService').__mockSyncServiceInstance;
+const { getRecentConversationMessages } = require('../../services/engine/repositories/conversation_messages');
 
 const ownEntityId = 'user-entity';
 const partnerEntityId = 'char-entity';
@@ -527,8 +521,7 @@ describe('ChatDetailScreen — scenario generation (§2-4)', () => {
       guided: guidedInputs,
     });
 
-    // Blocking sync fetched the new interaction before unblocking.
-    expect(syncAndWait).toHaveBeenCalled();
+    // The restart refreshed the conversation from the engine.
     expect(getRecentConversationMessages).toHaveBeenCalledWith(
       ownEntityId,
       'pk',

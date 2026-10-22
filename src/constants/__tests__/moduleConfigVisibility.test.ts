@@ -7,7 +7,28 @@ import {
 describe('moduleConfigVisibility', () => {
   describe('isSimpleFieldKey', () => {
     it('returns true for essential provider fields', () => {
-      for (const key of ['name', 'api_key', 'api_token', 'base_url', 'endpoint', 'model', 'model_id', 'voice_id', 'voice', 'speed', 'format']) {
+      for (const key of [
+        'name',
+        'api_key',
+        'api_token',
+        'base_url',
+        'endpoint',
+        'model',
+        'model_id',
+        'image_model',
+        'image_aspect_ratio',
+        'aspect_ratio',
+        'voice_id',
+        'voice',
+        'speed',
+        'pitch',
+        'energy',
+        'exaggeration',
+        'cfg_weight',
+        'instructions',
+        'format',
+        'sampling_preset_name',
+      ]) {
         expect(isSimpleFieldKey(key)).toBe(true);
       }
     });
@@ -24,10 +45,9 @@ describe('moduleConfigVisibility', () => {
         'response_format',
         'stop_tokens',
         'reasoning_effort',
-        'sampling_preset_name',
         'extra_params',
-        'image_aspect_ratio',
         'image_size',
+        'workflow_profiles',
         'stability',
         'similarity_boost',
       ]) {
@@ -38,6 +58,8 @@ describe('moduleConfigVisibility', () => {
     it('exposes the essential keys set (consistency guard)', () => {
       expect(SIMPLE_FIELD_KEYS.has('api_key')).toBe(true);
       expect(SIMPLE_FIELD_KEYS.has('base_url')).toBe(true);
+      // provider-registry 2-2: the preset dropdown is an intended addition.
+      expect(SIMPLE_FIELD_KEYS.has('sampling_preset_name')).toBe(true);
     });
   });
 

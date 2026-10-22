@@ -3,26 +3,24 @@
 #
 # The iOS Simulator cannot run in Docker (Apple EULA + technical reasons).
 # This workflow runs Maestro directly against the iOS Simulator on a macOS
-# runner, with Harmony Link running as a native Go binary.
+# runner, with Soulbits Engine running as a native Go binary.
 #
 # The same Maestro YAML flows from e2e/.maestro/ are reused for both
 # Android (Docker Compose) and iOS (macOS runner). Prefer text: selectors
 # over id: for cross-platform compatibility.
 #
-# Cost: ~$0.08/min for macos-latest runner (8× Linux rate).
-# 30 nightly runs + ~5 manual dispatches ≈ $25-35/mo.
+# Trigger policy (owner ruling 2026-10-13): macOS runners bill at 10× the
+# Linux minute rate, so this workflow is DISPATCH-ONLY — it runs when
+# explicitly requested and never automatically. The former path-scoped
+# pull_request trigger (e2e/.maestro/**, .github/workflows/e2e-ios.yml,
+# ios/**) was removed under the "macOS only when explicitly required" rule.
 #
 # See .current_work/test-framework-overhaul/6-6-IOSMacOSRunner.md
 
 name: E2E (iOS, macOS runner)
 
 on:
-  workflow_dispatch:
-  pull_request:
-    paths:
-      - 'e2e/.maestro/**'
-      - '.github/workflows/e2e-ios.yml'
-      - 'ios/**'
+  workflow_dispatch
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,12 +35,12 @@ jobs:
       - name: Checkout harmony-ai-app
         uses: actions/checkout@v4
 
-      - name: Checkout harmony-link-private (Go backend)
+      - name: Checkout engine repo (Go backend)
         uses: actions/checkout@v4
         with:
           repository: harmony-ai-solutions/harmony-link-private
           token: ${{ secrets.HARMONY_LINK_REPO_PAT }}
-          path: harmony-link
+          path: engine
           ref: main
 
       - name: Setup Node.js
@@ -54,7 +52,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26'
 
       - name: Install RN dependencies
         run: npm ci
@@ -68,62 +66,41 @@ jobs:
           ENVFILE: .env.e2e.ios
         run: npm run build:ios:simulator
 
-      - name: Build Harmony Link binary (macOS native)
-        working-directory: harmony-link
+      - name: Build Soulbits Engine binary (macOS native)
+        working-directory: engine
         run: |
           # Build a native macOS binary — no Docker needed on macOS runner.
-          go build -o /tmp/harmony-link .
+          go build -o /tmp/soulbits-engine .
 
-      - name: Generate self-signed CA + server cert
-        run: |
-          mkdir -p /tmp/certs
-          # Generate CA key and certificate
-          openssl genrsa -out /tmp/certs/ca-key.pem 2048
-          openssl req -new -x509 -key /tmp/certs/ca-key.pem \
-            -out /tmp/certs/ca.pem -days 1 \
-            -subj "/CN=Harmony Link E2E CA"
-          # Generate server key and CSR
-          openssl genrsa -out /tmp/certs/server-key.pem 2048
-          openssl req -new -key /tmp/certs/server-key.pem \
-            -out /tmp/certs/server.csr -subj "/CN=localhost"
-          # Create SAN extension config
-          cat > /tmp/certs/server.ext <<EOF
-          subjectAltName = DNS:localhost, IP:127.0.0.1
-          extendedKeyUsage = serverAuth
-          EOF
-          # Sign the server cert with the CA
-          openssl x509 -req -in /tmp/certs/server.csr \
-            -CA /tmp/certs/ca.pem -CAkey /tmp/certs/ca-key.pem \
-            -CAcreateserial -out /tmp/certs/server.pem -days 1 \
-            -extfile /tmp/certs/server.ext
-
-      - name: Start Harmony Link
+      - name: Start Soulbits Engine
+        # Configuration uses the engine's single SE_* environment namespace
+        # (plan 7-13). There is no CLOUD_MODE bypass any more: management-API/WS
+        # auth and device approval are unconditionally enforced. The engine
+        # self-generates a self-signed cert when none is configured — no cert
+        # files and no openssl step are needed.
         env:
-          CLOUD_MODE: "true"
-          HL_GENERAL_PORT: "28080"
-          HL_WSS_PORT: "28443"
-          HL_DATA_DIR: "/tmp/harmony-link-data"
-          HL_DATABASE_FILENAME: "data.sqlite"
-          HL_DATABASE_ENCRYPTION: "false"
-          HL_INFERENCE_TOKEN: "e2e-test-token"
-          HL_CERT_DIR: "/tmp/certs"
-          SERVER_CERT_PATH: "/tmp/certs/server.pem"
-          SERVER_KEY_PATH: "/tmp/certs/server-key.pem"
+          SE_WS_PORT: "28080"
+          SE_WSS_PORT: "28443"   # explicit: the main binary default is 0 = a RANDOM port
+          SE_ADMIN_PORT: "28081"
+          SE_ADMIN_API_KEY: "e2e-admin"
+          SE_DATA_DIR: "/tmp/soulbits-engine-data"
+          SE_DATABASE_FILENAME: "data.sqlite"
+          SE_DATABASE_ENCRYPTION: "false"
         run: |
-          mkdir -p /tmp/harmony-link-data
-          # Start Harmony Link in the background
-          /tmp/harmony-link disable-gui &
-          HL_PID=$!
-          echo "Harmony Link PID: $HL_PID"
+          mkdir -p /tmp/soulbits-engine-data
+          # Start Soulbits Engine in the background
+          /tmp/soulbits-engine disable-gui &
+          ENGINE_PID=$!
+          echo "Soulbits Engine PID: $ENGINE_PID"
           
           # Wait for healthcheck (plain HTTP)
           for i in $(seq 1 30); do
             if curl -s http://localhost:28080/health > /dev/null 2>&1; then
-              echo "Harmony Link is healthy (attempt $i)"
+              echo "Soulbits Engine is healthy (attempt $i)"
               curl -s http://localhost:28080/health
               break
             fi
-            echo "Waiting for Harmony Link (attempt $i/30)..."
+            echo "Waiting for Soulbits Engine (attempt $i/30)..."
             sleep 2
           done
           

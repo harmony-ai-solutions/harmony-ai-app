@@ -79,7 +79,7 @@
   "personaSetActiveDone": "Now chatting as {{name}}",
 
   "editTitle": "Edit Profile",
-  "editSubtitle": "Update how you appear across Harmony",
+  "editSubtitle": "Update how you appear across Soulbits",
   "usernameTaken": "This username is already taken",
 
   "personaEditTitle": "Edit Persona",
@@ -171,5 +171,7 @@
   "aiDisabledToast": "Disabled {{name}}",
   "aiEnabledToast": "Enabled {{name}}",
   "aiMutedToast": "Muted {{name}}",
-  "aiUnmutedToast": "Unmuted {{name}}"
+  "aiUnmutedToast": "Unmuted {{name}}",
+  "setAsBackground": "Set as background",
+  "currentBackground": "✓ Current background"
 }

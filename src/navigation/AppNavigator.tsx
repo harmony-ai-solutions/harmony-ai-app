@@ -9,6 +9,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { MainTabNavigator, MainTabParamList } from './MainTabNavigator';
 import { LandingScreen } from '../screens/LandingScreen';
 import { ChatDetailScreen } from '../screens/ChatDetailScreen';
+import { ChatBackgroundPickerScreen } from '../screens/ChatBackgroundPickerScreen';
 import { AIProfileScreen } from '../screens/AIProfileScreen';
 import { UserProfileScreen } from '../screens/UserProfileScreen';
 import { CreateAIScreen } from '../screens/CreateAIScreen';
@@ -19,17 +20,25 @@ import { EditProfileScreen } from '../screens/EditProfileScreen';
 import { PersonaEditScreen } from '../screens/PersonaEditScreen';
 import { BiometricLockSettingsScreen } from '../screens/settings/BiometricLockSettingsScreen';
 import { ComingSoonScreen } from '../screens/settings/ComingSoonScreen';
-import { DatabaseTableViewerScreen } from '../screens/development/DatabaseTableViewerScreen';
-import { ConnectionSetupScreen } from '../screens/setup/ConnectionSetupScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
-import { RegisterScreen } from '../screens/auth/RegisterScreen';
-import { SyncSettingsScreen } from '../screens/settings/SyncSettingsScreen';
+import { PendingApprovalScreen } from '../screens/auth/PendingApprovalScreen';
 import { BackgroundSettingsScreen } from '../screens/settings/BackgroundSettingsScreen';
 import { ModuleConfigEditScreen } from '../screens/config/ModuleConfigEditScreen';
 import { AccountSettingsScreen } from '../screens/settings/AccountSettingsScreen';
 import { AppearanceSettingsScreen } from '../screens/settings/AppearanceSettingsScreen';
-import { VoiceInputSettingsScreen } from '../screens/settings/VoiceInputSettingsScreen';
+import { ProvidersScreen } from '../screens/settings/ProvidersScreen';
+import { PersonaListScreen } from '../screens/settings/PersonaListScreen';
+import { DesktopSyncScreen } from '../screens/settings/DesktopSyncScreen';
+import { BackupSettingsScreen } from '../screens/settings/BackupSettingsScreen';
+import { RestoreOnboardingScreen } from '../screens/setup/RestoreOnboardingScreen';
+import { RestoreOfferScreen } from '../screens/setup/RestoreOfferScreen';
+import type { RestoreOffer } from '../services/backup/restoreOnboarding';
+import { IOSLifecycleInfoScreen } from '../screens/settings/IOSLifecycleInfoScreen';
 import { HelpSupportSettingsScreen } from '../screens/settings/HelpSupportSettingsScreen';
+import { EngineLogScreen } from '../screens/settings/EngineLogScreen';
+import { AppLogScreen } from '../screens/settings/AppLogScreen';
+import { EngineStatusScreen } from '../screens/settings/EngineStatusScreen';
+import { NotificationSettingsScreen } from '../screens/settings/NotificationSettingsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { DisabledAIsScreen } from '../screens/settings/DisabledAIsScreen';
@@ -40,13 +49,7 @@ import { MarketplaceItemDetailScreen } from '../screens/MarketplaceItemDetailScr
 import { MyLibraryScreen } from '../screens/MyLibraryScreen';
 import { MyListingsScreen } from '../screens/MyListingsScreen';
 import { ContentAssetScreen } from '../screens/ContentAssetScreen';
-// Global cloud-data-purge notice (mounted once near the navigation root; a
-// passive observer of CloudSessionService — never drives the connection).
-import { CloudPurgeBanner } from '../components/cloud/CloudPurgeBanner';
-// Dev-tools gate (src/config/cloud.ts): true in Metro dev builds AND
-// dev-flavor (beta) release builds — keeps the DB viewer reachable after a
-// release install (e.g. sync poison-pill recovery). Hidden in prod builds.
-import { IS_DEV } from '../config/cloud';
+import { AuthGate } from '../components/auth/AuthGate';
 
 export type RootStackParamList = {
   /** Tab container — the primary navigation surface (5-tab layout) */
@@ -69,6 +72,18 @@ export type RootStackParamList = {
   };
   /** AI Profile — the AI character's own profile page (mirrors My Profile). */
   AIProfile: { profileId: string };
+  /**
+   * ChatBackgroundPicker — per-entity chat background + dim picker.
+   * `entityId` is the PARTNER entity (the background follows the character,
+   * not the persona). `participantKey`/`povEntityId` are optional so the
+   * picker can list image bubbles from the current conversation; without them
+   * the Chat-history tab is empty (the Profile tab still works).
+   */
+  ChatBackgroundPicker: {
+    entityId: string;
+    participantKey?: string;
+    povEntityId?: string;
+  };
   /**
    * UserProfile — a generic profile page for any cloud user (e.g. an AI
    * character's creator). Pushed from the creator badge on AI profiles.
@@ -94,9 +109,8 @@ export type RootStackParamList = {
     editProfileId?: string;
   };
   Login: undefined;
-  Register: undefined;
-  ConnectionSetup: undefined;
-  SyncSettings: undefined;
+  /** Portal sign-in waiting screen (Option B) — pushed by LoginScreen. */
+  PendingApproval: undefined;
   BackgroundSettings: undefined;
   ThemeSettings: undefined;
   ThemeEditor: { themeId?: string } | undefined;
@@ -116,14 +130,36 @@ export type RootStackParamList = {
     moduleType: string;
     configId?: string;
   };
-  DatabaseTableViewer?: undefined;
   AccountSettings: undefined;
   AppearanceSettings: undefined;
-  /** Voice input — the single global shared-persona STT config surface (2-1). */
-  VoiceInputSettings: undefined;
+  /** Personas — the Settings-tab dedicated persona list (set active / edit). */
+  PersonaList: undefined;
+  /** Providers — the shared provider-account management surface (6-2). */
+  Providers: undefined;
+  /** Desktop sync — the changeset-v1 desktop↔phone sync config + status
+   *  surface (3-5), in the navigation slot the deleted rows-v1 SyncSettingsScreen
+   *  occupied. */
+  DesktopSync: undefined;
+  /** Backup & restore — user-owned-storage backup config + status (2-6). */
+  BackupSettings: undefined;
+  /** Restore onboarding — fresh-install restore flow (2-6). */
+  RestoreOnboarding: undefined;
+  /** Restore offer — the skippable fresh-install interstitial (5-3). */
+  RestoreOffer: { offer: RestoreOffer };
+  /** Background presence — honest-limits info for the iOS blind-tick
+   *  lifecycle (4-3). Informational only (the OS owns the wake policy). */
+  IOSLifecycleInfo: undefined;
   HelpSupportSettings: undefined;
+  /** Engine logs — the embedded engine's log viewer + diagnostics export (7-11). */
+  EngineLog: undefined;
+  /** App logs — the app's own log viewer + diagnostics export. */
+  AppLog: undefined;
+  /** Engine status — the embedded engine's live status, ports + diagnostics. */
+  EngineStatus: undefined;
   /** Notification feed — pushed over the tabs from the header bell */
   Notifications: undefined;
+  /** Notification delivery — outreach transport + lock-screen (plan 7-12 §4d) */
+  NotificationSettings: undefined;
   /** Disabled AIs — settings sub-screen listing disabled conversations */
   DisabledAIs: undefined;
   /** Blocked Users — settings sub-screen listing blocked cloud users */
@@ -169,87 +205,86 @@ export const AppNavigator: React.FC<AppNavigatorProps> = ({
   navigationRef,
 }) => {
   return (
-    <NavigationContainer ref={navigationRef} theme={transparentNavTheme}>
-      <Stack.Navigator
-        initialRouteName="MainTabs"
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: 'transparent' },
-          animation: 'fade',
-        }}
-      >
-        {/* ── Primary tab container (5-tab layout: Characters | Chat | Discover | Market | My Profile) ── */}
-        <Stack.Screen name="MainTabs" component={MainTabNavigator} />
+    <AuthGate>
+      <NavigationContainer ref={navigationRef} theme={transparentNavTheme}>
+        <Stack.Navigator
+          initialRouteName="MainTabs"
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: 'transparent' },
+            animation: 'fade',
+          }}
+        >
+          {/* ── Primary tab container (5-tab layout: Characters | Chat | Discover | Market | My Profile) ── */}
+          <Stack.Screen name="MainTabs" component={MainTabNavigator} />
 
-        {/* ── Legacy landing (kept for backward-compatible deep links) ── */}
-        <Stack.Screen name="Landing" component={LandingScreen} />
+          {/* ── Legacy landing (kept for backward-compatible deep links) ── */}
+          <Stack.Screen name="Landing" component={LandingScreen} />
 
-        {/* ── Full-screen detail routes pushed over the tabs ─────────── */}
-        <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
-        <Stack.Screen name="AIProfile" component={AIProfileScreen} />
-        <Stack.Screen name="UserProfile" component={UserProfileScreen} />
-        <Stack.Screen name="CreateAI" component={CreateAIScreen} />
-
-        {/* ── Notifications feed (pushed over tabs from the header bell) ── */}
-        <Stack.Screen name="Notifications" component={NotificationsScreen} />
-
-        {/* ── Settings (pushed over tabs from the header hamburger menu) ── */}
-        <Stack.Screen name="Settings" component={SettingsScreen} />
-
-        {/* ── Settings sub-pages (pushed over tabs from Settings) ── */}
-        <Stack.Screen name="ConnectionSetup" component={ConnectionSetupScreen} />
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Register" component={RegisterScreen} />
-        <Stack.Screen name="SyncSettings" component={SyncSettingsScreen} />
-        <Stack.Screen name="BackgroundSettings" component={BackgroundSettingsScreen} />
-        <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
-        <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />
-        <Stack.Screen
-          name="BiometricLockSettings"
-          component={BiometricLockSettingsScreen}
-        />
-        <Stack.Screen
-          name="ProfileSettings"
-          component={ProfileSettingsScreen}
-        />
-        <Stack.Screen name="EditProfile" component={EditProfileScreen} />
-        <Stack.Screen name="PersonaEdit" component={PersonaEditScreen} />
-        <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
-        <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
-        <Stack.Screen name="VoiceInputSettings" component={VoiceInputSettingsScreen} />
-        <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />
-        <Stack.Screen name="DisabledAIs" component={DisabledAIsScreen} />
-        <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
-        <Stack.Screen name="ArchivedChats" component={ArchivedChatsScreen} />
-        <Stack.Screen name="MarketplacePublish" component={MarketplacePublishScreen} />
-        <Stack.Screen name="MarketplaceItemDetail" component={MarketplaceItemDetailScreen} />
-        <Stack.Screen name="MyLibrary" component={MyLibraryScreen} />
-        <Stack.Screen name="MyListings" component={MyListingsScreen} />
-        <Stack.Screen name="ContentAsset" component={ContentAssetScreen} />
-        <Stack.Screen
-          name="ComingSoon"
-          component={ComingSoonScreen}
-        />
-        <Stack.Screen
-          name="ModuleConfigEdit"
-          component={ModuleConfigEditScreen}
-        />
-
-        {/* ── Dev-tools screens (Metro dev + dev-flavor builds) ────── */}
-        {IS_DEV && (
+          {/* ── Full-screen detail routes pushed over the tabs ─────────── */}
+          <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
           <Stack.Screen
-            name="DatabaseTableViewer"
-            component={DatabaseTableViewerScreen}
-            options={{ headerShown: false }}
+            name="ChatBackgroundPicker"
+            component={ChatBackgroundPickerScreen}
           />
-        )}
-      </Stack.Navigator>
-      {/* ── Global cloud-data-purge banner ────────────────────────────────
-          Rendered as a sibling of the stack navigator (still inside the
-          container so useNavigation works) — floats above every screen.
-          Passive CloudSessionService observer: shows while a purge blocks
-          connecting; tap jumps to SyncSettings. */}
-      <CloudPurgeBanner />
-    </NavigationContainer>
+          <Stack.Screen name="AIProfile" component={AIProfileScreen} />
+          <Stack.Screen name="UserProfile" component={UserProfileScreen} />
+          <Stack.Screen name="CreateAI" component={CreateAIScreen} />
+
+          {/* ── Notifications feed (pushed over tabs from the header bell) ── */}
+          <Stack.Screen name="Notifications" component={NotificationsScreen} />
+
+          {/* ── Settings (pushed over tabs from the header hamburger menu) ── */}
+          <Stack.Screen name="Settings" component={SettingsScreen} />
+
+          {/* ── Settings sub-pages (pushed over tabs from Settings) ── */}
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="PendingApproval" component={PendingApprovalScreen} />
+          <Stack.Screen name="BackgroundSettings" component={BackgroundSettingsScreen} />
+          <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
+          <Stack.Screen name="ThemeEditor" component={ThemeEditorScreen} />
+          <Stack.Screen
+            name="BiometricLockSettings"
+            component={BiometricLockSettingsScreen}
+          />
+          <Stack.Screen
+            name="ProfileSettings"
+            component={ProfileSettingsScreen}
+          />
+          <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+          <Stack.Screen name="PersonaEdit" component={PersonaEditScreen} />
+          <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
+          <Stack.Screen name="AppearanceSettings" component={AppearanceSettingsScreen} />
+          <Stack.Screen name="PersonaList" component={PersonaListScreen} />
+          <Stack.Screen name="Providers" component={ProvidersScreen} />
+          <Stack.Screen name="DesktopSync" component={DesktopSyncScreen} />
+          <Stack.Screen name="BackupSettings" component={BackupSettingsScreen} />
+          <Stack.Screen name="RestoreOnboarding" component={RestoreOnboardingScreen} />
+          <Stack.Screen name="RestoreOffer" component={RestoreOfferScreen} />
+          <Stack.Screen name="IOSLifecycleInfo" component={IOSLifecycleInfoScreen} />
+          <Stack.Screen name="HelpSupportSettings" component={HelpSupportSettingsScreen} />
+          <Stack.Screen name="EngineLog" component={EngineLogScreen} />
+          <Stack.Screen name="AppLog" component={AppLogScreen} />
+          <Stack.Screen name="EngineStatus" component={EngineStatusScreen} />
+          <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
+          <Stack.Screen name="DisabledAIs" component={DisabledAIsScreen} />
+          <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
+          <Stack.Screen name="ArchivedChats" component={ArchivedChatsScreen} />
+          <Stack.Screen name="MarketplacePublish" component={MarketplacePublishScreen} />
+          <Stack.Screen name="MarketplaceItemDetail" component={MarketplaceItemDetailScreen} />
+          <Stack.Screen name="MyLibrary" component={MyLibraryScreen} />
+          <Stack.Screen name="MyListings" component={MyListingsScreen} />
+          <Stack.Screen name="ContentAsset" component={ContentAssetScreen} />
+          <Stack.Screen
+            name="ComingSoon"
+            component={ComingSoonScreen}
+          />
+          <Stack.Screen
+            name="ModuleConfigEdit"
+            component={ModuleConfigEditScreen}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </AuthGate>
   );
 };

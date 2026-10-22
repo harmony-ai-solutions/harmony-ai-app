@@ -1,7 +1,16 @@
 /**
- * Auth Context — cloud authentication state
+ * Auth Context — cloud authentication state.
  *
- * Exposes `{ user, status, login, loginWithGoogle, loginWithApple, register, logout }`.
+ * Exposes `{ user, status, signInVersion, signInViaPortal, cancelSignIn,
+ * logout, refreshUser, pendingSignIn }`.
+ *
+ * ── PORTAL IS THE SIGN-IN (Option B, owner-ruled 2026-10-17) ──────────────
+ * The app no longer collects credentials directly. `signInViaPortal()` starts a
+ * cloud connect session, opens the portal URL in the system browser, and the
+ * user signs in / approves there. The redeemed token pair takes the IDENTICAL
+ * Keychain + `auth:changed` path the retired email/password login used — see
+ * {@link ConnectSessionService}. The direct-credential surface
+ * (login/loginWithGoogle/loginWithApple/register) is removed.
  *
  * On mount: loads tokens from Keychain and attempts `getProfile()`.  If tokens
  * are absent or the profile call returns 401 → `unauthenticated`.
@@ -9,9 +18,6 @@
  * Provider position (App.tsx): BETWEEN DatabaseProvider and SyncConnectionProvider.
  * `status==='loading'` must NOT block the locally-paired self-hosted mode —
  * it only gates the cloud branch.
- *
- * NOTE: The phase document's `src/context/` is a typo — the app convention
- * is `src/contexts/` (plural).
  */
 
 import React, {
@@ -22,58 +28,62 @@ import React, {
   useCallback,
   type ReactNode,
 } from 'react';
+import { Linking } from 'react-native';
 import AuthService, {
   AuthExpiredError,
   type UserProfile,
 } from '../services/auth/AuthService';
-import { cloudSessionService } from '../services/cloud/CloudSessionService';
 import DeviceAuthService from '../services/cloud/DeviceAuthService';
+import { getConnectSessionService } from '../services/cloud/ConnectSessionService';
 import { startSoulbitsTokenSync } from '../services/cloud/soulbitsTokenSync';
+import { startSeedingEnsure } from '../services/providers/seeding';
+import { pushTokenStore } from '../services/notifications/PushTokenStore';
 import { createLogger } from '../utils/logger';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const log = createLogger('[AuthContext]');
-
-/** Read the `connection_mode` flag — 'cloud' → true, anything else → false. */
-async function isCloudMode(): Promise<boolean> {
-  try {
-    const m = await AsyncStorage.getItem('connection_mode');
-    return m === 'cloud';
-  } catch {
-    return false;
-  }
-}
 
 // ── Types ───────────────────────────────────────────────────────────────
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
+/**
+ * The pending portal-sign-in state the waiting UI renders. `pending` is the
+ * live state; the others are terminal (the user must retry or cancel).
+ */
+export interface PendingSignIn {
+  /** The portal URL to (re)open; null until the session is created. */
+  connectUrl: string | null;
+  status: 'pending' | 'expired' | 'consumed' | 'errored';
+  /** Whole seconds left on the connect session (pending only). */
+  remainingSeconds: number;
+  /** Machine-readable message for the terminal states (errored only). */
+  message: string | null;
+}
+
 export interface AuthContextType {
   user: UserProfile | null;
   status: AuthStatus;
 
-  // Monotonic counter incremented after EVERY explicit sign-in action
-  // (email/password, Google, Apple). AppShell observes it to navigate the
-  // user straight to their profile (MyProfile tab) after a fresh sign-in —
-  // the app-start bootstrap path (persisted token) does NOT bump it, so
-  // returning users are not yanked to the profile on every launch.
+  // Monotonic counter incremented after EVERY explicit sign-in action.
+  // AppShell observes it to navigate the user straight to their profile
+  // (MyProfile tab) after a fresh sign-in — the app-start bootstrap path
+  // (persisted token) does NOT bump it, so returning users are not yanked to
+  // the profile on every launch.
   signInVersion: number;
 
-  // All login/register methods return void: the backend token-pair response
-  // carries no user profile, so `user` is populated asynchronously by the
-  // `auth:changed` listener (via getProfile). Callers should read `user`/
-  // `status` from the context rather than the action's return value.
-  login: (email: string, password: string) => Promise<void>;
-  register: (
-    email: string,
-    password: string,
-    displayName: string,
-  ) => Promise<void>;
-  loginWithGoogle: (idToken: string) => Promise<void>;
-  loginWithApple: (identityToken: string) => Promise<void>;
+  /**
+   * Begin the portal sign-in: create a connect session, open the portal URL in
+   * the system browser, and start polling. Resolves once the browser is opened
+   * (the redeem itself happens asynchronously via the poll → `auth:changed`).
+   */
+  signInViaPortal: () => Promise<void>;
+  /** Abandon a pending sign-in (stops polling, clears the waiting state). */
+  cancelSignIn: () => void;
   logout: () => Promise<void>;
   /** Re-fetch the current user's profile from the backend and update `user`. */
   refreshUser: () => Promise<void>;
+  /** Live portal-sign-in state for the waiting screen (null when idle). */
+  pendingSignIn: PendingSignIn | null;
 }
 
 // ── Context ─────────────────────────────────────────────────────────────
@@ -91,9 +101,10 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
-  // Incremented on every explicit sign-in (login / social). AppShell watches
+  // Incremented on every explicit sign-in (portal redeem). AppShell watches
   // this to navigate the freshly-signed-in user to their profile.
   const [signInVersion, setSignInVersion] = useState(0);
+  const [pendingSignIn, setPendingSignIn] = useState<PendingSignIn | null>(null);
 
   const bumpSignInVersion = useCallback(() => {
     setSignInVersion(v => v + 1);
@@ -113,14 +124,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return;
         }
 
+        // Proactive startup refresh (provider-registry follow-up). The 6-4
+        // seeding ensure-flow writes whatever `getToken()` returns into the
+        // engine account, so a cached-but-expired PASETO would be propagated as
+        // a stale credential. Refresh FIRST when the token is expired or within
+        // the refresh-ahead window; success emits `auth:changed`, and the
+        // existing listeners (tokenSync + seedingEnsure) carry the fresh PASETO
+        // through — no propagation code lives here.
+        //
+        // Transient failures are swallowed (the lazy 401 path stays
+        // authoritative and MUST NOT be pre-empted by a network blip). A
+        // terminal failure (rejected refresh token) returns false here and then
+        // falls through to the getProfile() → auth:expired/invalidate path.
+        await AuthService.refreshIfExpiring().catch((error: unknown) => {
+          log.warn(
+            'Startup proactive refresh skipped:',
+            error instanceof Error ? error.message : String(error),
+          );
+        });
+
         // Token loaded — try to fetch the profile.
         const profile = await AuthService.getProfile();
         if (!cancelled) {
           setUser(profile);
           setStatus('authenticated');
-          if (await isCloudMode()) {
-            cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on bootstrap:', e));
-          }
         }
       } catch (error: unknown) {
         if (!cancelled) {
@@ -149,6 +176,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       log.info('Auth expired — transitioning to unauthenticated');
       setUser(null);
       setStatus('unauthenticated');
+      setPendingSignIn(null);
     };
 
     AuthService.on('auth:expired', onExpired);
@@ -161,41 +189,48 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Subscribes to `auth:changed` (login + refresh) and bulk-updates the api_key
   // of every non-deleted soulbitscloud provider config. DB is guaranteed ready:
   // AuthProvider sits BELOW DatabaseProvider in App.tsx.
+  //
+  // 6-4 adds the seeding ensure-flow alongside it: the token-first account
+  // ensure (never flag-gated) + the guard-gated gap-fill, on `auth:changed` AND
+  // on the bootstrap-authenticated path (cold start already signed in). Both
+  // converge on the single soulbitscloud account row post-3-2.
   useEffect(() => {
-    return startSoulbitsTokenSync();
+    const stopTokenSync = startSoulbitsTokenSync();
+    const stopSeedingEnsure = startSeedingEnsure();
+    return () => {
+      stopTokenSync();
+      stopSeedingEnsure();
+    };
   }, []);
 
-  // ── Marketplace library hydration (non-blocking) ─────────────────────
-  // REMOVED in Phase 2 (A2): the in-memory stub backend owns the library
-  // (MarketplaceService.getLibrary()); there is no local cache to hydrate and
-  // the doomed content_library/marketplace_ownership_cache sidecar tables are
-  // deleted in Phase 4. MyLibraryScreen loads from the service on focus.
-
-  // ── Listen for auth:changed events (login/refresh) ────────────────────
+  // ── Listen for auth:changed events (portal redeem / refresh) ──────────
   useEffect(() => {
     const onChanged = async () => {
+      // The redeem resolved (or a refresh landed) — the waiting screen is done.
+      setPendingSignIn(null);
+
       // D-DEV-01 first-run registration: upsert the per-install device row
       // (authorized=false) so the broker's connect gate can find it. Best-
       // effort — a registration failure must not block login.
-      DeviceAuthService.registerDevice().catch(e =>
+      //
+      // Plan 7-12 §3: carry the effective push token (the Firebase FCM token
+      // when the SDK supplied one, else the native raw-APNs fallback). A token
+      // acquired at boot BEFORE sign-in could not be registered (signed out),
+      // and Android's FCM token is only ever registered through this flow.
+      const pushToken = pushTokenStore.getPushToken();
+      DeviceAuthService.registerDevice(pushToken ? { pushToken } : {}).catch(e =>
         log.warn('Device registration failed (non-fatal):', e instanceof Error ? e.message : String(e)),
       );
       try {
         const profile = await AuthService.getProfile();
         setUser(profile);
         setStatus('authenticated');
-        if (await isCloudMode()) {
-          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e)));
-        }
       } catch {
         // Profile fetch failed, but the token pair is valid (just stored /
         // refreshed). Stay authenticated — `user` populates on retry or next
         // launch. Only `auth:expired` (token rejection) downgrades to
         // unauthenticated, never a transient profile-read failure.
         setStatus('authenticated');
-        if (await isCloudMode()) {
-          cloudSessionService.connect().catch(e => log.warn('Cloud session connect failed on auth:changed:', e instanceof Error ? `${e.name}: ${e.message}` : String(e)));
-        }
       }
     };
 
@@ -205,39 +240,82 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
   }, []);
 
+  // ── Mirror the connect-session service state into `pendingSignIn` ─────
+  useEffect(() => {
+    const service = getConnectSessionService();
+    return service.subscribe((s) => {
+      const status: PendingSignIn['status'] | null =
+        s.status === 'pending' ||
+        s.status === 'expired' ||
+        s.status === 'consumed' ||
+        s.status === 'errored'
+          ? s.status
+          : null;
+
+      if (status === 'pending') {
+        setPendingSignIn(prev => ({
+          connectUrl: s.connectUrl ?? prev?.connectUrl ?? null,
+          status: 'pending',
+          remainingSeconds: s.remainingSeconds,
+          message: null,
+        }));
+      } else if (status !== null) {
+        setPendingSignIn(prev => ({
+          connectUrl: s.connectUrl ?? prev?.connectUrl ?? null,
+          status,
+          remainingSeconds: 0,
+          message: s.message,
+        }));
+      } else if (s.status === 'approved') {
+        // The redeem already emitted `auth:changed` (which clears the waiting
+        // state). Bump the fresh-sign-in counter so AppShell routes the user
+        // to their profile exactly as the old login path did.
+        bumpSignInVersion();
+      }
+      // idle / starting — no UI update.
+    });
+  }, [bumpSignInVersion]);
+
   // ── Action wrappers ───────────────────────────────────────────────────
 
-  const login = useCallback(async (email: string, password: string) => {
-    // AuthService.login stores the token pair and emits `auth:changed`; the
-    // listener above fetches the profile and flips status to `authenticated`.
-    await AuthService.login(email, password);
-    bumpSignInVersion();
-  }, [bumpSignInVersion]);
+  const signInViaPortal = useCallback(async () => {
+    const service = getConnectSessionService();
+    setPendingSignIn({
+      connectUrl: null,
+      status: 'pending',
+      remainingSeconds: 0,
+      message: null,
+    });
+    try {
+      const { connectUrl } = await service.start();
+      setPendingSignIn({
+        connectUrl,
+        status: 'pending',
+        remainingSeconds: service.getState().remainingSeconds,
+        message: null,
+      });
+      // Open the portal in the system browser. A failure to open is non-fatal
+      // (the user can retry via "Open browser again" on the waiting screen).
+      await Linking.openURL(connectUrl).catch(() => undefined);
+    } catch (e) {
+      log.warn('Failed to start portal sign-in:', e instanceof Error ? e.message : String(e));
+      setPendingSignIn({
+        connectUrl: null,
+        status: 'errored',
+        remainingSeconds: 0,
+        message: 'start_failed',
+      });
+    }
+  }, []);
 
-  const registerAction = useCallback(
-    async (email: string, password: string, displayName: string) => {
-      await AuthService.register(email, password, displayName);
-      // Registration does NOT return a token — user must verify email.
-      //
-      // The one-time first-signup SOUL bonus flow is REMOVED (A2): the wallet
-      // stub seeds a fixed 50-soul balance on every launch, so there is no
-      // bonus to claim.
-    },
-    [],
-  );
-
-  const loginWithGoogle = useCallback(async (idToken: string) => {
-    await AuthService.loginWithGoogle(idToken);
-    bumpSignInVersion();
-  }, [bumpSignInVersion]);
-
-  const loginWithApple = useCallback(async (identityToken: string) => {
-    await AuthService.loginWithApple(identityToken);
-    bumpSignInVersion();
-  }, [bumpSignInVersion]);
+  const cancelSignIn = useCallback(() => {
+    getConnectSessionService().cancel();
+    setPendingSignIn(null);
+  }, []);
 
   const logout = useCallback(async () => {
-    await cloudSessionService.disconnect().catch(() => {});
+    getConnectSessionService().cancel();
+    setPendingSignIn(null);
     await AuthService.logout();
     setUser(null);
     setStatus('unauthenticated');
@@ -260,12 +338,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         user,
         status,
         signInVersion,
-        login,
-        register: registerAction,
-        loginWithGoogle,
-        loginWithApple,
+        signInViaPortal,
+        cancelSignIn,
         logout,
         refreshUser,
+        pendingSignIn,
       }}>
       {children}
     </AuthContext.Provider>

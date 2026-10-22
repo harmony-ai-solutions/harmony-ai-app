@@ -1,6 +1,6 @@
 /**
  * Theme System Type Definitions
- * Matches Harmony Link's theme structure for cross-platform consistency
+ * Matches Soulbits Engine's theme structure for cross-platform consistency
  */
 
 /**
@@ -121,7 +121,7 @@ export interface Theme {
   version: string;           // Theme version (semver)
   colors: ThemeColors;       // Complete color palette
   isCustom?: boolean;        // True if user-created
-  isSynced?: boolean;        // True if synced with Harmony Link
+  isSynced?: boolean;        // True if synced with Soulbits Engine
   lastModified?: string;     // ISO timestamp of last modification
 }
 
@@ -149,7 +149,7 @@ export type BackgroundStyle =
 export interface ThemeSyncStatus {
   lastSync?: string;          // ISO timestamp
   pendingChanges: boolean;    // Has unsaved local changes
-  syncEnabled: boolean;       // Is sync with Harmony Link enabled
+  syncEnabled: boolean;       // Is sync with Soulbits Engine enabled
 }
 
 /**
@@ -194,7 +194,7 @@ export interface ThemeContextType {
   deleteCustomTheme: (themeId: string) => Promise<void>;
   importTheme: (themeJson: string) => Promise<void>;
   exportTheme: (themeId: string) => Promise<string>;
-  syncWithHarmonyLink: () => Promise<void>;
+  syncWithEngine: () => Promise<void>;
   refreshThemes: () => Promise<void>;
 }
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { TouchableOpacity, Text, View, StyleSheet, ViewStyle, Platform } from 'react-native';
+import { TouchableOpacity, Text, View, StyleSheet, ViewStyle } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
@@ -161,10 +161,12 @@ export const ThemedButton: React.FC<ThemedButtonProps> = ({
                     end={{ x: 0.85, y: 1 }}
                     style={[styles.borderOuter, { borderRadius: BUTTON_RADIUS }]}
                 >
+                    {/* Opaque-enough glass interior: the outer gradient only reads
+                        as a 1dp border ring instead of bleeding across the face. */}
                     <LinearGradient
                         colors={[
-                            hexToRgba(theme.colors.background.surface, 0.15),
-                            hexToRgba(theme.colors.background.surface, 0.08),
+                            hexToRgba(theme.colors.background.base, 0.92),
+                            hexToRgba(theme.colors.background.surface, 0.88),
                         ]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 1 }}

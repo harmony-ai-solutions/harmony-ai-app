@@ -31,7 +31,7 @@ jest.mock('../../utils/uuid', () => {
   };
 });
 
-const CATEGORIES_KEY = '@harmony_character_categories';
+const CATEGORIES_KEY = '@soulbits_character_categories';
 
 describe('CategoryPreferencesService', () => {
   beforeEach(async () => {

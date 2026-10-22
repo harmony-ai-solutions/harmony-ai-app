@@ -4,6 +4,14 @@
 > Explains the four core concepts of the Harmony AI App chat model — and, crucially, *why you (the human) are also an "entity".*
 >
 > Written in simple words, but technically accurate. See the reference table in §5 for exact table/field anchors.
+>
+> **Storage note (2026-10):** the four concepts below are unchanged, but they no
+> longer live in an app-side SQLite replica. They are the **embedded engine's**
+> data model (the engine owns the one database). The app reads/writes them
+> through the engine's loopback management API, and the app-side DTOs live in
+> [`src/services/engine/EngineApiClient.ts`](src/services/engine/EngineApiClient.ts)
+> (the repository seam `src/services/engine/repositories/index.ts` is a pure re-export of
+> the API-backed adapters). Table names below are the engine's SQLite tables.
 
 ---
 
@@ -53,19 +61,19 @@ A profile is *data*. An entity is that data *made alive and equipped with module
 
 ### 3.1 Character Profile — the *card*
 
-Defined in [`CharacterProfile`](src/database/models.ts:13) (table `character_profiles`).
+Defined in [`CharacterProfile`](src/services/engine/EngineApiClient.ts:13) (table `character_profiles`).
 
 - Pure **persona data**: `name`, `description`, `personality`, `appearance`, `backstory`, `voice_characteristics`, `scenario`, `example_dialogues`, …
 - It is a **template/blueprint**, modeled on the community character-card standard (greeting, lorebook, alternate greetings, etc. — see the chat-start concept docs in `.current_work/character-data-chat-start-concept/`).
 - It is **stateless on its own** — it cannot talk. It has no memory, no emotions, no modules. It is the *sheet of paper*.
-- An entity *references* one profile via [`character_profile_id`](src/database/models.ts:36).
+- An entity *references* one profile via [`character_profile_id`](src/services/engine/EngineApiClient.ts:36).
 
 ### 3.2 Entity — the *living participant*
 
-Defined in [`Entity`](src/database/models.ts:33) (table `entities`).
+Defined in [`Entity`](src/services/engine/EngineApiClient.ts:33) (table `entities`).
 
 - A **living instance** of a character: `id`, `alias` (display name), `character_profile_id`, `lifecycle_config`.
-- Wired up with **AI modules** via [`EntityModuleMapping`](src/database/models.ts:44) — cognition (brain), TTS (voice), STT (ears), vision (eyes), RAG (memory), imagination, movement, backend.
+- Wired up with **AI modules** via [`EntityModuleMapping`](src/services/engine/EngineApiClient.ts:44) — cognition (brain), TTS (voice), STT (ears), vision (eyes), RAG (memory), imagination, movement, backend.
 - Carries an **inner life**: emotion state, memory, emoji actions — all keyed to the entity.
 - **This is what actually participates in a chat.** It is the smallest unit that can send or receive messages.
 
@@ -73,21 +81,21 @@ Defined in [`Entity`](src/database/models.ts:33) (table `entities`).
 
 ### 3.3 Interaction — the *conversation thread*
 
-Defined in [`Interaction`](src/database/models.ts:448) (table `interactions`).
+Defined in [`Interaction`](src/services/engine/EngineApiClient.ts:448) (table `interactions`).
 
 - A **conversation** scoped to a set of participants:
-  - [`entity_id`](src/database/models.ts:450) — the entity this thread is anchored to (whose conversation list it belongs to).
-  - [`participant_ids`](src/database/models.ts:453) / [`participant_key`](src/database/models.ts:452) — every entity in the chat, plus a stable derived key (the sorted join of their IDs; empty string for "world").
-  - [`interaction_scope`](src/database/models.ts:451) — `private` (2 participants), `group` (3+), or `world`.
-  - [`presence_type`](src/database/models.ts:462) — e.g. `'phone'` (the in-app chat surface), `status`, `started_at`, `last_activity_at`.
+  - [`entity_id`](src/services/engine/EngineApiClient.ts:450) — the entity this thread is anchored to (whose conversation list it belongs to).
+  - [`participant_ids`](src/services/engine/EngineApiClient.ts:453) / [`participant_key`](src/services/engine/EngineApiClient.ts:452) — every entity in the chat, plus a stable derived key (the sorted join of their IDs; empty string for "world").
+  - [`interaction_scope`](src/services/engine/EngineApiClient.ts:451) — `private` (2 participants), `group` (3+), or `world`.
+  - [`presence_type`](src/services/engine/EngineApiClient.ts:462) — e.g. `'phone'` (the in-app chat surface), `status`, `started_at`, `last_activity_at`.
 - Has a lifecycle: it can be active, resumed, ended, or continued into a new interaction.
 
 ### 3.4 Conversation Message — a *line of dialogue*
 
-Defined in [`ConversationMessage`](src/database/models.ts:468) (table `conversation_messages`).
+Defined in [`ConversationMessage`](src/services/engine/EngineApiClient.ts:468) (table `conversation_messages`).
 
 - One message inside an interaction: `content`, `message_type` (`text` / `audio` / `image` / `greeting` …), optional media, emotional state.
-- **Crucially, it always carries a [`sender_entity_id`](src/database/models.ts:471)** — the entity that said it. There is no nullable "the human typed this" flag.
+- **Crucially, it always carries a [`sender_entity_id`](src/services/engine/EngineApiClient.ts:471)** — the entity that said it. There is no nullable "the human typed this" flag.
 
 ### 3.5 Presence — where an entity lives (channels & plugins)
 
@@ -100,7 +108,7 @@ A presence owns:
 - **Perception context** — what the entity currently perceives
 - **Output preferences** — TTS output type, reply mode (instant / realistic)
 
-**Plugins are presences.** Harmony Link game plugins and other application plugins act as presence providers: they report the participant set with every message, and the engine derives the interaction scope from it. The engine trusts what the plugin reports — it does *not* model perception asymmetry (e.g. eavesdropping) itself; that is the plugin's responsibility.
+**Plugins are presences.** Soulbits Engine game plugins and other application plugins act as presence providers: they report the participant set with every message, and the engine derives the interaction scope from it. The engine trusts what the plugin reports — it does *not* model perception asymmetry (e.g. eavesdropping) itself; that is the plugin's responsibility.
 
 | Presence Type | Interaction Scope |
 |---|---|
@@ -115,7 +123,7 @@ Key rules:
 - Multiple presences can feed the **same interaction** (phone + Discord DM with the same partner = one interaction); one presence can host several interactions.
 - When a plugin-provided participant set shifts the scope (2 → 3 participants), the current interaction is **closed** and a new one with the new scope is created — scope transitions are interaction boundaries.
 
-> Full detail: [Presence — Entity Channel Context](../harmony-link-private/docs/Cognition-System.md) in the Harmony Link Cognition System docs.
+> Full detail: [Presence — Entity Channel Context](../harmony-link-private/docs/Cognition-System.md) in the Soulbits Engine Cognition System docs.
 
 ---
 
@@ -125,7 +133,7 @@ This is the part that trips people up, so here is the full reasoning.
 
 ### Everyone is an entity — by design
 
-The engine treats **every speaker identically**. To build a prompt, track memory, update emotion, or resolve who is in a conversation, the code only ever asks "which entities are participating?" There is **no special-case `if (speaker is the human)` branch**. A speaker is always an [`Entity`](src/database/models.ts:33).
+The engine treats **every speaker identically**. To build a prompt, track memory, update emotion, or resolve who is in a conversation, the code only ever asks "which entities are participating?" There is **no special-case `if (speaker is the human)` branch**. A speaker is always an [`Entity`](src/services/engine/EngineApiClient.ts:33).
 
 For *your* messages to fit that model, **you must also be an entity.** That entity is your **user entity** — the identity you "chat as".
 
@@ -149,14 +157,14 @@ flowchart TD
 ### Why it has to be this way (the technical reasons)
 
 1. **Uniform participant model.** The engine, prompt builder, sync layer, and scope/participant-key logic are written generically over *entities*. Treating you as an entity means **zero special cases** for the human — the same code path handles group chats, world chats, and 1:1 chats.
-2. **Every message needs a sender.** [`sender_entity_id`](src/database/models.ts:471) is non-optional. Your messages must be owned by *some* entity, so you must have one.
-3. **Stable relationships & memory per identity.** The AI forms a relationship and accumulates memory scoped to the entity-pair (via [`participant_key`](src/database/models.ts:452)). Your entity gives the AI a stable "person" to remember and relate to.
+2. **Every message needs a sender.** [`sender_entity_id`](src/services/engine/EngineApiClient.ts:471) is non-optional. Your messages must be owned by *some* entity, so you must have one.
+3. **Stable relationships & memory per identity.** The AI forms a relationship and accumulates memory scoped to the entity-pair (via [`participant_key`](src/services/engine/EngineApiClient.ts:452)). Your entity gives the AI a stable "person" to remember and relate to.
 4. **The `{{user}}` macro.** Character cards reference `{{user}}`; it resolves to *your entity's* name/alias. Without an entity, there is nothing to resolve it to.
 5. **Roleplay is a feature, not a workaround.** Because you are "just another entity", you can impersonate **any** character. The AI treats each identity as a distinct conversation partner with its own relationship. That is exactly the "Chatting as" experience.
 
 ### The "Chatting as" identity (impersonation)
 
-Your chosen identity is stored by `ChatPreferencesService.getGlobalImpersonatedEntity` (see its use in [`ChatListScreen`](src/screens/ChatListScreen.tsx:343)) and shown in the **"Chatting as"** banner ([`ChatListScreen`](src/screens/ChatListScreen.tsx:654)). You can switch it any time; the chat list is then rooted at that entity (interactions where [`entity_id`](src/database/models.ts:450) = your identity).
+Your chosen identity is stored by `ChatPreferencesService.getGlobalImpersonatedEntity` (see its use in [`ChatListScreen`](src/screens/ChatListScreen.tsx:343)) and shown in the **"Chatting as"** banner ([`ChatListScreen`](src/screens/ChatListScreen.tsx:654)). You can switch it any time; the chat list is then rooted at that entity (interactions where [`entity_id`](src/services/engine/EngineApiClient.ts:450) = your identity).
 
 ### The `'user'` sentinel
 
@@ -168,11 +176,11 @@ When **no** identity has been chosen yet, the literal string `'user'` is used as
 
 | Concept | Table / interface | Key fields | Purpose |
 |---|---|---|---|
-| **Character Profile** | [`character_profiles`](src/database/models.ts:13) | `name`, `description`, `personality`, `appearance`, `backstory`, `voice_characteristics`, `scenario`, `example_dialogues` | Persona data / the card (template) |
-| **Entity** | [`entities`](src/database/models.ts:33) | `id`, `alias`, `character_profile_id`, `lifecycle_config`, `rag_reindex_required` | A living participant (AI *or* user) |
-| **Module Bindings** | [`entity_module_mappings`](src/database/models.ts:44) | `entity_id` + 8 × `*_config_id` (backend, cognition, tts, stt, vision, rag, imagination, movement) | The AI "brain & body" wired to an entity |
-| **Interaction** | [`interactions`](src/database/models.ts:448) | `entity_id`, `participant_ids`, `participant_key`, `interaction_scope`, `presence_type`, `status` | A conversation thread |
-| **Message** | [`conversation_messages`](src/database/models.ts:468) | `sender_entity_id`, `interaction_id`, `content`, `message_type` | One line of dialogue, owned by its sender |
+| **Character Profile** | [`character_profiles`](src/services/engine/EngineApiClient.ts:13) | `name`, `description`, `personality`, `appearance`, `backstory`, `voice_characteristics`, `scenario`, `example_dialogues` | Persona data / the card (template) |
+| **Entity** | [`entities`](src/services/engine/EngineApiClient.ts:33) | `id`, `alias`, `character_profile_id`, `lifecycle_config`, `rag_reindex_required` | A living participant (AI *or* user) |
+| **Module Bindings** | [`entity_module_mappings`](src/services/engine/EngineApiClient.ts:44) | `entity_id` + 8 × `*_config_id` (backend, cognition, tts, stt, vision, rag, imagination, movement) | The AI "brain & body" wired to an entity |
+| **Interaction** | [`interactions`](src/services/engine/EngineApiClient.ts:448) | `entity_id`, `participant_ids`, `participant_key`, `interaction_scope`, `presence_type`, `status` | A conversation thread |
+| **Message** | [`conversation_messages`](src/services/engine/EngineApiClient.ts:468) | `sender_entity_id`, `interaction_id`, `content`, `message_type` | One line of dialogue, owned by its sender |
 
 **Scope/participant derivation** (from [`deriveScopeFromParticipants`](src/screens/CreateAIScreen.tsx:479) / [`deriveParticipantKey`](src/screens/CreateAIScreen.tsx:479)):
 - 0–1 participants → `world` (empty key)
@@ -196,13 +204,13 @@ When **no** identity has been chosen yet, the literal string `'user'` is used as
 
 | Want to understand… | Read |
 |---|---|
-| The data model (all four concepts) | [`src/database/models.ts`](src/database/models.ts:1) |
+| The data model (all four concepts) | engine tables `character_profiles` / `entities` / `entity_module_mappings` / `interactions` / `conversation_messages`; app DTOs in [`src/services/engine/EngineApiClient.ts`](src/services/engine/EngineApiClient.ts) |
 | How an AI entity is created & wired | [`src/screens/CreateAIScreen.tsx`](src/screens/CreateAIScreen.tsx:407) |
 | Entity ↔ profile ↔ modules editing | [`src/screens/EntityConfigEditScreen.tsx`](src/screens/EntityConfigEditScreen.tsx:1) |
 | The "Chatting as" / impersonated identity | [`src/screens/ChatListScreen.tsx`](src/screens/ChatListScreen.tsx:343) |
 | Interaction session lifecycle (`ownEntityId`) | [`src/contexts/EntitySessionContext.tsx`](src/contexts/EntitySessionContext.tsx:149) |
-| Interaction / message SQL queries | [`src/database/repositories/interactions.ts`](src/database/repositories/interactions.ts:1), [`src/database/repositories/conversation_messages.ts`](src/database/repositories/conversation_messages.ts:1) |
-| How entity IDs are minted / how deletion cascades | [`src/utils/entityIdUtils.ts`](src/utils/entityIdUtils.ts:1), [`src/database/repositories/entities.ts`](src/database/repositories/entities.ts:1) |
+| Interaction / message reads & writes | [`src/services/engine/repositories/`](src/services/engine/repositories) (API-backed adapters) |
+| How entity IDs are minted / how deletion cascades | [`src/utils/entityIdUtils.ts`](src/utils/entityIdUtils.ts:1), [`src/services/engine/repositories/entities.ts`](src/services/engine/repositories) |
 
 ---
 
@@ -227,7 +235,7 @@ When **no** identity has been chosen yet, the literal string `'user'` is used as
 
 ```mermaid
 flowchart LR
-    L["🟢 Live entity"] -- "user deletes" --> T["🪦 Tombstone<br/>(soft delete — propagates<br/>to every device via sync)"]
+    L["🟢 Live entity"] -- "user deletes" --> T["🪦 Tombstone<br/>(soft delete — propagates<br/>to every device via changeset sync)"]
     T -- "all devices have received it" --> G["🗑️ Garbage-collected<br/>(purged at the next sync-finalize;<br/>the whole family: chats, memories,<br/>settings, images…)"]
     G -. "recreate? mint a NEW timestamped id<br/>(fresh start — no history comes back)" .-> L2["🟢 New entity"]
 ```
@@ -244,15 +252,40 @@ flowchart LR
   source memories are hard-deleted engine-side and app devices keep their copies — a known, documented
   divergence, not a deletion feature.
 
-### 8.3 One-time rebuilds (why the app may wipe and re-sync)
+### 8.3 No app-side rebuilds (the app has no local database)
 
-- **After updating past the ID-schema change (2026-09), the app rebuilds its local database once from
-  Harmony Link.** You'll briefly see "Rebuilding from Soulbits Engine…" at startup. Anything that was never
-  synced to Harmony Link (created while offline and never synced) is not part of the rebuild — sync before
-  updating if that matters to you. Chat preferences tied to old IDs reset once as part of this.
-- **Stale-device rebuild:** garbage collection frees space, so an old tombstone eventually stops existing
-  even as a "you deleted this" record. A device returning after that point can't be brought up to date
-  incrementally — Harmony Link tells it to rebuild, the app restarts itself and re-pulls everything.
-- **Version gate:** if the app is newer than the paired Harmony Link (or vice versa) in a way that would
-  corrupt sync, the app shows a clear "Harmony Link update required" state instead of failing confusingly —
-  and recovers automatically once the other side is updated.
+- The app no longer keeps a local SQLite replica, so the old "one-time wipe +
+  re-sync" and "stale-device rebuild" mechanics are **gone** — there is nothing
+  app-side to rebuild. The engine owns the database and its migrations.
+- Stale-peer convergence is handled **engine-side** by the changeset protocol: a
+  peer whose `(epoch, seq)` continuity is broken (a gap beyond retention) is
+  served a **baseline snapshot + a fresh epoch** (baseline rejoin) — see the
+  engine repo's `docs/Changeset-Sync.md`.
+- **Version gate:** the engine advertises `sync_schema_version` (and negotiates
+  `sync_protocol: ["changeset-v1"]`) in its handshake as a mismatched-dev-builds
+  guard, so two builds that would not sync cleanly refuse each other instead of
+  corrupting data.
+
+## 9. One brain, many presences (plan 7-8)
+
+An entity is **one person**. When you sync your own devices into a group, exactly
+one of them is the **cognition authority** — the "brain" that feels, remembers
+and replies — while every other device is a **presence terminal**: you type into
+it and it renders what the brain produced.
+
+- **Reactive replies are minted by the authority.** When you send a message on
+  your phone, the phone writes it (and forwards it through the relay); the
+  authority applies it and mints the companion's reply, which then syncs back and
+  renders on the phone. You never get two replies because two devices both
+  "thought" — only the authority narrates.
+- **Background beats and dreams** run on the authority only. Other devices pause
+  their beat runners while they are clients.
+- **If the authority goes quiet** (sleeping laptop, lost network), its lease
+  expires and narration pauses rather than duplicating; the app offers to promote
+  this device, and the next connection converges (baseline + fresh epoch). The
+  one-person guarantee is statistical — during a short failover window a duplicate
+  beat is possible, but never corruption (replies merge append-only).
+- **Where to see it:** the Desktop Sync status card shows a **Cognition** row
+  (this device / a device id / none) and a **narration-paused** banner; the iOS
+  background passes report a well-formed `not_authoritative` skip instead of
+  silently doing nothing.

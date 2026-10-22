@@ -64,3 +64,54 @@ export function buildSoulbitsClient(
     inferenceURL: CLOUD_HOSTS.inference,
   });
 }
+
+// ── Subscription / tier policy (task 2-5) ────────────────────────────────
+//
+// Cloud-mode startup fetches the caller's tier policy so the on-device engine
+// can honour it locally (the beat budget, `autonomy_beats_per_day`, is consumed
+// by the on-device lifecycle batch — wired for 4-x). Resolution goes through
+// the authenticated `/v1/subscription/me` endpoint; in cloud mode the
+// session-broker host equals the auth-service host (an API gateway routes by
+// path), so the client built here resolves `subscription.*` correctly.
+
+/** A snapshot of the caller's active subscription + tier limits. */
+export interface SubscriptionSnapshot {
+  /** Tier id (`free`, `core`, `infinite`, …). */
+  tierId: string;
+  displayName: string;
+  status: string;
+  expiresAt: string | null;
+  /** Per-tier limits; `autonomy_beats_per_day` lives here. */
+  limits: Record<string, unknown>;
+  features: Record<string, unknown>;
+}
+
+/**
+ * Fetch the caller's current subscription. Throws on a transport/auth error
+ * (the caller decides whether that is fatal).
+ */
+export async function fetchMySubscription(paseto: string): Promise<SubscriptionSnapshot> {
+  const client = buildSoulbitsClient({ paseto });
+  const sub = await client.subscription.getMySubscriptionOrThrow();
+  return {
+    tierId: sub.tier_id,
+    displayName: sub.display_name,
+    status: sub.status,
+    expiresAt: sub.expires_at ?? null,
+    limits: (sub.limits ?? {}) as Record<string, unknown>,
+    features: (sub.features ?? {}) as Record<string, unknown>,
+  };
+}
+
+/**
+ * Fetch the tier's daily autonomy-beat budget (`autonomy_beats_per_day`,
+ * added in 4-4). Returns null when the tier does not define one (unlimited /
+ * not applicable). Best-effort callers should catch and treat null as
+ * "unknown".
+ */
+export async function fetchAutonomyBeatsPerDay(paseto: string): Promise<number | null> {
+  const sub = await fetchMySubscription(paseto);
+  const raw = sub.limits['autonomy_beats_per_day'];
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  return null;
+}

@@ -12,7 +12,7 @@
 import React from 'react';
 import {act, cleanup, fireEvent, render, waitFor} from '@testing-library/react-native';
 import {ChatPartnerPickerModal} from '../chat/ChatPartnerPickerModal';
-import type {ChatPickerRow} from '../../database/repositories/characters';
+import type {ChatPickerRow} from '../../services/engine/repositories/characters';
 
 afterEach(cleanup);
 beforeEach(cleanup);
@@ -107,25 +107,25 @@ jest.mock('../../database/base64', () => ({
 
 // Real label helper, mocked async queries — the modal must resolve labels via
 // the SHARED helper (repo ruling: modal and tests use one implementation).
-jest.mock('../../database/repositories/characters', () => {
-  const actual = jest.requireActual('../../database/repositories/characters');
+jest.mock('../../services/engine/repositories/characters', () => {
+  const actual = jest.requireActual('../../services/engine/repositories/characters');
   return {
     ...actual,
     getChatPickerRows: jest.fn(() => Promise.resolve([])),
     hasChatPickerLibrary: jest.fn(() => Promise.resolve(false)),
-    getCharacterImages: jest.fn(() => Promise.resolve([])),
+    getPrimaryImage: jest.fn(() => Promise.resolve(null)),
   };
 });
 
 import {
   getChatPickerRows,
   hasChatPickerLibrary,
-  getCharacterImages,
-} from '../../database/repositories/characters';
+  getPrimaryImage,
+} from '../../services/engine/repositories/characters';
 
 const mockGetChatPickerRows = getChatPickerRows as jest.Mock;
 const mockHasChatPickerLibrary = hasChatPickerLibrary as jest.Mock;
-const mockGetCharacterImages = getCharacterImages as jest.Mock;
+const mockGetPrimaryImage = getPrimaryImage as jest.Mock;
 
 const PROFILE_ARIA = {
   id: 'p-aria',
@@ -187,7 +187,7 @@ describe('ChatPartnerPickerModal — picker rows', () => {
 
   it('loads one avatar per unique profile (entity rows reuse their linked profile)', async () => {
     // Isolate the avatar call count from earlier tests' renders.
-    mockGetCharacterImages.mockClear();
+    mockGetPrimaryImage.mockClear();
     const sharedProfile = {id: 'p-twin', name: 'Twin', nickname: '', description: ''};
     await renderModal([
       {kind: 'card', profile: sharedProfile as any},
@@ -204,8 +204,8 @@ describe('ChatPartnerPickerModal — picker rows', () => {
     ]);
 
     // Three rows but a single profile id → exactly one avatar load.
-    expect(mockGetCharacterImages).toHaveBeenCalledTimes(1);
-    expect(mockGetCharacterImages).toHaveBeenCalledWith('p-twin');
+    expect(mockGetPrimaryImage).toHaveBeenCalledTimes(1);
+    expect(mockGetPrimaryImage).toHaveBeenCalledWith('p-twin');
   });
 
   it('search filters by the RESOLVED label (alias prefix, not the profile name)', async () => {

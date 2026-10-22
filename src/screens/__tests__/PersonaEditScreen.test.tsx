@@ -165,7 +165,7 @@ jest.mock('../../utils/colorUtils', () => ({
 }));
 
 // ── Repos ─────────────────────────────────────────────────────────────────
-jest.mock('../../database/repositories/userEntities', () => ({
+jest.mock('../../services/engine/repositories/userEntities', () => ({
   createUserPersona: jest.fn(),
   updateUserPersona: jest.fn(),
   getUserPersona: jest.fn(),
@@ -181,7 +181,7 @@ jest.mock('../../database/repositories/userEntities', () => ({
   },
 }));
 
-jest.mock('../../database/repositories/entities', () => ({
+jest.mock('../../services/engine/repositories/entities', () => ({
   getEntity: jest.fn(),
   getAllEntities: jest.fn().mockResolvedValue([]),
   // Typed error class mirrored from the real repo module (D33 instanceof).
@@ -193,7 +193,7 @@ jest.mock('../../database/repositories/entities', () => ({
   },
 }));
 
-jest.mock('../../database/repositories/characters', () => ({
+jest.mock('../../services/engine/repositories/characters', () => ({
   getCharacterProfile: jest.fn(),
   getCharacterImages: jest.fn().mockResolvedValue([]),
   createCharacterImage: jest.fn().mockResolvedValue(undefined),
@@ -202,14 +202,6 @@ jest.mock('../../database/repositories/characters', () => ({
   getAllCharacterProfiles: jest.fn().mockResolvedValue([]),
 }));
 
-jest.mock('../../services/SyncService', () => {
-  const instance = { syncAndWait: jest.fn().mockResolvedValue(undefined) };
-  return {
-    __esModule: true,
-    default: instance,
-    __mockSyncServiceInstance: instance,
-  };
-});
 
 jest.mock('../../services/ChatPreferencesService', () => ({
   __esModule: true,
@@ -309,8 +301,8 @@ import {
   updateUserPersona,
   getUserPersona,
   resolvePersonaId,
-} from '../../database/repositories/userEntities';
-import { getEntity, getAllEntities } from '../../database/repositories/entities';
+} from '../../services/engine/repositories/userEntities';
+import { getEntity, getAllEntities } from '../../services/engine/repositories/entities';
 import ChatPreferencesService from '../../services/ChatPreferencesService';
 import RNFS from 'react-native-fs';
 
@@ -438,29 +430,6 @@ describe('PersonaEditScreen — create mode (full editor)', () => {
     expect(utils.getByText('personaNameReserved')).toBeTruthy();
     expect(mockShowAlert).not.toHaveBeenCalled();
   });
-
-  it('4-2/D34: a CRITICAL sync failure after create shows the failure alert and does not goBack', async () => {
-    // The pre-chat entity push must be critical (D34) — a failed push surfaces
-    // the failure alert instead of the success alert; the user stays on the
-    // screen so a retry re-runs the save (fresh derived id for creates).
-    const { __mockSyncServiceInstance } = require('../../services/SyncService');
-    (__mockSyncServiceInstance.syncAndWait as jest.Mock).mockRejectedValueOnce(new Error('push failed'));
-
-    const utils = await render(<PersonaEditScreen />);
-    await flush();
-
-    await fireEvent.changeText(utils.getByTestId('persona-name-input'), 'Mara');
-    await fireEvent.changeText(utils.getByTestId('persona-description-input'), 'A mystic healer');
-    await fireEvent.changeText(utils.getByTestId('persona-personality-input'), 'Calm, wise');
-    await fireEvent.press(utils.getByTestId('save-persona-button'));
-    await flush();
-
-    expect(__mockSyncServiceInstance.syncAndWait).toHaveBeenCalledWith({ timeoutMs: 45_000, critical: true });
-    expect(mockShowAlert).toHaveBeenCalledWith('common:error', 'personaSaveSyncFailed');
-    // No success alert, no navigation away — a retry can re-run the save.
-    expect(mockShowAlert).not.toHaveBeenCalledWith('personaSaved');
-    expect(mockNavigation.goBack).not.toHaveBeenCalled();
-  });
 });
 
 describe('PersonaEditScreen — edit mode (full editor)', () => {
@@ -482,7 +451,7 @@ describe('PersonaEditScreen — edit mode (full editor)', () => {
   });
 
   it('loads the full profile and saves via updateUserPersona (id frozen)', async () => {
-    const { getCharacterProfile } = require('../../database/repositories/characters');
+    const { getCharacterProfile } = require('../../services/engine/repositories/characters');
     (getCharacterProfile as jest.Mock).mockResolvedValue(profile('profile-1', 'Mystic Mara'));
 
     const utils = await render(<PersonaEditScreen />);
@@ -503,7 +472,7 @@ describe('PersonaEditScreen — edit mode (full editor)', () => {
   });
 
   it('exports the persona card (JSON) via RNFS write + Share (2-4 parity)', async () => {
-    const { getCharacterProfile } = require('../../database/repositories/characters');
+    const { getCharacterProfile } = require('../../services/engine/repositories/characters');
     (getCharacterProfile as jest.Mock).mockResolvedValue(profile('profile-1', 'Mystic Mara'));
     jest.spyOn(Share, 'share').mockResolvedValue({} as any);
 
@@ -519,7 +488,7 @@ describe('PersonaEditScreen — edit mode (full editor)', () => {
   });
 
   it('rename hitting the alias UNIQUE index shows the personaAliasConflict alert', async () => {
-    const { getCharacterProfile } = require('../../database/repositories/characters');
+    const { getCharacterProfile } = require('../../services/engine/repositories/characters');
     (getCharacterProfile as jest.Mock).mockResolvedValue(profile('profile-1', 'Mystic Mara'));
     mockUpdate.mockRejectedValue(
       new Error("UNIQUE constraint failed: index 'idx_entities_alias_unique'"),
@@ -543,7 +512,7 @@ describe('PersonaEditScreen — edit mode (full editor)', () => {
   });
 
   it('non-conflict save failures keep the generic personaSaveFailed alert', async () => {
-    const { getCharacterProfile } = require('../../database/repositories/characters');
+    const { getCharacterProfile } = require('../../services/engine/repositories/characters');
     (getCharacterProfile as jest.Mock).mockResolvedValue(profile('profile-1', 'Mystic Mara'));
     mockUpdate.mockRejectedValue(new Error('User persona not found: Mystic Mara'));
 
@@ -580,7 +549,7 @@ describe('PersonaEditScreen — persona edit alias-collision UX (D86 / review 7)
       character_profile_id: 'profile-1',
       entity_type: 'user',
     });
-    const { getCharacterProfile } = require('../../database/repositories/characters');
+    const { getCharacterProfile } = require('../../services/engine/repositories/characters');
     (getCharacterProfile as jest.Mock).mockResolvedValue(profile('profile-1', 'Mystic Mara'));
   });
 
@@ -625,7 +594,7 @@ describe('PersonaEditScreen — persona edit alias-collision UX (D86 / review 7)
   it('typed PersonaAliasConflictError from updateUserPersona (residual race) surfaces the same friendly inline error — never raw SQLite', async () => {
     // Pre-check passes (collision created between probe and save).
     (getAllEntities as jest.Mock).mockResolvedValue([]);
-    const { PersonaAliasConflictError } = require('../../database/repositories/userEntities');
+    const { PersonaAliasConflictError } = require('../../services/engine/repositories/userEntities');
     mockUpdate.mockRejectedValue(new PersonaAliasConflictError('Raced'));
 
     const utils = await render(<PersonaEditScreen />);
@@ -689,7 +658,7 @@ describe('PersonaEditScreen — built-in user mode (A1 / decision 8)', () => {
       character_profile_id: 'profile-user',
       entity_type: 'user',
     });
-    const { getCharacterProfile } = require('../../database/repositories/characters');
+    const { getCharacterProfile } = require('../../services/engine/repositories/characters');
     (getCharacterProfile as jest.Mock).mockResolvedValue(profile('profile-user', 'You'));
 
     const utils = await render(<PersonaEditScreen />);
@@ -742,7 +711,7 @@ describe('PersonaEditScreen — active-persona delete gate (review 2a)', () => {
       character_profile_id: 'profile-1',
       entity_type: 'user',
     });
-    const { getCharacterProfile } = require('../../database/repositories/characters');
+    const { getCharacterProfile } = require('../../services/engine/repositories/characters');
     (getCharacterProfile as jest.Mock).mockResolvedValue(profile('profile-1', 'Mystic Mara'));
   });
 

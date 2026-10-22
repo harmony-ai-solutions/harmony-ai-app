@@ -93,10 +93,10 @@ describe('ConnectionStateManager sync estimate limit', () => {
   });
 
   it('does not affect other AsyncStorage keys', async () => {
-    await AsyncStorage.setItem('harmony_jwt', 'abc');
-    await AsyncStorage.setItem('harmony_security_mode', 'secure');
+    await AsyncStorage.setItem('soulbits_jwt', 'abc');
+    await AsyncStorage.setItem('soulbits_security_mode', 'secure');
     await csm.setSyncEstimateLimitMB(20);
-    expect(await AsyncStorage.getItem('harmony_jwt')).toBe('abc');
-    expect(await AsyncStorage.getItem('harmony_security_mode')).toBe('secure');
+    expect(await AsyncStorage.getItem('soulbits_jwt')).toBe('abc');
+    expect(await AsyncStorage.getItem('soulbits_security_mode')).toBe('secure');
   });
 });

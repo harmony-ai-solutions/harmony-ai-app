@@ -106,7 +106,7 @@
 - See also: [[Memory System & Character Evolution]]
 
 ### Silent Reader Mode (Future Feature)
-- **Concept**: Passive learning mode for harmony entities when using external platforms like Kindroid or Character.AI for character backend.
+- **Concept**: Passive learning mode for harmony entities when using external commercial character backends.
 - **Purpose**: Build character memory and interaction patterns by observing conversations on commercial platforms
 - **Key Benefits**:
   - Enables gradual transition from commercial backends to local AI models

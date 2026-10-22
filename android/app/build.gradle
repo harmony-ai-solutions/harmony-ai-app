@@ -21,7 +21,10 @@ react {
     //   The list of variants to that are debuggable. For those we're going to
     //   skip the bundling of the JS bundle and the assets. By default is just 'debug'.
     //   If you add flavors like lite, prod, etc. you'll have to list your debuggableVariants.
-    debuggableVariants = ["devDebug"]
+    // Add every dev-variant debug build here (7-14: devStoreDebug joins devDebug
+    // so a dev-store build on device also loads JS from Metro rather than baking
+    // a bundle). See the "Distribution variant axis" note below.
+    debuggableVariants = ["devDebug", "devStoreDebug"]
 
     /* Bundling */
     //   A list containing the node command and its flags. Default is just 'node'.
@@ -42,6 +45,17 @@ react {
     //   A list of extra flags to pass to the 'bundle' commands.
     //   See https://github.com/react-native-community/cli/blob/main/docs/commands.md#bundle
     // extraPackagerArgs = []
+    //
+    // Metro worker cap (CI only). GitHub's ubuntu-latest runners are 2 vCPU
+    // and Metro defaults to ~half the cores, so the release bundle gets 1
+    // worker anyway — passing 2 explicitly keeps the bundle from starving the
+    // Gradle daemon, and the flag is opt-in so local builds keep full
+    // parallelism. The RN gradle plugin appends these tokens to the
+    // `react-native bundle` CLI (BundleHermesCTask), so --max-workers reaches
+    // Metro's bundler.
+    if (project.hasProperty("METRO_MAX_WORKERS")) {
+        extraPackagerArgs = ["--max-workers", project.property("METRO_MAX_WORKERS").toString()]
+    }
 
     /* Hermes Commands */
     //   The hermes compiler command to run. By default it is 'hermesc'
@@ -102,10 +116,15 @@ def resolveOAuthValue = { flavorName, key ->
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 // ── google-services.json placeholder guard ─────────────────────────────
-// Android Google Sign-In auto-discovers its OAuth client from
-// android/app/google-services.json (NOT from GOOGLE_WEB_CLIENT_ID). If that
-// file still contains the placeholder values, the SDK returns
-// idToken=null after the user picks an account.
+// android/app/google-services.json feeds BOTH:
+//   1. Android Google Sign-In (auto-discovers its OAuth client; a placeholder
+//      makes the SDK return idToken=null after the user picks an account), and
+//   2. Firebase Cloud Messaging (plan 7-12 §3, step 7 — @react-native-firebase/
+//      app + messaging read the generated resources google_app_id /
+//      gcm_defaultSenderId). A placeholder keeps dev/CI builds GREEN; the
+//      runtime FirebaseMessaging integration detects the missing config
+//      (getApps()==0 or getToken() rejecting) and falls back to the native
+//      raw-APNs token seam.
 def googleServicesFile = file("google-services.json")
 def isPlaceholder = false
 if (googleServicesFile.exists()) {
@@ -115,12 +134,28 @@ if (googleServicesFile.exists()) {
 if (isPlaceholder) {
     println "****************************************************************"
     println "*** WARNING: android/app/google-services.json is a PLACEHOLDER ***"
-    println "*** Google Sign-In on Android will return idToken=null.       ***"
-    println "*** Replace it with the real file from GCP (Firebase console), ***"
-    println "*** containing BOTH package names ai.soulbits.chat and        ***"
-    println "*** ai.soulbits.chat.dev with their debug+release SHA-1s.     ***"
-    println "*** See docs/OAUTH-SECRETS.md.                                ***"
+    println "*** Google Sign-In returns idToken=null AND FCM cannot address    ***"
+    println "*** this app (no token acquisition).                              ***"
+    println "*** Replace it with the real file from the Firebase console, both  ***"
+    println "*** package names ai.soulbits.chat + ai.soulbits.chat.dev with     ***"
+    println "*** their debug+release SHA-1s. See docs/OAUTH-SECRETS.md and      ***"
+    println "*** plan 7-12 §3 (D4 self-builder contract).                       ***"
     println "****************************************************************"
+}
+
+/**
+ * versionCode from a version string like "v0.4.16" / "0.4.16-dev": extracts the
+ * numeric triplet and packs it major * 1e6 + minor * 1e3 + patch. Monotonic
+ * while minor and patch stay < 1000 (this project's numbering). Garbage input
+ * falls back to 0 so a broken tag fails the install loudly instead of
+ * masquerading as a valid release.
+ */
+def deriveVersionCode(String versionName) {
+    def nums = (versionName =~ /\d+/).collect { it as int }
+    def major = nums.size() > 0 ? nums[0] : 0
+    def minor = nums.size() > 1 ? nums[1] : 0
+    def patch = nums.size() > 2 ? nums[2] : 0
+    return major * 1000000 + minor * 1000 + patch
 }
 
 android {
@@ -133,36 +168,108 @@ android {
         applicationId "ai.soulbits.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // CI passes -PVERSION_NAME=<tag/input> (see .github/workflows/
+        // build-release.yml) instead of rewriting this file with sed. The
+        // fallback stays the repo's current release — bump it here on each
+        // manual release so local/unflagged builds keep a sane version.
+        versionName project.findProperty("VERSION_NAME") ?: "0.4.25"
+        // Derived from versionName — MUST be monotonic across releases. A flat
+        // versionCode makes the system installer refuse the self-update
+        // ("App not installed", observed as a silent no-op on HyperOS/Android 15
+        // — owner bug report 2026-10-21): Android rejects any install whose
+        // versionCode is not HIGHER than the installed one.
+        versionCode deriveVersionCode(
+            (project.findProperty("VERSION_NAME") ?: "0.4.25").toString(),
+        )
 
         resValue "string", "build_config_package", "ai.soulbits.chat"
     }
+    // ── Distribution variant axis (plan 7-14) ─────────────────────────────
+    // APP_VARIANT ('store' | 'full') is the single functional distribution
+    // axis. 'full' = today's behavior (self-built / sideload; the in-app APK
+    // self-update is available); 'store' = Play / App Store listing (the store
+    // listing owns updates; the APK self-updater is OFF). Consumers:
+    // src/config/appVariant.ts + src/config/appChannel.ts.
+    //
+    // IMPLEMENTATION NOTE: the variant is expressed as ADDITIONAL FLAVORS in the
+    // EXISTING "environment" dimension rather than a second flavorDimension.
+    // A second dimension would rename EVERY variant (`devFullDebug` instead of
+    // `devDebug`) and break the existing build names, and
+    // `missingDimensionStrategy` cannot supply a default for the app module's
+    // OWN dimension (it resolves dimensions missing from a *consumed* library
+    // module only). So:
+    //   dev / prod           → APP_VARIANT=full  (task names UNCHANGED)
+    //   devStore / prodStore → APP_VARIANT=store (new names)
+    // Existing `assembleDevDebug`, `assembleDevRelease`, `assembleProdRelease`,
+    // and the E2E `assembleDevRelease -PE2E_DEBUG_SIGNING=true` all keep working.
+    // applicationId is NEVER suffixed differently per variant (design rule 5 —
+    // OAuth clients are per-package; existing installs must not be orphaned).
     flavorDimensions "environment"
     productFlavors {
         dev {
+            dimension "environment"
             applicationIdSuffix ".dev"
             versionNameSuffix "-dev"
             buildConfigField "boolean", "IS_BETA", "true"
+            buildConfigField "String", "APP_VARIANT", "\"full\""
+            // The flavour IS the environment (fixes the release-manifest
+            // channel: without this, Config.APP_ENV is undefined in release
+            // builds and cloud.ts falls back to 'prod' — the app then checks
+            // app/prod/latest.json, which per-channel isolation never serves,
+            // and the update banner is silently dead. Same reflection path as
+            // APP_VARIANT above: react-native-config surfaces BuildConfig).
+            buildConfigField "String", "APP_ENV", "\"dev\""
             buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('dev', 'GOOGLE_WEB_CLIENT_ID')}\""
             buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('dev', 'APPLE_SERVICES_ID')}\""
-            // E2E override — read from -P gradle properties (same pattern as
-            // GOOGLE_WEB_CLIENT_ID above). Pass via:
-            //   ./gradlew assembleDevDebug \
-            //     -PHARMONY_LINK_WSS_URL=wss://10.0.2.2:28443 \
-            //     -PHARMONY_LINK_WS_URL=ws://10.0.2.2:28080
-            // Or set in ~/.gradle/gradle.properties for local dev.
-            // When both are empty, ConnectionStateManager.applyE2EOverride() no-ops.
-            buildConfigField "String", "HARMONY_LINK_WSS_URL", "\"${project.findProperty('HARMONY_LINK_WSS_URL') ?: ''}\""
-            buildConfigField "String", "HARMONY_LINK_WS_URL", "\"${project.findProperty('HARMONY_LINK_WS_URL') ?: ''}\""
+
+            // ── E2E-only engine-peer override (plan 7-13) ───────────────────
+            // The E2E app-under-test must pair its embedded engine with the
+            // container engine so the standard device-approval handshake runs
+            // against it. The container engine's LAN endpoints are injected at
+            // BUILD TIME, and the fields are declared ONLY for E2E builds (the
+            // -PE2E_DEBUG_SIGNING marker) — never in normal dev/prod builds.
+            // react-native-config surfaces them to JS as
+            // `Config.E2E_ENGINE_PEER_WS_URL` / `..._WSS_URL` (it reflects the
+            // app's whole BuildConfig class); the override that consumes them
+            // (`src/services/engine/e2eEngineOverride.ts`) is inert when they
+            // are absent. See e2e/build-apk.sh / .github/workflows/e2e-android.yml
+            // and e2e/README.md ("Device approval").
+            if (project.hasProperty('E2E_DEBUG_SIGNING')) {
+                def e2ePeerWs = project.findProperty('E2E_ENGINE_PEER_WS_URL') ?: ''
+                def e2ePeerWss = project.findProperty('E2E_ENGINE_PEER_WSS_URL') ?: ''
+                buildConfigField "String", "E2E_ENGINE_PEER_WS_URL", "\"${e2ePeerWs}\""
+                buildConfigField "String", "E2E_ENGINE_PEER_WSS_URL", "\"${e2ePeerWss}\""
+            }
+        }
+        // devStore — dev environment + store variant. Same application id as
+        // `dev` (no store suffix; design rule 5). No E2E peer injection: the
+        // E2E app-under-test is the `full` dev build (assembleDevRelease).
+        devStore {
+            dimension "environment"
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
+            buildConfigField "boolean", "IS_BETA", "true"
+            buildConfigField "String", "APP_VARIANT", "\"store\""
+            buildConfigField "String", "APP_ENV", "\"dev\""
+            buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('dev', 'GOOGLE_WEB_CLIENT_ID')}\""
+            buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('dev', 'APPLE_SERVICES_ID')}\""
         }
         prod {
+            dimension "environment"
             buildConfigField "boolean", "IS_BETA", "false"
+            buildConfigField "String", "APP_VARIANT", "\"full\""
+            buildConfigField "String", "APP_ENV", "\"prod\""
             buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('prod', 'GOOGLE_WEB_CLIENT_ID')}\""
             buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('prod', 'APPLE_SERVICES_ID')}\""
-            // Production builds must NEVER carry the E2E override.
-            buildConfigField "String", "HARMONY_LINK_WSS_URL", "\"\""
-            buildConfigField "String", "HARMONY_LINK_WS_URL", "\"\""
+        }
+        // prodStore — prod environment + store variant (the Store listing build).
+        prodStore {
+            dimension "environment"
+            buildConfigField "boolean", "IS_BETA", "false"
+            buildConfigField "String", "APP_VARIANT", "\"store\""
+            buildConfigField "String", "APP_ENV", "\"prod\""
+            buildConfigField "String", "GOOGLE_WEB_CLIENT_ID", "\"${resolveOAuthValue('prod', 'GOOGLE_WEB_CLIENT_ID')}\""
+            buildConfigField "String", "APPLE_SERVICES_ID", "\"${resolveOAuthValue('prod', 'APPLE_SERVICES_ID')}\""
         }
     }
     signingConfigs {
@@ -208,6 +315,105 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+
+    // Engine sidecar (task 1-2): libengine.so MUST be extracted to
+    // nativeLibraryDir so it can be exec'd — a mapped-only lib
+    // (extractNativeLibs=false) is not a file on disk and cannot be run.
+    // useLegacyPackaging=true is the AGP DSL equivalent of
+    // android:extractNativeLibs="true" (engine docs/Sidecar-Deployment.md).
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+}
+
+// ── Engine sidecar vendoring (task 1-2) ─────────────────────────────────
+// The engine sidecar is shipped as jniLibs/<abi>/libengine.so so Android
+// extracts it into ApplicationInfo.nativeLibraryDir. Binaries are NOT
+// committed; `vendorEngineSidecar` fetches the PINNED engine release artifact
+// into place before the build.
+//
+// Pin the engine version with -PENGINE_SIDECAR_VERSION=<ver>. There is **no
+// default** (the previous `0.1.0` was a fictional pin that silently produced an
+// engine-less APK — plan 7-10 §2 "pin hygiene"). Artifact sources (first hit
+// wins, per ABI):
+//   1. -PENGINE_SIDECAR_ARTIFACTS_DIR=<dir>  → <dir>/<artifact-abi>/libengine.so
+//      (a local CI drop; the engine CI job `build-android-sidecar` produces
+//       build/android/<abi>/libengine.so)
+//   2. -PENGINE_SIDECAR_BASE_URL=<url>       → <url>/<version>/<artifact-abi>/libengine.so
+//      (a release-artifact download)
+// When neither yields a file the task WARNS and continues: builds for ABIs
+// without a sidecar artifact (armeabi-v7a/x86) still succeed, and
+// EngineSidecarModule.isAvailable() reports false there — the engine is simply
+// not offered on that device.
+//
+// -PENGINE_SIDECAR_STRICT=true turns that warning into a build FAILURE: CI must
+// never ship an engine-less APK again (plan 7-10 §2). It fails only for the
+// ABIs the engine actually targets (arm64-v8a/x86_64).
+//
+// ABI mapping: Android `arm64-v8a` → engine artifact dir `arm64`;
+// Android `x86_64` → engine artifact dir `x86_64`.
+def engineSidecarVersion = project.findProperty("ENGINE_SIDECAR_VERSION")
+def engineSidecarBaseUrl = project.findProperty("ENGINE_SIDECAR_BASE_URL")
+def engineSidecarArtifactsDir = project.findProperty("ENGINE_SIDECAR_ARTIFACTS_DIR")
+def engineSidecarStrict = (project.findProperty("ENGINE_SIDECAR_STRICT") ?: "false").toString().equalsIgnoreCase("true")
+def engineJniLibsDir = file("src/main/jniLibs")
+def engineAbiMap = ["arm64-v8a": "arm64", "x86_64": "x86_64"]
+
+tasks.register("vendorEngineSidecar") {
+    group = "engine"
+    description = "Fetch the pinned engine sidecar (libengine.so) into src/main/jniLibs/<abi>/."
+    doLast {
+        def missingAbis = []
+        engineAbiMap.each { androidAbi, artifactAbi ->
+            def destDir = new File(engineJniLibsDir, androidAbi)
+            def dest = new File(destDir, "libengine.so")
+            if (dest.exists() && dest.length() > 0) {
+                println("vendorEngineSidecar: ${dest} already present (${dest.length()} bytes)")
+                return
+            }
+            destDir.mkdirs()
+
+            def localSource = engineSidecarArtifactsDir ? new File(engineSidecarArtifactsDir, "${artifactAbi}/libengine.so") : null
+            if (localSource != null && localSource.exists()) {
+                java.nio.file.Files.copy(
+                    localSource.toPath(), dest.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                println("vendorEngineSidecar: copied ${localSource} -> ${dest}")
+                return
+            }
+
+            if (engineSidecarBaseUrl && engineSidecarVersion) {
+                def url = "${engineSidecarBaseUrl}/${engineSidecarVersion}/${artifactAbi}/libengine.so"
+                try {
+                    dest.withOutputStream { out ->
+                        new URL(url).withInputStream { inp -> inp.transferTo(out) }
+                    }
+                    println("vendorEngineSidecar: downloaded ${url} -> ${dest}")
+                    return
+                } catch (Exception e) {
+                    println("vendorEngineSidecar: WARNING download failed for ${androidAbi}: ${e.message}")
+                }
+            }
+
+            missingAbis << androidAbi
+            println("vendorEngineSidecar: WARNING no sidecar artifact for ${androidAbi}. " +
+                "Set -PENGINE_SIDECAR_ARTIFACTS_DIR=<dir> (local drop) or " +
+                "-PENGINE_SIDECAR_VERSION + -PENGINE_SIDECAR_BASE_URL (download). " +
+                "The engine will be unavailable on ${androidAbi} devices.")
+        }
+        if (!missingAbis.isEmpty() && engineSidecarStrict) {
+            throw new GradleException(
+                "vendorEngineSidecar: ENGINE_SIDECAR_STRICT=true but no sidecar artifact for " +
+                "${missingAbis.join(', ')}. CI must provision the engine (set ENGINE_SIDECAR_VERSION " +
+                "+ ENGINE_SIDECAR_BASE_URL). Refusing to build an engine-less APK (plan 7-10 §2).")
+        }
+    }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn("vendorEngineSidecar")
 }
 
 dependencies {
@@ -219,10 +425,26 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // Backup & restore (plan 2-6): WorkManager for the periodic backup job and
+    // DocumentFile for the SAF folder-picker tree URI.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    // Custom Tabs for the Dropbox/OneDrive OAuth PKCE authorize leg.
+    implementation("androidx.browser:browser:1.8.0")
+
+    // Animated image decoders (owner decision: static thumbnails in lists,
+    // animated originals in the full-size viewer). React Native 0.86 pins
+    // Fresco 3.6.0 in node_modules/react-native/gradle/libs.versions.toml
+    // (`fresco = "3.6.0"`); keep these two in lockstep with react-android.
+    implementation("com.facebook.fresco:animated-gif:3.6.0")
+    implementation("com.facebook.fresco:animated-webp:3.6.0")
 }
 
 // Copy react-native-vector-icons fonts to Android assets
 apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
 
-// Google services plugin (required for Google Sign-In)
+// Google services plugin — required for Google Sign-In AND Firebase Cloud
+// Messaging (plan 7-12 §3, step 7: @react-native-firebase/app + messaging read
+// the plugin-generated resources google_app_id / gcm_defaultSenderId).
 apply plugin: 'com.google.gms.google-services'

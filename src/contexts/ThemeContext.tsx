@@ -9,12 +9,12 @@ import { createLogger } from '../utils/logger';
 const log = createLogger('[ThemeContext]');
 
 // Storage keys
-const STORAGE_KEY_CURRENT_THEME = '@harmony_current_theme';
-const STORAGE_KEY_THEME_MODE = '@harmony_theme_mode';
-const STORAGE_KEY_CUSTOM_THEMES = '@harmony_custom_themes';
-const STORAGE_KEY_DYNAMIC_BG = '@harmony_dynamic_background';
-const STORAGE_KEY_BG_STYLE = '@harmony_background_style';
-const STORAGE_KEY_DARK_MODE = '@harmony_dark_mode';
+const STORAGE_KEY_CURRENT_THEME = '@soulbits_current_theme';
+const STORAGE_KEY_THEME_MODE = '@soulbits_theme_mode';
+const STORAGE_KEY_CUSTOM_THEMES = '@soulbits_custom_themes';
+const STORAGE_KEY_DYNAMIC_BG = '@soulbits_dynamic_background';
+const STORAGE_KEY_BG_STYLE = '@soulbits_background_style';
+const STORAGE_KEY_DARK_MODE = '@soulbits_dark_mode';
 
 // Create context
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -319,13 +319,13 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }, [availableThemes]);
 
     /**
-     * Sync themes with Harmony Link backend
-     * TODO: Implement when Harmony Link API client is ready
+     * Sync themes with Soulbits Engine backend
+     * TODO: Implement when Soulbits Engine API client is ready
      */
-    const syncWithHarmonyLink = useCallback(async () => {
+    const syncWithEngine = useCallback(async () => {
         try {
             // This will be implemented in Phase 3
-            log.info('Theme sync with Harmony Link - not yet implemented');
+            log.info('Theme sync with Soulbits Engine - not yet implemented');
 
             setSyncStatus(prev => ({
                 ...prev,
@@ -333,7 +333,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 pendingChanges: false,
             }));
         } catch (err) {
-            log.error('Failed to sync with Harmony Link:', err);
+            log.error('Failed to sync with Soulbits Engine:', err);
             setError(err as Error);
             throw err;
         }
@@ -434,7 +434,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         deleteCustomTheme,
         importTheme,
         exportTheme,
-        syncWithHarmonyLink,
+        syncWithEngine,
         refreshThemes,
     };
 

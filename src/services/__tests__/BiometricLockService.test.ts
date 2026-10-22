@@ -107,7 +107,7 @@ describe('BiometricLockService', () => {
       await BiometricLockService.setupLock('1234');
 
       expect(AsyncStorage.setItem).toHaveBeenCalledWith(
-        '@harmony_setting_lock_pin',
+        '@soulbits_setting_lock_pin',
         '1234',
       );
       expect(rnb.createKeys).not.toHaveBeenCalled();

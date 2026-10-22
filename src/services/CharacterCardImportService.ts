@@ -17,7 +17,7 @@ import {
 import {
   createCharacterProfile,
   createCharacterImage,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 import { setCharacterCreator } from './social/SocialService';
 import { base64ToUint8Array } from '../database/base64';
 import { createLogger } from '../utils/logger';
@@ -209,13 +209,17 @@ export async function importCharacterCardFromFile(
     throw new CharacterCardImportError('parse_failed');
   }
 
-  // Step 5: Persist
+  // Step 5: Persist. The ENGINE mints the profile id (`POST
+  // /api/character-profiles` ignores a client id) — create-then-use-response:
+  // the returned id drives the creator record, the image upload and the result
+  // (owner ruling 1).
   try {
-    await createCharacterProfile(mapped.profile);
+    const created = await createCharacterProfile(mapped.profile);
+    const profileId = created.id;
     if (creator) {
       try {
         await setCharacterCreator({
-          profileId: mapped.profile.id,
+          profileId,
           userId: creator.creatorUserId,
         });
       } catch (err) {
@@ -223,18 +227,18 @@ export async function importCharacterCardFromFile(
       }
     }
     if (mapped.image) {
-      await createCharacterImage(mapped.image);
+      await createCharacterImage({ ...mapped.image, character_profile_id: profileId });
     }
+
+    // Step 6: Return result
+    return {
+      profileId,
+      name: created.name ?? mapped.profile.name,
+      hadImage: !!mapped.image,
+      droppedFields,
+    };
   } catch (e) {
     log.error('Persistence failed:', e);
     throw e;
   }
-
-  // Step 6: Return result
-  return {
-    profileId: mapped.profile.id,
-    name: mapped.profile.name,
-    hadImage: !!mapped.image,
-    droppedFields,
-  };
 }

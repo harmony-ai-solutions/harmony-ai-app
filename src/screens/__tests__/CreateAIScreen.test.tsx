@@ -1,5 +1,5 @@
 /**
- * CreateAIScreen — reserved-name guard at the partner-name seam (2-2 UI / D33).
+ * CreateAIScreen — reserved-name guard (D33) + 1:1 Edit AI Partner rework.
  *
  * Verifies:
  *  - a partner named `user` / `deleted` (trim + case-insensitive) shows the
@@ -8,20 +8,55 @@
  *  - the typed `ReservedEntityNameError` from `mintEntityId` (belt-and-braces)
  *    maps to the SAME inline error — never the generic createFailed alert
  *  - a normal name still saves via the mint seam (happy-path control)
+ *  - (4-1) translated section titles (no raw `GREETINGSECTION` keys), the
+ *    Edit-mode Name + Nickname row, and the Export trigger in the header
+ *  - (4-2) `countLorebookEntries` / `buildCardSectionBadges` and the single
+ *    Character Card Sections accordion (every preserved toggle testID)
+ *  - (4-3) module-wiring group subheaders, provider · model subtitles, and the
+ *    selected-config wiring that gates the label-row edit link
  */
 
 import React from 'react';
 import { act, cleanup, fireEvent, render } from '@testing-library/react-native';
-import { CreateAIScreen } from '../CreateAIScreen';
+import {
+  CreateAIScreen,
+  buildCardSectionBadges,
+  countLorebookEntries,
+} from '../CreateAIScreen';
+import { formatModuleConfigSubtitle } from '../../components/entities/EntityModuleSelector';
 
 afterEach(cleanup);
 beforeEach(cleanup);
 
 // Stable mock references — the screen's effects depend on `t`; the real app
 // provides stable values, so the test mocks must too.
-const mockT = (key: string) => key;
+//
+// Namespace-qualified keys resolve to their bare key (`characters:nickname` →
+// `nickname`) and the i18n fallback argument (when a string) is returned, so
+// assertions can pin the human-readable label. This mirrors what a correct
+// `nsMode: 'fallback'` setup renders — never a raw `GREETINGSECTION` key.
+const mockT = (key: string, options?: unknown) => {
+  const bare = key.includes(':') ? key.slice(key.lastIndexOf(':') + 1) : key;
+  return typeof options === 'string' ? options : bare;
+};
 const mockGoBack = jest.fn();
 const mockNavigation = { navigate: jest.fn(), goBack: mockGoBack };
+
+/**
+ * Latest `useFocusEffect` callbacks — lets a test simulate the back-nav from
+ * ModuleConfigEdit (push/pop does NOT remount this screen).
+ */
+const mockFocusCallbacks: Array<() => void | (() => void)> = [];
+
+jest.mock('@react-navigation/native', () => {
+  const React = require('react');
+  return {
+    useFocusEffect: (cb: () => void) => {
+      mockFocusCallbacks.push(cb);
+      React.useEffect(cb, [cb]);
+    },
+  };
+});
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: mockT }),
@@ -148,7 +183,7 @@ jest.mock('../../components/themed/SectionHeader', () => {
 });
 
 jest.mock('../../utils/colorUtils', () => ({
-  hexToRgba: (hex: string, alpha: number) => hex,
+  hexToRgba: (hex: string, _alpha: number) => hex,
 }));
 
 jest.mock('../../utils/haptics', () => ({
@@ -156,10 +191,37 @@ jest.mock('../../utils/haptics', () => ({
 }));
 
 // Heavy editor components — shells (the wiring under test is the save path).
-jest.mock('../../components/entities/EntityModuleSelectorWithActions', () => ({
-  __esModule: true,
-  EntityModuleSelectorWithActions: () => null,
-}));
+// The module selector is rendered as a light probe so the screen's config
+// wiring (subtitle + selectedId) is observable without the real bottom sheet.
+jest.mock('../../components/entities/EntityModuleSelectorWithActions', () => {
+  const React = require('react');
+  const { View, Text, TouchableOpacity } = require('react-native');
+  return {
+    __esModule: true,
+    EntityModuleSelectorWithActions: ({
+      label,
+      moduleType,
+      configs,
+      selectedId,
+    }: any) =>
+      React.createElement(
+        View,
+        { testID: `module-selector-${moduleType}` },
+        React.createElement(Text, null, label),
+        React.createElement(Text, { testID: `module-selected-${moduleType}` }, `selected:${selectedId}`),
+        ...(configs ?? []).map((c: any) =>
+          React.createElement(
+            Text,
+            { key: c.id, testID: `module-option-${moduleType}-${c.id}` },
+            c.subtitle ? `${c.name} — ${c.subtitle}` : c.name,
+          ),
+        ),
+        selectedId
+          ? React.createElement(TouchableOpacity, { testID: `edit-module-config-${moduleType}` })
+          : null,
+      ),
+  };
+});
 jest.mock('../../components/characters/ProfileImagePicker', () => {
   const React = require('react');
   const { View } = require('react-native');
@@ -180,11 +242,11 @@ jest.mock('../../components/character-card/editor-sections', () => {
     LorebookSection: () => React.createElement(View, { testID: 'lorebook-section-mock' }),
     TagsSection: () => React.createElement(View, { testID: 'tags-section-mock' }),
     AttributionSection: () => React.createElement(View, { testID: 'attribution-section-mock' }),
-    ExportSection: ({ onExport }: any) =>
-      React.createElement(
-        TouchableOpacity,
-        { testID: 'export-card-button', onPress: () => onExport('json') },
-      ),
+    ExportSection: ({ onExport, compact }: any) =>
+      React.createElement(TouchableOpacity, {
+        testID: compact ? 'export-header-button' : 'export-card-button',
+        onPress: () => onExport('json'),
+      }),
     LifecycleSection: () => React.createElement(View, { testID: 'lifecycle-section-mock' }),
     GreetingSection: () => React.createElement(View, { testID: 'greeting-section-mock' }),
     computeImageDeltas: jest.fn().mockReturnValue({ create: [], update: [], remove: [] }),
@@ -198,14 +260,28 @@ jest.mock('../../components/character-card/editor-sections', () => {
       description: profile.description ?? '',
       personality: profile.personality ?? '',
       nickname: profile.nickname ?? '',
+      firstMes: profile.first_mes ?? '',
+      alternateGreetings: [],
+      postHistoryInstructions: '',
+      creator: profile.creator ?? '',
+      creatorNotes: '',
+      characterVersion: '',
+      tags: [],
+      groupOnlyGreetings: [],
+      extensions: {},
+      assets: null,
+      cardProvenance: null,
+      characterBook: profile.character_book ?? null,
+      lifecycleConfig: {},
     }),
     validateLifecycleConfig: jest.fn().mockReturnValue(true),
   };
 });
 
 // ── Repos / services ───────────────────────────────────────────────────────
-jest.mock('../../database/repositories/characters', () => ({
-  createCharacterProfile: jest.fn().mockResolvedValue(undefined),
+jest.mock('../../services/engine/repositories/characters', () => ({
+  // The engine mints the profile id — the mock returns a profile carrying one.
+  createCharacterProfile: jest.fn().mockResolvedValue({ id: 'profile-1', name: 'Mystery' }),
   createCharacterImage: jest.fn().mockResolvedValue(undefined),
   deleteCharacterImage: jest.fn().mockResolvedValue(undefined),
   deleteCharacterProfileCascade: jest.fn().mockResolvedValue(undefined),
@@ -216,15 +292,20 @@ jest.mock('../../database/repositories/characters', () => ({
   updateCharacterProfile: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../../database/repositories/entities', () => ({
-  createEntity: jest.fn().mockResolvedValue(undefined),
+jest.mock('../../services/engine/repositories/entities', () => ({
+  // Create-then-use-response: the engine mints the id + alias and echoes them.
+  createEntity: jest.fn().mockResolvedValue({
+    id: 'Mystery-20260905123514',
+    alias: 'Mystery',
+    entity_type: 'ai',
+    character_profile_id: 'profile-1',
+  }),
   createEntityModuleMapping: jest.fn().mockResolvedValue(undefined),
   createOrUpdateEntityModuleMapping: jest.fn().mockResolvedValue(undefined),
   getAllEntities: jest.fn().mockResolvedValue([]),
   getEntityByCharacterProfileId: jest.fn().mockResolvedValue(null),
   getEntityModuleMapping: jest.fn().mockResolvedValue(null),
   isProfilePersonaOwned: jest.fn().mockResolvedValue(false),
-  mintEntityId: jest.fn().mockResolvedValue('Mystery-20260905123514'),
   updateEntityFields: jest.fn().mockResolvedValue(undefined),
   // Typed error class mirrored from the real repo module (D33 instanceof).
   ReservedEntityNameError: class ReservedEntityNameError extends Error {
@@ -235,15 +316,15 @@ jest.mock('../../database/repositories/entities', () => ({
   },
 }));
 
-jest.mock('../../database/repositories/userEntities', () => ({
+jest.mock('../../services/engine/repositories/userEntities', () => ({
   getUserPersona: jest.fn().mockResolvedValue(null),
 }));
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   getActiveInteractionsByEntity: jest.fn().mockResolvedValue([]),
 }));
 
-jest.mock('../../database/repositories/modules', () => ({
+jest.mock('../../services/engine/repositories/modules', () => ({
   getAllCognitionConfigs: jest.fn().mockResolvedValue([]),
   getAllTTSConfigs: jest.fn().mockResolvedValue([]),
   getAllSTTConfigs: jest.fn().mockResolvedValue([]),
@@ -252,11 +333,6 @@ jest.mock('../../database/repositories/modules', () => ({
   getAllImaginationConfigs: jest.fn().mockResolvedValue([]),
   getAllMovementConfigs: jest.fn().mockResolvedValue([]),
   getAllBackendConfigs: jest.fn().mockResolvedValue([]),
-}));
-
-jest.mock('../../services/SyncService', () => ({
-  __esModule: true,
-  default: { initiateSync: jest.fn().mockResolvedValue(undefined), syncAndWait: jest.fn().mockResolvedValue(undefined) },
 }));
 
 jest.mock('../../services/ChatPreferencesService', () => ({
@@ -276,11 +352,23 @@ jest.mock('../../services/social/SocialService', () => ({
   setCharacterCreator: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { mintEntityId } from '../../database/repositories/entities';
-import { createCharacterProfile } from '../../database/repositories/characters';
+import { createEntity } from '../../services/engine/repositories/entities';
+import {
+  createCharacterProfile,
+  getCharacterProfile,
+} from '../../services/engine/repositories/characters';
+import {
+  getEntityByCharacterProfileId,
+  getEntityModuleMapping,
+} from '../../services/engine/repositories/entities';
+import { getAllBackendConfigs } from '../../services/engine/repositories/modules';
 
-const mockMint = mintEntityId as jest.Mock;
+const mockCreateEntity = createEntity as jest.Mock;
 const mockCreateProfile = createCharacterProfile as jest.Mock;
+const mockGetCharacterProfile = getCharacterProfile as jest.Mock;
+const mockGetEntityByProfile = getEntityByCharacterProfileId as jest.Mock;
+const mockGetMapping = getEntityModuleMapping as jest.Mock;
+const mockGetBackendConfigs = getAllBackendConfigs as jest.Mock;
 
 let mockRouteParams: any = {};
 
@@ -308,7 +396,15 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRouteParams = {};
-    mockMint.mockResolvedValue('Mystery-20260905123514');
+    mockCreateEntity.mockResolvedValue({
+      id: 'Mystery-20260905123514',
+      alias: 'Mystery',
+      entity_type: 'ai',
+      character_profile_id: 'profile-1',
+    });
+    mockGetCharacterProfile.mockResolvedValue(null);
+    mockGetEntityByProfile.mockResolvedValue(null);
+    mockGetMapping.mockResolvedValue(null);
   });
 
   it('shows the inline error and blocks submit for "deleted" (mint seam never reached)', async () => {
@@ -322,7 +418,7 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
     // D33: inline field error under the partner-name field — never an alert.
     expect(utils.getByTestId('create-ai-name-error')).toBeTruthy();
     expect(utils.getByText('nameReserved')).toBeTruthy();
-    expect(mockMint).not.toHaveBeenCalled();
+    expect(mockCreateEntity).not.toHaveBeenCalled();
     expect(mockCreateProfile).not.toHaveBeenCalled();
     expect(mockGoBack).not.toHaveBeenCalled();
     expect(mockShowAlert).not.toHaveBeenCalled();
@@ -337,7 +433,7 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
     await flush();
 
     expect(utils.getByTestId('create-ai-name-error')).toBeTruthy();
-    expect(mockMint).not.toHaveBeenCalled();
+    expect(mockCreateEntity).not.toHaveBeenCalled();
     expect(mockGoBack).not.toHaveBeenCalled();
     expect(mockShowAlert).not.toHaveBeenCalled();
   });
@@ -345,8 +441,8 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
   it('typed ReservedEntityNameError from the mint seam maps to the SAME inline error (belt-and-braces, never createFailed)', async () => {
     // The live pre-check passes (non-reserved name) but the seam rejects —
     // the residual-race / predicate-drift path.
-    mockMint.mockRejectedValue(
-      new (require('../../database/repositories/entities').ReservedEntityNameError)('Mystery'),
+    mockCreateEntity.mockRejectedValue(
+      new (require('../../services/engine/repositories/entities').ReservedEntityNameError)('Mystery'),
     );
 
     const utils = await renderScreen();
@@ -356,10 +452,12 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
     await fireEvent.press(utils.getByText('save'));
     await flush();
 
-    expect(mockMint).toHaveBeenCalledTimes(1);
+    expect(mockCreateEntity).toHaveBeenCalledTimes(1);
     expect(utils.getByTestId('create-ai-name-error')).toBeTruthy();
     expect(utils.getByText('nameReserved')).toBeTruthy();
-    expect(mockCreateProfile).not.toHaveBeenCalled();
+    // Create-then-use-response: the profile is created first; the entity
+    // rejection rolls it back so no orphan lingers.
+    expect(mockCreateProfile).toHaveBeenCalled();
     expect(mockGoBack).not.toHaveBeenCalled();
     expect(mockShowAlert).not.toHaveBeenCalled();
   });
@@ -372,9 +470,374 @@ describe('CreateAIScreen — reserved-name guard (D33)', () => {
     await fireEvent.press(utils.getByText('save'));
     await flush();
 
-    expect(mockMint).toHaveBeenCalledWith('Mystery');
+    expect(mockCreateEntity).toHaveBeenCalledWith(expect.objectContaining({ name: 'Mystery' }));
     expect(mockCreateProfile).toHaveBeenCalled();
     expect(utils.queryByTestId('create-ai-name-error')).toBeNull();
     expect(mockGoBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4-1 / 4-2 — i18n, identity card, header export, consolidated accordion
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CreateAIScreen — identity card & header export (4-1)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRouteParams = {};
+    mockGetCharacterProfile.mockResolvedValue(null);
+    mockGetEntityByProfile.mockResolvedValue(null);
+    mockGetMapping.mockResolvedValue(null);
+    mockGetBackendConfigs.mockResolvedValue([]);
+  });
+
+  it('renders translated section titles instead of raw i18n keys', async () => {
+    mockRouteParams = { editProfileId: 'profile-1' };
+    mockGetCharacterProfile.mockResolvedValue({ id: 'profile-1', name: 'Claire' });
+
+    const utils = await renderScreen();
+    await flush();
+
+    expect(utils.getByText('Identity')).toBeTruthy();
+    expect(utils.getByText('Character Card Sections')).toBeTruthy();
+    expect(utils.getByText('Persona & Prompts')).toBeTruthy();
+    expect(utils.getByText('Greetings')).toBeTruthy();
+    expect(utils.getByText('Lorebook')).toBeTruthy();
+    expect(utils.getByText('Gallery & Tags')).toBeTruthy();
+    expect(utils.getByText('AI Lifecycle & Attribution')).toBeTruthy();
+
+    // Regression: the pre-fix screen rendered raw keys (=> 'GREETINGSECTION').
+    expect(utils.queryByText('GREETINGSECTION')).toBeNull();
+    expect(utils.queryByText('nicknamePlaceholder')).toBeNull();
+  });
+
+  it('places Name and Nickname side-by-side in edit mode', async () => {
+    mockRouteParams = { editProfileId: 'profile-1' };
+    mockGetCharacterProfile.mockResolvedValue({ id: 'profile-1', name: 'Claire' });
+
+    const utils = await renderScreen();
+    await flush();
+
+    expect(utils.getByTestId('nickname-field')).toBeTruthy();
+    expect(utils.getByTestId('nickname-input')).toBeTruthy();
+    // One combined label row above the two-column grid.
+    expect(utils.getByText('Name * · Nickname')).toBeTruthy();
+    expect(utils.queryByText('Nickname')).toBeNull();
+  });
+
+  it('moves the Export trigger into the header and drops the mid-form card', async () => {
+    mockRouteParams = { editProfileId: 'profile-1' };
+    mockGetCharacterProfile.mockResolvedValue({ id: 'profile-1', name: 'Claire' });
+
+    const utils = await renderScreen();
+    await flush();
+
+    expect(utils.getByTestId('export-header-button')).toBeTruthy();
+    // The old standalone EXPORTCARD block is gone from the scroll body.
+    expect(utils.queryByTestId('export-card-button')).toBeNull();
+  });
+
+  it('does not render a header Export trigger in create mode', async () => {
+    const utils = await renderScreen();
+    await flush();
+
+    expect(utils.queryByTestId('export-header-button')).toBeNull();
+  });
+});
+
+describe('CreateAIScreen — Character Card Sections accordion (4-2)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRouteParams = { editProfileId: 'profile-1' };
+    mockGetCharacterProfile.mockResolvedValue({ id: 'profile-1', name: 'Claire' });
+    mockGetEntityByProfile.mockResolvedValue(null);
+    mockGetMapping.mockResolvedValue(null);
+    mockGetBackendConfigs.mockResolvedValue([]);
+  });
+
+  it('opens every section through its preserved toggle testID', async () => {
+    const utils = await renderScreen();
+    await flush();
+
+    // Persona & Prompts — starts collapsed (legacy alias also works).
+    expect(utils.queryByPlaceholderText('personalityPlaceholder')).toBeNull();
+    await fireEvent.press(utils.getByTestId('details-section-toggle'));
+    expect(utils.getByPlaceholderText('personalityPlaceholder')).toBeTruthy();
+
+    await fireEvent.press(utils.getByTestId('greeting-section-toggle'));
+    expect(utils.getByTestId('greeting-editor-section-mock')).toBeTruthy();
+    expect(utils.getByTestId('alternate-greetings-section-mock')).toBeTruthy();
+
+    await fireEvent.press(utils.getByTestId('lorebook-section-toggle'));
+    expect(utils.getByTestId('lorebook-section-mock')).toBeTruthy();
+
+    // Gallery & Tags is ONE combined section: the legacy tags toggle opens it
+    // too, showing the image picker followed by the tag editor.
+    await fireEvent.press(utils.getByTestId('tags-section-toggle'));
+    expect(utils.getByTestId('profile-image-picker-mock')).toBeTruthy();
+    expect(utils.getByTestId('tags-section-mock')).toBeTruthy();
+    // The combined header closes it again.
+    await fireEvent.press(utils.getByTestId('images-section-toggle'));
+    expect(utils.queryByTestId('profile-image-picker-mock')).toBeNull();
+    expect(utils.queryByTestId('tags-section-mock')).toBeNull();
+
+    // AI Lifecycle & Attribution is ONE combined section.
+    await fireEvent.press(utils.getByTestId('lifecycle-section-toggle'));
+    expect(utils.getByTestId('lifecycle-section-mock')).toBeTruthy();
+    expect(utils.getByTestId('attribution-section-mock')).toBeTruthy();
+    await fireEvent.press(utils.getByTestId('attribution-section-toggle'));
+    expect(utils.queryByTestId('lifecycle-section-mock')).toBeNull();
+    expect(utils.queryByTestId('attribution-section-mock')).toBeNull();
+  });
+
+  it('shows live summary pills for the collapsed rows', async () => {
+    const utils = await renderScreen();
+    await flush();
+
+    expect(utils.getByTestId('details-section-toggle-badge')).toBeTruthy();
+    expect(utils.getByTestId('greeting-section-toggle-badge')).toBeTruthy();
+    expect(utils.getByTestId('lorebook-section-toggle-badge')).toBeTruthy();
+    expect(utils.getByTestId('images-section-toggle-badge')).toBeTruthy();
+    expect(utils.getByTestId('lifecycle-section-toggle-badge')).toBeTruthy();
+
+    // Empty edit state → default/zero pills (no phantom counts). The chevron
+    // lives INSIDE each pill, so it is part of the text node.
+    expect(utils.getAllByText('Default ▾').length).toBe(2);
+    expect(utils.getByText('0 opening ▾')).toBeTruthy();
+    expect(utils.getByText('0 entries ▾')).toBeTruthy();
+    expect(utils.getByText('0 images · 0 tags ▾')).toBeTruthy();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4-3 — module wiring
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('CreateAIScreen — module wiring (4-3)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRouteParams = {};
+    mockGetCharacterProfile.mockResolvedValue(null);
+    mockGetEntityByProfile.mockResolvedValue(null);
+    mockGetMapping.mockResolvedValue(null);
+    mockGetBackendConfigs.mockResolvedValue([]);
+  });
+
+  it('renders the eight module selectors in one clean stack (expanded by default)', async () => {
+    const utils = await renderScreen();
+    await flush();
+
+    expect(utils.getByText('MODULE WIRING')).toBeTruthy();
+    // No noisy uppercase sub-group headers.
+    expect(utils.queryByText('CONVERSATION & COGNITION')).toBeNull();
+    expect(utils.queryByText('VOICE & SPEECH')).toBeNull();
+    expect(utils.queryByText('MEMORY, VISION & WORLD')).toBeNull();
+
+    for (const moduleType of [
+      'backend',
+      'cognition',
+      'tts',
+      'stt',
+      'rag',
+      'movement',
+      'vision',
+      'imagination',
+    ]) {
+      expect(utils.getByTestId(`module-selector-${moduleType}`)).toBeTruthy();
+    }
+  });
+
+  it('passes provider · model subtitles into the module config options', async () => {
+    mockGetBackendConfigs.mockResolvedValue([
+      {
+        id: 'b1',
+        name: 'Soulbits',
+        provider: 'soulbitscloud',
+        capability_json: '{"model":"qwen-35-9b"}',
+      },
+    ]);
+
+    const utils = await renderScreen();
+    await flush();
+
+    expect(
+      utils.getByText('Soulbits — Soulbits Cloud · qwen-35-9b'),
+    ).toBeTruthy();
+  });
+
+  it('wires the selected config so the label-row edit link is available', async () => {
+    mockRouteParams = { editProfileId: 'profile-1' };
+    mockGetCharacterProfile.mockResolvedValue({ id: 'profile-1', name: 'Claire' });
+    mockGetEntityByProfile.mockResolvedValue({ id: 'entity-1' });
+    mockGetMapping.mockResolvedValue({ backend_config_id: 'b1' });
+    mockGetBackendConfigs.mockResolvedValue([
+      {
+        id: 'b1',
+        name: 'Soulbits',
+        provider: 'soulbitscloud',
+        capability_json: '{"model":"qwen-35-9b"}',
+      },
+    ]);
+
+    const utils = await renderScreen();
+    await flush();
+
+    expect(utils.getByTestId('module-selected-backend')).toBeTruthy();
+    expect(utils.getByText('selected:b1')).toBeTruthy();
+    expect(utils.getByTestId('edit-module-config-backend')).toBeTruthy();
+  });
+
+  it('refetches the option lists on focus (back from ModuleConfigEdit)', async () => {
+    mockGetBackendConfigs.mockResolvedValueOnce([]);
+    mockFocusCallbacks.length = 0;
+
+    const utils = await renderScreen();
+    await flush();
+    // Mount focus load saw no backend options.
+    expect(utils.queryByTestId('module-option-backend-b2')).toBeNull();
+
+    // Saving/creating a config on the pushed ModuleConfigEdit screen does not
+    // remount this one — only a focus event gets us back to fresh data.
+    mockGetBackendConfigs.mockResolvedValue([
+      {
+        id: 'b2',
+        name: 'Fresh config',
+        provider: 'soulbitscloud',
+        capability_json: '{"model":"new-model"}',
+      },
+    ]);
+
+    await act(async () => {
+      mockFocusCallbacks.forEach(cb => cb());
+    });
+    await flush();
+
+    expect(utils.getByTestId('module-option-backend-b2')).toBeTruthy();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('countLorebookEntries', () => {
+  it('returns 0 for null / empty / invalid JSON', () => {
+    expect(countLorebookEntries(null)).toBe(0);
+    expect(countLorebookEntries('')).toBe(0);
+    expect(countLorebookEntries('null')).toBe(0);
+    expect(countLorebookEntries('{not json')).toBe(0);
+  });
+
+  it('counts the entries array (and tolerates a missing array)', () => {
+    expect(countLorebookEntries(JSON.stringify({ entries: [] }))).toBe(0);
+    expect(
+      countLorebookEntries(JSON.stringify({ entries: [{ content: 'a' }, { content: 'b' }] })),
+    ).toBe(2);
+    expect(countLorebookEntries(JSON.stringify({ extensions: {} }))).toBe(0);
+  });
+});
+
+describe('buildCardSectionBadges', () => {
+  const emptyState = {
+    personality: '',
+    voiceCharacteristics: '',
+    basePrompt: '',
+    scenario: '',
+    exampleDialogues: '',
+    postHistoryInstructions: '',
+    firstMes: '',
+    alternateGreetings: [] as string[],
+    characterBook: null as string | null,
+    imageCount: 0,
+    tags: [] as string[],
+    lifecycleConfig: {},
+    creatorName: '',
+  };
+
+  it('reports Default/zero pills for an empty card', () => {
+    expect(buildCardSectionBadges(emptyState)).toEqual({
+      persona: 'Default',
+      greetings: '0 opening',
+      lorebook: '0 entries',
+      galleryTags: '0 images · 0 tags',
+      lifecycleAttribution: 'Default',
+      images: '0 img',
+      tagsRow: '0 tags',
+      lifecycle: 'Default',
+      attribution: 'Default',
+    });
+  });
+
+  it('summarises a configured card', () => {
+    const badges = buildCardSectionBadges({
+      ...emptyState,
+      personality: 'Warm',
+      firstMes: 'Hi there',
+      alternateGreetings: ['Hello', 'Hey'],
+      characterBook: JSON.stringify({ entries: [{}, {}, {}] }),
+      imageCount: 2,
+      tags: ['fantasy', 'mentor', 'calm', 'kind'],
+      lifecycleConfig: { beat_interval: 1800 },
+      creatorName: 'Ada',
+    });
+
+    expect(badges.persona).toBe('Configured');
+    expect(badges.greetings).toBe('1 opening · 2 alt');
+    expect(badges.lorebook).toBe('3 entries');
+    expect(badges.galleryTags).toBe('2 images · 4 tags');
+    expect(badges.lifecycleAttribution).toBe('Custom');
+    expect(badges.images).toBe('2 img');
+    expect(badges.tagsRow).toBe('4 tags');
+    expect(badges.lifecycle).toBe('Custom');
+    expect(badges.attribution).toBe('Custom');
+  });
+
+  it('singularises a single lorebook entry and only counts non-empty values', () => {
+    const badges = buildCardSectionBadges({
+      ...emptyState,
+      characterBook: JSON.stringify({ entries: [{}] }),
+      lifecycleConfig: { autonomy_level: 0, beat_interval: 1800 },
+      creatorName: '   ',
+    });
+
+    expect(badges.lorebook).toBe('1 entry');
+    expect(badges.lifecycle).toBe('Custom');
+    expect(badges.attribution).toBe('Default');
+  });
+});
+
+describe('formatModuleConfigSubtitle', () => {
+  it('formats provider · model from a JSON-string capability overlay', () => {
+    expect(
+      formatModuleConfigSubtitle({
+        provider: 'soulbitscloud',
+        capability_json: '{"model":"qwen-35-9b"}',
+      }),
+    ).toBe('Soulbits Cloud · qwen-35-9b');
+  });
+
+  it('falls back to the provider label when no model is configured', () => {
+    expect(formatModuleConfigSubtitle({ provider: 'openai', capability_json: '{}' })).toBe(
+      'OpenAI',
+    );
+    expect(formatModuleConfigSubtitle({ provider: 'custom-provider' })).toBe('custom-provider');
+  });
+
+  it('formats both STT slots (transcription + VAD)', () => {
+    expect(
+      formatModuleConfigSubtitle({
+        transcription_provider: 'openai',
+        vad_provider: 'soulbitscloud',
+      }),
+    ).toBe('OpenAI + VAD: Soulbits Cloud');
+    expect(
+      formatModuleConfigSubtitle({ transcription_provider: 'openai', vad_provider: '' }),
+    ).toBe('OpenAI');
+  });
+
+  it('returns undefined when nothing is wired', () => {
+    expect(formatModuleConfigSubtitle({})).toBeUndefined();
+    expect(formatModuleConfigSubtitle({ provider: 'disabled' })).toBeUndefined();
+    expect(formatModuleConfigSubtitle({ capability_json: '{}' })).toBeUndefined();
   });
 });

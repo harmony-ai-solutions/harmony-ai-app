@@ -1,11 +1,11 @@
-# E2E Tests — HarmonyAIChat
+# E2E Tests — Soulbits
 
 ## Architecture
 
 ```
-┌───────────────────────── Docker network: harmony-e2e ──────────────────────────┐
+┌──────────────────────── Docker network: soulbits-e2e ──────────────────────────┐
 │                                                                                │
-│   harmony-link              android-emulator            maestro-runner          │
+│   soulbits-engine           android-emulator            maestro-runner          │
 │   (Go backend)              (budtmo/docker-android)     (custom image)         │
 │                                                                                │
 │   ┌─────────────┐          ┌──────────────────┐        ┌─────────────────┐    │
@@ -34,20 +34,20 @@
   - Linux: `/dev/kvm` must exist (`ls -la /dev/kvm`)
   - Windows: WSL2 + Docker Desktop — `/dev/kvm` is exposed by default (validated July 2026)
   - macOS: not supported — use the iOS E2E workflow instead
-- **Harmony Link image**: locally-built `soulbits/harmony-link:latest` (build from `harmony-link-private/Dockerfile.build`)
+- **Soulbits Engine image**: locally-built `soulbits/harmony-link:latest` (build from `harmony-link-private/Dockerfile`)
 - **Debug APK** built with E2E gradle properties (see Quick Start)
 
 ## Quick Start (Linux or WSL2 with KVM)
 
 ```bash
-# 1. Build the harmony-link image (one-time, rebuild after backend changes)
-cd harmony-link-private && docker build -f Dockerfile.build -t soulbits/harmony-link:latest .
+# 1. Build the Soulbits Engine image (one-time, rebuild after backend changes)
+cd harmony-link-private && docker build -t soulbits/harmony-link:latest .
 
 # 2. Build the debug APK with E2E gradle properties
 ./e2e/build-apk.sh
 # (Windows PowerShell: .\e2e\build-apk.ps1)
 
-# 3. Start the full stack (harmony-link + android-emulator + maestro-runner)
+# 3. Start the full stack (soulbits-engine + android-emulator + maestro-runner)
 docker compose -f e2e/docker-compose.yml up --abort-on-container-exit
 
 # 4. Check reports after run
@@ -59,12 +59,12 @@ ls e2e/reports/
 | Command | What it does |
 |---------|-------------|
 | `docker compose -f e2e/docker-compose.yml up --abort-on-container-exit` | Start everything; exits when Maestro finishes |
-| `docker compose -f e2e/docker-compose.yml up -d harmony-link android-emulator` | Start backend + emulator in background |
+| `docker compose -f e2e/docker-compose.yml up -d soulbits-engine android-emulator` | Start backend + emulator in background |
 | `docker compose -f e2e/docker-compose.yml up maestro-runner` | Re-run the full test suite (uses the service's built-in `command:` — stack must already be running) |
 | `docker compose -f e2e/docker-compose.yml run --rm maestro-runner maestro test /app/.maestro --include-tags smoke` | Run only smoke-tagged flows (uses `run` to override the service command) |
 | `docker compose -f e2e/docker-compose.yml run --rm maestro-runner maestro studio` | Open Maestro Studio for interactive flow authoring (uses `run` to override the service command) |
 
-> **`up` vs `run`:** Use `docker compose up maestro-runner` for the standard re-run — it attaches to the existing deployment and honours `depends_on` conditions (waits for harmony-link and android-emulator to be healthy). Use `docker compose run --rm` only when you need to **override** the service's default command (e.g. different Maestro flags, interactive studio).
+> **`up` vs `run`:** Use `docker compose up maestro-runner` for the standard re-run — it attaches to the existing deployment and honours `depends_on` conditions (waits for soulbits-engine and android-emulator to be healthy). Use `docker compose run --rm` only when you need to **override** the service's default command (e.g. different Maestro flags, interactive studio).
 
 ## CI Schedule
 
@@ -124,7 +124,7 @@ Open http://localhost:6080 in a browser while the stack is running.
 ### Tail logs
 
 ```bash
-docker compose -f e2e/docker-compose.yml logs harmony-link -f
+docker compose -f e2e/docker-compose.yml logs soulbits-engine -f
 docker compose -f e2e/docker-compose.yml logs android-emulator -f
 docker compose -f e2e/docker-compose.yml logs maestro-runner -f
 ```
@@ -135,7 +135,7 @@ docker compose -f e2e/docker-compose.yml logs maestro-runner -f
 docker compose -f e2e/docker-compose.yml up maestro-runner --force-recreate
 ```
 
-### Check Harmony Link health
+### Check Soulbits Engine health
 
 ```bash
 curl -f http://localhost:28080/health
@@ -159,7 +159,7 @@ This opens an interactive UI at http://localhost:8090 for recording flows agains
 
 WSL2 + nested KVM is widely reported to be slow and unreliable for Android emulation.
 The recommended approach for Windows is to run the Android emulator directly on the Windows host
-(via Android Studio), while Docker containers handle harmony-link and maestro-runner.
+(via Android Studio), while Docker containers handle soulbits-engine and maestro-runner.
 
 ### Setup
 
@@ -169,8 +169,8 @@ The recommended approach for Windows is to run the Android emulator directly on 
 adb -a -P 5037 nodaemon server
 adb devices   # confirm emulator is visible
 
-# 3. Start only harmony-link in Docker
-docker compose -f e2e/docker-compose.yml up -d harmony-link
+# 3. Start only soulbits-engine in Docker
+docker compose -f e2e/docker-compose.yml up -d soulbits-engine
 
 # 4. Run Maestro against the host emulator (overrides ADB_TARGET)
 docker compose -f e2e/docker-compose.yml run --rm ^
@@ -207,11 +207,9 @@ iOS E2E runs on macOS GitHub Actions runners.
 > validated end-to-end. See `docs/future-work.md` item #21.
 
 ```bash
-# Build the iOS Simulator .app with E2E gradle properties
-cd ios && xcodebuild \
-  -HARMONY_LINK_WSS_URL=wss://localhost:28443 \
-  -HARMONY_LINK_WS_URL=ws://localhost:28080 \
-  # (See .github/workflows/e2e-ios.yml for the full build invocation)
+# Build the iOS Simulator .app
+# (See .github/workflows/e2e-ios.yml for the full build invocation)
+cd ios && xcodebuild
 ```
 
 The same `e2e/.maestro/*.yaml` Maestro flows are reused for iOS.
@@ -220,17 +218,101 @@ Use Maestro's `platform:` filter for platform-specific steps.
 
 See `.current_work/test-framework-overhaul/6-6-IOSMacOSRunner.md` for full details.
 
-## Harmony Link Service
+## Soulbits Engine Service
 
 We use the **locally-built image** `soulbits/harmony-link:latest` (built from
-`harmony-link-private/Dockerfile.build`). The compose file sets `pull_policy: never`
-so Docker doesn't try to fetch it from a registry.
+`harmony-link-private/Dockerfile`). The compose file sets `pull_policy: never`
+so Docker doesn't try to fetch it from a registry — build it first (Quick Start).
+CI does the same: `.github/workflows/e2e-android.yml` checks out
+`harmony-link-private` and runs `docker build -t soulbits/harmony-link:latest .`.
 
 No separate Dockerfile.e2e is needed — the same image runs headless via `CMD ["disable-gui"]`
-and accepts configuration via `CLOUD_MODE=true` + `HL_*` environment variables.
+and accepts configuration via the engine's `SE_*` environment namespace
+(plan 7-13: `SE_WS_PORT`, `SE_WSS_PORT`, `SE_ADMIN_PORT`, `SE_DATA_DIR`,
+`SE_DATABASE_FILENAME`, `SE_DATABASE_ENCRYPTION`, `SE_ADMIN_API_KEY`). The old
+`HL_*` names were never read and the `HARMONY_LINK_*` prefix never mapped the
+nested config keys — both are gone.
 
-This mirrors the pattern from `soulbits-cloud-backend`'s `runHarmonyLinkContainer()` function.
-See `.current_work/test-framework-overhaul/6-2-HarmonyLinkService.md` for the full rationale.
+### Device approval (auth is unconditionally enforced)
+
+The engine has **no `CLOUD_MODE` bypass** any more (plan 7-13): the management
+API, the event WS and device approval are always enforced. A device that pairs
+with the engine registers as **PENDING** (`is_approved=0`) and cannot sync until
+it is approved. Approve it over the engine's admin API with the
+`X-Admin-API-Key` header (`SE_ADMIN_API_KEY`; the compose sets `e2e-admin`):
+
+```bash
+# List devices awaiting approval
+curl -s -H "X-Admin-API-Key: e2e-admin" \
+  http://localhost:28081/api/sync/devices/pending
+
+# Approve one by its device_id
+curl -s -X POST -H "X-Admin-API-Key: e2e-admin" \
+  http://localhost:28081/api/sync/devices/<device_id>/approve
+```
+
+`e2e/approve-pending-devices.sh` wraps both for convenience. The current
+`.maestro` suite only asserts the app boot path and never opens a sync session,
+so nothing registers as pending during a boot-only run — this step is required
+as soon as a pairing/sync flow is added under `e2e/.maestro/`.
+
+### E2E-only engine-URL override (how the app pairs with the container engine)
+
+A phone pairs with an authority engine via the changeset-v1 sync-client **LAN**
+transport: the app's embedded engine dials the peer, sends `HANDSHAKE_REQUEST`,
+registers PENDING, and syncs once a user approves (see above). The Docker stack
+exercises that same flow against the container `soulbits-engine` — the app's
+embedded engine is pointed at it by an **E2E-only, build-time** override:
+
+```
+gradle assembleDevRelease \
+  -PE2E_DEBUG_SIGNING=true \
+  -PE2E_ENGINE_PEER_WS_URL=10.0.2.2:28080 \
+  -PE2E_ENGINE_PEER_WSS_URL=10.0.2.2:28443
+```
+
+`10.0.2.2` is the Android emulator's alias for its host (the compose `socat`
+bridge forwards it to the `soulbits-engine` container — see `docker-compose.yml`).
+
+- The two `-P` values become BuildConfig fields that are declared **only** for
+  E2E builds (the `-PE2E_DEBUG_SIGNING` marker; see `android/app/build.gradle`),
+  so they are absent from normal dev/prod builds.
+- `src/services/engine/e2eEngineOverride.ts` reads them (react-native-config
+  reflects the app's whole BuildConfig class), and once the embedded engine is
+  ready it configures the sync client (`PUT /api/sync/client`, LAN transport,
+  `insecure-ssl` for the engine's self-signed cert). That is the **only** thing
+  the override does — the real device-approval handshake and JWT issuance run
+  unchanged engine-side. There is **no auth shortcut in the app**.
+- `-PE2E_DEBUG_SIGNING=true` without the two URL properties is harmless: the
+  fields resolve empty and the override is a no-op.
+
+**Precondition — the app must ship the engine sidecar.** The override configures
+the app's *embedded* engine; if the APK is engine-less (no
+`src/main/jniLibs/<abi>/libengine.so`), there is no engine to configure and the
+override is a silent no-op. `e2e/build-apk.sh` / `.ps1` do not vendor a sidecar
+by default (the engine release artifact is owner/CI-gated), so a full pairing
+run needs the sidecar pinned too, e.g.:
+
+```bash
+./gradlew assembleDevRelease \
+  -PE2E_DEBUG_SIGNING=true \
+  -PE2E_ENGINE_PEER_WS_URL=10.0.2.2:28080 \
+  -PE2E_ENGINE_PEER_WSS_URL=10.0.2.2:28443 \
+  -PENGINE_SIDECAR_ARTIFACTS_DIR=<dir-with-<abi>/libengine.so>   # or VERSION+BASE_URL
+```
+
+Manual pairing sequence (without a Maestro flow):
+
+```bash
+# 1. Stack up (engine + emulator), APK built with the flags above
+docker compose -f e2e/docker-compose.yml up -d soulbits-engine android-emulator
+# 2. Install + launch the E2E APK (maestro-runner does `adb install` then the smoke flow)
+docker compose -f e2e/docker-compose.yml up maestro-runner
+# 3. Once the app's engine is ready the override dials the container engine;
+#    the device registers PENDING. Approve it:
+./e2e/approve-pending-devices.sh
+# 4. Re-check on the app: Settings → Desktop Sync shows state "syncing"
+```
 
 ### Why no Dockerfile.e2e?
 
@@ -258,7 +340,7 @@ See `.current_work/test-framework-overhaul/6-4-SelfSignedTLSBootstrap.md` and
 All Maestro flows use placeholder UI selectors (e.g., `text: "Connected"`). These **must** be
 tuned against the real app UI before the flows can pass in CI. The recommended workflow:
 
-1. Start the stack: `docker compose -f e2e/docker-compose.yml up -d harmony-link android-emulator`
+1. Start the stack: `docker compose -f e2e/docker-compose.yml up -d soulbits-engine android-emulator`
 2. Open Maestro Studio: `docker compose run --rm maestro-runner maestro studio`
 3. Interactively record flows against the running emulator
 4. Export and replace the placeholder YAML files

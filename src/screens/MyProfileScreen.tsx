@@ -55,10 +55,10 @@ import { hapticLightPress } from '../utils/haptics';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { PersonaRow } from '../components/profile/PersonaRow';
 import { ProfileTabs, ProfileTabKey, ProfileTabDef } from '../components/profile/ProfileTabs';
-import { getUserCharacterProfiles } from '../database/repositories/characters';
+import { getUserCharacterProfiles } from '../database/repositories';
 import * as SocialService from '../services/social/SocialService';
 import type { StubPost } from '../services/social/SocialService';
-import { getUserEntities, Persona } from '../database/repositories/userEntities';
+import { getUserEntities, Persona } from '../database/repositories';
 import { CharacterProfile } from '../database/models';
 import ChatPreferencesService from '../services/ChatPreferencesService';
 import ProfileExtrasService from '../services/profile/ProfileExtrasService';
@@ -316,7 +316,7 @@ export const MyProfileScreen: React.FC = () => {
 
   if (!theme) return null;
 
-  // Icon-only tabs — Posts (grid) | Saved (bookmark) | Personas (user)
+  // Tabs with icon + small label — Posts (grid) | Favorites (bookmark) | Personas (user)
   const tabs: ProfileTabDef[] = [
     {
       key: 'posts',
@@ -328,7 +328,7 @@ export const MyProfileScreen: React.FC = () => {
       key: 'saved',
       icon: 'bookmark-outline',
       iconFocused: 'bookmark',
-      label: t('tabSaved'),
+      label: t('tabFavorites'),
     },
     {
       key: 'personas',
@@ -515,8 +515,13 @@ export const MyProfileScreen: React.FC = () => {
           </ThemedText>
         )}
 
-        {/* ── Tab bar — icon-only with active underline ── */}
-        <ProfileTabs active={activeTab} onChange={setActiveTab} tabs={tabs} />
+        {/* ── Tab bar — icons with small labels and active underline ── */}
+        <ProfileTabs
+          active={activeTab}
+          onChange={setActiveTab}
+          tabs={tabs}
+          showLabels
+        />
 
         {/* ── Content grid — 3-column media grid for the active tab ── */}
         <View style={styles.gridContent}>

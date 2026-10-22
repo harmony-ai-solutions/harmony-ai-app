@@ -2,7 +2,7 @@
  * Category Preferences Service
  *
  * Manages the user's CUSTOM character-category list using AsyncStorage
- * (key `@harmony_character_categories` — an array of `{id, name}`).
+ * (key `@soulbits_character_categories` — an array of `{id, name}`).
  *
  * This replaced the client-only categories sidecar table (O6):
  * category MEMBERSHIP is no longer stored in the DB at all — a profile
@@ -21,7 +21,7 @@ import { createLogger } from '../utils/logger';
 import { generateId } from '../utils/uuid';
 
 const log = createLogger('[CategoryPreferencesService]');
-const CATEGORIES_KEY = '@harmony_character_categories';
+const CATEGORIES_KEY = '@soulbits_character_categories';
 
 /** A user-defined character category (persisted in AsyncStorage). */
 export interface CharacterCategory {

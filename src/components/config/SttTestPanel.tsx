@@ -21,7 +21,7 @@
  *
  * Props: optional `enabled` (defaults true) and optional `entityId` (threaded by
  * edit-mode CreateAI, 5-1) — an explicit entity overrides persona resolution.
- * When offline it renders an informative "Connect to Harmony Link to test"
+ * When offline it renders an informative "Connect to Soulbits Engine to test"
  * state — it never fabricates a result.
  */
 
@@ -33,13 +33,10 @@ import { Buffer } from 'buffer';
 import { v7 as uuidv7 } from 'uuid';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useSyncConnection } from '../../contexts/SyncConnectionContext';
-// Base tint for the VAD timeline track (bar colors are inline via theme).
-const VAD_TRACK_TINT = 'rgba(127,127,127,0.2)';
 import { ThemedText } from '../themed/ThemedText';
-import { ThemedButton } from '../themed/ThemedButton';
 import AudioRecorder from '../../services/AudioRecorder';
 import ChatPreferencesService from '../../services/ChatPreferencesService';
-import { resolvePersonaId } from '../../database/repositories/userEntities';
+import { resolvePersonaId } from '../../database/repositories';
 import { runTest, ModuleTestSessionError } from '../../services/voiceInput/moduleTestSessionService';
 import { startAudioStream } from '../../services/streaming/streamingService';
 import type { AudioStreamHandle } from '../../services/streaming/types';
@@ -136,12 +133,15 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
   const [liveText, setLiveText] = useState('');
   const [liveListening, setLiveListening] = useState(false);
   const [recordingMs, setRecordingMs] = useState(0);
+  // Live AutoVAD (`STT_SPEECH_STARTED` / `STT_SPEECH_STOPPED`) state + segments.
+  const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [liveVadSegments, setLiveVadSegments] = useState<VadSegment[]>([]);
   const recordingStartRef = useRef(0);
+  const streamStartRef = useRef(0);
+  const vadStartRef = useRef<number | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamHandleRef = useRef<AudioStreamHandle | null>(null);
   const unsubPcmRef = useRef<(() => void) | null>(null);
-
-  if (!theme) return null;
 
   const isOffline = !isConnected;
   const isBusy = phase === 'recording' || phase === 'processing';
@@ -173,7 +173,37 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
   }, [entityId]);
 
   // ── Live test: open the streaming session, feed LIVE raw PCM from the mic ───
+  /**
+   * Handle one AutoVAD gate transition. `timestampMs` is the local receipt time;
+   * segments are tracked relative to the stream start so the timeline bars are
+   * meaningful regardless of wall-clock offsets.
+   */
+  const handleVoiceActivity = useCallback((speaking: boolean, timestampMs: number) => {
+    const start = streamStartRef.current || timestampMs;
+    const elapsed = Math.max(0, timestampMs - start);
+    if (speaking) {
+      if (vadStartRef.current === null) vadStartRef.current = elapsed;
+      setIsVoiceActive(true);
+      return;
+    }
+    setIsVoiceActive(false);
+    if (vadStartRef.current === null) return;
+    const segmentStart = vadStartRef.current;
+    vadStartRef.current = null;
+    setLiveVadSegments((prev) => [
+      ...prev,
+      { start_ms: segmentStart, end_ms: Math.max(segmentStart, elapsed) },
+    ]);
+  }, []);
+
   const startLive = useCallback(async () => {
+    // Start timestamp BEFORE opening the stream so early VAD events land
+    // relative to the true stream start.
+    streamStartRef.current = Date.now();
+    vadStartRef.current = null;
+    setLiveVadSegments([]);
+    setIsVoiceActive(false);
+
     const testEntityId = await resolveTestEntityId();
     // Open the engine stream session (STT_START_LISTEN) FIRST — the engine pulls
     // immediately, so the ring buffer's read-ahead wait holds until the mic feeds.
@@ -186,6 +216,7 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
       onTranscript: (transcript) => {
         setLiveText((prev) => (prev ? `${prev} ${transcript.text}` : transcript.text));
       },
+      onVoiceActivity: handleVoiceActivity,
       onError: (err) => log.error('Live stream error:', err),
     });
     streamHandleRef.current = handle;
@@ -196,9 +227,23 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
     setPhase('recording');
     setLiveListening(true);
     startTimer();
-  }, [resolveTestEntityId, startTimer]);
+  }, [resolveTestEntityId, startTimer, handleVoiceActivity]);
 
   const stopLive = useCallback(async () => {
+    // Close an utterance that was still active when the user stopped.
+    if (vadStartRef.current !== null) {
+      const segmentStart = vadStartRef.current;
+      vadStartRef.current = null;
+      const segmentEnd = Math.max(
+        segmentStart,
+        Date.now() - (streamStartRef.current || Date.now()),
+      );
+      setLiveVadSegments((prev) => [
+        ...prev,
+        { start_ms: segmentStart, end_ms: segmentEnd },
+      ]);
+    }
+    setIsVoiceActive(false);
     unsubPcmRef.current?.();
     unsubPcmRef.current = null;
     try {
@@ -223,6 +268,9 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
       setError(null);
       setResult(null);
       setLiveText('');
+      setLiveVadSegments([]);
+      setIsVoiceActive(false);
+      vadStartRef.current = null;
       if (mode === 'live') {
         await startLive();
       } else {
@@ -319,6 +367,8 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
     };
   }, []);
 
+  if (!theme) return null;
+
   // ── Offline state ──
   if (isOffline) {
     return (
@@ -337,133 +387,199 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
   }
 
   const bars = computeVadBars(result?.vad_segments ?? [], result?.duration_ms ?? 0);
+  // Live timeline: span the recorded duration (or the last segment end) so bars
+  // appear in real time, before the 1s recording tick.
+  const lastLiveSegmentEnd = liveVadSegments.reduce(
+    (max, segment) => Math.max(max, segment.end_ms),
+    0,
+  );
+  const liveBars = computeVadBars(
+    liveVadSegments,
+    Math.max(recordingMs, lastLiveSegmentEnd, 1),
+  );
 
   return (
     <View style={styles.wrapper}>
-      {/* ── Saved-config note (eventserver transport tests the SYNCED config) ── */}
-      <ThemedText size={12} variant="muted">
-        {t('usesSavedConfig')}
-      </ThemedText>
-
-      {/* ── Mode segmented control: Live test (primary) / Quick test ── */}
-      <View style={styles.modeSegmented}>
-        {(['live', 'quick'] as TestMode[]).map((m) => (
-          <TouchableOpacity
-            key={m}
-            style={[styles.modeSegment, mode === m && { backgroundColor: theme.colors.accent.primary }]}
-            onPress={() => {
-              if (phase !== 'recording' && phase !== 'processing') {
-                hapticLightPress();
-                setMode(m);
-                setError(null);
-                setResult(null);
-                setLiveText('');
-              }
-            }}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityState={{ selected: mode === m }}
-            testID={`stt-mode-${m}`}
-          >
-            <ThemedText
-              size={13}
-              weight="medium"
-              variant={mode === m ? 'primary' : 'secondary'}
-              style={mode === m ? styles.modeSegmentActiveText : undefined}
+      {/* ── Mode bar (Live AutoVAD / One-Shot) ── */}
+      <View style={styles.headerRow}>
+        <ThemedText size={10.5} style={styles.sectionLabel}>
+          Stream Mode
+        </ThemedText>
+        <View style={styles.modeSegmented}>
+          {(['live', 'quick'] as TestMode[]).map((m) => (
+            <TouchableOpacity
+              key={m}
+              style={[styles.modeSegment, mode === m ? styles.modeSegmentActive : null]}
+              onPress={() => {
+                if (phase !== 'recording' && phase !== 'processing') {
+                  hapticLightPress();
+                  setMode(m);
+                  setError(null);
+                  setResult(null);
+                  setLiveText('');
+                  setLiveVadSegments([]);
+                  setIsVoiceActive(false);
+                  vadStartRef.current = null;
+                }
+              }}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityState={{ selected: mode === m }}
+              testID={`stt-mode-${m}`}
             >
-              {m === 'live' ? t('liveTestLabel') : t('quickTestLabel')}
-            </ThemedText>
-          </TouchableOpacity>
-        ))}
+              <ThemedText
+                size={10}
+                style={mode === m ? styles.modeSegmentActiveText : styles.modeSegmentText}
+              >
+                {m === 'live' ? 'Live AutoVAD' : 'One-Shot'}
+              </ThemedText>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
-      <ThemedText size={12} variant="muted">
-        {mode === 'live' ? t('liveTestHint') : t('quickTestHint')}
-      </ThemedText>
 
-      {/* ── Record / Stop button ── */}
-      <View style={styles.actionsRow}>
-        <ThemedButton
-          label={
-            phase === 'recording'
-              ? t('stopButton')
-              : phase === 'processing'
-                ? t('processing')
-                : mode === 'live'
-                  ? t('liveRecordButton')
-                  : t('recordButton')
-          }
-          onPress={handlePress}
-          disabled={phase === 'processing' || !enabled}
-          icon={phase === 'recording' ? 'stop' : 'microphone'}
-          variant={phase === 'recording' ? 'outline' : 'primary'}
-          testID="stt-record-button"
-        />
-        {(phase === 'recording') && (
-          <ThemedText size={12} variant="muted" style={styles.duration}>
-            {Math.round(recordingMs / 1000)}s
+      {/* ── Dark AutoVAD status pill with glowing dot ── */}
+      {mode === 'live' ? (
+        <View testID="stt-live-vad-status" style={styles.vadPill}>
+          <View
+            style={[
+              styles.glowDot,
+              {
+                backgroundColor: isVoiceActive ? '#22C55E' : '#F59E0B',
+                shadowColor: isVoiceActive ? '#22C55E' : '#F59E0B',
+              },
+            ]}
+          />
+          <ThemedText
+            size={11}
+            numberOfLines={1}
+            style={[
+              styles.vadPillText,
+              { color: isVoiceActive ? '#4ADE80' : '#94A3B8' },
+            ]}
+          >
+            {isVoiceActive
+              ? 'STT_SPEECH_STARTED · Voice Detected'
+              : 'STT_SPEECH_STOPPED · Waiting for voice…'}
           </ThemedText>
-        )}
-        {phase === 'processing' && (
-          <ActivityIndicator size="small" color={theme.colors.accent.primary} />
-        )}
-        {phase === 'recording' && mode === 'live' && liveListening && (
-          <View style={styles.liveActivityRow}>
-            <Icon name="waveform" size={16} color={theme.colors.accent.primary} />
-            <ThemedText size={12} variant="accent">{t('liveListening')}</ThemedText>
-          </View>
-        )}
-      </View>
-
-      {/* ── Live result: accumulated live transcript (visible while streaming) ── */}
-      {(phase === 'recording' || phase === 'done') && mode === 'live' && (
-        <View style={styles.resultSection}>
-          <View style={styles.resultRow}>
-            <ThemedText size={13} variant="secondary">{t('liveTranscriptLabel')}</ThemedText>
-            <ThemedText size={14} weight="medium" style={styles.resultValue} testID="stt-live-transcript">
-              {liveText || t('emptyTranscript')}
+          {phase === 'recording' && liveListening ? (
+            <ThemedText size={9.5} style={styles.listeningText}>
+              {t('liveListening')}
             </ThemedText>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* ── Live VAD speech segments ── */}
+      {mode === 'live' ? (
+        <View style={styles.vadSection}>
+          <View style={styles.vadLabelRow}>
+            <ThemedText size={10.5} style={styles.vadLabel}>
+              Live VAD Speech Segments
+            </ThemedText>
+            <ThemedText size={10} style={styles.vadCount}>
+              {`${liveVadSegments.length} utterances`}
+            </ThemedText>
+          </View>
+          <View style={styles.vadTimeline} testID="stt-vad-timeline">
+            {liveBars.map((b, i) => (
+              <View
+                key={i}
+                testID={`stt-live-vad-bar-${i}`}
+                style={[
+                  styles.vadBar,
+                  { left: `${b.left}%`, width: `${b.width}%` },
+                ]}
+              />
+            ))}
           </View>
         </View>
-      )}
+      ) : null}
+
+      {/* ── Live transcript → dark `sh-textarea` box ── */}
+      {mode === 'live' ? (
+        <View style={styles.transcriptBox}>
+          <ThemedText size={9.5} style={styles.transcriptHint}>
+            [transcribed on speech stop]
+          </ThemedText>
+          <ThemedText size={11.5} style={styles.transcriptText} testID="stt-live-transcript">
+            {liveText || t('emptyTranscript')}
+          </ThemedText>
+        </View>
+      ) : null}
 
       {/* ── Quick result: transcript / duration / VAD bars ── */}
       {phase === 'done' && mode === 'quick' && result && (
         <View style={styles.resultSection}>
-          <View style={styles.resultRow}>
-            <ThemedText size={13} variant="secondary">{t('transcriptLabel')}</ThemedText>
-            <ThemedText size={14} weight="medium" style={styles.resultValue} testID="stt-transcript">
+          <View style={styles.transcriptBox}>
+            <ThemedText size={9.5} style={styles.transcriptHint}>
+              {`${result.duration_ms} ms · ${t('transcriptLabel')}`}
+            </ThemedText>
+            <ThemedText size={11.5} style={styles.transcriptText} testID="stt-transcript">
               {result.transcript || t('emptyTranscript')}
             </ThemedText>
           </View>
-          <View style={styles.resultRow}>
-            <ThemedText size={13} variant="secondary">{t('durationLabel')}</ThemedText>
-            <ThemedText size={13} variant="primary">{result.duration_ms} ms</ThemedText>
-          </View>
-
-          <View style={styles.resultRow}>
-            <ThemedText size={13} variant="secondary">{t('vadLabel')}</ThemedText>
-          </View>
-          {bars.length === 0 ? (
-            <ThemedText size={12} variant="muted">{t('noVadSegments')}</ThemedText>
-          ) : (
-            <View style={styles.vadTimeline} testID="stt-vad-timeline">
-              {bars.map((b, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.vadBar,
-                    {
-                      left: `${b.left}%`,
-                      width: `${b.width}%`,
-                      backgroundColor: theme.colors.accent.primary,
-                    },
-                  ]}
-                />
-              ))}
+          <View style={styles.vadSection}>
+            <View style={styles.vadLabelRow}>
+              <ThemedText size={10.5} style={styles.vadLabel}>
+                {t('vadLabel')}
+              </ThemedText>
             </View>
-          )}
+            {bars.length === 0 ? (
+              <ThemedText size={10.5} style={styles.emptyVadText}>
+                {t('noVadSegments')}
+              </ThemedText>
+            ) : (
+              <View style={styles.vadTimeline} testID="stt-vad-timeline">
+                {bars.map((b, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.vadBar,
+                      { left: `${b.left}%`, width: `${b.width}%` },
+                    ]}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
         </View>
       )}
+
+      {/* ── Start / Stop realtime stream ── */}
+      <TouchableOpacity
+        testID="stt-record-button"
+        onPress={handlePress}
+        disabled={phase === 'processing' || !enabled}
+        accessibilityRole="button"
+        style={[
+          styles.recordButton,
+          phase === 'recording' ? styles.recordButtonActive : null,
+          phase === 'processing' || !enabled ? styles.disabled : null,
+        ]}
+      >
+        {phase === 'processing' ? (
+          <ActivityIndicator size="small" color="#E879F9" />
+        ) : null}
+        <ThemedText
+          size={11.5}
+          numberOfLines={1}
+          style={phase === 'recording' ? styles.recordButtonActiveText : styles.recordButtonText}
+        >
+          {phase === 'recording'
+            ? `⏹ ${t('stopButton')}`
+            : phase === 'processing'
+              ? t('processing')
+              : mode === 'live'
+                ? `🎙️ ${t('liveRecordButton')}`
+                : `🎙️ ${t('recordButton')}`}
+        </ThemedText>
+        {phase === 'recording' && mode === 'live' ? (
+          <ThemedText size={10} style={styles.recordDuration}>
+            {`${Math.round(recordingMs / 1000)}s`}
+          </ThemedText>
+        ) : null}
+      </TouchableOpacity>
 
       {/* ── Error state ── */}
       {phase === 'error' && error && (
@@ -476,38 +592,132 @@ export const SttTestPanel: React.FC<SttTestPanelProps> = ({
 };
 
 const styles = StyleSheet.create({
-  wrapper: { gap: 12 },
-  actionsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  duration: { minWidth: 36 },
+  wrapper: { gap: 8 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  sectionLabel: {
+    flex: 1,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
   offlineRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   offlineText: { flex: 1 },
   modeSegmented: {
     flexDirection: 'row',
-    borderRadius: 10,
-    padding: 3,
-    gap: 3,
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(127,127,127,0.15)',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: '#070B14',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.16)',
+    borderRadius: 8,
+    padding: 2,
   },
   modeSegment: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
-  modeSegmentActiveText: {
-    color: '#FFFFFF',
+  modeSegmentActive: {
+    backgroundColor: 'rgba(232, 121, 249, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(232, 121, 249, 0.38)',
   },
-  liveActivityRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  resultSection: { gap: 10 },
-  resultRow: { gap: 4 },
-  resultValue: { lineHeight: 20 },
+  modeSegmentText: { color: '#64748B', fontWeight: '600' },
+  modeSegmentActiveText: { color: '#E879F9', fontWeight: '700' },
+
+  // ── AutoVAD status pill (`stt-live-vad-status`) ──
+  vadPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: 'rgba(7, 11, 20, 0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.16)',
+    borderRadius: 9,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  glowDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 999,
+    shadowOpacity: 0.9,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
+  },
+  vadPillText: { flex: 1, fontWeight: '700' },
+  listeningText: { color: '#E879F9', fontWeight: '600' },
+
+  // ── VAD timeline (`vad-track`) ──
+  vadSection: { gap: 5 },
+  vadLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  vadLabel: { color: '#CBD5E1', fontWeight: '600' },
+  vadCount: { color: '#4ADE80', fontWeight: '600' },
   vadTimeline: {
     flexDirection: 'row',
-    height: 16,
-    borderRadius: 4,
+    height: 20,
+    borderRadius: 6,
     overflow: 'hidden',
     position: 'relative',
-    backgroundColor: VAD_TRACK_TINT,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.16)',
+    backgroundColor: 'rgba(148, 163, 184, 0.14)',
   },
-  vadBar: { position: 'absolute', top: 0, bottom: 0, borderRadius: 2 },
+  vadBar: {
+    position: 'absolute',
+    top: 2,
+    bottom: 2,
+    borderRadius: 4,
+    backgroundColor: '#22C55E',
+    opacity: 0.85,
+  },
+  emptyVadText: { color: '#64748B' },
+
+  // ── Transcript (`sh-textarea`) ──
+  transcriptBox: {
+    backgroundColor: '#070B14',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.16)',
+    borderRadius: 9,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
+    gap: 3,
+    minHeight: 52,
+  },
+  transcriptHint: { color: '#64748B' },
+  transcriptText: { color: '#E2E8F0', lineHeight: 17 },
+  resultSection: { gap: 8 },
+
+  // ── Start / stop button (`btn-outline-dark`) ──
+  recordButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    width: '100%',
+    backgroundColor: 'rgba(15, 22, 38, 0.9)',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 9,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  recordButtonActive: {
+    backgroundColor: 'rgba(236, 72, 153, 0.14)',
+    borderColor: 'rgba(236, 72, 153, 0.5)',
+  },
+  recordButtonText: { color: '#E879F9', fontWeight: '600' },
+  recordButtonActiveText: { color: '#f472b6', fontWeight: '600' },
+  recordDuration: { color: '#94A3B8', fontWeight: '600' },
+  disabled: { opacity: 0.55 },
 });

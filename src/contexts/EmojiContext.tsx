@@ -28,9 +28,9 @@ import EmojiService from '../services/EmojiService';
 const log = createLogger('[EmojiContext]');
 
 // Storage keys
-const STORAGE_KEY_EMOJI_SET = '@harmony_emoji_set';
-const STORAGE_KEY_SKIN_TONE = '@harmony_emoji_skin_tone';
-const STORAGE_KEY_RECENT = '@harmony_emoji_recent';
+const STORAGE_KEY_EMOJI_SET = '@soulbits_emoji_set';
+const STORAGE_KEY_SKIN_TONE = '@soulbits_emoji_skin_tone';
+const STORAGE_KEY_RECENT = '@soulbits_emoji_recent';
 
 // Max recent emojis
 const MAX_RECENT_EMOJIS = 40;

@@ -53,6 +53,7 @@ const LOCAL_PORTS = {
   sessionBroker: 8080,
   conductProxy: 8085,
   inference: 8082,
+  syncRelay: 8093,
 };
 
 // ── Flavour detection ──────────────────────────────────────────────────
@@ -104,6 +105,14 @@ const INFERENCE_HOST = useLocal
   ? `http://${LOCAL_HOST}:${LOCAL_PORTS.inference}`
   : `https://${SUFFIX}api.soulbits.app`;
 
+// The SoulbitsCloud sync-relay WS endpoint (plan 7-1/7-3). The app normally
+// learns `relay_url` from the portal QR payload (7-4); this is only the
+// build-flavour default for the manual-entry fallback. The relay service is
+// distinct from the retired conduct proxy, hence its own host.
+const SYNC_RELAY_HOST = useLocal
+  ? `ws://${LOCAL_HOST}:${LOCAL_PORTS.syncRelay}`
+  : `wss://${SUFFIX}sync.soulbits.app`;
+
 // ── External hosts (backward-compatible export) ────────────────────────
 // `session` is the session-broker host — used as the Soulbits client's
 // `cloudURL` base for the `session.*` sub-API (POST /v1/session/connect &
@@ -123,10 +132,41 @@ export const WS_PATHS = {
   worker: '/ws/worker',
 };
 
+// ── Sync relay (SoulbitsCloud, plan 7-1/7-3) ───────────────────────────
+// The relay WS path is fixed; the URL normally arrives in the portal QR payload.
+export const SYNC_RELAY = {
+  wsPath: '/v1/sync/ws',
+  /** Build-flavour default for the manual-entry fallback. */
+  defaultRelayUrl: `${SYNC_RELAY_HOST}/v1/sync/ws`,
+  /**
+   * The hosted-backup REST base (plan 7-5): the same sync-relay service that
+   * serves `/v1/sync/ws` also serves the backup blob routes
+   * (`/v1/backup/objects/{sha256}`, `/v1/backup/manifest/{device}`) and
+   * `/v1/sync/status`. Derived from the relay host (wss→https).
+   */
+  backupBaseUrl: SYNC_RELAY_HOST.replace(/^ws/, 'http'),
+};
+
 // ── OAuth identifiers ──────────────────────────────────────────────────
 export const OAUTH = {
   googleWebClientId: GOOGLE_WEB_CLIENT_ID,
   appleServicesId: APPLE_SERVICES_ID,
+};
+
+// ── Release manifests (plan 7-10 §1; per-channel since 2026-10-17) ─────
+// Static JSON on the existing CloudFront download hosts (no new service). The
+// engine workflow writes `engine/latest.json`; the app's `publish-manifest` job
+// writes one manifest PER CHANNEL — `app/dev/latest.json` and
+// `app/prod/latest.json` — so a dev dispatch is never visible to prod installs.
+// A build reads ONLY its own channel's file, derived from APP_ENV (identical to
+// {@link APP_ENVIRONMENT.env}); absolute URLs become a de-facto public contract
+// (owner sign-off).
+export const RELEASES = {
+  baseUrl: 'https://download.soulbits.app',
+  engineManifestUrl: 'https://download.soulbits.app/engine/latest.json',
+  appManifestUrl: `https://download.soulbits.app/app/${
+    APP_ENV === 'dev' ? 'dev' : 'prod'
+  }/latest.json`,
 };
 
 // ── Environment metadata ───────────────────────────────────────────────
@@ -160,4 +200,10 @@ export const AUTH_ENDPOINTS = {
   apple: `${AUTH_HOST}/v1/auth/apple`,
   me: `${AUTH_HOST}/v1/auth/me`,
   resendVerification: `${AUTH_HOST}/v1/auth/resend-verification`,
+  /**
+   * Delegated device enrollment (plan 7-15 E2): exchange a single-use desktop-
+   * issued grant for this device's OWN cloud session. Returns exactly the login
+   * `TokenResponse` shape (401 `enrollment_grant_invalid` on replay/expiry).
+   */
+  deviceEnroll: `${AUTH_HOST}/v1/auth/device/enroll`,
 };

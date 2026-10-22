@@ -101,7 +101,7 @@ async function resolveEngineConnection(): Promise<{ url: string; mode: string }>
       ? (await ConnectionStateManager.getWSUrl()) ?? ''
       : (await ConnectionStateManager.getWSSUrl()) ?? '';
   if (!url) {
-    throw new ModuleTestSessionError('Not connected to Harmony Link');
+    throw new ModuleTestSessionError('Not connected to Soulbits Engine');
   }
   return { url, mode };
 }

@@ -27,24 +27,23 @@ import {
   setEntityDisabled,
   getDisabledEntityIds,
   ReservedEntityNameError,
-} from '../database/repositories/entities';
-import { resolvePersonaId } from '../database/repositories/userEntities';
+} from '../database/repositories';
+import { resolvePersonaId } from '../database/repositories';
 import {
   getPhoneConversationsPage,
   PhoneConversationPageRow,
   getLastInteractionMessage,
   deriveScopeFromParticipants,
   deriveParticipantKey,
-} from '../database/repositories/interactions';
+} from '../database/repositories';
 import {
   getPrimaryImage,
   getCharacterProfile,
   imageToDataURL,
   ChatPickerRow,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
-import SyncService from '../services/SyncService';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import ChatPreferencesService, { ChatReplyMode } from '../services/ChatPreferencesService';
 import EntitySessionService from '../services/EntitySessionService';
@@ -55,21 +54,23 @@ import { HeaderMenuButton } from '../components/navigation/HeaderMenuButton';
 import { HeaderNotificationButton } from '../components/navigation/HeaderNotificationButton';
 import { ChatPartnerPickerModal } from '../components/chat/ChatPartnerPickerModal';
 import { openCharacterChat } from '../services/CharacterChatService';
+import { getLockedEntityIds } from '../services/variant/entityAccess';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { createLogger } from '../utils/logger';
+import { copyAppDiagnosticsWithToast } from '../services/diagnostics/appDiagnostics';
 import {
   getChatConversationSettingsBatch,
   setConversationPinned,
   setConversationArchived,
   getReplyMode,
   setReplyMode,
-} from '../database/repositories/chatConversationSettings';
+} from '../database/repositories';
 import {
   deleteConversationByParticipantKey,
   markConversationMessagesRead,
   markConversationMessagesUnread,
   getUnreadCountByParticipantKeys,
-} from '../database/repositories/conversation_messages';
+} from '../database/repositories';
 import {
   ChatConversationMenuModal,
   ChatConversationMenuState,
@@ -130,8 +131,11 @@ function sortListItems(items: ChatListItem[]): ChatListItem[] {
 export function resolveDisplayUnreadCount(
   derivedCount: number,
   muted: boolean,
+  locked = false,
 ): number {
-  return muted ? 0 : derivedCount;
+  // A store-locked entity is not interactable, so its unread badge must never
+  // imply an actionable unread (plan 7-14 V3) — treated like mute for display.
+  return muted || locked ? 0 : derivedCount;
 }
 
 /**
@@ -145,7 +149,17 @@ export function shouldReloadAfterSync(tables: string[]): boolean {
   return tables.includes('conversation_messages') || tables.includes('chat_conversation_settings');
 }
 
-interface ChatListItem {
+/**
+ * Whether the bottom-right `+` (New Chat) FAB should render. The FAB opens the
+ * character picker and mints a conversation, both of which need a usable engine
+ * connection — while `!canUseChat` the screen is showing the engine-starting
+ * empty state, so an actionable FAB would only lead to a dead end.
+ */
+export function shouldShowNewChatFab(canUseChat: boolean): boolean {
+  return canUseChat;
+}
+
+export interface ChatListItem {
   interactionId: string;
   entityId: string;
   characterId: string | null;
@@ -154,6 +168,11 @@ interface ChatListItem {
   lastMessageSender: string;
   lastMessageTime: Date | null;
   avatarUri: string | null;
+  /**
+   * Profile whose primary image backs `avatarUri`. Hydration happens AFTER the
+   * first paint (see {@link hydrateListAvatars}) so rows render immediately.
+   */
+  avatarProfileId?: string | null;
   participantKey: string;
   participantIds: string[];
   isGroup: boolean;
@@ -164,6 +183,9 @@ interface ChatListItem {
   archived: boolean;
   muted: boolean;
   disabled: boolean;
+  // Store-variant runtime lock (plan 7-14 V3): the entity remains VISIBLE but
+  // is not interactable (greyed + lock affordance, distinct from `disabled`).
+  locked: boolean;
   unreadCount: number;
 }
 
@@ -176,6 +198,59 @@ const getEntityDisplayName = (
   if (characterProfileName) return characterProfileName;
   return entityId;
 };
+
+/**
+ * Fill `avatarUri` on already-rendered rows, in parallel and deduped by
+ * profile id. Called as a SECOND phase after the list has painted, so the
+ * first paint never waits on avatars. Multiple rows for one profile share one
+ * avatar lookup; `resolveAvatar` is injectable for tests.
+ *
+ * `onAvatarResolved` fires per profile the moment its avatar lands, letting the
+ * screen paint each row as it arrives instead of waiting for the whole batch.
+ */
+export async function hydrateListAvatars(
+  items: ChatListItem[],
+  resolveAvatar: (profileId: string) => Promise<string | null> = async profileId => {
+    const image = await getPrimaryImage(profileId);
+    return image ? imageToDataURL(image) : null;
+  },
+  onAvatarResolved?: (profileId: string, avatarUri: string | null) => void,
+): Promise<ChatListItem[]> {
+  const profileIds = [
+    ...new Set(
+      items
+        .filter(item => !item.avatarUri && item.avatarProfileId)
+        .map(item => item.avatarProfileId as string),
+    ),
+  ];
+  if (profileIds.length === 0) return items;
+
+  const resolved = await Promise.all(
+    profileIds.map(async profileId => {
+      let avatarUri: string | null = null;
+      try {
+        avatarUri = await resolveAvatar(profileId);
+      } catch {
+        avatarUri = null;
+      }
+      if (onAvatarResolved) {
+        try {
+          onAvatarResolved(profileId, avatarUri);
+        } catch {
+          // A progressive-update callback must never break the batch.
+        }
+      }
+      return [profileId, avatarUri] as const;
+    }),
+  );
+  const avatarByProfile = new Map(resolved);
+
+  return items.map(item => {
+    if (item.avatarUri || !item.avatarProfileId) return item;
+    const avatarUri = avatarByProfile.get(item.avatarProfileId) ?? null;
+    return avatarUri ? { ...item, avatarUri } : item;
+  });
+}
 
 // Tab-screen navigation: routes are dispatched to the parent root stack.
 // Using 'any' here avoids CompositeNavigationProp boilerplate while
@@ -244,14 +319,26 @@ export const ChatListScreen: React.FC = () => {
       activeEntityId: string,
       rows: PhoneConversationPageRow[],
       filteredIds: Set<string>,
+      lockedIds: Set<string>,
     ): Promise<ChatListItem[]> => {
       // Get all entities for display info lookups
       const entities = await getAllEntities();
       const entityMap = new Map(entities.map(e => [e.id, e]));
 
-      const listItems: ChatListItem[] = [];
       const seenPrivateKeys = new Set<string>(); // For deduping private interactions per D-01
 
+      interface PlannedRow {
+        row: PhoneConversationPageRow;
+        participantIds: string[];
+        participantKey: string;
+        scope: string;
+        /** Private scope only — the non-impersonated participant. */
+        partnerEntityId?: string;
+      }
+
+      // Phase A — synchronous planning: dedupe, scope and blocked/deleted
+      // filtering. No network calls here, so the row set is known immediately.
+      const plans: PlannedRow[] = [];
       for (const row of rows) {
         let participantIds: string[];
         try {
@@ -284,143 +371,186 @@ export const ChatListScreen: React.FC = () => {
           // (pair) interactions — group chats handle missing members by name.
           if (!entityMap.has(partnerEntityId)) continue;
 
-          const entity = entityMap.get(partnerEntityId);
-
-          // Get last message preview per D-25
-          const lastMsg = await getLastInteractionMessage(activeEntityId, participantKey);
-
-          // Determine who sent the last message
-          let lastMessageSender = '';
-          if (lastMsg) {
-            if (lastMsg.sender_entity_id === activeEntityId) {
-              lastMessageSender = t('you');
-            } else {
-              lastMessageSender = partnerEntityId;
-              if (entity?.character_profile_id) {
-                const profile = await getCharacterProfile(entity.character_profile_id);
-                if (profile) {
-                  lastMessageSender = profile.name;
-                }
-              }
-            }
-          }
-
-          // Get character profile and avatar
-          let avatarUri: string | null = null;
-          let characterProfileName: string | null = null;
-          if (entity?.character_profile_id) {
-            const profile = await getCharacterProfile(entity.character_profile_id);
-            characterProfileName = profile?.name ?? null;
-            const primaryImage = await getPrimaryImage(entity.character_profile_id);
-            if (primaryImage) {
-              avatarUri = imageToDataURL(primaryImage);
-            }
-          }
-
-          const characterName = getEntityDisplayName(
-            entity?.alias ?? null,
-            characterProfileName,
-            partnerEntityId,
-          );
-
-          // Use the most recent interactionId for this participant_key
-          listItems.push({
-            interactionId: row.interactionId,
-            entityId: partnerEntityId,
-            characterId: entity?.character_profile_id ?? null,
-            characterName,
-            lastMessage: lastMsg?.content || t('noMessagesYet'),
-            lastMessageSender,
-            lastMessageTime: lastMsg?.created_at || null,
-            avatarUri,
-            participantKey,
-            participantIds,
-            isGroup: false,
-            // pin/archived filled in below from the settings batch; mute/
-            // disabled from the partner ENTITY flags (Q8); unread derived.
-            pinned: false,
-            archived: false,
-            muted: entity?.is_muted === 1,
-            disabled: entity?.is_disabled === 1,
-            unreadCount: 0,
-          });
+          plans.push({ row, participantIds, participantKey, scope, partnerEntityId });
         } else if (scope === 'group') {
-          // Group interactions: one entry per participant set per D-01 (the
-          // page query already dedupes by participant_key).
-
           // F5: skip group conversations containing a blocked participant.
           if (participantIds.some(id => filteredIds.has(id))) continue;
-
-          // Get last message preview
-          const lastMsg = await getLastInteractionMessage(activeEntityId, participantKey);
-
-          // Build display name from participant names per D-12
-          const otherParticipantIds = participantIds.filter(id => id !== activeEntityId);
-          const displayNames: string[] = [];
-          let avatarUri: string | null = null;
-
-          for (const pid of otherParticipantIds) {
-            const entity = entityMap.get(pid);
-            if (entity?.character_profile_id) {
-              const profile = await getCharacterProfile(entity.character_profile_id);
-              if (profile) {
-                displayNames.push(profile.name);
-                continue;
-              }
-            }
-            displayNames.push(pid);
-          }
-
-          // Try to get avatar from first participant
-          const firstEntity = otherParticipantIds.length > 0 ? entityMap.get(otherParticipantIds[0]) : null;
-          if (firstEntity?.character_profile_id) {
-            const primaryImage = await getPrimaryImage(firstEntity.character_profile_id);
-            if (primaryImage) {
-              avatarUri = imageToDataURL(primaryImage);
-            }
-          }
-
-          const groupName = displayNames.join(', ');
-
-          listItems.push({
-            interactionId: row.interactionId,
-            entityId: '', // No single partner for groups
-            characterId: null,
-            characterName: groupName,
-            lastMessage: lastMsg?.content || t('noMessagesYet'),
-            lastMessageSender: '',
-            lastMessageTime: lastMsg?.created_at || null,
-            avatarUri,
-            participantKey,
-            participantIds,
-            isGroup: true,
-            // Groups have no single partner entity — mute/disable flags are
-            // not applicable. pin/archived/unread filled in below.
-            pinned: false,
-            archived: false,
-            muted: false,
-            disabled: false,
-            unreadCount: 0,
-          });
+          plans.push({ row, participantIds, participantKey, scope });
         }
       }
 
-      // Merge per-conversation pin/archive state from the settings batch.
-      const keys = listItems.map(item => item.participantKey);
-      const settingsMap = await getChatConversationSettingsBatch(keys);
-      // Derive unread counts from conversation_messages.is_read, scoped to this
-      // POV entity (A2) — the badge is no longer a stored counter.
-      const unreadMap = await getUnreadCountByParticipantKeys(keys, activeEntityId);
-      for (const item of listItems) {
-        const settings = settingsMap.get(item.participantKey);
-        if (settings) {
+      // Phase B — hydrate previews + profile names IN PARALLEL. Rows from
+      // `getPhoneConversationsPage` are already hydrated by the engine's
+      // chat-list (`lastMessage`, `pinned`, `archived`, `unreadCount`), so the
+      // only reads left are the legacy fallbacks for hand-built rows. Avatars
+      // are deliberately NOT fetched here: they are filled by
+      // `hydrateListAvatars()` after the first paint.
+      const missingSettingsKeys: string[] = [];
+      const missingUnreadKeys: string[] = [];
+      const noteMissingHydration = (row: PhoneConversationPageRow, key: string) => {
+        if (row.pinned === undefined || row.archived === undefined) missingSettingsKeys.push(key);
+        if (row.unreadCount === undefined) missingUnreadKeys.push(key);
+      };
+
+      const listItems: ChatListItem[] = await Promise.all(
+        plans.map(async plan => {
+          const { row, participantIds, participantKey, scope } = plan;
+
+          if (scope === 'private') {
+            const partnerEntityId = plan.partnerEntityId as string;
+            const entity = entityMap.get(partnerEntityId);
+            const characterProfileId = entity?.character_profile_id ?? null;
+            // `GET /api/entities` embeds the linked profile's name — a per-row
+            // `GET /api/character-profiles/:id` is only needed when it is absent.
+            const embeddedName = entity?.character_profile_name || null;
+
+            const [lastMsg, profile] = await Promise.all([
+              // Pre-hydrated rows carry the last message — skip `/messages`.
+              row.lastMessage !== undefined
+                ? Promise.resolve(row.lastMessage)
+                : getLastInteractionMessage(activeEntityId, participantKey),
+              characterProfileId && !embeddedName
+                ? getCharacterProfile(characterProfileId)
+                : Promise.resolve(null),
+            ]);
+            const profileName = embeddedName || profile?.name || null;
+
+            // Determine who sent the last message
+            let lastMessageSender = '';
+            if (lastMsg) {
+              if (lastMsg.sender_entity_id === activeEntityId) {
+                lastMessageSender = t('you');
+              } else {
+                lastMessageSender = profileName ?? partnerEntityId;
+              }
+            }
+
+            const characterName = getEntityDisplayName(
+              entity?.alias ?? null,
+              profileName,
+              partnerEntityId,
+            );
+
+            const muted = entity?.is_muted === 1;
+            const locked = lockedIds.has(partnerEntityId);
+
+            const item: ChatListItem = {
+              interactionId: row.interactionId,
+              entityId: partnerEntityId,
+              characterId: characterProfileId,
+              characterName,
+              lastMessage: lastMsg?.content || t('noMessagesYet'),
+              lastMessageSender,
+              lastMessageTime: lastMsg?.created_at || null,
+              avatarUri: null,
+              avatarProfileId: characterProfileId,
+              participantKey,
+              participantIds,
+              isGroup: false,
+              // pin/archive/unread come straight off the chat-list row; mute/
+              // disabled are partner ENTITY flags (Q8).
+              pinned: row.pinned ?? false,
+              archived: row.archived ?? false,
+              muted,
+              disabled: entity?.is_disabled === 1,
+              locked,
+              unreadCount:
+                row.unreadCount !== undefined
+                  ? resolveDisplayUnreadCount(row.unreadCount, muted, locked)
+                  : 0,
+            } satisfies ChatListItem;
+            noteMissingHydration(row, participantKey);
+            return item;
+          }
+
+          // Group interactions: one entry per participant set per D-01.
+          const lastMsg =
+            row.lastMessage !== undefined
+              ? row.lastMessage
+              : await getLastInteractionMessage(activeEntityId, participantKey);
+          const otherParticipantIds = participantIds.filter(id => id !== activeEntityId);
+          const displayNames = await Promise.all(
+            otherParticipantIds.map(async pid => {
+              const entity = entityMap.get(pid);
+              // Entity rows already carry the display label (alias, then the
+              // linked profile's name) — only fall back to a profile read.
+              const embeddedName = entity?.alias || entity?.character_profile_name;
+              if (embeddedName) return embeddedName;
+              if (entity?.character_profile_id) {
+                const profile = await getCharacterProfile(entity.character_profile_id);
+                if (profile) return profile.name;
+              }
+              return pid;
+            }),
+          );
+
+          // The group avatar comes from its first non-self participant.
+          const firstEntity =
+            otherParticipantIds.length > 0 ? entityMap.get(otherParticipantIds[0]) : null;
+
+          const item: ChatListItem = {
+            interactionId: row.interactionId,
+            entityId: '', // No single partner for groups
+            characterId: null,
+            characterName: displayNames.join(', '),
+            lastMessage: lastMsg?.content || t('noMessagesYet'),
+            lastMessageSender: '',
+            lastMessageTime: lastMsg?.created_at || null,
+            avatarUri: null,
+            avatarProfileId: firstEntity?.character_profile_id ?? null,
+            participantKey,
+            participantIds,
+            isGroup: true,
+            // Groups have no single partner entity — mute/disable/lock flags
+            // are not applicable. pin/archived/unread come from the row.
+            pinned: row.pinned ?? false,
+            archived: row.archived ?? false,
+            muted: false,
+            disabled: false,
+            locked: false,
+            unreadCount:
+              row.unreadCount !== undefined
+                ? resolveDisplayUnreadCount(row.unreadCount, false, false)
+                : 0,
+          } satisfies ChatListItem;
+          noteMissingHydration(row, participantKey);
+          return item;
+        }),
+      );
+
+      // Legacy/partial rows only: hand-built rows that carry no pre-hydrated
+      // pin/archive/unread still get the batched reads. A real page carries
+      // every field, so BOTH batches are skipped (no extra HTTP requests).
+      if (missingSettingsKeys.length > 0) {
+        const wanted = new Set(missingSettingsKeys);
+        const settingsMap = await getChatConversationSettingsBatch(
+          missingSettingsKeys,
+          activeEntityId,
+        );
+        for (const item of listItems) {
+          if (!wanted.has(item.participantKey)) continue;
+          const settings = settingsMap.get(item.participantKey);
+          if (!settings) continue;
           item.pinned = settings.pinned;
           item.archived = settings.archived;
         }
-        item.unreadCount = resolveDisplayUnreadCount(
-          unreadMap.get(item.participantKey) ?? 0,
-          item.muted,
+      }
+      if (missingUnreadKeys.length > 0) {
+        const wanted = new Set(missingUnreadKeys);
+        // Derive unread counts from conversation_messages.is_read, scoped to
+        // this POV entity (A2) — the badge is no longer a stored counter.
+        const unreadMap = await getUnreadCountByParticipantKeys(
+          missingUnreadKeys,
+          activeEntityId,
         );
+        for (const item of listItems) {
+          if (!wanted.has(item.participantKey)) continue;
+          item.unreadCount = resolveDisplayUnreadCount(
+            unreadMap.get(item.participantKey) ?? 0,
+            item.muted,
+            item.locked,
+          );
+        }
       }
 
       return listItems;
@@ -436,17 +566,64 @@ export const ChatListScreen: React.FC = () => {
    */
   const loadFilteredEntityIds = useCallback(async (): Promise<Set<string>> => {
     const filtered = new Set<string>();
-    try {
-      (await getBlockedUserIds()).forEach(id => filtered.add(id));
-    } catch (error) {
-      log.warn('Failed to load blocked users — chat list filter skipped:', error);
-    }
-    try {
-      (await getDisabledEntityIds()).forEach(id => filtered.add(id));
-    } catch (error) {
-      log.warn('Failed to load disabled entities — chat list filter skipped:', error);
-    }
+    // Both reads are independent, synchronous-ish lookups — issue them together
+    // instead of paying two round-trips one after the other.
+    const [blocked, disabled] = await Promise.all([
+      getBlockedUserIds().catch(error => {
+        log.warn('Failed to load blocked users — chat list filter skipped:', error);
+        return new Set<string>();
+      }),
+      getDisabledEntityIds().catch(error => {
+        log.warn('Failed to load disabled entities — chat list filter skipped:', error);
+        return [] as string[];
+      }),
+    ]);
+    blocked.forEach(id => filtered.add(id));
+    disabled.forEach(id => filtered.add(id));
     return filtered;
+  }, []);
+
+  /**
+   * Second paint pass: fill avatars for the rows already on screen. Updates the
+   * live list by participant key (so a concurrent live message update is not
+   * clobbered) and re-sorts only if nothing structural changed.
+   */
+  const applyResolvedAvatars = useCallback(async (base: ChatListItem[]) => {
+    if (!base.some(item => item.avatarProfileId)) return;
+    try {
+      // Progressive pass: each avatar paints the moment its profile resolves.
+      const paintResolved = (profileId: string, avatarUri: string | null) => {
+        if (!avatarUri) return;
+        let changed = false;
+        const next = chatListRef.current.map(item => {
+          if (item.avatarUri || item.avatarProfileId !== profileId) return item;
+          changed = true;
+          return { ...item, avatarUri };
+        });
+        if (!changed) return;
+        chatListRef.current = next;
+        setChatList(next.filter(item => !item.archived));
+        setArchivedList(next.filter(item => item.archived));
+      };
+
+      const hydrated = await hydrateListAvatars(base, undefined, paintResolved);
+      const avatarByKey = new Map(hydrated.map(item => [item.participantKey, item.avatarUri]));
+      let changed = false;
+      const merged = sortListItems(
+        chatListRef.current.map(item => {
+          const avatarUri = avatarByKey.get(item.participantKey);
+          if (!avatarUri || item.avatarUri) return item;
+          changed = true;
+          return { ...item, avatarUri };
+        }),
+      );
+      if (!changed) return;
+      chatListRef.current = merged;
+      setChatList(merged.filter(item => !item.archived));
+      setArchivedList(merged.filter(item => item.archived));
+    } catch (error) {
+      log.warn('Failed to hydrate chat-list avatars:', error);
+    }
   }, []);
 
   /**
@@ -458,17 +635,24 @@ export const ChatListScreen: React.FC = () => {
   const loadChatList = useCallback(
     async (activeEntityId: string) => {
       try {
-        const filteredIds = await loadFilteredEntityIds();
-
         listPageRef.current = 0;
         listHasMoreRef.current = true;
 
-        const rows = await getPhoneConversationsPage(activeEntityId, {
-          limit: CHAT_LIST_PAGE_SIZE,
-          offset: 0,
-        });
+        // Filters, store-lock flags and the conversation page are independent
+        // reads — start all three together instead of chaining awaits.
+        const [filteredIds, lockedIds, rows] = await Promise.all([
+          loadFilteredEntityIds(),
+          // Store-variant runtime lock (7-14 V3): locked entities stay VISIBLE,
+          // so they are NOT added to the filtered (hidden) set — the flag rides
+          // the row for greying / badge suppression / detail gating.
+          getLockedEntityIds(),
+          getPhoneConversationsPage(activeEntityId, {
+            limit: CHAT_LIST_PAGE_SIZE,
+            offset: 0,
+          }),
+        ]);
 
-        const items = await buildListItems(activeEntityId, rows, filteredIds);
+        const items = await buildListItems(activeEntityId, rows, filteredIds, lockedIds);
         const sorted = sortListItems(items);
         chatListRef.current = sorted;
 
@@ -485,13 +669,17 @@ export const ChatListScreen: React.FC = () => {
         // Keep the floating bubble's unread badge in sync with the
         // conversation that currently has the bubble shown (if any).
         syncBubbleUnreadBadge(sorted);
+
+        // Avatars arrive AFTER the first paint — rows (name, preview, time)
+        // render immediately; the thumbnail pass fills them in.
+        void applyResolvedAvatars(sorted);
       } catch (error) {
         log.error('Failed to load chat list:', error);
       } finally {
         setRefreshing(false);
       }
     },
-    [buildListItems, loadFilteredEntityIds],
+    [applyResolvedAvatars, buildListItems, loadFilteredEntityIds],
   );
 
   /** Load the next page of conversations and append (offset pagination, F6). */
@@ -503,18 +691,22 @@ export const ChatListScreen: React.FC = () => {
     loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      const filteredIds = await loadFilteredEntityIds();
-      const rows = await getPhoneConversationsPage(activeEntityId, {
-        limit: CHAT_LIST_PAGE_SIZE,
-        offset: listPageRef.current * CHAT_LIST_PAGE_SIZE,
-      });
+      // Same three independent reads as loadChatList — issue them together.
+      const [filteredIds, lockedIds, rows] = await Promise.all([
+        loadFilteredEntityIds(),
+        getLockedEntityIds(),
+        getPhoneConversationsPage(activeEntityId, {
+          limit: CHAT_LIST_PAGE_SIZE,
+          offset: listPageRef.current * CHAT_LIST_PAGE_SIZE,
+        }),
+      ]);
 
       if (rows.length === 0) {
         listHasMoreRef.current = false;
         return;
       }
 
-      const items = await buildListItems(activeEntityId, rows, filteredIds);
+      const items = await buildListItems(activeEntityId, rows, filteredIds, lockedIds);
       listPageRef.current += 1;
       listHasMoreRef.current = rows.length === CHAT_LIST_PAGE_SIZE;
 
@@ -529,13 +721,14 @@ export const ChatListScreen: React.FC = () => {
       setChatList(merged.filter(item => !item.archived));
       setArchivedList(merged.filter(item => item.archived));
       syncBubbleUnreadBadge(merged);
+      void applyResolvedAvatars(merged);
     } catch (error) {
       log.error('Failed to load more conversations:', error);
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [buildListItems, loadFilteredEntityIds]);
+  }, [applyResolvedAvatars, buildListItems, loadFilteredEntityIds]);
 
   /** Debounce a full reload so rapid session events collapse into one fetch. */
   const scheduleChatListReload = useCallback(() => {
@@ -667,27 +860,14 @@ export const ChatListScreen: React.FC = () => {
         scheduleChatListReload();
       };
 
-      // Sync-apply refresh (3-1 → 4-1): synced-in partner messages never bump
-      // the badge because the increment only lived in the live-WS path;
-      // synced-in `chat_conversation_settings` rows change pin/archive sort.
-      // SyncService emits `sync:data-applied` after an inbound apply; this
-      // handler triggers the same debounced reload (recounts derived unread via
-      // getUnreadCountByParticipantKeys, re-sorts by pin/recency).
-      const handleSyncApplied = (payload: { tables: string[] }) => {
-        if (!shouldReloadAfterSync(payload.tables)) return;
-        scheduleChatListReload();
-      };
-
       EntitySessionService.on('message:received', handleMessageReceived);
       EntitySessionService.on('session:started', handleSessionLifecycle);
       EntitySessionService.on('session:stopped', handleSessionLifecycle);
-      SyncService.on('sync:data-applied', handleSyncApplied);
 
       return () => {
         EntitySessionService.off('message:received', handleMessageReceived);
         EntitySessionService.off('session:started', handleSessionLifecycle);
         EntitySessionService.off('session:stopped', handleSessionLifecycle);
-        SyncService.off('sync:data-applied', handleSyncApplied);
         if (reloadTimerRef.current) {
           clearTimeout(reloadTimerRef.current);
           reloadTimerRef.current = null;
@@ -732,7 +912,18 @@ export const ChatListScreen: React.FC = () => {
         showAlert(t('common:error'), t('characters:chatOpenReservedName'));
         return;
       }
-      showAlert(t('common:error'), t('characters:chatOpenFailed'));
+      showAlert(t('common:error'), t('characters:chatOpenFailed'), [
+        { text: t('common:close'), style: 'cancel' },
+        {
+          text: t('common:copyDiagnostics'),
+          onPress: () => {
+            void copyAppDiagnosticsWithToast(showToast, {
+              success: t('common:diagnosticsCopied'),
+              failure: t('common:diagnosticsCopyFailed'),
+            });
+          },
+        },
+      ]);
     }
   };
 
@@ -983,9 +1174,15 @@ export const ChatListScreen: React.FC = () => {
       item={item}
       onPress={() => {
         hapticLightPress();
+        // Locked rows still open their detail (which shows the neutral lock
+        // state and refuses new sessions) — visible-but-locked, not hidden.
         handleChatPress(item);
       }}
-      onLongPress={() => handleLongPress(item)}
+      // Locked rows offer no conversation actions (nothing is interactable).
+      onLongPress={() => {
+        if (item.locked) return;
+        handleLongPress(item);
+      }}
     />
   );
 
@@ -1060,7 +1257,7 @@ export const ChatListScreen: React.FC = () => {
           <View
             style={styles.notPairedContainer}
             testID="chat-list-not-paired"
-            accessibilityLabel="Not paired with Harmony Link"
+            accessibilityLabel="Not paired with Soulbits Engine"
           >
             <ThemedEmptyState
               icon="connection"
@@ -1143,12 +1340,14 @@ export const ChatListScreen: React.FC = () => {
       )}
 
 
-      <ThemedFab
-        icon="plus"
-        onPress={() => setPickerVisible(true)}
-        style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }}
-        testID="new-chat-fab"
-      />
+      {shouldShowNewChatFab(canUseChat) && (
+        <ThemedFab
+          icon="plus"
+          onPress={() => setPickerVisible(true)}
+          style={{ bottom: TAB_BAR_FAB_OFFSET + safeBottom }}
+          testID="new-chat-fab"
+        />
+      )}
 
       {/* "Start a new chat" picker — cards + unused entities, persona-scoped */}
       <ChatPartnerPickerModal
@@ -1219,6 +1418,7 @@ const ChatRowCard: React.FC<{
   onLongPress: () => void;
 }> = ({ item, onPress, onLongPress }) => {
   const { theme } = useAppTheme();
+  const { t } = useTranslation('chatList');
   const scale = useRef(new Animated.Value(1)).current;
 
   if (!theme) return null;
@@ -1245,17 +1445,25 @@ const ChatRowCard: React.FC<{
   const borderEnd = hexToRgba(theme.colors.accent.secondary, 0.10);
   const glassFill = hexToRgba(theme.colors.background.surface, 0.45);
 
+  const locked = item.locked;
+
   return (
-    <Animated.View style={{ transform: [{ scale }] }}>
+    <Animated.View
+      style={{ transform: [{ scale }], opacity: locked ? 0.55 : 1 }}
+    >
       <TouchableOpacity
         onPress={onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
-        onLongPress={onLongPress}
+        onLongPress={locked ? undefined : onLongPress}
         delayLongPress={400}
         activeOpacity={0.85}
         testID="chat-list-item"
-        accessibilityLabel={`Chat with ${item.characterName}`}
+        accessibilityLabel={
+          locked
+            ? `${item.characterName} — ${t('lockedChat')}`
+            : `Chat with ${item.characterName}`
+        }
       >
         {/* ── 1dp hairline gradient border ── */}
         <LinearGradient
@@ -1321,6 +1529,16 @@ const ChatRowCard: React.FC<{
                 )}
                 {item.muted && (
                   <Icon name="volume-off" size={13} color={theme.colors.text.muted} />
+                )}
+                {/* Store lock affordance — distinct from the disabled shield so
+                    users don't think THEY disabled it (plan 7-14 V3). */}
+                {locked && (
+                  <Icon
+                    name="lock-outline"
+                    size={13}
+                    color={theme.colors.accent.primary}
+                    testID="chat-locked-icon"
+                  />
                 )}
                 {item.disabled && (
                   <Icon name="shield-off-outline" size={13} color={theme.colors.status.error} />

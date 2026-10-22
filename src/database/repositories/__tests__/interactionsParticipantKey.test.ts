@@ -18,14 +18,14 @@
  *   TestDeriveParticipantKey_World, TestDeriveParticipantKey_OwnEntityNotInSet
  */
 
-jest.mock('../../connection', () => ({
-  getDatabase: jest.fn(),
+jest.mock('../../../services/engine/EngineApiClient', () => ({
+  engineApiClient: { getEntityConfig: jest.fn() },
 }));
 
 import {
   deriveParticipantKey,
   deriveScopeFromParticipants,
-} from '../interactions';
+} from '../../../services/engine/repositories/interactions';
 
 describe('deriveScopeFromParticipants (engine parity)', () => {
   it('maps participant counts to scopes exactly like the engine', () => {

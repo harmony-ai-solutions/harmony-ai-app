@@ -9,59 +9,41 @@ on:
       version:
         description: 'Version number for the build'
         default: 'v0.0.0-dev'
+      engine_version:
+        description: 'Soulbits Engine version to provision (e.g. v0.3.2). Falls back to the ENGINE_SIDECAR_VERSION repo variable.'
+        default: ''
       skip_build:
         description: 'Run tests only, skip APK/IPA builds (dry-run)'
+        type: boolean
+        default: false
+      build_ios:
+        description: 'Also build the iOS IPA matrix (macOS runners bill at 10× the Linux minute rate). Release tags always build iOS.'
+        type: boolean
+        default: false
+      build_environments:
+        description: 'Which environments to build (Android APKs; the iOS matrix follows when build_ios is enabled). Release tags always build both. The prod channel manifest stays tag-only — a prod-only dispatch uploads the versioned APK without advertising it to prod installs.'
+        type: choice
+        options:
+          - dev
+          - prod
+          - both
+        default: dev
+      publish_latest:
+        description: 'Also publish the channel manifest (app/dev/latest.json) so installed dev builds see this release. Tag runs always publish both channel manifests.'
+        type: boolean
+        default: false
+      manifests_only:
+        description: 'Fast path: skip tests and builds entirely — only re-publish the channel manifests and invalidate the CloudFront cache (version input still applies).'
         type: boolean
         default: false
 
 jobs:
   # ───────────────────────────────────────────────────────────────────
-  # NEW: Schema parity gate — checks RN schema matches Go schema
-  # ───────────────────────────────────────────────────────────────────
-  schema-parity:
-    name: Schema parity (RN ↔ Harmony Link)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/checkout@v5
-        with:
-          repository: harmony-ai-solutions/harmony-link-private
-          token: ${{ secrets.HARMONY_LINK_REPO_PAT }}
-          path: harmony-link
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: npm
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-      - run: npm ci
-      - name: Install Go dependencies
-        working-directory: harmony-link
-        run: go mod download
-      - name: Dump RN schema
-        run: npm run schema:dump -- --output rn-schema.current.json
-      - name: Dump Go schema
-        working-directory: harmony-link
-        run: go run . dump-schema | tail -n +4 > ../go-schema.current.json
-      - name: Compare schemas
-        run: python3 scripts/compare-schemas.py rn-schema.current.json go-schema.current.json
-      - name: Upload schemas on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: schema-diff
-          path: |
-            rn-schema.current.json
-            go-schema.current.json
-
-  # ───────────────────────────────────────────────────────────────────
-  # NEW: Test gate — must pass before any artifact is built
+  # Test gate — must pass before any artifact is built
   # ───────────────────────────────────────────────────────────────────
   test:
     name: Tests (pre-release gate)
-    needs: schema-parity
+    if: ${{ !inputs.manifests_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -70,28 +52,23 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      - run: npm ci
+      - run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Type-check
         run: npx tsc --noEmit
 
-      - name: Lint
+      # Non-blocking (owner ruling 2026-10-17): the repo carries ~270
+      # pre-existing lint errors in unrelated files; lint must not gate
+      # releases. Re-block once the lint debt is paid down.
+      - name: Lint (non-blocking)
         run: npm run lint
+        continue-on-error: true
 
       - name: Unit tests
         run: npx jest --selectProjects unit --reporters=default --reporters=jest-junit
         env:
           JEST_JUNIT_OUTPUT_DIR: ./reports
           JEST_JUNIT_OUTPUT_NAME: unit-tests.xml
-
-      - name: Integration tests
-        run: npx jest --selectProjects integration --reporters=default --reporters=jest-junit
-        env:
-          JEST_JUNIT_OUTPUT_DIR: ./reports
-          JEST_JUNIT_OUTPUT_NAME: integration-tests.xml
-
-      - name: Migration tests
-        run: npx jest --selectProjects unit --testPathPatterns migrations
 
       - name: Upload test results
         if: always()
@@ -110,17 +87,18 @@ jobs:
   # ───────────────────────────────────────────────────────────────────
 
   # ──────────────────────────────────────────────
-  # Job 1: Build Android APK (matrix: dev, prod)
+  # Job 1: Build Android APK (matrix: dev, prod — dispatch-selectable
+  # via build_environments; tags and 'both' build every entry)
   # ──────────────────────────────────────────────
   build-android:
     name: Build Android APK (${{ matrix.environment }})
     needs: test
-    if: ${{ !inputs.skip_build }}
+    if: ${{ !inputs.skip_build && !inputs.manifests_only }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        environment: [dev, prod]
+        environment: ${{ fromJSON((github.event_name == 'push' || inputs.build_environments == 'both') && '["dev","prod"]' || (inputs.build_environments == 'prod' && '["prod"]') || '["dev"]') }}
 
     steps:
       - name: Checkout code
@@ -138,8 +116,20 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # NOTE: deliberately NOT using setup-java's `cache: gradle` — Gradle's
+      # docs warn that the two caching mechanisms interfere. setup-gradle owns
+      # the dependency + build cache for this job.
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # Dispatch runs land on a feature branch, not the default branch —
+          # the action is restore-only off the default branch by default, so
+          # allow writes here or the cache never warms.
+          cache-read-only: false
+          cache-cleanup: on-success
+
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Set VERSION variable
         run: |
@@ -157,22 +147,57 @@ jobs:
         run: |
           echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
 
+      - name: Resolve engine version
+        run: |
+          ENGINE_VERSION='${{ github.event.inputs.engine_version }}'
+          if [ -z "${ENGINE_VERSION}" ]; then
+            ENGINE_VERSION='${{ vars.ENGINE_SIDECAR_VERSION }}'
+          fi
+          if [ -z "${ENGINE_VERSION}" ]; then
+            echo "::error::No engine version: set the 'engine_version' workflow input or the ENGINE_SIDECAR_VERSION repo variable."
+            exit 1
+          fi
+          echo "ENGINE_VERSION=${ENGINE_VERSION}" >> $GITHUB_ENV
+          echo "::notice::Provisioning Soulbits Engine ${ENGINE_VERSION}"
+
+      - name: Restore engine sidecar
+        # vendorEngineSidecar skips downloads when the .so files already exist
+        # (app/build.gradle: dest.exists() check) — restoring this dir keyed on
+        # the pinned engine version skips the 2× ~60 MB CloudFront downloads.
+        uses: actions/cache@v4
+        with:
+          path: android/app/src/main/jniLibs
+          key: engine-sidecar-${{ env.ENGINE_VERSION }}
+
       - name: Build ${{ matrix.environment }} release APK
         working-directory: android
         run: |
           if [ -z "$GOOGLE_WEB_CLIENT_ID" ]; then echo "::error::GOOGLE_WEB_CLIENT_ID_DEV/_PROD variable not set"; exit 1; fi
-          # Update versionName in build.gradle
-          sed -i "s/versionName \"[^\"]*\"/versionName \"${VERSION}\"/" app/build.gradle
           chmod +x gradlew
           ./gradlew assemble${{ matrix.environment == 'dev' && 'Dev' || 'Prod' }}Release \
+            -PVERSION_NAME="${VERSION}" \
+            -PMETRO_MAX_WORKERS=2 \
             -PRELEASE_KEYSTORE_FILE=release.keystore \
             -PRELEASE_KEYSTORE_PASSWORD="${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}" \
             -PRELEASE_KEY_ALIAS="${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}" \
             -PRELEASE_KEY_PASSWORD="${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}" \
             -PGOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID" \
-            -PAPPLE_SERVICES_ID="${{ vars.APPLE_SERVICES_ID }}"
+            -PAPPLE_SERVICES_ID="${{ vars.APPLE_SERVICES_ID }}" \
+            -PENGINE_SIDECAR_VERSION="${ENGINE_VERSION}" \
+            -PENGINE_SIDECAR_BASE_URL="https://download.soulbits.app/engine" \
+            -PENGINE_SIDECAR_STRICT=true
         env:
           GOOGLE_WEB_CLIENT_ID: ${{ matrix.environment == 'dev' && vars.GOOGLE_WEB_CLIENT_ID_DEV || vars.GOOGLE_WEB_CLIENT_ID_PROD }}
+
+      - name: Assert APK contains the engine sidecar
+        working-directory: android
+        run: |
+          APK_PATH="app/build/outputs/apk/${{ matrix.environment }}/release/app-${{ matrix.environment }}-release.apk"
+          echo "── libengine.so entries in ${APK_PATH} ──"
+          unzip -l "${APK_PATH}" | grep -E 'libengine\.so' || {
+            echo "::error::APK is missing libengine.so — engine provisioning failed (plan 7-10 §2)."
+            exit 1
+          }
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -191,9 +216,18 @@ jobs:
       - name: Update latest APK pointer
         run: |
           APK_PATH="android/app/build/outputs/apk/${{ matrix.environment }}/release/app-${{ matrix.environment }}-release.apk"
+          S3_VERSIONED="s3://soulbits-releases/app/${VERSION}/${{ matrix.environment }}/harmony-ai-app-${VERSION}-android.apk"
           S3_LATEST="s3://soulbits-releases/app/latest/${{ matrix.environment }}/harmony-ai-app-android.apk"
-          echo "Updating latest pointer: ${S3_LATEST}"
-          aws s3 cp "${APK_PATH}" "${S3_LATEST}"
+          # Preferred: server-side CopyObject of the already-uploaded versioned
+          # APK (no ~75 MB re-upload). --copy-props metadata-directive keeps
+          # content-type/metadata but never touches object tagging — the CLI's
+          # tag-preserving default needs s3:GetObjectTagging/PutObjectTagging,
+          # which the ci-releases-uploader IAM user does not have.
+          if ! aws s3 cp "${S3_VERSIONED}" "${S3_LATEST}" --copy-props metadata-directive; then
+            echo "::warning::Server-side latest-pointer copy failed — falling back to a local re-upload."
+            echo "Updating latest pointer (local upload): ${S3_LATEST}"
+            aws s3 cp "${APK_PATH}" "${S3_LATEST}"
+          fi
 
       - name: Print download URLs
         run: |
@@ -207,12 +241,17 @@ jobs:
   build-ios:
     name: Build iOS IPA (${{ matrix.environment }})
     needs: test
-    if: ${{ !inputs.skip_build }}
+    # macOS runners bill at 10× the Linux minute rate — run only when
+    # explicitly required (owner ruling 2026-10-13): on release tags
+    # (refs/tags/v*, where create-release's GitHub Release body links the IPAs;
+    # skipping would publish dead links) or when a manual dispatch opts in
+    # via the `build_ios` input. Plain dispatch runs are Android-only.
+    if: ${{ !inputs.skip_build && (inputs.build_ios == true || github.event_name == 'push') }}
     runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
-        environment: [dev, prod]
+        environment: ${{ fromJSON((github.event_name == 'push' || inputs.build_environments == 'both') && '["dev","prod"]' || (inputs.build_environments == 'prod' && '["prod"]') || '["dev"]') }}
 
     steps:
       - name: Checkout code
@@ -225,7 +264,31 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Resolve engine version
+        run: |
+          ENGINE_VERSION='${{ github.event.inputs.engine_version }}'
+          if [ -z "${ENGINE_VERSION}" ]; then
+            ENGINE_VERSION='${{ vars.ENGINE_SIDECAR_VERSION }}'
+          fi
+          if [ -z "${ENGINE_VERSION}" ]; then
+            echo "::error::No engine version: set the 'engine_version' workflow input or the ENGINE_SIDECAR_VERSION repo variable."
+            exit 1
+          fi
+          echo "ENGINE_VERSION=${ENGINE_VERSION}" >> $GITHUB_ENV
+          echo "::notice::Provisioning Soulbits Engine ${ENGINE_VERSION}"
+
+      - name: Fetch Soulbits Engine xcframework
+        run: |
+          set -euo pipefail
+          mkdir -p ios/Frameworks
+          URL="https://download.soulbits.app/engine/${ENGINE_VERSION}/SoulbitsEngine.xcframework.zip"
+          echo "Downloading ${URL}"
+          curl -fSL "${URL}" -o /tmp/SoulbitsEngine.xcframework.zip
+          unzip -q -o /tmp/SoulbitsEngine.xcframework.zip -d ios/Frameworks
+          echo "── ios/Frameworks ──"
+          ls -la ios/Frameworks
 
       - name: Install CocoaPods
         run: |
@@ -247,7 +310,10 @@ jobs:
       - name: Generate .env for ${{ matrix.environment }}
         run: |
           if [ -z "$GOOGLE_WEB_CLIENT_ID" ]; then echo "::error::GOOGLE_WEB_CLIENT_ID_DEV/_PROD variable not set"; exit 1; fi
-          printf 'APP_ENV=%s\nIS_BETA=%s\nGOOGLE_WEB_CLIENT_ID=%s\nAPPLE_SERVICES_ID=%s\n' \
+          # APP_VARIANT (plan 7-14): 'full' for every current matrix entry. A
+          # future store iOS matrix entry would set this to 'store' (same bundle
+          # id — no suffix; the store listing owns updates).
+          printf 'APP_ENV=%s\nAPP_VARIANT=full\nIS_BETA=%s\nGOOGLE_WEB_CLIENT_ID=%s\nAPPLE_SERVICES_ID=%s\n' \
             "${{ matrix.environment }}" \
             "${{ matrix.environment == 'dev' && 'true' || 'false' }}" \
             "$GOOGLE_WEB_CLIENT_ID" \
@@ -307,7 +373,130 @@ jobs:
           echo "📥 Latest:    https://download.soulbits.app/app/latest/${{ matrix.environment }}/harmony-ai-app-ios.ipa"
 
   # ──────────────────────────────────────────────
-  # Job 3: Create GitHub Release with download links
+  # Job 3: Publish the channel release manifests (app/<env>/latest.json)
+  # ──────────────────────────────────────────────
+  # Per-channel manifests (owner ruling 2026-10-17): each channel reads ONLY
+  # its own file, so dev dispatches are invisible to prod installs.
+  #   - dispatch with publish_latest=true → writes app/dev/latest.json ONLY,
+  #     and only when dev was built (build_environments=dev|both; a prod-only
+  #     dispatch logs a notice instead and publishes no channel manifest)
+  #   - tag v*                              → writes BOTH dev and prod files
+  # SINGLE WRITER: only this job writes these files. It needs build-android
+  # only (URLs are deterministic, not artifact-derived), so a dispatch that
+  # skips the iOS matrix can still publish. The manifest shape is a de-facto
+  # public contract — owner sign-off is an explicit gate; do not change field
+  # names/URLs without it. The dev file's version carries the flavor's exact
+  # "-dev" suffix (android versionNameSuffix) so an up-to-date dev install
+  # compares EQUAL and the update banner stays silent.
+  publish-manifest:
+    name: Publish channel manifests
+    needs: [build-android]
+    # Normal mode: only after a successful APK build (publish_latest/tag).
+    # manifests_only fast path: run with the build dependency skipped.
+    if: ${{ !cancelled() && (inputs.manifests_only == true || (needs.build-android.result == 'success' && (inputs.publish_latest == true || startsWith(github.ref, 'refs/tags/v')))) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set VERSION variable
+        run: |
+          INPUTS_VERSION='${{ github.event.inputs.version }}'
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          elif [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' && -n "${INPUTS_VERSION}" ]]; then
+            VERSION="${INPUTS_VERSION}"
+          else
+            VERSION="v0.0.0-dev"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_S3_UPLOAD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_S3_UPLOAD_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Write channel manifests (app/<env>/latest.json)
+        env:
+          RELEASES_BASE_URL: https://download.soulbits.app
+          # Mirror of the build matrices' selector: which environments this
+          # run actually built ('both' on tags and for build_environments=both).
+          BUILT_ENVIRONMENTS: ${{ (github.event_name == 'push' || inputs.build_environments == 'both') && 'both' || (inputs.build_environments == 'prod' && 'prod') || 'dev' }}
+        run: |
+          set -euo pipefail
+          RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          NOTES_URL="https://github.com/harmony-ai-solutions/harmony-ai-app/releases/tag/${VERSION}"
+          # NOTE: heredoc terminators must stay at column 0 of the shell
+          # script — do not indent the JSON lines further in YAML.
+          cat > app-dev-latest.json <<JSON
+          {
+            "version": "${VERSION}-dev",
+            "releasedAt": "${RELEASED_AT}",
+            "notesUrl": "${NOTES_URL}",
+            "android": { "url": "${RELEASES_BASE_URL}/app/${VERSION}/dev/harmony-ai-app-${VERSION}-android.apk" },
+            "ios":     { "url": "${RELEASES_BASE_URL}/app/${VERSION}/dev/harmony-ai-app-${VERSION}-ios.ipa" }
+          }
+          JSON
+          cat > app-prod-latest.json <<JSON
+          {
+            "version": "${VERSION}",
+            "releasedAt": "${RELEASED_AT}",
+            "notesUrl": "${NOTES_URL}",
+            "android": { "url": "${RELEASES_BASE_URL}/app/${VERSION}/prod/harmony-ai-app-${VERSION}-android.apk" },
+            "ios":     { "url": "${RELEASES_BASE_URL}/app/${VERSION}/prod/harmony-ai-app-${VERSION}-ios.ipa" }
+          }
+          JSON
+          # Dev channel manifest: only when the dev APK was actually built in
+          # this run — a prod-only dispatch must not link a non-existent dev APK.
+          if [[ "${BUILT_ENVIRONMENTS}" == "both" || "${BUILT_ENVIRONMENTS}" == "dev" ]]; then
+            cat app-dev-latest.json
+            aws s3 cp app-dev-latest.json "s3://soulbits-releases/app/dev/latest.json"
+            echo "✅ dev manifest: https://download.soulbits.app/app/dev/latest.json"
+          else
+            echo "::notice::dev not built in this run — skipping the dev channel manifest"
+          fi
+          # Prod manifest: tag releases ONLY — a dev dispatch must never
+          # advertise versions to prod-channel installs.
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            cat app-prod-latest.json
+            aws s3 cp app-prod-latest.json "s3://soulbits-releases/app/prod/latest.json"
+            echo "✅ prod manifest: https://download.soulbits.app/app/prod/latest.json"
+          elif [[ "${BUILT_ENVIRONMENTS}" == "prod" ]]; then
+            echo "Dispatch run: app/prod/latest.json intentionally NOT published (the prod APK was built and uploaded versioned, but the prod channel manifest stays tag-only by design — prod installs are not advertised to)"
+          else
+            echo "Dispatch run: app/prod/latest.json intentionally NOT published"
+          fi
+
+      - name: Invalidate CloudFront manifest cache
+        # The download distribution uses Managed-CachingOptimized: latest.json
+        # is cached at the edge up to 24h and origin Cache-Control is IGNORED
+        # (owner ruling 2026-10-18: CI invalidates after publish). Requires the
+        # CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID repo variable and the
+        # ci-releases-uploader cloudfront:CreateInvalidation grant (tofu
+        # shared env). Skips with a warning when the variable is unset so
+        # publishes never fail on it.
+        env:
+          DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISTRIBUTION_ID}" ]; then
+            echo "::warning::CLOUDFRONT_DOWNLOAD_DISTRIBUTION_ID variable not set — skipping invalidation (manifest may serve stale up to 24h at the edge)"
+            exit 0
+          fi
+          # AWS CLI v2 multi-path form: separate quoted strings after ONE
+          # --paths flag. A quoted "a b" string is ONE path (v1 splitting was
+          # removed in v2 — InvalidArgument), and repeated --paths flags
+          # OVERRIDE instead of appending (verified: 1-path batch).
+          INVALIDATION=$(aws cloudfront create-invalidation \
+            --distribution-id "${DISTRIBUTION_ID}" \
+            --paths "/app/dev/latest.json" "/app/prod/latest.json" \
+            --no-cli-pager)
+          echo "Invalidation created: ${INVALIDATION}"
+
+  # ──────────────────────────────────────────────
+  # Job 4: Create GitHub Release with download links
   # ──────────────────────────────────────────────
   create-release:
     name: Create GitHub Release
@@ -339,3 +528,6 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The channel release manifests (app/<env>/latest.json) are written by the
+      # `publish-manifest` job (Job 3) — this job no longer writes a manifest.

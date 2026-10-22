@@ -1,8 +1,9 @@
 /**
- * ProfileTabs — icon-only tab bar for profile screens.
+ * ProfileTabs — tab bar for profile screens.
  *
- * A horizontal bar with icon-only tabs (no text labels). The active tab is
- * highlighted with an accent underline indicator beneath its icon.
+ * A horizontal bar that is icon-only by default. The active tab is highlighted
+ * with an accent underline indicator beneath its icon. Passing `showLabels`
+ * renders a small text label under the indicator (icon → indicator → label).
  *
  * The tab key type is generic so the same component powers both the user's
  * My Profile screen (Posts / Favorites / Personas) and the AI character
@@ -13,6 +14,7 @@ import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
+import { ThemedText } from '../themed/ThemedText';
 import { hapticLightPress } from '../../utils/haptics';
 
 /** Tab keys used by the user's My Profile screen. */
@@ -35,6 +37,11 @@ interface ProfileTabsProps<T extends string> {
   tabs: ProfileTabDef<T>[];
   /** testID prefix for each tab button: `<prefix>-<key>` */
   testIDPrefix?: string;
+  /**
+   * Render a small text label under the active underline indicator.
+   * Defaults to `false` (icon-only, as on the AI character profile screen).
+   */
+  showLabels?: boolean;
 }
 
 export const ProfileTabs = <T extends string>({
@@ -42,6 +49,7 @@ export const ProfileTabs = <T extends string>({
   onChange,
   tabs,
   testIDPrefix = 'profile-tab',
+  showLabels = false,
 }: ProfileTabsProps<T>) => {
   const { theme } = useAppTheme();
 
@@ -82,6 +90,24 @@ export const ProfileTabs = <T extends string>({
                 !isActive && styles.indicatorHidden,
               ]}
             />
+            {showLabels && (
+              <ThemedText
+                size={11}
+                weight="medium"
+                numberOfLines={1}
+                testID={`${testIDPrefix}-label-${tab.key}`}
+                style={[
+                  styles.label,
+                  {
+                    color: isActive
+                      ? theme.colors.accent.primary
+                      : theme.colors.text.muted,
+                  },
+                ]}
+              >
+                {tab.label}
+              </ThemedText>
+            )}
           </TouchableOpacity>
         );
       })}
@@ -111,6 +137,9 @@ const styles = StyleSheet.create({
   },
   indicatorHidden: {
     opacity: 0,
+  },
+  label: {
+    textAlign: 'center',
   },
 });
 

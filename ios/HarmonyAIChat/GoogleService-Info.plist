@@ -2,13 +2,57 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CLIENT_ID</key>
-	<string>128352209891-07iqnfd4udu6p7vt86dvh4go65htkv43.apps.googleusercontent.com</string>
-	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.128352209891-07iqnfd4udu6p7vt86dvh4go65htkv43</string>
+	<!--
+	  PLACEHOLDER Firebase iOS config (plan 7-12 §3, step 7 — D1=b/D2/D4).
+
+	  Used by BOTH:
+	    - Google Sign-In (@react-native-google-signin) — reads CLIENT_ID /
+	      REVERSED_CLIENT_ID (see docs/OAUTH-SECRETS.md), and
+	    - Firebase Cloud Messaging (@react-native-firebase/app + messaging) —
+	      reads GOOGLE_APP_ID / GCM_SENDER_ID / API_KEY.
+
+	  The values below are dummy-but-well-formed so the build stays green and so
+	  FirebaseMessaging degrades gracefully at runtime (getToken() rejects
+	  against the dummy project → the native raw-APNs token seam remains the
+	  fallback).
+
+	  OWNER/RELEASE GATE: replace with the real GoogleService-Info.plist from
+	  the Firebase console AND add it to the HarmonyAIChat target's
+	  "Copy Bundle Resources" (RNFB reads it from the app bundle; the file is
+	  currently tracked but not referenced by the Xcode project — same class of
+	  gate as `pod install`).
+
+	  SELF-BUILDER CONTRACT (D4): self-builds swap in their own config; for
+	  topology A (direct desktop-engine pairing) that Firebase project MUST
+	  match the desktop engine's SE_FCM_* project (plan 7-12 §3/§5).
+	-->
+	<key>API_KEY</key>
+	<string>AIzaSy0000000000000000000000000000000000000</string>
+	<key>GCM_SENDER_ID</key>
+	<string>000000000000</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
 	<string>ai.soulbits.chat</string>
+	<key>PROJECT_ID</key>
+	<string>soulbits-placeholder</string>
+	<key>STORAGE_BUCKET</key>
+	<string>soulbits-placeholder.appspot.com</string>
+	<key>IS_ADS_ENABLED</key>
+	<false/>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false/>
+	<key>IS_APPINVITE_ENABLED</key>
+	<false/>
+	<key>IS_GCM_ENABLED</key>
+	<true/>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true/>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:000000000000:ios:0000000000000000000000</string>
+	<key>CLIENT_ID</key>
+	<string>128352209891-07iqnfd4udu6p7vt86dvh4go65htkv43.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.128352209891-07iqnfd4udu6p7vt86dvh4go65htkv43</string>
 </dict>
 </plist>

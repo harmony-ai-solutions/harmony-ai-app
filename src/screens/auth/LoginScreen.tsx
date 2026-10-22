@@ -1,31 +1,22 @@
 /**
- * LoginScreen
+ * LoginScreen — the single Soulbits Cloud sign-in screen (Option B,
+ * owner-ruled 2026-10-17).
  *
- * Email/password login screen for Soulbits Cloud authentication.
- * Handles:
- *  - 401 "invalid credentials" → inline error
- *  - 403 "email not verified" → inline VerifyPrompt with resend cooldown
- *  - Google Sign-In via native SDK → `loginWithGoogle(idToken)` (Phase 5-4)
- *  - Apple Sign-In (iOS-only) via native `<AppleButton>` → `loginWithApple(identityToken)` (Phase 5-5)
- *  - Navigation link to RegisterScreen
+ * The portal IS the sign-in: there is no email/password form and no native
+ * Google/Apple buttons here. Both CTAs — the primary "Sign in with Soulbits"
+ * and the secondary "Create account" — start the portal connect-session flow
+ * (`signInViaPortal`), which opens the portal in the system browser (the same
+ * page serves sign-in AND sign-up, so a first-time user creates their account
+ * mid-flow). The app then pushes {@link PendingApprovalScreen} and waits for
+ * the poll to redeem the token pair.
  */
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import {
-  View,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
+import React, { useCallback, useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AppleButton } from '@invertase/react-native-apple-authentication';
 import { createLogger } from '../../utils/logger';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -33,19 +24,7 @@ import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { ThemedButton } from '../../components/themed/ThemedButton';
 import { ScreenHeader } from '../../components/themed/ScreenHeader';
-import { VerifyPrompt } from './VerifyPrompt';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
-import {
-  signInWithGoogle,
-  GoogleSignInError,
-  GoogleSignInErrorType,
-} from '../../services/auth/googleSignIn';
-import {
-  signInWithApple,
-  AppleSignInError,
-  AppleSignInErrorType,
-} from '../../services/auth/appleSignIn';
-import { AuthError } from '../../services/auth/AuthService';
 
 const log = createLogger('[LoginScreen]');
 
@@ -55,376 +34,62 @@ export const LoginScreen: React.FC = () => {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { t } = useTranslation('auth');
-  const { login, loginWithGoogle, loginWithApple, status } = useAuth();
+  const { signInViaPortal, status } = useAuth();
 
-  // ── Form state ─────────────────────────────────────────────────────────
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // ── Error state ────────────────────────────────────────────────────────
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [showVerify, setShowVerify] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 800);
-  }, []);
-
-  // ── Password field ref for "next" focus ────────────────────────────────
-  const passwordRef = useRef<TextInput>(null);
-
-  // ── Navigate back when auth succeeds ──────────────────────────────────
-  // Covers all sign-in methods (email, Google, Apple). AuthService.login()
-  // emits 'auth:changed'; AuthContext processes that asynchronously
-  // (getProfile + cloudSessionService.connect), eventually setting status
-  // to 'authenticated'. This effect fires on that transition and pops the
-  // Login screen back to the screen that pushed it (typically
-  // ConnectionSetupScreen, where the cloud session status is visible).
+  // Safety net: if the user lands here already authenticated (e.g. a persisted
+  // token completed between render and press), pop back to the caller. The
+  // normal path replaces this screen with PendingApproval.
   useEffect(() => {
     if (status === 'authenticated') {
       navigation.goBack();
     }
   }, [status, navigation]);
 
-  // ── Login handler ──────────────────────────────────────────────────────
-  const handleLogin = useCallback(async () => {
-    if (!email.trim() || !password) {
-      setLoginError(t('loginErrorInvalidCredentials'));
-      return;
-    }
+  const handleSignIn = useCallback(() => {
+    // Kick off the portal flow, then show the waiting screen. Login is
+    // REPLACED so the waiting screen's pop returns to whatever pushed Login.
+    log.info('Starting portal sign-in');
+    void signInViaPortal();
+    navigation.replace('PendingApproval');
+  }, [signInViaPortal, navigation]);
 
-    setIsSubmitting(true);
-    setLoginError(null);
-    setShowVerify(false);
-
-    try {
-      await login(email.trim(), password);
-      // AuthContext flips to authenticated → navigation to cloud flow (Phase 6-2)
-      log.info('Login successful for:', email.trim());
-    } catch (err: unknown) {
-      // Branch on the HTTP status carried by AuthError. The backend 403/401
-      // bodies carry their own error strings (not the codes), so substring
-      // matching on the message is brittle.
-      if (err instanceof AuthError) {
-        if (err.status === 403) {
-          log.info('Email not verified — showing VerifyPrompt');
-          setShowVerify(true);
-          setLoginError(t('loginErrorEmailNotVerified'));
-        } else if (err.status === 401) {
-          setLoginError(t('loginErrorInvalidCredentials'));
-        } else {
-          log.error('Login failed:', err);
-          setLoginError(t('loginErrorGeneric'));
-        }
-      } else {
-        log.error('Login failed:', err);
-        setLoginError(t('loginErrorGeneric'));
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [email, password, login, t]);
-
-  // ── Google Sign-In ───────────────────────────────────────────────────
-
-  const handleGoogle = useCallback(async () => {
-    setLoginError(null);
-    setShowVerify(false);
-    setIsSubmitting(true);
-
-    try {
-      const idToken = await signInWithGoogle();
-      await loginWithGoogle(idToken);
-      // AuthContext flips to authenticated → navigation to cloud flow (Phase 6-2)
-      log.info('Google Sign-In successful');
-    } catch (err: unknown) {
-      if (err instanceof GoogleSignInError) {
-        switch (err.type) {
-          case GoogleSignInErrorType.CANCELLED:
-            // Silently dismiss — no error toast (user tapped "Cancel")
-            log.info('Google Sign-In cancelled by user');
-            break;
-
-          case GoogleSignInErrorType.PLAY_SERVICES:
-            log.warn('Google Sign-In — Play Services unavailable');
-            setLoginError(t('googleErrorPlayServices'));
-            break;
-
-          case GoogleSignInErrorType.DEVELOPER_ERROR:
-            log.warn('Google Sign-In — developer error (SHA-1 / OAuth config)');
-            setLoginError(t('googleErrorDeveloperError'));
-            break;
-
-          case GoogleSignInErrorType.UNKNOWN:
-            // Include the raw error message so users can report it for debugging
-            log.error('Google Sign-In unknown error:', err.message);
-            setLoginError(
-              err.message
-                ? `${t('googleErrorGeneric')}\n\nDetails: ${err.message}`
-                : t('googleErrorGeneric'),
-            );
-            break;
-        }
-        return;
-      }
-
-      // Handle backend 403 — email not verified (edge case for Google
-      // accounts where email hasn't been verified through the cloud)
-      if (err instanceof AuthError && err.status === 403) {
-        log.warn('Google Sign-In — email not verified (403)');
-        setLoginError(t('loginErrorEmailNotVerified'));
-        return;
-      }
-
-      // Handle backend 409 conflict (email already registered with another
-      // sign-in method)
-      if (err instanceof AuthError && err.status === 409) {
-        log.warn('Google Sign-In — email collision (409)');
-        setLoginError(t('googleErrorEmailConflict'));
-        return;
-      }
-
-      // Handle backend 401 — Google token rejected
-      if (err instanceof AuthError && err.status === 401) {
-        log.warn('Google Sign-In — Google token rejected by backend (401)');
-        setLoginError(t('loginErrorInvalidCredentials'));
-        return;
-      }
-
-      // Any other AuthError (network, server error, etc.)
-      if (err instanceof AuthError) {
-        log.error('Google Sign-In backend error:', err.message, 'status:', err.status);
-        setLoginError(t('googleErrorGeneric'));
-        return;
-      }
-
-      // Generic fallback (network error, unexpected exception)
-      log.error('Google Sign-In failed:', err);
-      setLoginError(t('googleErrorGeneric'));
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [loginWithGoogle, t]);
-
-  // ── Apple Sign-In (iOS-only) ─────────────────────────────────────────
-
-  const handleApple = useCallback(async () => {
-    setLoginError(null);
-    setShowVerify(false);
-    setIsSubmitting(true);
-
-    try {
-      const identityToken = await signInWithApple();
-      await loginWithApple(identityToken);
-      // AuthContext flips to authenticated → navigation to cloud flow (Phase 6-2)
-      log.info('Apple Sign-In successful');
-    } catch (err: unknown) {
-      if (err instanceof AppleSignInError) {
-        switch (err.type) {
-          case AppleSignInErrorType.CANCELLED:
-            // Silently dismiss — no error toast
-            log.info('Apple Sign-In cancelled by user');
-            return;
-
-          case AppleSignInErrorType.NOT_CONFIGURED:
-            log.warn('Apple Sign-In — not configured or not available');
-            setLoginError(t('appleErrorNotConfigured'));
-            return;
-
-          case AppleSignInErrorType.UNKNOWN:
-            log.error('Apple Sign-In unknown error:', err.message);
-            setLoginError(t('appleErrorGeneric'));
-            return;
-        }
-      }
-
-      // Handle backend 409 conflict (email already registered with another
-      // sign-in method). Branch on AuthError.status — the 409 body carries an
-      // "already exists" error string (not the status code), so a substring
-      // match on "409" would never hit.
-      if (err instanceof AuthError && err.status === 409) {
-        log.warn('Apple Sign-In — email collision (409)');
-        setLoginError(t('appleErrorEmailConflict'));
-        return;
-      }
-
-      // Generic fallback
-      log.error('Apple Sign-In failed:', err);
-      setLoginError(t('appleErrorGeneric'));
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [loginWithApple, t]);
-
-  // ── Render guard ───────────────────────────────────────────────────────
   if (!theme) return null;
-
-  // ── Derived styles ─────────────────────────────────────────────────────
-  const inputStyle = {
-    color: theme.colors.text.primary,
-    borderColor: theme.colors.border.default,
-    backgroundColor: theme.colors.background.base,
-  };
 
   return (
     <ThemedView style={styles.container}>
-      {/* ── Header ── */}
       <ScreenHeader
-        title={t('login_title')}
+        title={t('signIn_title')}
         onBack={() => navigation.goBack()}
       />
 
-      <KeyboardAvoidingView
-        style={styles.keyboardAvoid}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={[
-            styles.scrollContent,
-            { paddingBottom: 40 + safeBottom },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={[theme!.colors.accent.primary]}
-              tintColor={theme!.colors.accent.primary}
-              progressBackgroundColor={theme!.colors.background.surface}
-            />
-          }
-        >
-          {/* ── Title / Subtitle ── */}
-          <View style={styles.headerSection}>
-            <ThemedText variant="secondary" style={styles.subtitle}>
-              {t('login_subtitle')}
-            </ThemedText>
-          </View>
+      <View style={[styles.content, { paddingBottom: 40 + safeBottom }]}>
+        <View style={styles.headerSection}>
+          <ThemedText variant="secondary" style={styles.subtitle}>
+            {t('signIn_subtitle')}
+          </ThemedText>
+        </View>
 
-          {/* ── Email field ── */}
-          <View style={styles.fieldGroup}>
-            <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-              {t('emailLabel')}
-            </ThemedText>
-            <TextInput
-              style={[styles.input, inputStyle]}
-              value={email}
-              onChangeText={setEmail}
-              placeholder={t('emailPlaceholder')}
-              placeholderTextColor={theme.colors.text.muted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="email"
-              returnKeyType="next"
-              onSubmitEditing={() => passwordRef.current?.focus()}
-              editable={!isSubmitting}
-            />
-          </View>
+        <ThemedButton
+          label={t('signIn_withSoulbits')}
+          onPress={handleSignIn}
+          disabled={status === 'loading'}
+          style={styles.primaryButton}
+          testID="login-sign-in-soulbits"
+        />
 
-          {/* ── Password field ── */}
-          <View style={styles.fieldGroup}>
-            <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-              {t('passwordLabel')}
-            </ThemedText>
-            <TextInput
-              ref={passwordRef}
-              style={[styles.input, inputStyle]}
-              value={password}
-              onChangeText={setPassword}
-              placeholder={t('passwordPlaceholder')}
-              placeholderTextColor={theme.colors.text.muted}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="password"
-              returnKeyType="go"
-              onSubmitEditing={handleLogin}
-              editable={!isSubmitting}
-            />
-          </View>
+        <ThemedButton
+          label={t('signIn_createAccount')}
+          onPress={handleSignIn}
+          variant="outline"
+          disabled={status === 'loading'}
+          style={styles.secondaryButton}
+          testID="login-create-account"
+        />
 
-          {/* ── Error message ── */}
-          {loginError && !showVerify && (
-            <ThemedText variant="accent" style={styles.errorText}>
-              {loginError}
-            </ThemedText>
-          )}
-
-          {/* ── Sign In button ── */}
-          <ThemedButton
-            label={
-              isSubmitting ? t('loginLoading') : t('loginButton')
-            }
-            onPress={handleLogin}
-            disabled={isSubmitting || status === 'loading'}
-            style={styles.primaryButton}
-          />
-
-          {/* ── VerifyPrompt (shown on 403 "email not verified") ── */}
-          {showVerify && (
-            <VerifyPrompt email={email.trim()} />
-          )}
-
-          {/* ── Social login section ── */}
-          <View style={styles.socialSection}>
-            <View style={styles.dividerRow}>
-              <View
-                style={[
-                  styles.divider,
-                  { backgroundColor: theme.colors.border.default },
-                ]}
-              />
-              <ThemedText
-                size={12}
-                variant="muted"
-                style={styles.dividerText}
-              >
-                {t('login_orDivider')}
-              </ThemedText>
-              <View
-                style={[
-                  styles.divider,
-                  { backgroundColor: theme.colors.border.default },
-                ]}
-              />
-            </View>
-
-            <ThemedButton
-              label={t('googleButtonLabel')}
-              onPress={handleGoogle}
-              variant="outline"
-              disabled={isSubmitting || status === 'loading'}
-              style={styles.socialButton}
-            />
-
-            {/* Apple Sign-In — iOS only, uses native <AppleButton> */}
-            {Platform.OS === 'ios' && !isSubmitting && (
-              <AppleButton
-                buttonType={AppleButton.Type.SIGN_IN}
-                buttonStyle={AppleButton.Style.BLACK}
-                style={styles.appleButton}
-                onPress={handleApple}
-              />
-            )}
-          </View>
-
-          {/* ── Link to Register ── */}
-          <View style={styles.footerSection}>
-            <ThemedText variant="secondary" size={13}>
-              {t('loginLinkRegister')}
-            </ThemedText>
-            <ThemedButton
-              label={t('register_title')}
-              onPress={() => navigation.navigate('Register')}
-              variant="ghost"
-            />
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        <ThemedText variant="muted" size={13} style={styles.hint}>
+          {t('signIn_browserHint')}
+        </ThemedText>
+      </View>
     </ThemedView>
   );
 };
@@ -433,17 +98,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    elevation: 0,
-  },
-  keyboardAvoid: {
+  content: {
     flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    gap: 12,
   },
   headerSection: {
-    marginBottom: 24,
+    marginBottom: 12,
     alignItems: 'center',
   },
   subtitle: {
@@ -451,55 +113,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     opacity: 0.8,
   },
-  fieldGroup: {
-    marginBottom: 16,
-  },
-  fieldLabel: {
-    marginBottom: 6,
-  },
-  input: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    minHeight: 44,
-  },
-  errorText: {
-    fontSize: 13,
-    marginBottom: 12,
-    textAlign: 'center',
-  },
   primaryButton: {
-    marginTop: 8,
+    marginTop: 4,
   },
-  socialSection: {
-    marginTop: 24,
-    gap: 12,
+  secondaryButton: {
+    marginTop: 4,
   },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  divider: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-  },
-  dividerText: {
-    marginHorizontal: 12,
-    opacity: 0.6,
-  },
-  socialButton: {
-    opacity: 0.6,
-  },
-  appleButton: {
-    width: '100%',
-    height: 44,
-  },
-  footerSection: {
-    marginTop: 32,
-    alignItems: 'center',
-    gap: 4,
+  hint: {
+    marginTop: 12,
+    textAlign: 'center',
+    opacity: 0.7,
+    lineHeight: 18,
   },
 });

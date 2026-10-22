@@ -20,7 +20,9 @@ import {
   View,
   TouchableWithoutFeedback,
   Animated,
+  Image,
 } from 'react-native';
+import type { ImageSourcePropType } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import LinearGradient from 'react-native-linear-gradient';
 import { Avatar } from 'react-native-paper';
@@ -28,6 +30,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenHeader } from '../components/themed/ScreenHeader';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
+import { AppLifecycle } from 'react-native-applifecycle';
 import { useTranslation } from 'react-i18next';
 import { v7 as uuidv7 } from 'uuid';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -48,37 +52,37 @@ import { ScenarioGeneratorSheet, ScenarioGuidedInputs } from '../components/chat
 import { DayDivider } from '../components/chat/DayDivider';
 import EntityEmojiActionService from '../services/EntityEmojiActionService';
 import { useEntitySession } from '../contexts/EntitySessionContext';
-import EntitySessionService, { InteractionSession, isIngestionSessionError } from '../services/EntitySessionService'; // Still needed for event listeners
-import { SyncService } from '../services/SyncService';
+import EntitySessionService, { InteractionSession, PendingMessage, isIngestionSessionError } from '../services/EntitySessionService'; // Still needed for event listeners
 import {
   getConversationMessagesByParticipantKey,
   getRecentConversationMessages,
   updateConversationMessage,
   getConversationMessage,
   deleteConversationMessage,
-} from '../database/repositories/conversation_messages';
+} from '../database/repositories';
 import {
   getPrimaryImage,
   getCharacterProfile,
   imageToDataURL,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 import {
   getAllEntities,
   deleteEntity,
   getEntity,
   setEntityDisabled,
-} from '../database/repositories/entities';
-import { getReplyMode } from '../database/repositories/chatConversationSettings';
-import { getUserPersona } from '../database/repositories/userEntities';
+} from '../database/repositories';
+import { getReplyMode } from '../database/repositories';
+import { getUserPersona } from '../database/repositories';
 import { PersonaSwitcherModal } from '../components/modals/PersonaSwitcherModal';
 import { useSyncConnection } from '../contexts/SyncConnectionContext';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import ChatBackgroundService from '../services/ChatBackgroundService';
 import { createLogger } from '../utils/logger';
 import { ConversationMessage, CharacterProfile } from '../database/models';
 import {
   deriveParticipantKey,
   deriveScopeFromParticipants,
-} from '../database/repositories/interactions';
+} from '../database/repositories';
 import {
   MessageActionSheet,
   MessageAction,
@@ -88,20 +92,23 @@ import {
   ForwardPickerModal,
   ForwardTarget,
 } from '../components/chat/ForwardPickerModal';
-import { markConversationMessagesRead } from '../database/repositories/conversation_messages';
+import { markConversationMessagesRead } from '../database/repositories';
 import {
   showBubble,
   hasBubblePermission,
   requestBubblePermission,
 } from '../services/ChatBubbleService';
 import { isChatLocked } from '../services/marketplace/MarketplaceService';
+import { isEntityLocked } from '../services/variant/entityAccess';
 
 const log = createLogger('[ChatDetailScreen]');
 
 // TODO: Automatic scrollback pagination — when the user scrolls near the top of the
-// message list, older messages should be loaded via getConversationMessagesByParticipantKey
-// with a beforeTimestamp cursor (the created_at of the oldest currently loaded message).
-// The initial load and refresh calls should use the same page size, but refreshes (new message,
+// message list, older messages should be loaded via getConversationMessagesByParticipantKey.
+// The `before` cursor is OPAQUE: pass the engine's `next_cursor` from the previous page
+// VERBATIM (3-1/3-2 — the engine stores timestamps in mixed formats, so a synthesized
+// `created_at` cursor is wrong). The initial load and refresh calls should use the same
+// page size, but refreshes (new message,
 // edit, delete) currently replace the entire list — they need to be changed to smart-merge
 // (append new, keep older pages) so the user doesn't lose already-loaded history.
 // For now, this constant controls the fixed window size shown on open and refresh.
@@ -183,8 +190,15 @@ export function shouldInitializeEntitySession(params: {
   participantKey: string | null;
   disabledLoaded: boolean;
   isDisabled: boolean;
+  /**
+   * Store-variant runtime lock (plan 7-14 V3): a locked entity (a provider this
+   * build doesn't offer) must never send INIT. Optional so existing callers /
+   * tests are unaffected (absent ⇒ unlocked).
+   */
+  locked?: boolean;
 }): boolean {
   if (params.chatLocked) return false;
+  if (params.locked) return false;
   if (!params.isConnected || !params.participantKey) return false;
   if (!params.disabledLoaded) return false;
   if (params.isDisabled) return false;
@@ -211,7 +225,14 @@ export function resolveChatConnectionState(params: {
   isConnected: boolean;
   isSessionActive: boolean;
   sessionFailed: boolean;
+  /**
+   * Store-variant lock (7-14 V3): a locked entity never starts a session, so it
+   * must NOT show the eternal amber "connecting" pulse — a calm grey (offline)
+   * dot is the clean presentation. Optional ⇒ full-variant callers unchanged.
+   */
+  locked?: boolean;
 }): ChatConnectionState {
+  if (params.locked) return 'offline';
   if (!params.isConnected) return 'offline';
   if (params.sessionFailed) return 'error';
   return params.isSessionActive ? 'connected' : 'connecting';
@@ -301,6 +322,40 @@ function isSameCalendarDay(a: Date, b: Date): boolean {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
+/**
+ * D-35 — project an optimistic pending row into the ConversationMessage shape
+ * the chat renders. Pending rows are read-only projections (never persisted);
+ * `is_read` is true so they never enter the unread/divider math.
+ */
+function pendingToConversationMessage(p: PendingMessage): ConversationMessage {
+  return {
+    id: p.id,
+    entity_id: p.entity_id,
+    sender_entity_id: p.sender_entity_id,
+    interaction_id: p.interactionId,
+    content: p.content,
+    audio_duration: p.audio_duration,
+    message_type: p.message_type,
+    audio_data: p.audio_data,
+    audio_mime_type: p.audio_mime_type,
+    image_data: p.image_data,
+    image_mime_type: p.image_mime_type,
+    vl_model: null,
+    vl_model_interpretation: null,
+    emotional_state_bits: 0,
+    is_recon_followup: false,
+    is_edited: false,
+    edit_of_message_id: null,
+    reactions_json: null,
+    reply_to_message_id: p.reply_to_message_id,
+    is_pinned: false,
+    is_read: true,
+    created_at: p.created_at,
+    updated_at: p.created_at,
+    deleted_at: null,
+  };
+}
+
 export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { t } = useTranslation('chatDetail');
   const { bottom: safeBottom } = useSafeAreaInsets();
@@ -317,12 +372,20 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { isConnected } = useSyncConnection();
   const {
     isSessionActive,
+    activeSessions,
     startInteractionSession,
     stopInteractionSession,
     clearFailedSession,
   } = useEntitySession();
 
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  /**
+   * D-35 — optimistic, IN-MEMORY outgoing rows for this interaction, fed by
+   * EntitySessionService's `message:pending` event. The engine authors the
+   * authoritative rows; pending rows are reconciled away once the engine read
+   * returns them (see the reconcile effect below).
+   */
+  const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -364,6 +427,21 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     routeParticipantKey || ''
   );
 
+  // The partner ENTITY whose chat background/dim this conversation shows.
+  // Backgrounds are entity-scoped (not persona-scoped): switching persona
+  // keeps the same character background.
+  const chatEntityId = useMemo(
+    () => participantIds.find(id => id !== ownEntityId) ?? null,
+    [participantIds, ownEntityId],
+  );
+
+  /** Resolved background image + image opacity + scrim opacity for the chat. */
+  const [chatBackground, setChatBackground] = useState<{
+    source: ImageSourcePropType | null;
+    dim: number;
+    transparency: number;
+  } | null>(null);
+
   const [actionSheetMessage, setActionSheetMessage] =
     useState<ConversationMessage | null>(null);
   // Reply-to context: the message the user is replying to (consumed on send).
@@ -378,6 +456,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // The init effect gates on this so it never sends INIT while the flag is
   // still loading (see shouldInitializeEntitySession — Q8).
   const [disabledLoaded, setDisabledLoaded] = useState(false);
+  // Store-variant runtime lock (plan 7-14 V3): true when the partner entity is
+  // wired to a provider this build doesn't offer. The chat shows a neutral
+  // banner and refuses new sessions; it is COMPUTED, never persisted. Full
+  // variant → always false (isEntityLocked short-circuits, zero fetches).
+  const [isLocked, setIsLocked] = useState(false);
 
   // 4-3 (D36): terminal session-failure state. Set by the session:error
   // listener (matched by interactionId OR participant set — a terminal failure
@@ -395,6 +478,41 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   // Using a ref (not state) avoids re-render cascades and stale closure issues
   // in event listeners that need the current ID at callback time.
   const currentInteractionIdRef = useRef(routeInteractionId);
+  /**
+   * Live context session map. Mirrored into a ref so the re-arm callbacks stay
+   * referentially stable: a new identity on every session update would re-run
+   * the focus effect and re-arm needlessly (same pattern as the context's own
+   * `activeSessionsRef`).
+   */
+  const activeSessionsRef = useRef(activeSessions);
+  activeSessionsRef.current = activeSessions;
+  /**
+   * True while this screen's own INIT is in flight — focus/foreground must not
+   * race the mount effect into a second INIT.
+   */
+  const sessionInitInFlightRef = useRef(false);
+  /**
+   * Toast + translation refs. Both are used by the INIT path, but their
+   * identities are not guaranteed stable (a context provider re-create or a
+   * test double would change them), which would change `initializeSession` and
+   * re-fire the init effect on every render — one INIT per render.
+   */
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
+  const tRef = useRef(t);
+  tRef.current = t;
+  /**
+   * False once this screen unmounts. Used by the session init/re-arm toast so a
+   * slow load that lands after the user left cannot pop a toast over the next
+   * screen.
+   */
+  const screenMountedRef = useRef(true);
+  useEffect(() => {
+    screenMountedRef.current = true;
+    return () => {
+      screenMountedRef.current = false;
+    };
+  }, []);
 
   // HARD GATE — marketplace preview lock (viewable free, chat locked until
   // acquired; own library never locked): once set, this chat is a locked
@@ -675,6 +793,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           if (partnerEntityId) {
             const partner = await getEntity(partnerEntityId);
             if (mounted) setIsDisabled(partner?.is_disabled === 1);
+            // Store-variant lock (no-op / false in the full variant).
+            const locked = await isEntityLocked(partnerEntityId);
+            if (mounted) setIsLocked(locked);
           }
         }
       } catch (error) {
@@ -697,6 +818,34 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     };
   }, [participantKey, participantIds, ownEntityId]);
+
+  // Chat background (entity-scoped). Reloaded on focus so returning from the
+  // picker (or the AI profile image viewer) shows the new image immediately.
+  // A dangling profile/file ref self-heals to "no background" on read.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      if (!chatEntityId) {
+        setChatBackground(null);
+        return undefined;
+      }
+      ChatBackgroundService.loadChatBackground(chatEntityId)
+        .then(resolved => {
+          if (cancelled) return;
+          setChatBackground({
+            source: resolved.source,
+            dim: resolved.dim,
+            transparency: resolved.transparency,
+          });
+        })
+        .catch(err => {
+          if (!cancelled) log.warn('Failed to load chat background:', err);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [chatEntityId]),
+  );
 
   // Load messages and last-read timestamp on mount
   useEffect(() => {
@@ -765,66 +914,174 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeInteractionId]);
 
-  // Session initialization – (re)start the session when sync connection becomes available
-  useEffect(() => {
-    let mounted = true;
+  // ── Session init / re-arm ──────────────────────────────────────────────
 
-    // GATE (shouldInitializeEntitySession, Q8 / review): never send INIT for a
-    // locked marketplace conversation, while disconnected/un-ready, before the
-    // partner's disabled flag has loaded, or for a DISABLED partner — the
-    // engine would reject with ErrEntityDisabled and the user would see an
-    // error toast. Silent skip (debug log, no toast); re-inits when the flag
-    // loads or when the user re-enables from the chat menu (`isDisabled` is a
-    // dep so the toggle immediately restarts the session).
-    if (
-      !shouldInitializeEntitySession({
+  // GATE (shouldInitializeEntitySession, Q8 / review): never send INIT for a
+  // locked marketplace conversation, while disconnected/un-ready, before the
+  // partner's disabled flag has loaded, or for a DISABLED partner — the engine
+  // would reject with ErrEntityDisabled and the user would see an error toast.
+  // Silent skip (debug log, no toast); re-inits when the flag loads or when the
+  // user re-enables from the chat menu.
+  const canInitializeSession = useCallback(
+    () =>
+      shouldInitializeEntitySession({
         chatLocked: chatLockedRef.current,
         isConnected,
         participantKey,
         disabledLoaded,
         isDisabled,
-      })
-    ) {
+        locked: isLocked,
+      }),
+    [isConnected, participantKey, disabledLoaded, isDisabled, isLocked],
+  );
+
+  /** The ONE INIT path: the mount effect and every re-arm call this. */
+  const initializeSession = useCallback(async () => {
+    sessionInitInFlightRef.current = true;
+    try {
+      log.info(`Initializing interaction session for ${routeInteractionId}...`);
+      // Reply mode is read fresh from the SYNCED settings column on every
+      // session init so the mode is not lost between navigations. Uses
+      // participantKey (stable). 4-4: supersedes ChatPreferencesService; the
+      // one-time legacy AsyncStorage migration runs inside getReplyMode.
+      const savedMode = await getReplyMode(participantKey);
+      const mode = savedMode || 'realistic';
+      await startInteractionSession(ownEntityId, participantIds, mode);
+    } catch (error: any) {
+      log.error('Failed to initialize entity session:', error);
+
+      if (!screenMountedRef.current) return;
+
+      const errorMessage = error?.message || 'Unknown error';
+      showToastRef.current(`${tRef.current('common:error')}: ${errorMessage}`);
+    } finally {
+      sessionInitInFlightRef.current = false;
+    }
+  }, [
+    ownEntityId,
+    participantIds,
+    participantKey,
+    routeInteractionId,
+    startInteractionSession,
+  ]);
+
+  /**
+   * Ref-routed INIT handle for the effects below. Same failure mode — and the
+   * same remedy — as showToastRef/tRef above: `initializeSession` is a
+   * useCallback, and any dep of it that changes identity (a context provider
+   * handing out fresh closures, a test double, `participantIds` being re-derived)
+   * rebuilds it. Listing it in an effect's dependency array then re-runs that
+   * effect on every render — the 3 Hz loop from the owner-device trace
+   * (2026-10-21): "Initializing interaction session for <id>…" → context
+   * "Starting interaction session…" → service "Reusing existing interaction
+   * session…", forever, while the screen stayed mounted (stacked screens too).
+   * The effects therefore depend only on the gate STATE that decides when an
+   * INIT may happen, and read the latest callback through this ref.
+   */
+  const initializeSessionRef = useRef(initializeSession);
+  initializeSessionRef.current = initializeSession;
+
+  /**
+   * True when a session for THIS own entity + participant set already exists —
+   * CONNECTING included. Such a session must not be restarted: the service
+   * would reuse it anyway, and skipping avoids a pointless INIT round-trip and
+   * guarantees a partial session is never torn down. FAILED entries are
+   * terminal, so they do not count (a retry still creates a fresh session).
+   */
+  const hasLiveSessionForParticipantSet = useCallback((): boolean => {
+    const targetKey = [...participantIds].sort().join('+');
+    for (const session of activeSessionsRef.current.values()) {
+      if (session.failed) continue;
+      if (session.ownEntityId !== ownEntityId) continue;
+      if ([...session.participantIds].sort().join('+') !== targetKey) continue;
+      return true;
+    }
+    return false;
+  }, [ownEntityId, participantIds]);
+
+  /**
+   * Re-arm the session after a deliberate teardown.
+   *
+   * EntitySessionService closes every session on whole-app ON_STOP while the
+   * sync connection is deliberately kept up (D1-5 always-connected), so
+   * `isConnected` never changes and the init effect never re-ran: the open chat
+   * stayed dead until a full unmount/remount (owner device, 2026-10-21).
+   * Teardown-on-leave/unmount is unchanged and still intentional.
+   *
+   * Calls the INIT through initializeSessionRef so this callback (and the two
+   * effects wired to it: focus + AppLifecycle) keeps a stable identity — the
+   * other half of the same owner-device loop.
+   */
+  const rearmSessionIfNeeded = useCallback(() => {
+    if (sessionInitInFlightRef.current) return;
+    if (!canInitializeSession()) return;
+    if (hasLiveSessionForParticipantSet()) return;
+    initializeSessionRef.current();
+  }, [canInitializeSession, hasLiveSessionForParticipantSet]);
+
+  // Session initialization – (re)start when sync/partner state changes.
+  //
+  // Guarded EXACTLY like the re-arm path above (owner device, 2026-10-21). This
+  // effect used to call initializeSession() unconditionally, so every re-run —
+  // and it re-ran on every render while the provider's callbacks were unstable —
+  // paid a GET /api/entities/:id/chat-list (~330 ms) followed by a reused INIT,
+  // then stored the identical session under a fresh Map, which restarted the
+  // cycle. A live session for this participant set (CONNECTING included) or an
+  // INIT already in flight means there is nothing to do. Mount is unaffected:
+  // the service tears sessions down on leave/unmount, so the next mount finds
+  // nothing live and INITs as before; `canInitializeSession`/`isLocked` changes
+  // still re-run this effect and get a fresh INIT when the gate opens.
+  useEffect(() => {
+    if (!canInitializeSession()) {
       if (isDisabled) {
         log.debug('Skipping session INIT: partner entity is disabled');
       }
+      if (isLocked) {
+        log.debug('Skipping session INIT: partner entity is locked (store variant)');
+      }
       return;
     }
+    if (sessionInitInFlightRef.current) return;
+    if (hasLiveSessionForParticipantSet()) return;
 
-    const initializeSession = async () => {
-      try {
-        log.info(`Initializing interaction session for ${routeInteractionId}...`);
-        // Reply mode is read fresh from the SYNCED settings column on every
-        // session init so the mode is not lost between navigations. Uses
-        // participantKey (stable). 4-4: supersedes ChatPreferencesService; the
-        // one-time legacy AsyncStorage migration runs inside getReplyMode.
-        const savedMode = await getReplyMode(participantKey);
-        const mode = savedMode || 'realistic';
-        await startInteractionSession(ownEntityId, participantIds, mode);
-      } catch (error: any) {
-        if (!mounted) return;
-
-        log.error('Failed to initialize entity session:', error);
-
-        const errorMessage = error?.message || 'Unknown error';
-        showToast(`${t('common:error')}: ${errorMessage}`);
-      }
-    };
-
-    initializeSession();
-
-    return () => {
-      mounted = false;
-    };
+    initializeSessionRef.current();
   }, [
-    routeInteractionId,
-    ownEntityId,
-    participantIds,
-    isConnected,
-    participantKey,
+    canInitializeSession,
+    hasLiveSessionForParticipantSet,
     isDisabled,
-    disabledLoaded,
+    isLocked,
+    // routeInteractionId is NOT a callback dep any more, but a param change on a
+    // re-used screen instance (same mount, new chat) must still re-evaluate the
+    // gate exactly as the pre-fix `initializeSession` dep did.
+    routeInteractionId,
   ]);
+
+  // Re-arm when the screen becomes interactive again: a back-nav from a pushed
+  // screen re-fires focus even though this screen never unmounted.
+  useFocusEffect(
+    useCallback(() => {
+      rearmSessionIfNeeded();
+    }, [rearmSessionIfNeeded]),
+  );
+
+  /**
+   * Re-arm on app FOREGROUND. useFocusEffect does NOT re-fire when the app
+   * returns with this screen already focused, and the ON_STOP teardown leaves
+   * sync connected (D1-5), so nothing else would bring the chat back (owner
+   * device, 2026-10-21). Android emits active/background from androidx
+   * ProcessLifecycleOwner; iOS falls back to AppState (active/inactive/
+   * background). Only a real foreground re-arms.
+   */
+  useEffect(() => {
+    const subscription = AppLifecycle.addEventListener('change', nextState => {
+      const state = nextState as string;
+      if (state !== 'active' && state !== 'foreground') return;
+      rearmSessionIfNeeded();
+    });
+    return () => {
+      subscription?.remove?.();
+    };
+  }, [rearmSessionIfNeeded]);
 
   // Listen for new messages and typing indicator
   useEffect(() => {
@@ -955,6 +1212,46 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [routeInteractionId, ownEntityId, participantKey]);
 
+  // D-35 — optimistic pending rows for this interaction. Seed from the service
+  // (covers a session started before this screen mounted) and track updates.
+  useEffect(() => {
+    setPendingMessages(
+      EntitySessionService.getPendingMessages(currentInteractionIdRef.current),
+    );
+    const handlePending = (
+      receivedInteractionId: string,
+      pending: PendingMessage[],
+    ) => {
+      if (receivedInteractionId === currentInteractionIdRef.current) {
+        setPendingMessages(pending);
+      }
+    };
+    EntitySessionService.on('message:pending', handlePending);
+    return () => {
+      EntitySessionService.off('message:pending', handlePending);
+    };
+  }, [routeInteractionId]);
+
+  // D-35 reconciliation — whenever the engine-authored list refreshes, drop
+  // pending rows the engine has now authored (matched by type+content+sender+
+  // timing, since the engine mints its own id). The service emits
+  // `message:pending` with the reduced set, which updates the state above.
+  useEffect(() => {
+    if (messages.length === 0) return;
+    EntitySessionService.reconcilePendingMessages(
+      currentInteractionIdRef.current,
+      messages,
+    );
+  }, [messages]);
+
+  // Drop any un-reconciled pending rows when the chat closes (the engine
+  // authors the authoritative rows; they reappear on the next open).
+  useEffect(() => {
+    return () => {
+      EntitySessionService.clearPendingMessages(currentInteractionIdRef.current);
+    };
+  }, []);
+
   // Listen for session errors
   useEffect(() => {
     const sortedScreenParticipants = [...participantIds].sort().join('+');
@@ -1038,29 +1335,41 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }, [participantKey, ownEntityId, participantIds, startInteractionSession, showToast, t]);
 
-  // 4-3 (D35): ingestion-class failures ("the AI couldn't be found on Harmony
-  // Link") — run a blocking re-sync so the engine ingests the entity, then
-  // retry the session. 4-2 (D13/D34): the wait is CRITICAL so a failed sync
-  // surfaces as a rejection (logged here) instead of resolving best-effort.
+  // 4-3 (D35): ingestion-class failures ("the AI couldn't be found on the
+  // engine") — retry the session. Task 3-4: the entity is authored directly on
+  // the engine (management API), so there is no sync step to run first.
   const handleSyncAndRetry = useCallback(async () => {
     hapticLightPress();
-    try {
-      await SyncService.getInstance().syncAndWait({ critical: true });
-    } catch (error) {
-      log.warn('Sync-and-retry sync failed (critical):', error);
-    }
     await handleSessionRetry();
   }, [handleSessionRetry]);
 
-  // Seed emoji action defaults when session becomes active
+  // Seed emoji action defaults once the session is live.
+  //
+  // The key MUST be the OWN entity id, never the interaction id (owner device,
+  // 2026-10-21). Two reasons:
+  //   1. The engine's `emoji_actions` table is scoped by ENTITY — its FK is
+  //      `emoji_actions.entity_id → entities(id)`. Seeding with an interaction
+  //      id violated it for every row, so the log filled with "Failed to seed
+  //      emoji action defaults: EngineApiError: FOREIGN KEY constraint failed"
+  //      and the engine logged the same per action.
+  //   2. Picker parity — the inline picker already uses the own entity:
+  //      ChatInputBar gets `entityId={ownEntityId}` (chat input bar render
+  //      below) and hands it to EmojiPickerInline, which calls
+  //      EntityEmojiActionService.getActionsMap(entityId). The action editor
+  //      scopes the same way. Seeding the own entity means picker, editor and
+  //      message sending all read one set of actions.
   useEffect(() => {
-    if (currentInteractionIdRef.current && isSessionActive(currentInteractionIdRef.current)) {
-      // Use interactionId as the key for emoji defaults
-      EntityEmojiActionService.seedDefaults(currentInteractionIdRef.current).catch(err => {
-        log.warn('Failed to seed emoji action defaults:', err);
-      });
-    }
-  }, [routeInteractionId, isSessionActive]);
+    if (!ownEntityId) return;
+    const interactionId = currentInteractionIdRef.current;
+    if (!interactionId || !isSessionActive(interactionId)) return;
+    EntityEmojiActionService.seedDefaults(ownEntityId).catch(err => {
+      log.warn('Failed to seed emoji action defaults:', err);
+    });
+    // activeSessions stays a dep on purpose: isSessionActive's identity is now
+    // stable (see EntitySessionContext), so the connecting → active transition —
+    // the moment seeding becomes possible — is only observable through the
+    // session map itself.
+  }, [routeInteractionId, isSessionActive, activeSessions, ownEntityId]);
 
   const handleConfirmAndSendMessage = useCallback(
     async (messageId: string, finalText: string) => {
@@ -1070,19 +1379,26 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       try {
-        const message = await getConversationMessage(messageId);
-        if (!message || !message.audio_data) {
+        // D-35: the audio lives on the in-memory pending row (the engine has no
+        // app-facing message read).
+        const pending = EntitySessionService.getPendingMessage(messageId);
+        if (!pending || !pending.audio_data) {
           throw new Error('Message not found or has no audio');
         }
 
-        const base64Audio = message.audio_data;
+        const base64Audio = pending.audio_data;
 
-        // Resolve emoji actions in the text
+        // Resolve emoji actions in the text.
+        // OWN entity id is the lookup key (engine FK: emoji_actions.entity_id →
+        // entities(id); the picker/editor scope by it too). Passing the
+        // interaction id here always resolved an EMPTY action map, so emoji → RP
+        // substitution and additional_effects silently never fired (owner
+        // device, 2026-10-21).
         let sendText = finalText;
         let additionalEffects = null;
 
         const resolved = await EntityEmojiActionService.resolveMessageActions(
-          currentInteractionIdRef.current,
+          ownEntityId,
           sendText,
         );
 
@@ -1091,12 +1407,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           additionalEffects = resolved.effects;
         }
 
-        // Update message with final text and change type to 'combined'
-        const updates: any = { message_type: 'combined' };
-        if (sendText !== message.content) {
-          updates.content = sendText;
-        }
-        await updateConversationMessage(messageId, updates);
+        // D-35: patch the pending row to the combined shape the engine will
+        // author (message_type is engine-authored and NOT patchable via the
+        // message PATCH route), so reconciliation matches it on the next read.
+        EntitySessionService.patchPendingMessage(messageId, {
+          message_type: 'combined',
+          content: sendText,
+        });
 
         // Build the combined utterance (audio + text)
         const session = EntitySessionService.getInteractionSession(currentInteractionIdRef.current);
@@ -1106,8 +1423,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             content: sendText,
             type: 'UTTERANCE_COMBINED',
             audio: base64Audio,
-            audio_type: message.audio_mime_type || 'audio/wav',
-            audio_duration: message.audio_duration || 0,
+            audio_type: pending.audio_mime_type || 'audio/wav',
+            audio_duration: pending.audio_duration || 0,
             message_id: messageId,
           };
 
@@ -1156,7 +1473,9 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleReactToMessage = useCallback(
     async (messageId: string, emoji: string) => {
       try {
-        const msg = await getConversationMessage(messageId);
+        // D-35: look the message up from the loaded list — the engine has no
+        // id-only message GET route.
+        const msg = loadedMessagesRef.current.find(m => m.id === messageId) ?? null;
         if (!msg) return;
 
         // Parse existing reactions
@@ -1443,13 +1762,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       try {
-        // Resolve emoji actions in the text
+        // Resolve emoji actions in the text.
+        // OWN entity id — not the interaction id — matching the picker/editor and
+        // the engine's entity-scoped emoji_actions FK (see the seed effect above).
+        // With the interaction id this always came back empty, so emoji → RP
+        // substitution and additional_effects silently never fired.
         let sendText = text;
         let additionalEffects = null;
         const replyId = replyToMessage?.id ?? null;
 
         const resolved = await EntityEmojiActionService.resolveMessageActions(
-          currentInteractionIdRef.current,
+          ownEntityId,
           sendText,
         );
 
@@ -1851,6 +2174,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     })();
   }, [ownEntityId, participantIds, navigation]);
 
+  // Open the per-entity chat background picker (Set background). The
+  // background belongs to the partner entity, so it survives persona switches.
+  const handleOpenBackgroundPicker = useCallback(() => {
+    setMenuVisible(false);
+    if (!chatEntityId) return;
+    hapticLightPress();
+    navigation.navigate('ChatBackgroundPicker', {
+      entityId: chatEntityId,
+      participantKey: participantKey || undefined,
+      povEntityId: ownEntityId,
+    });
+  }, [chatEntityId, participantKey, ownEntityId, navigation]);
+
   // Open the AI partner's profile page (AIProfile) when the user taps the
   // header avatar or character name in a private chat with an AI character.
   const handleOpenPartnerProfile = useCallback(() => {
@@ -1868,10 +2204,19 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     return map;
   }, [messages]);
 
+  // D-35: engine-authored messages plus the optimistic pending rows, rendered
+  // immediately; pending rows are reconciled away once the engine read returns
+  // their authoritative counterparts.
+  const displayMessages = useMemo(
+    () => [...messages, ...pendingMessages.map(pendingToConversationMessage)],
+    [messages, pendingMessages],
+  );
+
   // Calculate messages with divider AND compute the initial scroll target
   const { messagesWithDivider, initialScrollTarget } = useMemo(() => {
-    if (messages.length === 0) {
-      return { messagesWithDivider: messages, initialScrollTarget: 'bottom' as const };
+    const msgs = displayMessages;
+    if (msgs.length === 0) {
+      return { messagesWithDivider: msgs, initialScrollTarget: 'bottom' as const };
     }
 
     // Insert a calendar-day divider before the first message of each new day.
@@ -1880,25 +2225,25 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // message (i === 0) so a freshly opened conversation shows its start date
     // ("Today"/"Yesterday"/date) like mainstream chat apps.
     let withDivider: any[] = [];
-    for (let i = 0; i < messages.length; i++) {
+    for (let i = 0; i < msgs.length; i++) {
       if (
         i === 0 ||
-        !isSameCalendarDay(messages[i - 1].created_at, messages[i].created_at)
+        !isSameCalendarDay(msgs[i - 1].created_at, msgs[i].created_at)
       ) {
         withDivider.push({
-          id: `day-divider-${messages[i].id}`,
+          id: `day-divider-${msgs[i].id}`,
           type: 'day',
-          date: messages[i].created_at,
+          date: msgs[i].created_at,
         });
       }
-      withDivider.push(messages[i]);
+      withDivider.push(msgs[i]);
     }
 
     if (showDivider) {
       // "New messages" divider = the FIRST partner-sent UNREAD message at open,
       // derived from the loaded page's `is_read` flags (3-1 — no AsyncStorage;
       // the legacy last-read-timestamp divider-key derivation is gone A5/A2).
-      const firstUnreadIndex = messages.findIndex(
+      const firstUnreadIndex = msgs.findIndex(
         m =>
           m.sender_entity_id !== ownEntityId &&
           m.is_read === false,
@@ -1908,10 +2253,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         // Map the raw-message index to the corresponding index in the
         // day-augmented array (each message has one preceding day-divider).
         const insertionIndex = withDivider.findIndex(
-          (m: any) => m.id === messages[firstUnreadIndex].id,
+          (m: any) => m.id === msgs[firstUnreadIndex].id,
         );
         if (insertionIndex !== -1) {
-          const newMessageCount = messages.length - firstUnreadIndex;
+          const newMessageCount = msgs.length - firstUnreadIndex;
           withDivider.splice(insertionIndex, 0, {
             id: 'new-messages-divider',
             type: 'divider',
@@ -1928,7 +2273,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     // reported bug, so the scroll target is never a divider index.
     return { messagesWithDivider: withDivider, initialScrollTarget: 'bottom' as const };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, showDivider, ownEntityId]);
+  }, [displayMessages, showDivider, ownEntityId]);
 
   useEffect(() => {
     if (!isInitialScrollDone.current) {
@@ -1972,9 +2317,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       !isInitialScrollDone.current &&
       ((initialScrollTarget === 'bottom' && hasRealContent) ||
         isKnownEmpty ||
-        sessionFailed !== null)
+        sessionFailed !== null ||
+        // Store-variant lock (7-14 V3): a locked entity never INITs, so
+        // has_first_mes stays unknown — reveal immediately so the lock banner
+        // (and any existing history) is not stranded behind the splash.
+        isLocked)
     ) {
-      if (isKnownEmpty || sessionFailed !== null) {
+      if (isKnownEmpty || sessionFailed !== null || isLocked) {
         // Nothing to scroll or pin — reveal immediately.
         isInitialScrollDone.current = true;
         isReadyToShowRef.current = true;
@@ -2004,7 +2353,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         }, 60);
       }
     }
-  }, [messages, messagesWithDivider, initialScrollTarget, loading, hasFirstMes, sessionFailed]);
+  }, [messages, messagesWithDivider, initialScrollTarget, loading, hasFirstMes, sessionFailed, isLocked]);
 
   const persistMarkAsRead = useCallback(() => {
     // Derived unread (A5/A2): mark partner-sent messages in THIS conversation
@@ -2147,14 +2496,6 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           currentInteractionIdRef.current = result.interactionId;
         }
         setHasFirstMes(true);
-
-        // 4-2 (D34): critical — a failed sync rejects instead of resolving
-        // best-effort (logged here; the restart keeps the honest failure path).
-        await SyncService.getInstance()
-          .syncAndWait({ critical: true })
-          .catch(err => {
-            log.warn('Scenario restart sync failed (critical):', err);
-          });
 
         if (participantKey) {
           const updatedMessages = await getRecentConversationMessages(
@@ -2347,6 +2688,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
     isConnected,
     isSessionActive: isSessionActive(currentInteractionIdRef.current),
     sessionFailed: sessionFailed !== null,
+    locked: isLocked,
   });
 
   // Pulsing affordance for the "connecting" state.
@@ -2500,6 +2842,7 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                 handleEntityContextMenu();
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              testID="chat-entity-menu-button"
             >
               <Icon
                 name="dots-vertical"
@@ -2562,14 +2905,16 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                   >
                     <Icon name="account-switch-outline" size={18} color={theme!.colors.accent.primary} />
                   </View>
-                  <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
-                    {t('myPersonas')}
-                  </ThemedText>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText size={15} weight="medium">
+                      {t('myPersonas')}
+                    </ThemedText>
+                    <ThemedText variant="muted" size={11}>
+                      {t('myPersonasCaption')}
+                    </ThemedText>
+                  </View>
                   <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
-                <ThemedText variant="muted" size={11} style={styles.menuItemCaption}>
-                  {t('myPersonasCaption')}
-                </ThemedText>
                 <View
                   style={[
                     styles.menuItemSeparator,
@@ -2595,14 +2940,50 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                       color={theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover}
                     />
                   </View>
-                  <ThemedText size={15} weight="medium" style={{ flex: 1 }}>
-                    {t('partnerSettings')}
-                  </ThemedText>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText size={15} weight="medium">
+                      {t('partnerSettings')}
+                    </ThemedText>
+                    <ThemedText variant="muted" size={11}>
+                      {t('partnerSettingsCaption', { name: headerName })}
+                    </ThemedText>
+                  </View>
                   <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
-                <ThemedText variant="muted" size={11} style={styles.menuItemCaption}>
-                  {t('partnerSettingsCaption', { name: headerName })}
-                </ThemedText>
+                <View
+                  style={[
+                    styles.menuItemSeparator,
+                    { backgroundColor: theme!.colors.border.default + '44' },
+                  ]}
+                />
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleOpenBackgroundPicker}
+                  activeOpacity={0.65}
+                  testID="chat-set-background"
+                >
+                  <View
+                    style={[
+                      styles.menuIconBadge,
+                      { backgroundColor: (theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover) + '1A' },
+                    ]}
+                  >
+                    <Icon
+                      name="wallpaper"
+                      size={18}
+                      color={theme!.colors.accent.secondary ?? theme!.colors.accent.primaryHover}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText size={15} weight="medium">
+                      {t('setBackground')}
+                    </ThemedText>
+                    <ThemedText variant="muted" size={11}>
+                      {t('setBackgroundCaption')}
+                    </ThemedText>
+                  </View>
+                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
+                </TouchableOpacity>
                 <View
                   style={[
                     styles.menuItemSeparator,
@@ -2659,7 +3040,6 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                   <ThemedText size={15} weight="medium" style={{ flex: 1, color: theme!.colors.status.error }}>
                     {isDisabled ? t('enable') : t('disableTitle', { name: headerName })}
                   </ThemedText>
-                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
                 <View
                   style={[
@@ -2681,9 +3061,8 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
                     <Icon name="delete-outline" size={18} color={theme!.colors.status.error} />
                   </View>
                   <ThemedText size={15} weight="medium" style={{ flex: 1, color: theme!.colors.status.error }}>
-                    Delete Entity
+                    {t('deleteCharacter', { name: headerName })}
                   </ThemedText>
-                  <Icon name="chevron-right" size={18} color={theme!.colors.text.muted} />
                 </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
@@ -2735,6 +3114,35 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
       <View
         style={styles.keyboardAvoid}
       >
+      {/* Entity chat background: cover image + dark scrim (dim/100) behind
+          the message list. `transparency` is the image's own opacity — the
+          scrim stays after it, and every chat element renders above this
+          layer (there is no overlay mode). Bubbles are opaque cards, so they
+          stay legible. */}
+      {chatBackground?.source && (
+        <View
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+          testID="chat-background-layer"
+        >
+          <Image
+            source={chatBackground.source}
+            style={[
+              StyleSheet.absoluteFill,
+              { opacity: chatBackground.transparency / 100 },
+            ]}
+            resizeMode="cover"
+            testID="chat-background-image"
+          />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: '#000', opacity: chatBackground.dim / 100 },
+            ]}
+            testID="chat-background-scrim"
+          />
+        </View>
+      )}
       <View
         style={[
           styles.content,
@@ -2883,7 +3291,20 @@ const isOwn = !isPartnerMessage(item, ownEntityId);
 
 </View>
 
-{isDisabled ? (
+{isLocked ? (
+        // Store-variant lock (plan 7-14 V3): neutral copy, NO CTA/link/steering.
+        // Reuses the composer-slot container (same trade as the disabled banner):
+        // nothing can be sent while locked, so the composer is replaced.
+        <View
+          style={[styles.disabledBanner, styles.lockedBanner, { paddingBottom: safeBottom + 14 }]}
+          testID="locked-entity-banner"
+        >
+          <Icon name="lock-outline" size={18} color={theme?.colors.text.muted} />
+          <ThemedText variant="muted" size={13} style={styles.disabledBannerText}>
+            {t('lockedBanner')}
+          </ThemedText>
+        </View>
+      ) : isDisabled ? (
         <View style={[styles.disabledBanner, { paddingBottom: safeBottom + 14 }]}>
           <Icon name="shield-off-outline" size={18} color={theme?.colors.status.error} />
           <ThemedText variant="muted" size={13} style={styles.disabledBannerText}>
@@ -3148,13 +3569,6 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginLeft: 62,
   },
-  menuItemCaption: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    paddingTop: 0,
-    marginTop: -4,
-    marginLeft: 46,
-  },
   disabledBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3167,6 +3581,13 @@ const styles = StyleSheet.create({
   },
   disabledBannerText: {
     flex: 1,
+  },
+  // Store-variant lock banner (7-14 V3): NEUTRAL tint (not the red disabled
+  // treatment) — the user did NOT disable this entity; its provider simply
+  // isn't offered by this build. No CTA/link/steering.
+  lockedBanner: {
+    backgroundColor: 'rgba(124, 58, 237, 0.10)',
+    borderTopColor: 'rgba(124, 58, 237, 0.28)',
   },
   // 4-3 (D36): terminal session-failure card — applied ON TOP of
   // disabledBanner (same container tokens); only switches the row layout to a

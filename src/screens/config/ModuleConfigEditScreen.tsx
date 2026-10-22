@@ -1,14 +1,14 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   View,
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  TextInput,
   Platform,
   KeyboardAvoidingView,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -31,20 +31,39 @@ import { ThemedView } from '../../components/themed/ThemedView';
 import { ThemedText } from '../../components/themed/ThemedText';
 import { hapticLightPress } from '../../utils/haptics';
 import { useAppAlert } from '../../contexts/AppAlertContext';
+import { AccountForm } from '../../components/providers/AccountForm';
+import {
+  ProviderSlotSection,
+  groupFieldsIntoRows,
+} from '../../components/config/ProviderSlotSection';
+import type { SlotState } from '../../components/config/ProviderSlotSection';
 import { FormField } from '../../components/config/FormField';
-import { AdvancedSamplingParams } from '../../components/config/AdvancedSamplingParams';
-import { SoulbitsModelSelect } from '../../components/config/SoulbitsModelSelect';
-import { MODULE_TYPES, ModuleTypeConfig } from '../../constants/moduleConfiguration';
+import { useProviderCapabilityCatalog } from '../../hooks/useProviderCapabilityCatalog';
+import {
+  catalogModelsForModule,
+  findModel,
+  getSpeechOptions,
+} from '../../constants/modelCapabilities';
+import type { FieldDefinition } from '../../constants/providerFieldSchemas';
+import {
+  MODULE_TYPES,
+  ModuleTypeConfig,
+  ProviderOption,
+  STT_SLOT_PROVIDER_OPTIONS,
+} from '../../constants/moduleConfiguration';
 import { MODULE_DEFAULTS, PROVIDER_DEFAULTS } from '../../constants/moduleDefaults';
-import { PROVIDER_SCHEMAS } from '../../constants/providerFieldSchemas';
-import { isSimpleFieldKey, isManagedCloudField } from '../../constants/moduleConfigVisibility';
+import {
+  filterAvailableProviders,
+  getAvailableProviders,
+  STORE_PROVIDER_ID,
+} from '../../services/variant/providerAvailability';
+import { invalidateEntityAccessCache } from '../../services/variant/entityAccess';
+import { isStoreVariant } from '../../config/appVariant';
+import { capabilityDefaultsOf } from '../../constants/accountFieldSchemas';
 import { useAppTheme } from '../../contexts/ThemeContext';
-import { useSyncConnection } from '../../contexts/SyncConnectionContext';
 import { SttTestPanel } from '../../components/config/SttTestPanel';
 import { TtsTestPanel } from '../../components/config/TtsTestPanel';
-import { CLOUD_HOSTS } from '../../config/cloud';
-import { injectSoulbitsToken } from '../../services/cloud/soulbitsTokenSync';
-import AuthService from '../../services/auth/AuthService';
+import { disablePersonaVoice } from '../../services/voiceInput/personaVoice';
 import {
   createBackendConfig, updateBackendConfig, getBackendConfig, deleteBackendConfig,
   createCognitionConfig, updateCognitionConfig, getCognitionConfig, deleteCognitionConfig,
@@ -54,55 +73,10 @@ import {
   createTTSConfig, updateTTSConfig, getTTSConfig, deleteTTSConfig,
   createVisionConfig, updateVisionConfig, getVisionConfig, deleteVisionConfig,
   createImaginationConfig, updateImaginationConfig, getImaginationConfig, deleteImaginationConfig,
-} from '../../database/repositories/modules';
-import {
-  createOpenAIProviderConfig, updateOpenAIProviderConfig, getOpenAIProviderConfig, deleteOpenAIProviderConfig,
-} from '../../database/repositories/providers/OpenAIProviderConfigRepository';
-import {
-  createOpenAICompatibleProviderConfig, updateOpenAICompatibleProviderConfig, getOpenAICompatibleProviderConfig, deleteOpenAICompatibleProviderConfig,
-} from '../../database/repositories/providers/OpenAICompatibleProviderConfigRepository';
-import {
-  createOpenRouterProviderConfig, updateOpenRouterProviderConfig, getOpenRouterProviderConfig, deleteOpenRouterProviderConfig,
-} from '../../database/repositories/providers/OpenRouterProviderConfigRepository';
-import {
-  createElevenLabsProviderConfig, updateElevenLabsProviderConfig, getElevenLabsProviderConfig, deleteElevenLabsProviderConfig,
-} from '../../database/repositories/providers/ElevenLabsProviderConfigRepository';
-import {
-  createHarmonySpeechProviderConfig, updateHarmonySpeechProviderConfig, getHarmonySpeechProviderConfig, deleteHarmonySpeechProviderConfig,
-} from '../../database/repositories/providers/HarmonySpeechProviderConfigRepository';
-import {
-  createKindroidProviderConfig, updateKindroidProviderConfig, getKindroidProviderConfig, deleteKindroidProviderConfig,
-} from '../../database/repositories/providers/KindroidProviderConfigRepository';
-import {
-  createKajiwotoProviderConfig, updateKajiwotoProviderConfig, getKajiwotoProviderConfig, deleteKajiwotoProviderConfig,
-} from '../../database/repositories/providers/KajiwotoProviderConfigRepository';
-import {
-  createCharacterAIProviderConfig, updateCharacterAIProviderConfig, getCharacterAIProviderConfig, deleteCharacterAIProviderConfig,
-} from '../../database/repositories/providers/CharacterAIProviderConfigRepository';
-import {
-  createLocalAIProviderConfig, updateLocalAIProviderConfig, getLocalAIProviderConfig, deleteLocalAIProviderConfig,
-} from '../../database/repositories/providers/LocalAIProviderConfigRepository';
-import {
-  createMistralProviderConfig, updateMistralProviderConfig, getMistralProviderConfig, deleteMistralProviderConfig,
-} from '../../database/repositories/providers/MistralProviderConfigRepository';
-import {
-  createOllamaProviderConfig, updateOllamaProviderConfig, getOllamaProviderConfig, deleteOllamaProviderConfig,
-} from '../../database/repositories/providers/OllamaProviderConfigRepository';
-import {
-  createComfyUIProviderConfig, updateComfyUIProviderConfig, getComfyUIProviderConfig, deleteComfyUIProviderConfig,
-} from '../../database/repositories/providers/ComfyUIProviderConfigRepository';
-import {
-  createGoogleProviderConfig, updateGoogleProviderConfig, getGoogleProviderConfig, deleteGoogleProviderConfig,
-} from '../../database/repositories/providers/GoogleProviderConfigRepository';
-import {
-  createXAIProviderConfig, updateXAIProviderConfig, getXAIProviderConfig, deleteXAIProviderConfig,
-} from '../../database/repositories/providers/XAIProviderConfigRepository';
-import {
-  createAnthropicProviderConfig, updateAnthropicProviderConfig, getAnthropicProviderConfig, deleteAnthropicProviderConfig,
-} from '../../database/repositories/providers/AnthropicProviderConfigRepository';
-import {
-  createSoulbitsCloudProviderConfig, updateSoulbitsCloudProviderConfig, getSoulbitsCloudProviderConfig, deleteSoulbitsCloudProviderConfig,
-} from '../../database/repositories/providers/SoulbitsCloudProviderConfigRepository';
+  listAccounts, createAccount,
+} from '../../database/repositories';
+import type { ProviderAccount } from '../../database/models';
+import type { ProviderAccountWriteDto } from '../../services/engine/EngineApiClient';
 
 type RootStackParamList = {
   ModuleConfigEdit: {
@@ -117,28 +91,58 @@ type RootStackParamList = {
 type ModuleConfigEditRouteProp = RouteProp<RootStackParamList, 'ModuleConfigEdit'>;
 type ModuleConfigEditNavigationProp = NativeStackNavigationProp<RootStackParamList, 'ModuleConfigEdit'>;
 
-const OPENAI_FAMILY = ['openai', 'openaicompatible', 'openrouter', 'google', 'xai', 'anthropic'];
-
-/** Beta-aware inference host, used to prefill the Soulbits Cloud base_url when connected. */
-function soulbitsCloudBaseUrl(cloudConnected: boolean): string | undefined {
-  return cloudConnected ? CLOUD_HOSTS.inference : undefined;
+/**
+ * Seed the per-slot "explicit field" set from a loaded capability overlay: a
+ * persisted value that differs from the provider's default was set explicitly
+ * by the user (used by the preset preview chips to label overrides — plan §11
+ * A3 "explicit local values override the preset").
+ */
+function explicitKeysFromPersisted(
+  providerType: string,
+  persisted: Record<string, any> | null | undefined,
+): Record<string, boolean> {
+  if (!persisted) return {};
+  const defaults = PROVIDER_DEFAULTS[providerType] || {};
+  const out: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(persisted)) {
+    if (value === undefined || value === null || value === '') continue;
+    if (String(value) !== String(defaults[key])) out[key] = true;
+  }
+  return out;
 }
 
-/**
- * True when the api_key field holds an injected cloud PASETO (v4.local.*) that
- * must be shown read-only — same prefix heuristic the engine uses to switch
- * between PASETO mode and plain API-key mode (`strings.HasPrefix(apiKey,
- * "v4.local.")`). Prevents the user from copying/editing the managed credential.
- */
-function isManagedSoulbitsApiKey(
-  providerType: string,
-  fieldKey: string,
-  apiKey: string | undefined,
-): boolean {
-  return providerType === 'soulbitscloud'
-    && fieldKey === 'api_key'
-    && typeof apiKey === 'string'
-    && apiKey.startsWith('v4.local.');
+/** Parse a capability overlay (JSON string or object) into a plain object. */
+function parseCapability(value: unknown): Record<string, any> {
+  if (value && typeof value === 'object') return { ...(value as Record<string, any>) };
+  if (typeof value === 'string' && value.trim() !== '') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+/** Serialize a capability overlay, dropping undefined values (stable '{}'). */
+function serializeCapability(values: Record<string, any>): string {
+  const cleaned: Record<string, any> = {};
+  for (const [key, value] of Object.entries(values ?? {})) {
+    if (value === undefined) continue;
+    cleaned[key] = value;
+  }
+  return JSON.stringify(cleaned);
+}
+
+/** One provider slot definition (STT has two; every other module one). */
+interface SlotDef {
+  slot: string;
+  label: string;
+  providerField: string;
+  accountField: string;
+  capabilityField: string;
+  modelModuleType: string;
 }
 
 const MODULE_REPOSITORIES: Record<string, {
@@ -157,29 +161,7 @@ const MODULE_REPOSITORIES: Record<string, {
   imagination: { create: createImaginationConfig, update: updateImaginationConfig, get: getImaginationConfig, delete: deleteImaginationConfig },
 };
 
-const PROVIDER_REPOSITORIES: Record<string, {
-  create: (config: any) => Promise<string>;
-  update: (config: any) => Promise<void>;
-  get: (id: string) => Promise<any | null>;
-  delete: (id: string) => Promise<void>;
-}> = {
-  openai: { create: createOpenAIProviderConfig, update: updateOpenAIProviderConfig, get: getOpenAIProviderConfig, delete: deleteOpenAIProviderConfig },
-  openaicompatible: { create: createOpenAICompatibleProviderConfig, update: updateOpenAICompatibleProviderConfig, get: getOpenAICompatibleProviderConfig, delete: deleteOpenAICompatibleProviderConfig },
-  openrouter: { create: createOpenRouterProviderConfig, update: updateOpenRouterProviderConfig, get: getOpenRouterProviderConfig, delete: deleteOpenRouterProviderConfig },
-  elevenlabs: { create: createElevenLabsProviderConfig, update: updateElevenLabsProviderConfig, get: getElevenLabsProviderConfig, delete: deleteElevenLabsProviderConfig },
-  harmonyspeech: { create: createHarmonySpeechProviderConfig, update: updateHarmonySpeechProviderConfig, get: getHarmonySpeechProviderConfig, delete: deleteHarmonySpeechProviderConfig },
-  kindroid: { create: createKindroidProviderConfig, update: updateKindroidProviderConfig, get: getKindroidProviderConfig, delete: deleteKindroidProviderConfig },
-  kajiwoto: { create: createKajiwotoProviderConfig, update: updateKajiwotoProviderConfig, get: getKajiwotoProviderConfig, delete: deleteKajiwotoProviderConfig },
-  characterai: { create: createCharacterAIProviderConfig, update: updateCharacterAIProviderConfig, get: getCharacterAIProviderConfig, delete: deleteCharacterAIProviderConfig },
-  localai: { create: createLocalAIProviderConfig, update: updateLocalAIProviderConfig, get: getLocalAIProviderConfig, delete: deleteLocalAIProviderConfig },
-  mistral: { create: createMistralProviderConfig, update: updateMistralProviderConfig, get: getMistralProviderConfig, delete: deleteMistralProviderConfig },
-  ollama: { create: createOllamaProviderConfig, update: updateOllamaProviderConfig, get: getOllamaProviderConfig, delete: deleteOllamaProviderConfig },
-  comfyui: { create: createComfyUIProviderConfig, update: updateComfyUIProviderConfig, get: getComfyUIProviderConfig, delete: deleteComfyUIProviderConfig },
-  google: { create: createGoogleProviderConfig, update: updateGoogleProviderConfig, get: getGoogleProviderConfig, delete: deleteGoogleProviderConfig },
-  xai: { create: createXAIProviderConfig, update: updateXAIProviderConfig, get: getXAIProviderConfig, delete: deleteXAIProviderConfig },
-  anthropic: { create: createAnthropicProviderConfig, update: updateAnthropicProviderConfig, get: getAnthropicProviderConfig, delete: deleteAnthropicProviderConfig },
-  soulbitscloud: { create: createSoulbitsCloudProviderConfig, update: updateSoulbitsCloudProviderConfig, get: getSoulbitsCloudProviderConfig, delete: deleteSoulbitsCloudProviderConfig },
-};
+const EMPTY_SLOT: SlotState = { providerType: '', accountId: null, capability: {} };
 
 export const ModuleConfigEditScreen: React.FC = () => {
   const route = useRoute<ModuleConfigEditRouteProp>();
@@ -188,36 +170,89 @@ export const ModuleConfigEditScreen: React.FC = () => {
   const { showAlert } = useAppAlert();
   const { t } = useTranslation('moduleConfig');
   const { bottom: safeBottom } = useSafeAreaInsets();
-  const { isConnected, connectionStatus } = useSyncConnection();
-  const cloudConnected = connectionStatus?.mode === 'cloud' && isConnected === true;
-  // Managed Soulbits Cloud mode — endpoint + tokens are auto-synced from the
-  // backend, so the credential/endpoint fields should be hidden regardless of
-  // the momentary WS connection state.
-  const isCloudMode = connectionStatus?.mode === 'cloud';
-  
+
   const { moduleType, configId, entityId } = route.params;
   const isCreate = !configId;
   const isSTT = moduleType === 'stt';
-  
-  // Module config fields (name, module-specific fields, provider references)
+
+  // Module config fields (name + module-specific scalars).
   const [formValues, setFormValues] = useState<Record<string, any>>({
     name: '',
-    provider: '',
   });
-  
-  // Inline provider config fields — keyed by provider slot
-  // For standard modules: 'provider' (single slot)
-  // For STT: 'transcription' and 'vad' (two slots)
-  const [providerForms, setProviderForms] = useState<Record<string, {
-    providerConfigId: string | null;
-    values: Record<string, any>;
-  }>>({});
-  
+
+  // Per-slot provider state (provider type + account FK + capability overlay).
+  const [slots, setSlots] = useState<Record<string, SlotState>>({});
+
+  // Per-slot set of capability keys the user has explicitly set (session edits +
+  // persisted values that differ from the provider defaults). Drives the preset
+  // preview chips' "your explicit value wins" annotation (plan §11 A3).
+  const [explicitFields, setExplicitFields] = useState<
+    Record<string, Record<string, boolean>>
+  >({});
+
+  // Shared provider accounts (all types; filtered per slot by the chosen type).
+  const [accounts, setAccounts] = useState<ProviderAccount[]>([]);
+  // The "Add account…" modal target (slot) — null when closed.
+  const [editorSlot, setEditorSlot] = useState<string | null>(null);
+  const [savingAccount, setSavingAccount] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   // Simple vs Advanced mode toggle — Simple hides the deep technical fields.
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // STT presents one interactive 2-stage pipeline instead of two slot walls.
+  const [activeSttStage, setActiveSttStage] = useState<'vad' | 'transcription'>('transcription');
+  const { catalog } = useProviderCapabilityCatalog();
+
+  const slotDefs: SlotDef[] = useMemo(
+    () =>
+      isSTT
+        ? [
+            {
+              slot: 'transcription',
+              label: 'Transcription',
+              providerField: 'transcription_provider',
+              accountField: 'transcription_provider_account_id',
+              capabilityField: 'transcription_capability_json',
+              modelModuleType: 'stt',
+            },
+            {
+              slot: 'vad',
+              label: 'VAD',
+              providerField: 'vad_provider',
+              accountField: 'vad_provider_account_id',
+              capabilityField: 'vad_capability_json',
+              modelModuleType: 'vad',
+            },
+          ]
+        : [
+            {
+              slot: 'provider',
+              label: '',
+              providerField: 'provider',
+              accountField: 'provider_account_id',
+              capabilityField: 'capability_json',
+              modelModuleType: moduleType,
+            },
+          ],
+    [isSTT, moduleType],
+  );
+
+  const providerOptions = useMemo(() => getAvailableProviders(moduleType), [moduleType]);
+
+  // Per-slot provider lists (provider-registry 6-5 step 2): STT's transcription
+  // and VAD slots each carry their own option list (scoped to the engine clients
+  // that implement the capability); every other module uses the module list.
+  const providerOptionsForSlot = useCallback(
+    (slot: string): ProviderOption[] => {
+      if (isSTT && (slot === 'transcription' || slot === 'vad')) {
+        return filterAvailableProviders(STT_SLOT_PROVIDER_OPTIONS[slot]);
+      }
+      return providerOptions;
+    },
+    [isSTT, providerOptions],
+  );
 
   // Restore the persisted Simple/Advanced preference.
   useEffect(() => {
@@ -257,26 +292,40 @@ export const ModuleConfigEditScreen: React.FC = () => {
 
   if (!theme) return null;
 
+  const emptySlotFor = (providerType: string, modelModuleType: string): SlotState => ({
+    providerType,
+    accountId: null,
+    capability: capabilityDefaultsOf(
+      providerType,
+      PROVIDER_DEFAULTS[providerType] ?? {},
+      modelModuleType,
+    ),
+  });
+
   const loadConfig = async () => {
+    // Accounts are shared across slots — load once (variant-filtered).
+    try {
+      const all = await listAccounts();
+      setAccounts(all);
+    } catch (err) {
+      log.error('Failed to load provider accounts:', err);
+      setAccounts([]);
+    }
+
     if (!configId) {
-      // Create mode — prefill with module defaults
+      // Create mode — seed module defaults + an empty provider slot per slot.
       const defaults = MODULE_DEFAULTS[moduleType] || {};
-      setFormValues(prev => ({
-        ...prev,
-        ...defaults,
-      }));
-      
-      if (isSTT) {
-        setProviderForms({
-          transcription: { providerConfigId: null, values: {} },
-          vad: { providerConfigId: null, values: {} },
-        });
-      } else {
-        setProviderForms({
-          provider: { providerConfigId: null, values: {} },
-        });
+      const storeVariant = isStoreVariant();
+      const storeProvider = storeVariant ? STORE_PROVIDER_ID : '';
+      const nextSlots: Record<string, SlotState> = {};
+      const nextExplicit: Record<string, Record<string, boolean>> = {};
+      for (const def of slotDefs) {
+        nextSlots[def.slot] = emptySlotFor(storeProvider, def.modelModuleType);
+        nextExplicit[def.slot] = {};
       }
-      
+      setFormValues({ ...defaults, name: '' });
+      setSlots(nextSlots);
+      setExplicitFields(nextExplicit);
       setLoading(false);
       return;
     }
@@ -289,85 +338,53 @@ export const ModuleConfigEditScreen: React.FC = () => {
       }
 
       const config = await repo.get(configId);
-      if (config) {
-        if (isSTT) {
-          setFormValues({
-            name: config.name,
-            transcription_provider: config.transcription_provider ?? '',
-            vad_provider: config.vad_provider ?? '',
-            main_stream_time_millis: config.main_stream_time_millis,
-            transition_stream_time_millis: config.transition_stream_time_millis,
-            max_buffer_count: config.max_buffer_count,
-          });
+      if (!config) {
+        setLoading(false);
+        return;
+      }
 
-          // Load transcription provider config inline
-          const txProviderType = config.transcription_provider;
-          const txProviderConfigId = config.transcription_provider_config_id;
-          let txProviderValues: Record<string, any> = {};
-          if (txProviderType && txProviderConfigId) {
-            const pRepo = PROVIDER_REPOSITORIES[txProviderType];
-            if (pRepo) {
-              const pConfig = await pRepo.get(txProviderConfigId);
-              if (pConfig) {
-                const defaults = PROVIDER_DEFAULTS[txProviderType] || {};
-                txProviderValues = { ...defaults, ...pConfig };
-              }
-            }
-          }
-
-          // Load VAD provider config inline
-          const vadProviderType = config.vad_provider;
-          const vadProviderConfigId = config.vad_provider_config_id;
-          let vadProviderValues: Record<string, any> = {};
-          if (vadProviderType && vadProviderConfigId) {
-            const pRepo = PROVIDER_REPOSITORIES[vadProviderType];
-            if (pRepo) {
-              const pConfig = await pRepo.get(vadProviderConfigId);
-              if (pConfig) {
-                const defaults = PROVIDER_DEFAULTS[vadProviderType] || {};
-                vadProviderValues = { ...defaults, ...pConfig };
-              }
-            }
-          }
-
-          setProviderForms({
-            transcription: { providerConfigId: txProviderConfigId ?? null, values: txProviderValues },
-            vad: { providerConfigId: vadProviderConfigId ?? null, values: vadProviderValues },
-          });
-        } else {
-          // Standard module
-          const providerType = config.provider;
-          const providerConfigId = config.provider_config_id;
-          
-          const moduleFields = Object.fromEntries(
-            Object.entries(config).filter(([k]) =>
-              !['id', 'name', 'provider', 'provider_config_id', 'deleted_at'].includes(k)
-            )
-          );
-
-          setFormValues({
-            name: config.name,
-            provider: providerType ?? '',
-            ...moduleFields,
-          });
-
-          // Load provider config values inline
-          let providerValues: Record<string, any> = {};
-          if (providerType && providerConfigId) {
-            const pRepo = PROVIDER_REPOSITORIES[providerType];
-            if (pRepo) {
-              const pConfig = await pRepo.get(providerConfigId);
-              if (pConfig) {
-                const defaults = PROVIDER_DEFAULTS[providerType] || {};
-                providerValues = { ...defaults, ...pConfig };
-              }
-            }
-          }
-
-          setProviderForms({
-            provider: { providerConfigId: providerConfigId ?? null, values: providerValues },
-          });
+      if (isSTT) {
+        setFormValues({
+          name: config.name,
+          main_stream_time_millis: config.main_stream_time_millis,
+          transition_stream_time_millis: config.transition_stream_time_millis,
+          max_buffer_count: config.max_buffer_count,
+        });
+        const nextSlots: Record<string, SlotState> = {};
+        const nextExplicit: Record<string, Record<string, boolean>> = {};
+        for (const def of slotDefs) {
+          const providerType: string = config[def.providerField] ?? '';
+          const accountId: string | null = config[def.accountField] ?? null;
+          const capability = parseCapability(config[def.capabilityField]);
+          nextSlots[def.slot] = { providerType, accountId, capability };
+          nextExplicit[def.slot] = explicitKeysFromPersisted(providerType, capability);
         }
+        setSlots(nextSlots);
+        setExplicitFields(nextExplicit);
+      } else {
+        const def = slotDefs[0];
+        const providerType: string = config.provider ?? '';
+        const accountId: string | null = config.provider_account_id ?? null;
+        const capability = parseCapability(config.capability_json);
+
+        const moduleFields = Object.fromEntries(
+          Object.entries(config).filter(
+            ([k]) =>
+              ![
+                'id',
+                'name',
+                'provider',
+                'provider_account_id',
+                'capability_json',
+                'deleted_at',
+              ].includes(k)
+          )
+        );
+        setFormValues({ name: config.name, ...moduleFields });
+        setSlots({ [def.slot]: { providerType, accountId, capability } });
+        setExplicitFields({
+          [def.slot]: explicitKeysFromPersisted(providerType, capability),
+        });
       }
     } catch (error) {
       log.error('Failed to load config:', error);
@@ -377,109 +394,85 @@ export const ModuleConfigEditScreen: React.FC = () => {
   };
 
   const handleModuleFieldChange = (key: string, value: any) => {
-    setFormValues(prev => ({ ...prev, [key]: value }));
+    setFormValues((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleProviderFieldChange = (slot: string, key: string, value: any) => {
-    setProviderForms(prev => ({
+  /** Provider type switch: reset the account + reseed the module-scoped defaults. */
+  const handleProviderSwitch = (slot: string, providerType: string) => {
+    const def = slotDefs.find((d) => d.slot === slot);
+    setSlots((prev) => ({
       ...prev,
-      [slot]: {
-        ...prev[slot],
-        values: {
-          ...prev[slot].values,
-          [key]: value,
-        },
-      },
+      [slot]: emptySlotFor(providerType, def?.modelModuleType ?? moduleType),
+    }));
+    setExplicitFields((prev) => ({ ...prev, [slot]: {} }));
+  };
+
+  const handleAccountChange = (slot: string, accountId: string | null) => {
+    setSlots((prev) => ({
+      ...prev,
+      [slot]: { ...(prev[slot] ?? EMPTY_SLOT), accountId },
     }));
   };
 
-  const handleProviderSwitch = async (slot: string, providerType: string) => {
-    if (slot === 'provider') {
-      handleModuleFieldChange('provider', providerType);
-    } else if (slot === 'transcription') {
-      handleModuleFieldChange('transcription_provider', providerType);
-    } else if (slot === 'vad') {
-      handleModuleFieldChange('vad_provider', providerType);
-    }
-
-    // Reset provider form values to defaults for the new type
-    const defaults = PROVIDER_DEFAULTS[providerType] || {};
-
-    // Feature 1: when switching TO Soulbits Cloud while connected, prefill the
-    // beta-aware inference endpoint (overrides the prod default baked into PROVIDER_DEFAULTS).
-    if (providerType === 'soulbitscloud') {
-      const prefillUrl = soulbitsCloudBaseUrl(cloudConnected);
-      if (prefillUrl) {
-        defaults.base_url = prefillUrl;
-      }
-      // Pre-seed the cloud PASETO as api_key (read-only in the form) so new
-      // configs ship with a working credential without manual entry.
-      try {
-        const paseto = await AuthService.getToken();
-        if (paseto) {
-          defaults.api_key = paseto;
-        }
-      } catch {
-        // No cloud token — standalone mode. Leave api_key empty for the user.
-      }
-    }
-
-    setProviderForms(prev => ({
+  /** "Disabled (Manual Push-to-Talk only)" — clears the VAD slot. */
+  const handleDisableSlot = (slot: string) => {
+    setSlots((prev) => ({
       ...prev,
-      [slot]: {
-        providerConfigId: null, // new provider type = no existing config
-        values: { ...defaults },
-      },
+      [slot]: { ...EMPTY_SLOT },
     }));
-  };
-
-  const handleExtraParamsChange = (slot: string, jsonString: string) => {
-    handleProviderFieldChange(slot, 'extra_params', jsonString);
+    setExplicitFields((prev) => ({ ...prev, [slot]: {} }));
   };
 
   /**
-   * Save provider config (create or update), return the config ID.
+   * "Disabled (voice input off)" on the STT transcription stage — a DELIBERATE
+   * user write of the engine 'disabled' sentinel through the persona-voice
+   * helper (the same LWW-safe OFF write the retired VoiceInputSettingsScreen
+   * performed). The linked mapping is left intact so the user can switch a
+   * provider back on later. Only offered in edit mode (a config id exists).
    */
-  const saveProviderConfig = async (
-    providerType: string,
-    slot: string,
-  ): Promise<string | null> => {
-    const pRepo = PROVIDER_REPOSITORIES[providerType];
-    if (!pRepo) return null;
-
-    const form = providerForms[slot];
-    if (!form) return null;
-
-    // Build the provider config object from form values
-    const providerConfig = { ...form.values };
-
-    // Ensure the name field is set (derive from module config name + provider type)
-    if (!providerConfig.name) {
-      providerConfig.name = `${formValues.name || 'Config'} - ${providerType}`;
-    }
-
-    // Inject the current cloud PASETO as api_key for NEW soulbitscloud configs
-    // (belt-and-braces on top of the form prefill — catches token refreshes that
-    // happened while the form was open). No-op for updates / standalone mode.
-    const seededConfig = await injectSoulbitsToken({
-      providerType,
-      isCreate: !form.providerConfigId,
-      providerConfig,
-    });
-
+  const handleDisableVoiceInput = async () => {
+    if (!configId) return;
     try {
-      if (form.providerConfigId) {
-        // Update existing
-        await pRepo.update({ ...seededConfig, id: form.providerConfigId });
-        return form.providerConfigId;
-      } else {
-        // Create new
-        const newId = await pRepo.create(seededConfig);
-        return newId;
-      }
+      await disablePersonaVoice(configId);
+      navigation.goBack();
     } catch (error) {
-      log.error(`Failed to save ${providerType} provider config:`, error);
-      throw error;
+      log.error('Failed to disable voice input:', error);
+      showAlert(t('common:error'), t('saveFailed'));
+    }
+  };
+
+  const handleCapabilityChange = (slot: string, key: string, value: any) => {
+    setSlots((prev) => ({
+      ...prev,
+      [slot]: {
+        ...(prev[slot] ?? EMPTY_SLOT),
+        capability: { ...(prev[slot]?.capability ?? {}), [key]: value },
+      },
+    }));
+    // A user edit is an explicit local value (overrides a preset — §11 A3).
+    setExplicitFields((prev) => ({
+      ...prev,
+      [slot]: { ...(prev[slot] ?? {}), [key]: true },
+    }));
+  };
+
+  /** "Add account…" submit: create the shared account, then select it. */
+  const handleSubmitAccount = async (dto: ProviderAccountWriteDto) => {
+    if (!editorSlot) return;
+    const providerType = slots[editorSlot]?.providerType;
+    if (!providerType) return;
+    setSavingAccount(true);
+    try {
+      const id = await createAccount(providerType, dto);
+      const all = await listAccounts();
+      setAccounts(all);
+      handleAccountChange(editorSlot, id);
+      setEditorSlot(null);
+    } catch (error) {
+      log.error('Failed to create provider account:', error);
+      showAlert(t('common:error'), t('accountSaveFailed'));
+    } finally {
+      setSavingAccount(false);
     }
   };
 
@@ -489,83 +482,71 @@ export const ModuleConfigEditScreen: React.FC = () => {
       return;
     }
 
-    setSaving(true);
-    try {
-      const repo = MODULE_REPOSITORIES[moduleType];
-      if (!repo) {
-        showAlert(t('common:error'), t('unknownModuleType'));
+    const repo = MODULE_REPOSITORIES[moduleType];
+    if (!repo) {
+      showAlert(t('common:error'), t('unknownModuleType'));
+      return;
+    }
+
+    // Provider required per slot. STT's VAD stage may be disabled entirely
+    // (manual push-to-talk) — the engine treats an empty VAD provider as off.
+    for (const def of slotDefs) {
+      if (isSTT && def.slot === 'vad' && !slots[def.slot]?.providerType) continue;
+      if (!slots[def.slot]?.providerType) {
+        const key = isSTT
+          ? def.slot === 'transcription'
+            ? 'transcriptionProviderRequired'
+            : 'vadProviderRequired'
+          : 'providerRequired';
+        showAlert(t('common:error'), t(key));
         return;
       }
+    }
 
+    setSaving(true);
+    try {
+      let moduleConfig: Record<string, any>;
       if (isSTT) {
-        // STT: validate both provider slots
-        const txProvider = formValues.transcription_provider;
-        const vadProvider = formValues.vad_provider;
-        if (!txProvider) {
-          showAlert(t('common:error'), t('transcriptionProviderRequired'));
-          return;
-        }
-        if (!vadProvider) {
-          showAlert(t('common:error'), t('vadProviderRequired'));
-          return;
-        }
-
-        // Save transcription provider config
-        const txConfigId = await saveProviderConfig(txProvider, 'transcription');
-        // Save VAD provider config
-        const vadConfigId = await saveProviderConfig(vadProvider, 'vad');
-
-        const moduleConfig = {
+        const tx = slots.transcription;
+        const vad = slots.vad;
+        moduleConfig = {
           name: formValues.name,
-          transcription_provider: txProvider,
-          transcription_provider_config_id: txConfigId,
-          vad_provider: vadProvider,
-          vad_provider_config_id: vadConfigId,
+          transcription_provider: tx.providerType,
+          transcription_provider_account_id: tx.accountId,
+          transcription_capability_json: serializeCapability(tx.capability),
+          vad_provider: vad.providerType,
+          vad_provider_account_id: vad.accountId,
+          vad_capability_json: serializeCapability(vad.capability),
           main_stream_time_millis: formValues.main_stream_time_millis,
           transition_stream_time_millis: formValues.transition_stream_time_millis,
           max_buffer_count: formValues.max_buffer_count,
         };
-
-        if (isCreate) {
-          await repo.create(moduleConfig);
-        } else {
-          await repo.update({ ...moduleConfig, id: configId });
-        }
       } else {
-        // Standard module
-        const providerType = formValues.provider;
-        if (!providerType) {
-          showAlert(t('common:error'), t('providerRequired'));
-          return;
-        }
-
-        // Save provider config inline
-        const providerConfigId = await saveProviderConfig(providerType, 'provider');
-
-        // Build module config, filtering out provider config fields
-        const moduleSpecificKeys = (MODULE_TYPES.find(m => m.id === moduleType)?.moduleSpecificFields || []).map(f => f.key);
-        const moduleSpecificDefaults = MODULE_DEFAULTS[moduleType] || {};
+        const providerSlot = slots.provider;
+        const moduleSpecificKeys = (
+          MODULE_TYPES.find((m) => m.id === moduleType)?.moduleSpecificFields || []
+        ).map((f) => f.key);
         const moduleFields: Record<string, any> = {};
         for (const key of moduleSpecificKeys) {
-          if (formValues[key] !== undefined) {
-            moduleFields[key] = formValues[key];
-          }
+          if (formValues[key] !== undefined) moduleFields[key] = formValues[key];
         }
-
-        const moduleConfig = {
+        moduleConfig = {
           name: formValues.name,
-          provider: providerType,
-          provider_config_id: providerConfigId,
+          provider: providerSlot.providerType,
+          provider_account_id: providerSlot.accountId,
+          capability_json: serializeCapability(providerSlot.capability),
           ...moduleFields,
         };
-
-        if (isCreate) {
-          await repo.create(moduleConfig);
-        } else {
-          await repo.update({ ...moduleConfig, id: configId });
-        }
       }
-      
+
+      if (isCreate) {
+        await repo.create(moduleConfig);
+      } else {
+        await repo.update({ ...moduleConfig, id: configId });
+      }
+
+      // Provider/module wiring changed → the computed lock set is stale (7-14).
+      invalidateEntityAccessCache();
       navigation.goBack();
     } catch (error) {
       log.error('Failed to save:', error);
@@ -589,6 +570,7 @@ export const ModuleConfigEditScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             await repo.delete(configId);
+            invalidateEntityAccessCache();
             navigation.goBack();
           },
         },
@@ -596,200 +578,18 @@ export const ModuleConfigEditScreen: React.FC = () => {
     );
   };
 
-  const getModuleConfig = (): ModuleTypeConfig | undefined => {
-    return MODULE_TYPES.find(m => m.id === moduleType);
-  };
+  const getModuleConfig = (): ModuleTypeConfig | undefined =>
+    MODULE_TYPES.find((m) => m.id === moduleType);
 
   const moduleConfig = getModuleConfig();
 
-  // ── Provider option chip ──
-  const renderProviderOption = (
-    option: { id: string; name: string },
-    currentValue: string,
-    onSelect: (id: string) => void,
-    keyPrefix: string = '',
-  ) => {
-    const isSelected = currentValue === option.id;
-    return (
-      <TouchableOpacity
-        key={`${keyPrefix}${option.id}`}
-        style={[
-          styles.providerChip,
-          {
-            borderColor: isSelected
-              ? theme!.colors.accent.primary
-              : theme!.colors.border.default,
-            backgroundColor: isSelected
-              ? theme!.colors.accent.primary + '1A'
-              : theme!.colors.background.base,
-          },
-        ]}
-        onPress={() => onSelect(option.id)}
-        activeOpacity={0.7}
-      >
-        {isSelected && (
-          <LinearGradient
-            colors={[theme!.colors.accent.primary, theme!.colors.accent.secondary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={styles.chipPip}
-          />
-        )}
-        <ThemedText
-          size={13}
-          variant={isSelected ? 'accent' : 'primary'}
-          weight={isSelected ? 'medium' : 'normal'}
-          style={{ paddingLeft: isSelected ? 8 : 0 }}
-        >
-          {option.name}
-        </ThemedText>
-        {isSelected && (
-          <Icon name="check" size={14} color={theme!.colors.accent.primary} style={{ marginLeft: 4 }} />
-        )}
-      </TouchableOpacity>
-    );
-  };
-
-  // ── Text input with theme styling (for module-specific fields) ──
-  const renderThemedInput = (
-    label: string,
-    value: any,
-    onChangeText: (text: string) => void,
-    placeholder: string,
-    keyboardType: 'default' | 'decimal-pad' | 'number-pad' = 'default',
-  ) => (
-    <View>
-      <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-        {label}
-      </ThemedText>
-      <TextInput
-        style={[
-          styles.input,
-          {
-            color: theme!.colors.text.primary,
-            borderColor: theme!.colors.border.default,
-            backgroundColor: theme!.colors.background.base,
-          },
-        ]}
-        value={value?.toString() ?? ''}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        keyboardType={keyboardType}
-        placeholderTextColor={theme!.colors.text.muted}
-      />
-    </View>
-  );
-
-  // ── Render inline provider config fields for a slot ──
-  const renderInlineProviderFields = (
-    slot: string,
-    providerType: string,
-  ) => {
-    const schema = PROVIDER_SCHEMAS[providerType];
-    if (!schema) return null;
-
-    const form = providerForms[slot];
-    if (!form) return null;
-
-    const isOpenAIFamily = OPENAI_FAMILY.includes(providerType);
-
-    // Fields used to look up the module model catalog. The STT VAD slot uses a
-    // dedicated 'vad' mapping (voice-activity models, e.g. silero-vad) instead
-    // of the STT transcription models.
-    const modelModuleType = slot === 'vad' ? 'vad' : moduleType;
-
-    // Filter out 'name' field (auto-generated from module config name) and, in
-    // Simple mode, any field not in the essential set.
-    const fields = schema.fields.filter(f => {
-      if (f.key === 'name') return false;
-      if (showAdvanced) return true;
-      return isSimpleFieldKey(f.key);
-    });
-
-    // Managed Soulbits Cloud provider (cloud mode): the endpoint and the
-    // API key/token are auto-synced from the backend — hide both fields in
-    // Simple AND Advanced mode so the screen never suggests they are
-    // user-configurable. The credential is still injected server-side
-    // (injectSoulbitsToken) and synced via soulbitsTokenSync.
-    const isManagedCloudProvider =
-      providerType === 'soulbitscloud' && isCloudMode;
-
-    return (
-      <View style={styles.providerFieldsContainer}>
-        {fields.map((field) => {
-          // Hide endpoint/credential fields for managed Soulbits Cloud providers.
-          if (isManagedCloudProvider && isManagedCloudField(field.key)) {
-            return null;
-          }
-
-          if (providerType === 'soulbitscloud' && field.key === 'model') {
-            return (
-              <View key={field.key} style={{ marginBottom: 16 }}>
-                <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>{field.label}</ThemedText>
-                <SoulbitsModelSelect
-                  moduleType={modelModuleType}
-                  value={form.values.model ?? ''}
-                  onChange={(m) => handleProviderFieldChange(slot, 'model', m)}
-                />
-              </View>
-            );
-          }
-          return (
-            <FormField
-              key={field.key}
-              field={field}
-              value={form.values[field.key]}
-              onChange={(key, value) => handleProviderFieldChange(slot, key, value)}
-              readOnly={isManagedSoulbitsApiKey(providerType, field.key, form.values.api_key)}
-            />
-          );
-        })}
-
-        {/* Advanced Sampling Params for OpenAI family (Advanced mode only) */}
-        {showAdvanced && isOpenAIFamily && (
-          <AdvancedSamplingParams
-            extraParamsJson={form.values.extra_params || '{}'}
-            onChange={(json) => handleExtraParamsChange(slot, json)}
-          />
-        )}
-      </View>
-    );
-  };
-
-  // ── Render provider section for a single slot ──
-  const renderProviderSection = (
-    slot: string,
-    label: string,
-    providerType: string,
-  ) => {
-    const providerOptions = moduleConfig?.providerOptions || [];
-
-    return (
-      <ThemedCard elevated accentStripe style={styles.section}>
-        <SectionHeader title={label} />
-        <View style={styles.sectionContent}>
-          {/* Provider type selector */}
-          <View>
-            <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-              Provider Type *
-            </ThemedText>
-            <View style={styles.providerChips}>
-              {providerOptions.map((option) =>
-                renderProviderOption(
-                  option,
-                  providerType,
-                  (id) => handleProviderSwitch(slot, id),
-                )
-              )}
-            </View>
-          </View>
-
-          {/* Inline provider config fields */}
-          {providerType && renderInlineProviderFields(slot, providerType)}
-        </View>
-      </ThemedCard>
-    );
-  };
+  // ── Selected TTS model (for test-panel paralinguistic tags) ──
+  const ttsSlot = slots.provider;
+  const selectedTtsModel = useMemo(() => {
+    if (moduleType !== 'tts' || !ttsSlot?.providerType) return null;
+    const entries = catalogModelsForModule(catalog[ttsSlot.providerType], 'tts');
+    return findModel(entries, ttsSlot.capability?.model) ?? null;
+  }, [moduleType, ttsSlot, catalog]);
 
   // ── Loading state ──
   if (loading) {
@@ -806,132 +606,438 @@ export const ModuleConfigEditScreen: React.FC = () => {
     );
   }
 
-  const renderModuleSpecificFields = () => {
-    if (isSTT) {
-      // STT special case: dual provider slots
-      return (
-        <>
-          {/* Transcription Provider Section */}
-          {renderProviderSection(
-            'transcription',
-            'Transcription Provider',
-            formValues.transcription_provider,
-          )}
-
-          {/* VAD Provider Section */}
-          {renderProviderSection(
-            'vad',
-            'VAD Provider',
-            formValues.vad_provider,
-          )}
-
-          {/* STT Settings Section */}
-          <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title="STT Settings" />
-            <View style={styles.sectionContent}>
-              {renderThemedInput(
-                t('mainStreamTime'),
-                formValues.main_stream_time_millis,
-                (text) => handleModuleFieldChange('main_stream_time_millis', text ? parseInt(text, 10) : null),
-                '2000',
-                'number-pad',
-              )}
-              {renderThemedInput(
-                t('transitionStreamTime'),
-                formValues.transition_stream_time_millis,
-                (text) => handleModuleFieldChange('transition_stream_time_millis', text ? parseInt(text, 10) : null),
-                '1000',
-                'number-pad',
-              )}
-              {renderThemedInput(
-                t('maxBufferCount'),
-                formValues.max_buffer_count,
-                (text) => handleModuleFieldChange('max_buffer_count', text ? parseInt(text, 10) : null),
-                '5',
-                'number-pad',
-              )}
-            </View>
-          </ThemedCard>
-
-          {/* ── STT/VAD recorder test block (2-2) — eventserver debug session. The
-              engine runs the entity's SYNCED STT config (draft configs can't be
-              tested over the eventserver transport) — see SttTestPanel doc. ── */}
-          {formValues.transcription_provider && (
-            <ThemedCard elevated accentStripe style={styles.section}>
-              <SectionHeader title={t('testConfiguration')} />
-              <View style={styles.sectionContent}>
-                <SttTestPanel enabled={!!formValues.transcription_provider} entityId={entityId} />
+  /** RAG's Embedding Concurrency footer (Advanced only, inside Capability). */
+  const renderRagFooter = () => {
+    const fields = getModuleConfig()?.moduleSpecificFields ?? [];
+    if (fields.length === 0) return null;
+    return (
+      <>
+        {groupFieldsIntoRows(fields).map((row) => (
+          <View
+            key={row.map((f) => f.key).join('-')}
+            style={row.length > 1 ? styles.twoColRow : undefined}
+          >
+            {row.map((field) => (
+              <View key={field.key} style={row.length > 1 ? styles.halfCol : undefined}>
+                <FormField
+                  field={field}
+                  value={formValues[field.key]}
+                  onChange={handleModuleFieldChange}
+                  testID={`module-field-${field.key}`}
+                />
               </View>
-            </ThemedCard>
-          )}
-        </>
+            ))}
+          </View>
+        ))}
+      </>
+    );
+  };
+
+  const renderSlots = () => {
+    // STT shows exactly ONE stage at a time (Stage 1 VAD / Stage 2
+    // Transcription) as a single Provider + Capability card (Phase 3-6).
+    const defs = isSTT
+      ? slotDefs.filter((def) => def.slot === activeSttStage)
+      : slotDefs;
+
+    return defs.map((def) => {
+      const slotState = slots[def.slot] ?? EMPTY_SLOT;
+      const typeAccounts = accounts.filter((a) => a.type === slotState.providerType);
+      const isVadStage = isSTT && def.slot === 'vad';
+      // Voice input OFF is a deliberate sentinel write, offered only when an
+      // existing STT config is being edited (a create has nothing to disable).
+      const isVoiceInputStage =
+        isSTT && def.slot === 'transcription' && !isCreate;
+      return (
+        <ProviderSlotSection
+          key={def.slot}
+          slot={def.slot}
+          slotLabel={def.label}
+          modelModuleType={def.modelModuleType}
+          providerOptions={providerOptionsForSlot(def.slot)}
+          state={slotState}
+          accounts={typeAccounts}
+          showAdvanced={showAdvanced}
+          explicitFields={explicitFields[def.slot] ?? {}}
+          configName={!isSTT ? formValues.name : undefined}
+          onConfigNameChange={
+            !isSTT ? (val) => handleModuleFieldChange('name', val) : undefined
+          }
+          onToggleAdvanced={!isSTT ? setShowAdvanced : undefined}
+          onProviderChange={(type) => handleProviderSwitch(def.slot, type)}
+          onAccountChange={(id) => handleAccountChange(def.slot, id)}
+          onCapabilityChange={(key, value) => handleCapabilityChange(def.slot, key, value)}
+          onAddAccount={() => {
+            hapticLightPress();
+            setEditorSlot(def.slot);
+          }}
+          footerContent={
+            !isSTT && moduleType === 'rag' && showAdvanced ? renderRagFooter() : undefined
+          }
+          singleCard={isSTT}
+          cardTitle={
+            isSTT
+              ? isVadStage
+                ? t('stage1CardTitle')
+                : t('stage2CardTitle')
+              : undefined
+          }
+          cardBadge={
+            isSTT
+              ? isVadStage
+                ? t('stage1Badge')
+                : t('stage2Badge')
+              : undefined
+          }
+          allowDisable={isVadStage || isVoiceInputStage}
+          disableLabel={
+            isVoiceInputStage ? t('disabledVoiceInput') : undefined
+          }
+          onDisableSlot={
+            isVadStage
+              ? () => handleDisableSlot(def.slot)
+              : isVoiceInputStage
+                ? () => {
+                    void handleDisableVoiceInput();
+                  }
+                : undefined
+          }
+        />
+      );
+    });
+  };
+
+  /** Compact `Simple | Advanced` switch for the STT pipeline header (2-3). */
+  const renderSttModeSwitch = () => (
+    <View style={[styles.modeSegmented, { backgroundColor: theme.colors.background.base }]}>
+      <TouchableOpacity
+        testID="mode-simple-button"
+        onPress={() => {
+          hapticLightPress();
+          setShowAdvanced(false);
+        }}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityState={{ selected: !showAdvanced }}
+        style={[
+          styles.modeSegment,
+          !showAdvanced && [
+            styles.modeSegmentActive,
+            { backgroundColor: theme.colors.accent.primary },
+          ],
+        ]}
+      >
+        <ThemedText
+          size={11}
+          weight="medium"
+          variant={showAdvanced ? 'secondary' : 'primary'}
+          style={!showAdvanced ? styles.modeSegmentActiveText : undefined}
+        >
+          {t('modeSimple')}
+        </ThemedText>
+      </TouchableOpacity>
+      <TouchableOpacity
+        testID="mode-advanced-button"
+        onPress={() => {
+          hapticLightPress();
+          setShowAdvanced(true);
+        }}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityState={{ selected: showAdvanced }}
+        style={[
+          styles.modeSegment,
+          showAdvanced && [
+            styles.modeSegmentActive,
+            { backgroundColor: theme.colors.accent.primary },
+          ],
+        ]}
+      >
+        <ThemedText
+          size={11}
+          weight="medium"
+          variant={showAdvanced ? 'primary' : 'secondary'}
+          style={showAdvanced ? styles.modeSegmentActiveText : undefined}
+        >
+          {t('modeAdvanced')}
+        </ThemedText>
+      </TouchableOpacity>
+    </View>
+  );
+
+  /** Realtime Audio Pipeline banner (Stage 1 VAD ➔ Stage 2 Transcription). */
+  const renderSttPipeline = () => {
+    const vad = slots.vad;
+    const tx = slots.transcription;
+    const providerLabelFor = (slot: string, id?: string): string => {
+      if (!id) return slot === 'vad' ? 'Manual Push-to-Talk' : 'Select provider';
+      const found = providerOptionsForSlot(slot).find((p) => p.id === id);
+      return found?.name ?? id;
+    };
+    const vadModelLabel = vad?.capability?.model
+      ? String(vad.capability.model) === 'silero-vad'
+        ? 'Silero VAD'
+        : String(vad.capability.model)
+      : vad?.providerType
+        ? 'Silero VAD'
+        : 'Disabled';
+    const txModelLabel = tx?.capability?.model
+      ? String(tx.capability.model).includes('whisper')
+        ? 'FasterWhisper'
+        : String(tx.capability.model)
+      : 'FasterWhisper';
+
+    return (
+      <ThemedCard elevated style={styles.section}>
+        <SectionHeader title={t('sttPipelineTitle')} right={renderSttModeSwitch()} />
+        <View style={styles.sectionContent}>
+          <FormField
+            field={{
+              key: 'name',
+              label: t('configName'),
+              type: 'text',
+              required: true,
+              placeholder: t('configNamePlaceholder'),
+            }}
+            value={formValues.name ?? ''}
+            onChange={(_key, value) => handleModuleFieldChange('name', value)}
+            testID="config-name-stt"
+          />
+
+          <View style={styles.pipelineLabelRow}>
+            <ThemedText size={12} variant="secondary">
+              {t('pipelineStages')}
+            </ThemedText>
+            {Boolean(vad?.providerType) && (
+              <View
+                style={[
+                  styles.autoVadBadge,
+                  {
+                    borderColor: theme.colors.status.success + '66',
+                    backgroundColor: theme.colors.status.success + '1A',
+                  },
+                ]}
+              >
+                <ThemedText
+                  size={10}
+                  weight="medium"
+                  style={{ color: theme.colors.status.success }}
+                >
+                  {t('autoVadActive')}
+                </ThemedText>
+              </View>
+            )}
+          </View>
+
+          <View
+            style={[
+              styles.pipelineFlow,
+              {
+                backgroundColor: 'rgba(7, 11, 20, 0.75)',
+                borderColor: theme.colors.border.default,
+              },
+            ]}
+          >
+            <TouchableOpacity
+              testID="stt-stage-vad"
+              onPress={() => {
+                hapticLightPress();
+                setActiveSttStage('vad');
+              }}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityState={{ selected: activeSttStage === 'vad' }}
+              style={[
+                styles.pipelineNode,
+                {
+                  borderColor:
+                    activeSttStage === 'vad'
+                      ? theme.colors.accent.primary
+                      : theme.colors.border.default,
+                  backgroundColor:
+                    activeSttStage === 'vad'
+                      ? theme.colors.accent.primary + '24'
+                      : theme.colors.background.surface,
+                },
+              ]}
+            >
+              <ThemedText size={10} weight="bold" numberOfLines={1} style={styles.pipelineStageLabel}>
+                {t('stage1Label')}
+              </ThemedText>
+              <ThemedText size={12} weight="bold" numberOfLines={1} style={styles.pipelineStageValue}>
+                {`${vad?.providerType ? '🟢' : '⚪'} ${vadModelLabel}`}
+              </ThemedText>
+              <ThemedText size={10.5} numberOfLines={1} style={styles.pipelineStageVadCaption}>
+                {`${providerLabelFor('vad', vad?.providerType)} · ${
+                  vad?.capability?.threshold ?? 0.5
+                } thr`}
+              </ThemedText>
+            </TouchableOpacity>
+
+            <ThemedText size={14} weight="bold" style={styles.pipelineArrow}>
+              ➔
+            </ThemedText>
+
+            <TouchableOpacity
+              testID="stt-stage-transcription"
+              onPress={() => {
+                hapticLightPress();
+                setActiveSttStage('transcription');
+              }}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityState={{ selected: activeSttStage === 'transcription' }}
+              style={[
+                styles.pipelineNode,
+                {
+                  borderColor:
+                    activeSttStage === 'transcription'
+                      ? theme.colors.accent.primary
+                      : theme.colors.border.default,
+                  backgroundColor:
+                    activeSttStage === 'transcription'
+                      ? theme.colors.accent.primary + '24'
+                      : theme.colors.background.surface,
+                },
+              ]}
+            >
+              <ThemedText size={10} weight="bold" numberOfLines={1} style={styles.pipelineStageLabel}>
+                {t('stage2Label')}
+              </ThemedText>
+              <ThemedText size={12} weight="bold" numberOfLines={1} style={styles.pipelineStageValue}>
+                {`📝 ${txModelLabel}`}
+              </ThemedText>
+              <ThemedText size={10.5} numberOfLines={1} style={styles.pipelineStageTxCaption}>
+                {tx?.providerType
+                  ? `${providerLabelFor('transcription', tx.providerType)} · ${
+                      tx?.capability?.model || 'v3-turbo'
+                    }`
+                  : 'Select provider'}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+
+          <ThemedText size={11} variant="muted">
+            {t('sttPipelineHint')}
+          </ThemedText>
+        </View>
+      </ThemedCard>
+    );
+  };
+
+  const renderModuleSection = () => {
+    if (isSTT) {
+      // Realtime Stream Buffer & Overlap is an Advanced-only concern (Phase 3-6).
+      if (!showAdvanced) return null;
+      const bufferFields: FieldDefinition[] = [
+        {
+          key: 'main_stream_time_millis',
+          label: t('chunkWindow'),
+          type: 'number',
+          width: 'half',
+          placeholder: '2000',
+        },
+        {
+          key: 'transition_stream_time_millis',
+          label: t('transitionOverlap'),
+          type: 'number',
+          width: 'half',
+          placeholder: '1000',
+        },
+        {
+          key: 'max_buffer_count',
+          label: t('maxSpeechChunks'),
+          type: 'number',
+          placeholder: '5',
+          tooltip: t('sttMaxSpeechChunksHint'),
+        },
+      ];
+
+      return (
+        <ThemedCard elevated style={styles.section}>
+          <SectionHeader
+            title={t('sttBufferTitle')}
+            right={
+              <View style={styles.cyanBadge}>
+                <ThemedText size={10} weight="medium" style={{ color: '#38BDF8' }}>
+                  AutoVAD Window
+                </ThemedText>
+              </View>
+            }
+          />
+          <View style={styles.sectionContent}>
+            {groupFieldsIntoRows(bufferFields).map((row) => (
+              <View
+                key={row.map((f) => f.key).join('-')}
+                style={row.length > 1 ? styles.twoColRow : undefined}
+              >
+                {row.map((field) => (
+                  <View key={field.key} style={row.length > 1 ? styles.halfCol : undefined}>
+                    <FormField
+                      field={field}
+                      value={formValues[field.key]}
+                      onChange={handleModuleFieldChange}
+                      testID={`module-field-${field.key}`}
+                    />
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        </ThemedCard>
       );
     }
 
-    // Standard modules: Module Settings above Provider Settings
-    const fields = moduleConfig?.moduleSpecificFields ?? [];
-    
+    // RAG's Embedding Concurrency renders inside the capability card footer.
+    if (moduleType === 'rag') return null;
+
+    const allFields = moduleConfig?.moduleSpecificFields ?? [];
+    // `output_type` is a legacy persisted scalar, intentionally hidden from the
+    // TTS behavior card (it still round-trips through save).
+    const fields =
+      moduleType === 'tts'
+        ? allFields.filter((field) => field.key !== 'output_type')
+        : allFields;
+    if (fields.length === 0) return null;
+
+    const title =
+      moduleType === 'movement'
+        ? t('movementExecution')
+        : moduleType === 'vision'
+        ? t('imagePreprocessing')
+        : moduleType === 'cognition'
+        ? t('cognitionSettings')
+        : moduleType === 'tts'
+        ? t('moduleBehaviorTts')
+        : `${moduleConfig?.name ?? moduleType} Settings`;
+
     return (
-      <>
-        {/* Module-specific fields */}
-        {fields.length > 0 && (
-          <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title="Module Settings" />
-            <View style={styles.sectionContent}>
-              {fields.map((field) => (
-                <View key={field.key}>
-                  <ThemedText size={13} variant="secondary" style={styles.fieldLabel}>
-                    {field.label}
-                  </ThemedText>
-                  <TextInput
-                    style={[
-                      styles.input,
-                      {
-                        color: theme.colors.text.primary,
-                        borderColor: theme.colors.border.default,
-                        backgroundColor: theme.colors.background.base,
-                      },
-                    ]}
-                    value={formValues[field.key]?.toString() ?? ''}
-                    onChangeText={(text) => {
-                      if (field.type === 'number') {
-                        handleModuleFieldChange(field.key, text === '' ? null : (field.step && field.step < 1 ? parseFloat(text) : parseInt(text, 10)));
-                      } else {
-                        handleModuleFieldChange(field.key, text);
-                      }
-                    }}
-                    placeholder={field.placeholder}
-                    keyboardType={field.type === 'number' ? 'decimal-pad' : 'default'}
-                    placeholderTextColor={theme.colors.text.muted}
+      <ThemedCard elevated style={styles.section}>
+        <SectionHeader title={title} />
+        <View style={styles.sectionContent}>
+          {groupFieldsIntoRows(fields).map((row) => (
+            <View
+              key={row.map((f) => f.key).join('-')}
+              style={row.length > 1 ? styles.twoColRow : undefined}
+            >
+              {row.map((field) => (
+                <View key={field.key} style={row.length > 1 ? styles.halfCol : undefined}>
+                  <FormField
+                    field={field}
+                    value={formValues[field.key]}
+                    onChange={handleModuleFieldChange}
+                    testID={`module-field-${field.key}`}
                   />
                 </View>
               ))}
             </View>
-          </ThemedCard>
-        )}
-
-        {/* Provider config section (inline) */}
-        {renderProviderSection(
-          'provider',
-          'Provider Settings',
-          formValues.provider,
-        )}
-
-        {/* ── TTS playback test block (2-3) — eventserver debug session. The
-            editor threads the optional `entityId` route param (edit-mode
-            CreateAI) into the panel: with an entity the test is ENABLED, in
-            create mode (no entity) it shows the disabled hint; see TtsTestPanel doc. ── */}
-        {moduleType === 'tts' && formValues.provider && (
-          <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title={t('testConfiguration')} />
-            <View style={styles.sectionContent}>
-              <TtsTestPanel entityId={entityId} />
-            </View>
-          </ThemedCard>
-        )}
-      </>
+          ))}
+        </View>
+      </ThemedCard>
     );
   };
+
+  const editorProviderType = editorSlot ? slots[editorSlot]?.providerType ?? '' : '';
 
   return (
     <ThemedView style={styles.container}>
@@ -954,8 +1060,19 @@ export const ModuleConfigEditScreen: React.FC = () => {
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel="Save configuration"
               accessibilityRole="button"
+              testID="header-save-button"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                backgroundColor: 'rgba(236, 72, 153, 0.14)',
+                borderWidth: 1,
+                borderColor: 'rgba(236, 72, 153, 0.4)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
             >
-              <Icon name="check" size={24} color={theme.colors.accent.primary} />
+              <Icon name="check" size={18} color={theme.colors.accent.primary} />
             </TouchableOpacity>
           )
         }
@@ -973,117 +1090,76 @@ export const ModuleConfigEditScreen: React.FC = () => {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={[theme!.colors.accent.primary]}
-              tintColor={theme!.colors.accent.primary}
-              progressBackgroundColor={theme!.colors.background.surface}
+              colors={[theme.colors.accent.primary]}
+              tintColor={theme.colors.accent.primary}
+              progressBackgroundColor={theme.colors.background.surface}
             />
           }
         >
-          {/* ── General Section ── */}
-          <ThemedCard elevated accentStripe style={styles.section}>
-            <SectionHeader title="General" />
-            <View style={styles.sectionContent}>
-              {renderThemedInput(
-                t('configName'),
-                formValues.name,
-                (text) => handleModuleFieldChange('name', text),
-                'Enter config name',
-              )}
-            </View>
-          </ThemedCard>
+          {/* ── STT: Realtime Audio Pipeline (Config Name + stage flow) ── */}
+          {isSTT && renderSttPipeline()}
 
-          {/* ── Simple / Advanced mode toggle ── */}
-          <ThemedCard elevated style={styles.section}>
-            <View style={styles.modeToggleRow}>
-              <View style={styles.modeToggleCopy}>
-                <ThemedText size={15} weight="medium">
-                  {t('modeLabel')}
-                </ThemedText>
-                <ThemedText size={12} variant="muted" style={styles.modeToggleHint}>
-                  {showAdvanced ? t('modeAdvancedHint') : t('modeSimpleHint')}
-                </ThemedText>
+          {/* ── Provider → Account → Capability, per slot ── */}
+          {renderSlots()}
+
+          {/* ── Section 4 — Module ── */}
+          {renderModuleSection()}
+
+          {/* ── STT/VAD recorder test block (2-2) ── */}
+          {isSTT && (
+            <ThemedCard elevated style={styles.section}>
+              <SectionHeader title={t('realtimeVadSttTestStudio')} />
+              <View style={styles.sectionContent}>
+                <SttTestPanel enabled={!!slots.transcription?.providerType} entityId={entityId} />
               </View>
+            </ThemedCard>
+          )}
 
-              <View
-                style={[
-                  styles.modeSegmented,
-                  { backgroundColor: theme.colors.background.surface },
-                ]}
-              >
-                <TouchableOpacity
-                  style={[
-                    styles.modeSegment,
-                    !showAdvanced && [
-                      styles.modeSegmentActive,
-                      { backgroundColor: theme.colors.accent.primary },
-                    ],
-                  ]}
-                  onPress={() => {
-                    hapticLightPress();
-                    setShowAdvanced(false);
-                  }}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('modeSimple')}
-                  accessibilityState={{ selected: !showAdvanced }}
-                >
-                  <ThemedText
-                    size={13}
-                    weight="medium"
-                    variant={showAdvanced ? 'secondary' : 'primary'}
-                    style={!showAdvanced ? styles.modeSegmentActiveText : undefined}
+          {/* ── TTS playback test block (2-3 / 3-5) ── */}
+          {moduleType === 'tts' && (
+            <ThemedCard elevated style={styles.section}>
+              <SectionHeader
+                title={t('voiceTestStudio')}
+                right={
+                  <View
+                    style={[
+                      styles.greenBadge,
+                      {
+                        borderColor: theme.colors.status.success + '66',
+                        backgroundColor: theme.colors.status.success + '1A',
+                      },
+                    ]}
                   >
-                    {t('modeSimple')}
-                  </ThemedText>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.modeSegment,
-                    showAdvanced && [
-                      styles.modeSegmentActive,
-                      { backgroundColor: theme.colors.accent.primary },
-                    ],
-                  ]}
-                  onPress={() => {
-                    hapticLightPress();
-                    setShowAdvanced(true);
-                  }}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('modeAdvanced')}
-                  accessibilityState={{ selected: showAdvanced }}
-                >
-                  <ThemedText
-                    size={13}
-                    weight="medium"
-                    variant={showAdvanced ? 'primary' : 'secondary'}
-                    style={showAdvanced ? styles.modeSegmentActiveText : undefined}
-                  >
-                    {t('modeAdvanced')}
-                  </ThemedText>
-                </TouchableOpacity>
+                    <ThemedText
+                      size={10}
+                      weight="medium"
+                      style={{ color: theme.colors.status.success }}
+                    >
+                      {t('directEngineSynthesis')}
+                    </ThemedText>
+                  </View>
+                }
+              />
+              <View style={styles.sectionContent}>
+                <TtsTestPanel
+                  providerType={slots.provider?.providerType}
+                  accountId={slots.provider?.accountId}
+                  capability={slots.provider?.capability}
+                  paralinguisticTags={getSpeechOptions(selectedTtsModel)?.paralinguistic_tags}
+                />
               </View>
-            </View>
-          </ThemedCard>
-
-          {/* Module-specific fields (including STT dual-provider) */}
-          {renderModuleSpecificFields()}
+            </ThemedCard>
+          )}
 
           {/* ── Danger Zone ── */}
           {!isCreate && (
             <ThemedCard
               elevated
-              style={[
-                styles.section,
-                styles.dangerSection,
-                { borderColor: theme.colors.status.error },
-              ]}
+              style={styles.section}
             >
               <SectionHeader
                 title="Danger Zone"
                 accentPip={false}
-                style={{ borderBottomColor: theme.colors.status.error + '44' }}
               />
               <View style={styles.sectionContent}>
                 <TouchableOpacity
@@ -1123,15 +1199,40 @@ export const ModuleConfigEditScreen: React.FC = () => {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* ── "Add account…" modal (shared AccountForm, 6-2) ── */}
+      <Modal
+        visible={editorSlot !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEditorSlot(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalShell, { backgroundColor: theme.colors.background.surface }]}>
+            {editorSlot && (
+              <>
+                <ThemedText size={16} weight="bold" style={styles.modalTitle}>
+                  {t('accountAddTitle')}
+                </ThemedText>
+                <AccountForm
+                  key={editorProviderType}
+                  type={editorProviderType}
+                  submitting={savingAccount}
+                  onSubmit={handleSubmitAccount}
+                  onCancel={() => setEditorSlot(null)}
+                />
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { elevation: 4 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  savingIndicator: { marginRight: 16 },
   keyboardAvoid: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 48 },
 
@@ -1139,12 +1240,63 @@ const styles = StyleSheet.create({
   section: {
     padding: 0,
     overflow: 'hidden',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   sectionContent: {
-    padding: 16,
-    gap: 12,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    paddingTop: 2,
+    gap: 10,
   },
+  twoColRow: { flexDirection: 'row', gap: 10 },
+  halfCol: { flex: 1 },
+  cyanBadge: {
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.35)',
+    backgroundColor: 'rgba(56, 189, 248, 0.14)',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  pipelineLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  autoVadBadge: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  greenBadge: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  pipelineFlow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 8,
+  },
+  pipelineNode: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 2,
+  },
+  pipelineStageLabel: { fontSize: 10, color: '#64748B' },
+  pipelineStageValue: { fontSize: 12 },
+  pipelineStageVadCaption: { fontSize: 10.5, color: '#E879F9' },
+  pipelineStageTxCaption: { fontSize: 10.5, color: '#38BDF8' },
+  pipelineArrow: { color: '#E879F9', fontSize: 14 },
   dangerSection: {
     borderWidth: 1.5,
   },
@@ -1158,33 +1310,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     minHeight: 44,
-  },
-
-  // ── Provider chips ──
-  providerChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  providerChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  chipPip: {
-    width: 3,
-    height: 16,
-    borderRadius: 2,
-    marginRight: 0,
-  },
-
-  // ── Inline provider fields ──
-  providerFieldsContainer: {
-    marginTop: 4,
   },
 
   // ── Danger zone ──
@@ -1240,4 +1365,18 @@ const styles = StyleSheet.create({
   modeSegmentActiveText: {
     color: '#FFFFFF',
   },
+
+  // ── Add-account modal ──
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalShell: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+    maxHeight: '85%',
+  },
+  modalTitle: { marginBottom: 12 },
 });

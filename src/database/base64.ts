@@ -9,30 +9,45 @@
 /**
  * Convert Uint8Array to Base64 string
  * React Native compatible implementation
- * 
- * Used for converting captured audio/images to base64 for storage
+ *
+ * Used for converting captured audio/images to base64 for storage.
+ *
+ * The output is accumulated in chunks and joined once: a single `result += …`
+ * across a multi-MB buffer is O(N²) in V8 (every append allocates a fresh
+ * rope-ish copy), which dominated the byte path on device.
  */
 export function uint8ArrayToBase64(bytes: Uint8Array): string {
   const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let result = '';
+  const CHUNK_BYTES = 8192;
+  const chunks: string[] = [];
+  let chunk = '';
+  let chunkBytes = 0;
   let i;
-  
+
   for (i = 0; i < bytes.length; i += 3) {
     const byte1 = bytes[i];
     const byte2 = i + 1 < bytes.length ? bytes[i + 1] : 0;
     const byte3 = i + 2 < bytes.length ? bytes[i + 2] : 0;
-    
+
     const encoded1 = byte1 >> 2;
     const encoded2 = ((byte1 & 3) << 4) | (byte2 >> 4);
     const encoded3 = ((byte2 & 15) << 2) | (byte3 >> 6);
     const encoded4 = byte3 & 63;
-    
-    result += base64Chars[encoded1] + base64Chars[encoded2];
-    result += i + 1 < bytes.length ? base64Chars[encoded3] : '=';
-    result += i + 2 < bytes.length ? base64Chars[encoded4] : '=';
+
+    chunk += base64Chars[encoded1] + base64Chars[encoded2];
+    chunk += i + 1 < bytes.length ? base64Chars[encoded3] : '=';
+    chunk += i + 2 < bytes.length ? base64Chars[encoded4] : '=';
+
+    chunkBytes += 3;
+    if (chunkBytes >= CHUNK_BYTES) {
+      chunks.push(chunk);
+      chunk = '';
+      chunkBytes = 0;
+    }
   }
-  
-  return result;
+
+  if (chunk) chunks.push(chunk);
+  return chunks.join('');
 }
 
 /**

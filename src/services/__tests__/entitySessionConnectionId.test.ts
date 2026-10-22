@@ -72,12 +72,8 @@ jest.mock('../ConnectionStateManager', () => ({
   },
 }));
 
-jest.mock('../SyncService', () => ({
-  __esModule: true,
-  SyncService: { getInstance: () => ({ initiateSync: jest.fn().mockResolvedValue(undefined) }) },
-}));
 
-jest.mock('../../database/repositories/interactions', () => ({
+jest.mock('../../services/engine/repositories/interactions', () => ({
   createInteraction: jest.fn().mockResolvedValue(undefined),
   deriveScopeFromParticipants: jest.fn()
     .mockImplementation((p: string[]) => (p.length <= 1 ? 'world' : p.length === 2 ? 'private' : 'group')),
@@ -90,22 +86,14 @@ jest.mock('../../database/repositories/interactions', () => ({
     }),
 }));
 
-jest.mock('../../database/repositories/conversation_messages', () => ({
+jest.mock('../../services/engine/repositories/conversation_messages', () => ({
   messageExists: jest.fn(),
   createConversationMessage: jest.fn(),
   updateConversationMessage: jest.fn(),
   getConversationMessage: jest.fn(),
 }));
 
-jest.mock('../../database/connection', () => ({
-  getDatabase: jest.fn(),
-  getSyncDatabase: jest.fn().mockResolvedValue(undefined),
-}));
 
-jest.mock('../cloud/CloudSessionService', () => ({
-  cloudSessionService: { connect: jest.fn(), disconnect: jest.fn(), getStatus: jest.fn().mockReturnValue('idle'), isPurging: jest.fn().mockReturnValue(false) },
-  default: {},
-}));
 
 function resetSingleton(): void {
   (EntitySessionService as any).instance = null;

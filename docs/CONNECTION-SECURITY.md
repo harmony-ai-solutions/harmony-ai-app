@@ -2,11 +2,56 @@
 
 ## Overview
 
-Harmony AI App offers flexible security options when connecting to Harmony Link, allowing you to choose the best connection method for your setup.
+Harmony AI App offers flexible security options when connecting to Soulbits Engine, allowing you to choose the best connection method for your setup.
+
+## QR pairing (plan 7-15)
+
+The primary way to pair now is to **scan a QR code** the desktop engine shows.
+The scanner (on the Desktop Sync screen's top **Pair device** card) accepts two
+kinds of payload and routes them automatically:
+
+- **Cloud code** — `{relay_url, pairing_token, account_hint}` (the portal and
+  the desktop's **Soulbits Cloud** tab mint the same shape). The phone verifies
+  `account_hint` against the signed-in account, then applies the relay config
+  with the short-lived, single-use `pairing_token`.
+- **LAN code** — `{v, kind:"soulbits-lan", ws, wss?, mode, fingerprint?,
+  dataset_id, name, secret, ttl, enrollment?}`. The phone shows a confirmation
+  sheet (desktop name, security mode, short certificate fingerprint, dataset)
+  and, on confirm, applies the addresses + mode + fingerprint + the single-use
+  `secret` in one settings write.
+
+### Certificate pinning (trust-on-first-use)
+
+When the LAN code carries a certificate fingerprint (`sha256:AB:CD:…`), the app
+pins it: the engine persists it as `peer_fingerprint` and **fails closed** on any
+WSS dial whose presented certificate fingerprint differs. The confirmation sheet
+shows the **first 8 hex characters** so you can eyeball that the code and the
+target match. A pinned fingerprint is the recommended default whenever the
+desktop advertises a TLS endpoint (`mode` = `secure` or `insecure-ssl`).
+
+### The single-use pairing secret
+
+The LAN code also carries a **short-lived (5-minute), single-use** pairing
+`secret` (≥128-bit). Presenting it in the device-approval handshake lets the
+desktop **auto-approve** the device that scanned the code — displaying the QR is
+the authorization gesture. The secret is written to the engine exactly once (the
+engine clears it after the first successful dial) and the app never persists or
+logs it. If the secret is expired, replayed, or invalid, pairing falls back to
+the desktop's manual **approve this device** prompt.
+
+### Delegated enrollment (full variant)
+
+A desktop that is signed in may include an `enrollment` block in the LAN code.
+A **signed-out** full-variant phone can then adopt the desktop's account: it
+exchanges the short-lived, single-use grant for its **own** device-scoped
+session (no shared credentials; each device is revocable). The confirmation
+sheet offers this as "Use «account» from this desktop". A phone already signed
+in to the **same** account simply pairs; a phone signed in to a **different**
+account is warned and skips enrollment. Store builds never offer this.
 
 ## Security Modes
 
-When you connect to Harmony Link, the app may present you with security options. Understanding these modes will help you make the right choice for your situation.
+When you connect to Soulbits Engine, the app may present you with security options. Understanding these modes will help you make the right choice for your situation.
 
 ### 🔒 Secure (Verified SSL)
 
@@ -14,7 +59,7 @@ When you connect to Harmony Link, the app may present you with security options.
 
 **When to use**:
 - Connecting over the internet
-- When Harmony Link has a properly signed SSL certificate
+- When Soulbits Engine has a properly signed SSL certificate
 - Production environments
 - When maximum security is required
 
@@ -31,17 +76,17 @@ When you connect to Harmony Link, the app may present you with security options.
 
 ### 🔓 Trust This Certificate (Self-Signed SSL)
 
-**What it is**: Encrypted connection that trusts self-signed certificates created by Harmony Link.
+**What it is**: Encrypted connection that trusts self-signed certificates created by Soulbits Engine.
 
 **When to use**:
-- Home networks with Harmony Link
+- Home networks with Soulbits Engine
 - Development and testing
 - When you see a certificate error and trust the server
 - Private networks where you control both devices
 
 **Pros**:
 - Still provides encryption
-- Works with Harmony Link's auto-generated certificates
+- Works with Soulbits Engine's auto-generated certificates
 - Free - no certificate purchase needed
 
 **Cons**:
@@ -49,7 +94,7 @@ When you connect to Harmony Link, the app may present you with security options.
 - You must manually trust the certificate
 - Vulnerable if someone intercepts your network
 
-**Security Note**: Only use this mode when connecting to your own Harmony Link server on a network you trust.
+**Security Note**: Only use this mode when connecting to your own Soulbits Engine server on a network you trust.
 
 ---
 
@@ -74,18 +119,25 @@ When you connect to Harmony Link, the app may present you with security options.
 
 **⚠️ Warning**: Never use this mode over public WiFi or the internet. Your data will be visible to anyone monitoring the network.
 
+**QR pairing over unencrypted LAN:** in unencrypted mode both the single-use
+pairing `secret` and all synced data travel in cleartext. The accepted
+mitigation is the same-LAN threat model plus the secret's **single-use,
+5-minute TTL** — pair only on a network you trust, and prefer `secure` /
+`insecure-ssl` (with a pinned fingerprint) whenever the desktop advertises a TLS
+endpoint.
+
 ---
 
 ## First-Time Connection
 
-When you first connect to Harmony Link:
+When you first connect to Soulbits Engine:
 
 1. **Enter Connection Details**
-   - IP address of your Harmony Link server
+   - IP address of your Soulbits Engine server
    - Port number (usually 8080)
 
-2. **Approve on Harmony Link**
-   - Go to your Harmony Link computer
+2. **Approve on Soulbits Engine**
+   - Go to your Soulbits Engine computer
    - Approve the pairing request
 
 3. **Choose Security Mode** (if prompted)
@@ -102,17 +154,17 @@ When you first connect to Harmony Link:
 
 If you see this message, it means:
 
-- Harmony Link is using a self-signed certificate (common for home use)
+- Soulbits Engine is using a self-signed certificate (common for home use)
 - Your Android device doesn't automatically trust it
 - You need to choose how to proceed
 
-**This is normal** for personal Harmony Link installations!
+**This is normal** for personal Soulbits Engine installations!
 
 ## Viewing Certificate Details
 
 When the security prompt appears, you can tap "View Certificate Details" to see:
 
-- Who issued the certificate (usually "Harmony Link")
+- Who issued the certificate (usually "Soulbits Engine")
 - Certificate fingerprint
 - Validity period
 
@@ -145,7 +197,7 @@ If you want to change your security settings:
 
 ✅ **Recommended**: Trust This Certificate (Self-Signed SSL)
 - Provides encryption
-- Works with Harmony Link's built-in certificates
+- Works with Soulbits Engine's built-in certificates
 - Good balance of security and convenience
 
 ### For Public/Cloud Deployment
@@ -158,7 +210,7 @@ If you want to change your security settings:
 ### For Local Testing
 
 ⚠️ **Acceptable**: Unencrypted
-- Only when Harmony Link is on the same computer
+- Only when Soulbits Engine is on the same computer
 - Never over a network
 - Temporary use only
 
@@ -175,12 +227,12 @@ If you want to change your security settings:
 
 **Possible causes**:
 - Wrong IP address or port
-- Harmony Link not running
+- Soulbits Engine not running
 - Firewall blocking connection
 - Different network (phone not on WiFi)
 
 **Solution**:
-1. Verify Harmony Link is running
+1. Verify Soulbits Engine is running
 2. Check IP address is correct
 3. Ensure both devices on same network
 4. Check firewall settings
@@ -188,7 +240,7 @@ If you want to change your security settings:
 ### "Want to Switch to Secure Mode Later"
 
 **Solution**:
-1. Get a proper SSL certificate for Harmony Link
+1. Get a proper SSL certificate for Soulbits Engine
 2. In app: Settings → Sync → Reset Security Mode
 3. Reconnect - should work with Secure mode now
 
@@ -217,15 +269,15 @@ No security credentials are shared with third parties.
 ## FAQ
 
 **Q: Why am I seeing a certificate error?**  
-A: Harmony Link generates its own certificates for convenience. They're not signed by a public authority, so devices need to be told to trust them.
+A: Soulbits Engine generates its own certificates for convenience. They're not signed by a public authority, so devices need to be told to trust them.
 
 **Q: Is "Trust This Certificate" safe?**  
-A: Yes, if you're connecting to your own Harmony Link on a network you control. The connection is still encrypted.
+A: Yes, if you're connecting to your own Soulbits Engine on a network you control. The connection is still encrypted.
 
 **Q: How do I get rid of the warning?**  
 A: Either:
 1. Use "Trust This Certificate" mode (connection is still encrypted)
-2. Get a proper SSL certificate for Harmony Link (more complex)
+2. Get a proper SSL certificate for Soulbits Engine (more complex)
 
 **Q: What if someone steals my certificate?**  
 A: With a self-signed certificate, they'd need access to your network. Use strong WiFi security and trusted networks only.
@@ -236,7 +288,7 @@ A: Currently, the setting is per device. To change modes, use the Reset button i
 ## Need Help?
 
 If you're still having issues:
-1. Check the Harmony Link documentation
+1. Check the Soulbits Engine documentation
 2. Visit our community forums
 3. Report issues on GitHub
 

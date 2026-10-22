@@ -1,0 +1,19 @@
+{
+  "settingsRow": "Background presence",
+  "settingsGroup": "Presence",
+  "title": "Background presence",
+  "intro": "Your companion lives on this device. iOS decides when it may wake.",
+  "bestEffortTitle": "Best-effort timing",
+  "bestEffortBody": "iOS grants short background windows at its own discretion — roughly hourly when your device is idle, less often when it is busy, on low power, or has Background App Refresh turned off. There is no fixed schedule, and some days may bring few or no wakes.",
+  "overnightTitle": "Overnight deep care",
+  "overnightBody": "When your device is charging and on Wi-Fi, iOS may grant a longer overnight window. That is when memories are tidied and any backlog is caught up. It is a bonus window, not a guarantee — nights (or even days) apart is normal.",
+  "correctnessTitle": "Always correct, never lost",
+  "correctnessBody": "You never miss anything. Whenever the app opens — or the next background window arrives — everything catches up at once. A long absence is handled gently: your companion notices you were away rather than replaying a backlog.",
+  "relayTitle": "Reaching you",
+  "relayBody": "When your companion has something worth telling you, the device asks for a notification to be delivered to you. The request carries no readable content through our servers.",
+  "telemetryTitle": "This session",
+  "telemetryKeepalive": "Hourly wakes",
+  "telemetryOvernight": "Overnight windows",
+  "telemetryHonoredMissed": "{{honored}} honored · {{missed}} missed",
+  "footer": "This page describes how iOS background timing works. It is not a setting."
+}

@@ -2,20 +2,16 @@
  * Jest setup file for mocking React Native modules
  */
 
-// Mock react-native-sqlite-storage
-jest.mock('react-native-sqlite-storage', () => ({
-  enablePromise: jest.fn(),
-  DEBUG: jest.fn(),
-  openDatabase: jest.fn(() => Promise.resolve({
-    executeSql: jest.fn(() => Promise.resolve([{ rows: { length: 0, item: jest.fn() } }])),
-    transaction: jest.fn(),
-    close: jest.fn(() => Promise.resolve()),
-  })),
-}));
+// Signal the logger (src/utils/logger.ts) to use a synchronous transport under
+// Jest — avoids post-teardown "Cannot log after tests are done" errors. Also
+// read by src/services/connection/createWebSocket.ts to select the standard
+// WebSocket ctor under Jest.
+globalThis.__JEST__ = true;
 
 // Mock react-native-fs
 jest.mock('react-native-fs', () => ({
   DocumentDirectoryPath: '/mock/documents',
+  CachesDirectoryPath: '/mock/caches',
   mkdir: jest.fn(() => Promise.resolve()),
   exists: jest.fn(() => Promise.resolve(false)),
   unlink: jest.fn(() => Promise.resolve()),
@@ -28,6 +24,8 @@ jest.mock('react-native-keychain', () => ({
   ACCESSIBLE: {
     WHEN_UNLOCKED: 'WhenUnlocked',
     WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'WhenUnlockedThisDeviceOnly',
+    AFTER_FIRST_UNLOCK: 'AccessibleAfterFirstUnlock',
+    AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'AccessibleAfterFirstUnlockThisDeviceOnly',
   },
   // Full enum surface — BiometricLockService reads ACCESS_CONTROL at module load
   // to build its shared access-control constant, so the mock must provide it.
@@ -137,6 +135,7 @@ jest.mock('react-native-config', () => ({
   __esModule: true,
   default: {
     APP_ENV: 'dev',
+    APP_VARIANT: 'full',
     IS_BETA: true,
     GOOGLE_WEB_CLIENT_ID: 'test-client.apps.googleusercontent.com',
     APPLE_SERVICES_ID: '',
@@ -148,8 +147,24 @@ jest.mock('react-native-config', () => ({
 jest.mock('react-native-device-info', () => ({
   getUniqueId: jest.fn(() => Promise.resolve('test-device-001')),
   getDeviceName: jest.fn(() => Promise.resolve('Test Device')),
+  getModel: jest.fn(() => 'Test Model'),
   getVersion: jest.fn(() => '1.0.0'),
   getBuildNumber: jest.fn(() => '1'),
+  getSystemVersion: jest.fn(() => '17.0'),
+}));
+
+// Mock react-native-applifecycle (android lifecycle bridge). Its dist is ESM
+// and its module init touches a native module, so tests always get this inert
+// default; lifecycle-sensitive suites override it per-suite with controllable
+// handlers. `Platform` is mocked as iOS here, so RN AppState is the library's
+// own fallback anyway.
+jest.mock('react-native-applifecycle', () => ({
+  __esModule: true,
+  AppLifecycle: {
+    addEventListener: jest.fn(() => ({ remove: jest.fn() })),
+    currentState: 'active',
+    isAvailable: true,
+  },
 }));
 
 // Mock react-native-track-player
@@ -161,6 +176,14 @@ jest.mock('react-native-track-player', () => ({
     Paused: 'paused',
     Stopped: 'stopped',
     Buffering: 'buffering',
+    // These three are part of the real RNTP `State` enum and are read by
+    // `src/services/playbackState.ts` (the completion classifier). Without them
+    // `State.Loading` / `State.Ended` / `State.Error` resolve to `undefined`
+    // here, so the classifier's sets silently lose those members and a test
+    // could pass for the wrong reason.
+    Loading: 'loading',
+    Ended: 'ended',
+    Error: 'error',
     Connecting: 'connecting',
   },
   Capability: {
@@ -210,6 +233,31 @@ jest.mock('react-native-audio-record', () => ({
 jest.mock('react-native-image-picker', () => ({
   launchImageLibrary: jest.fn(() => Promise.resolve({ assets: [] })),
   launchCamera: jest.fn(() => Promise.resolve({ assets: [] })),
+}));
+
+// Mock react-native-camera-kit (native camera view manager). The Camera is a
+// codegen'd native component that cannot be loaded under Jest; expose it as a
+// host view carrying onReadCode so tests can fire a scan with
+// fireEvent(camera, 'readCode', { nativeEvent: { codeStringValue } }).
+jest.mock('react-native-camera-kit', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  return {
+    __esModule: true,
+    Camera: ({ onReadCode }) =>
+      React.createElement(View, { testID: 'mock-camera', onReadCode }),
+    CameraType: { Back: 'back', Front: 'front' },
+  };
+});
+
+// Mock react-native-share (native share sheet). The default export is the
+// Share API object; tests assert on `Share.open` and can stub it.
+jest.mock('react-native-share', () => ({
+  __esModule: true,
+  default: {
+    open: jest.fn(() => Promise.resolve({ success: true })),
+    isPackageInstalled: jest.fn(() => Promise.resolve(false)),
+  },
 }));
 
 // Mock @react-native-clipboard/clipboard

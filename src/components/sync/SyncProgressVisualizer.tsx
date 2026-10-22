@@ -44,7 +44,7 @@ export interface SyncProgressVisualizerProps {
   totalExpected?: number;
   /** Whether a sync is actively running */
   active: boolean;
-  /** Whether connected to the harmony backend */
+  /** Whether connected to the Soulbits Engine backend */
   connected: boolean;
 }
 

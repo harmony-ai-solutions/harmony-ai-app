@@ -11,10 +11,82 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppTheme } from '../../contexts/ThemeContext';
 import { ThemedText } from '../themed/ThemedText';
 import { hapticLightPress } from '../../utils/haptics';
+import { MODULE_TYPES } from '../../constants/moduleConfiguration';
 
 export interface ModuleConfigOption {
   id: string;
   name: string;
+  /** Optional provider + model summary, e.g. "Soulbits Cloud · qwen-35-9b". */
+  subtitle?: string;
+}
+
+/**
+ * Provider id → human label, derived from the single module-type table so the
+ * selector never hardcodes a second copy of the provider names.
+ */
+const PROVIDER_LABELS: Record<string, string> = (() => {
+  const labels: Record<string, string> = {};
+  for (const moduleType of MODULE_TYPES) {
+    for (const option of moduleType.providerOptions) {
+      if (!labels[option.id]) labels[option.id] = option.name;
+    }
+  }
+  return labels;
+})();
+
+/** Read the `model` field out of a capability overlay (JSON string or object). */
+function readCapabilityModel(capability: unknown): string | undefined {
+  if (!capability) return undefined;
+  let parsed: unknown = capability;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return undefined;
+    }
+  }
+  if (parsed && typeof parsed === 'object') {
+    const model = (parsed as Record<string, unknown>).model;
+    if (typeof model === 'string' && model.trim() !== '') return model.trim();
+  }
+  return undefined;
+}
+
+/**
+ * Build the muted "provider · model" summary shown under a config's name.
+ *
+ * - Standard single-slot configs: `${ProviderLabel}${model ? ` · ${model}` : ''}`
+ * - STT dual-slot configs: `${TranscriptionProviderLabel} + VAD: ${VadLabel}`
+ *
+ * Pure + defensive (config rows arrive from the engine and may carry a JSON
+ * string, an object, or nothing at all). Returns `undefined` when the row has
+ * no resolvable provider, so callers can skip the subtitle line entirely.
+ */
+export function formatModuleConfigSubtitle(
+  config: Record<string, any>,
+): string | undefined {
+  if (!config) return undefined;
+
+  const label = (provider: unknown): string | undefined => {
+    if (typeof provider !== 'string' || provider === '' || provider === 'disabled') {
+      return undefined;
+    }
+    return PROVIDER_LABELS[provider] ?? provider;
+  };
+
+  // STT carries two independent provider slots.
+  if (config.transcription_provider || config.vad_provider) {
+    const transcription = label(config.transcription_provider);
+    const vad = label(config.vad_provider);
+    if (!transcription) return vad ? `VAD: ${vad}` : undefined;
+    return vad ? `${transcription} + VAD: ${vad}` : transcription;
+  }
+
+  const provider = label(config.provider);
+  if (!provider) return undefined;
+
+  const model = readCapabilityModel(config.capability_json);
+  return model ? `${provider} · ${model}` : provider;
 }
 
 interface EntityModuleSelectorProps {
@@ -48,12 +120,18 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
   // Engine-seeded default configs arrive via normal sync and appear as
   // ordinary options.
   const options = [
-    { id: -1, name: 'Disabled', value: '' },
-    ...configs.map(c => ({ id: c.id, name: c.name, value: String(c.id) })),
+    { id: -1, name: 'Disabled', value: '', subtitle: undefined as string | undefined },
+    ...configs.map(c => ({
+      id: c.id as string | number,
+      name: c.name,
+      value: String(c.id),
+      subtitle: c.subtitle,
+    })),
   ];
 
-  const selectedLabel =
-    options.find(o => o.value === selectedId)?.name ?? 'Disabled';
+  const selectedOption = options.find(o => o.value === selectedId);
+  const selectedLabel = selectedOption?.name ?? 'Disabled';
+  const selectedSubtitle = selectedOption?.subtitle;
   const isDisabled = selectedId === '';
 
   return (
@@ -64,14 +142,15 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
         </ThemedText>
       )}
 
-      {/* ── Selector button ── */}
+      {/* ── Selector button (`sb-input` from the Edit AI Partner design) ── */}
       <TouchableOpacity
         style={[
           styles.selector,
           {
+            backgroundColor: 'rgba(15, 23, 42, 0.9)',
             borderColor: isDisabled
               ? theme.colors.border.default
-              : theme.colors.accent.primary + '66',
+              : 'rgba(236, 72, 153, 0.5)',
             opacity: isLoading ? 0.5 : 1,
           },
         ]}
@@ -83,49 +162,40 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
         activeOpacity={0.7}
         disabled={isLoading}
       >
-        <LinearGradient
-          colors={
-            isDisabled
-              ? [
-                  theme.colors.background.elevated,
-                  theme.colors.background.surface,
-                ]
-              : [
-                  theme.colors.accent.primary + '1A',
-                  theme.colors.background.elevated,
-                ]
-          }
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFill}
-        />
-        {/* Left accent pip for active selection */}
-        {!isDisabled && (
-          <LinearGradient
-            colors={[theme.colors.accent.primary, theme.colors.accent.secondary ?? theme.colors.accent.primaryHover]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={styles.selectorPip}
-          />
-        )}
-        <View style={styles.selectorInner}>
+        <View style={styles.selectorTextGroup}>
           <ThemedText
-            size={14}
+            size={13.5}
+            weight={isDisabled ? 'normal' : 'medium'}
             variant={isDisabled ? 'muted' : 'primary'}
-            style={{ flex: 1 }}
+            numberOfLines={1}
+            style={isDisabled ? undefined : styles.selectorName}
           >
             {selectedLabel}
           </ThemedText>
-          <Icon
-            name="chevron-down"
-            size={18}
-            color={
-              isDisabled
-                ? theme.colors.text.muted
-                : theme.colors.accent.primary
-            }
-          />
+          {selectedSubtitle ? (
+            <ThemedText
+              size={11}
+              variant="muted"
+              numberOfLines={1}
+              testID="module-selector-subtitle"
+            >
+              {selectedSubtitle}
+            </ThemedText>
+          ) : null}
         </View>
+        <ThemedText
+          size={12}
+          style={[
+            styles.selectorChevron,
+            {
+              color: isDisabled
+                ? theme.colors.text.muted
+                : theme.colors.accent.primary,
+            },
+          ]}
+        >
+          ▾
+        </ThemedText>
       </TouchableOpacity>
 
       {/* ── Popup modal ── */}
@@ -212,26 +282,24 @@ export const EntityModuleSelector: React.FC<EntityModuleSelectorProps> = ({
                     }}
                     activeOpacity={0.65}
                   >
-                    {isSelected && (
-                      <LinearGradient
-                        colors={[
-                          theme.colors.accent.primary,
-                          theme.colors.accent.secondary ??
-                            theme.colors.accent.primaryHover,
-                        ]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 0, y: 1 }}
-                        style={styles.itemAccentPip}
-                      />
-                    )}
-                    <ThemedText
-                      size={14}
-                      variant={isSelected ? 'accent' : 'primary'}
-                      weight={isSelected ? 'medium' : 'normal'}
-                      style={{ flex: 1, paddingLeft: isSelected ? 10 : 0 }}
-                    >
-                      {item.name}
-                    </ThemedText>
+                    <View style={styles.modalItemText}>
+                      <ThemedText
+                        size={14}
+                        variant={isSelected ? 'accent' : 'primary'}
+                        weight={isSelected ? 'medium' : 'normal'}
+                      >
+                        {item.name}
+                      </ThemedText>
+                      {item.subtitle ? (
+                        <ThemedText
+                          size={11}
+                          variant="muted"
+                          numberOfLines={1}
+                        >
+                          {item.subtitle}
+                        </ThemedText>
+                      ) : null}
+                    </View>
                     {isSelected && (
                       <Icon
                         name="check"
@@ -295,20 +363,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderRadius: 8,
-    minHeight: 44,
-    overflow: 'hidden',
-  },
-  selectorPip: {
-    width: 3,
-    alignSelf: 'stretch',
-  },
-  selectorInner: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
     gap: 8,
+  },
+  selectorTextGroup: {
+    flex: 1,
+    gap: 1,
+  },
+  selectorName: {
+    fontWeight: '600',
+  },
+  selectorChevron: {
+    flexShrink: 0,
   },
 
   // ── Modal sheet ──
@@ -362,15 +429,13 @@ const styles = StyleSheet.create({
   modalItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 12,
     paddingHorizontal: 20,
-    gap: 0,
+    gap: 12,
   },
-  itemAccentPip: {
-    width: 3,
-    height: 20,
-    borderRadius: 2,
-    marginRight: 0,
+  modalItemText: {
+    flex: 1,
+    gap: 2,
   },
   createNewRow: {
     flexDirection: 'row',

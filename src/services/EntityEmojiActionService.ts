@@ -3,6 +3,12 @@
  *
  * Handles CRUD operations for emoji actions and resolves message text
  * by substituting emoji with RP text and collecting emotion effects.
+ *
+ * Every public method takes an ENTITY id (the own entity's id) — never an
+ * interaction id. The engine stores actions under `emoji_actions.entity_id`
+ * with a FOREIGN KEY on `entities(id)`, and the picker/editor scope their
+ * lookups by the same id. See actionCache below for the 2026-10-21 incident
+ * where call sites passed an interaction id.
  */
 import { createLogger } from '../utils/logger';
 import { EmojiService } from './EmojiService';
@@ -13,7 +19,7 @@ import {
   ResolvedMessageActions,
   Ekman8Emotion,
 } from '../types/emoji';
-import * as emojiActionRepo from '../database/repositories/emoji_actions';
+import * as emojiActionRepo from '../database/repositories';
 
 const log = createLogger('[EntityEmojiActionService]');
 
@@ -62,7 +68,22 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 class EntityEmojiActionServiceClass {
-  // In-memory cache: entityId -> (emojiNative -> EmojiAction)
+  /**
+   * In-memory cache: entityId -> (emojiNative -> EmojiAction).
+   *
+   * KEY CONTRACT: every key here is an ENTITY id (own entity), never an
+   * interaction id. The engine scopes emoji actions by entity
+   * (emoji_actions.entity_id → entities(id), FK enforced), and the picker/editor
+   * look them up with the own entity id, so an interaction id is always a miss.
+   *
+   * History (owner device, 2026-10-21): ChatDetailScreen used to pass the
+   * interaction id when seeding and when resolving a message. Seeding failed the
+   * FK per row, and resolution cached an EMPTY map under the interaction id — so
+   * emoji → RP substitution and additional_effects silently never fired. Those
+   * stale interaction-keyed entries are harmless (they can never collide with a
+   * real entity id and are dropped by invalidateAllCaches), and the call sites
+   * now pass the own entity id consistently.
+   */
   private actionCache: Map<string, Map<string, EmojiAction>> = new Map();
 
   /**

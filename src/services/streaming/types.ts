@@ -6,7 +6,7 @@
  * (`{start_byte, bytes_count}`) → the client answers each with
  * `STT_FETCH_MICROPHONE_RESULT` (`AudioChunk` = base64 PCM + format) → results
  * stream back as `STT_OUTPUT_TEXT`. This module is track-generic (audio v1,
- * video later via Harmony Link) and session-source agnostic (debug for the
+ * video later via Soulbits Engine) and session-source agnostic (debug for the
  * module test panel, a regular call session for future voice/video calls).
  */
 
@@ -60,6 +60,13 @@ export interface StartAudioStreamOptions {
   bufferDurationSeconds?: number;
   /** Called for every streamed transcript. */
   onTranscript: (transcript: StreamTranscript) => void;
+  /**
+   * Called when the engine's AutoVAD gate opens/closes
+   * (`STT_SPEECH_STARTED` / `STT_SPEECH_STOPPED`). `speaking` is `true` on
+   * speech start and `false` on speech end; `timestampMs` is the local
+   * `Date.now()` receipt time (useful for live VAD segment bars).
+   */
+  onVoiceActivity?: (speaking: boolean, timestampMs: number) => void;
   /** Called on a terminal/async failure. */
   onError?: (error: Error) => void;
   /** Called on lifecycle state changes. */

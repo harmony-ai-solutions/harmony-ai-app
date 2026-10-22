@@ -1,5 +1,60 @@
 # Testing Strategy
 
+> **UPDATE (2026-10-19, provider-registry 7-1):** the suite grew with the
+> provider-registry workstream. New/updated suites cover the shared **provider
+> accounts** model (`ProvidersScreen`, `AccountForm`, the `providers` repository
+> adapter), the **catalog-backed pickers** (`CatalogModelSelect`,
+> `SamplingPresetSelect`, `usePresets`), the **seeding ensure-flow**
+> (`src/services/providers/__tests__/seeding.test.ts`), the account/capability
+> schema split (`accountFieldSchemas`, `providerFieldSections`) and the
+> reactivated provider pickers (`moduleConfiguration`). The **engine-contract
+> gates** moved to contract version **1.6.0** (the accounts / verify / models /
+> capabilities surface) — see [`docs/provider-registry.md`](provider-registry.md)
+> for the architecture and
+> [`docs/engine-contract-gates.md`](engine-contract-gates.md) for the gate
+> mechanics. Three competitor providers were removed (R9).
+>
+> **UPDATE (2026-10-12, task 3-4):** the **integration** project and the
+> **schema-parity / SQLite-driver** sections below are **historical**. The
+> `__tests__/integration/` sync-protocol suites, the node SQLite shim
+> (`better-sqlite3`) and the schema-parity tooling were deleted with the TS
+> SQLite/sync stack. There is now a single jest project — **`unit`**:
+>
+> ```
+> npm test          # = jest --selectProjects unit  (src/** + __tests__/**)
+> ```
+>
+> The app's data layer is the embedded engine's management API; the engine
+> adapter suites live under `src/services/engine/**`.
+>
+> **UPDATE (2026-10-12, task 5-1):** the retired schema-parity gate is replaced
+> by **engine-contract gates** — see
+> [`docs/engine-contract-gates.md`](engine-contract-gates.md). They live in the
+> `unit` project (`engineContractConformance.test.ts` + `engineLoopbackSmoke.test.ts`)
+> and run with `npm test`; no extra CI job is required. The `--maxWorkers`
+> guidance below is retained only as history (the `better-sqlite3` cross-worker
+> contamination it guarded against is gone with the SQLite stack).
+>
+> **UPDATE (2026-10-13, plan 7-11):** the suite is now **135 unit suites /
+> 1146 tests**. The engine-log viewer added `EngineLogStream` (WS client),
+> `EngineLogScreen` (view logic + render), `buildDiagnosticsReport` /
+> `shareDiagnostics`, the `EngineApiClient` log-method tests, and the
+> `engineContractConformance` / `engineLoopbackSmoke` additions for the 7 log
+> endpoints.
+>
+> **UPDATE (2026-10-12, task 5-2):** the current suite is **124 unit suites /
+> 998 tests** (single `unit` project), covering the embedded-engine work:
+> engine host + lifecycle (`EngineHost`, `EngineService`, `EngineLifecycle`,
+> `EngineDbKey`), iOS blind-tick (`IOSLifecycleWakeHandler`,
+> `IOSMaintenanceScheduler`, `IOSLifecycleBridge`, `IOSLifecycleTelemetry`,
+> `PushRelayClient`), backup (`BackupOrchestrator` + targets), the
+> engine-contract gates (`engineContractConformance`, `engineLoopbackSmoke`),
+> and the notification-permission module. The Integration / Migration rows in the
+> tables below are **RETIRED** (their suites were deleted with the TS stack) —
+> kept for history only. Every `src/database/**` reference below is likewise
+> historical: the data layer is the embedded engine's management API
+> (`src/services/engine/**`).
+
 This document describes how the HarmonyAIChat React Native app is tested,
 what kinds of tests exist, and how to add new ones.
 
@@ -24,8 +79,8 @@ what kinds of tests exist, and how to add new ones.
 | Layer | Directory | Run Command |
 |---|---|---|
 | Unit | `src/**/__tests__/*.test.ts(x)`, `__tests__/**/*.test.ts(x)` (excl. integration) | `npx jest --selectProjects unit` |
-| Integration | `__tests__/integration/**/*.test.ts` | `npx jest --selectProjects integration` |
-| Migration | `src/database/__tests__/migrations.*.test.ts` | `npx jest --selectProjects unit --testPathPatterns migrations` |
+| ~~Integration~~ (RETIRED) | ~~`__tests__/integration/**/*.test.ts`~~ | deleted with the TS stack (3-4) |
+| ~~Migration~~ (RETIRED) | ~~`src/database/__tests__/migrations.*.test.ts`~~ | deleted with the TS stack (3-4) |
 | E2E (Android) | `e2e/.maestro/*.yaml` | `docker compose -f e2e/docker-compose.yml up` |
 | E2E (iOS) | `e2e/.maestro/*.yaml` | macOS GitHub Actions runner (nightly) |
 
@@ -84,10 +139,10 @@ Runs `test:unit` (isolated — see [Known Issue](#known-issue-better-sqlite3-cro
 npm run test:unit
 ```
 
-This is the **recommended** way to run unit tests. It passes `--maxWorkers=40` so
-every test file runs in its own worker, which avoids the better-sqlite3
-cross-worker contamination described below. (`npx jest --selectProjects unit`
-without `--maxWorkers` can intermittently fail — see the known issue.)
+This is the **recommended** way to run unit tests. It passes `--maxWorkers=45`.
+The `--maxWorkers` value is a plain parallelism knob today — the
+`better-sqlite3` cross-worker contamination it once guarded against is gone with
+the SQLite stack (see the historical note below).
 
 ### Integration Tests Only
 
@@ -105,7 +160,12 @@ Equivalent to the old `jest` invocation — both projects, Jest's default worker
 pool. Only use this when you specifically want the unmodified Jest behaviour;
 it can trigger the contamination known issue.
 
-### Known Issue: better-sqlite3 cross-worker contamination
+### Known Issue: better-sqlite3 cross-worker contamination (historical)
+
+> **Historical (task 3-4):** `better-sqlite3` and the `NodeDatabase` test shim
+> were deleted with the SQLite stack, so this issue no longer exists. The note is
+> retained for context; the `--maxWorkers` knob is now a plain parallelism
+> setting.
 
 The unit suites that exercise the real SQLite engine via `better-sqlite3`
 (`NodeDatabase` — the smoke, compat, snapshot, roll-forward, repository and
@@ -126,9 +186,7 @@ those files are assigned to the **same Jest worker**.
   deterministic.
 - **Fix / workaround**: run unit tests with `--maxWorkers` greater than or equal
   to the number of unit test files so each file gets its own worker (no sharing
-  → no contamination). The `test:unit` script does this (`--maxWorkers=45` for
-  the current 44 unit files). **If the unit suite grows beyond 45 files, bump
-  the `--maxWorkers` value in `package.json` accordingly.**
+  → no contamination). The `test:unit` script sets `--maxWorkers=45`.
 - **Related fix**: `NodeDatabase` no longer applies `PRAGMA journal_mode = WAL`
   to `:memory:` databases — WAL is meaningless for in-memory DBs and asking
   better-sqlite3 to switch an in-memory DB into WAL mode hangs the native
@@ -163,22 +221,22 @@ Requires Docker Desktop with KVM support (validated on Windows 11 + WSL2 + Docke
 # 1. Build APK with E2E gradle properties (use the helper script)
 ./e2e/build-apk.sh              # Linux/macOS/WSL
 # .\e2e\build-apk.ps1           # Windows PowerShell
-# This passes -PHARMONY_LINK_WSS_URL and -PHARMONY_LINK_WS_URL to gradle
-# and copies the APK to e2e/app-debug.apk
+# This builds the JS-bundled devRelease APK and copies it to e2e/app-debug.apk
 
-# 2. Build Harmony Link image locally (in harmony-link-private repo)
+# 2. Build Soulbits Engine image locally (in harmony-link-private repo)
 cd ../harmony-link-private
-docker build -f Dockerfile.build -t soulbits/harmony-link:latest .
+docker build -t soulbits/harmony-link:latest .
 
 # 3. Start the stack
 cd ../harmony-ai-app
 docker compose -f e2e/docker-compose.yml up
 ```
 
-> **Note:** The compose file uses `soulbits/harmony-link:latest` (locally-built)
-> with `pull_policy: never`. Don't use `harmonyai/harmony-link:latest` from
-> Docker Hub for E2E — it's stale (Dec 2025) and may diverge from the
-> backend code you're testing against.
+> **Note:** The compose file uses the locally-built image
+> `soulbits/harmony-link:latest` with `pull_policy: never` (it is not published
+> to a Docker registry — build it first, as above). CI does the same:
+> `.github/workflows/e2e-android.yml` checks out `harmony-link-private` and runs
+> `docker build`. Engine configuration uses the `SE_*` env namespace (plan 7-13).
 
 ### E2E Tests (iOS — currently deferred)
 
@@ -194,15 +252,18 @@ macOS only. Runs via GitHub Actions on the macos-latest runner. See `e2e/README.
 
 | Workflow | Trigger | What It Runs |
 |---|---|---|
-| `.github/workflows/test.yml` | Every PR | TypeScript type check, unit tests, integration tests, lint |
-| `.github/workflows/schema-parity.yml` | Every PR + tags | Compares RN schema against Go server schema |
+| `.github/workflows/test.yml` | Every PR | TypeScript type check, unit tests (incl. engine-contract gates), lint; plus the optional `contract-drift` job (engine-repo version check, runs when `HARMONY_LINK_REPO_PAT` is set) |
 | `.github/workflows/e2e-android.yml` | Nightly (03:00 UTC) + manual | Full Android E2E suite in Docker |
 | `.github/workflows/e2e-ios.yml` | Nightly (03:00 UTC) + manual | Full iOS E2E suite on macOS runner |
-| `.github/workflows/build-release.yml` | Tag push | Release build (gated on `test` + `schema-parity`) |
+| `.github/workflows/build-release.yml` | Tag push | Release build (gated on `test`) |
+
+> The former `schema-parity.yml` workflow was deleted with the TS stack (3-4); its
+> role is now covered by the engine-contract gates documented in
+> [`docs/engine-contract-gates.md`](engine-contract-gates.md).
 
 ### Run Cadence
 
-- **Every PR**: type-check + unit + integration + migration + schema parity
+- **Every PR**: type-check + unit tests (incl. engine-contract conformance + loopback smoke) + lint
 - **Nightly (03:00 UTC)**: full Android E2E (Docker) + iOS E2E (macOS runner)
 - **Pre-release**: all of the above must pass before the release build starts
 
@@ -226,9 +287,14 @@ Production uses `react-native-sqlite-storage` with SQLCipher via the `ReactNativ
 
 SQLCipher encryption is not supported by any Node SQLite driver. Most repository and migration tests don't depend on encryption behavior — they care about SQL semantics, which are identical with or without encryption. A small on-device smoke test (see `docs/future-work.md`) verifies encryption end-to-end before each release.
 
-### Schema parity via dump-and-diff in CI
+### Engine-contract gates (replaced schema parity)
 
-Parity requires comparing the RN client schema against the Go server schema — two different codebases that can't be tested in a single Jest run. The dedicated `schema-parity.yml` workflow fetches the Go repo, runs both `dump-schema` commands, and diffs the JSON outputs. **Long-term goal**: vendored canonical schema file or Atlas HCL descriptor (see `docs/future-work.md`).
+The app no longer keeps a schema, so there is nothing to keep "in parity" — but
+every read/write goes over the embedded engine's management REST API. The retired
+dump-and-diff parity gate is replaced by the **engine-contract gates**: a
+contract-version pin (`ENGINE_CONTRACT_VERSION`), shared management-API wire
+fixtures with mapper conformance, an endpoint manifest and a loopback-transport
+smoke. See [`docs/engine-contract-gates.md`](engine-contract-gates.md).
 
 ### Maestro over Detox for E2E
 
@@ -306,7 +372,10 @@ appId: ai.soulbits.chat
 - assertVisible: "Connection Status"
 ```
 
-### Walkthrough: Migration Change
+### Walkthrough: Migration Change (historical — the app no longer keeps a schema)
+
+> The app has no migrations or schema since task 3-4; the engine owns them. This
+> walkthrough is retained for historical context.
 
 1. Add a new numbered file in `src/database/migrations/`: `000029_description.ts`
 2. Export the SQL string
@@ -314,7 +383,7 @@ appId: ai.soulbits.chat
 4. Run snapshot update: `npx jest --selectProjects unit --testPathPatterns migrations --updateSnapshot`
 5. Review the snapshot diff carefully
 6. If the schema changed, coordinate with the Go team — update `harmony-link-private` migration too
-7. Refresh the committed baseline: `npm run schema:dump -- --output schema/rn-schema.json`
+7. (Retired — `npm run schema:dump` and `schema/rn-schema.json` were deleted with the parity tooling.)
 8. Commit both the migration and the updated snapshots/baseline
 
 ## Troubleshooting

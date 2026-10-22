@@ -86,8 +86,8 @@ import {
   updateCharacterImage,
   deleteCharacterImage,
   getAllCharacterProfiles,
-} from '../database/repositories/characters';
-import { getAllEntities, getEntity, ReservedEntityNameError } from '../database/repositories/entities';
+} from '../database/repositories';
+import { getAllEntities, getEntity, ReservedEntityNameError } from '../database/repositories';
 import {
   createUserPersona,
   getUserPersona,
@@ -95,10 +95,10 @@ import {
   deleteUserPersona,
   PersonaAliasConflictError,
   resolvePersonaId,
-} from '../database/repositories/userEntities';
-import type { UserPersonaAvatar, UserPersonaProfileFields } from '../database/repositories/userEntities';
-import syncService from '../services/SyncService';
+} from '../database/repositories';
+import type { UserPersonaAvatar, UserPersonaProfileFields } from '../database/repositories';
 import ChatPreferencesService from '../services/ChatPreferencesService';
+import { ensurePersonaVoiceConfig } from '../services/voiceInput/personaVoice';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
 
@@ -853,21 +853,8 @@ export const PersonaEditScreen: React.FC = () => {
         }
       }
 
-      // ── Push the backing entity to the engine (CRITICAL — 4-2/D34) so chat
-      //    INIT_ENTITY succeeds when chatting as this persona. A failed push
-      //    surfaces the failure alert instead of the success alert; the persona
-      //    is saved locally either way and a retry re-runs the save. ──
-      try {
-        await syncService.syncAndWait({ timeoutMs: 45_000, critical: true });
-      } catch (syncErr) {
-        log.error('Auto-sync after persona save failed (critical):', syncErr);
-        const syncCode = (syncErr as { code?: string })?.code;
-        showAlert(
-          t('common:error'),
-          syncCode === 'sync_conflict' ? t('personaSaveSyncConflict') : t('personaSaveSyncFailed'),
-        );
-        return;
-      }
+      // ── Task 3-4: the persona's backing entity is authored directly on the
+      //    engine at save time — there is no separate sync push to wait for. ──
 
       showAlert(t('personaSaved'), undefined, [{ text: t('common:ok') }]);
       navigation.goBack();
@@ -995,6 +982,18 @@ export const PersonaEditScreen: React.FC = () => {
       },
     ]);
   }, [isEdit, isBuiltIn, isActivePersona, personaId, navigation, showAlert, t]);
+
+  // ── Shared voice input (all personas) ──────────────────────────────────
+  /** Direct jump to the pinned STT editor; ensure-link runs on this tap only. */
+  const handleManageVoiceInput = useCallback(async () => {
+    try {
+      const { configId } = await ensurePersonaVoiceConfig();
+      navigation.navigate('ModuleConfigEdit', { moduleType: 'stt', configId });
+    } catch (err) {
+      log.error('Failed to open voice input config:', err);
+      showAlert(t('common:error'), t('settings:voiceInputUnavailable'));
+    }
+  }, [navigation, showAlert, t]);
 
   if (!theme || !loaded) return null;
 
@@ -1437,7 +1436,7 @@ export const PersonaEditScreen: React.FC = () => {
                 </ThemedText>
               </View>
               <TouchableOpacity
-                onPress={() => navigation.navigate('VoiceInputSettings')}
+                onPress={() => void handleManageVoiceInput()}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 testID="persona-voice-input-manage"
                 accessibilityRole="button"

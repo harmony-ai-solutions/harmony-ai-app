@@ -51,12 +51,12 @@ import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
 import {
   getChatPickerRows,
-  getCharacterImages,
+  getPrimaryImage,
   hasChatPickerLibrary,
+  imageToDataURL,
   resolveChatPickerRowLabel,
   ChatPickerRow,
-} from '../../database/repositories/characters';
-import { createDataURL } from '../../database/base64';
+} from '../../database/repositories';
 import { ProfileAvatar } from '../profile/ProfileAvatar';
 import { createLogger } from '../../utils/logger';
 
@@ -135,11 +135,8 @@ export const ChatPartnerPickerModal: React.FC<ChatPartnerPickerModalProps> = ({
         await Promise.all(
           profileIds.map(async profileId => {
             try {
-              const imgs = await getCharacterImages(profileId);
-              const primary = imgs.find(img => img.is_primary === true);
-              avatarMap[profileId] = primary
-                ? createDataURL(primary.image_data, primary.mime_type)
-                : null;
+              const primary = await getPrimaryImage(profileId);
+              avatarMap[profileId] = primary ? imageToDataURL(primary) : null;
             } catch {
               avatarMap[profileId] = null;
             }

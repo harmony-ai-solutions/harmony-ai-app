@@ -1,20 +1,19 @@
 /**
- * Jest multi-project configuration.
+ * Jest configuration (task 3-4: single project).
  *
- * Two projects:
- *  - **unit**:  Node environment, fast unit tests (excludes integration tests)
- *  - **integration**: Node environment, mocks ConnectionManager for sync tests
+ * After the TS sync/SQLite stack deletion there is one test project:
+ *  - **unit**: Node environment, fast unit tests (src/**).
+ *
+ * The former `integration` project (the rows-v1 sync-protocol suites under
+ * `__tests__/integration/`) is deleted with the sync stack. The
+ * `@test-utils/database` mapper pointed at the deleted node SQLite shim.
  *
  * @see docs/TESTING.md for the full testing strategy and run commands.
  */
 
 const transformIgnorePatterns = [
-  'node_modules/(?!(react-native|@react-native|@react-navigation|react-native-fs|react-native-keychain|react-native-sqlite-storage|@react-native-documents|react-native-vector-icons|react-native-linear-gradient|react-native-safe-area-context|react-native-screens|react-native-paper|react-native-config|uuid|react-native-track-player|@invertase|@react-native-google-signin|@react-native-community)/)',
+  'node_modules/(?!(react-native|@react-native|@react-navigation|react-native-fs|react-native-keychain|@react-native-documents|react-native-vector-icons|react-native-linear-gradient|react-native-safe-area-context|react-native-screens|react-native-paper|react-native-config|uuid|react-native-track-player|react-native-applifecycle|@invertase|@react-native-google-signin|@react-native-community)/)',
 ];
-
-const moduleNameMapper = {
-  '^@test-utils/database$': '<rootDir>/src/database/__test_utils__/testDatabase',
-};
 
 module.exports = {
   projects: [
@@ -28,23 +27,9 @@ module.exports = {
         '<rootDir>/__tests__/**/*.test.ts',
         '<rootDir>/__tests__/**/*.test.tsx',
       ],
-      testPathIgnorePatterns: [
-        '/node_modules/',
-        '/__tests__/integration/',
-      ],
-      transformIgnorePatterns,
-      setupFiles: ['./jest.setup.js'],
-      moduleNameMapper,
-    },
-    {
-      displayName: 'integration',
-      preset: '@react-native/jest-preset',
-      testEnvironment: 'node',
-      testMatch: ['<rootDir>/__tests__/integration/**/*.test.ts'],
       testPathIgnorePatterns: ['/node_modules/'],
       transformIgnorePatterns,
       setupFiles: ['./jest.setup.js'],
-      moduleNameMapper,
     },
   ],
 };

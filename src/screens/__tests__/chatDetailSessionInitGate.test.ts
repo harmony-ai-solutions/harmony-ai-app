@@ -46,4 +46,10 @@ describe('shouldInitializeEntitySession (session INIT gate, Q8)', () => {
   it('false when the partner entity is disabled (never send INIT)', () => {
     expect(shouldInitializeEntitySession({ ...base, isDisabled: true })).toBe(false);
   });
+
+  it('false when the partner entity is store-locked (7-14 V3 — visible but locked)', () => {
+    expect(shouldInitializeEntitySession({ ...base, locked: true })).toBe(false);
+    // Absent ⇒ unlocked (full-variant callers unaffected).
+    expect(shouldInitializeEntitySession({ ...base })).toBe(true);
+  });
 });

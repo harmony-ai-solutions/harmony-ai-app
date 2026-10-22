@@ -8,6 +8,10 @@
  *
  * Visual language mirrors the app's obsidian-glass sheets (CharacterCardMenuModal,
  * CategoryFilterDropdown): gradient glass surface, accent stripe, soft shadows.
+ *
+ * Store variant (plan 7-14): purchases are disabled at launch, so the badge
+ * renders as a static, informational pill — the balance stays visible but there
+ * is no wallet action dropdown (no top-up / cash-out affordance).
  */
 
 import React, { useRef, useState } from 'react';
@@ -28,6 +32,7 @@ import { ThemedText } from '../themed/ThemedText';
 import { SoulIcon } from './SoulIcon';
 import { hexToRgba } from '../../utils/colorUtils';
 import { hapticLightPress } from '../../utils/haptics';
+import { purchasesEnabled } from '../../services/variant/purchaseAccess';
 
 const DROPDOWN_WIDTH = 190;
 
@@ -83,6 +88,42 @@ export const SoulBalanceDropdown: React.FC<SoulBalanceDropdownProps> = ({
   const balanceText = Number.isInteger(balance)
     ? String(balance)
     : balance.toFixed(2);
+
+  // Store variant (plan 7-14): purchases are disabled at launch — the badge is
+  // informational only. The balance stays visible; there is NO wallet top-up
+  // ("Buy Souls") or cash-out ("Sell Souls") action, and no dropdown to open.
+  if (!purchasesEnabled()) {
+    return (
+      <View
+        style={[
+          styles.badge,
+          { borderColor: hexToRgba(accent, 0.35), backgroundColor: 'rgba(0,0,0,0.22)' },
+        ]}
+        testID="soul-balance-badge"
+      >
+        <SoulIcon size={18} />
+        <ThemedText
+          variant="primary"
+          size={14}
+          weight="bold"
+          hierarchy="header"
+          numberOfLines={1}
+          style={styles.balanceText}
+        >
+          {balanceText}
+        </ThemedText>
+        <ThemedText
+          variant="secondary"
+          size={12}
+          hierarchy="subtext"
+          numberOfLines={1}
+          style={styles.balanceLabel}
+        >
+          {t('souls')}
+        </ThemedText>
+      </View>
+    );
+  }
 
   const dropdownLeft = anchor
     ? Math.max(

@@ -20,7 +20,7 @@
  * Reached from the Characters screen by tapping an AI character card.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -28,7 +28,9 @@ import {
   RefreshControl,
   TouchableOpacity,
   Image,
+  ActivityIndicator,
 } from 'react-native';
+import type { ImageStyle, StyleProp } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -49,30 +51,37 @@ import { hexToRgba } from '../utils/colorUtils';
 import { ProfileAvatar } from '../components/profile/ProfileAvatar';
 import { ProfileTabs } from '../components/profile/ProfileTabs';
 import { ImageCommentModal } from '../components/characters/ImageCommentModal';
+import { ImageViewerModal } from '../components/modals/ImageViewerModal';
 import {
   getAICharacterProfile,
-  getCharacterImages,
+  getCharacterImagesMetadata,
+  getPrimaryImage,
   getSiblingCharacterProfiles,
   getCharacterStats,
+  getCachedImageBytes,
+  imageToDataURL,
+  shouldUseThumbnail,
   CharacterStats,
-} from '../database/repositories/characters';
+} from '../database/repositories';
+import { createDataURL } from '../database/base64';
 import {
   duplicateAIPartner,
   getEntityByCharacterProfileId,
   setEntityDisabled,
   setEntityMuted,
   ReservedEntityNameError,
-} from '../database/repositories/entities';
-import { createUserPersonaFromCard } from '../database/repositories/userEntities';
+} from '../database/repositories';
+import { createUserPersonaFromCard } from '../database/repositories';
 import * as SocialService from '../services/social/SocialService';
 import type { StubCharacterCreator } from '../services/social/SocialService';
 import { openCharacterChat } from '../services/CharacterChatService';
+import ChatBackgroundService from '../services/ChatBackgroundService';
+import type { ChatBackgroundRef } from '../services/ChatBackgroundService';
 import {
   getListingForProfile,
   isChatLocked,
 } from '../services/marketplace/MarketplaceService';
 import type { MarketplaceListingDetail } from '../services/marketplace/MarketplaceService';
-import { createDataURL } from '../database/base64';
 import { CharacterProfile, CharacterImage } from '../database/models';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { createLogger } from '../utils/logger';
@@ -94,6 +103,90 @@ interface ImagePostState {
   likes: number;
   commentCount: number;
 }
+
+/**
+ * A gallery tile's DISPLAY bytes as a `data:` URL (progressive fill).
+ *
+ * Not a URL `Image` source: under RN New Architecture the Fabric image loader
+ * does not forward `source.headers`, so the engine's token check 401'd the image
+ * GET and Fresco painted the tile blank with no JS error (owner device, Android
+ * 15, v0.4.18-dev, 2026-10-21). Rendering through the app's own fetch + byte
+ * cache is the path every working avatar/portrait on that device already uses.
+ *
+ * Picks the derived preview for `ready`/`pending` rows (`pending` = legacy row,
+ * the read generates + persists it) and the original for `unavailable` / older
+ * engines. A remembered "no thumbnail" (thumb 404) still has the original.
+ * Exported so the screen test pins the tile decision without a full render.
+ */
+export async function galleryTileImageSource(
+  profileId: string,
+  image: CharacterImage,
+): Promise<string | null> {
+  // A row that already carries bytes needs no request.
+  if (image.image_data) return imageToDataURL(image);
+
+  const variant = shouldUseThumbnail(image) ? 'thumb' : 'original';
+  const bytes =
+    (await getCachedImageBytes(profileId, image.id, variant, {
+      thumbnailState: image.thumbnail_state,
+    })) ??
+    (variant === 'thumb'
+      ? await getCachedImageBytes(profileId, image.id, 'original')
+      : null);
+  if (!bytes) return null;
+  // A thumbnail's mime differs from the original's (JPEG/PNG vs GIF/WebP):
+  // use the RESPONSE mime, never the metadata mime.
+  return createDataURL(bytes.data, bytes.contentType || image.mime_type);
+}
+
+interface GalleryTileImageProps {
+  profileId: string;
+  image: CharacterImage;
+  style: StyleProp<ImageStyle>;
+}
+
+/**
+ * One gallery tile's image, filling in when its bytes land. Module scope (like
+ * the picker's history tile) so a parent re-render — a like/comment tap — does
+ * not restart the load; the byte cache keeps a remount instant.
+ */
+const GalleryTileImage: React.FC<GalleryTileImageProps> = ({
+  profileId,
+  image,
+  style,
+}) => {
+  const [uri, setUri] = useState<string | null>(() =>
+    image.image_data ? imageToDataURL(image) : null,
+  );
+
+  useEffect(() => {
+    if (image.image_data) return undefined;
+    let cancelled = false;
+    galleryTileImageSource(profileId, image)
+      .then(next => {
+        if (!cancelled && next) setUri(next);
+      })
+      .catch(err => {
+        // Display path: an empty tile beats an error for one missing image.
+        log.warn('Failed to load gallery image:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileId, image]);
+
+  if (!uri) {
+    return (
+      <View
+        style={[style, styles.tileImageLoading]}
+        testID={`ai-image-tile-loading-${image.id}`}
+      >
+        <ActivityIndicator size="small" color="rgba(255,255,255,0.5)" />
+      </View>
+    );
+  }
+  return <Image source={{ uri }} style={style} resizeMode="cover" />;
+};
 
 export const AIProfileScreen: React.FC = () => {
   const { theme } = useAppTheme();
@@ -123,6 +216,8 @@ export const AIProfileScreen: React.FC = () => {
   const [aiEntityId, setAiEntityId] = useState<string | null>(null);
   const [entityDisabled, setEntityDisabledState] = useState(false);
   const [entityMuted, setEntityMutedState] = useState(false);
+  // Current per-entity chat background (image viewer action reflects it).
+  const [backgroundRef, setBackgroundRef] = useState<ChatBackgroundRef | null>(null);
 
   // ── Social state ───────────────────────────────────────────────────────
   const [profileLiked, setProfileLiked] = useState(false);
@@ -146,6 +241,14 @@ export const AIProfileScreen: React.FC = () => {
   // ── Comment modal state ────────────────────────────────────────────────
   const [commentImageId, setCommentImageId] = useState<string | null>(null);
   const [commentVisible, setCommentVisible] = useState(false);
+  // Full-size viewer. The ORIGINAL bytes are resolved through the byte cache
+  // (data URL) — animated GIF/WebP keep animating from a data URL on Android,
+  // and a URL + headers source is unusable under Fabric (headers never reach
+  // the engine; see `galleryTileImageSource`). The modal opens immediately and
+  // shows a spinner until the bytes land.
+  const [viewerImage, setViewerImage] = useState<CharacterImage | null>(null);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewerLoading, setViewerLoading] = useState(false);
   const [chatting, setChatting] = useState(false);
   // One-click Duplicate in flight (engine-parity entity copy).
   const [duplicating, setDuplicating] = useState(false);
@@ -172,13 +275,14 @@ export const AIProfileScreen: React.FC = () => {
         log.warn('Failed to load entity flags:', entErr);
       }
 
-      // Primary avatar + full gallery
-      const imgs = await getCharacterImages(profileId);
+      // Primary avatar (thumbnail) + gallery metadata (no blobs — tiles render
+      // the derived preview by URL; contract 1.8.0).
+      const [imgs, primary] = await Promise.all([
+        getCharacterImagesMetadata(profileId),
+        getPrimaryImage(profileId),
+      ]);
       setImages(imgs);
-      const primary = imgs.find(img => img.is_primary === true);
-      setAvatarUri(
-        primary ? createDataURL(primary.image_data, primary.mime_type) : null,
-      );
+      setAvatarUri(primary ? imageToDataURL(primary) : null);
 
       // Other forks of the same AI (same base name, e.g. Max 2 / Max 3)
       const siblings = await getSiblingCharacterProfiles(data.name);
@@ -191,11 +295,8 @@ export const AIProfileScreen: React.FC = () => {
         await Promise.all(
           siblingCopies.map(async copy => {
             try {
-              const copyImgs = await getCharacterImages(copy.id);
-              const copyPrimary = copyImgs.find(img => img.is_primary === true);
-              avatarMap[copy.id] = copyPrimary
-                ? createDataURL(copyPrimary.image_data, copyPrimary.mime_type)
-                : null;
+              const copyPrimary = await getPrimaryImage(copy.id);
+              avatarMap[copy.id] = copyPrimary ? imageToDataURL(copyPrimary) : null;
             } catch {
               avatarMap[copy.id] = null;
             }
@@ -322,18 +423,69 @@ export const AIProfileScreen: React.FC = () => {
     }
   }, [profileId, user?.id]);
 
+  /**
+   * Refresh ONLY the chat background ref for this profile's entity.
+   *
+   * The background belongs to the chat ENTITY (the same one
+   * `handlePartnerSettings` uses in reverse) and can be changed from another
+   * surface — the chat screen's picker, or its menu — while this screen stays
+   * MOUNTED underneath. The viewer's "✓ Current background" label reads
+   * `backgroundRef`, so a back-nav must re-read it; it rides the screen's
+   * EXISTING focus effect (below) rather than adding a second focus mechanism.
+   */
+  const refreshBackgroundRef = useCallback(async () => {
+    try {
+      const ent = await getEntityByCharacterProfileId(profileId);
+      if (!ent) return;
+      const bg = await ChatBackgroundService.getChatBackgroundRecord(ent.id);
+      setBackgroundRef(bg.ref);
+    } catch (err) {
+      log.warn('Failed to refresh chat background:', err);
+    }
+  }, [profileId]);
+
   // Reload on focus (edits to the profile reflect immediately)
   useFocusEffect(
     useCallback(() => {
       loadProfile();
-    }, [loadProfile]),
+      refreshBackgroundRef();
+    }, [loadProfile, refreshBackgroundRef]),
   );
+
+  // Resolve the viewer's ORIGINAL bytes when it opens. `viewerImage` changing
+  // is the open trigger; closing clears the URI so a re-open never flashes the
+  // previous image.
+  useEffect(() => {
+    if (!viewerImage) {
+      setViewerUri(null);
+      setViewerLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setViewerUri(null);
+    setViewerLoading(true);
+    getCachedImageBytes(profileId, viewerImage.id, 'original')
+      .then(bytes => {
+        if (cancelled || !bytes) return;
+        setViewerUri(createDataURL(bytes.data, bytes.contentType || viewerImage.mime_type));
+      })
+      .catch(err => {
+        // The modal keeps its placeholder icon; no error surface for one image.
+        log.warn('Failed to load the full-size image:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setViewerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileId, viewerImage]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadProfile();
+    await Promise.all([loadProfile(), refreshBackgroundRef()]);
     setRefreshing(false);
-  }, [loadProfile]);
+  }, [loadProfile, refreshBackgroundRef]);
 
   // ── Actions ────────────────────────────────────────────────────────────
   // "Edit AI Profile and Settings" opens the single edit surface:
@@ -463,6 +615,39 @@ export const AIProfileScreen: React.FC = () => {
       );
     } catch (err) {
       log.warn('Failed to toggle mute:', err);
+      showToast(t('common:error'));
+    }
+  };
+
+  // Image viewer action — the viewed gallery image becomes the entity's chat
+  // background; when it already IS the background, tapping removes it.
+  const isViewerImageBackground =
+    !!viewerImage &&
+    backgroundRef?.kind === 'profile' &&
+    backgroundRef.profileId === profileId &&
+    backgroundRef.imageId === viewerImage.id;
+
+  const handleToggleImageBackground = async () => {
+    if (!aiEntityId || !viewerImage) return;
+    hapticLightPress();
+    try {
+      if (isViewerImageBackground) {
+        await ChatBackgroundService.clearChatBackground(aiEntityId);
+        setBackgroundRef(null);
+      } else {
+        await ChatBackgroundService.setChatBackgroundProfile(
+          aiEntityId,
+          profileId,
+          viewerImage.id,
+        );
+        setBackgroundRef({
+          kind: 'profile',
+          profileId,
+          imageId: viewerImage.id,
+        });
+      }
+    } catch (err) {
+      log.warn('Failed to update chat background:', err);
       showToast(t('common:error'));
     }
   };
@@ -1027,11 +1212,22 @@ export const AIProfileScreen: React.FC = () => {
                       };
                       return (
                         <View key={img.id} style={styles.postCard}>
-                          <Image
-                            source={{ uri: createDataURL(img.image_data, img.mime_type) }}
-                            style={styles.postImage}
-                            resizeMode="cover"
-                          />
+                          <TouchableOpacity
+                            onPress={() => {
+                              hapticLightPress();
+                              setViewerImage(img);
+                            }}
+                            activeOpacity={0.85}
+                            testID={`ai-image-tile-${img.id}`}
+                            accessibilityRole="imagebutton"
+                            accessibilityLabel={img.description || resolvedName}
+                          >
+                            <GalleryTileImage
+                              profileId={profileId}
+                              image={img}
+                              style={styles.postImage}
+                            />
+                          </TouchableOpacity>
                           {/* Date/time caption under the image */}
                           <View style={styles.postDateRow}>
                             <Icon
@@ -1169,6 +1365,27 @@ export const AIProfileScreen: React.FC = () => {
         onClose={handleCommentsClosed}
         // The character's owner can moderate (copy/delete) any comment.
         canModerateAll={isOwner}
+      />
+
+      {/* ── Full-size viewer — ORIGINAL bytes as a data URL (still animates) ── */}
+      <ImageViewerModal
+        visible={viewerImage != null}
+        imageUri={viewerUri}
+        loading={viewerLoading}
+        description={viewerImage?.description || undefined}
+        accentColor={theme.colors.accent.primary}
+        backgroundAction={
+          aiEntityId && viewerImage
+            ? {
+                label: isViewerImageBackground
+                  ? t('currentBackground')
+                  : t('setAsBackground'),
+                active: isViewerImageBackground,
+                onPress: handleToggleImageBackground,
+              }
+            : undefined
+        }
+        onClose={() => setViewerImage(null)}
       />
     </ThemedView>
   );
@@ -1362,6 +1579,11 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 1,
     backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  // Same box as `postImage` so the grid never reflows while bytes land.
+  tileImageLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   postDateRow: {
     flexDirection: 'row',

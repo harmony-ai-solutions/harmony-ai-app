@@ -39,7 +39,7 @@ import {
   getUserCharacterProfiles,
   getCharacterProfile,
   updateCharacterProfile,
-} from '../database/repositories/characters';
+} from '../database/repositories';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type RouteParams = RouteProp<RootStackParamList, 'ContentAsset'>;
