@@ -5,6 +5,10 @@ import { Avatar, IconButton } from 'react-native-paper';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../themed/ThemedText';
 import AudioPlayer from '../../services/AudioPlayer';
+import {
+  getConversationMessageAudioBase64,
+  getConversationMessageImageBase64,
+} from '../../services/engine/repositories/conversation_messages';
 import { hasPlaybackStarted, isPlaybackPaused, isPlaybackInProgress } from '../../services/playbackState';
 import { Theme } from '../../theme/types';
 import { ConversationMessage } from '../../database/models';
@@ -16,6 +20,90 @@ import { MessageReactionsBar } from './MessageReactionsBar';
 
 const log = createLogger('[ChatBubble]');
 const { width: screenWidth } = Dimensions.get('window');
+
+/**
+ * Engine-parity blob presence (desktop frontend parity, `chatStoreUtils.js`):
+ * the management-API timeline payload is deliberately METADATA-ONLY — audio and
+ * image bytes are never inlined; they arrive lazily from the dedicated byte
+ * endpoints (`GET /api/messages/:id/{audio,image}`) via the two-phase loader.
+ * Media presence is therefore signaled by the lightweight mime columns (the
+ * desktop frontend uses `has_audio: !!audio_mime_type`), with `message_type`
+ * as a fallback for legacy rows that never stamped a mime.
+ */
+
+/** True when the message row carries the actual audio bytes. */
+export function hasAudioBytes(
+  message: Pick<ConversationMessage, 'audio_data'>,
+): boolean {
+  return Boolean(message.audio_data && message.audio_data.length > 0);
+}
+
+/** True when the message row carries the actual image bytes. */
+export function hasImageBytes(
+  message: Pick<ConversationMessage, 'image_data'>,
+): boolean {
+  return Boolean(message.image_data && message.image_data.length > 0);
+}
+
+/** True when the message indicates audio, with or without the bytes on hand. */
+export function indicatesAudio(
+  message: Pick<
+    ConversationMessage,
+    'audio_data' | 'audio_mime_type' | 'message_type'
+  >,
+): boolean {
+  return (
+    hasAudioBytes(message) ||
+    Boolean(message.audio_mime_type) ||
+    message.message_type === 'audio' ||
+    message.message_type === 'combined'
+  );
+}
+
+/** True when the message indicates an image, with or without the bytes. */
+export function indicatesImage(
+  message: Pick<
+    ConversationMessage,
+    'image_data' | 'image_mime_type' | 'message_type'
+  >,
+): boolean {
+  return (
+    hasImageBytes(message) ||
+    Boolean(message.image_mime_type) ||
+    message.message_type === 'image'
+  );
+}
+
+/**
+ * Per-screen cache of blobs already fetched lazily from the byte endpoints
+ * (desktop parity: the shared player caches one object URL per message id).
+ * Keys are `${kind}:${messageId}` so audio and image share the eviction cap.
+ * A failed fetch is remembered too — a 404/network error must not re-fire on
+ * every render of the same bubble.
+ */
+const resolvedBlobCache = new Map<string, string>();
+const blobFailures = new Set<string>();
+const RESOLVED_BLOB_CACHE_MAX = 48;
+
+function cacheBlob(key: string, base64: string): void {
+  if (resolvedBlobCache.has(key)) resolvedBlobCache.delete(key);
+  resolvedBlobCache.set(key, base64);
+  if (resolvedBlobCache.size > RESOLVED_BLOB_CACHE_MAX) {
+    // Evict the oldest entry (Map preserves insertion order).
+    const oldest = resolvedBlobCache.keys().next().value;
+    if (oldest !== undefined) resolvedBlobCache.delete(oldest);
+  }
+}
+
+function cachedBlob(key: string): string | undefined {
+  const hit = resolvedBlobCache.get(key);
+  if (hit !== undefined) {
+    // Refresh recency so a repeated play doesn't evict the hot entry.
+    resolvedBlobCache.delete(key);
+    resolvedBlobCache.set(key, hit);
+  }
+  return hit;
+}
 
 /**
  * Partner-message derivation (§1-10): a message is a PARTNER message when its
@@ -131,6 +219,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [currentPosition, setCurrentPosition] = useState<number>(0);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [showTranscription, setShowTranscription] = useState(false);
+  /**
+   * Engine parity: image bytes for the inline tile resolve lazily from
+   * `GET /api/messages/:id/image` — the timeline payload only carries the mime.
+   */
+  const [resolvedImage, setResolvedImage] = useState<string | null>(
+    hasImageBytes(message) ? message.image_data ?? null : null,
+  );
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /**
    * Has playback actually started for the current utterance? RNTP reports
@@ -150,6 +245,45 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   useEffect(() => {
     setEditedText(message.content || '');
   }, [message.content]);
+
+  // The FlatList reuses bubble rows; re-derive the inline image bytes whenever
+  // the row's message changes — inline bytes win, otherwise the cache.
+  const messageImageKey = `${message.id}:${message.image_data ? 'bytes' : 'meta'}`;
+  useEffect(() => {
+    if (hasImageBytes(message)) {
+      setResolvedImage(message.image_data ?? null);
+    } else {
+      setResolvedImage(cachedBlob(`image:${message.id}`) ?? null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messageImageKey]);
+
+  // Lazy two-phase image load: the list payload carries only `image_mime_type`;
+  // fetch the bytes from the byte endpoint once per message (cached above).
+  useEffect(() => {
+    if (resolvedImage) return;
+    const key = `image:${message.id}`;
+    if (!indicatesImage(message) || blobFailures.has(key)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const base64 = await getConversationMessageImageBase64(message.id);
+        if (!base64) {
+          blobFailures.add(key);
+          return;
+        }
+        cacheBlob(key, base64);
+        if (!cancelled) setResolvedImage(base64);
+      } catch (error) {
+        blobFailures.add(key);
+        log.warn('Failed to load message image:', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message.id, resolvedImage]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -240,21 +374,42 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   }, [isPlaying]);
 
   const handlePlayAudio = async () => {
-    if (!message.audio_data) return;
-    
+    if (!indicatesAudio(message)) return;
+
     try {
       if (isPlaying) {
         // Pause playback
         await AudioPlayer.pause();
         setIsPlaying(false);
       } else {
+        // Engine parity: the timeline payload is metadata-only — on first play
+        // the audio bytes are fetched lazily from
+        // `GET /api/messages/:id/audio` (desktop frontend parity: the shared
+        // player resolves its object URL on demand).
+        const key = `audio:${message.id}`;
+        let audioBytes = message.audio_data || cachedBlob(key);
+        if (!audioBytes && !blobFailures.has(key)) {
+          setIsLoadingAudio(true);
+          try {
+            audioBytes = await getConversationMessageAudioBase64(message.id);
+            if (audioBytes) {
+              cacheBlob(key, audioBytes);
+            } else {
+              blobFailures.add(key);
+            }
+          } finally {
+            setIsLoadingAudio(false);
+          }
+        }
+        if (!audioBytes) return;
+
         // Check if the correct audio is loaded
         if (!AudioPlayer.isMessageLoaded(message.id)) {
           log.debug(`Loading audio for message ${message.id} (current: ${AudioPlayer.getCurrentMessageId()})`);
           // Wrong audio is loaded, load the correct one
           await AudioPlayer.loadAudioForMessage(
             message.id,
-            message.audio_data,
+            audioBytes,
             message.audio_mime_type || 'audio/wav'
           );
           
@@ -294,8 +449,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   };
 
   const handleImagePress = () => {
-    if (message.image_data && onImagePress) {
-      onImagePress(message.image_data, message.image_mime_type || 'image/jpeg');
+    // Bytes may still be resolving lazily — only open the lightbox once the
+    // image data is actually available.
+    const base64 = resolvedImage ?? (hasImageBytes(message) ? message.image_data : null);
+    if (base64 && onImagePress) {
+      onImagePress(base64, message.image_mime_type || 'image/jpeg');
     }
   };
 
@@ -313,8 +471,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const renderContent = () => {
     const hasText = message.content && message.content.trim().length > 0;
-    const hasAudio = message.audio_data && message.audio_data.length > 0;
-    const hasImage = message.image_data && message.image_data.length > 0;
+    // Media presence from the lightweight mime columns; the bytes (audio on
+    // first play, image inline) resolve lazily via the byte endpoints.
+    const hasAudio = indicatesAudio(message);
+    const hasImage = resolvedImage !== null && indicatesImage(message);
 
     // Audio message with transcription (message_type: 'combined' or 'audio' with text)
     const hasAudioWithTranscription = hasAudio && hasText;
@@ -364,9 +524,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         )}
 
         {hasImage && (
-          <TouchableOpacity onPress={handleImagePress} style={styles.imageContainer}>
+          <TouchableOpacity
+            onPress={handleImagePress}
+            style={styles.imageContainer}
+            testID={`chat-image-${message.id}`}
+          >
             <Image
-              source={{ uri: `data:${message.image_mime_type || 'image/jpeg'};base64,${message.image_data}` }}
+              source={{ uri: `data:${message.image_mime_type || 'image/jpeg'};base64,${resolvedImage}` }}
               style={styles.image}
               resizeMode="cover"
             />
