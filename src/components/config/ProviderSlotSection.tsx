@@ -51,6 +51,7 @@ import {
   isSamplingParamKey,
   isParamSupported,
   partitionFieldsBySupport,
+  type SpeechOptionsMeta,
 } from '../../constants/modelCapabilities';
 import {
   getProviderFieldsForModule,
@@ -197,18 +198,118 @@ export function groupFieldsIntoRows(fields: FieldDefinition[]): FieldDefinition[
   return rows;
 }
 
-/** Normalize a model's `speech_options.voices` (strings or objects). */
-function normalizeVoiceOptions(
-  voices: Array<string | { id?: string; name?: string }> | undefined,
-): Array<{ id: string; name: string }> {
-  const list = voices && voices.length > 0 ? voices : FALLBACK_TTS_VOICES;
+/**
+ * One gateway-style language descriptor (`soulbitscloud` speech_options):
+ * `{code, name, voices}` — voices scoped to that language. Soulvoice's plain
+ * language-name strings never become these.
+ */
+interface TtsLanguageScope {
+  code?: string;
+  name?: string;
+  language?: string;
+  id?: string;
+  voices?: unknown;
+}
+
+/** One voice entry after normalization. */
+interface TtsVoiceOption {
+  id: string;
+  name: string;
+}
+
+/** Normalize one voice list: strings or objects keyed id/name/voice. */
+function collectVoiceOptions(list: unknown): TtsVoiceOption[] {
+  if (!Array.isArray(list)) return [];
   return list
-    .map((voice) =>
-      typeof voice === 'string'
-        ? { id: voice, name: voice }
-        : { id: String(voice.id ?? voice.name ?? ''), name: String(voice.name ?? voice.id ?? '') },
-    )
+    .map((raw): TtsVoiceOption => {
+      if (typeof raw === 'string') {
+        return { id: raw, name: raw };
+      }
+      const entry = (raw ?? {}) as { id?: unknown; name?: unknown; voice?: unknown };
+      const id = String(entry.id ?? entry.name ?? entry.voice ?? '');
+      return { id, name: String(entry.name ?? id) };
+    })
     .filter((voice) => voice.id !== '');
+}
+
+/** The descriptor id of a language entry (gateway `code`, soulvoice name, …). */
+function languageScopeId(entry: TtsLanguageScope): string {
+  return String(entry.code ?? entry.language ?? entry.id ?? entry.name ?? '').trim();
+}
+
+/**
+ * Normalize a model's `speech_options.languages` into `{id, name}` picker
+ * options. Declared shapes (research soulvoice §3.2, gateway `SpeechOptions`):
+ *  - soulvoice live: plain names — `["default", "en", …]`
+ *  - soulbitscloud gateway: descriptors — `[{code, name, voices}, …]`
+ * `String(code)` over the gateway's objects produced the "[object Object]"
+ * rows (owner report, 2026-10-22) — the id is now read from the fields.
+ */
+export function normalizeTtsLanguageOptions(
+  languages: SpeechOptionsMeta['languages'],
+): Array<{ id: string; name: string }> {
+  const list =
+    languages && languages.length > 0 ? languages : FALLBACK_TTS_LANGUAGES;
+  return list
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return { id: entry, name: entry };
+      }
+      const id = languageScopeId(entry as TtsLanguageScope);
+      const name = String((entry as TtsLanguageScope).name ?? id);
+      return { id, name };
+    })
+    .filter((option) => option.id !== '');
+}
+
+/**
+ * Normalize a model's selectable voices into `{id, name}` picker options,
+ * tolerant of every declared shape:
+ *  - flat strings (`soulbitscloud` gateway — present only when the model
+ *    accepts `voice` WITHOUT a language scope, e.g. KittenTTS)
+ *  - descriptor objects keyed `voice` (`{voice, language?, styles?}` —
+ *    soulvoice live; the old normalizer only read `id`/`name`, so every
+ *    soulvoice entry came out empty, got filtered, and the picker fell back
+ *    to the generic list — the "voices never change with the model" report,
+ *    owner 2026-10-22)
+ *  - per-language voice scopes: when the model declares NO flat voices, the
+ *    languages' own `voices` arrays are the source. A language that declares
+ *    its own set SCOPES the picker to that set (Chatterbox Multilingual);
+ *    with no language selected the union of every language's voices is shown.
+ * Falls back to the generic list only when the model declares neither.
+ */
+export function normalizeTtsVoiceOptions(
+  speechOptions: SpeechOptionsMeta | null | undefined,
+  languageValue?: string | null,
+): TtsVoiceOption[] {
+  const selected = String(languageValue ?? '').trim().toLowerCase();
+  const languageEntries = (speechOptions?.languages ?? []).flatMap((entry) =>
+    typeof entry === 'object' && entry !== null ? [entry as TtsLanguageScope] : [],
+  );
+
+  // A selected language that declares its own voice set scopes the picker.
+  const scoped = languageEntries.find((entry) => {
+    const id = languageScopeId(entry);
+    return id !== '' && id.toLowerCase() === selected;
+  });
+  if (scoped && Array.isArray(scoped.voices) && (scoped.voices as unknown[]).length > 0) {
+    return collectVoiceOptions(scoped.voices);
+  }
+
+  // Union: the flat list plus every language's scoped voices.
+  let flat = collectVoiceOptions(speechOptions?.voices);
+  for (const entry of languageEntries) {
+    flat = flat.concat(collectVoiceOptions(entry.voices));
+  }
+  const seen = new Set<string>();
+  const union = flat.filter((voice) => {
+    if (seen.has(voice.id)) return false;
+    seen.add(voice.id);
+    return true;
+  });
+  return union.length > 0
+    ? union
+    : FALLBACK_TTS_VOICES.map((voice) => ({ id: voice, name: voice }));
 }
 
 // ── Sibling components (Wave 2, same interfaces) ─────────────────────────────
@@ -788,19 +889,24 @@ export const ProviderSlotSection: React.FC<ProviderSlotSectionProps> = ({
 
   // ── TTS: Language + Base Voice dropdowns (soulbitscloud / soulvoice) ──
   const renderTtsVoiceAndLanguage = () => {
-    const languageValue = String(state.capability.language ?? '');
-    const voiceValue = String(state.capability.voice ?? '');
+    // A value saved while the descriptor bug was live can be the literal
+    // "[object Object]" string (the old picker's option ids were
+    // `String(languageObject)`); render that as unset instead of keeping it
+    // as a phantom option row.
+    const cleanPickerValue = (raw: string): string =>
+      raw.includes('[object Object]') ? '' : raw;
+    const languageValue = cleanPickerValue(String(state.capability.language ?? ''));
+    const voiceValue = cleanPickerValue(String(state.capability.voice ?? ''));
 
-    const languageOptions = (
-      speechOptions?.languages && speechOptions.languages.length > 0
-        ? speechOptions.languages
-        : FALLBACK_TTS_LANGUAGES
-    ).map((code) => ({ id: String(code), name: String(code) }));
+    const languageOptions = normalizeTtsLanguageOptions(speechOptions?.languages);
     if (languageValue && !languageOptions.some((o) => o.id === languageValue)) {
       languageOptions.push({ id: languageValue, name: languageValue });
     }
 
-    const voiceOptions = normalizeVoiceOptions(speechOptions?.voices);
+    // Voice list follows the model (and, on the gateway's per-language models,
+    // the selected language) — never the generic fallback while the model
+    // declares its own voices.
+    const voiceOptions = normalizeTtsVoiceOptions(speechOptions, languageValue);
     if (voiceValue && !voiceOptions.some((o) => o.id === voiceValue)) {
       voiceOptions.push({ id: voiceValue, name: voiceValue });
     }

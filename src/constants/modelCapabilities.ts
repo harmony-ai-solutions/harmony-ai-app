@@ -144,10 +144,32 @@ export interface SpeechOptionsMeta {
   operation_modes?: string[];
   supports_voice_cloning?: boolean;
   supports_voice_design?: boolean;
-  /** ISO-639-1 language codes the model can speak. */
-  languages?: string[];
-  /** Built-in voice ids/names (shape varies per provider). */
-  voices?: Array<string | { id?: string; name?: string }>;
+  /**
+   * The model's speakable languages. Shape varies per provider (research
+   * soulvoice §3.2 / the gateway's `SpeechOptions`):
+   *  - soulvoice (HSE live): plain language NAMES — `["default", "en", …]`
+   *  - soulbitscloud (gateway): descriptors — `[{code: "EN", name: "English",
+   *    voices: ["Bella", …]}, …]`, where `voices` is scoped to that language
+   *  - the app's offline catalog: absent (fallback list applies)
+   */
+  languages?: Array<
+    | string
+    | {
+        code?: string;
+        name?: string;
+        language?: string;
+        id?: string;
+        voices?: Array<string | { id?: string; name?: string; voice?: string }>;
+      }
+  >;
+  /**
+   * Built-in voice ids/names. Also shape-varied: plain strings
+   * (`soulbitscloud` gateway flat voices — present only when the model accepts
+   * `voice` WITHOUT a language scope, e.g. KittenTTS) or descriptors
+   * (`{voice, language?, styles?}` — soulvoice live; `{id?, name?}` — the
+   * app's interim assumption).
+   */
+  voices?: Array<string | { id?: string; name?: string; voice?: string }>;
   /** Chatterbox-style tags (`[laughter]`, `[sigh]`, …). */
   paralinguistic_tags?: string[];
   /** Generation params the model accepts (`pitch`, `speed`, `cfg_weight`, …). */
