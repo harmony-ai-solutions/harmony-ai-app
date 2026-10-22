@@ -106,6 +106,94 @@ describe('parseSyncPairingPayloadV2', () => {
     expect(route.kind).toBe('cloud');
   });
 
+  // ── Cloud QR payload v3 (2026-10-22 incident fix) ──────────────────────────
+
+  it('parses the desktop-minted v3 cloud payload (kind soulbits-cloud, v=1)', () => {
+    const route = parseSyncPairingPayloadV2(
+      JSON.stringify({
+        v: 1,
+        kind: 'soulbits-cloud',
+        relay_url: 'wss://sync.soulbits.app/v1/sync/ws',
+        pairing_token: 'tok-123',
+        account_hint: 'user@example.com',
+        dataset_id: 'b1f0c5d9-8a7e-4c3b-9f21-2d6e8a0b4c7d',
+      }),
+    );
+    expect(route.kind).toBe('cloud');
+    if (route.kind !== 'cloud') return;
+    expect(route.payload).toEqual({
+      relay_url: 'wss://sync.soulbits.app/v1/sync/ws',
+      pairing_token: 'tok-123',
+      account_hint: 'user@example.com',
+      dataset_id: 'b1f0c5d9-8a7e-4c3b-9f21-2d6e8a0b4c7d',
+    });
+  });
+
+  it('tolerates a v3 cloud payload without dataset_id', () => {
+    const route = parseSyncPairingPayloadV2(
+      JSON.stringify({
+        v: 1,
+        kind: 'soulbits-cloud',
+        relay_url: 'wss://sync.soulbits.app/v1/sync/ws',
+        pairing_token: 'tok-123',
+        account_hint: 'user@example.com',
+      }),
+    );
+    expect(route.kind).toBe('cloud');
+    if (route.kind !== 'cloud') return;
+    expect(route.payload.dataset_id).toBeUndefined();
+  });
+
+  it('rejects a v3 cloud payload with an unsupported version', () => {
+    expect(() =>
+      parseSyncPairingPayloadV2(
+        JSON.stringify({
+          v: 2,
+          kind: 'soulbits-cloud',
+          relay_url: 'wss://sync.soulbits.app/v1/sync/ws',
+          pairing_token: 'tok-123',
+          account_hint: 'user@example.com',
+        }),
+      ),
+    ).toThrow(SyncPairingParseError);
+  });
+
+  it('still parses the legacy cloud shape with an optional dataset_id (no kind)', () => {
+    const route = parseSyncPairingPayloadV2(
+      JSON.stringify({
+        relay_url: 'wss://sync.soulbits.app/v1/sync/ws',
+        pairing_token: 'tok-123',
+        account_hint: 'user@example.com',
+        dataset_id: 'ds-9',
+      }),
+    );
+    expect(route.kind).toBe('cloud');
+    if (route.kind !== 'cloud') return;
+    expect(route.payload.dataset_id).toBe('ds-9');
+  });
+
+  it('rejects a v3 cloud payload missing relay_url or pairing_token', () => {
+    expect(() =>
+      parseSyncPairingPayloadV2(
+        JSON.stringify({ v: 1, kind: 'soulbits-cloud', pairing_token: 'tok-123' }),
+      ),
+    ).toThrow(SyncPairingParseError);
+  });
+
+  it('the legacy parser surfaces the v3 dataset_id too', () => {
+    const payload = parseSyncPairingPayload(
+      JSON.stringify({
+        v: 1,
+        kind: 'soulbits-cloud',
+        relay_url: 'wss://sync.soulbits.app/v1/sync/ws',
+        pairing_token: 'tok-123',
+        account_hint: 'user@example.com',
+        dataset_id: 'ds-9',
+      }),
+    );
+    expect(payload.dataset_id).toBe('ds-9');
+  });
+
   it('parses a full LAN payload', () => {
     const route = parseSyncPairingPayloadV2(JSON.stringify(LAN_PAYLOAD));
     expect(route.kind).toBe('lan');

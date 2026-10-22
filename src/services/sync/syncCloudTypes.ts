@@ -3,9 +3,22 @@
  *
  * Two QR payloads reach the phone and both flow through this module:
  *
- *  1. **Cloud** (portal + `POST /api/sync/pairing/cloud`) — the pinned shape:
+ *  1. **Cloud** (portal + `POST /api/sync/pairing/cloud`) — two shapes:
+ *
+ *     the pinned **legacy** shape:
  *
  *       { "relay_url": "wss://…/v1/sync/ws", "pairing_token": "…", "account_hint": "…" }
+ *
+ *     and the **cloud QR payload v3** the desktop mints (2026-10-22 incident
+ *     fix — the pairing binding is a (user, dataset) invite, so the QR now
+ *     names the dataset the phone joins):
+ *
+ *       { "v": 1, "kind": "soulbits-cloud", "relay_url": "wss://…/v1/sync/ws",
+ *         "pairing_token": "…", "account_hint": "<full email>",
+ *         "dataset_id": "<account user id uuid>" }
+ *
+ *     `dataset_id` is OPTIONAL in both shapes (older codes omit it and the
+ *     phone falls back to whatever dataset the engine already holds).
  *
  *     `pairing_token` is a short-lived, single-use credential the engine presents
  *     on its first relay connect (7-1 consume). `account_hint` identifies the
@@ -34,6 +47,12 @@ export interface SyncPairingPayload {
   relay_url: string;
   pairing_token: string;
   account_hint: string;
+  /**
+   * The dataset (account user id) the pairing binding joins — present in the
+   * desktop-minted cloud QR payload v3 (2026-10-22); optional in the legacy
+   * portal shape. The phone carries it into the engine config PUT verbatim.
+   */
+  dataset_id?: string;
 }
 
 /** The delegated-enrollment block of a LAN payload (plan 7-15 E2). */
@@ -124,7 +143,11 @@ function parseCloudPayload(obj: Record<string, unknown>): SyncPairingPayload {
     throw new SyncPairingParseError('pairing code is missing relay_url or pairing_token');
   }
 
-  return { relay_url, pairing_token, account_hint };
+  const payload: SyncPairingPayload = { relay_url, pairing_token, account_hint };
+  // Cloud QR payload v3 (2026-10-22): optional in both the v3 and legacy shapes.
+  const dataset_id = asString(obj.dataset_id);
+  if (dataset_id) payload.dataset_id = dataset_id;
+  return payload;
 }
 
 /** Validate + project the optional `enrollment` block (tolerant: dropped if unusable). */
@@ -176,10 +199,18 @@ function parseLanPayload(obj: Record<string, unknown>): LanSyncPairingPayload {
 
 /**
  * Parse a pairing code into a discriminated {@link ParsedPairingPayload}
- * (cloud vs LAN) — **parser v2** (plan 7-15). Accepts the canonical JSON object
- * as a string (what the QR encodes) or a `key=value` query-style string for the
- * cloud fallback. Throws {@link SyncPairingParseError} when a required field is
- * missing or the payload is unrecognized.
+ * (cloud vs LAN) — **parser v2** (plan 7-15), extended for the **cloud QR
+ * payload v3** (2026-10-22). Accepts the canonical JSON object as a string
+ * (what the QR encodes) or a `key=value` query-style string for the cloud
+ * fallback. Discrimination:
+ *
+ *   - `kind: "soulbits-lan"` → the LAN payload (unchanged, plan 7-15);
+ *   - `kind: "soulbits-cloud"` (v=1) → the desktop-minted cloud QR v3 — only
+ *     v1 exists, a future version is rejected loudly rather than mis-parsed;
+ *   - no `kind` → the legacy cloud shape (both keep `dataset_id` optional).
+ *
+ * Throws {@link SyncPairingParseError} when a required field is missing or
+ * the payload is unrecognized.
  */
 export function parseSyncPairingPayloadV2(raw: string): ParsedPairingPayload {
   const text = (raw ?? '').trim();
@@ -189,8 +220,18 @@ export function parseSyncPairingPayloadV2(raw: string): ParsedPairingPayload {
 
   const obj = coerceObject(text);
 
-  if (asString(obj.kind) === 'soulbits-lan') {
+  const kind = asString(obj.kind);
+  if (kind === 'soulbits-lan') {
     return { kind: 'lan', payload: parseLanPayload(obj) };
+  }
+  if (kind === 'soulbits-cloud') {
+    const v = Number(obj.v);
+    if (v !== 1) {
+      throw new SyncPairingParseError(
+        `unsupported cloud pairing payload version (v=${String(obj.v)})`,
+      );
+    }
+    return { kind: 'cloud', payload: parseCloudPayload(obj) };
   }
   return { kind: 'cloud', payload: parseCloudPayload(obj) };
 }
