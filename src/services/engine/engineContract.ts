@@ -123,8 +123,14 @@
  * animation preserved). Endpoint manifest stays at 53 (byte routes carry no
  * fixture payload); fixtures: `characterImages` gained `thumbnail_state` +
  * `has_thumbnail`.
+ * 1.8.0 → 1.9.0 (desktop-sync UX fix, 2026-10-22): `GET /api/sync/client/status`
+ * and `PUT /api/sync/client` responses gained `awaiting_group_key` (boolean;
+ * true = relay transport + enabled + no sync-group key + no live client) so
+ * the app can render a truthful "waiting for sync key" state instead of a
+ * generic "stopped". Additive/optional — older engines omit it and the app
+ * degrades gracefully (treats absent as false, falls back to `sync_group`).
  */
-export const ENGINE_CONTRACT_VERSION = '1.8.0';
+export const ENGINE_CONTRACT_VERSION = '1.9.0';
 
 /** Outcome of a contract-version comparison. */
 export interface ContractVersionCheck {

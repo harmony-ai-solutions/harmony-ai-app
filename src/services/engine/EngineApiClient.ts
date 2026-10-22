@@ -859,6 +859,15 @@ export interface SyncClientStatusDto {
   narration_paused: boolean;
   /** Relay-connection observability; null in LAN mode. */
   relay: RelayStatusDto | null;
+  /**
+   * True when the relay transport is enabled without a sync-group key and no
+   * live relay client (contract 1.9.0, 2026-10-22 incident fix): the engine is
+   * WAITING for the group key another device must escrow into the account —
+   * a truthful "waiting for sync key" state. OPTIONAL for graceful
+   * degradation against older engines (absent = false; the app falls back to
+   * the `sync_group` state).
+   */
+  awaiting_group_key?: boolean;
   config: SyncClientConfigDto;
 }
 
