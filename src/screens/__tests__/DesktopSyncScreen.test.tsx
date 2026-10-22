@@ -1,12 +1,15 @@
 /**
- * DesktopSyncScreen — 3-5 + 7-3 tests.
+ * DesktopSyncScreen — 3-5 + 7-3 + Design A (2026-10-22) tests.
  *
  * The screen is driven by the mocked EngineApiClient singleton (per the 3-2
  * convention) plus the mocked sync orchestrator / auth service (7-3). Covers:
- * status rendering (state + authority), the transport picker + cloud fields,
- * the relay status block, cloud pairing (manual code + QR camera scan),
- * the sync-group key card, the rotation banner, auth-needed recovery and the
- * quota banner.
+ * status rendering (hero state + authority), the Setup checklist (account /
+ * paired / join rows, the auto-join and its empty-escrow waiting row), the
+ * plain Sync status card (devices / last sync / encryption + warnings), the
+ * Advanced disclosure (manual pairing, configuration, relay diagnostics,
+ * sync-key actions), cloud pairing (manual code + QR camera scan) with the
+ * UNCONDITIONAL group_join_pending + auto-join, the rotation banner,
+ * auth-needed recovery and the quota banner.
  */
 
 import React from 'react';
@@ -118,7 +121,7 @@ jest.mock('../../components/settings/SettingsRows', () => {
   return {
     __esModule: true,
     SettingsToggleRow: ({ value, onValueChange, ...props }: any) =>
-      React.createElement(View, null, React.createElement(Switch, { testID: props.icon === 'account-multiple-plus-outline' ? 'desktop-sync-join-switch' : 'desktop-sync-enabled-switch', value, onValueChange })),
+      React.createElement(View, null, React.createElement(Switch, { testID: 'desktop-sync-enabled-switch', value, onValueChange })),
     SettingsLinkRow: () => React.createElement(View, null),
     SettingsDetailRow: () => React.createElement(View, null),
   };
@@ -222,6 +225,14 @@ function status(over: Record<string, unknown> = {}) {
   };
 }
 
+/** A relay-transport status snapshot (cloud mode). */
+function cloudStatus(over: Record<string, unknown> = {}) {
+  return status({
+    config: { ...status().config, transport: 'relay', relay_url: 'wss://sync.test/v1/sync/ws' },
+    ...over,
+  });
+}
+
 async function renderScreen(initial = status()) {
   mockStatus.mockResolvedValue(initial);
   mockKeyStatus.mockResolvedValue({ state: 'uninitialized', has_key: false, rotation_required: false });
@@ -230,6 +241,25 @@ async function renderScreen(initial = status()) {
   const utils = await render(<DesktopSyncScreen />);
   await waitFor(() => expect(utils.getByTestId('desktop-sync-state')).toBeTruthy());
   return utils;
+}
+
+/** Open the collapsed Advanced settings disclosure (Design A). */
+async function openAdvanced(utils: any) {
+  await act(async () => {
+    fireEvent.press(utils.getByTestId('desktop-sync-advanced-toggle'));
+  });
+}
+
+/** Scan a (cloud) QR payload through the camera mock. */
+async function scanCode(utils: any, code: string) {
+  await act(async () => {
+    fireEvent.press(utils.getByTestId('desktop-sync-scan-button'));
+  });
+  await act(async () => {
+    fireEvent(utils.getByTestId('mock-camera'), 'readCode', {
+      nativeEvent: { codeStringValue: code },
+    });
+  });
 }
 
 /** A v2 LAN pairing QR payload (plan 7-15), JSON-encoded for the scanner. */
@@ -249,6 +279,19 @@ function lanCode(over: Record<string, unknown> = {}): string {
   });
 }
 
+/** The desktop-minted cloud QR payload v3 (2026-10-22). */
+function cloudCodeV3(over: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    v: 1,
+    kind: 'soulbits-cloud',
+    relay_url: 'wss://sync.test/v1/sync/ws',
+    pairing_token: 'tok-v3',
+    account_hint: 'user@example.com',
+    dataset_id: 'uid-1',
+    ...over,
+  });
+}
+
 const ENROLLMENT = {
   relay_url: 'wss://sync.soulbits.app/v1/sync/ws',
   grant: 'grant-1',
@@ -257,14 +300,7 @@ const ENROLLMENT = {
 
 /** Render, scan a code, and (optionally) confirm the LAN sheet. */
 async function scanAndMaybeConfirm(utils: any, code: string, confirm = true) {
-  await act(async () => {
-    fireEvent.press(utils.getByTestId('desktop-sync-scan-button'));
-  });
-  await act(async () => {
-    fireEvent(utils.getByTestId('mock-camera'), 'readCode', {
-      nativeEvent: { codeStringValue: code },
-    });
-  });
+  await scanCode(utils, code);
   if (confirm) {
     await act(async () => {
       fireEvent.press(utils.getByTestId('lan-confirm-button'));
@@ -273,19 +309,22 @@ async function scanAndMaybeConfirm(utils: any, code: string, confirm = true) {
 }
 
 describe('DesktopSyncScreen', () => {
-  it('renders the state and authority from the status', async () => {
+  it('renders the state from the status and the authority under Advanced', async () => {
     const utils = await renderScreen(status({ state: 'pending_approval', local_authoritative: false }));
     expect(utils.getByTestId('desktop-sync-state').props.children).toBe('state_pending_approval');
-    expect(utils.getByTestId('desktop-sync-authority').props.children).toBe('authorityPeer');
     // The pairing hint is shown while awaiting approval (LAN).
     expect(utils.getByTestId('desktop-sync-pending-hint')).toBeTruthy();
+    await openAdvanced(utils);
+    expect(utils.getByTestId('desktop-sync-authority').props.children).toBe('authorityPeer');
   });
 
   it('shows where cognition runs and the narration-paused banner (plan 7-8)', async () => {
     const local = await renderScreen(status({ cognition_authority: 'local' }));
+    await openAdvanced(local);
     expect(local.getByTestId('desktop-sync-cognition-authority').props.children).toBe('cognitionLocal');
 
     const remote = await renderScreen(status({ cognition_authority: 'phone-9' }));
+    await openAdvanced(remote);
     expect(remote.getByTestId('desktop-sync-cognition-authority').props.children).toBe(
       'cognitionDevice:{"device":"phone-9"}',
     );
@@ -311,89 +350,72 @@ describe('DesktopSyncScreen', () => {
     expect(utils.getByTestId('desktop-sync-pending-writes')).toBeTruthy();
   });
 
-  it('connects with the form config when the button is pressed', async () => {
-    mockUpdate.mockResolvedValue(status());
+  // ── Design A: the Setup checklist ────────────────────────────────────────
+
+  it('renders the Setup checklist rows (signed in / paired / joining)', async () => {
     const utils = await renderScreen();
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-connect'));
-    });
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        enabled: true,
-        transport: 'lan',
-        peer_address: '192.168.1.10:28080',
-        security_mode: 'secure',
-      }),
-    );
+    expect(utils.getByTestId('desktop-sync-setup-card')).toBeTruthy();
+    // Signed in — the account from AuthService's profile.
+    expect(utils.getByTestId('desktop-sync-setup-row-account')).toBeTruthy();
+    expect(
+      utils.getByText('setupRowSignedIn:{"account":"user@example.com"}'),
+    ).toBeTruthy();
+    // LAN default → not paired yet.
+    expect(utils.getByText('setupRowPairedPending')).toBeTruthy();
+    // Not paired, no key → the join row is idle (honest, not "waiting").
+    expect(utils.getByText('setupJoinIdle')).toBeTruthy();
   });
 
-  it('disconnects via the disconnect button', async () => {
-    mockDisconnect.mockResolvedValue(status({ state: 'stopped' }));
-    const utils = await renderScreen();
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-disconnect'));
-    });
-    expect(mockDisconnect).toHaveBeenCalled();
+  it('shows the paired + joined checklist rows once the relay config is live', async () => {
+    const utils = await renderScreen(cloudStatus({ sync_group: 'member' }));
+    expect(utils.getByText('setupRowPaired')).toBeTruthy();
+    expect(utils.getByText('setupJoinDone')).toBeTruthy();
   });
 
-  it('confirms before handing over authority and calls yield', async () => {
-    mockYield.mockResolvedValue({ status: 'ok', state: 'syncing' });
-    mockShowAlert.mockImplementation((_t: string, _m: string, buttons: any[]) => {
-      const confirm = buttons?.find(b => b.text === 'yieldConfirm');
-      confirm?.onPress?.();
-    });
-    const utils = await renderScreen(status({ state: 'syncing' }));
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-yield'));
-    });
-    expect(mockShowAlert).toHaveBeenCalled();
-    expect(mockYield).toHaveBeenCalled();
-  });
-
-  it('warns about pending writes before disabling', async () => {
-    const utils = await renderScreen(status({ pending_writes: 2 }));
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-disable'));
-    });
-    expect(mockShowAlert).toHaveBeenCalled();
-    expect(mockUpdate).not.toHaveBeenCalled();
-  });
-
-  // ── 7-3: transport picker + cloud surface ──────────────────────────────
-
-  it('hides the direct-LAN transport in store builds (7-14 V3 — cloud relay only)', async () => {
-    setAppVariantForTests('store');
-    try {
-      const utils = await renderScreen();
-      // The direct-LAN pairing entry (topology A) is gone; only the cloud-relay
-      // chip remains and the transport is pinned to relay.
-      expect(utils.queryByTestId('desktop-sync-transport-lan')).toBeNull();
-      expect(utils.getByTestId('desktop-sync-transport-relay')).toBeTruthy();
-      expect(utils.getByTestId('desktop-sync-relay-url')).toBeTruthy();
-      expect(utils.getByTestId('desktop-sync-pair-button')).toBeTruthy();
-    } finally {
-      setAppVariantForTests(null);
-    }
-  });
-
-  it('switches to the cloud transport and surfaces the relay + pairing UI', async () => {
-    const utils = await renderScreen();
-    expect(utils.queryByTestId('desktop-sync-relay-url')).toBeNull();
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
-    });
-    expect(utils.getByTestId('desktop-sync-relay-url')).toBeTruthy();
-    expect(utils.getByTestId('desktop-sync-device-id')).toBeTruthy();
-    expect(utils.getByTestId('desktop-sync-dataset-id')).toBeTruthy();
-    expect(utils.getByTestId('desktop-sync-pair-button')).toBeTruthy();
-    expect(utils.getByTestId('desktop-sync-scan-button')).toBeTruthy();
-    expect(utils.getByTestId('desktop-sync-start-cloud-sync')).toBeTruthy();
-  });
-
-  it('renders the relay status block (quota rows + seq) in cloud mode', async () => {
+  it('shows the amber awaiting-key row when the engine reports awaiting_group_key', async () => {
     const utils = await renderScreen(
-      status({
-        config: { ...status().config, transport: 'relay', relay_url: 'wss://sync.test/v1/sync/ws' },
+      cloudStatus({ state: 'stopped', sync_group: 'uninitialized', awaiting_group_key: true }),
+    );
+    // The hero maps the waiting-for-sync-key state BEFORE the generic stopped.
+    expect(utils.getByTestId('desktop-sync-state').props.children).toBe('state_awaiting_key');
+    expect(utils.getByText('stateSub_awaiting_key')).toBeTruthy();
+    expect(utils.getByTestId('desktop-sync-setup-join-waiting')).toBeTruthy();
+    expect(utils.getByText('setupJoinWaitingHint')).toBeTruthy();
+    expect(utils.getByTestId('desktop-sync-setup-join-retry')).toBeTruthy();
+  });
+
+  it('degrades gracefully when awaiting_group_key is absent (older engine)', async () => {
+    // Absent field → treated as false: the hero falls back to the raw state…
+    const stopped = await renderScreen(status({ state: 'stopped', sync_group: 'uninitialized' }));
+    expect(stopped.getByTestId('desktop-sync-state').props.children).toBe('state_stopped');
+    expect(stopped.queryByTestId('desktop-sync-setup-join-waiting')).toBeNull();
+    // …and the sync_group state still drives the waiting row (key_pending),
+    // plus the paired-but-uninitialized fallback for pre-1.9.0 engines.
+    const pending = await renderScreen(cloudStatus({ state: 'stopped', sync_group: 'key_pending' }));
+    expect(pending.getByTestId('desktop-sync-state').props.children).toBe('state_stopped');
+    expect(pending.getByTestId('desktop-sync-setup-join-waiting')).toBeTruthy();
+    const pairedUninitialized = await renderScreen(
+      cloudStatus({ state: 'stopped', sync_group: 'uninitialized' }),
+    );
+    expect(pairedUninitialized.getByTestId('desktop-sync-state').props.children).toBe('state_stopped');
+    expect(pairedUninitialized.getByTestId('desktop-sync-setup-join-waiting')).toBeTruthy();
+  });
+
+  it('shows a spinner in the join row while a join is in flight', async () => {
+    const utils = await renderScreen(cloudStatus({ sync_group: 'key_pending' }));
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-setup-join-retry'));
+    });
+    // The auto-join runs: the orchestrator is invoked (spinner shown while
+    // in flight is covered implicitly by the phase machine).
+    await waitFor(() => expect(mockJoinCloudSync).toHaveBeenCalled());
+  });
+
+  // ── Design A: the plain Sync status card ──────────────────────────────────
+
+  it('renders the plain status rows (devices / last sync / encryption)', async () => {
+    const utils = await renderScreen(
+      cloudStatus({
         relay: {
           connected: true,
           auth_needed: false,
@@ -412,6 +434,156 @@ describe('DesktopSyncScreen', () => {
         },
       }),
     );
+    expect(utils.getByTestId('desktop-sync-status-devices').props.children).toBe(
+      'relayDevicesUpTo:{"count":3}',
+    );
+    expect(utils.getByTestId('desktop-sync-status-last-sync').props.children).toBe('lastSyncLive');
+    expect(utils.getByTestId('desktop-sync-status-encryption').props.children).toBe('encryptionE2E');
+  });
+
+  it('derives the last-sync age from the relay snapshot when disconnected', async () => {
+    const utils = await renderScreen(
+      cloudStatus({
+        relay: {
+          connected: false,
+          auth_needed: false,
+          last_seq: 12,
+          last_seq_age_ms: 5 * 60_000,
+          acked_seq: 10,
+          buffered_frames: 0,
+          buffered_bytes: 0,
+          cap: 0,
+          overflow: false,
+          rejected_frames: 0,
+          decrypt_failures: 0,
+          sync_buffer_mb: 0,
+          sync_devices: 3,
+          backup_storage_mb: 0,
+        },
+      }),
+    );
+    expect(utils.getByTestId('desktop-sync-status-last-sync').props.children).toBe(
+      'lastSyncMinAgo:{"count":5}',
+    );
+  });
+
+  it('hides the devices / last-sync rows without a relay snapshot (LAN mode)', async () => {
+    const utils = await renderScreen();
+    expect(utils.queryByTestId('desktop-sync-status-devices')).toBeNull();
+    expect(utils.queryByTestId('desktop-sync-status-last-sync')).toBeNull();
+    // The encryption row is static and always shown.
+    expect(utils.getByTestId('desktop-sync-status-encryption')).toBeTruthy();
+  });
+
+  // ── Actions under Advanced ────────────────────────────────────────────────
+
+  it('connects with the form config when the button is pressed', async () => {
+    mockUpdate.mockResolvedValue(status());
+    const utils = await renderScreen();
+    await openAdvanced(utils);
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-connect'));
+    });
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabled: true,
+        transport: 'lan',
+        peer_address: '192.168.1.10:28080',
+        security_mode: 'secure',
+      }),
+    );
+  });
+
+  it('disconnects via the disconnect button', async () => {
+    mockDisconnect.mockResolvedValue(status({ state: 'stopped' }));
+    const utils = await renderScreen();
+    await openAdvanced(utils);
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-disconnect'));
+    });
+    expect(mockDisconnect).toHaveBeenCalled();
+  });
+
+  it('confirms before handing over authority and calls yield', async () => {
+    mockYield.mockResolvedValue({ status: 'ok', state: 'syncing' });
+    mockShowAlert.mockImplementation((_t: string, _m: string, buttons: any[]) => {
+      const confirm = buttons?.find(b => b.text === 'yieldConfirm');
+      confirm?.onPress?.();
+    });
+    const utils = await renderScreen(status({ state: 'syncing' }));
+    await openAdvanced(utils);
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-yield'));
+    });
+    expect(mockShowAlert).toHaveBeenCalled();
+    expect(mockYield).toHaveBeenCalled();
+  });
+
+  it('warns about pending writes before disabling', async () => {
+    const utils = await renderScreen(status({ pending_writes: 2 }));
+    await openAdvanced(utils);
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-disable'));
+    });
+    expect(mockShowAlert).toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  // ── 7-3: transport picker + cloud surface (under Advanced) ────────────────
+
+  it('hides the direct-LAN transport in store builds (7-14 V3 — cloud relay only)', async () => {
+    setAppVariantForTests('store');
+    try {
+      const utils = await renderScreen();
+      await openAdvanced(utils);
+      // The direct-LAN pairing entry (topology A) is gone; only the cloud-relay
+      // chip remains and the transport is pinned to relay.
+      expect(utils.queryByTestId('desktop-sync-transport-lan')).toBeNull();
+      expect(utils.getByTestId('desktop-sync-transport-relay')).toBeTruthy();
+      expect(utils.getByTestId('desktop-sync-relay-url')).toBeTruthy();
+      expect(utils.getByTestId('desktop-sync-pair-button')).toBeTruthy();
+    } finally {
+      setAppVariantForTests(null);
+    }
+  });
+
+  it('switches to the cloud transport and surfaces the relay + pairing UI', async () => {
+    const utils = await renderScreen();
+    await openAdvanced(utils);
+    expect(utils.queryByTestId('desktop-sync-relay-url')).toBeNull();
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
+    });
+    expect(utils.getByTestId('desktop-sync-relay-url')).toBeTruthy();
+    expect(utils.getByTestId('desktop-sync-device-id')).toBeTruthy();
+    expect(utils.getByTestId('desktop-sync-dataset-id')).toBeTruthy();
+    expect(utils.getByTestId('desktop-sync-pair-button')).toBeTruthy();
+    expect(utils.getByTestId('desktop-sync-scan-button')).toBeTruthy();
+    expect(utils.getByTestId('desktop-sync-start-cloud-sync')).toBeTruthy();
+  });
+
+  it('renders the relay diagnostics block (quota rows + seq) under Advanced', async () => {
+    const utils = await renderScreen(
+      cloudStatus({
+        relay: {
+          connected: true,
+          auth_needed: false,
+          last_seq: 12,
+          last_seq_age_ms: 500,
+          acked_seq: 10,
+          buffered_frames: 2,
+          buffered_bytes: 2048,
+          cap: 4096,
+          overflow: false,
+          rejected_frames: 0,
+          decrypt_failures: 0,
+          sync_buffer_mb: 64,
+          sync_devices: 3,
+          backup_storage_mb: 1024,
+        },
+      }),
+    );
+    await openAdvanced(utils);
     expect(utils.getByTestId('desktop-sync-relay-status')).toBeTruthy();
     expect(utils.getByTestId('desktop-sync-relay-seq').props.children.join('')).toBe('12 / 10');
     // Plan 7-6: the tier device cap + buffer usage render proactively.
@@ -424,8 +596,7 @@ describe('DesktopSyncScreen', () => {
 
   it('shows "unlimited" for the device cap and buffer when the tier quotas are 0', async () => {
     const utils = await renderScreen(
-      status({
-        config: { ...status().config, transport: 'relay', relay_url: 'wss://sync.test/v1/sync/ws' },
+      cloudStatus({
         relay: {
           connected: true,
           auth_needed: false,
@@ -444,14 +615,14 @@ describe('DesktopSyncScreen', () => {
         },
       }),
     );
+    await openAdvanced(utils);
     expect(utils.getByTestId('desktop-sync-relay-devices').props.children).toBe('relayUnlimited');
     expect(utils.getByTestId('desktop-sync-relay-buffered').props.children.join('')).toBe('0 MB / relayUnlimited');
   });
 
   it('escalates the buffer row when the relay buffer has overflowed', async () => {
     const utils = await renderScreen(
-      status({
-        config: { ...status().config, transport: 'relay', relay_url: 'wss://sync.test/v1/sync/ws' },
+      cloudStatus({
         relay: {
           connected: true,
           auth_needed: false,
@@ -470,22 +641,28 @@ describe('DesktopSyncScreen', () => {
         },
       }),
     );
+    await openAdvanced(utils);
     const buffered = utils.getByTestId('desktop-sync-relay-buffered');
     expect(buffered.props.children.join('')).toBe('8 KB / 4 KB');
     // The row ties into the existing warning styling when overflowed.
     expect(buffered.props.style).toBeTruthy();
   });
 
-  it('hides the quota rows when there is no relay snapshot (LAN mode)', async () => {
+  it('hides the relay diagnostics block when there is no relay snapshot (LAN mode)', async () => {
     const utils = await renderScreen();
+    await openAdvanced(utils);
     expect(utils.queryByTestId('desktop-sync-relay-status')).toBeNull();
     expect(utils.queryByTestId('desktop-sync-relay-devices')).toBeNull();
     expect(utils.queryByTestId('desktop-sync-relay-buffered')).toBeNull();
   });
 
-  it('pairs from a pasted code: PUTs the relay config with the transient pairing token', async () => {
-    mockUpdate.mockResolvedValue(status());
+  // ── Cloud pairing (manual paste under Advanced + auto-join) ───────────────
+
+  it('pairs from a pasted code: PUTs the relay config with the transient token + unconditional join flag', async () => {
+    mockUpdate.mockResolvedValue(cloudStatus());
+    mockJoinCloudSync.mockResolvedValue({ action: 'joined' });
     const utils = await renderScreen();
+    await openAdvanced(utils);
     await act(async () => {
       fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
     });
@@ -507,8 +684,11 @@ describe('DesktopSyncScreen', () => {
         pairing_token: 'tok-1',
         relay_token: 'PASETO',
         enabled: true,
+        group_join_pending: true,
       }),
     );
+    // A pasted cloud code follows the same auto-join path as a scan.
+    await waitFor(() => expect(mockJoinCloudSync).toHaveBeenCalled());
   });
 
   it('rejects a pairing code minted for another account', async () => {
@@ -518,6 +698,7 @@ describe('DesktopSyncScreen', () => {
       display_name: 'Other',
     });
     const utils = await renderScreen();
+    await openAdvanced(utils);
     await act(async () => {
       fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
     });
@@ -539,9 +720,6 @@ describe('DesktopSyncScreen', () => {
   it('opens the QR scanner modal when camera permission is granted', async () => {
     const utils = await renderScreen();
     await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
-    });
-    await act(async () => {
       fireEvent.press(utils.getByTestId('desktop-sync-scan-button'));
     });
     expect(mockCheckAndRequestPermission).toHaveBeenCalledWith('android.permission.CAMERA');
@@ -549,53 +727,78 @@ describe('DesktopSyncScreen', () => {
     expect(utils.getByTestId('qr-scanner-hint')).toBeTruthy();
   });
 
-  it('pairs from a scanned code via the shared parse → verify → configure path', async () => {
-    mockUpdate.mockResolvedValue(status());
+  it('auto-joins the sync group after a successful cloud pairing (scan)', async () => {
+    mockUpdate.mockResolvedValue(cloudStatus());
+    mockJoinCloudSync.mockResolvedValue({ action: 'joined' });
     const utils = await renderScreen();
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
-    });
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-scan-button'));
-    });
-    const code = JSON.stringify({
-      relay_url: 'wss://sync.test/v1/sync/ws',
-      pairing_token: 'scan-tok',
-      account_hint: 'user@example.com',
-    });
-    await act(async () => {
-      fireEvent(utils.getByTestId('mock-camera'), 'readCode', {
-        nativeEvent: { codeStringValue: code },
-      });
-    });
+    await scanCode(utils, cloudCodeV3());
     await waitFor(() =>
       expect(mockUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
           transport: 'relay',
           relay_url: 'wss://sync.test/v1/sync/ws',
-          pairing_token: 'scan-tok',
+          pairing_token: 'tok-v3',
           relay_token: 'PASETO',
           enabled: true,
+          // Scanning a cloud QR ALWAYS means joining the existing group.
+          group_join_pending: true,
+          // The v3 payload's dataset reaches the PUT verbatim.
+          dataset_id: 'uid-1',
         }),
       ),
     );
+    await waitFor(() => expect(mockJoinCloudSync).toHaveBeenCalledTimes(1));
     // The scanner closed itself once a code was read.
     expect(utils.queryByTestId('mock-camera')).toBeNull();
   });
 
+  it('falls back to the locally known dataset when the payload omits dataset_id', async () => {
+    mockUpdate.mockResolvedValue(cloudStatus());
+    mockJoinCloudSync.mockResolvedValue({ action: 'joined' });
+    const utils = await renderScreen(cloudStatus());
+    const { dataset_id, ...legacy } = JSON.parse(cloudCodeV3());
+    await scanCode(utils, JSON.stringify(legacy));
+    await waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ group_join_pending: true, dataset_id: 'ds-1' }),
+      ),
+    );
+    await waitFor(() => expect(mockJoinCloudSync).toHaveBeenCalled());
+  });
+
+  it('shows the amber waiting row (not an error toast) when the escrow is empty', async () => {
+    mockUpdate.mockResolvedValue(cloudStatus());
+    mockJoinCloudSync.mockRejectedValueOnce(
+      new Error('no escrowed sync key yet — start cloud sync on another device first'),
+    );
+    const utils = await renderScreen();
+    await scanCode(utils, cloudCodeV3());
+    await waitFor(() => expect(mockJoinCloudSync).toHaveBeenCalled());
+    await waitFor(() => expect(utils.getByTestId('desktop-sync-setup-join-waiting')).toBeTruthy());
+    // The empty escrow is NOT a generic failure — no error toast for it.
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.stringContaining('groupActionFailed'));
+    // Retry re-runs the join.
+    mockJoinCloudSync.mockResolvedValueOnce({ action: 'joined' });
+    await act(async () => {
+      fireEvent.press(utils.getByTestId('desktop-sync-setup-join-retry'));
+    });
+    await waitFor(() => expect(mockJoinCloudSync).toHaveBeenCalledTimes(2));
+  });
+
+  it('surfaces a real join failure as the red row with the message', async () => {
+    mockUpdate.mockResolvedValue(cloudStatus());
+    mockJoinCloudSync.mockRejectedValueOnce(new Error('engine unreachable'));
+    const utils = await renderScreen();
+    await scanCode(utils, cloudCodeV3());
+    await waitFor(() => expect(utils.getByTestId('desktop-sync-setup-join-error')).toBeTruthy());
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'groupActionFailed:{"message":"engine unreachable"}',
+    );
+  });
+
   it('shows the parse-error copy when the scanned QR is not a pairing code', async () => {
     const utils = await renderScreen();
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
-    });
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-scan-button'));
-    });
-    await act(async () => {
-      fireEvent(utils.getByTestId('mock-camera'), 'readCode', {
-        nativeEvent: { codeStringValue: 'totally not a pairing code' },
-      });
-    });
+    await scanCode(utils, 'totally not a pairing code');
     expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('pairingFailed'));
     expect(mockUpdate).not.toHaveBeenCalled();
   });
@@ -603,9 +806,6 @@ describe('DesktopSyncScreen', () => {
   it('falls back to manual paste when camera permission is denied', async () => {
     mockCheckAndRequestPermission.mockResolvedValueOnce(false);
     const utils = await renderScreen();
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
-    });
     await act(async () => {
       fireEvent.press(utils.getByTestId('desktop-sync-scan-button'));
     });
@@ -619,12 +819,10 @@ describe('DesktopSyncScreen', () => {
     expect(utils.queryByTestId('mock-camera')).toBeNull();
   });
 
-  it('starts cloud sync from the group card when uninitialized', async () => {
+  it('starts a new sync group from the advanced sync-key card when uninitialized', async () => {
     mockStartCloudSync.mockResolvedValue({ action: 'created' });
-    const utils = await renderScreen();
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
-    });
+    const utils = await renderScreen(cloudStatus());
+    await openAdvanced(utils);
     await act(async () => {
       fireEvent.press(utils.getByTestId('desktop-sync-start-cloud-sync'));
     });
@@ -633,10 +831,8 @@ describe('DesktopSyncScreen', () => {
 
   it('offers "finish joining" when the engine is key_pending', async () => {
     mockJoinCloudSync.mockResolvedValue({ action: 'joined' });
-    const utils = await renderScreen(status({ sync_group: 'key_pending' }));
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
-    });
+    const utils = await renderScreen(cloudStatus({ sync_group: 'key_pending' }));
+    await openAdvanced(utils);
     await act(async () => {
       fireEvent.press(utils.getByTestId('desktop-sync-join-cloud-sync'));
     });
@@ -648,10 +844,7 @@ describe('DesktopSyncScreen', () => {
     mockShowAlert.mockImplementation((_t: string, _m: string, buttons: any[]) => {
       buttons?.find(b => b.text === 'resetKeyConfirm')?.onPress?.();
     });
-    const utils = await renderScreen(status({ rotation_required: true }));
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
-    });
+    const utils = await renderScreen(cloudStatus({ rotation_required: true }));
     expect(utils.getByTestId('desktop-sync-rotation-banner')).toBeTruthy();
     await act(async () => {
       fireEvent.press(utils.getAllByTestId('desktop-sync-reset-key')[0]);
@@ -660,11 +853,10 @@ describe('DesktopSyncScreen', () => {
   });
 
   it('auto-recovers auth_needed by re-injecting a fresh relay token', async () => {
-    mockUpdate.mockResolvedValue(status());
+    mockUpdate.mockResolvedValue(cloudStatus());
     await renderScreen(
-      status({
+      cloudStatus({
         state: 'auth_needed',
-        config: { ...status().config, transport: 'relay', relay_url: 'wss://sync.test/v1/sync/ws' },
         relay: {
           connected: false,
           auth_needed: true,
@@ -700,16 +892,15 @@ describe('DesktopSyncScreen', () => {
     const utils = await renderScreen();
     expect(utils.getByTestId('desktop-sync-pairing-card')).toBeTruthy();
     expect(utils.getByTestId('desktop-sync-scan-button')).toBeTruthy();
-    // The manual LAN form (peer address) is collapsed under Advanced.
-    expect(utils.queryByTestId('desktop-sync-advanced-toggle')).toBeTruthy();
+    // The Advanced disclosure is collapsed by default — no protocol fields.
+    expect(utils.getByTestId('desktop-sync-advanced-toggle')).toBeTruthy();
     expect(utils.queryByDisplayValue('192.168.1.10:28080')).toBeNull();
+    expect(utils.queryByTestId('desktop-sync-relay-url')).toBeNull();
   });
 
   it('reveals the manual LAN form under the Advanced disclosure', async () => {
     const utils = await renderScreen();
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-advanced-toggle'));
-    });
+    await openAdvanced(utils);
     expect(utils.queryByDisplayValue('192.168.1.10:28080')).toBeTruthy();
     expect(utils.getByTestId('desktop-sync-security-picker')).toBeTruthy();
   });
@@ -794,14 +985,8 @@ describe('DesktopSyncScreen', () => {
   it('skips enrollment when signed in with the matching account (pair only)', async () => {
     mockUpdate.mockResolvedValue(status());
     const utils = await renderScreen();
-    // Confirm the phone is signed in (relay shows the account row); profile is
-    // user@example.com — matches the masked hint u***@example.com.
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
-    });
-    await waitFor(() =>
-      expect(utils.getByTestId('desktop-sync-account').props.children).toBe('accountSignedIn'),
-    );
+    // The phone is signed in (default mocks) and the profile email
+    // user@example.com matches the masked hint u***@example.com.
     await scanAndMaybeConfirm(utils, lanCode({ enrollment: ENROLLMENT }));
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ transport: 'lan' }));
     expect(AuthService.enrollDevice).not.toHaveBeenCalled();
@@ -816,13 +1001,6 @@ describe('DesktopSyncScreen', () => {
     });
     mockUpdate.mockResolvedValue(status());
     const utils = await renderScreen();
-    // Confirm the phone is signed in (relay shows the account row).
-    await act(async () => {
-      fireEvent.press(utils.getByTestId('desktop-sync-transport-relay'));
-    });
-    await waitFor(() =>
-      expect(utils.getByTestId('desktop-sync-account').props.children).toBe('accountSignedIn'),
-    );
     await scanAndMaybeConfirm(utils, lanCode({ enrollment: ENROLLMENT }));
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ transport: 'lan' }));
     expect(AuthService.enrollDevice).not.toHaveBeenCalled();

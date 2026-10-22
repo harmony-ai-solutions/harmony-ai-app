@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Linking,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -30,6 +31,7 @@ import { LanPairingConfirmSheet } from '../../components/modals/LanPairingConfir
 import { engineApiClient } from '../../services/engine/EngineApiClient';
 import { getEngineManifest, refreshUpdates } from '../../services/updates/UpdateAvailableService';
 import type {
+  RelayStatusDto,
   SyncClientConfigPatchDto,
   SyncClientState,
   SyncClientStatusDto,
@@ -98,6 +100,28 @@ function securityModeHint(mode: string, t: (k: string) => string): string {
     default:
       return '';
   }
+}
+
+/**
+ * Honest "Last sync" derivation for the plain status card (Design A): live →
+ * "Live"; a known last sequence → its age ("Just now" / "N min ago" / …); no
+ * traffic yet → "Not yet". Never invents a fresher value than the relay
+ * reports.
+ */
+function lastSyncValue(
+  relay: RelayStatusDto | null,
+  t: (k: string, opts?: Record<string, unknown>) => string,
+): string {
+  if (!relay) return t('lastSyncUnknown');
+  if (relay.connected) return t('lastSyncLive');
+  if (relay.last_seq <= 0) return t('lastSyncUnknown');
+  const age = relay.last_seq_age_ms;
+  if (age < 60_000) return t('lastSyncJustNow');
+  const mins = Math.floor(age / 60_000);
+  if (mins < 60) return t('lastSyncMinAgo', { count: mins });
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return t('lastSyncHoursAgo', { count: hours });
+  return t('lastSyncDaysAgo', { count: Math.floor(hours / 24) });
 }
 
 /** State → badge colour + icon. */
@@ -262,6 +286,20 @@ const TransportPicker: React.FC<{
  * and the security shield badge are recycled from SyncSettingsScreen /
  * ConnectionSetupScreen. 7-3 keeps that language and adds the transport picker,
  * the relay status block and the sync-group / pairing cards.
+ *
+ * **Design A — simplified flow (2026-10-22 incident fix).** The main path is
+ * now: hero orb (with a truthful "Almost there" waiting-for-sync-key state
+ * from `awaiting_group_key`), a "Link your desktop" card with ONE scan CTA,
+ * a plain-language "Setup" checklist (signed in → paired → joining the sync
+ * group, with the auto-join wired after a successful cloud pairing), and a
+ * plain "Sync status" card (devices / last sync / encryption + the truthful
+ * contextual warnings). Every protocol field (manual pairing code, full
+ * configuration, relay diagnostics, sync-key actions, disconnect/disable)
+ * moves under a collapsed **Advanced settings** disclosure — nothing a power
+ * user had is deleted, only relocated. Scanning a cloud QR ALWAYS means
+ * "join the existing sync group": `group_join_pending: true` is PUT
+ * unconditionally and the join (escrow GET → engine import) runs
+ * automatically — the step that was previously silently missing.
  */
 export const DesktopSyncScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -295,9 +333,15 @@ export const DesktopSyncScreen: React.FC = () => {
   const [deviceId, setDeviceId] = useState('');
   const [datasetId, setDatasetId] = useState('');
   const [pairingCode, setPairingCode] = useState('');
-  const [joinExisting, setJoinExisting] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  // The signed-in account label (email) for the Setup checklist row.
+  const [account, setAccount] = useState<string | null>(null);
   const [scannerVisible, setScannerVisible] = useState(false);
+  // Auto-join visibility (Design A): the join that runs after a successful
+  // cloud pairing is NEVER silently swallowed — every phase renders in the
+  // Setup checklist. 'idle' → 'working' → 'done' | 'waiting' | 'error'.
+  const [joinPhase, setJoinPhase] = useState<'idle' | 'working' | 'waiting' | 'done' | 'error'>('idle');
+  const [joinError, setJoinError] = useState<string | null>(null);
   // LAN QR flow (plan 7-15): the scanned payload awaiting confirmation, and the
   // manual-LAN form disclosure (QR-first UX — the form collapses under Advanced).
   const [pendingLan, setPendingLan] = useState<LanSyncPairingPayload | null>(null);
@@ -443,6 +487,10 @@ export const DesktopSyncScreen: React.FC = () => {
       AuthService.getToken()
         .then(() => setSignedIn(true))
         .catch(() => setSignedIn(false));
+      // The Setup checklist's "Signed in — <account>" row label.
+      AuthService.getProfile()
+        .then(p => setAccount(p?.email ?? p?.username ?? p?.id ?? null))
+        .catch(() => setAccount(null));
       const id = setInterval(refreshStatus, POLL_INTERVAL_MS);
       return () => clearInterval(id);
     }, [refreshStatus, refreshGroupStatus, refreshRotationFlag, refreshDesktopArtifacts]),
@@ -570,7 +618,44 @@ export const DesktopSyncScreen: React.FC = () => {
     ]);
   }, [refreshStatus, showAlert, showToast, t]);
 
-  /** Verify the cloud code's account hint, then PUT the relay config. */
+  /**
+   * The auto-join runner (Design A, 2026-10-22): after a successful cloud
+   * pairing the join runs AUTOMATICALLY — PUT `group_join_pending` → escrow
+   * GET → engine group import (`syncGroupOrchestrator.joinCloudSync`). Every
+   * phase is surfaced in the Setup checklist, never silently swallowed:
+   *   - empty escrow ("no escrowed sync key yet") → the amber WAITING row
+   *     (not a generic error toast — the desktop just hasn't escrowed yet);
+   *   - any other failure → the red row with the message + Retry.
+   */
+  const runAutoJoin = useCallback(async () => {
+    hapticLightPress();
+    setJoinPhase('working');
+    setJoinError(null);
+    try {
+      await syncGroupOrchestrator.joinCloudSync();
+      setJoinPhase('done');
+      showToast(t('joinCloudSyncDone'));
+    } catch (e: any) {
+      const message = e?.message ?? String(e);
+      if (String(message).toLowerCase().includes('no escrowed sync key')) {
+        setJoinPhase('waiting');
+      } else {
+        setJoinPhase('error');
+        setJoinError(message);
+        showToast(t('groupActionFailed', { message }));
+      }
+    } finally {
+      await Promise.allSettled([refreshStatus(), refreshGroupStatus()]);
+    }
+  }, [refreshGroupStatus, refreshStatus, showToast, t]);
+
+  /**
+   * Verify the cloud code's account hint, then PUT the relay config. A cloud
+   * scan ALWAYS means "join the existing sync group" (2026-10-22 ruling):
+   * `group_join_pending: true` is PUT unconditionally and the auto-join runs
+   * right after. A v3 payload's `dataset_id` (the pairing binding's dataset)
+   * is carried into the PUT verbatim.
+   */
   const applyCloudPairing = useCallback(
     async (payload: SyncPairingPayload) => {
       let token: string;
@@ -591,20 +676,26 @@ export const DesktopSyncScreen: React.FC = () => {
       }
 
       setRelayUrl(payload.relay_url);
+      if (payload.dataset_id) {
+        // Reflect the binding's dataset in the (collapsed) advanced form too.
+        setDatasetId(payload.dataset_id);
+      }
       const next = await apply({
         transport: 'relay',
         relay_url: payload.relay_url,
         pairing_token: payload.pairing_token,
         relay_token: token,
         device_id: deviceId.trim(),
-        dataset_id: datasetId.trim(),
-        group_join_pending: joinExisting,
+        dataset_id: payload.dataset_id ?? datasetId.trim(),
+        group_join_pending: true,
         device_name: deviceName.trim(),
         enabled: true,
       });
       if (next) {
         showToast(t('pairingSuccess'));
         await Promise.all([refreshGroupStatus(), refreshRotationFlag()]);
+        // Auto-join is THE flow now — the step that was silently missing.
+        await runAutoJoin();
       }
     },
     [
@@ -612,9 +703,9 @@ export const DesktopSyncScreen: React.FC = () => {
       datasetId,
       deviceId,
       deviceName,
-      joinExisting,
       refreshGroupStatus,
       refreshRotationFlag,
+      runAutoJoin,
       showToast,
       t,
     ],
@@ -825,7 +916,6 @@ export const DesktopSyncScreen: React.FC = () => {
   const inputBg = theme.colors.background.surface;
 
   const state = status?.state ?? 'stopped';
-  const visual = stateVisual(state);
   const pendingWrites = status?.pending_writes ?? 0;
   const authorityLabel = status?.local_authoritative ? t('authorityThisDevice') : t('authorityPeer');
   // Plan 7-8: where cognition (the "one brain") runs for this dataset.
@@ -841,6 +931,39 @@ export const DesktopSyncScreen: React.FC = () => {
   const syncGroup = status?.sync_group ?? 'uninitialized';
   const rotationPending = (status?.rotation_required ?? false) || rotationFlag;
   const isCloud = transport === 'relay';
+
+  // ── Design A derivations (2026-10-22) ──────────────────────────────────────
+  // Truthful "waiting for sync key" state (contract 1.9.0). OPTIONAL on the
+  // wire: an older engine omits it → treat absent as false and fall back to
+  // the sync_group state below.
+  const awaitingKey = status?.awaiting_group_key === true;
+  // Mapped BEFORE the generic stopped state so the hero names the missing
+  // step instead of a bare "Stopped".
+  const heroVisual = awaitingKey ? { color: '#f0a23b', icon: 'cloud-sync' } : stateVisual(state);
+  const heroLabel = awaitingKey ? t('state_awaiting_key') : t(stateLabelKey(state));
+  const heroSubtext = awaitingKey ? t('stateSub_awaiting_key') : t(stateSubtextKey(state));
+
+  // Setup checklist: paired = relay transport + dataset set + enabled.
+  const pairedStatus =
+    !!status &&
+    status.enabled &&
+    status.config.transport === 'relay' &&
+    !!(status.dataset_id || status.config.dataset_id);
+  // Setup checklist: the join row. working > error > done > waiting > idle —
+  // a join in ANY state stays visible in the checklist.
+  const joinedGroup = status?.sync_group === 'member' || groupStatus?.has_key === true;
+  const joinDisplay =
+    joinPhase === 'working'
+      ? 'working'
+      : joinPhase === 'error'
+        ? 'error'
+        : joinPhase === 'done' || joinedGroup
+          ? 'done'
+          : joinPhase === 'waiting' || awaitingKey || syncGroup === 'key_pending'
+            ? 'waiting'
+            : pairedStatus && syncGroup === 'uninitialized'
+              ? 'waiting'
+              : 'idle';
 
   return (
     <ThemedView style={styles.container}>
@@ -862,24 +985,24 @@ export const DesktopSyncScreen: React.FC = () => {
         {/* ── Hero connection-status orb (recycled from the deleted
             SyncSettingsScreen) ──────────────────────────────────────────── */}
         <View style={styles.heroOrbContainer} testID="desktop-sync-hero">
-          <View style={[styles.heroGlowRing, { borderColor: hexToRgba(visual.color, 0.25) }]}>
-            <View style={[styles.heroGlowMid, { borderColor: hexToRgba(visual.color, 0.4) }]}>
+          <View style={[styles.heroGlowRing, { borderColor: hexToRgba(heroVisual.color, 0.25) }]}>
+            <View style={[styles.heroGlowMid, { borderColor: hexToRgba(heroVisual.color, 0.4) }]}>
               <LinearGradient
-                colors={[visual.color, hexToRgba(visual.color, 0.5)]}
+                colors={[heroVisual.color, hexToRgba(heroVisual.color, 0.5)]}
                 start={{ x: 0.3, y: 0.1 }}
                 end={{ x: 0.7, y: 0.9 }}
                 style={styles.heroOrb}
               >
                 <View style={styles.heroOrbHighlight} />
-                <Icon name={visual.icon} size={36} color="#fff" />
+                <Icon name={heroVisual.icon} size={36} color="#fff" />
               </LinearGradient>
             </View>
           </View>
           <ThemedText weight="bold" size={20} style={styles.heroStatusText} testID="desktop-sync-state">
-            {t(stateLabelKey(state))}
+            {heroLabel}
           </ThemedText>
           <ThemedText variant="secondary" size={13} style={styles.heroSubtext}>
-            {t(stateSubtextKey(state))}
+            {heroSubtext}
           </ThemedText>
         </View>
 
@@ -891,7 +1014,7 @@ export const DesktopSyncScreen: React.FC = () => {
           <View style={styles.cardHeader}>
             <Icon name="qrcode-scan" size={18} color={accentPrimary} />
             <ThemedText weight="medium" size={15} style={styles.cardTitle}>
-              {t('pairingSection')}
+              {t('linkDesktopSection')}
             </ThemedText>
           </View>
 
@@ -906,44 +1029,153 @@ export const DesktopSyncScreen: React.FC = () => {
             style={styles.actionButton}
             testID="desktop-sync-scan-button"
           />
+        </ThemedCard>
 
-          {isCloud ? (
-            <>
-              <ThemedText variant="muted" size={12} style={styles.fieldHint}>
-                {t('pairingHint')}
-              </ThemedText>
+        {/* ── Setup card (Design A): the auto-join checklist, plain language
+            rows with status icons. The join row is the incident's core fix —
+            a join in ANY state stays visible here. ─────────────────────── */}
+        <ThemedCard accentStripe style={styles.card} testID="desktop-sync-setup-card">
+          <View style={styles.cardHeader}>
+            <Icon name="format-list-checks" size={18} color={accentPrimary} />
+            <ThemedText weight="medium" size={15} style={styles.cardTitle}>
+              {t('setupSection')}
+            </ThemedText>
+          </View>
 
-              <Field
-                label={t('pairingCodeLabel')}
-                value={pairingCode}
-                onChangeText={setPairingCode}
-                placeholder={t('pairingCodePlaceholder')}
-                hint={t('pairingCodeHint')}
-                multiline
-                backgroundColor={inputBg}
-                inputTextColor={textPrimary}
-                inputPlaceholderColor={textMuted}
-                testID="desktop-sync-pairing-code"
+          {/* Row 1 — signed in. */}
+          <View style={styles.setupRow} testID="desktop-sync-setup-row-account">
+            <Icon
+              name={signedIn ? 'check-circle' : 'close-circle'}
+              size={18}
+              color={signedIn ? '#4caf82' : '#f44336'}
+            />
+            <ThemedText size={13} style={styles.setupRowLabel}>
+              {signedIn
+                ? account
+                  ? t('setupRowSignedIn', { account })
+                  : t('accountSignedIn')
+                : t('accountSignedOut')}
+            </ThemedText>
+          </View>
+          {!signedIn ? (
+            <ThemedText variant="muted" size={11} style={styles.fieldHint}>
+              {t('accountSignedOutHint')}
+            </ThemedText>
+          ) : null}
+
+          <View style={styles.detailDivider} />
+
+          {/* Row 2 — paired with the desktop (relay + dataset set + enabled). */}
+          <View style={styles.setupRow} testID="desktop-sync-setup-row-paired">
+            <Icon
+              name={pairedStatus ? 'check-circle' : 'circle-outline'}
+              size={18}
+              color={pairedStatus ? '#4caf82' : textMuted}
+            />
+            <ThemedText size={13} style={styles.setupRowLabel}>
+              {pairedStatus ? t('setupRowPaired') : t('setupRowPairedPending')}
+            </ThemedText>
+          </View>
+
+          <View style={styles.detailDivider} />
+
+          {/* Row 3 — joining the sync group (the auto-join). */}
+          <View style={styles.setupRow} testID="desktop-sync-setup-row-join">
+            {joinDisplay === 'working' ? (
+              <ActivityIndicator size="small" color={accentPrimary} testID="desktop-sync-setup-join-spinner" />
+            ) : (
+              <Icon
+                name={
+                  joinDisplay === 'done'
+                    ? 'check-circle'
+                    : joinDisplay === 'waiting'
+                      ? 'clock-alert-outline'
+                      : joinDisplay === 'error'
+                        ? 'alert-circle'
+                        : 'circle-outline'
+                }
+                size={18}
+                color={
+                  joinDisplay === 'done'
+                    ? '#4caf82'
+                    : joinDisplay === 'waiting'
+                      ? '#f0a23b'
+                      : joinDisplay === 'error'
+                        ? '#f44336'
+                        : textMuted
+                }
               />
+            )}
+            <ThemedText size={13} style={styles.setupRowLabel}>
+              {t('setupRowJoining')}
+            </ThemedText>
+            <ThemedText
+              size={13}
+              weight="medium"
+              style={{
+                color:
+                  joinDisplay === 'done'
+                    ? '#4caf82'
+                    : joinDisplay === 'waiting'
+                      ? '#f0a23b'
+                      : joinDisplay === 'error'
+                        ? '#f44336'
+                        : textMuted,
+              }}
+            >
+              {joinDisplay === 'done'
+                ? t('setupJoinDone')
+                : joinDisplay === 'working'
+                  ? t('setupJoinWorking')
+                  : joinDisplay === 'waiting'
+                    ? t('setupJoinWaitingValue')
+                    : joinDisplay === 'error'
+                      ? t('setupJoinFailed')
+                      : t('setupJoinIdle')}
+            </ThemedText>
+          </View>
 
-              <SettingsToggleRow
-                icon="account-multiple-plus-outline"
-                label={t('joinExistingLabel')}
-                value={joinExisting}
-                onValueChange={setJoinExisting}
-                theme={theme}
-              />
-
+          {/* Amber waiting row — the desktop has not escrowed the group key
+              yet; the join finishes by itself once it does. */}
+          {joinDisplay === 'waiting' ? (
+            <View style={styles.joinHintBlock} testID="desktop-sync-setup-join-waiting">
+              <View style={styles.warningRow}>
+                <Icon name="clock-alert-outline" size={18} color="#f0a23b" />
+                <ThemedText variant="secondary" size={12} style={styles.warningText}>
+                  {t('setupJoinWaitingHint')}
+                </ThemedText>
+              </View>
               <ThemedButton
-                label={busy ? t('pairing') : t('pairButton')}
-                icon="link-variant"
+                label={t('setupJoinRetry')}
+                icon="refresh"
                 variant="outline"
-                onPress={() => void handlePairFromCode(pairingCode)}
-                disabled={busy || !pairingCode.trim()}
-                style={styles.actionButton}
-                testID="desktop-sync-pair-button"
+                onPress={() => void runAutoJoin()}
+                disabled={busy}
+                style={styles.joinRetryButton}
+                testID="desktop-sync-setup-join-retry"
               />
-            </>
+            </View>
+          ) : null}
+
+          {/* Red row — the join failed for a real reason (never swallowed). */}
+          {joinDisplay === 'error' && joinError ? (
+            <View style={styles.joinHintBlock} testID="desktop-sync-setup-join-error">
+              <View style={styles.warningRow}>
+                <Icon name="alert-circle" size={18} color="#f44336" />
+                <ThemedText variant="secondary" size={12} style={styles.warningText}>
+                  {joinError}
+                </ThemedText>
+              </View>
+              <ThemedButton
+                label={t('setupJoinRetry')}
+                icon="refresh"
+                variant="outline"
+                onPress={() => void runAutoJoin()}
+                disabled={busy}
+                style={styles.joinRetryButton}
+                testID="desktop-sync-setup-join-retry"
+              />
+            </View>
           ) : null}
         </ThemedCard>
 
@@ -956,138 +1188,47 @@ export const DesktopSyncScreen: React.FC = () => {
             </ThemedText>
           </View>
 
-          <View style={styles.detailRow}>
-            <View style={styles.detailLabel}>
-              <View style={[styles.dot, { backgroundColor: visual.color }]} />
-              <ThemedText variant="muted" size={13}>{t('stateLabel')}</ThemedText>
-            </View>
-            <ThemedText size={13} style={{ color: visual.color }}>
-              {t(stateLabelKey(state))}
-            </ThemedText>
-          </View>
-
-          <View style={styles.detailDivider} />
-
-          <View style={styles.detailRow}>
-            <View style={styles.detailLabel}>
-              <Icon name={isCloud ? 'cloud-outline' : 'lan'} size={14} color={textMuted} />
-              <ThemedText variant="muted" size={13}>{t('transportLabel')}</ThemedText>
-            </View>
-            <ThemedText size={13} testID="desktop-sync-transport-badge">
-              {isCloud ? t('transportCloud') : t('transportLan')}
-            </ThemedText>
-          </View>
-
-          <View style={styles.detailDivider} />
-
-          <View style={styles.detailRow}>
-            <View style={styles.detailLabel}>
-              <Icon name="crown-outline" size={14} color={textMuted} />
-              <ThemedText variant="muted" size={13}>{t('authorityLabel')}</ThemedText>
-            </View>
-            <ThemedText size={13} testID="desktop-sync-authority">{authorityLabel}</ThemedText>
-          </View>
-
-          {/* Plan 7-8: where cognition runs (the "one brain, many presences"). */}
-          <View style={styles.detailDivider} />
-
-          <View style={styles.detailRow}>
-            <View style={styles.detailLabel}>
-              <Icon name="brain" size={14} color={textMuted} />
-              <ThemedText variant="muted" size={13}>{t('cognitionLabel')}</ThemedText>
-            </View>
-            <ThemedText size={13} testID="desktop-sync-cognition-authority">{cognitionLabel}</ThemedText>
-          </View>
-
-          <View style={styles.detailDivider} />
-
-          <View style={styles.detailRow}>
-            <View style={styles.detailLabel}>
-              <Icon name="database-outline" size={14} color={textMuted} />
-              <ThemedText variant="muted" size={13}>{t('datasetLabel')}</ThemedText>
-            </View>
-            <ThemedText size={12} numberOfLines={1} style={styles.mono}>
-              {status?.dataset_id ?? '—'}
-            </ThemedText>
-          </View>
-
-          {isCloud && (
+          {/* Plain rows only (Design A): devices, last sync, encryption. The
+              protocol rows (transport/authority/cognition/dataset/group state/
+              fingerprint) and the relay counters moved under Advanced →
+              Diagnostics — nothing was deleted, only relocated. */}
+          {relay ? (
             <>
-              <View style={styles.detailDivider} />
               <View style={styles.detailRow}>
                 <View style={styles.detailLabel}>
-                  <Icon name="key-outline" size={14} color={textMuted} />
-                  <ThemedText variant="muted" size={13}>{t('groupStateLabel')}</ThemedText>
+                  <Icon name="cellphone-multiple" size={14} color={textMuted} />
+                  <ThemedText variant="muted" size={13}>{t('relayDevicesLabel')}</ThemedText>
                 </View>
-                <ThemedText size={13} testID="desktop-sync-group-state">
-                  {t(`groupState_${syncGroup}`)}
-                </ThemedText>
-              </View>
-              {groupStatus?.fingerprint ? (
-                <>
-                  <View style={styles.detailDivider} />
-                  <View style={styles.detailRow}>
-                    <View style={styles.detailLabel}>
-                      <Icon name="fingerprint" size={14} color={textMuted} />
-                      <ThemedText variant="muted" size={13}>{t('fingerprintLabel')}</ThemedText>
-                    </View>
-                    <ThemedText size={11} numberOfLines={1} style={styles.mono} testID="desktop-sync-fingerprint">
-                      {groupStatus.fingerprint.slice(0, 16)}…
-                    </ThemedText>
-                  </View>
-                </>
-              ) : null}
-            </>
-          )}
-
-          {/* Relay round-trip / buffer block (7-3). */}
-          {isCloud && relay ? (
-            <View style={styles.relayBlock} testID="desktop-sync-relay-status">
-              <View style={styles.relayHeader}>
-                <View style={[styles.dot, { backgroundColor: relay.connected ? '#4caf82' : '#f0a23b' }]} />
-                <ThemedText variant="secondary" size={12} style={styles.relayHeaderText}>
-                  {relay.connected ? t('relayConnected') : t('relayDisconnected')}
-                </ThemedText>
-              </View>
-              <View style={styles.detailRow}>
-                <ThemedText variant="muted" size={12}>{t('relaySeqLabel')}</ThemedText>
-                <ThemedText size={12} testID="desktop-sync-relay-seq">
-                  {relay.last_seq} / {relay.acked_seq}
-                </ThemedText>
-              </View>
-              {/* Plan 7-6: the tier's device cap, shown before it is hit. */}
-              <View style={styles.detailRow}>
-                <ThemedText variant="muted" size={12}>{t('relayDevicesLabel')}</ThemedText>
-                <ThemedText size={12} testID="desktop-sync-relay-devices">
+                <ThemedText size={13} testID="desktop-sync-status-devices">
                   {relay.sync_devices > 0 ? t('relayDevicesUpTo', { count: relay.sync_devices }) : t('relayUnlimited')}
                 </ThemedText>
               </View>
-              {/* Plan 7-6: buffer usage (bytes / tier cap); escalates on overflow. */}
+
+              <View style={styles.detailDivider} />
+
               <View style={styles.detailRow}>
-                <ThemedText variant="muted" size={12}>{t('relayBufferLabel')}</ThemedText>
-                <ThemedText
-                  size={12}
-                  style={relay.overflow ? styles.relayWarn : undefined}
-                  testID="desktop-sync-relay-buffered"
-                >
-                  {formatBytes(relay.buffered_bytes)} / {relay.cap > 0 ? formatBytes(relay.cap) : t('relayUnlimited')}
+                <View style={styles.detailLabel}>
+                  <Icon name="update" size={14} color={textMuted} />
+                  <ThemedText variant="muted" size={13}>{t('lastSyncLabel')}</ThemedText>
+                </View>
+                <ThemedText size={13} testID="desktop-sync-status-last-sync">
+                  {lastSyncValue(relay, t)}
                 </ThemedText>
               </View>
-              {relay.overflow ? (
-                <ThemedText size={11} style={styles.relayWarn}>{t('relayOverflow')}</ThemedText>
-              ) : null}
-              {relay.rejected_frames > 0 ? (
-                <ThemedText size={11} style={styles.relayWarn}>
-                  {t('relayRejected', { count: relay.rejected_frames })}
-                </ThemedText>
-              ) : null}
-              {relay.decrypt_failures > 0 ? (
-                <ThemedText size={11} style={styles.relayWarn}>
-                  {t('relayDecryptFailures', { count: relay.decrypt_failures })}
-                </ThemedText>
-              ) : null}
-            </View>
+            </>
           ) : null}
+
+          <View style={styles.detailDivider} />
+
+          <View style={styles.detailRow}>
+            <View style={styles.detailLabel}>
+              <Icon name="shield-check" size={14} color={textMuted} />
+              <ThemedText variant="muted" size={13}>{t('encryptionLabel')}</ThemedText>
+            </View>
+            <ThemedText size={13} testID="desktop-sync-status-encryption">
+              {t('encryptionE2E')}
+            </ThemedText>
+          </View>
 
           {state === 'auth_needed' ? (
             <ThemedCard style={styles.infoCard} testID="desktop-sync-auth-needed">
@@ -1227,106 +1368,151 @@ export const DesktopSyncScreen: React.FC = () => {
           </ThemedCard>
         ) : null}
 
-        {/* ── Config card ─────────────────────────────────────────────── */}
+        {/* ── Advanced settings (Design A): collapsed by default. Everything
+            a power user had before stays reachable here — the manual pairing
+            code, the full configuration, the diagnostics (protocol rows +
+            relay counters), the sync-key actions and disconnect/disable. ── */}
         <ThemedCard accentStripe style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Icon name="cog-outline" size={18} color={accentPrimary} />
-            <ThemedText weight="medium" size={15} style={styles.cardTitle}>
-              {t('configSection')}
+          <TouchableOpacity
+            style={styles.advancedToggle}
+            onPress={() => {
+              hapticLightPress();
+              setShowAdvanced(v => !v);
+            }}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showAdvanced }}
+            testID="desktop-sync-advanced-toggle"
+          >
+            <Icon
+              name={showAdvanced ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={textMuted}
+            />
+            <ThemedText size={13} weight="medium" variant="secondary" style={styles.advancedToggleText}>
+              {t('advancedToggle')}
             </ThemedText>
-          </View>
+          </TouchableOpacity>
+        </ThemedCard>
 
-          <SettingsToggleRow
-            icon="sync"
-            label={t('enabledLabel')}
-            value={enabled}
-            onValueChange={handleToggleEnabled}
-            theme={theme}
-          />
+        {showAdvanced ? (
+          <>
+            {/* Manual pairing code (the removed main-path paste surface). A
+                pasted cloud code follows the SAME auto-join path as a scan. */}
+            {isCloud ? (
+              <ThemedCard accentStripe style={styles.card} testID="desktop-sync-manual-pairing-card">
+                <View style={styles.cardHeader}>
+                  <Icon name="link-variant" size={18} color={accentPrimary} />
+                  <ThemedText weight="medium" size={15} style={styles.cardTitle}>
+                    {t('pairingSection')}
+                  </ThemedText>
+                </View>
 
-          <View style={styles.fieldWrapper}>
-            <ThemedText weight="medium" size={13} style={styles.fieldLabel}>
-              {t('transportSection')}
-            </ThemedText>
-            <TransportPicker value={transport} onChange={setTransport} theme={theme} t={t} cloudOnly={storeVariant} />
-            <ThemedText variant="muted" size={11} style={styles.fieldHint}>
-              {isCloud ? t('transportCloudHint') : t('transportLanHint')}
-            </ThemedText>
-          </View>
+                <ThemedText variant="muted" size={12} style={styles.fieldHint}>
+                  {t('pairingHint')}
+                </ThemedText>
+
+                <Field
+                  label={t('pairingCodeLabel')}
+                  value={pairingCode}
+                  onChangeText={setPairingCode}
+                  placeholder={t('pairingCodePlaceholder')}
+                  hint={t('pairingCodeHint')}
+                  multiline
+                  backgroundColor={inputBg}
+                  inputTextColor={textPrimary}
+                  inputPlaceholderColor={textMuted}
+                  testID="desktop-sync-pairing-code"
+                />
+
+                <ThemedButton
+                  label={busy ? t('pairing') : t('pairButton')}
+                  icon="link-variant"
+                  variant="outline"
+                  onPress={() => void handlePairFromCode(pairingCode)}
+                  disabled={busy || !pairingCode.trim()}
+                  style={styles.actionButton}
+                  testID="desktop-sync-pair-button"
+                />
+              </ThemedCard>
+            ) : null}
+
+            {/* ── Configuration (unchanged semantics; the LAN manual fields
+                are always visible here — the nested disclosure is gone). */}
+            <ThemedCard accentStripe style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Icon name="cog-outline" size={18} color={accentPrimary} />
+                <ThemedText weight="medium" size={15} style={styles.cardTitle}>
+                  {t('configSection')}
+                </ThemedText>
+              </View>
+
+              <SettingsToggleRow
+                icon="sync"
+                label={t('enabledLabel')}
+                value={enabled}
+                onValueChange={handleToggleEnabled}
+                theme={theme}
+              />
+
+              <View style={styles.fieldWrapper}>
+                <ThemedText weight="medium" size={13} style={styles.fieldLabel}>
+                  {t('transportSection')}
+                </ThemedText>
+                <TransportPicker value={transport} onChange={setTransport} theme={theme} t={t} cloudOnly={storeVariant} />
+                <ThemedText variant="muted" size={11} style={styles.fieldHint}>
+                  {isCloud ? t('transportCloudHint') : t('transportLanHint')}
+                </ThemedText>
+              </View>
 
           {!isCloud ? (
             <>
-              <TouchableOpacity
-                style={styles.advancedToggle}
-                onPress={() => {
-                  hapticLightPress();
-                  setShowAdvanced(v => !v);
-                }}
-                accessibilityRole="button"
-                accessibilityState={{ expanded: showAdvanced }}
-                testID="desktop-sync-advanced-toggle"
-              >
-                <Icon
-                  name={showAdvanced ? 'chevron-up' : 'chevron-down'}
-                  size={18}
-                  color={textMuted}
-                />
-                <ThemedText size={13} variant="secondary" style={styles.advancedToggleText}>
-                  {t('advancedToggle')}
+              <ThemedText variant="muted" size={11} style={styles.fieldHint}>
+                {t('advancedHint')}
+              </ThemedText>
+
+              <Field
+                label={t('peerAddressLabel')}
+                value={peerAddress}
+                onChangeText={setPeerAddress}
+                placeholder="192.168.1.10:28080"
+                hint={t('peerAddressHint')}
+                backgroundColor={inputBg}
+                inputTextColor={textPrimary}
+                inputPlaceholderColor={textMuted}
+              />
+
+              <Field
+                label={t('peerWssAddressLabel')}
+                value={peerWssAddress}
+                onChangeText={setPeerWssAddress}
+                placeholder={t('optionalPlaceholder')}
+                hint={t('peerWssAddressHint')}
+                backgroundColor={inputBg}
+                inputTextColor={textPrimary}
+                inputPlaceholderColor={textMuted}
+              />
+
+              <View style={styles.fieldWrapper}>
+                <ThemedText weight="medium" size={13} style={styles.fieldLabel}>
+                  {t('securityModeLabel')}
                 </ThemedText>
-              </TouchableOpacity>
-
-              {showAdvanced ? (
-                <>
-                  <ThemedText variant="muted" size={11} style={styles.fieldHint}>
-                    {t('advancedHint')}
+                <SelectPicker
+                  label={t('securityModeLabel')}
+                  value={securityMode}
+                  options={SECURITY_MODES}
+                  onChange={setSecurityMode}
+                />
+                {/* Security shield badge (recycled from ConnectionSetupScreen). */}
+                <View style={styles.securityBadge}>
+                  <Icon name={secBadge.icon} size={14} color={secBadge.color} />
+                  <ThemedText size={12} variant="secondary" style={styles.securityBadgeText}>
+                    {secBadge.label}
                   </ThemedText>
-
-                  <Field
-                    label={t('peerAddressLabel')}
-                    value={peerAddress}
-                    onChangeText={setPeerAddress}
-                    placeholder="192.168.1.10:28080"
-                    hint={t('peerAddressHint')}
-                    backgroundColor={inputBg}
-                    inputTextColor={textPrimary}
-                    inputPlaceholderColor={textMuted}
-                  />
-
-                  <Field
-                    label={t('peerWssAddressLabel')}
-                    value={peerWssAddress}
-                    onChangeText={setPeerWssAddress}
-                    placeholder={t('optionalPlaceholder')}
-                    hint={t('peerWssAddressHint')}
-                    backgroundColor={inputBg}
-                    inputTextColor={textPrimary}
-                    inputPlaceholderColor={textMuted}
-                  />
-
-                  <View style={styles.fieldWrapper}>
-                    <ThemedText weight="medium" size={13} style={styles.fieldLabel}>
-                      {t('securityModeLabel')}
-                    </ThemedText>
-                    <SelectPicker
-                      label={t('securityModeLabel')}
-                      value={securityMode}
-                      options={SECURITY_MODES}
-                      onChange={setSecurityMode}
-                    />
-                    {/* Security shield badge (recycled from ConnectionSetupScreen). */}
-                    <View style={styles.securityBadge}>
-                      <Icon name={secBadge.icon} size={14} color={secBadge.color} />
-                      <ThemedText size={12} variant="secondary" style={styles.securityBadgeText}>
-                        {secBadge.label}
-                      </ThemedText>
-                    </View>
-                    <ThemedText variant="muted" size={11} style={styles.fieldHint}>
-                      {securityModeHint(securityMode, t)}
-                    </ThemedText>
-                  </View>
-                </>
-              ) : null}
+                </View>
+                <ThemedText variant="muted" size={11} style={styles.fieldHint}>
+                  {securityModeHint(securityMode, t)}
+                </ThemedText>
+              </View>
             </>
           ) : (
             <>
@@ -1401,95 +1587,234 @@ export const DesktopSyncScreen: React.FC = () => {
           />
         </ThemedCard>
 
-        {/* ── Sync-group key card (7-3) ───────────────────────────────── */}
-        {isCloud ? (
-          <ThemedCard accentStripe style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Icon name="key-variant" size={18} color={accentPrimary} />
-              <ThemedText weight="medium" size={15} style={styles.cardTitle}>
-                {t('groupSection')}
-              </ThemedText>
-            </View>
+        {/* ── Diagnostics (Design A): the protocol rows + relay counters that
+            were removed from the plain status card live here. ──────────── */}
+            <ThemedCard accentStripe style={styles.card} testID="desktop-sync-diagnostics-card">
+              <View style={styles.cardHeader}>
+                <Icon name="chart-timeline-variant" size={18} color={accentPrimary} />
+                <ThemedText weight="medium" size={15} style={styles.cardTitle}>
+                  {t('diagnosticsSection')}
+                </ThemedText>
+              </View>
 
-            <ThemedText variant="muted" size={12} style={styles.fieldHint}>
-              {t(`groupHelp_${syncGroup}`)}
-            </ThemedText>
+              <View style={styles.detailRow}>
+                <View style={styles.detailLabel}>
+                  <Icon name={isCloud ? 'cloud-outline' : 'lan'} size={14} color={textMuted} />
+                  <ThemedText variant="muted" size={13}>{t('transportLabel')}</ThemedText>
+                </View>
+                <ThemedText size={13} testID="desktop-sync-transport-badge">
+                  {isCloud ? t('transportCloud') : t('transportLan')}
+                </ThemedText>
+              </View>
 
-            {syncGroup === 'uninitialized' ? (
-              <ThemedButton
-                label={busy ? t('groupWorking') : t('startCloudSyncButton')}
-                icon="key-plus"
-                onPress={handleStartCloudSync}
-                disabled={busy || !signedIn}
-                style={styles.actionButton}
-                testID="desktop-sync-start-cloud-sync"
-              />
+              <View style={styles.detailDivider} />
+
+              <View style={styles.detailRow}>
+                <View style={styles.detailLabel}>
+                  <Icon name="crown-outline" size={14} color={textMuted} />
+                  <ThemedText variant="muted" size={13}>{t('authorityLabel')}</ThemedText>
+                </View>
+                <ThemedText size={13} testID="desktop-sync-authority">{authorityLabel}</ThemedText>
+              </View>
+
+              {/* Plan 7-8: where cognition runs (the "one brain, many presences"). */}
+              <View style={styles.detailDivider} />
+
+              <View style={styles.detailRow}>
+                <View style={styles.detailLabel}>
+                  <Icon name="brain" size={14} color={textMuted} />
+                  <ThemedText variant="muted" size={13}>{t('cognitionLabel')}</ThemedText>
+                </View>
+                <ThemedText size={13} testID="desktop-sync-cognition-authority">{cognitionLabel}</ThemedText>
+              </View>
+
+              <View style={styles.detailDivider} />
+
+              <View style={styles.detailRow}>
+                <View style={styles.detailLabel}>
+                  <Icon name="database-outline" size={14} color={textMuted} />
+                  <ThemedText variant="muted" size={13}>{t('datasetLabel')}</ThemedText>
+                </View>
+                <ThemedText size={12} numberOfLines={1} style={styles.mono}>
+                  {status?.dataset_id ?? '—'}
+                </ThemedText>
+              </View>
+
+              {isCloud && (
+                <>
+                  <View style={styles.detailDivider} />
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailLabel}>
+                      <Icon name="key-outline" size={14} color={textMuted} />
+                      <ThemedText variant="muted" size={13}>{t('groupStateLabel')}</ThemedText>
+                    </View>
+                    <ThemedText size={13} testID="desktop-sync-group-state">
+                      {t(`groupState_${syncGroup}`)}
+                    </ThemedText>
+                  </View>
+                  {groupStatus?.fingerprint ? (
+                    <>
+                      <View style={styles.detailDivider} />
+                      <View style={styles.detailRow}>
+                        <View style={styles.detailLabel}>
+                          <Icon name="fingerprint" size={14} color={textMuted} />
+                          <ThemedText variant="muted" size={13}>{t('fingerprintLabel')}</ThemedText>
+                        </View>
+                        <ThemedText size={11} numberOfLines={1} style={styles.mono} testID="desktop-sync-fingerprint">
+                          {groupStatus.fingerprint.slice(0, 16)}…
+                        </ThemedText>
+                      </View>
+                    </>
+                  ) : null}
+                </>
+              )}
+
+              {/* Relay round-trip / buffer block (7-3) — the raw counters that
+                  were removed from the plain status card. */}
+              {isCloud && relay ? (
+                <View style={styles.relayBlock} testID="desktop-sync-relay-status">
+                  <View style={styles.relayHeader}>
+                    <View style={[styles.dot, { backgroundColor: relay.connected ? '#4caf82' : '#f0a23b' }]} />
+                    <ThemedText variant="secondary" size={12} style={styles.relayHeaderText}>
+                      {relay.connected ? t('relayConnected') : t('relayDisconnected')}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <ThemedText variant="muted" size={12}>{t('relaySeqLabel')}</ThemedText>
+                    <ThemedText size={12} testID="desktop-sync-relay-seq">
+                      {relay.last_seq} / {relay.acked_seq}
+                    </ThemedText>
+                  </View>
+                  {/* Plan 7-6: the tier's device cap, shown before it is hit. */}
+                  <View style={styles.detailRow}>
+                    <ThemedText variant="muted" size={12}>{t('relayDevicesLabel')}</ThemedText>
+                    <ThemedText size={12} testID="desktop-sync-relay-devices">
+                      {relay.sync_devices > 0 ? t('relayDevicesUpTo', { count: relay.sync_devices }) : t('relayUnlimited')}
+                    </ThemedText>
+                  </View>
+                  {/* Plan 7-6: buffer usage (bytes / tier cap); escalates on overflow. */}
+                  <View style={styles.detailRow}>
+                    <ThemedText variant="muted" size={12}>{t('relayBufferLabel')}</ThemedText>
+                    <ThemedText
+                      size={12}
+                      style={relay.overflow ? styles.relayWarn : undefined}
+                      testID="desktop-sync-relay-buffered"
+                    >
+                      {formatBytes(relay.buffered_bytes)} / {relay.cap > 0 ? formatBytes(relay.cap) : t('relayUnlimited')}
+                    </ThemedText>
+                  </View>
+                  {relay.overflow ? (
+                    <ThemedText size={11} style={styles.relayWarn}>{t('relayOverflow')}</ThemedText>
+                  ) : null}
+                  {relay.rejected_frames > 0 ? (
+                    <ThemedText size={11} style={styles.relayWarn}>
+                      {t('relayRejected', { count: relay.rejected_frames })}
+                    </ThemedText>
+                  ) : null}
+                  {relay.decrypt_failures > 0 ? (
+                    <ThemedText size={11} style={styles.relayWarn}>
+                      {t('relayDecryptFailures', { count: relay.decrypt_failures })}
+                    </ThemedText>
+                  ) : null}
+                </View>
+              ) : null}
+            </ThemedCard>
+
+            {/* ── Sync-key actions (7-3): the rare phone-first "start a new
+                sync group" case (clearly labeled, outlined), the manual
+                "Finish joining" retry, and the danger-styled reset. ──────── */}
+            {isCloud ? (
+              <ThemedCard accentStripe style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <Icon name="key-variant" size={18} color={accentPrimary} />
+                  <ThemedText weight="medium" size={15} style={styles.cardTitle}>
+                    {t('groupSection')}
+                  </ThemedText>
+                </View>
+
+                <ThemedText variant="muted" size={12} style={styles.fieldHint}>
+                  {t(`groupHelp_${syncGroup}`)}
+                </ThemedText>
+
+                {syncGroup === 'uninitialized' ? (
+                  <ThemedButton
+                    label={busy ? t('groupWorking') : t('startCloudSyncButton')}
+                    icon="key-plus"
+                    variant="outline"
+                    onPress={handleStartCloudSync}
+                    disabled={busy || !signedIn}
+                    style={styles.actionButton}
+                    testID="desktop-sync-start-cloud-sync"
+                  />
+                ) : null}
+
+                {syncGroup === 'key_pending' ? (
+                  <ThemedButton
+                    label={busy ? t('groupWorking') : t('joinCloudSyncButton')}
+                    icon="key-link"
+                    onPress={handleJoinCloudSync}
+                    disabled={busy || !signedIn}
+                    style={styles.actionButton}
+                    testID="desktop-sync-join-cloud-sync"
+                  />
+                ) : null}
+
+                {syncGroup === 'member' ? (
+                  <ThemedButton
+                    label={busy ? t('groupWorking') : t('resetKeyButton')}
+                    icon="rotate-left"
+                    variant="outline"
+                    iconColor={theme.colors.status?.error ?? '#f44336'}
+                    onPress={handleResetKey}
+                    disabled={busy}
+                    style={styles.actionButton}
+                    testID="desktop-sync-reset-key"
+                  />
+                ) : null}
+              </ThemedCard>
             ) : null}
 
-            {syncGroup === 'key_pending' ? (
-              <ThemedButton
-                label={busy ? t('groupWorking') : t('joinCloudSyncButton')}
-                icon="key-link"
-                onPress={handleJoinCloudSync}
-                disabled={busy || !signedIn}
-                style={styles.actionButton}
-                testID="desktop-sync-join-cloud-sync"
-              />
-            ) : null}
+        {/* ── Actions (disconnect / disable / hand over) ────────────────── */}
+            <ThemedCard accentStripe style={styles.card}>
+              <View style={styles.cardHeader}>
+                <Icon name="tune-variant" size={18} color={accentPrimary} />
+                <ThemedText weight="medium" size={15} style={styles.cardTitle}>
+                  {t('actionsSection')}
+                </ThemedText>
+              </View>
 
-            {syncGroup === 'member' ? (
               <ThemedButton
-                label={busy ? t('groupWorking') : t('resetKeyButton')}
-                icon="rotate-left"
+                label={t('disconnectButton')}
+                icon="lan-disconnect"
                 variant="outline"
-                onPress={handleResetKey}
-                disabled={busy}
+                onPress={handleDisconnect}
+                disabled={busy || !status?.enabled}
                 style={styles.actionButton}
-                testID="desktop-sync-reset-key"
+                testID="desktop-sync-disconnect"
               />
-            ) : null}
-          </ThemedCard>
+
+              <ThemedButton
+                label={t('disableButton')}
+                icon="sync-off"
+                variant="outline"
+                onPress={() => handleToggleEnabled(false)}
+                disabled={busy || !status?.enabled}
+                style={styles.actionButton}
+                testID="desktop-sync-disable"
+              />
+
+              <ThemedButton
+                label={t('yieldButton')}
+                icon="crown-outline"
+                variant="outline"
+                onPress={handleYield}
+                disabled={busy || state !== 'syncing'}
+                style={styles.actionButton}
+                testID="desktop-sync-yield"
+              />
+            </ThemedCard>
+          </>
         ) : null}
-
-        {/* ── Actions ─────────────────────────────────────────────────── */}
-        <ThemedCard accentStripe style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Icon name="tune-variant" size={18} color={accentPrimary} />
-            <ThemedText weight="medium" size={15} style={styles.cardTitle}>
-              {t('actionsSection')}
-            </ThemedText>
-          </View>
-
-          <ThemedButton
-            label={t('disconnectButton')}
-            icon="lan-disconnect"
-            variant="outline"
-            onPress={handleDisconnect}
-            disabled={busy || !status?.enabled}
-            style={styles.actionButton}
-            testID="desktop-sync-disconnect"
-          />
-
-          <ThemedButton
-            label={t('disableButton')}
-            icon="sync-off"
-            variant="outline"
-            onPress={() => handleToggleEnabled(false)}
-            disabled={busy || !status?.enabled}
-            style={styles.actionButton}
-            testID="desktop-sync-disable"
-          />
-
-          <ThemedButton
-            label={t('yieldButton')}
-            icon="crown-outline"
-            variant="outline"
-            onPress={handleYield}
-            disabled={busy || state !== 'syncing'}
-            style={styles.actionButton}
-            testID="desktop-sync-yield"
-          />
-        </ThemedCard>
 
         <ThemedText variant="muted" size={12} style={styles.footerText}>
           {t('footer')}
@@ -1596,6 +1921,12 @@ const styles = StyleSheet.create({
   desktopLinkRow: { flexDirection: 'row', gap: 10 },
   desktopLinkButton: { flex: 1 },
   errorText: { marginTop: 6 },
+
+  // ── Setup checklist (Design A, 2026-10-22) ──────────────────────────────────
+  setupRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  setupRowLabel: { flex: 1 },
+  joinHintBlock: { marginTop: 4, gap: 10 },
+  joinRetryButton: { alignSelf: 'flex-start' },
 
   // ── Transport picker ───────────────────────────────────────────────────────
   transportRow: { flexDirection: 'row', gap: 10 },
