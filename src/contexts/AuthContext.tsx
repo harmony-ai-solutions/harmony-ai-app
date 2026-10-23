@@ -37,6 +37,7 @@ import DeviceAuthService from '../services/cloud/DeviceAuthService';
 import { getConnectSessionService } from '../services/cloud/ConnectSessionService';
 import { startSoulbitsTokenSync } from '../services/cloud/soulbitsTokenSync';
 import { startSeedingEnsure } from '../services/providers/seeding';
+import { attachRelayTokenRotationReinject } from '../services/sync/relayTokenRotationReinject';
 import { pushTokenStore } from '../services/notifications/PushTokenStore';
 import { createLogger } from '../utils/logger';
 
@@ -194,12 +195,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // ensure (never flag-gated) + the guard-gated gap-fill, on `auth:changed` AND
   // on the bootstrap-authenticated path (cold start already signed in). Both
   // converge on the single soulbitscloud account row post-3-2.
+  //
+  // 2026-10-23: the SAME event also re-injects a rotated PASETO into the
+  // engine's relay config (cloud-relay sync only, verified before the write) so
+  // the engine's relay credential never ages out behind a perfectly valid
+  // sign-in. Idempotent by construction — see relayAuthRecovery's gates.
   useEffect(() => {
     const stopTokenSync = startSoulbitsTokenSync();
     const stopSeedingEnsure = startSeedingEnsure();
+    const stopRelayTokenRotation = attachRelayTokenRotationReinject();
     return () => {
       stopTokenSync();
       stopSeedingEnsure();
+      stopRelayTokenRotation();
     };
   }, []);
 

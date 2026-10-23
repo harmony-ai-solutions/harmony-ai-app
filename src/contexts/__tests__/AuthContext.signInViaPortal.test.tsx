@@ -52,6 +52,11 @@ jest.mock('../../services/providers/seeding', () => ({
   startSeedingEnsure: () => () => {},
 }));
 
+// 2026-10-23: the relay-token rotation hook also rides on `auth:changed`.
+jest.mock('../../services/sync/relayTokenRotationReinject', () => ({
+  attachRelayTokenRotationReinject: () => () => {},
+}));
+
 jest.mock('../../services/notifications/PushTokenStore', () => ({
   pushTokenStore: { getPushToken: () => 'push-token-1' },
 }));
