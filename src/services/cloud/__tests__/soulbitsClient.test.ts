@@ -30,6 +30,13 @@ describe('buildSoulbitsClient', () => {
     expect(opts.refreshToken).toBeUndefined();
     expect(opts.cloudURL).toBeTruthy();
   });
+
+  it('honours an explicit cloud host (local dev splits auth from the session broker)', () => {
+    mockedCreateClient.mockReturnValue({});
+    buildSoulbitsClient({ paseto: 'v4.local.x', cloudURL: 'http://127.0.0.1:8083' });
+    const opts = mockedCreateClient.mock.calls[0][0];
+    expect(opts.cloudURL).toBe('http://127.0.0.1:8083');
+  });
 });
 
 describe('fetchMySubscription', () => {

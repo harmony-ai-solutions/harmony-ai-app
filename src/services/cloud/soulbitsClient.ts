@@ -43,6 +43,13 @@ export interface BuildSoulbitsClientOptions {
    * auth header and every protected endpoint returns 401.
    */
   paseto: string;
+  /**
+   * Cloud REST host. Defaults to the session broker (`CLOUD_HOSTS.session`),
+   * which equals the auth host in cloud mode (an API gateway routes by path).
+   * Local dev splits the services by port, so callers that use the auth/account/
+   * apiKeys sub-APIs pass `CLOUD_HOSTS.auth` explicitly.
+   */
+  cloudURL?: string;
 }
 
 /**
@@ -60,7 +67,7 @@ export function buildSoulbitsClient(
   return createClient({
     paseto: opts.paseto,
     // Deliberately NO refreshToken → disables the client's in-memory auto-refresh.
-    cloudURL: CLOUD_HOSTS.session,
+    cloudURL: opts.cloudURL ?? CLOUD_HOSTS.session,
     inferenceURL: CLOUD_HOSTS.inference,
   });
 }
