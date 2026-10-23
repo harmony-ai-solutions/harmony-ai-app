@@ -5,6 +5,7 @@
     "build": { "model": "opencode-go/deepseek-v4.1-flash" },
     "coder": { "model": "opencode-go/deepseek-v4.1-flash" },
     "code-expert": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "ui-ux-expert": { "model": "opencode-go/deepseek-v4.1-flash" },
     "gsd-advisor-researcher": { "model": "opencode-go/deepseek-v4.1-flash" },
     "gsd-ai-researcher": { "model": "opencode-go/deepseek-v4.1-flash" },
     "gsd-assumptions-analyzer": { "model": "zai-coding-plan/glm-5.3" },
